@@ -17,11 +17,11 @@ async fn approval_test_core(
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         backend,
     );
-    LashCore::rlm_builder(backend.clone(), lash::TurnBudget::Unbounded, factory)
+    LashCore::rlm_builder(backend.clone(), lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(1024), factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
 
-        .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded))
+        .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded).max_tool_calls(lash::MaxToolCalls::new(1024)))
         .serve_workbench_model(provider, test_model())
         // The `processes` module is catalogue presence, not an ability bit (ADR
         // 0095): the workbench's scripted sources author `processes.*`, so the

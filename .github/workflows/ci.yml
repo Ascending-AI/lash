@@ -1604,6 +1604,7 @@ jobs:
             pg-attachment-referrers \
             pg-model-keys \
             pg-rlm-frame-open \
+            pg-rlm-tool-call-limit \
             pg-pool-wait \
             pg-sim-backend-faults \
             pg-cross-backend \
@@ -1660,6 +1661,11 @@ jobs:
         run: |
           bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
             bash scripts/ci/store-tests.sh pg-rlm-frame-open
+
+      - name: Test the RLM tool-call limit on Postgres
+        run: |
+          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
+            bash scripts/ci/store-tests.sh pg-rlm-tool-call-limit
 
       - name: Test runtime pool-wait binding
         if: github.event_name != 'pull_request' && github.event_name != 'merge_group'

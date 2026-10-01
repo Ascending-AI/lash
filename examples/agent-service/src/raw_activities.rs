@@ -296,21 +296,26 @@ finish("done through raw activities");
             std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &backend,
         );
-        let core = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-            .serve_test_model(
-                provider,
-                lash::ModelMetadata::builder("scripted-model")
-                    .context_window_tokens(200_000)
-                    .build()
-                    .expect("model spec"),
-            )
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                "agent-service-raw-activity-test",
-                "agent-service-raw-activity-test-boot",
-            ))
-            .expect("core");
+        let core = LashCore::rlm_builder(
+            backend,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+            factory,
+        )
+        .serve_test_model(
+            provider,
+            lash::ModelMetadata::builder("scripted-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("model spec"),
+        )
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "agent-service-raw-activity-test",
+            "agent-service-raw-activity-test-boot",
+        ))
+        .expect("core");
         AppStateData::new(
             core,
             Arc::new(Mutex::new(

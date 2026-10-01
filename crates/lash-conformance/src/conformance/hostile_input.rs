@@ -165,7 +165,7 @@ pub(super) async fn session_namespace(factory: Arc<dyn crate::DeploymentStore>) 
 pub async fn process_environment_namespace(store: Arc<dyn crate::ProcessExecutionEnvStore>) {
     let spec = crate::ProcessExecutionEnvSpec::new(
         crate::AdmittedPluginConfig::default(),
-        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
     );
     let bytes = spec.to_store_bytes().expect("encode test environment");
     let claim = crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(

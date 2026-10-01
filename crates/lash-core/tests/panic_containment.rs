@@ -645,7 +645,10 @@ fn policy() -> SessionPolicy {
                 .build()
                 .expect("valid model"),
         )),
-        ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     }
 }
 

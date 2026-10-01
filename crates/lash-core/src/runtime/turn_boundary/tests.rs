@@ -127,7 +127,10 @@ async fn recording_session() -> (Arc<RecordingStore>, SessionStore) {
 fn state_with_graph(graph: SessionGraph) -> RuntimeSessionState {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("session-1"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            UNBOUNDED,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.ensure_agent_frame_initialized();
     if !graph.nodes.is_empty() {
@@ -173,7 +176,10 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
             .await;
     let host: Arc<dyn crate::EffectHost> = double.lash_backend().effect_host();
     let recording = Arc::new(crate::testing::double_unbound_recording_store(&double).await);
-    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED));
+    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+        UNBOUNDED,
+        crate::MaxToolCalls::new(1024),
+    ));
     state.session_id = SessionId::from("final-cancel-cas");
     state.ensure_agent_frame_initialized();
     let store = SessionStore::new(recording.clone(), state.session_id.clone())
@@ -302,7 +308,7 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
     recording.inject_turn_cancel_before_next_runtime_commit(later_request);
     pipeline
         .prepared_checkpoint(
-            SessionPolicy::new(UNBOUNDED),
+            SessionPolicy::new(UNBOUNDED, crate::MaxToolCalls::new(1024)),
             0,
             &MessageSequence::default(),
             None,
@@ -562,7 +568,10 @@ fn reopening_a_previous_frame_refuses_and_keeps_the_current_frame() {
     let clock = crate::SystemClock;
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("frame-switch-back"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            UNBOUNDED,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.ensure_agent_frame_initialized_with_clock(&clock);
     let frame_a = super::super::open_agent_frame_in_state_with_clock(
@@ -650,7 +659,7 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
     // fact below is attributable to the switch alone.
     pipeline
         .prepared_checkpoint(
-            SessionPolicy::new(UNBOUNDED),
+            SessionPolicy::new(UNBOUNDED, crate::MaxToolCalls::new(1024)),
             0,
             &MessageSequence::from_base(Vec::new().into()),
             None,
@@ -724,7 +733,7 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
     let user = text_message("u0", MessageRole::User, "hello");
     next_turn
         .prepared_checkpoint(
-            SessionPolicy::new(UNBOUNDED),
+            SessionPolicy::new(UNBOUNDED, crate::MaxToolCalls::new(1024)),
             0,
             &MessageSequence::from_base(vec![user].into()),
             None,
@@ -772,7 +781,7 @@ async fn progress_boundaries_accumulate_protocol_events_in_the_draft() {
     let mut pipeline = TurnBoundary::from_state(state_with_graph(SessionGraph::default()));
     pipeline
         .prepared_checkpoint(
-            SessionPolicy::new(UNBOUNDED),
+            SessionPolicy::new(UNBOUNDED, crate::MaxToolCalls::new(1024)),
             0,
             &MessageSequence::from_base(vec![user.clone()].into()),
             None,
@@ -786,7 +795,7 @@ async fn progress_boundaries_accumulate_protocol_events_in_the_draft() {
 
     let boundary = pipeline
         .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
-            policy: SessionPolicy::new(UNBOUNDED),
+            policy: SessionPolicy::new(UNBOUNDED, crate::MaxToolCalls::new(1024)),
             turn_index: 1,
             messages: MessageSequence::from_base(vec![user, assistant].into()),
             event_delta,
@@ -811,7 +820,7 @@ async fn final_commit_persists_the_complete_turn_tail_once() {
         leased_boundary(&store, state_with_graph(SessionGraph::default())).await;
     pipeline
         .prepared_checkpoint(
-            SessionPolicy::new(UNBOUNDED),
+            SessionPolicy::new(UNBOUNDED, crate::MaxToolCalls::new(1024)),
             0,
             &MessageSequence::from_base(vec![user.clone()].into()),
             None,
@@ -820,7 +829,7 @@ async fn final_commit_persists_the_complete_turn_tail_once() {
         .expect("prepare checkpoint in memory");
     pipeline
         .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
-            policy: SessionPolicy::new(UNBOUNDED),
+            policy: SessionPolicy::new(UNBOUNDED, crate::MaxToolCalls::new(1024)),
             turn_index: 1,
             messages: MessageSequence::from_base(vec![user, assistant.clone()].into()),
             event_delta: vec![
@@ -893,7 +902,7 @@ async fn a_skipped_boundary_keeps_queued_appends_for_the_next_one() {
     let session_id = pipeline.state().session_id.clone();
     pipeline
         .prepared_checkpoint(
-            SessionPolicy::new(UNBOUNDED),
+            SessionPolicy::new(UNBOUNDED, crate::MaxToolCalls::new(1024)),
             0,
             &MessageSequence::from_base(vec![user.clone()].into()),
             None,
@@ -921,7 +930,7 @@ async fn a_skipped_boundary_keeps_queued_appends_for_the_next_one() {
 
     let skipped = pipeline
         .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
-            policy: SessionPolicy::new(UNBOUNDED),
+            policy: SessionPolicy::new(UNBOUNDED, crate::MaxToolCalls::new(1024)),
             turn_index: 1,
             messages: MessageSequence::from_base(vec![user.clone(), pending_tool_call].into()),
             event_delta: Vec::new(),
@@ -935,7 +944,7 @@ async fn a_skipped_boundary_keeps_queued_appends_for_the_next_one() {
 
     pipeline
         .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
-            policy: SessionPolicy::new(UNBOUNDED),
+            policy: SessionPolicy::new(UNBOUNDED, crate::MaxToolCalls::new(1024)),
             turn_index: 2,
             messages: MessageSequence::from_base(vec![user, assistant].into()),
             event_delta: Vec::new(),
@@ -1018,7 +1027,7 @@ async fn final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_muta
         leased_boundary(&store, state_with_graph(SessionGraph::default())).await;
     pipeline
         .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
-            policy: SessionPolicy::new(UNBOUNDED),
+            policy: SessionPolicy::new(UNBOUNDED, crate::MaxToolCalls::new(1024)),
             turn_index: 1,
             messages: MessageSequence::from_base(messages.into()),
             event_delta: Vec::new(),
@@ -1095,7 +1104,10 @@ async fn replayed_exec_tool_output_is_a_gc_root_without_pending_or_message_refs(
             crate::AttachmentSource::stored(attachment.clone()),
         )),
     }];
-    let state = RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED));
+    let state = RuntimeSessionState::new(crate::SessionPolicy::new(
+        UNBOUNDED,
+        crate::MaxToolCalls::new(1024),
+    ));
     let committed = committed_attachment_ids(&state, &tool_calls, None, &[]);
     assert_eq!(committed, vec![attachment.id.clone()]);
 
@@ -1347,7 +1359,7 @@ async fn gates_advance_after_an_attachment_bearing_tool_result() {
     let mut pipeline = TurnBoundary::from_state(state_with_graph(SessionGraph::default()));
     pipeline
         .prepared_checkpoint(
-            SessionPolicy::new(UNBOUNDED),
+            SessionPolicy::new(UNBOUNDED, crate::MaxToolCalls::new(1024)),
             7,
             &MessageSequence::from_base(prepared.clone().into()),
             None,
@@ -1376,7 +1388,7 @@ async fn gates_advance_after_an_attachment_bearing_tool_result() {
     ));
     let boundary = pipeline
         .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
-            policy: SessionPolicy::new(UNBOUNDED),
+            policy: SessionPolicy::new(UNBOUNDED, crate::MaxToolCalls::new(1024)),
             turn_index: 8,
             messages: MessageSequence::from_base(progressed.into()),
             event_delta: vec![crate::SessionHistoryRecord::Protocol(test_protocol_event(
@@ -1409,7 +1421,10 @@ fn a_committed_frame_open_clears_execution_state_and_ends_the_last_committed_fra
     let clock = crate::SystemClock;
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("frame-transition"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            UNBOUNDED,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.ensure_agent_frame_initialized_with_clock(&clock);
     let committed = state
@@ -1535,7 +1550,10 @@ fn a_first_commit_that_switches_ends_the_first_frame_it_opens() {
     let clock = crate::SystemClock;
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("first-turn-switch"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            UNBOUNDED,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.ensure_agent_frame_initialized_with_clock(&clock);
     let first = state
@@ -1595,7 +1613,10 @@ fn a_registration_turn_then_a_switch_ends_the_committed_frame_with_its_carries()
     let clock = crate::SystemClock;
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("registration-then-switch"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            UNBOUNDED,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.ensure_agent_frame_initialized_with_clock(&clock);
     let first = state

@@ -357,11 +357,18 @@ impl Harness {
                         "the companion host must select LASH_CONTEXT_OVERFLOW_VM_WORKER",
                     )?,
                 ));
-                lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, rlm)
+                lash::LashCore::rlm_builder(
+                    backend,
+                    lash::TurnBudget::Unbounded,
+                    lash::MaxToolCalls::new(1024),
+                    rlm,
+                )
             }
-            Protocol::Standard => {
-                lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-            }
+            Protocol::Standard => lash::LashCore::standard_builder(
+                backend,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            ),
         };
         let builder = builder
             .models(Arc::new(

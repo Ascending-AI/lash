@@ -139,7 +139,10 @@ fn protocol_integrator_traits_are_implementable_from_the_facade() {
 fn snapshot_agent_frame_is_constructible_from_the_facade() {
     let frame_node_id: FrameNodeId = serde_json::from_str(r#""frame-node/v2/host-path""#)
         .expect("transparent frame node id restore");
-    let policy = lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded);
+    let policy = lash::runtime::SessionPolicy::new(
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    );
     let mut snapshot = lash::runtime::SessionSnapshot::new(policy.clone());
     snapshot.agent_frames.push(AgentFrameRecord {
         frame_node_id,

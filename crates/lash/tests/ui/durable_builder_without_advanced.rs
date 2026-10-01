@@ -26,20 +26,25 @@ async fn durable_core_without_advanced(
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
-    lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-        .models(std::sync::Arc::new(
-            lash::ModelRegistry::new()
-                .register("compile-only", lash::RegisteredModel::new(model, provider))
-                .expect("one key registers"),
-        ))
-        .model("compile-only")
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .termination(lash::durability::TerminationPolicy::default())
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "durable-builder-test-worker",
-            "durable-builder-test-boot",
-        ))
+    lash::LashCore::rlm_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+        factory,
+    )
+    .models(std::sync::Arc::new(
+        lash::ModelRegistry::new()
+            .register("compile-only", lash::RegisteredModel::new(model, provider))
+            .expect("one key registers"),
+    ))
+    .model("compile-only")
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+    .termination(lash::durability::TerminationPolicy::default())
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        "durable-builder-test-worker",
+        "durable-builder-test-boot",
+    ))
 }
 
 fn main() {

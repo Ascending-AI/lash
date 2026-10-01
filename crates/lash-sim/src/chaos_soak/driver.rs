@@ -137,17 +137,21 @@ pub(super) fn soak_core(
     Arc::new(move |backend, owner| {
         let model = process::model_spec()?;
         let processes = LashlangProcesses::over(&backend);
-        lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024).with_drain_mode(drain))
-            .recovery_lease(lash::RecoveryLeaseConfig {
-                generation_rank: rank.load(Ordering::SeqCst),
-                timings: soak_lease_timings(),
-            })
-            .serve_test_model(soak_provider(Arc::clone(&reached)), model)
-            .plugin(Arc::new(processes))
-            .build(owner)
-            .map_err(|error| format!("build the lash core: {error}"))
+        lash::LashCore::standard_builder(
+            backend,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024).with_drain_mode(drain))
+        .recovery_lease(lash::RecoveryLeaseConfig {
+            generation_rank: rank.load(Ordering::SeqCst),
+            timings: soak_lease_timings(),
+        })
+        .serve_test_model(soak_provider(Arc::clone(&reached)), model)
+        .plugin(Arc::new(processes))
+        .build(owner)
+        .map_err(|error| format!("build the lash core: {error}"))
     })
 }
 

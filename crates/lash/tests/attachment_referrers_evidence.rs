@@ -218,7 +218,10 @@ async fn start_turn_child(
                 law_model().wire_model,
                 law_model(),
             )),
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            ..lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            )
         },
         lash_core::PluginOptions::default(),
     );
@@ -420,18 +423,23 @@ fn law_core_over(
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
-    let mut builder = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-        .serve_test_model(provider, law_model())
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tools(Arc::new(BlobTools {
-            witness: Arc::clone(witness),
-        }))
-        .plugin(Arc::new(
-            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
-                lash_core::lifetime::session_or_starter,
-            ),
-        ));
+    let mut builder = LashCore::rlm_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+        factory,
+    )
+    .serve_test_model(provider, law_model())
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+    .tools(Arc::new(BlobTools {
+        witness: Arc::clone(witness),
+    }))
+    .plugin(Arc::new(
+        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+            lash_core::lifetime::session_or_starter,
+        ),
+    ));
     if let Some(expiry) = upload_expiry {
         builder = builder.attachment_upload_expiry(expiry);
     }

@@ -22,7 +22,10 @@ fn remote_peer_retains_the_execution_controls_the_session_recorded() {
                 max_duplicate_cost_tokens: None,
             },
         ] {
-            let mut policy = lash_core::SessionPolicy::new(lash_core::TurnBudget::bounded(9));
+            let mut policy = lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::bounded(9),
+                lash_core::MaxToolCalls::new(7),
+            );
             policy.no_progress_budget = no_progress_budget;
             policy.charge_safety = charge_safety.clone();
             let recorded = lash_core::PersistedSessionConfig::from(&policy);
@@ -50,9 +53,17 @@ fn remote_peer_retains_the_execution_controls_the_session_recorded() {
                 .try_into()
                 .expect("peer resolves the execution policy");
             assert_eq!(
-                (peer.policy.no_progress_budget, peer.policy.charge_safety),
-                (no_progress_budget, charge_safety),
-                "the remote peer must run under both recorded controls"
+                (
+                    peer.policy.max_tool_calls,
+                    peer.policy.no_progress_budget,
+                    peer.policy.charge_safety
+                ),
+                (
+                    lash_core::MaxToolCalls::new(7),
+                    no_progress_budget,
+                    charge_safety
+                ),
+                "the remote peer must run under every recorded control"
             );
         }
     }

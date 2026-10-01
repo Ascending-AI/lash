@@ -51,6 +51,7 @@ mod tests {
             session_id: "generation-gate".into(),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         };
         state.refresh_plugin_states(&plugins);
@@ -96,6 +97,7 @@ mod tests {
             session_id: "capture-race".into(),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         };
         handle.set("value", serde_json::json!(1)).unwrap();

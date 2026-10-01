@@ -6,7 +6,10 @@ use super::*;
 /// replay adopts every field its first execution ran under.
 #[test]
 fn a_recorded_turn_config_round_trips_whole() {
-    let mut config = crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded);
+    let mut config = crate::PersistedSessionConfig::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    );
     config.model = Some(crate::ModelConfig::new(crate::RecordedModel::mint(
         crate::ModelKey::from("recorded-model"),
         crate::ModelMetadata::builder("recorded-model")

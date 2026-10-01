@@ -412,6 +412,7 @@ impl SugarTurn {
             policy: policy.clone(),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::bounded(8),
+                crate::MaxToolCalls::new(1024),
             ))
         };
         let mut runtime = Box::pin(

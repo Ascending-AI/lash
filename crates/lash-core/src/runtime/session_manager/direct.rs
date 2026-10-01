@@ -457,6 +457,7 @@ mod tests {
                 policy: policy.clone(),
                 ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
                 ))
             },
             None,

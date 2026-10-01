@@ -49,6 +49,138 @@ impl TurnBudget {
     }
 }
 
+/// The number of tool calls one execution may make: the host's required
+/// decision, with no default and no built-in ceiling (FIG-4546).
+///
+/// What it counts depends on the execution. A cell — one code cell of a turn,
+/// or one tool step of a protocol without cells — may make at most this many
+/// tool calls in total. A process may hold at most this many at once: a call
+/// counts from its acceptance until the process no longer depends on it, so
+/// a long-running process is bounded in what it retains, never in what it
+/// does over its life. The call that passes the limit fails with
+/// [`ToolCallLimitExceeded`]; every call under it runs untouched. The limit
+/// paces nothing: rate limits and throttling are the host's own.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(transparent)]
+pub struct MaxToolCalls(std::num::NonZeroUsize);
+
+impl MaxToolCalls {
+    /// # Panics
+    ///
+    /// Panics when `max_tool_calls` is zero: an execution that may call no
+    /// tool is expressed by its tool access, not by this limit. In a const
+    /// context, a literal zero is rejected during compilation.
+    pub const fn new(max_tool_calls: usize) -> Self {
+        match std::num::NonZeroUsize::new(max_tool_calls) {
+            Some(max_tool_calls) => Self(max_tool_calls),
+            None => panic!("max_tool_calls must be non-zero"),
+        }
+    }
+
+    /// The limit.
+    pub const fn get(self) -> usize {
+        self.0.get()
+    }
+
+    /// The limit, as the non-zero count a wire mirror carries.
+    pub const fn non_zero(self) -> std::num::NonZeroUsize {
+        self.0
+    }
+}
+
+impl From<std::num::NonZeroUsize> for MaxToolCalls {
+    fn from(max_tool_calls: std::num::NonZeroUsize) -> Self {
+        Self(max_tool_calls)
+    }
+}
+
+impl std::fmt::Display for MaxToolCalls {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+/// Which execution a [`MaxToolCalls`] limit refused.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallLimitScope {
+    /// A cell: the limit is the total it may make.
+    Cell,
+    /// A process: the limit is what it may hold at once.
+    Process,
+}
+
+/// A tool call refused by the session's [`MaxToolCalls`]: the program asked
+/// for more tool calls than its recorded limit admits.
+///
+/// It is the program's failure, never the host's: the limit is recorded
+/// config and the count is a fact of the program's own history, so a replay
+/// or a redrive refuses the same call. Nothing of the refused calls is
+/// journaled or dispatched.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct ToolCallLimitExceeded {
+    pub scope: ToolCallLimitScope,
+    /// The recorded `max_tool_calls` the execution runs under.
+    pub limit: MaxToolCalls,
+    /// The calls counted against the limit before the refused ones: made so
+    /// far by a cell, held now by a process.
+    pub counted: usize,
+    /// The calls refused together: one for a single call, an aggregate's
+    /// unique tool calls for an aggregate.
+    pub requested: usize,
+}
+
+impl ToolCallLimitExceeded {
+    /// The stable code a refused call's tool failure carries.
+    pub const CODE: &'static str = "max_tool_calls_exceeded";
+}
+
+impl std::fmt::Display for ToolCallLimitExceeded {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            scope,
+            limit,
+            counted,
+            requested,
+        } = self;
+        match scope {
+            ToolCallLimitScope::Cell => write!(
+                formatter,
+                "tool call limit exceeded (max_tool_calls = {limit}): one cell or step may make \
+                 at most {limit} tool calls; this one has made {counted} and asked for \
+                 {requested} more. None of the {requested} ran. Make fewer tool calls per cell \
+                 or step."
+            ),
+            ToolCallLimitScope::Process => write!(
+                formatter,
+                "tool call limit exceeded (max_tool_calls = {limit}): a process may hold at \
+                 most {limit} tool calls at once; this one holds {counted} and asked for \
+                 {requested} more. None of the {requested} ran. Await the calls it holds \
+                 before starting more."
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ToolCallLimitExceeded {}
+
 /// Per-turn bound on *consecutive unproductive* provider attempts: model calls
 /// that committed no successful execution to the turn.
 ///

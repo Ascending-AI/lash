@@ -101,6 +101,7 @@ async fn completed_reasoning_part_does_not_republish_streamed_summary() -> Resul
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(provider, mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -230,6 +231,7 @@ async fn semantic_publication_reasoning_then_tool_does_not_repeat_reasoning() ->
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(provider, mock_model_spec())
     .tools(Arc::new(AppTools))
@@ -286,6 +288,7 @@ async fn semantic_publication_streamed_reasoning_keeps_distinct_completed_reason
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(provider, mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -345,6 +348,7 @@ async fn semantic_publication_streamed_reasoning_keeps_nonstreamed_text() -> Res
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(provider, mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -394,6 +398,7 @@ async fn semantic_publication_preserves_identical_completed_reasoning_parts_and_
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(provider, mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -1116,6 +1121,7 @@ pub(super) async fn session_observation_remote_recovery_stream_yields_dto_gap() 
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(Arc::new(
@@ -1165,6 +1171,7 @@ pub(super) async fn capacity_and_age_trim_force_snapshot_with_matching_observati
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(Arc::new(
@@ -1208,6 +1215,7 @@ pub(super) async fn trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_ev
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(Arc::new(
@@ -1422,6 +1430,7 @@ pub(super) async fn durable_revision_requires_replacement_evidence() -> Result<(
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(replay_store)
@@ -1480,6 +1489,7 @@ pub(super) async fn idle_session_reconnect_after_failed_append_yields_gap_withou
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(Arc::new(FailingAppendReplayStore::new()))
@@ -1527,6 +1537,7 @@ pub(super) async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
         let core = explicit_ephemeral_facets(LashCore::standard_builder(
             double_backend().await,
             crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
         ))
         .serve_test_model(mock_provider(), mock_model_spec())
         .live_replay_store(replay_store.clone())
@@ -1633,6 +1644,7 @@ pub(super) async fn notification_observes_installed_projection() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(replay_store.clone())
@@ -2050,6 +2062,7 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
     let bootstrap_core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -2068,6 +2081,7 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
     let first_core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(Arc::new(
@@ -2103,6 +2117,7 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
     let second_core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(Arc::new(
@@ -2190,6 +2205,7 @@ pub(super) async fn gap_replacement_then_continuation_after_trimmed_history() ->
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(Arc::new(
@@ -2257,6 +2273,7 @@ pub(super) async fn subscriber_lag_with_trimmed_suffix_forces_gap_then_continues
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(Arc::new(
@@ -2359,6 +2376,7 @@ pub(super) async fn recoverable_chat_conformance_disconnect_does_not_cancel_serv
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(provider, mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;

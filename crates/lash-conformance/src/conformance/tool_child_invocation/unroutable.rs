@@ -575,7 +575,8 @@ pub async fn a_lent_child_is_cancelled_by_its_openers_durable_end(
                 .build()
                 .into_runtime()
                 .with_opener_state(crate::session::OpenerState::default());
-                context.restore_outstanding_groups(vec![handle]);
+                context
+                    .restore_outstanding_groups(vec![handle], &std::collections::BTreeMap::new());
                 let closed = context
                     .close_opener_groups()
                     .await

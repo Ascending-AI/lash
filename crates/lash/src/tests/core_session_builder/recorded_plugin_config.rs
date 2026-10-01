@@ -209,6 +209,7 @@ async fn probe_core(backend: lash_core::Backend, probe: &Arc<ProbeFactory>) -> R
     explicit_ephemeral_facets(LashCore::standard_builder(
         backend,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .plugin(probe.clone())
     .serve_test_model(mock_provider(), mock_model_spec())
@@ -320,6 +321,7 @@ async fn the_command_catalog_lists_every_registered_command() -> Result<()> {
             "set_autonomy",
             "set_charge_safety",
             "set_generation",
+            "set_max_tool_calls",
             "set_model",
             "set_no_progress_budget",
             "set_reasoning",

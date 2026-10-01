@@ -169,8 +169,8 @@ impl RuntimeSessionServices {
                 Arc::clone(&services.current.host.core.durability.attachment_store),
                 Arc::new(crate::ChronologicalProjection::default()),
                 crate::TurnContext::default(),
+                services.current.execution_env_spec()?,
             )
-            .with_execution_env_spec(services.current.execution_env_spec()?)
             // The process's durable stamps (effect occurrences, its terminal
             // prelude) follow the `F` its store recorded, never this build's
             // own epoch: N+1 writes N's formats until finalize (FIG-3805).
@@ -184,9 +184,7 @@ impl RuntimeSessionServices {
             .with_lent_process_stop(cancellation_for_runtime.clone())
             .without_turn_cancel_observation()
             .with_process_work(services.current.host.work.process_wiring().cloned())
-            .with_opener_state(crate::session::OpenerState::new(
-                services.current.host.core.control.opener_work_bound,
-            ))
+            .with_opener_state(crate::session::OpenerState::default())
             .with_unrecorded_session_sources(services.current.host.core.control.open_sources);
             if let Some(invocation) = execution_context_for_runtime.causal_invocation.clone() {
                 context = context.with_parent_invocation(invocation);

@@ -5,7 +5,8 @@ use std::sync::Arc;
 mod aggregate;
 mod worker_execution;
 pub use aggregate::{
-    BridgeAggregateLeaf, host_lifetime_failure_message, settle_bridge_aggregate, timer_duration_ms,
+    BridgeAggregateLeaf, host_lifetime_failure_message, is_tool_call_limit_failure,
+    settle_bridge_aggregate, timer_duration_ms, tool_call_limit_failure,
 };
 pub use worker_execution::WorkerRun;
 mod error;

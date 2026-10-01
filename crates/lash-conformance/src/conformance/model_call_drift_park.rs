@@ -69,7 +69,10 @@ async fn build_runtime(parts: DriftParts, note: Option<&'static str>) -> crate::
     let state = crate::RuntimeSessionState {
         session_id: parts.session_id.clone(),
         policy: policy.clone(),
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     Box::pin(
         crate::LashRuntime::builder(parts.host, crate::testing::runtime_lease_owner())

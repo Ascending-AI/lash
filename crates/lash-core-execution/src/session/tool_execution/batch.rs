@@ -11,6 +11,7 @@ use super::*;
 
 use super::group::{
     GroupChildSettled, PreparedGroupChild, PreparedToolChildLeaf, ToolAggregateConsumer,
+    tool_call_limit_failure,
 };
 
 impl RuntimeExecutionContext<'_> {
@@ -274,6 +275,22 @@ impl RuntimeExecutionContext<'_> {
                 // recorded `Failed` terminal replaying and stays on the reply
                 // surface.
                 Err(error) => {
+                    // A batch the session's recorded `max_tool_calls` refuses
+                    // is the program's failure (FIG-4546): each call it had
+                    // not already settled answers the typed refusal, and the
+                    // enclosing cell goes on to read it.
+                    if let Some(exceeded) = error.tool_call_limit_exceeded() {
+                        let refused = ToolInvocationReply::from_output(ToolCallOutput::failure(
+                            tool_call_limit_failure(exceeded),
+                        ));
+                        return ToolBatchReplies {
+                            replies: replies
+                                .iter_mut()
+                                .map(|reply| reply.take().unwrap_or_else(|| refused.clone()))
+                                .collect(),
+                            settlement_order: Vec::new(),
+                        };
+                    }
                     if !error.journaled {
                         self.record_nested_effect_error(error.clone());
                     }

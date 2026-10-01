@@ -924,7 +924,10 @@ mod tests {
                         .build()
                         .expect("model"),
                 ))),
-                ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
+                ..crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                )
             })
             .build(),
         )
@@ -986,7 +989,10 @@ mod tests {
                         .build()
                         .expect("model"),
                 ))),
-                ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
+                ..crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                )
             })
             .build(),
         )
@@ -1049,7 +1055,10 @@ mod tests {
                         .build()
                         .expect("model"),
                 ))),
-                ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
+                ..crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                )
             })
             .build(),
         )
@@ -1091,7 +1100,10 @@ mod tests {
                         .build()
                         .expect("model"),
                 ))),
-                ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
+                ..crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                )
             })
             .build(),
         )
@@ -1144,7 +1156,10 @@ mod tests {
                         .build()
                         .expect("model"),
                 ))),
-                ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
+                ..crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                )
             })
             .build(),
         )
@@ -1202,7 +1217,10 @@ mod tests {
                         .build()
                         .expect("model"),
                 ))),
-                ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
+                ..crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                )
             })
             .build(),
         )

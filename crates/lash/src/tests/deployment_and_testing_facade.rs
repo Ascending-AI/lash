@@ -5,7 +5,12 @@ async fn deployment_drain_status_keeps_waiting_process_non_drained() {
     let backend = sqlite_memory_store_backend().await;
     let registry = backend.process_registry();
     let core = explicit_ephemeral_facets(
-        LashCore::standard_builder(backend, crate::TurnBudget::Unbounded).model("mock-model"),
+        LashCore::standard_builder(
+            backend,
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        )
+        .model("mock-model"),
     )
     .build(crate::testing::runtime_lease_owner())
     .expect("build core with a process registry");
@@ -72,8 +77,12 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
         let backend: lash_core::Backend = sqlite_memory_store_backend().await;
         let factory = backend.session_store_factory();
         let core = explicit_ephemeral_facets(
-            LashCore::standard_builder(backend.clone(), crate::TurnBudget::Unbounded)
-                .model("mock-model"),
+            LashCore::standard_builder(
+                backend.clone(),
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            )
+            .model("mock-model"),
         )
         .build(crate::testing::runtime_lease_owner())
         .expect("build core");
@@ -85,7 +94,10 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
         assert!(idle.drained());
 
         let session_id = lash_core::SessionId::from("drain-parked-turn");
-        let mut policy = lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded);
+        let mut policy = lash_core::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        );
         policy.session_id = Some(session_id.clone());
         let store = lash_core::runtime::admit_session_view(
             &factory,
@@ -135,6 +147,7 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
             session_id: session_id.clone(),
             ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         };
         let commit = lash_core::store::RuntimeCommit::persisted_state_with_operation_for_testing(
@@ -175,8 +188,12 @@ async fn parked_work_merges_parked_turns_and_processes() {
     let factory = backend.session_store_factory();
     let registry = backend.process_registry();
     let core = explicit_ephemeral_facets(
-        LashCore::standard_builder(backend.clone(), crate::TurnBudget::Unbounded)
-            .model("mock-model"),
+        LashCore::standard_builder(
+            backend.clone(),
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        )
+        .model("mock-model"),
     )
     .build(crate::testing::runtime_lease_owner())
     .expect("build core");
@@ -225,7 +242,8 @@ async fn parked_work_merges_parked_turns_and_processes() {
     let process_park = parked_process.park.as_deref().cloned().expect("parked");
 
     let session_id = lash_core::SessionId::from("parked-work-turn");
-    let mut policy = lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded);
+    let mut policy =
+        lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
     policy.session_id = Some(session_id.clone());
     let store = lash_core::runtime::admit_session_view(
         &factory,
@@ -440,7 +458,12 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
     let registry = backend.process_registry();
     let own = backend.build_generation().clone();
     let core = explicit_ephemeral_facets(
-        LashCore::standard_builder(backend, crate::TurnBudget::Unbounded).model("mock-model"),
+        LashCore::standard_builder(
+            backend,
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        )
+        .model("mock-model"),
     )
     .build(crate::testing::runtime_lease_owner())
     .expect("build core with a process registry");
@@ -498,7 +521,11 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
             pending_observer_intents: Vec::new(),
             session_id: turn_session.clone(),
             relation: lash_core::SessionRelation::Root,
-            config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+            config: lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            )
+            .into(),
             head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )
@@ -584,6 +611,7 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
         session_id: turn_session.clone(),
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
     state.ensure_agent_frame_initialized();
@@ -655,7 +683,12 @@ async fn a_closing_session_holds_a_generation_drain_until_its_physical_delete() 
     let factory = backend.session_store_factory();
     let clock = backend.clock();
     let core = explicit_ephemeral_facets(
-        LashCore::standard_builder(backend, crate::TurnBudget::Unbounded).model("mock-model"),
+        LashCore::standard_builder(
+            backend,
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        )
+        .model("mock-model"),
     )
     .build(crate::testing::runtime_lease_owner())
     .expect("build the core");
@@ -669,7 +702,11 @@ async fn a_closing_session_holds_a_generation_drain_until_its_physical_delete() 
             pending_observer_intents: Vec::new(),
             session_id: session.clone(),
             relation: lash_core::SessionRelation::Root,
-            config: lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+            config: lash_core::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            )
+            .into(),
             head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )

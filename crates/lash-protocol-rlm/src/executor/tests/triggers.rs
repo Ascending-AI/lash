@@ -1354,7 +1354,10 @@ async fn execute_trigger_process_with_originator(
                 .build()
                 .expect("trigger process test model"),
         ))),
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
         lash_core::testing::runtime_helpers::LayeredBackend::over(table.backend().clone())

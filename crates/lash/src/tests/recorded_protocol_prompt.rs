@@ -137,6 +137,7 @@ fn core_with_defaults(
     explicit_ephemeral_facets(LashCore::standard_builder(
         backend,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .session_plugin(
         crate::standard::STANDARD_PROTOCOL_PLUGIN_ID,

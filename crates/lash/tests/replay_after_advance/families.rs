@@ -95,7 +95,10 @@ pub async fn trigger_emit(kind: StorageKind, live: bool) {
         &lash_core::testing::host_pin_claim_for_testing(),
         &lash_core::ProcessExecutionEnvSpec::new(
             lash_core::AdmittedPluginConfig::default(),
-            lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            ),
         ),
     )
     .await
@@ -218,7 +221,10 @@ async fn trigger_route_world(
         &lash_core::testing::host_pin_claim_for_testing(),
         &lash_core::ProcessExecutionEnvSpec::new(
             lash_core::AdmittedPluginConfig::default(),
-            lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            ),
         ),
     )
     .await

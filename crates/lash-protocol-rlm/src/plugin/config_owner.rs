@@ -378,6 +378,7 @@ mod tests {
     fn facts_for<T>(check: impl FnOnce(&CandidateFacts<'_>) -> T) -> T {
         let config = lash_core::PersistedSessionConfig::from(&lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ));
         let core = lash_core::CoreConfig::of(&config);
         check(&CandidateFacts {
@@ -452,6 +453,7 @@ mod tests {
             lash_core::ConfigRegistry::build(&[std::sync::Arc::new(factory)]).expect("registry");
         let mut config = lash_core::PersistedSessionConfig::from(&lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ));
         config.plugin_config = registry
             .resolve_creation(
@@ -734,6 +736,7 @@ mod tests {
             lash_core::ConfigRegistry::build(&[std::sync::Arc::new(factory)]).expect("registry");
         let mut config = lash_core::PersistedSessionConfig::from(&lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ));
         config.plugin_config = registry
             .resolve_creation(

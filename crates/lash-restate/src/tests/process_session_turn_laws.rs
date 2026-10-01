@@ -188,6 +188,7 @@ async fn parent_runtime_with_models(
         policy: policy.clone(),
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
     let backend =

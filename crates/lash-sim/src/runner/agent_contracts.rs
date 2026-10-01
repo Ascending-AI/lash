@@ -613,16 +613,21 @@ async fn facade_final_value_execution_inner(
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
-    let mut builder = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(
-            fixed_texts_provider(provider_kind, provider_responses),
-            lash_core::ModelMetadata::builder(provider_kind)
-                .context_window_tokens(200_000)
-                .build()
-                .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
-        );
+    let mut builder = lash::LashCore::rlm_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+        factory,
+    )
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .serve_test_model(
+        fixed_texts_provider(provider_kind, provider_responses),
+        lash_core::ModelMetadata::builder(provider_kind)
+            .context_window_tokens(200_000)
+            .build()
+            .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
+    );
     if let Some(tools) = tools {
         builder = builder.tools(tools);
     }
@@ -963,7 +968,7 @@ async fn agent_process_contract_core_with_options_and_effect_layer(
     )
     .with_lashlang_execution_sink(Arc::clone(&graph_store) as Arc<dyn lash::tracing::TraceSink>);
     let turn_budget = max_turns.map_or(lash::TurnBudget::Unbounded, lash::TurnBudget::bounded);
-    let mut builder = lash::LashCore::rlm_builder(backend, turn_budget, factory)
+    let mut builder = lash::LashCore::rlm_builder(backend, turn_budget, lash::MaxToolCalls::new(1024), factory)
         // The process surface is rendered from the tool catalogue, so a host that
         // wants `processes.*` inside a cell installs the plugin that supplies it.
         // Without it every fixed process contract's first cell dies on

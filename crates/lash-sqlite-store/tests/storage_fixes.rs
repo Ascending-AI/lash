@@ -105,6 +105,7 @@ fn commit_at(
         session_id: SessionId::from(session_id.to_string()),
         ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
         ))
     };
     let commit = RuntimeCommit {
@@ -220,6 +221,7 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
         ))
     };
     state.set_tool_state_snapshot(Some(persisted_tool_state_at_generation(3)));
@@ -570,8 +572,11 @@ async fn process_record_is_a_root_without_registry_liveness() {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("unwired-process-owner"),
         relation: lash_core_execution::SessionRelation::default(),
-        config: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
-            .into(),
+        config: lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
+        )
+        .into(),
         head: lash_core_execution::SessionCreationHead::CommittedByCreator,
     };
     store.admit_session(&request).await.expect("admit session");

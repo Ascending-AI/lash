@@ -72,7 +72,10 @@ mod tests {
             observation_call_key: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+                crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ),
             ),
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: SessionId::from("granted-call-session"),
@@ -100,6 +103,13 @@ mod tests {
             attachment_store,
             Arc::new(crate::ChronologicalProjection::default()),
             crate::TurnContext::default(),
+            crate::ProcessExecutionEnvSpec::new(
+                crate::AdmittedPluginConfig::default(),
+                crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ),
+            ),
         );
         context = context.with_tool_child_host(effect_host);
         if let Some(guard) = wiring {
@@ -576,7 +586,10 @@ mod tests {
             observation_call_key: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+                crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ),
             ),
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: SessionId::from("session"),
@@ -598,6 +611,13 @@ mod tests {
             attachment_store,
             Arc::new(crate::ChronologicalProjection::default()),
             crate::TurnContext::default(),
+            crate::ProcessExecutionEnvSpec::new(
+                crate::AdmittedPluginConfig::default(),
+                crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ),
+            ),
         )
     }
 

@@ -75,7 +75,11 @@ impl World {
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash_core::SessionRelation::Root,
-                config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+                config: lash_core::SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                    lash_core::MaxToolCalls::new(1024),
+                )
+                .into(),
                 head: lash_core::SessionCreationHead::CommittedByCreator,
             },
         )
@@ -166,6 +170,7 @@ impl World {
             policy: policy.clone(),
             ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
             ))
         };
         Box::pin(

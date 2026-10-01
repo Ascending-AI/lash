@@ -59,15 +59,20 @@ fn build_core(restate: &RestateTestBackend) -> lash::LashCore {
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
-    lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(provider, model_spec())
-        .build(lash_core::LeaseOwnerIdentity::opaque(
-            "lash-restate-test",
-            "substrate-lost-zombie",
-        ))
-        .expect("build the lash core")
+    lash::LashCore::rlm_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+        factory,
+    )
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+    .serve_test_model(provider, model_spec())
+    .build(lash_core::LeaseOwnerIdentity::opaque(
+        "lash-restate-test",
+        "substrate-lost-zombie",
+    ))
+    .expect("build the lash core")
 }
 
 /// `process main() signals { go: any } { value = wait_signal("go") finish value }`
@@ -137,7 +142,10 @@ async fn publish_process(restate: &RestateTestBackend) -> lash_core::ProcessStar
                         model_spec().wire_model,
                         model_spec(),
                     )),
-                    ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                    ..lash_core::SessionPolicy::new(
+                        lash_core::TurnBudget::Unbounded,
+                        lash_core::MaxToolCalls::new(1024),
+                    )
                 },
             )),
         )

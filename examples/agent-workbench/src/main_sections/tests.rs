@@ -194,6 +194,7 @@ pub(super) fn explicit_durable_test_facets_on(backend: lash::Backend) -> lash::L
     lash::LashCore::rlm_builder(
         backend,
         lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
         factory,
     )
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -1145,11 +1146,11 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
-    let core = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
+    let core = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(1024), factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
 
-        .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded))
+        .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded).max_tool_calls(lash::MaxToolCalls::new(1024)))
         .serve_workbench_model(provider, model)
         // The `processes` module is catalogue presence, not an ability bit (ADR
         // 0095): the workbench's scripted sources author `processes.*`, so the
@@ -1798,6 +1799,7 @@ async fn live_workbench_restate_state_over_stores(
     let core = LashCore::rlm_builder(
         lash::Backend::new(backend.clone()),
         lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
         factory,
     )
         .serve_workbench_model(provider, model)
@@ -2033,11 +2035,11 @@ fn test_workbench_core(backend: lash::Backend) -> LashCore {
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
-    LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
+    LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(1024), factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
 
-        .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded))
+        .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded).max_tool_calls(lash::MaxToolCalls::new(1024)))
         .serve_workbench_model(provider, model)
         // The `processes` module is catalogue presence, not an ability bit (ADR
         // 0095): the workbench's scripted sources author `processes.*`, so the

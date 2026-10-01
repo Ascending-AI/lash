@@ -218,21 +218,25 @@ pub(super) fn core(harness: &Harness, call: Arc<HeldModelCall>) -> lash::LashCor
         })
         .build()
         .into_handle();
-    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(
-            provider,
-            lash::ModelMetadata::builder("process-root-recovery")
-                .context_window_tokens(100_000)
-                .build()
-                .unwrap(),
-        )
-        .build(lash_core::LeaseOwnerIdentity::opaque(
-            "process-root-recovery",
-            "test",
-        ))
-        .unwrap();
+    let core = lash::LashCore::standard_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+    .serve_test_model(
+        provider,
+        lash::ModelMetadata::builder("process-root-recovery")
+            .context_window_tokens(100_000)
+            .build()
+            .unwrap(),
+    )
+    .build(lash_core::LeaseOwnerIdentity::opaque(
+        "process-root-recovery",
+        "test",
+    ))
+    .unwrap();
     harness.install_process_worker(
         lash_core_worker::DurableProcessWorker::new(core.durable_process_worker_config().unwrap())
             .unwrap(),

@@ -111,8 +111,8 @@ pub mod config {
     /// The owner of the core configuration the commands below change.
     pub use lash_core::CoreConfigOwner;
     pub use lash_core::plugin::config::core::{
-        SetAttachmentAcceptance, SetAutonomy, SetChargeSafety, SetGeneration, SetModel,
-        SetNoProgressBudget, SetReasoning, SetToolAccess, SetTurnBudget,
+        SetAttachmentAcceptance, SetAutonomy, SetChargeSafety, SetGeneration, SetMaxToolCalls,
+        SetModel, SetNoProgressBudget, SetReasoning, SetToolAccess, SetTurnBudget,
     };
     pub use lash_core::{
         CORE_CONFIG_OWNER, ConfigCommandCatalog, ConfigCommandDescriptor, ConfigCommandEntry,
@@ -240,16 +240,17 @@ pub use lash_core::store::{
 pub use lash_core::{
     AdmissionRefusal, AwaitEventKey, AwaitEventWaitIdentity, BatchId, ChargeSafetyPolicy,
     ChargeSafetyRefusalEvidence, CommitBudget, CommitBudgetLimit, DrainMode, DrainModePolicy,
-    EmptyModels, FrameKey, InputId, InputItem, LlmCallRecord, ModelConfig, ModelKey, ModelLimits,
-    ModelLimitsError, ModelMetadata, ModelMetadataBuilder, ModelRegistry, ModelUnavailable,
-    ModelUnavailableReason, NoProgressBudget, NodeId, OmittedToolCalls, PendingTurnInput,
-    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
-    PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
-    ProcessId, QueuedDrainCandidate, QueuedDrainFamily, QueuedDrainPolicy, QueuedDrainRequest,
-    QueuedDrainSelection, QueuedWorkBatchingConfig, ReasoningRefused, RecordedModel,
-    RegisteredModel, RegistrationError, Resolution, ResolveOutcome, RuntimeModels, RuntimeOwner,
-    SessionCreateRequest, SessionError, SessionId, SessionListFilter, SessionRelationKind,
-    SessionStartPoint, SessionView, TurnActivity, TurnActivityId, TurnBudget, TurnCause, TurnEvent,
+    EmptyModels, FrameKey, InputId, InputItem, LlmCallRecord, MaxToolCalls, ModelConfig, ModelKey,
+    ModelLimits, ModelLimitsError, ModelMetadata, ModelMetadataBuilder, ModelRegistry,
+    ModelUnavailable, ModelUnavailableReason, NoProgressBudget, NodeId, OmittedToolCalls,
+    PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
+    PendingTurnInputCancelTarget, PendingTurnInputRead, PendingTurnInputReadStatus,
+    PendingTurnInputSuffixCancelOutcome, ProcessId, QueuedDrainCandidate, QueuedDrainFamily,
+    QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection, QueuedWorkBatchingConfig,
+    ReasoningRefused, RecordedModel, RegisteredModel, RegistrationError, Resolution,
+    ResolveOutcome, RuntimeModels, RuntimeOwner, SessionCreateRequest, SessionError, SessionId,
+    SessionListFilter, SessionRelationKind, SessionStartPoint, SessionView, ToolCallLimitExceeded,
+    ToolCallLimitScope, TurnActivity, TurnActivityId, TurnBudget, TurnCause, TurnEvent,
     TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnId, TurnInput,
     TurnInputApplication, facade_support::GenerationOverlay, facade_support::PluginStack,
     facade_support::SessionCommand, facade_support::SessionCommandReceipt,
@@ -313,9 +314,9 @@ pub use lash_sansio::{
 pub mod prelude {
     pub use crate::{
         AdvancedToolAdmin, ChargeSafetyPolicy, CoreTriggerAdmin, DeploymentDrainStatus,
-        DurableSession, EmbedError, InputItem, LashCore, LashCoreBuilder, LashSession, ModelConfig,
-        ModelKey, ModelLimits, ModelLimitsError, ModelMetadata, ModelMetadataBuilder,
-        ModelRegistry, NoProgressBudget, ObservableSession, ParkedSession,
+        DurableSession, EmbedError, InputItem, LashCore, LashCoreBuilder, LashSession,
+        MaxToolCalls, ModelConfig, ModelKey, ModelLimits, ModelLimitsError, ModelMetadata,
+        ModelMetadataBuilder, ModelRegistry, NoProgressBudget, ObservableSession, ParkedSession,
         PendingTurnInputCancelOutcome, PluginOperations, PluginStack, RegisteredModel, Result,
         SendBuilder, SendHandle, SendOutcome, SessionBuilder, SessionCommand, SessionCommandAdmin,
         SessionCommandReceipt, SessionCreateRequest, SessionCreation, SessionDeleteReport,
@@ -1249,7 +1250,6 @@ pub mod durability {
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::RecordedKeys;
     pub use lash_core::runtime::process_start::ProcessStartRelay;
-    pub use lash_core::session::OpenerWorkBound;
     pub use lash_core::usage_accounting::UsageAccountingBinding;
     pub use lash_core_store::attachments::{
         AttachmentProducer, AttachmentSourcePolicy, AttachmentSourcePolicyError,

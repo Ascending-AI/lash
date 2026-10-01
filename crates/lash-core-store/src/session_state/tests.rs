@@ -73,8 +73,10 @@ fn commit_result_mismatch_remains_sticky_until_execution_state_staging() {
     const LEAF_A: &str = "execution_state/leaf-a";
     const LEAF_B: &str = "execution_state/leaf-b";
 
-    let mut resident =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let mut resident = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
     let root =
         br#"{"generation":"a","leaves":["execution_state/leaf-a","execution_state/leaf-b"]}"#
             .to_vec();
@@ -136,8 +138,10 @@ fn commit_result_mismatch_remains_sticky_until_execution_state_staging() {
 
 #[test]
 fn committing_execution_state_leaves_releases_their_resident_bodies() {
-    let mut state =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
     let leaf_key = "execution_state/blake3/aa".to_string();
     let leaf_body = vec![7u8; 4096];
     let mut snapshot =
@@ -202,8 +206,10 @@ fn committing_execution_state_leaves_releases_their_resident_bodies() {
 }
 
 fn two_leaf_execution(root: &[u8], leaf_key: &str, leaf_body: &[u8]) -> RuntimeSessionState {
-    let mut state =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
     let mut snapshot = crate::plugin::ExecutionStateSnapshot::from_root(Some(root.to_vec().into()));
     snapshot.changed_component(leaf_key.to_string(), leaf_body.to_vec());
     state
@@ -293,8 +299,10 @@ fn released_execution_bodies_without_a_retained_snapshot_refuse_hydration() {
         "a later store-backed release must not launder the refusal into no execution"
     );
 
-    let mut rootless =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let mut rootless = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
     rootless.discard_runtime_snapshots();
     assert_eq!(
         rootless
@@ -386,8 +394,10 @@ fn restoring_a_capture_keeps_held_leaves_unchanged_and_stages_missing_ones() {
 
 #[test]
 fn descriptorless_execution_state_leaves_without_a_root_remain_corrupt() {
-    let mut state =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
     state.checkpoint_components.entries.insert(
         "execution_state/blake3/corrupt".to_string(),
         ResidentCheckpointComponent::Changed {
@@ -412,10 +422,13 @@ fn session_snapshot_serialization_excludes_runtime_only_fields_and_round_trips()
         session_id: SessionId::from("snapshot-test"),
         policy: SessionPolicy {
             model: Some(recorded_model("mock")),
-            ..SessionPolicy::new(crate::TurnBudget::Unbounded)
+            ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
         },
         head_revision: 42,
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.set_tool_state_snapshot(Some(crate::ToolState::default()));
     state.set_plugin_state(Some(crate::PluginState::default()));
@@ -458,7 +471,10 @@ fn session_snapshot_serialization_excludes_runtime_only_fields_and_round_trips()
 fn read_view_snapshot_projects_frame_identity_from_the_graph() {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("read-view-frames"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.ensure_agent_frame_initialized();
     assert!(state.current_frame_node_id.is_some());
@@ -478,8 +494,10 @@ fn read_view_snapshot_projects_frame_identity_from_the_graph() {
 
 #[test]
 fn boxed_runtime_authority_keeps_flat_json_and_requires_tool_access() {
-    let mut state =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
     state
         .authority
         .tool_access
@@ -508,6 +526,7 @@ fn boxed_runtime_authority_keeps_flat_json_and_requires_tool_access() {
 
     let current = serde_json::to_value(RuntimeSessionState::new(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     )))
     .expect("serialize current runtime state");
     assert_eq!(
@@ -519,9 +538,11 @@ fn boxed_runtime_authority_keeps_flat_json_and_requires_tool_access() {
 
 #[test]
 fn incomplete_checkpoint_component_projection_is_a_typed_error() {
-    let projected =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-            .to_snapshot();
+    let projected = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ))
+    .to_snapshot();
     let state = RuntimeSessionState::from_snapshot(projected);
 
     let error = state
@@ -540,9 +561,11 @@ fn incomplete_checkpoint_component_projection_is_a_typed_error() {
 
 #[test]
 fn new_session_rejects_unproven_checkpoint_component_projection() {
-    let projected =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-            .to_snapshot();
+    let projected = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ))
+    .to_snapshot();
     let state = RuntimeSessionState::from_snapshot(projected);
 
     let error = state
@@ -559,8 +582,10 @@ fn new_session_rejects_unproven_checkpoint_component_projection() {
 #[test]
 #[should_panic(expected = "adopted head revision must advance")]
 fn persisted_commit_cannot_adopt_nonadvancing_revision() {
-    let mut state =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
     let mut receipt = commit_result_for(&state);
     receipt.head_revision = state.head_revision;
     state.apply_persisted_commit_result(receipt);
@@ -569,8 +594,10 @@ fn persisted_commit_cannot_adopt_nonadvancing_revision() {
 #[test]
 #[should_panic(expected = "adopted head revision must advance")]
 fn persisted_commit_cannot_adopt_regressing_revision() {
-    let mut state =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
     state.head_revision = 2;
     let mut receipt = commit_result_for(&state);
     receipt.head_revision = 1;
@@ -578,8 +605,10 @@ fn persisted_commit_cannot_adopt_regressing_revision() {
 }
 
 fn fresh_state_with_initial_frame() -> RuntimeSessionState {
-    let mut state =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
     state.ensure_agent_frame_initialized();
     state
 }
@@ -628,8 +657,10 @@ fn an_unpersisted_initial_frame_opens_under_the_installed_plugin_config() {
         settled.protocol_turn_options()
     );
 
-    let mut reopened =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let mut reopened = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
     reopened.authority.plugin_config = settled;
     reopened.ensure_agent_frame_initialized();
     assert_eq!(
@@ -662,15 +693,19 @@ fn a_persisted_initial_frame_keeps_the_config_it_opened_under() {
 /// restores it.
 #[test]
 fn config_revision_round_trips_through_the_persisted_head_config() {
-    let mut state =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
     state.config_revision = 5;
 
     let config = crate::store::persisted_session_config_from_state(&state);
     assert_eq!(config.config_revision, 5);
 
-    let mut restored =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let mut restored = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
     apply_persisted_session_config(&mut restored, &config);
     assert_eq!(restored.config_revision, 5);
     assert_eq!(restored.policy.model, config.model);
@@ -680,8 +715,10 @@ fn config_revision_round_trips_through_the_persisted_head_config() {
 /// the sticky config, while the state's own policy stays the root's.
 #[test]
 fn recorded_session_view_reads_the_sticky_config_under_a_root_view() {
-    let mut state =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
     state.session_id = SessionId::from("recorded-view-law");
     state.policy.model = Some(recorded_model("sticky-route"));
     let sticky = state.policy.clone();
@@ -710,8 +747,10 @@ fn recorded_session_view_reads_the_sticky_config_under_a_root_view() {
 
 #[test]
 fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlement() {
-    let mut state =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
     state.session_id = SessionId::from("root-config-law");
     state.policy.model = Some(recorded_model("sticky-route"));
     let sticky = crate::store::persisted_session_config_from_state(&state);
@@ -787,8 +826,10 @@ fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlem
 /// config is still the head's.
 #[test]
 fn a_root_commit_identity_covers_its_view_not_the_sticky_config_it_writes() {
-    let mut state =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
     state.session_id = SessionId::from("root-config-identity");
     state.policy.model = Some(recorded_model("first-route"));
     let first = crate::store::persisted_session_config_from_state(&state);
@@ -862,7 +903,10 @@ fn projection_text(id: &str) -> crate::Message {
 fn the_state_and_its_read_views_share_one_projection() {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("shared-projection"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.append_active_conversation_messages(&[projection_text("m1")]);
 
@@ -917,7 +961,10 @@ fn a_durable_frame_switch_leaves_only_the_new_frame_resident() {
     let clock = crate::SystemClock;
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("frame-residency"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.append_active_conversation_messages(&[projection_text("a1"), projection_text("a2")]);
     let old_frame = state.current_frame_node_id.clone().expect("initial frame");
@@ -1000,7 +1047,8 @@ fn capped_plugin_config(cap: u64) -> crate::PluginConfig {
 fn a_redriven_root_runs_under_its_admitted_plugin_config_revision() {
     use crate::session_state::facade_ops::RuntimeSessionStateFacadeOps as _;
 
-    let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
+    let policy =
+        crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
     let mut admitted = crate::PersistedSessionConfig::from(&policy);
     admitted.plugin_config = capped_plugin_config(12);
     admitted.config_revision = 4;

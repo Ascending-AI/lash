@@ -346,7 +346,10 @@ fn route_headers_stay_out_of_the_persisted_session_config() {
             ),
         )
         .unwrap();
-    let mut policy = lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded);
+    let mut policy = lash_core::SessionPolicy::new(
+        lash_core::TurnBudget::Unbounded,
+        lash_core::MaxToolCalls::new(1024),
+    );
     policy.model = Some(lash_core::ModelConfig::new(
         lash_core::RuntimeModels::snapshot(&models, &lash_core::ModelKey::new("model")).unwrap(),
     ));

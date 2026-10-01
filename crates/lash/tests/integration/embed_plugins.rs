@@ -255,30 +255,34 @@ async fn core_with_responses(
         .build()
         .into_handle();
     let double = crate::support::restate_double(SEED).await;
-    let core = LashCore::standard_builder(double.lash_backend(), lash::TurnBudget::Unbounded)
-        .models(std::sync::Arc::new(
-            lash::ModelRegistry::new()
-                .register(
-                    "mock-model",
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("mock-model")
-                            .context_window_tokens(16_000)
-                            .build()
-                            .expect("valid model spec"),
-                        provider,
-                    ),
-                )
-                .expect("register the test model"),
-        ))
-        .model("mock-model")
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .plugin(plugin)
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "embed-plugins-test-worker",
-            "embed-plugins-test-boot",
-        ))
-        .expect("core");
+    let core = LashCore::standard_builder(
+        double.lash_backend(),
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .models(std::sync::Arc::new(
+        lash::ModelRegistry::new()
+            .register(
+                "mock-model",
+                lash::RegisteredModel::new(
+                    lash::ModelMetadata::builder("mock-model")
+                        .context_window_tokens(16_000)
+                        .build()
+                        .expect("valid model spec"),
+                    provider,
+                ),
+            )
+            .expect("register the test model"),
+    ))
+    .model("mock-model")
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .plugin(plugin)
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        "embed-plugins-test-worker",
+        "embed-plugins-test-boot",
+    ))
+    .expect("core");
     (core, double)
 }
 

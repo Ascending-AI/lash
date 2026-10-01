@@ -422,6 +422,7 @@ pub(super) fn measure_snapshot(
         session_id: lash_sansio::SessionId::from("fig-1257-snapshot-budget"),
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
     let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state);

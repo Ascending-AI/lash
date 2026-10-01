@@ -470,7 +470,9 @@ fn build_turn_core(
     // namespace of its own on the shared restate-server, dropped with the run.
     let backend = substrate.backend.clone();
     let builder = match channel {
-        crate::ChannelSelection::Standard => LashCore::standard_builder(backend, budget),
+        crate::ChannelSelection::Standard => {
+            LashCore::standard_builder(backend, budget, lash::MaxToolCalls::new(1024))
+        }
         crate::ChannelSelection::Cell | crate::ChannelSelection::Native => {
             let mut config = lash::rlm::RlmProtocolPluginConfig::builder()
                 .channel(if channel == crate::ChannelSelection::Cell {
@@ -491,7 +493,7 @@ fn build_turn_core(
                 std::sync::Arc::new(lash::rlm::TypescriptDialect),
                 &backend,
             );
-            LashCore::rlm_builder(backend, budget, factory)
+            LashCore::rlm_builder(backend, budget, lash::MaxToolCalls::new(1024), factory)
         }
     };
     let shutdown_marker =

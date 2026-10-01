@@ -320,30 +320,34 @@ async fn witness(store: Store, native: bool) {
         })
         .build()
         .into_handle();
-    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .models(std::sync::Arc::new(
-            lash::ModelRegistry::new()
-                .register(
-                    "catalog-fixture",
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("catalog-fixture")
-                            .context_window_tokens(16_000)
-                            .build()
-                            .expect("model"),
-                        provider,
-                    ),
-                )
-                .expect("register the test model"),
-        ))
-        .model("catalog-fixture")
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .plugin(factory.clone())
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "mcp-catalog",
-            uuid::Uuid::new_v4().to_string(),
-        ))
-        .expect("core");
+    let core = lash::LashCore::standard_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .models(std::sync::Arc::new(
+        lash::ModelRegistry::new()
+            .register(
+                "catalog-fixture",
+                lash::RegisteredModel::new(
+                    lash::ModelMetadata::builder("catalog-fixture")
+                        .context_window_tokens(16_000)
+                        .build()
+                        .expect("model"),
+                    provider,
+                ),
+            )
+            .expect("register the test model"),
+    ))
+    .model("catalog-fixture")
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .plugin(factory.clone())
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        "mcp-catalog",
+        uuid::Uuid::new_v4().to_string(),
+    ))
+    .expect("core");
     let endpoint;
     let stop;
     if let Some(engine) = &engine {

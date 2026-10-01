@@ -45,6 +45,8 @@ pub struct RemoteProcessExecutionPolicy {
     #[serde(default)]
     pub autonomous: bool,
     pub turn_budget: RemoteTurnBudget,
+    /// Required wire mirror of the session's tool-call limit.
+    pub max_tool_calls: std::num::NonZeroUsize,
     pub no_progress_budget: RemoteNoProgressBudget,
     pub charge_safety: RemoteChargeSafetyPolicy,
     /// Session-wide generation intent, mirroring `SessionPolicy.generation`.
@@ -74,13 +76,14 @@ pub struct RemoteProcessExecutionEnvSpec {
 }
 
 impl RemoteProcessExecutionPolicy {
-    pub fn new(turn_budget: RemoteTurnBudget) -> Self {
+    pub fn new(turn_budget: RemoteTurnBudget, max_tool_calls: std::num::NonZeroUsize) -> Self {
         Self {
             model: None,
             attachment_acceptance: Default::default(),
             session_id: None,
             autonomous: false,
             turn_budget,
+            max_tool_calls,
             no_progress_budget: match lash_sansio::NoProgressBudget::default() {
                 lash_sansio::NoProgressBudget::Bounded(limit) => {
                     RemoteNoProgressBudget::Bounded(limit)
@@ -94,10 +97,10 @@ impl RemoteProcessExecutionPolicy {
 }
 
 impl RemoteProcessExecutionEnvSpec {
-    pub fn new(turn_budget: RemoteTurnBudget) -> Self {
+    pub fn new(turn_budget: RemoteTurnBudget, max_tool_calls: std::num::NonZeroUsize) -> Self {
         Self {
             plugin_config: RemoteProcessPluginConfig::default(),
-            policy: RemoteProcessExecutionPolicy::new(turn_budget),
+            policy: RemoteProcessExecutionPolicy::new(turn_budget, max_tool_calls),
             render: None,
         }
     }

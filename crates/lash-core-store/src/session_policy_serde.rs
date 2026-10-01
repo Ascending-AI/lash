@@ -10,7 +10,7 @@
 //! runtime-only field by construction.
 
 use crate::SessionId;
-use crate::{ModelConfig, NoProgressBudget, SessionPolicy, TurnBudget};
+use crate::{MaxToolCalls, ModelConfig, NoProgressBudget, SessionPolicy, TurnBudget};
 
 impl serde::Serialize for SessionPolicy {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -19,7 +19,7 @@ impl serde::Serialize for SessionPolicy {
     {
         use serde::ser::SerializeStruct;
 
-        let mut fields = 3;
+        let mut fields = 4;
         if self.model.is_some() {
             fields += 1;
         }
@@ -45,6 +45,7 @@ impl serde::Serialize for SessionPolicy {
         state.serialize_field("session_id", &self.session_id)?;
         state.serialize_field("autonomous", &self.autonomous)?;
         state.serialize_field("turn_budget", &self.turn_budget)?;
+        state.serialize_field("max_tool_calls", &self.max_tool_calls)?;
         if self.no_progress_budget != NoProgressBudget::default() {
             state.serialize_field("no_progress_budget", &self.no_progress_budget)?;
         }
@@ -75,6 +76,7 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
             #[serde(default)]
             autonomous: bool,
             turn_budget: TurnBudget,
+            max_tool_calls: MaxToolCalls,
             #[serde(default)]
             no_progress_budget: NoProgressBudget,
             #[serde(default)]
@@ -90,6 +92,7 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
             session_id: wire.session_id,
             autonomous: wire.autonomous,
             turn_budget: wire.turn_budget,
+            max_tool_calls: wire.max_tool_calls,
             no_progress_budget: wire.no_progress_budget,
             charge_safety: wire.charge_safety,
             generation: wire.generation,

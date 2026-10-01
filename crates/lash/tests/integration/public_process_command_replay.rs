@@ -294,29 +294,33 @@ async fn law(kind: StorageKind, method: Method, live: bool) {
         })
         .build()
         .into_handle();
-    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .models(std::sync::Arc::new(
-            lash_core::ModelRegistry::new()
-                .register(
-                    "mock-model",
-                    lash_core::RegisteredModel::new(
-                        lash_core::ModelMetadata::builder("mock-model")
-                            .context_window_tokens(200_000)
-                            .build()
-                            .unwrap(),
-                        provider,
-                    ),
-                )
-                .expect("register the test model"),
-        ))
-        .model("mock-model")
-        .build(lash_core::LeaseOwnerIdentity::opaque(
-            "receipt-law",
-            "facade",
-        ))
-        .unwrap();
+    let core = lash::LashCore::standard_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .models(std::sync::Arc::new(
+        lash_core::ModelRegistry::new()
+            .register(
+                "mock-model",
+                lash_core::RegisteredModel::new(
+                    lash_core::ModelMetadata::builder("mock-model")
+                        .context_window_tokens(200_000)
+                        .build()
+                        .unwrap(),
+                    provider,
+                ),
+            )
+            .expect("register the test model"),
+    ))
+    .model("mock-model")
+    .build(lash_core::LeaseOwnerIdentity::opaque(
+        "receipt-law",
+        "facade",
+    ))
+    .unwrap();
     let worker =
         lash::durability::DurableProcessWorker::new(core.durable_process_worker_config().unwrap())
             .unwrap();

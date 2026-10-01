@@ -51,6 +51,7 @@ fn agent_scenario_plugin_reserved_source_key_refusal_is_typed() -> Result<()> {
         let core = explicit_ephemeral_facets(LashCore::standard_builder(
             double.lash_backend(),
             crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
         ))
         .serve_test_model(mock_provider(), mock_model_spec())
         .plugin(Arc::new(StaticPluginFactory::new("accept", spec)))
@@ -121,6 +122,7 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
         let core = explicit_ephemeral_facets(LashCore::standard_builder(
             backend,
             crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
         ))
         .serve_test_model(mock_provider(), mock_model_spec())
         .plugin(Arc::new(StaticPluginFactory::new("accept", spec)))

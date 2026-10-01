@@ -551,6 +551,7 @@ pub async fn a_root_commit_racing_a_close_is_refused_stale_fence(
     let close = close(&admin, &id, runner.as_ref()).await;
     let mut state = lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
         lash_core::TurnBudget::Unbounded,
+        lash_core::MaxToolCalls::new(1024),
     ));
     state.session_id = id.clone();
     state.ensure_agent_frame_initialized();

@@ -348,6 +348,7 @@ async fn restate_deployment(
     let core = lash::LashCore::standard_builder(
         lash_core::Backend::new(backend.clone()),
         lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
     )
     .serve_test_model(
         lash_core::testing::TestProvider::builder()

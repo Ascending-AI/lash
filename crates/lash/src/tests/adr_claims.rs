@@ -165,6 +165,7 @@ async fn multi_model_turn_and_remote_report_keep_per_call_evidence() -> Result<(
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(provider, mock_model_spec())
     .tools(Arc::new(AppTools))
@@ -292,6 +293,7 @@ async fn resumed_session_observe_wait_cancel_drive_keep_original_owners() -> Res
         explicit_ephemeral_facets(LashCore::standard_builder(
             backend,
             crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
         ))
         .serve_test_model(
             text_provider("owner-matrix", "owner-model", answer),

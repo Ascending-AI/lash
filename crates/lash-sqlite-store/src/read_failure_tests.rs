@@ -225,6 +225,7 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
         session_id: SessionId::from("readonly-session"),
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
         ))
     };
     assert_storage_failure(
@@ -426,6 +427,7 @@ async fn admit_and_seed(store: &SqliteStore, session_id: &SessionId) {
         session_id: session_id.clone(),
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
         ))
     };
     state.ensure_agent_frame_initialized();
@@ -527,6 +529,7 @@ async fn seed_failure_evidence_session(
         session_id: SessionId::from(session_id.to_string()),
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
         ))
     };
     let mut commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state);

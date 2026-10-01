@@ -93,7 +93,11 @@ async fn double_over(
 /// A core over `double` whose commits fit `nodes` nodes.
 fn core_over(double: &lash_restate_test::RestateTestBackend, nodes: usize) -> Result<LashCore> {
     explicit_ephemeral_facets_with_budget(
-        LashCore::standard_builder(double.lash_backend(), crate::TurnBudget::Unbounded),
+        LashCore::standard_builder(
+            double.lash_backend(),
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ),
         crate::CommitBudget::bounded(1024 * 1024, nodes),
     )
     .serve_test_model(mock_provider(), mock_model_spec())
@@ -450,7 +454,11 @@ async fn a_catalog_row_with_no_head_is_refused_and_never_opened_with_defaults(
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(ID),
             relation: lash_core::SessionRelation::Root,
-            config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+            config: lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            )
+            .into(),
             head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )
@@ -526,7 +534,11 @@ async fn a_send_to_a_catalog_row_with_no_head_answers_the_typed_refusal(
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(ID),
             relation: lash_core::SessionRelation::Root,
-            config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+            config: lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            )
+            .into(),
             head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )

@@ -30,11 +30,15 @@ pub(super) fn runtime_core_for_scripts(
     let (provider_handle, model, provider_kind) =
         runtime_provider_components(&provider_kind, &transport)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(provider_handle, model)
-        .build(crate::sim_process_owner())
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    let core = lash::LashCore::standard_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .serve_test_model(provider_handle, model)
+    .build(crate::sim_process_owner())
+    .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     Ok((core, transport, provider_kind))
 }

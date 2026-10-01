@@ -358,8 +358,8 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectGroupShape => Terminal,
             // an awaited aggregate nothing can settle; the same program awaits it again.
             Self::AggregateAwaitUnsettled => Terminal,
-            // the opener's retention bound refuses the same group again.
-            Self::EffectGroupOpenerBoundExceeded => Terminal,
+            // the recorded tool-call limit refuses the same call again.
+            Self::MaxToolCallsExceeded => Terminal,
             // the child request names the wrong cancellation authority.
             Self::RuntimeEffectToolChildCancellationAuthority => Terminal,
             // the child request routes its completion inconsistently.

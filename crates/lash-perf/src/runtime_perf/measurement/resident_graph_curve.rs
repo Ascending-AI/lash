@@ -413,6 +413,7 @@ mod commit_scaling_tests {
         const SAMPLES: usize = 256;
         let mut state = RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ));
         state.ensure_agent_frame_initialized();
         let mut held = Vec::with_capacity(turns + SAMPLES);

@@ -265,7 +265,11 @@ async fn committed_factory_attachment() -> (
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("explicit-root-factory"),
         relation: crate::SessionRelation::Root,
-        config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+        config: crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        )
+        .into(),
         head: crate::SessionCreationHead::CommittedByCreator,
     };
     let store = crate::testing::runtime_helpers::create_session_store(&factory, &request)
@@ -1295,7 +1299,11 @@ async fn fenced_fixture(session_id: &SessionId) -> FencedFixture {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
         relation: crate::SessionRelation::Root,
-        config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+        config: crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        )
+        .into(),
         head: crate::SessionCreationHead::CommittedByCreator,
     };
     let store = crate::testing::runtime_helpers::create_session_store(&factory, &request)
@@ -2028,7 +2036,8 @@ fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
     let recorded = |key: &str| {
         crate::testing::test_model_config(key, crate::testing::test_model_metadata(key))
     };
-    let mut policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
+    let mut policy =
+        crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
     policy.model = Some(recorded("attachment-model"));
     policy.attachment_acceptance = lash_core_store::attachments::attachment_test_acceptance();
     let changed_host = Arc::new(crate::provider::AttachmentCapabilitySnapshot {

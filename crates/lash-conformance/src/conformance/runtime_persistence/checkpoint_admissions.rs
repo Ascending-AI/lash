@@ -26,7 +26,10 @@ where
     admit_conformance_session(&open, &SessionId::from("checkpoint-component-refs")).await;
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("checkpoint-component-refs"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.set_execution_state_snapshot(Some(b"known-execution-state".to_vec().into()));
     let mut first_commit = RuntimeCommit::persisted_state_for_test(&state);
@@ -279,7 +282,10 @@ where
 pub async fn checkpoint_rejects_unknown_component_ref(store: Arc<dyn RuntimeStore>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("checkpoint-unknown-ref"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     let mut commit = RuntimeCommit::persisted_state_for_test(&state);
     commit.checkpoint.components.insert(
@@ -318,7 +324,10 @@ pub async fn checkpoint_rejects_unknown_component_ref(store: Arc<dyn RuntimeStor
 pub async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn RuntimeStore>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("missing-frame-root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     let node = SessionNodeRecord {
         node_id: "unframed-root".into(),
@@ -368,7 +377,10 @@ pub async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
     .await;
     let mut state = RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     let mut expected = Vec::new();
     let mut replay = None;
@@ -1435,6 +1447,7 @@ pub(super) fn sample_session_node(
                 reason: AgentFrameReason::initial(),
                 assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
                 )),
             }
         } else {

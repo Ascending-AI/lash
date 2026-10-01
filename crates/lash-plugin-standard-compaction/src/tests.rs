@@ -293,6 +293,7 @@ async fn standard_compaction_turn_transform_strips_old_image_attachments() {
 
     let state = SessionSnapshot::new(lash_core::SessionPolicy::new(
         lash_core::TurnBudget::Unbounded,
+        lash_core::MaxToolCalls::new(1024),
     ));
     let traces = Arc::new(RecordingTraces::default());
     let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);

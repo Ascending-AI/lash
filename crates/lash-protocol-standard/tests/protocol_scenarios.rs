@@ -963,7 +963,10 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
                 .build()
                 .expect("Standard scenario model"),
         ))),
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     // The cancel intent executes inside the engine's process workflow, which
     // reaches the deployment's process-worker slot: install a durable worker

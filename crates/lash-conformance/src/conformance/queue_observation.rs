@@ -15,7 +15,11 @@ pub async fn queue_head_read_failure_publishes_recoverable_gap(backend: crate::B
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: crate::SessionRelation::Root,
-                config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+                config: crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                )
+                .into(),
                 head: crate::SessionCreationHead::CommittedByCreator,
             })
             .await
@@ -23,7 +27,10 @@ pub async fn queue_head_read_failure_publishes_recoverable_gap(backend: crate::B
         if committed {
             let state = RuntimeSessionState {
                 session_id: session_id.clone(),
-                ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+                ..RuntimeSessionState::new(crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ))
             };
             view.commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
                 .await

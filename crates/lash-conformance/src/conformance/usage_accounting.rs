@@ -964,7 +964,10 @@ async fn assert_fork_carries_no_usage(tier: &UsageAccountingTier, world: &World,
             node_id: leaf,
             relation: crate::SessionRelation::Root,
             pending_observer_intents: Vec::new(),
-            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            policy: crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            ),
             plugin_config: Default::default(),
         })
         .await

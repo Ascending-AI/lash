@@ -155,13 +155,18 @@ pub(super) fn rlm_core() -> CoreBuild {
             std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &backend,
         );
-        lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-            .recovery_lease(super::recovery_lease())
-            .serve_test_model(provider, model_spec()?)
-            .build(owner)
-            .map_err(|error| format!("build the lash core: {error}"))
+        lash::LashCore::rlm_builder(
+            backend,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+            factory,
+        )
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .recovery_lease(super::recovery_lease())
+        .serve_test_model(provider, model_spec()?)
+        .build(owner)
+        .map_err(|error| format!("build the lash core: {error}"))
     })
 }
 
@@ -231,7 +236,10 @@ pub(crate) async fn publish_process(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
                     model: Some(recorded_model()?),
-                    ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                    ..lash_core::SessionPolicy::new(
+                        lash_core::TurnBudget::Unbounded,
+                        lash_core::MaxToolCalls::new(1024),
+                    )
                 },
             )),
         )

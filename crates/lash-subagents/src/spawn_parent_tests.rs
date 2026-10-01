@@ -23,6 +23,7 @@ impl lash_core::plugin::runtime_host::SessionStateService for NamedSnapshots {
         self.read.lock_recover().push(session_id.clone());
         Ok(RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
         .to_snapshot())
     }

@@ -364,6 +364,7 @@ impl SurfaceRunner {
                     session_id: session.clone(),
                     ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
+                        lash_core::MaxToolCalls::new(1024),
                     ))
                 });
                 let commit = RuntimeCommit::persisted_state_with_operation_for_testing(
@@ -433,7 +434,11 @@ async fn surface_runners(
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(SURFACE_RUNTIME_SESSION),
         relation: SessionRelation::Root,
-        config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+        config: lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
+        .into(),
         head: SessionCreationHead::CommittedByCreator,
     };
     let sqlite_store = Arc::new(SqliteStore::open(&sqlite_runtime_root).await.unwrap());

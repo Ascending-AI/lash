@@ -162,7 +162,10 @@ fn write_head(fleet: FleetFormat) -> Vec<u8> {
     let session = SessionId::from("session");
     let meta = SessionHeadMeta::created(
         &session,
-        crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded),
+        crate::PersistedSessionConfig::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ),
         fleet,
     );
     serde_json::to_vec(&SessionHeadPayload {

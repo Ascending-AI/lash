@@ -409,13 +409,17 @@ fn build_core(
             crate::runtime_perf::providers::BenchmarkEchoTool::new(Arc::clone(&effect_host)),
         )),
     )));
-    lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .serve_test_model(provider, latency_model_spec()?)
-        .plugins(plugins)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build(latency_owner())
-        .map_err(anyhow::Error::from)
+    lash::LashCore::standard_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .serve_test_model(provider, latency_model_spec()?)
+    .plugins(plugins)
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .build(latency_owner())
+    .map_err(anyhow::Error::from)
 }
 
 /// A read-only core over a second store set on `stores_dir`. The per-sample
@@ -1216,7 +1220,11 @@ mod tests {
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash_core::SessionRelation::Root,
-                config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+                config: lash_core::SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                    lash_core::MaxToolCalls::new(1024),
+                )
+                .into(),
                 head: lash_core::SessionCreationHead::CommittedByCreator,
             })
             .await

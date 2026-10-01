@@ -145,7 +145,10 @@ mod tests {
     #[test]
     fn committed_attachment_ids_merge_tool_outputs_with_message_refs() {
         let tool_ref = attachment_ref("tool-output");
-        let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED));
+        let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+            UNBOUNDED,
+            crate::MaxToolCalls::new(1024),
+        ));
         let message = crate::Message {
             id: "message".to_string(),
             role: crate::MessageRole::User,
@@ -189,7 +192,10 @@ mod tests {
             reference: attachment_ref(id),
             witness: "witness".to_string(),
         };
-        let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED));
+        let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+            UNBOUNDED,
+            crate::MaxToolCalls::new(1024),
+        ));
         let message = crate::Message {
             id: "result".to_string(),
             role: crate::MessageRole::User,
@@ -218,7 +224,10 @@ mod tests {
 
     #[test]
     fn committed_attachment_ids_include_omitted_tool_call_attachments() {
-        let state = RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED));
+        let state = RuntimeSessionState::new(crate::SessionPolicy::new(
+            UNBOUNDED,
+            crate::MaxToolCalls::new(1024),
+        ));
         let omitted = crate::OmittedToolCalls {
             count: 1,
             failures: 0,
@@ -254,7 +263,10 @@ mod tests {
     }
 
     fn state_with_messages(messages: &[Message]) -> RuntimeSessionState {
-        let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED));
+        let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+            UNBOUNDED,
+            crate::MaxToolCalls::new(1024),
+        ));
         state.session_graph = crate::SessionGraph::from_active_read_state(messages);
         state
     }

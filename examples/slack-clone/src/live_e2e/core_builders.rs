@@ -238,27 +238,30 @@ pub(super) fn standard_core_over(
     spec: StandardCoreSpec<'_>,
 ) -> Result<LashCore> {
     let (models, model_key) = one_model(provider, model)?;
-    let mut builder =
-        LashCore::standard_builder(backend, lash::TurnBudget::bounded(spec.turn_budget))
-            .models(models)
-            .model(model_key)
-            .reasoning(live_reasoning())
-            .generation(generation(spec.output_cap))
-            .session_plugin(
-                lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
-                lash::standard::StandardTurnOptions {
-                    prompt: Some(lash::standard::StandardPrompt {
-                        instructions: vec![spec.instructions.to_string()],
-                        ..Default::default()
-                    }),
-                    render: None,
-                },
-            )
-            .context("encode the live-E2E standard prompt")?
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .trace_sink(Arc::new(JsonlTraceSink::new(spec.trace_path)))
-            .trace_level(TraceLevel::Extended);
+    let mut builder = LashCore::standard_builder(
+        backend,
+        lash::TurnBudget::bounded(spec.turn_budget),
+        lash::MaxToolCalls::new(1024),
+    )
+    .models(models)
+    .model(model_key)
+    .reasoning(live_reasoning())
+    .generation(generation(spec.output_cap))
+    .session_plugin(
+        lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
+        lash::standard::StandardTurnOptions {
+            prompt: Some(lash::standard::StandardPrompt {
+                instructions: vec![spec.instructions.to_string()],
+                ..Default::default()
+            }),
+            render: None,
+        },
+    )
+    .context("encode the live-E2E standard prompt")?
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .trace_sink(Arc::new(JsonlTraceSink::new(spec.trace_path)))
+    .trace_level(TraceLevel::Extended);
     if let Some(tools) = spec.tools {
         builder = builder.tools(tools);
     }
@@ -301,6 +304,7 @@ pub(super) async fn rlm_core(
     let mut builder = LashCore::rlm_builder(
         backend,
         lash::TurnBudget::bounded(MAX_MODEL_TURNS_PER_SESSION_TURN),
+        lash::MaxToolCalls::new(1024),
         factory,
     )
     .models(models)

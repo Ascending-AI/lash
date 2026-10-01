@@ -54,15 +54,20 @@ fn build_core(restate: &RestateTestBackend) -> lash::LashCore {
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
-    lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(provider, model_spec())
-        .build(lash_core::LeaseOwnerIdentity::opaque(
-            "lash-restate-test",
-            "admission-invariant",
-        ))
-        .expect("build the lash core")
+    lash::LashCore::rlm_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+        factory,
+    )
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+    .serve_test_model(provider, model_spec())
+    .build(lash_core::LeaseOwnerIdentity::opaque(
+        "lash-restate-test",
+        "admission-invariant",
+    ))
+    .expect("build the lash core")
 }
 
 /// Where the broken invariant meets the admission.

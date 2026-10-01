@@ -135,7 +135,10 @@ async fn start_request(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
                     model: Some(super::process::recorded_model()?),
-                    ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                    ..lash_core::SessionPolicy::new(
+                        lash_core::TurnBudget::Unbounded,
+                        lash_core::MaxToolCalls::new(1024),
+                    )
                 },
             )),
         )

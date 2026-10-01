@@ -27,8 +27,11 @@ fn request(session_id: impl Into<SessionId>) -> SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: session_id.into(),
         relation: SessionRelation::Root,
-        config: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
-            .into(),
+        config: lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
+        )
+        .into(),
         head: SessionCreationHead::CommittedByCreator,
     }
 }
@@ -50,6 +53,7 @@ async fn create_state(
         session_id: SessionId::from(session_id.to_string()),
         ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
         ))
     };
     (store, state)
@@ -92,7 +96,10 @@ async fn fork_store(
         session_id: SessionId::from(session_id.to_string()),
         node_id: node_id.to_string().into(),
         relation: SessionRelation::Root,
-        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+        policy: lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
+        ),
         plugin_config: Default::default(),
     };
     factory

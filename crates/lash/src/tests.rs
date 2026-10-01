@@ -1121,6 +1121,7 @@ pub(crate) fn standard_core_over(backend: lash_core::Backend) -> LashCore {
     explicit_ephemeral_facets(LashCore::standard_builder(
         backend,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())
@@ -1153,7 +1154,12 @@ async fn rlm_core_builder() -> crate::core::LashCoreBuilder {
 #[cfg(feature = "rlm")]
 fn rlm_core_builder_over(backend: lash_core::Backend) -> crate::core::LashCoreBuilder {
     let factory = rlm_factory(&backend);
-    LashCore::rlm_builder(backend, crate::TurnBudget::Unbounded, factory)
+    LashCore::rlm_builder(
+        backend,
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+        factory,
+    )
 }
 
 mod scope_support;

@@ -113,7 +113,10 @@ fn realistic_commit(
                         frame_key: frame_key.clone(),
                         reason: lash_core_execution::AgentFrameReason::initial(),
                         assignment: lash_core_execution::AgentFrameAssignment::unconfigured(
-                            SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+                            SessionPolicy::new(
+                                lash_core_execution::TurnBudget::Unbounded,
+                                lash_core_execution::MaxToolCalls::new(1024),
+                            ),
                         ),
                     }
                 } else {
@@ -157,10 +160,14 @@ fn realistic_commit(
                         .expect("benchmark model"),
                 ),
             )),
-            ..SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
+            ..SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+                lash_core_execution::MaxToolCalls::new(1024),
+            )
         },
         ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
         ))
     };
     let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(
@@ -393,6 +400,7 @@ async fn measured_commit_size_curve() {
                                 relation: SessionRelation::Root,
                                 config: SessionPolicy::new(
                                     lash_core_execution::TurnBudget::Unbounded,
+                                    lash_core_execution::MaxToolCalls::new(1024),
                                 )
                                 .into(),
                                 head: SessionCreationHead::CommittedByCreator,
@@ -411,6 +419,7 @@ async fn measured_commit_size_curve() {
                                 relation: SessionRelation::Root,
                                 config: SessionPolicy::new(
                                     lash_core_execution::TurnBudget::Unbounded,
+                                    lash_core_execution::MaxToolCalls::new(1024),
                                 )
                                 .into(),
                                 head: SessionCreationHead::CommittedByCreator,

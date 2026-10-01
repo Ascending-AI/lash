@@ -73,6 +73,7 @@ fn core_over(backend: lash_core::Backend, provider: ProviderHandle) -> Result<La
     explicit_ephemeral_facets(LashCore::standard_builder(
         backend,
         crate::TurnBudget::bounded(CORE_DEFAULT_TURNS),
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(provider, mock_model_spec())
     .tools(Arc::new(AppTools))
@@ -344,10 +345,12 @@ async fn creation_refuses_charge_safety_above_the_ceiling_without_recording_a_se
     let inherited = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .session_spec(
         crate::SessionSpec::default()
             .turn_budget(crate::TurnBudget::Unbounded)
+            .max_tool_calls(crate::MaxToolCalls::new(1024))
             .charge_safety(charge_safety_above_the_ceiling().charge_safety),
     )
     .serve_test_model(looping_provider(&calls), mock_model_spec())
@@ -766,6 +769,7 @@ async fn a_recorded_budget_bounds_every_root_after_an_engine_restart(
     let unbounded = explicit_ephemeral_facets(LashCore::standard_builder(
         second,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(endless_provider(&calls), mock_model_spec())
     .tools(Arc::new(AppTools))
@@ -887,4 +891,179 @@ async fn live_a_recorded_budget_bounds_every_root_after_a_deployment_restart() -
     }
     first.finish().await;
     result
+}
+
+/// How many times a `max_tool_calls` refusal appears in what the model is
+/// shown.
+fn refusals_shown(request: &LlmRequest) -> usize {
+    format!("{:?}", request.messages)
+        .matches("tool call limit exceeded")
+        .count()
+}
+
+/// A model that calls `app_lookup` twice in one step, then answers once the
+/// turn holds both results. `shown` records, per answer, how many refusals
+/// the request it answered carried.
+fn fanning_provider(shown: &Arc<std::sync::Mutex<Vec<usize>>>) -> ProviderHandle {
+    let shown = Arc::clone(shown);
+    crate::testing::TestProvider::builder()
+        .kind("recorded-max-tool-calls")
+        .complete(move |request| {
+            let shown = Arc::clone(&shown);
+            async move {
+                if tool_results_this_turn(&request) >= 2 {
+                    shown
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .push(refusals_shown(&request));
+                    return Ok(text_response("answered"));
+                }
+                Ok(LlmResponse {
+                    parts: (0..2)
+                        .map(|call| LlmOutputPart::ToolCall {
+                            call_id: format!("fan-{call}"),
+                            tool_name: "app_lookup".into(),
+                            input_json: "{}".into(),
+                            replay: None,
+                        })
+                        .collect(),
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build()
+        .into_handle()
+}
+
+/// `SetMaxToolCalls` reaches the next root and no earlier one (FIG-4546): a
+/// step of two calls runs under the limit the session was created with, and
+/// after the command the same step is refused, on the open runtime and on the
+/// engine's own reopen, with the refusal in the model's tool results.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_commanded_max_tool_calls_binds_the_next_root() -> Result<()> {
+    const ID: &str = "commanded-max-tool-calls";
+    let shown = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let core = core_over(double_backend().await, fanning_provider(&shown))?;
+    create_with_budget(&core, ID, crate::TurnBudget::Unbounded).await?;
+    assert_eq!(
+        recorded_config(&core, ID).await?.max_tool_calls,
+        crate::MaxToolCalls::new(1024),
+        "the session records the limit it was created with"
+    );
+    let session = core.session(ID).open().await?;
+    session
+        .send(TurnInput::text("look two things up"))
+        .output()
+        .await?;
+
+    let revision = session.admin().config().revision().await?;
+    let outcome = apply(
+        &session,
+        "one-call-a-step",
+        revision,
+        crate::config::ConfigTransaction::of(crate::config::SetMaxToolCalls {
+            max_tool_calls: crate::MaxToolCalls::new(1),
+        }),
+    )
+    .await?;
+    assert!(
+        matches!(
+            outcome,
+            crate::config::ConfigTransactionOutcome::Applied { .. }
+        ),
+        "{outcome:?}"
+    );
+    session
+        .send(TurnInput::text("look two things up again"))
+        .output()
+        .await?;
+    drop(session);
+    engine_driven_turn(&core, ID, "and once more").await?;
+
+    assert_eq!(
+        *shown
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+        // Each root's request carries the roots before it: none refused
+        // under the created limit, then both calls of each later root.
+        vec![0, 2, 4],
+        "the limit binds from the root after the command"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn set_max_tool_calls_is_applied_at_the_next_revision_and_a_stale_one_publishes_nothing()
+-> Result<()> {
+    applied_then_stale(
+        "set-max-tool-calls",
+        crate::config::SetMaxToolCalls {
+            max_tool_calls: crate::MaxToolCalls::new(7),
+        },
+        crate::config::SetMaxToolCalls {
+            max_tool_calls: crate::MaxToolCalls::new(9),
+        },
+        |config| config.max_tool_calls,
+        crate::MaxToolCalls::new(7),
+    )
+    .await
+}
+
+/// A zero limit does not decode, so its submit is refused typed before
+/// anything is queued: there is no "no limit" spelling.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn set_max_tool_calls_of_zero_is_refused_at_submit() -> Result<()> {
+    const ID: &str = "set-max-tool-calls-zero";
+    let (core, session) = created_session(ID).await?;
+    let created = recorded_config(&core, ID).await?;
+    let zero =
+        crate::config::ConfigTransaction::new().then_entry(crate::config::ConfigCommandEntry {
+            owner: crate::config::CORE_CONFIG_OWNER.to_string(),
+            command: "set_max_tool_calls".to_string(),
+            args: serde_json::json!({ "max_tool_calls": 0 }),
+        });
+    let error = apply(&session, "zero", created.config_revision, zero)
+        .await
+        .expect_err("a zero tool-call limit does not decode");
+    assert!(
+        matches!(
+            &error,
+            crate::EmbedError::ConfigSubmit(crate::config::ConfigSubmitError::InvalidArgs {
+                owner,
+                command,
+                ..
+            }) if owner == crate::config::CORE_CONFIG_OWNER && command == "set_max_tool_calls"
+        ),
+        "{error:?}"
+    );
+    let head = recorded_config(&core, ID).await?;
+    assert_eq!(head.config_revision, created.config_revision);
+    assert_eq!(head.max_tool_calls, created.max_tool_calls);
+    Ok(())
+}
+
+/// A core whose session spec states no `max_tool_calls` is refused, typed,
+/// before any session can be created under it (FIG-4546): the limit has no
+/// default and no built-in ceiling to fall back to.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_core_without_max_tool_calls_is_refused() -> Result<()> {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let refused = explicit_ephemeral_facets(LashCore::standard_builder(
+        double_backend().await,
+        crate::TurnBudget::bounded(CORE_DEFAULT_TURNS),
+        crate::MaxToolCalls::new(1024),
+    ))
+    .session_spec(crate::SessionSpec::new().turn_budget(crate::TurnBudget::Unbounded))
+    .serve_test_model(looping_provider(&calls), mock_model_spec())
+    .tools(Arc::new(AppTools))
+    .build(crate::testing::runtime_lease_owner());
+    let Err(error) = refused else {
+        panic!("a core without max_tool_calls must not build");
+    };
+    assert!(
+        matches!(error, crate::EmbedError::MissingMaxToolCalls),
+        "{error:?}"
+    );
+    assert!(error.is_terminal() && !error.is_retryable(), "{error}");
+    Ok(())
 }

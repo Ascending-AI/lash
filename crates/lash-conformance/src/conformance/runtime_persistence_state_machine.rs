@@ -1273,7 +1273,10 @@ fn modeled_state(model: &ReferenceModel) -> RuntimeSessionState {
     let mut state = RuntimeSessionState {
         session_id: session_id(),
         head_revision: model.head_revision,
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.checkpoint_components =
         lash_core::testing::conformance_support::RuntimeCheckpointComponents::complete_refs_for_testing(

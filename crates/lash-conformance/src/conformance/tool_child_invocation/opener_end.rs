@@ -53,9 +53,7 @@ fn opener_context(
     .route_tool_children()
     .build()
     .into_runtime()
-    .with_opener_state(crate::session::OpenerState::new(
-        crate::session::OpenerWorkBound::default(),
-    ))
+    .with_opener_state(crate::session::OpenerState::default())
     .with_cancellation_token(cancel)
 }
 

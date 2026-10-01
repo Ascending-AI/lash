@@ -55,29 +55,33 @@ async fn websocket_core(
     let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
         .await
         .expect("build the Restate server double");
-    let core = LashCore::standard_builder(double.lash_backend(), lash::TurnBudget::Unbounded)
-        .models(std::sync::Arc::new(
-            lash::ModelRegistry::new()
-                .register(
-                    "gpt-5.4",
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("gpt-5.4")
-                            .context_window_tokens(16_000)
-                            .build()
-                            .expect("valid model spec"),
-                        provider,
-                    ),
-                )
-                .expect("register the test model"),
-        ))
-        .model("gpt-5.4")
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "codex-websocket-runtime-test",
-            "codex-websocket-runtime-test-boot",
-        ))
-        .expect("core");
+    let core = LashCore::standard_builder(
+        double.lash_backend(),
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .models(std::sync::Arc::new(
+        lash::ModelRegistry::new()
+            .register(
+                "gpt-5.4",
+                lash::RegisteredModel::new(
+                    lash::ModelMetadata::builder("gpt-5.4")
+                        .context_window_tokens(16_000)
+                        .build()
+                        .expect("valid model spec"),
+                    provider,
+                ),
+            )
+            .expect("register the test model"),
+    ))
+    .model("gpt-5.4")
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        "codex-websocket-runtime-test",
+        "codex-websocket-runtime-test-boot",
+    ))
+    .expect("core");
     (core, double)
 }
 
@@ -188,35 +192,39 @@ async fn codex_websocket_facade_turn_round_trips_a_tool_call() {
     let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
         .await
         .expect("build the Restate server double");
-    let core = LashCore::standard_builder(double.lash_backend(), lash::TurnBudget::Unbounded)
-        .models(std::sync::Arc::new(
-            lash::ModelRegistry::new()
-                .register(
-                    "gpt-5.4",
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("gpt-5.4")
-                            .context_window_tokens(16_000)
-                            .build()
-                            .expect("valid model spec"),
-                        websocket_provider(&server),
-                    ),
-                )
-                .expect("register the test model"),
-        ))
-        .model("gpt-5.4")
-        .tools(Arc::new(StaticToolProvider::new(
-            vec![echo_probe_definition()],
-            EchoProbe {
-                seen: Arc::clone(&seen),
-            },
-        )))
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "codex-websocket-runtime-tool-test",
-            "codex-websocket-runtime-tool-test-boot",
-        ))
-        .expect("core");
+    let core = LashCore::standard_builder(
+        double.lash_backend(),
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .models(std::sync::Arc::new(
+        lash::ModelRegistry::new()
+            .register(
+                "gpt-5.4",
+                lash::RegisteredModel::new(
+                    lash::ModelMetadata::builder("gpt-5.4")
+                        .context_window_tokens(16_000)
+                        .build()
+                        .expect("valid model spec"),
+                    websocket_provider(&server),
+                ),
+            )
+            .expect("register the test model"),
+    ))
+    .model("gpt-5.4")
+    .tools(Arc::new(StaticToolProvider::new(
+        vec![echo_probe_definition()],
+        EchoProbe {
+            seen: Arc::clone(&seen),
+        },
+    )))
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        "codex-websocket-runtime-tool-test",
+        "codex-websocket-runtime-tool-test-boot",
+    ))
+    .expect("core");
     let session = created_session(&core, "codex-ws-runtime-tool")
         .await
         .open()

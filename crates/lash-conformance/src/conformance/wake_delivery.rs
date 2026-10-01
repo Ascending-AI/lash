@@ -323,6 +323,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
             session_id: Some(SessionId::from(target_session_id.to_string())),
             autonomous: false,
             turn_budget: crate::TurnBudget::Unbounded,
+            max_tool_calls: crate::MaxToolCalls::new(1024),
             no_progress_budget: Default::default(),
             charge_safety: Default::default(),
             generation: crate::GenerationOptions::default(),
@@ -1192,7 +1193,11 @@ async fn missing_target_is_deferred_and_rearmed(
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(target_session_id.to_string()),
             relation: crate::SessionRelation::Root,
-            config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+            config: crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            )
+            .into(),
             head: crate::SessionCreationHead::CommittedByCreator,
         })
         .await
@@ -1243,7 +1248,11 @@ async fn sender_floor_lifetime(
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(target_session_id.to_string()),
             relation: crate::SessionRelation::Root,
-            config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+            config: crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            )
+            .into(),
             head: crate::SessionCreationHead::CommittedByCreator,
         })
         .await
@@ -1982,7 +1991,11 @@ async fn target_gone_is_a_typed_discard(
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(target_session_id.to_string()),
         relation: crate::SessionRelation::Root,
-        config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+        config: crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        )
+        .into(),
         head: crate::SessionCreationHead::CommittedByCreator,
     };
     factory

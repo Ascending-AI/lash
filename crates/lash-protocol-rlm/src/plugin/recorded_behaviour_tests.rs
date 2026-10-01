@@ -76,7 +76,7 @@ pub(super) fn policy() -> SessionPolicy {
             "rlm-recorded-behaviour-model",
             lash_core::testing::test_model_metadata("rlm-recorded-behaviour-model"),
         )),
-        ..SessionPolicy::new(TurnBudget::Unbounded)
+        ..SessionPolicy::new(TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024))
     }
 }
 

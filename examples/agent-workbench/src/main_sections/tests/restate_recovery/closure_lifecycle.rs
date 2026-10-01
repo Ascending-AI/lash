@@ -36,7 +36,11 @@ async fn authorize_restate_completion_closure(
             pending_observer_intents: Vec::new(),
             session_id: address.session_id.clone(),
             relation: lash::persistence::SessionRelation::Root,
-            config: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded).into(),
+            config: lash::runtime::SessionPolicy::new(
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            )
+            .into(),
             head: lash::persistence::SessionCreationHead::CommittedByCreator,
         })
         .await
@@ -114,6 +118,7 @@ async fn consume_closure_by_commit(
         session_id: authorization.session_id().clone(),
         ..lash::persistence::RuntimeSessionState::new(lash::runtime::SessionPolicy::new(
             lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
         ))
     };
     let mut commit = lash::persistence::RuntimeCommit::persisted_state_for_test(&state)
@@ -592,7 +597,11 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
                     pending_observer_intents: Vec::new(),
                     session_id: late_address.session_id.clone(),
                     relation: lash::persistence::SessionRelation::Root,
-                    config: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded).into(),
+                    config: lash::runtime::SessionPolicy::new(
+                        lash::TurnBudget::Unbounded,
+                        lash::MaxToolCalls::new(1024),
+                    )
+                    .into(),
                     head: lash::persistence::SessionCreationHead::CommittedByCreator,
                 })
                 .await

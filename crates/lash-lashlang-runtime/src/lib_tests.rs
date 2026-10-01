@@ -99,7 +99,10 @@ fn harness_session_policy() -> lash_core::SessionPolicy {
                 .build()
                 .expect("harness model"),
         ))),
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     }
 }
 

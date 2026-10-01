@@ -225,6 +225,7 @@ async fn pressure_compaction_opens_a_summary_frame_the_turn_continues_in() -> Re
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         provider,
@@ -326,6 +327,7 @@ async fn explicit_compaction_opens_a_summary_frame_the_next_turn_continues_in() 
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         standard_compaction_provider(vec![
@@ -395,6 +397,7 @@ async fn overflow_recovery_opens_a_summary_frame_the_recovered_turn_continues_in
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         provider,
@@ -554,6 +557,7 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         provider,
@@ -672,6 +676,7 @@ async fn overflow_recovery_starts_a_frame_without_a_reload() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.into(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         provider,
@@ -861,6 +866,7 @@ async fn repeated_admin_compactions_distinguish_changed_snapshots() -> Result<()
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         standard_compaction_provider(responses),
@@ -945,6 +951,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         provider,
@@ -1054,6 +1061,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
     let reopened_core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         standard_compaction_provider(vec![response_with_usage("response after reopen", 1)]),
@@ -1098,6 +1106,7 @@ async fn repeated_compactions_use_distinct_physical_parents() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         standard_compaction_provider(vec![
@@ -1179,6 +1188,7 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         standard_compaction_provider(vec![
@@ -1308,6 +1318,7 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         standard_compaction_provider(responses),
@@ -1493,6 +1504,7 @@ async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Re
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         standard_compaction_provider(vec![
@@ -1631,6 +1643,7 @@ async fn mid_turn_graph_append_never_replicates_the_read_tail_durably() -> Resul
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         standard_compaction_provider(vec![
@@ -1769,6 +1782,7 @@ async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         standard_compaction_provider(vec![
@@ -1897,6 +1911,7 @@ async fn after_turn_enqueue_persists_the_reply_exactly_once() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         standard_compaction_provider(vec![response_with_usage("first response", 1)]),
@@ -1999,6 +2014,7 @@ async fn admin_compaction_commit_failure_applies_once_on_the_engines_retry() -> 
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.into(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         provider,

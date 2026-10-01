@@ -131,7 +131,41 @@ pub async fn settle_bridge_aggregate(
         lash_core::session::ToolAggregateOutcome::HostControl(message) => {
             Err(ExecutionHostError::new(message))
         }
+        lash_core::session::ToolAggregateOutcome::ToolCallLimitExceeded(exceeded) => {
+            Err(ExecutionHostError::from_tool_failure(
+                &tool_call_limit_failure(exceeded),
+                command.to_string(),
+            ))
+        }
     }
+}
+
+/// The tool failure a `max_tool_calls` refusal carries: typed by its class
+/// and code, never retried, and worded by the refusal so the limit is named
+/// in what the model reads (FIG-4546).
+pub fn tool_call_limit_failure(
+    exceeded: lash_core::ToolCallLimitExceeded,
+) -> lash_core::ToolFailure {
+    let mut failure = lash_core::ToolFailure::runtime(
+        lash_core::ToolFailureClass::ResourceLimit,
+        lash_core::ToolCallLimitExceeded::CODE,
+        exceeded.to_string(),
+    );
+    failure.raw = Some(lash_core::ToolValue::untrusted_json(
+        serde_json::json!({ "tool_call_limit": exceeded }),
+    ));
+    failure
+}
+
+/// Whether a VM terminal is the session's `max_tool_calls` refusing an
+/// aggregate: the program's failure, carried on the aggregate's error
+/// channel with the refusal's typed class and code.
+pub fn is_tool_call_limit_failure(error: &lashlang::RuntimeError) -> bool {
+    matches!(
+        error,
+        lashlang::RuntimeError::AggregateHostControl { source }
+            if source.tool_failure_code() == Some(lash_core::ToolCallLimitExceeded::CODE)
+    )
 }
 
 /// The message for the VM terminal that ends an execution awaiting an

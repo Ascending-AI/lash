@@ -165,6 +165,7 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
                 session_id: SessionId::from("runtime-perf-checkpoint-state"),
                 ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
+                    lash_core::MaxToolCalls::new(1024),
                 ))
             };
             let store = memory_perf_store(&runtime_state.session_id).await?;

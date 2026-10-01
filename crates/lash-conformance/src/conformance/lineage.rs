@@ -97,7 +97,11 @@ fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
         relation: SessionRelation::Root,
-        config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+        config: crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        )
+        .into(),
         head: SessionCreationHead::CommittedByCreator,
     }
 }
@@ -117,7 +121,10 @@ async fn seed(
         .expect("admit lineage conformance session");
     let mut state = RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.ensure_agent_frame_initialized();
     for ordinal in 0..plugins {
@@ -149,7 +156,10 @@ async fn fork(
             session_id: SessionId::from(session_id.to_string()),
             node_id: node_id.to_string().into(),
             relation: SessionRelation::Root,
-            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            policy: crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            ),
             plugin_config: Default::default(),
         })
         .await

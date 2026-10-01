@@ -79,7 +79,9 @@ async fn noop_process_work_backend() -> DecoratedBackend {
 }
 
 fn unbounded_session_spec() -> crate::SessionSpec {
-    crate::SessionSpec::new().turn_budget(crate::TurnBudget::Unbounded)
+    crate::SessionSpec::new()
+        .turn_budget(crate::TurnBudget::Unbounded)
+        .max_tool_calls(crate::MaxToolCalls::new(1024))
 }
 
 impl lash_core::facade_support::PluginOperation for NonblockingObservationQuery {
@@ -183,6 +185,7 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(Arc::new(StaticPluginFactory::new(
@@ -371,6 +374,7 @@ async fn compact_context_system_prompt_is_the_protocols_compaction_render() -> R
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .tools(Arc::new(AppTools))
@@ -413,6 +417,7 @@ async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -457,6 +462,7 @@ async fn queue_enqueue_and_cancel_emit_typed_observation_events() -> Result<()> 
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -514,6 +520,7 @@ async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Re
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -610,6 +617,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         noop_process_work_backend().await.into(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .session_spec(session_spec)
     .serve_test_model(provider, mock_model_spec())
@@ -924,6 +932,7 @@ async fn trigger_emit_does_not_append_session_node_or_queue_work() -> Result<()>
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(Arc::new(StaticPluginFactory::new(
@@ -985,6 +994,7 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         checkpoint_gated_provider(entered_tx, release_rx),
@@ -1055,6 +1065,7 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .session_spec(session_spec)
     .serve_test_model(provider, mock_model_spec())
@@ -1116,6 +1127,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .session_spec(session_spec)
     .serve_test_model(provider, mock_model_spec())
@@ -1231,6 +1243,7 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         noop_process_work_backend().await.into(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .session_spec(session_spec)
     .serve_test_model(provider, mock_model_spec())
@@ -1315,6 +1328,7 @@ async fn config_and_tool_mutations_publish_observation_immediately() -> Result<(
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .tools(Arc::new(AppTools))
@@ -1361,6 +1375,7 @@ async fn config_admin_sets_persisted_tool_access() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .tools(Arc::new(AppTools))
@@ -1419,6 +1434,7 @@ async fn related_session_opens_with_parent_and_runs_a_turn() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -1490,6 +1506,7 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
         let core = explicit_ephemeral_facets(LashCore::standard_builder(
             backend.into(),
             crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
         ))
         .serve_test_model(mock_provider(), mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
@@ -1528,7 +1545,10 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
                 },
                 config: lash_core::SessionPolicy {
                     model: Some(recorded_model(mock_model_spec())),
-                    ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                    ..lash_core::SessionPolicy::new(
+                        lash_core::TurnBudget::Unbounded,
+                        lash_core::MaxToolCalls::new(1024),
+                    )
                 }
                 .into(),
                 head: lash_core::SessionCreationHead::Config,
@@ -1578,6 +1598,7 @@ async fn direct_turn_reports_the_acceptance_it_was_admitted_under() -> Result<()
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -1636,6 +1657,7 @@ async fn host_start_core() -> Result<LashCore> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         noop_process_work_backend().await.into(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .session_spec(session_spec)
     .serve_test_model(provider, mock_model_spec())

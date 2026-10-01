@@ -203,7 +203,10 @@ async fn drive_redrive_turn(
     let state = crate::RuntimeSessionState {
         session_id: session_id.clone(),
         policy: policy.clone(),
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     let members: Arc<dyn crate::ToolProvider> = Arc::new(RedriveMembers { witness });
     let mut factories = producer.factories.clone();

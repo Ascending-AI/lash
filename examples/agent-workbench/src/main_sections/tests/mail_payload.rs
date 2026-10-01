@@ -97,7 +97,10 @@ async fn inject_message_scopes_emission_to_requested_session() {
     let process_identity = process_input.process_identity();
     let process_env_spec = lash::process::ProcessExecutionEnvSpec::new(
         Default::default(),
-        lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
+        lash::runtime::SessionPolicy::new(
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        ),
     );
     let process_env_ref = artifacts
         .publish_process_env(&pin, &process_env_spec)

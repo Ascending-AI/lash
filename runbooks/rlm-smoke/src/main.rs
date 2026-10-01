@@ -491,7 +491,7 @@ async fn main() -> Result<()> {
     trace_context
         .metadata
         .insert("runbook_trace_offset".to_string(), json!(args.trace_offset));
-    let core = LashCore::rlm_builder(backend, lash::TurnBudget::bounded(12), protocol)
+    let core = LashCore::rlm_builder(backend, lash::TurnBudget::bounded(12), lash::MaxToolCalls::new(1024), protocol)
         // The smoke run serves one model, keyed by its wire model.
         .models(Arc::new(
             lash::ModelRegistry::new()

@@ -28,7 +28,10 @@ pub async fn committed_turn_receipt_answers_the_parent_end_recovery_read(
 
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     let mut commit = RuntimeCommit::persisted_state_for_test(&state);
     commit.turn_commit = RuntimeTurnCommitStamp::new(crate::OperationId::turn(
@@ -128,7 +131,10 @@ pub(super) async fn seed_append_receipt_state(
 ) -> RuntimeSessionState {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     let nodes = vec![crate::SessionAppendNode::plugin(
         "append-receipt-seed",
@@ -654,7 +660,10 @@ pub async fn append_receipt_corrupt_identity_encoding_version_is_refused<F, Fut>
 pub async fn concurrent_same_append_operation_applies_exactly_once(store: Arc<dyn RuntimeStore>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     let nodes = vec![crate::SessionAppendNode::plugin(
         "append-receipt-race",
@@ -934,7 +943,10 @@ pub async fn append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics
 pub async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     let nodes = vec![crate::SessionAppendNode::plugin(
         "append-receipt",

@@ -685,6 +685,7 @@ mod process_visibility_tests {
                 policy,
                 ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
                 ))
             },
             None,

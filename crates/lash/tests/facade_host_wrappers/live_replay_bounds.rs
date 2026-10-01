@@ -24,30 +24,34 @@ async fn eviction_law(backend: lash::Backend, tag: &str) {
         })
         .build()
         .into_handle();
-    let core = LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .models(std::sync::Arc::new(
-            lash::ModelRegistry::new()
-                .register(
-                    "live-replay-bounds",
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("live-replay-bounds")
-                            .context_window_tokens(64_000)
-                            .build()
-                            .expect("model"),
-                        provider,
-                    ),
-                )
-                .expect("one key registers"),
-        ))
-        .model("live-replay-bounds")
-        .live_replay_store(replay.clone())
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "replay-bounds",
-            tag,
-        ))
-        .expect("core");
+    let core = LashCore::standard_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .models(std::sync::Arc::new(
+        lash::ModelRegistry::new()
+            .register(
+                "live-replay-bounds",
+                lash::RegisteredModel::new(
+                    lash::ModelMetadata::builder("live-replay-bounds")
+                        .context_window_tokens(64_000)
+                        .build()
+                        .expect("model"),
+                    provider,
+                ),
+            )
+            .expect("one key registers"),
+    ))
+    .model("live-replay-bounds")
+    .live_replay_store(replay.clone())
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        "replay-bounds",
+        tag,
+    ))
+    .expect("core");
     let id = format!("replay-bounds-{tag}");
     core.session(&id)
         .create(lash::SessionCreation::default())

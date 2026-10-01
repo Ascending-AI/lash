@@ -154,6 +154,7 @@ impl DriveParts {
             policy,
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         }
     }

@@ -819,7 +819,10 @@ async fn exec_and_execution_environment_effects_cross_controller_once() {
     let recorder = RecordingEffectController::default();
     let policy = SessionPolicy {
         model: Some(lash_core::testing::runtime_helpers::standard_test_model_config()),
-        ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let plugin_session =
         lash_core::testing::test_plugin_host(vec![Arc::new(EffectControllerTestProtocolFactory {
@@ -839,6 +842,7 @@ async fn exec_and_execution_environment_effects_cross_controller_once() {
         runtime_services,
         RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         )),
         lash_core::testing::runtime_lease_owner(),
     )
@@ -876,7 +880,10 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
     let backend = double.lash_backend();
     let policy = SessionPolicy {
         model: Some(lash_core::testing::runtime_helpers::standard_test_model_config()),
-        ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let plugin_session =
         lash_core::testing::test_plugin_host(vec![Arc::new(EffectControllerTestProtocolFactory {
@@ -899,6 +906,7 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
         runtime_services,
         RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         )),
         lash_core::testing::runtime_lease_owner(),
     )

@@ -81,6 +81,7 @@ async fn run_fixture(
     let mut builder = lash::LashCore::standard_builder(
         lash::Backend::new(engine.clone()),
         lash::TurnBudget::bounded(1),
+        lash::MaxToolCalls::new(1024),
     )
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))

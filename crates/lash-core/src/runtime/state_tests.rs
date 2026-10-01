@@ -65,8 +65,10 @@ async fn corrupt_commit_result_cannot_forge_discarded_execution_state_residency(
     const LEAF_B: &str = "execution_state/leaf-b";
 
     let store = crate::testing::unbound_recording_store().await;
-    let mut generation_a =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let mut generation_a = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
     crate::store::SessionCatalogStore::admit_session(
         &store,
         &crate::testing::store_fixtures::root_session_request(&generation_a.session_id),
@@ -188,9 +190,11 @@ fn reconciled_generation_forces_next_plugin_state_export() {
         crate::runtime::tests::helpers::plugin_session_with_tools(&SessionId::from("root"), tools);
     let snapshot = plugins.tool_registry().export_state();
     let persisted_generation = snapshot.generation();
-    let mut projected =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-            .to_snapshot();
+    let mut projected = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ))
+    .to_snapshot();
     projected.tool_state_ref = Some("persisted-tool-state".to_string().into());
     projected.tool_state_generation = Some(persisted_generation);
     let mut state = RuntimeSessionState::from_snapshot(projected);

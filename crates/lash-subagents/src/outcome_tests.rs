@@ -52,6 +52,7 @@ fn spawn_rejects_child_depth_past_limit() {
     };
     let snapshot = lash_core::runtime::RuntimeSessionState::new(lash_core::SessionPolicy::new(
         lash_core::TurnBudget::Unbounded,
+        lash_core::MaxToolCalls::new(1024),
     ))
     .to_snapshot();
     let result = build_spawn_create_request(SpawnCreateRequestInput {

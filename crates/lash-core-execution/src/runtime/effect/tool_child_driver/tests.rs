@@ -40,7 +40,10 @@ impl crate::ToolProvider for NoopTools {
 pub(super) fn spec(turns: usize) -> ProcessExecutionEnvSpec {
     ProcessExecutionEnvSpec::new(
         crate::AdmittedPluginConfig::default(),
-        crate::SessionPolicy::new(crate::TurnBudget::bounded(turns)),
+        crate::SessionPolicy::new(
+            crate::TurnBudget::bounded(turns),
+            crate::MaxToolCalls::new(1024),
+        ),
     )
 }
 

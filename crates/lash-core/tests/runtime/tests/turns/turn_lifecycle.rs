@@ -1462,6 +1462,7 @@ pub(super) async fn continue_as_frame_rotation_reconciles_newly_advertised_tool(
         runtime_services,
         RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         )),
         lash_core::testing::runtime_lease_owner(),
     )

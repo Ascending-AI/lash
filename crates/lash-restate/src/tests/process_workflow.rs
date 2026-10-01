@@ -1159,7 +1159,10 @@ pub(super) fn recovery_session_policy() -> lash_core::SessionPolicy {
                 .build()
                 .expect("model spec"),
         ))),
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     }
 }
 
@@ -1470,7 +1473,10 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
                         .build()
                         .expect("model spec"),
                 ))),
-                ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                ..lash_core::SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                    lash_core::MaxToolCalls::new(1024),
+                )
             }
             .into(),
             head: lash_core::SessionCreationHead::CommittedByCreator,

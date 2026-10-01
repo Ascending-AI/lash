@@ -41,7 +41,10 @@ fn persistence_types_are_nameable(graph: GraphAppend) -> RuntimeCommit {
         drive_fence: None,
         root_terminal: None,
         park_root: None,
-        config: PersistedSessionConfig::new(lash::TurnBudget::Unbounded),
+        config: PersistedSessionConfig::new(
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        ),
         execution_config: None,
         current_frame_node_id: None,
         frame_transition: None,
@@ -152,7 +155,11 @@ fn builder_accepts_tools_and_plugins(
 }
 
 fn a_core_is_built_over_one_backend(backend: lash::Backend) -> lash::LashCoreBuilder {
-    lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+    lash::LashCore::standard_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
 }
 
 fn tool_contract_types_are_nameable(record: ToolCallRecord, contract: ToolOutputContract) {
@@ -369,7 +376,10 @@ fn main() {
         SessionHeadPayload {
             schema_version: 1,
             session_id: SessionId::from("facade"),
-            config: PersistedSessionConfig::new(lash::TurnBudget::Unbounded),
+            config: PersistedSessionConfig::new(
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            ),
             current_frame_node_id: None,
             published_by_drive: false,
         },

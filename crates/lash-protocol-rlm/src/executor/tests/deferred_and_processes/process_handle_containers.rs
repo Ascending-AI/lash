@@ -41,7 +41,10 @@ async fn control_round_trip(storage: &str, access: &str, suspension: &str) {
                 .build()
                 .expect("TypeScript signal test model"),
         ))),
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
         table.backend().clone(),

@@ -102,24 +102,29 @@ async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
             std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &backend,
         );
-        let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .serve_test_model(
-                ProviderHandle::new(provider.into_components()),
-                lash_core::ModelMetadata::builder(model)
-                    .context_window_tokens(200_000)
-                    .build()
-                    .expect("model limits")
-                    .with_capability(lash_core::ModelCapability {
-                        instruction_role: Default::default(),
-                        native_mid_conversation_system: false,
-                        cache_control: Some(cache_control),
-                        ..lash_core::ModelCapability::default()
-                    }),
-            )
-            .build(crate::sim_process_owner())
-            .expect("RLM prefix-stability core");
+        let core = lash::LashCore::rlm_builder(
+            backend,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+            factory,
+        )
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_model(
+            ProviderHandle::new(provider.into_components()),
+            lash_core::ModelMetadata::builder(model)
+                .context_window_tokens(200_000)
+                .build()
+                .expect("model limits")
+                .with_capability(lash_core::ModelCapability {
+                    instruction_role: Default::default(),
+                    native_mid_conversation_system: false,
+                    cache_control: Some(cache_control),
+                    ..lash_core::ModelCapability::default()
+                }),
+        )
+        .build(crate::sim_process_owner())
+        .expect("RLM prefix-stability core");
         let session = crate::open_created_session(
             &core,
             format!("prefix-stability-{}", model.replace('/', "-")),

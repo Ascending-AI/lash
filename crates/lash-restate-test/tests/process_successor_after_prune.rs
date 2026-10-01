@@ -168,7 +168,10 @@ fn process_env_spec() -> lash_core::ProcessExecutionEnvSpec {
                     .build()
                     .expect("model spec"),
             ))),
-            ..lash_core::SessionPolicy::new(lash::TurnBudget::Unbounded)
+            ..lash_core::SessionPolicy::new(
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            )
         },
     )
 }
@@ -298,25 +301,28 @@ async fn a_same_start_key_successor_after_prune_runs_its_own_workflow() {
     let engine = Arc::new(RecordingEngine {
         runs: Mutex::new(Vec::new()),
     });
-    let core =
-        lash::LashCore::standard_builder(backend.lash_backend(), lash::TurnBudget::Unbounded)
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .serve_test_model(
-                provider,
-                lash_core::ModelMetadata::builder("mock-model")
-                    .context_window_tokens(200_000)
-                    .build()
-                    .expect("model spec"),
-            )
-            .plugin(Arc::new(EnginePluginFactory {
-                engine: Arc::clone(&engine),
-            }))
-            .build(lash_core::LeaseOwnerIdentity::opaque(
-                "lash-restate-test",
-                "process-successor-after-prune",
-            ))
-            .expect("build the lash core");
+    let core = lash::LashCore::standard_builder(
+        backend.lash_backend(),
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .serve_test_model(
+        provider,
+        lash_core::ModelMetadata::builder("mock-model")
+            .context_window_tokens(200_000)
+            .build()
+            .expect("model spec"),
+    )
+    .plugin(Arc::new(EnginePluginFactory {
+        engine: Arc::clone(&engine),
+    }))
+    .build(lash_core::LeaseOwnerIdentity::opaque(
+        "lash-restate-test",
+        "process-successor-after-prune",
+    ))
+    .expect("build the lash core");
     backend.install_process_worker(
         lash::durability::DurableProcessWorker::new(
             core.durable_process_worker_config()

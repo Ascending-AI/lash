@@ -117,7 +117,10 @@ fn process_env_spec() -> lash_core::ProcessExecutionEnvSpec {
         lash_core::AdmittedPluginConfig::default(),
         lash_core::SessionPolicy {
             model: Some(recorded_model(mock_model_spec())),
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            ..lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            )
         },
     )
 }
@@ -231,10 +234,11 @@ fn process_test_builder(backend: lash_core::Backend) -> crate::core::LashCoreBui
     LashCore::rlm_builder(
         backend,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
         factory,
     )
     .session_spec(
-        crate::SessionSpec::new().turn_budget(crate::TurnBudget::Unbounded),
+        crate::SessionSpec::new().turn_budget(crate::TurnBudget::Unbounded).max_tool_calls(crate::MaxToolCalls::new(1024)),
     )
     .serve_test_model(provider, mock_model_spec())
     .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
@@ -284,7 +288,11 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::Root,
-            config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+            config: lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            )
+            .into(),
             head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )
@@ -376,6 +384,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
         session_id: session_id.clone(),
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
     let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state)
@@ -401,7 +410,11 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
             pending_observer_intents: Vec::new(),
             session_id: late_session_id.clone(),
             relation: lash_core::SessionRelation::Root,
-            config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+            config: lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            )
+            .into(),
             head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )

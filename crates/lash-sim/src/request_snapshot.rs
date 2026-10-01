@@ -26,26 +26,30 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
         .await
         .expect("sim engine");
     let backend = engine.backend();
-    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(provider, model)
-        .session_plugin(
-            lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
-            lash::standard::StandardTurnOptions {
-                prompt: Some(lash::standard::StandardPrompt {
-                    intro: Some("System snapshot instruction.".to_string()),
-                    omit_builtin_guidance: true,
-                    ..Default::default()
-                }),
-                render: None,
-            },
-        )
-        .expect("standard prompt options")
-        .trace_jsonl_path(&trace_path)
-        .trace_level(TraceLevel::Extended)
-        .build(crate::sim_process_owner())
-        .expect("runtime core");
+    let core = lash::LashCore::standard_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .serve_test_model(provider, model)
+    .session_plugin(
+        lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
+        lash::standard::StandardTurnOptions {
+            prompt: Some(lash::standard::StandardPrompt {
+                intro: Some("System snapshot instruction.".to_string()),
+                omit_builtin_guidance: true,
+                ..Default::default()
+            }),
+            render: None,
+        },
+    )
+    .expect("standard prompt options")
+    .trace_jsonl_path(&trace_path)
+    .trace_level(TraceLevel::Extended)
+    .build(crate::sim_process_owner())
+    .expect("runtime core");
     let session = crate::open_created_session(&core, "history-request-snapshot")
         .await
         .expect("session");

@@ -53,13 +53,24 @@
 //! and a rank that lands after that close — a committed loser's drain, a
 //! cancelled attempt's captured usage — is still the opener's to incorporate.
 //!
-//! # Retirement under a live opener
+//! # The tool-call limit
 //!
-//! A held group's units count against the opener's bound (§9) until the group
-//! retires. When a new group would pass the bound, the opener retires its
-//! oldest held group as a whole — its losers run to their own terminals, their
-//! ranks are incorporated, the group is closed — and tries again; the bound
-//! refuses only when nothing is left to retire.
+//! A group's tool calls are admitted against the session's recorded
+//! `max_tool_calls` before anything of the group is journaled or dispatched
+//! (ADR 0099 §9, FIG-4546). The limit is read from the policy the execution
+//! recorded — a root's snapshot, a process's environment — so a replay, a
+//! redrive and a reopen all judge the same call against the same number.
+//!
+//! * A **cell** counts every tool call it makes: the limit is its total.
+//! * A **process** counts the calls it holds: accepted, running, or settled
+//!   and still required. A group consumed to exhaustion releases its calls,
+//!   and so does a group the process holds after an early decision once
+//!   every loser of it has settled: its ranks are incorporated and it is
+//!   closed. A call still running is held, and the limit never waits for it.
+//!
+//! The group that passes the limit is refused whole with a typed
+//! [`ToolCallLimitExceeded`](crate::ToolCallLimitExceeded): the program's
+//! failure, not the host's. Nothing is queued, paced or split.
 //!
 //! Step 3 runs after finalization rather than only inside it because the
 //! host's own close spawns a finalizer with no opener steps (the closing
@@ -76,62 +87,14 @@ use super::execution_context::RuntimeExecutionContext;
 use crate::runtime::effect::LoserPolicy;
 use crate::runtime::effect::executor::RuntimeEffectControllerError;
 
-/// How much effect-group work one logical opener may retain at once
-/// (ADR 0099 §9).
-///
-/// The unit is the **unique child execution**: a group reserves one unit per
-/// child it admits — tool invocation or timer — from the moment it is accepted
-/// until its opener no longer depends on it. Operand positions are not host
-/// work: a handle written at two positions is one child, and the
-/// position-to-child mapping lives in the VM (§10 L4, §11 clause 1). A child
-/// counts while it is accepted but unclaimed, running, closing, or settled and
-/// still required — settled-but-unconsumed ranks and unincorporated facts are
-/// exactly the retained state §9 refuses to leave unbounded.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct OpenerWorkBound {
-    max_retained_children: std::num::NonZeroUsize,
-}
-
-impl OpenerWorkBound {
-    /// The default: 1024 unique children per opener — forty times the
-    /// standard protocol's widest single tool batch, and far beyond what one
-    /// cell's aggregates retain in practice.
-    pub const DEFAULT: Self = Self {
-        max_retained_children: match std::num::NonZeroUsize::new(1024) {
-            Some(value) => value,
-            None => unreachable!(),
-        },
-    };
-
-    /// A bound of `max_retained_children` unique children per opener.
-    #[must_use]
-    pub const fn new(max_retained_children: std::num::NonZeroUsize) -> Self {
-        Self {
-            max_retained_children,
-        }
-    }
-
-    /// How many unique children one opener may retain at once.
-    #[must_use]
-    pub const fn max_retained_children(self) -> usize {
-        self.max_retained_children.get()
-    }
-}
-
-impl Default for OpenerWorkBound {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
-}
-
 /// The groups an opener holds after their consumer stopped early, in the
-/// order they were handed over, and the work every group it formed reserves.
+/// order they were handed over, and the tool calls every group it formed
+/// holds.
 #[derive(Debug, Default)]
 pub struct OpenerGroupRegistry {
     outstanding: Vec<crate::EffectGroupHandle>,
-    /// Children reserved per group key, from formation to release (§9).
+    /// Tool calls held per group key, from formation to release (§9).
     reserved: std::collections::BTreeMap<String, usize>,
-    bound: OpenerWorkBound,
 }
 
 impl OpenerGroupRegistry {
@@ -154,7 +117,7 @@ impl OpenerGroupRegistry {
 /// What an opener shares across the phase contexts it builds: the once-only
 /// incorporation ledger and the registry of groups it still holds.
 ///
-/// Cloning shares both; [`OpenerState::new`] starts a fresh opener.
+/// Cloning shares both; [`OpenerState::default`] starts a fresh opener.
 #[derive(Clone, Debug, Default)]
 pub struct OpenerState {
     pub(crate) ledger: Arc<std::sync::Mutex<super::IncorporationLedger>>,
@@ -162,18 +125,6 @@ pub struct OpenerState {
 }
 
 impl OpenerState {
-    /// A fresh opener that may retain at most `bound` of group work.
-    #[must_use]
-    pub fn new(bound: OpenerWorkBound) -> Self {
-        Self {
-            ledger: Arc::default(),
-            groups: Arc::new(std::sync::Mutex::new(OpenerGroupRegistry {
-                bound,
-                ..OpenerGroupRegistry::default()
-            })),
-        }
-    }
-
     /// What the opener has incorporated so far.
     #[must_use]
     pub fn ledger_snapshot(&self) -> super::IncorporationLedger {
@@ -234,16 +185,37 @@ impl<'run> RuntimeExecutionContext<'run> {
             .collect()
     }
 
-    /// Reattach the groups a predecessor segment handed over. Their
-    /// reservations come with them: the successor is the same opener, so the
-    /// work its predecessor accepted is still retained (§9: replay reuses the
-    /// reservation).
-    pub fn restore_outstanding_groups(&self, handles: Vec<crate::EffectGroupHandle>) {
+    /// The tool calls each group the opener holds reserves, for a segment
+    /// handover beside [`outstanding_groups_snapshot`](Self::outstanding_groups_snapshot).
+    #[must_use]
+    pub fn held_tool_calls_snapshot(&self) -> std::collections::BTreeMap<String, usize> {
+        let registry = self.opener_groups.lock_recover();
+        registry
+            .outstanding
+            .iter()
+            .filter_map(|handle| {
+                let calls = registry.reserved.get(handle.group_key())?;
+                Some((handle.group_key().to_string(), *calls))
+            })
+            .collect()
+    }
+
+    /// Reattach the groups a predecessor segment handed over, with the tool
+    /// calls each one holds. The successor is the same opener, so the calls
+    /// its predecessor accepted are still held (§9: replay reuses the
+    /// reservation, and never counts it twice).
+    pub fn restore_outstanding_groups(
+        &self,
+        handles: Vec<crate::EffectGroupHandle>,
+        held_tool_calls: &std::collections::BTreeMap<String, usize>,
+    ) {
         let mut registry = self.opener_groups.lock_recover();
         for handle in &handles {
-            registry
-                .reserved
-                .insert(handle.group_key().to_string(), handle.children());
+            if let Some(calls) = held_tool_calls.get(handle.group_key()) {
+                registry
+                    .reserved
+                    .insert(handle.group_key().to_string(), *calls);
+            }
         }
         registry.outstanding = handles;
     }
@@ -261,90 +233,150 @@ impl<'run> RuntimeExecutionContext<'run> {
         format!("{}{command}", self.own_group_key_prefix())
     }
 
-    /// Reserve `children` units of this opener's retained work for
-    /// `group_key` (ADR 0099 §9), before the group is opened or any child
-    /// dispatched.
+    /// Admit `calls` tool calls of the group `group_key` against the
+    /// session's recorded `max_tool_calls` (ADR 0099 §9, FIG-4546), before
+    /// the group is opened or any child dispatched.
     ///
-    /// A key this opener already reserved reuses its reservation, and a group
-    /// the journal has already accepted is admitted over the bound: accepted
-    /// work is never retroactively refused because the budget changed. A fresh
-    /// group that does not fit is refused whole, with
-    /// [`EffectGroupOpenerBoundExceeded`](crate::RuntimeErrorCode::EffectGroupOpenerBoundExceeded),
-    /// and nothing of it is journaled.
-    pub(crate) async fn reserve_group_work(
+    /// A cell counts every call it makes; a process counts the calls it
+    /// holds, and stops counting a held group once all of it has settled. A key
+    /// already admitted reuses its admission: a group formed again on replay
+    /// is the same calls, never more. A fresh group that does not fit is
+    /// refused whole with
+    /// [`MaxToolCallsExceeded`](crate::RuntimeErrorCode::MaxToolCallsExceeded)
+    /// and its typed [`ToolCallLimitExceeded`](crate::ToolCallLimitExceeded)
+    /// cause, and nothing of it is journaled.
+    pub(crate) async fn reserve_tool_calls(
         &self,
         group_key: &str,
-        children: usize,
+        calls: usize,
     ) -> Result<(), RuntimeEffectControllerError> {
-        let (retained, limit) = loop {
-            let (retained, limit) = {
-                let mut registry = self.opener_groups.lock_recover();
-                if registry.reserved.contains_key(group_key) {
-                    return Ok(());
+        if calls == 0 {
+            return Ok(());
+        }
+        let limit = self.max_tool_calls();
+        let exceeded = if self.process_id().is_none() {
+            let mut made = self.cell_tool_calls.lock_recover();
+            if made.contains_key(group_key) {
+                return Ok(());
+            }
+            let counted = made.values().sum::<usize>();
+            if counted.saturating_add(calls) <= limit.get() {
+                made.insert(group_key.to_string(), calls);
+                return Ok(());
+            }
+            crate::ToolCallLimitExceeded {
+                scope: crate::ToolCallLimitScope::Cell,
+                limit,
+                counted,
+                requested: calls,
+            }
+        } else {
+            loop {
+                let held = {
+                    let mut registry = self.opener_groups.lock_recover();
+                    if registry.reserved.contains_key(group_key) {
+                        return Ok(());
+                    }
+                    let held = registry.reserved.values().sum::<usize>();
+                    if held.saturating_add(calls) <= limit.get() {
+                        registry.reserved.insert(group_key.to_string(), calls);
+                        return Ok(());
+                    }
+                    held
+                };
+                // Over the limit: a held group whose calls have all settled
+                // is no longer held, so release the oldest such and try
+                // again. A call still running is held: the limit refuses.
+                if !self.release_oldest_settled_group().await? {
+                    break crate::ToolCallLimitExceeded {
+                        scope: crate::ToolCallLimitScope::Process,
+                        limit,
+                        counted: held,
+                        requested: calls,
+                    };
                 }
-                let retained = registry.reserved.values().sum::<usize>();
-                let limit = registry.bound.max_retained_children();
-                if retained.saturating_add(children) <= limit {
-                    registry.reserved.insert(group_key.to_string(), children);
-                    return Ok(());
-                }
-                (retained, limit)
-            };
-            // Over the bound: retire the oldest group the opener still holds
-            // and try again. Only when nothing is left to retire is the bound
-            // a refusal.
-            if !self.retire_oldest_held_group().await? {
-                break (retained, limit);
             }
         };
-        Err(RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::EffectGroupOpenerBoundExceeded,
-            format!(
-                "effect group {group_key} would add {children} child(ren) to the {retained} this \
-                 opener already retains, past its bound of {limit}; the group is refused whole \
-                 and nothing of it is dispatched (ADR 0099 §9)"
-            ),
+        *self.tool_call_limit_refusal.lock_recover() = Some(exceeded);
+        Err(RuntimeEffectControllerError::max_tool_calls_exceeded(
+            exceeded,
         ))
     }
 
-    /// Retire the oldest group this opener holds, as a whole, while the opener
-    /// stays live (ADR 0099 §9): wait out its remaining ranks — its losers run
-    /// to their own terminals, nothing is cancelled — incorporate them, close
-    /// it and release its units. Answers `false` when the opener holds no
-    /// group.
+    /// The latest `max_tool_calls` refusal this execution met, typed. A
+    /// language runtime whose run failed on the refusal reads it here to
+    /// report the failure with its typed cause.
+    #[must_use]
+    pub fn tool_call_limit_refusal(&self) -> Option<crate::ToolCallLimitExceeded> {
+        *self.tool_call_limit_refusal.lock_recover()
+    }
+
+    /// Release the oldest group this process holds, if every child of it has
+    /// already settled (ADR 0099 §9): incorporate its ranks, close it and
+    /// stop counting its tool calls. Answers `false`, releasing nothing, when
+    /// the process holds no group or its oldest still has a child running.
     ///
-    /// A held group is one whose consumer stopped early, so the aggregate that
-    /// formed it has already answered: nothing replays or continues from it,
-    /// and its recorded settlements are the identity fence a reopen is served
-    /// from. Retirement is reached only when a new group would pass the bound,
-    /// which is a fact of the opener's own deterministic history, so a replay
-    /// retires the same groups at the same point and issues the same commands.
-    async fn retire_oldest_held_group(&self) -> Result<bool, RuntimeEffectControllerError> {
+    /// It never waits. A held group is one whose consumer stopped early, so
+    /// the aggregate that formed it has already answered and nothing replays
+    /// or continues from it; once its last rank is recorded none of its calls
+    /// is running and none is required, so they are no longer held. A group
+    /// with a child still running is held, and waiting for it would be the
+    /// queue the limit does not have: the caller refuses instead. Settlement
+    /// is durable and only ever moves forward, so a group this released is
+    /// settled on every replay, and a replay releases the same groups at the
+    /// same point.
+    async fn release_oldest_settled_group(&self) -> Result<bool, RuntimeEffectControllerError> {
         let Some(mut handle) = ({
             let mut registry = self.opener_groups.lock_recover();
             (!registry.outstanding.is_empty()).then(|| registry.outstanding.remove(0))
         }) else {
             return Ok(false);
         };
+        let hold = |handle| {
+            self.opener_groups
+                .lock_recover()
+                .outstanding
+                .insert(0, handle)
+        };
         let controller = self.dispatch.effect_controller.controller();
+        let last_rank = match u64::try_from(handle.children()) {
+            Ok(last_rank) => last_rank,
+            Err(_) => {
+                let group_key = handle.group_key().to_string();
+                hold(handle);
+                return Err(RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                    format!("effect group {group_key} has more children than ranks"),
+                ));
+            }
+        };
+        match controller
+            .read_group_settlement(handle.group_key(), last_rank)
+            .await
+        {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                hold(handle);
+                return Ok(false);
+            }
+            Err(error) => {
+                hold(handle);
+                return Err(error);
+            }
+        }
+        // Every rank is recorded, so each of these answers without waiting.
         let cancel = self.cancellation_token.clone().unwrap_or_default();
         while !handle.is_exhausted() {
             if let Err(error) = controller
                 .await_next_settlement(&mut handle, self.turn_cancel_wait(cancel.child_token()))
                 .await
             {
-                self.opener_groups
-                    .lock_recover()
-                    .outstanding
-                    .insert(0, handle);
+                hold(handle);
                 return Err(error);
             }
         }
         if let Err(error) = self.incorporate_group_prefix(&handle).await {
-            self.opener_groups
-                .lock_recover()
-                .outstanding
-                .insert(0, handle);
+            hold(handle);
             return Err(error);
         }
         self.release_group_work(handle.group_key());
@@ -354,14 +386,16 @@ impl<'run> RuntimeExecutionContext<'run> {
         {
             tracing::warn!(
                 error = %error,
-                "closing a retired effect group failed; the close is retryable and the \
+                "closing a released effect group failed; the close is retryable and the \
                  opener's end resumes whatever closing is recorded"
             );
         }
         Ok(true)
     }
 
-    /// Release `group_key`'s reservation: its opener no longer depends on it.
+    /// Release the tool calls `group_key` holds: its opener no longer
+    /// depends on them. A cell's total is not a holding, so nothing of it is
+    /// released: a call a cell made stays made.
     pub(crate) fn release_group_work(&self, group_key: &str) {
         self.opener_groups.lock_recover().reserved.remove(group_key);
     }

@@ -249,6 +249,7 @@ mod contention_tests {
             session_id: SessionId::from(session_id),
             ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
             ))
         };
         first_state.policy.model = Some(lash_core::testing::test_model_config(
@@ -1063,6 +1064,7 @@ pub(crate) async fn run_once_durable_queued_work_contention(
             session_id: session_id.clone(),
             ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
             ))
         };
         store

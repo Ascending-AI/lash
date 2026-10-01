@@ -708,7 +708,10 @@ mod label_annotation_tests {
                     source,
                     lash_core::ProcessExecutionEnvSpec::new(
                         Default::default(),
-                        lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                        lash_core::SessionPolicy::new(
+                            lash_core::TurnBudget::Unbounded,
+                            lash_core::MaxToolCalls::new(1024),
+                        ),
                     ),
                 ),
             )

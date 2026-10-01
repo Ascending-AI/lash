@@ -331,6 +331,7 @@ async fn async_main() -> anyhow_like::Result<()> {
     let mut core_builder = lash::LashCore::rlm_builder(
         backend,
         lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
         factory,
     )
     .models(Arc::new(OpenRouterModels { provider }))

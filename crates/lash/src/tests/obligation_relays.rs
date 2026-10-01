@@ -170,7 +170,12 @@ async fn every_builder_path_runs_every_obligation_kinds_relay() {
 
     let (backend, passes) = recorded_backend().await;
     let core = configured(
-        LashCore::builder(backend, crate::TurnBudget::Unbounded).protocol_plugin(Arc::new(
+        LashCore::builder(
+            backend,
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        )
+        .protocol_plugin(Arc::new(
             lash_protocol_standard::StandardProtocolPluginFactory::new(),
         )),
     )
@@ -182,6 +187,7 @@ async fn every_builder_path_runs_every_obligation_kinds_relay() {
     let core = configured(LashCore::standard_builder(
         backend,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .build(owner())
     .expect("build through the standard builder");
@@ -205,6 +211,7 @@ async fn every_builder_path_runs_every_obligation_kinds_relay() {
         let core = configured(LashCore::rlm_builder(
             backend,
             crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
             factory,
         ))
         .build(owner())

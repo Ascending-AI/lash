@@ -113,10 +113,6 @@ pub struct RuntimeControlConfig {
     /// persisted tools (FIG-3353). Carried on the host config so every
     /// construction below the facade sees the same choice.
     pub tool_surface_open_mode: crate::ToolSurfaceOpenMode,
-    /// How much effect-group work one logical opener may retain at once
-    /// (ADR 0099 §9). Read when an opener's state is created; a group already
-    /// accepted is never refused by a later change to it.
-    pub opener_work_bound: crate::session::OpenerWorkBound,
     /// This deployment's tool-child wiring: the live-opener registry a turn or
     /// process incarnation registers itself in, and the resolver that routes a
     /// journaled tool child of an effect group to the handler-level driver
@@ -238,7 +234,6 @@ impl RuntimeHostConfig {
                 process_tool_visibility_filter: None,
                 tool_source_policy: crate::ToolSourcePolicy::default(),
                 tool_surface_open_mode: crate::ToolSurfaceOpenMode::default(),
-                opener_work_bound: crate::session::OpenerWorkBound::default(),
                 tool_children,
                 open_sources: crate::runtime::effect::UnrecordedSessionSources::default(),
                 scope_close: Arc::new(crate::engine::NoScopeClose),
@@ -477,13 +472,6 @@ impl RuntimeHostConfig {
     /// independent from the wake merge key and all batching safety gates.
     pub fn with_process_wake_delivery_policy(mut self, policy: crate::DeliveryPolicy) -> Self {
         self.control.process_wake_delivery_policy = policy;
-        self
-    }
-
-    /// Set how much effect-group work one logical opener may retain at once
-    /// (ADR 0099 §9). Groups already accepted keep their reservation.
-    pub fn with_opener_work_bound(mut self, bound: crate::session::OpenerWorkBound) -> Self {
-        self.control.opener_work_bound = bound;
         self
     }
 }

@@ -305,9 +305,13 @@ impl AgentScenarioSetup {
         let turn_budget = self
             .max_turns
             .map_or(crate::TurnBudget::Unbounded, crate::TurnBudget::bounded);
-        let mut builder =
-            explicit_ephemeral_facets(LashCore::rlm_builder(backend.into(), turn_budget, factory))
-                .serve_test_model(provider, mock_model_spec());
+        let mut builder = explicit_ephemeral_facets(LashCore::rlm_builder(
+            backend.into(),
+            turn_budget,
+            crate::MaxToolCalls::new(1024),
+            factory,
+        ))
+        .serve_test_model(provider, mock_model_spec());
         if let Some(tools) = self.tool_provider {
             builder = builder.tools(tools);
         }
@@ -403,7 +407,11 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
                 pending_observer_intents: Vec::new(),
                 session_id: seed_session_id.clone(),
                 relation: lash_core::SessionRelation::Root,
-                config: lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+                config: lash_core::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                )
+                .into(),
                 head: lash_core::SessionCreationHead::CommittedByCreator,
             },
         )
@@ -890,7 +898,10 @@ impl AgentSessionTurnProcessScenario {
         let child_policy = lash_core::SessionPolicy {
             model: Some(recorded_model(mock_model_spec())),
             turn_budget: lash_core::TurnBudget::bounded(2),
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            ..lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            )
         };
         lash_core::SessionCreateRequest::child(
             self.session_id.clone(),

@@ -34,6 +34,7 @@ fn test_state(session_id: &SessionId) -> RuntimeSessionState {
         turn_index: 1,
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     }
 }

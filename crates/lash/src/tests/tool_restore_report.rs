@@ -77,6 +77,7 @@ async fn seed_session_with_a_persisted_tool(
     let granting_core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .tools(Arc::new(AppTools))
@@ -119,6 +120,7 @@ async fn open_delivers_the_tool_restore_report_to_the_host() -> Result<()> {
     let grantless_core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -158,6 +160,7 @@ async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
     let strict_core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(Arc::new(OpenLifecycleProbeFactory {
@@ -206,6 +209,7 @@ async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
     let tolerant_core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -231,6 +235,7 @@ async fn a_per_open_override_states_the_policy_for_one_session() -> Result<()> {
     let tolerant_core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -286,6 +291,7 @@ async fn require_refuses_a_drive_rebuild_that_lost_a_tool_source() -> Result<()>
     let strict_core = explicit_ephemeral_facets(LashCore::standard_builder(
         strict.lash_backend(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .tool_source_policy(lash_core::ToolSourcePolicy::Require)

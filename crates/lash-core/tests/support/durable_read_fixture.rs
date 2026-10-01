@@ -1395,7 +1395,11 @@ fn fixture_session_request(session_id: &SessionId) -> SessionStoreCreateRequest 
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
         relation: SessionRelation::Root,
-        config: SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+        config: SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
+        .into(),
         head: SessionCreationHead::CommittedByCreator,
     }
 }
@@ -1429,6 +1433,7 @@ fn fixture_state() -> RuntimeSessionState {
         session_id: SessionId::from(SESSION_ID.to_string()),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     }
 }
@@ -1460,7 +1465,10 @@ fn fixture_tool_output() -> lash_core::ToolCallOutput {
 fn fixture_process_env() -> ProcessExecutionEnvSpec {
     let mut env = ProcessExecutionEnvSpec::new(
         Default::default(),
-        SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        ),
     );
     env.render = Some(lash_core::RecordedRender {
         renderer_id: "standard".to_string(),

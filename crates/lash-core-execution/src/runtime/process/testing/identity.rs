@@ -50,6 +50,7 @@ fn process_execution_env_identity_golden_corpus() {
         session_id: Some(SessionId::from("session")),
         autonomous: true,
         turn_budget: crate::TurnBudget::bounded(1),
+        max_tool_calls: crate::MaxToolCalls::new(1024),
         no_progress_budget: Default::default(),
         generation: crate::GenerationOptions {
             output_token_cap: std::num::NonZeroUsize::new(1024),
@@ -63,7 +64,7 @@ fn process_execution_env_identity_golden_corpus() {
     let specs = [
         ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
         ),
         ProcessExecutionEnvSpec::new(plugin_config, policy),
     ];
@@ -80,12 +81,12 @@ fn process_execution_env_identity_golden_corpus() {
         actual,
         [
             (
-                "{\"plugin_config\":{\"revision\":0,\"config\":{}},\"policy\":{\"session_id\":null,\"autonomous\":false,\"turn_budget\":\"unbounded\"}}".to_string(),
-                "process-env:v6:blake3:20e2a0daf5845a51a6c44a39fe5e21e4994fd741514edd2cd1dd322d3c2b319a".to_string(),
+                "{\"plugin_config\":{\"revision\":0,\"config\":{}},\"policy\":{\"session_id\":null,\"autonomous\":false,\"turn_budget\":\"unbounded\",\"max_tool_calls\":1024}}".to_string(),
+                "process-env:v6:blake3:359aa9b669b4a7fb3a7a471a622a7d316cda72d3c5f9adbb8f48738103447383".to_string(),
             ),
             (
-                r#"{"plugin_config":{"revision":3,"config":{"protocol":"protocol","namespaces":{"a:b":{"enabled":true}}}},"policy":{"model":{"model":{"key":"rich-key","metadata":{"wire_model":"model:rich","limits":{"context_window_tokens":8192,"output_token_capacity":2048},"capability":{"instruction_role":"developer","native_mid_conversation_system":true,"cache_control":"anthropic","stream_termination":"eof_tolerated","sampling":"pinned","reasoning":{"efforts":["low","high"],"encoding":{"budget":{"high":1024,"low":256}},"disable":true,"mandatory":true}}}},"reasoning":{"effort":"high"}},"session_id":"session","autonomous":true,"turn_budget":{"bounded":1},"generation":{"output_token_cap":1024,"temperature":0.25,"seed":-7}}}"#.to_string(),
-                "process-env:v6:blake3:16a3f530708b8327383651f9329b3b2a93de75e752fe716aa7b2da9b81e11040".to_string(),
+                r#"{"plugin_config":{"revision":3,"config":{"protocol":"protocol","namespaces":{"a:b":{"enabled":true}}}},"policy":{"model":{"model":{"key":"rich-key","metadata":{"wire_model":"model:rich","limits":{"context_window_tokens":8192,"output_token_capacity":2048},"capability":{"instruction_role":"developer","native_mid_conversation_system":true,"cache_control":"anthropic","stream_termination":"eof_tolerated","sampling":"pinned","reasoning":{"efforts":["low","high"],"encoding":{"budget":{"high":1024,"low":256}},"disable":true,"mandatory":true}}}},"reasoning":{"effort":"high"}},"session_id":"session","autonomous":true,"turn_budget":{"bounded":1},"max_tool_calls":1024,"generation":{"output_token_cap":1024,"temperature":0.25,"seed":-7}}}"#.to_string(),
+                "process-env:v6:blake3:525e11a6358a1b3b8a441680283f8900be425932cc9e929e0410ba83425dfa04".to_string(),
             ),
         ]
     );

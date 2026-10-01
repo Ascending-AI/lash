@@ -130,6 +130,7 @@ async fn inherited_child_session_carries_parent_tool_state() {
         runtime_services,
         RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         )),
         lash_core::testing::runtime_lease_owner(),
     )
@@ -242,6 +243,7 @@ async fn captured_plugin_init_is_immune_to_post_spawn_parent_mutation() {
         runtime_services,
         RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         )),
         lash_core::testing::runtime_lease_owner(),
     )
@@ -351,6 +353,7 @@ async fn durable_child_writes_to_its_own_attachment_namespace() {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
     let runtime_host = host;
@@ -511,6 +514,7 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
             session_id: SessionId::from("root"),
             ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
             ))
         },
         lash_core::testing::runtime_lease_owner(),
@@ -644,6 +648,7 @@ async fn forked_child_session_keeps_hidden_live_tool_out_of_catalog_across_rebui
         runtime_services,
         RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         )),
         lash_core::testing::runtime_lease_owner(),
     )
@@ -1195,6 +1200,7 @@ async fn a_child_records_the_config_its_owners_chose_from_the_parent() {
     );
     let mut parent_state = RuntimeSessionState::new(lash_core::SessionPolicy::new(
         lash_core::TurnBudget::Unbounded,
+        lash_core::MaxToolCalls::new(1024),
     ));
     parent_state
         .authority

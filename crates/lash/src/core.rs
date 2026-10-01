@@ -173,8 +173,15 @@ impl LashCore {
     /// setter for a store, a registry or an effect host, so a core cannot mix
     /// substrates, and there is no in-memory default. The zero-infra
     /// backend for local tests is a Restate engine over a SQLite memory store set.
-    pub fn builder(backend: Backend, turn_budget: lash_core::TurnBudget) -> LashCoreBuilder {
-        LashCoreBuilder::new(backend, turn_budget)
+    ///
+    /// `turn_budget` and `max_tool_calls` are the two execution controls a
+    /// host must decide: neither has a default.
+    pub fn builder(
+        backend: Backend,
+        turn_budget: lash_core::TurnBudget,
+        max_tool_calls: lash_core::MaxToolCalls,
+    ) -> LashCoreBuilder {
+        LashCoreBuilder::new(backend, turn_budget, max_tool_calls)
     }
 
     /// Sugar entry point: a [`LashCoreBuilder`] over `backend` pre-seeded
@@ -182,8 +189,9 @@ impl LashCore {
     pub fn standard_builder(
         backend: Backend,
         turn_budget: lash_core::TurnBudget,
+        max_tool_calls: lash_core::MaxToolCalls,
     ) -> LashCoreBuilder {
-        LashCore::builder(backend, turn_budget).protocol_plugin(Arc::new(
+        LashCore::builder(backend, turn_budget, max_tool_calls).protocol_plugin(Arc::new(
             lash_protocol_standard::StandardProtocolPluginFactory::new(),
         ))
     }
@@ -381,9 +389,10 @@ impl LashCore {
     pub fn rlm_builder(
         backend: Backend,
         turn_budget: lash_core::TurnBudget,
+        max_tool_calls: lash_core::MaxToolCalls,
         factory: crate::rlm::RlmProtocolPluginFactory,
     ) -> LashCoreBuilder {
-        LashCore::builder(backend, turn_budget).protocol_plugin(Arc::new(factory))
+        LashCore::builder(backend, turn_budget, max_tool_calls).protocol_plugin(Arc::new(factory))
     }
 
     pub fn session(&self, session_id: impl Into<SessionId>) -> SessionBuilder {
@@ -785,10 +794,16 @@ pub struct LashCoreBuilder {
 }
 
 impl LashCoreBuilder {
-    fn new(backend: Backend, turn_budget: lash_core::TurnBudget) -> Self {
+    fn new(
+        backend: Backend,
+        turn_budget: lash_core::TurnBudget,
+        max_tool_calls: lash_core::MaxToolCalls,
+    ) -> Self {
         Self {
             protocol_factory: None,
-            session_spec: SessionSpec::new().turn_budget(turn_budget),
+            session_spec: SessionSpec::new()
+                .turn_budget(turn_budget)
+                .max_tool_calls(max_tool_calls),
             models: None,
             run_definitions: lash_core::RunDefinitions::default(),
             backend,
@@ -1064,6 +1079,9 @@ impl LashCoreBuilder {
         let turn_budget = session_spec
             .turn_budget
             .ok_or(EmbedError::MissingTurnBudget)?;
+        let max_tool_calls = session_spec
+            .max_tool_calls
+            .ok_or(EmbedError::MissingMaxToolCalls)?;
         // The default key must name a registered model now; the binding a
         // session records is still minted when that session is created.
         if let Some(models) = self.models.as_ref() {
@@ -1073,7 +1091,10 @@ impl LashCoreBuilder {
         }
         // With the model fields taken, resolving the spec mints nothing.
         let policy = session_spec
-            .resolve_against(&SessionPolicy::new(turn_budget), &lash_core::EmptyModels)
+            .resolve_against(
+                &SessionPolicy::new(turn_budget, max_tool_calls),
+                &lash_core::EmptyModels,
+            )
             .map_err(|error| match error {
                 lash_core::facade_support::SpecResolveError::Model(error) => {
                     EmbedError::ModelUnknown(error)

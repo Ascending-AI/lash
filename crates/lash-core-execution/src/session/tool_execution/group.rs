@@ -223,6 +223,38 @@ impl RuntimeExecutionContext<'_> {
         // Opening a group writes the journal; a replayed language command's
         // guard admits it or refuses it before any row exists (FIG-3586).
         scoped.admit_journal_write()?;
+        // The group's unique tool calls are admitted against the session's
+        // recorded `max_tool_calls` before anything of it is journaled,
+        // announced or dispatched (ADR 0099 §9, FIG-4546). Timers are not
+        // tool calls and are not counted.
+        let tool_calls = children
+            .iter()
+            .filter(|child| child.tool().is_some())
+            .count();
+        self.reserve_tool_calls(&group_key, tool_calls).await?;
+        self.form_tool_child_group(
+            group_invocation,
+            group_key.clone(),
+            batch_id,
+            children,
+            wake,
+            reopen,
+        )
+        .await
+        .inspect_err(|_| self.release_group_work(&group_key))
+    }
+
+    /// Forms and opens a group whose tool calls are already admitted.
+    async fn form_tool_child_group(
+        &self,
+        group_invocation: crate::RuntimeEffectInvocation,
+        group_key: String,
+        batch_id: &str,
+        children: &[PreparedGroupChild],
+        wake: GroupWakePolicy,
+        reopen: crate::GroupReopen,
+    ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
+        let scoped = self.dispatch.effect_controller.clone();
         let scope = scoped.execution_scope().clone();
         let admitted = scoped.admitted_scope().clone();
         let controller = self.dispatch.effect_controller.controller();
@@ -325,9 +357,6 @@ impl RuntimeExecutionContext<'_> {
             );
         }
 
-        // The group's unique children are reserved against the opener's bound
-        // before anything is journaled or dispatched (ADR 0099 §9).
-        self.reserve_group_work(&group_key, children.len()).await?;
         let session_facts = self.tool_child_session_facts(opener_context);
         let mut envelopes = Vec::with_capacity(children.len());
         for (position, child) in children.iter().enumerate() {
@@ -413,12 +442,8 @@ impl RuntimeExecutionContext<'_> {
             wake,
             LoserPolicy::RunToCompletion,
         )
-        .map(|group| group.with_reopen(reopen))
-        .inspect_err(|_| self.release_group_work(&group_key))?;
-        controller
-            .open_effect_group(group)
-            .await
-            .inspect_err(|_| self.release_group_work(&group_key))
+        .map(|group| group.with_reopen(reopen))?;
+        controller.open_effect_group(group).await
     }
 
     /// Binds every tool child's request to its call's identity (ADR 0117 §7)
@@ -1167,7 +1192,7 @@ impl RuntimeExecutionContext<'_> {
         }
         let consumer = ToolAggregateConsumer::AllSettled;
         let group_key = self.tool_child_group_key(batch_id);
-        let handle = self
+        let handle = match self
             .open_tool_child_group(
                 group_invocation,
                 group_key.clone(),
@@ -1176,7 +1201,25 @@ impl RuntimeExecutionContext<'_> {
                 consumer.wake(),
                 crate::GroupReopen::RetainedShape,
             )
-            .await?;
+            .await
+        {
+            Ok(handle) => handle,
+            Err(error) => {
+                // The step asked for more tool calls than the session's
+                // recorded `max_tool_calls` admits (FIG-4546): every call of
+                // it answers the typed refusal, so the model reads the limit
+                // in its tool results. Nothing was journaled or dispatched,
+                // and a replay refuses the same step the same way.
+                let Some(exceeded) = error.tool_call_limit_exceeded() else {
+                    return Err(error);
+                };
+                return Ok(leaves
+                    .iter()
+                    .filter_map(PreparedGroupChild::tool)
+                    .map(|leaf| (leaf.input_index, limit_refused_group_leaf(leaf, exceeded)))
+                    .collect());
+            }
+        };
         let mut settled = self
             .consume_tool_child_group(handle, &leaves, consumer)
             .await?;
@@ -1228,6 +1271,47 @@ fn cancelled_group_leaf(leaf: &PreparedToolChildLeaf) -> CompletedProtocolToolCa
         output: completed.output.clone(),
     };
     CompletedProtocolToolCall { completed, record }
+}
+
+/// The tool failure a call refused by the session's `max_tool_calls` settles
+/// with: typed by its code, never retried, and worded by the refusal so the
+/// limit is named wherever the failure is shown (FIG-4546).
+pub(crate) fn tool_call_limit_failure(exceeded: crate::ToolCallLimitExceeded) -> ToolFailure {
+    ToolFailure::runtime(
+        ToolFailureClass::ResourceLimit,
+        crate::ToolCallLimitExceeded::CODE,
+        exceeded.to_string(),
+    )
+}
+
+/// The presentation of a tool call its step's `max_tool_calls` refused.
+fn limit_refused_group_leaf(
+    leaf: &PreparedToolChildLeaf,
+    exceeded: crate::ToolCallLimitExceeded,
+) -> CompletedProtocolToolCall {
+    let ids = crate::tool_dispatch::ToolCallIds::of(&leaf.call.call);
+    let tool = leaf.call.call.tool_name.clone();
+    let output = ToolCallOutput::failure(tool_call_limit_failure(exceeded));
+    let record = ToolCallRecord {
+        call_id: ids.call_id.clone(),
+        provider_call_id: ids.provider_call_id.clone(),
+        tool: tool.clone(),
+        args: leaf.call.call.args.clone(),
+        output: output.clone(),
+    };
+    CompletedProtocolToolCall {
+        completed: crate::sansio::CompletedToolCall {
+            model_return: ModelToolReturn::from_output(tool.clone(), &output),
+            call_id: ids.call_id,
+            provider_call_id: ids.provider_call_id,
+            tool_name: tool,
+            args: leaf.call.call.args.clone(),
+            output,
+            intent_outcomes: Vec::new(),
+            replay: leaf.call.call.replay.clone(),
+        },
+        record,
+    }
 }
 
 /// What a group tool child records of its opener and emits back to it

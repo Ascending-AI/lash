@@ -116,16 +116,20 @@ fn tool_core(executions: Arc<AtomicUsize>) -> CoreBuild {
             .context_window_tokens(200_000)
             .build()
             .map_err(|error| format!("model spec: {error}"))?;
-        lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .recovery_lease(super::recovery_lease())
-            .serve_test_model(tool_provider(), model)
-            .tools(Arc::new(StuckTool {
-                executions: Arc::clone(&executions),
-            }) as Arc<dyn lash_core::ToolProvider>)
-            .build(owner)
-            .map_err(|error| format!("build the lash core: {error}"))
+        lash::LashCore::standard_builder(
+            backend,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .recovery_lease(super::recovery_lease())
+        .serve_test_model(tool_provider(), model)
+        .tools(Arc::new(StuckTool {
+            executions: Arc::clone(&executions),
+        }) as Arc<dyn lash_core::ToolProvider>)
+        .build(owner)
+        .map_err(|error| format!("build the lash core: {error}"))
     })
 }
 

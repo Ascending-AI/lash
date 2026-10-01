@@ -89,7 +89,8 @@ pub(crate) use lash_sansio::llm::types::{
 };
 pub(crate) use lash_sansio::session_model::{ConversationRecord, ProtocolEvent, TurnBudget};
 pub(crate) use lash_sansio::session_model::{
-    NoProgressBudget, message::BaseRenderCache, message::MessageSequence,
+    MaxToolCalls, NoProgressBudget, ToolCallLimitExceeded, message::BaseRenderCache,
+    message::MessageSequence,
 };
 pub(crate) use lash_sansio::tool_contract::{ToolDefinition, ToolId, ToolManifest};
 pub(crate) use lash_sansio::{

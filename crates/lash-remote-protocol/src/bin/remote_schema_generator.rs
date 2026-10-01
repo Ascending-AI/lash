@@ -99,11 +99,14 @@ mod tests {
                 .schema;
         let validator = jsonschema::validator_for(&schema).expect("schema compiles");
         let request = RemotePersistProcessEnvRequest {
-            env_spec: RemoteProcessExecutionEnvSpec::new(RemoteTurnBudget::Unbounded),
+            env_spec: RemoteProcessExecutionEnvSpec::new(
+                RemoteTurnBudget::Unbounded,
+                lash_sansio::MaxToolCalls::new(1024).non_zero(),
+            ),
         };
         let value = serde_json::to_value(request).expect("environment serializes");
         assert!(validator.is_valid(&value));
-        for field in ["no_progress_budget", "charge_safety"] {
+        for field in ["max_tool_calls", "no_progress_budget", "charge_safety"] {
             let mut incomplete = value.clone();
             incomplete["env_spec"]["policy"]
                 .as_object_mut()
@@ -119,6 +122,19 @@ mod tests {
         zero["env_spec"]["policy"]["no_progress_budget"] = json!({"bounded": 0});
         assert!(!validator.is_valid(&zero));
         assert!(serde_json::from_value::<RemotePersistProcessEnvRequest>(zero).is_err());
+        let mut no_calls = serde_json::to_value(RemotePersistProcessEnvRequest {
+            env_spec: RemoteProcessExecutionEnvSpec::new(
+                RemoteTurnBudget::Unbounded,
+                lash_sansio::MaxToolCalls::new(1024).non_zero(),
+            ),
+        })
+        .expect("environment serializes");
+        no_calls["env_spec"]["policy"]["max_tool_calls"] = json!(0);
+        assert!(
+            !validator.is_valid(&no_calls),
+            "zero is not a tool-call limit"
+        );
+        assert!(serde_json::from_value::<RemotePersistProcessEnvRequest>(no_calls).is_err());
     }
 
     #[test]

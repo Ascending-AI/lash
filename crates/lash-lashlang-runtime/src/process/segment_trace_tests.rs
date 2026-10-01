@@ -608,6 +608,7 @@ fn predecessor_envelope(
         pending_summary: Vec::new(),
         effect_omissions: std::collections::BTreeMap::new(),
         outstanding_groups: Vec::new(),
+        held_tool_calls: Default::default(),
         worker_recovery: Default::default(),
     })
     .expect("serialize segment-state writer");
@@ -823,6 +824,9 @@ fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
     // The predecessor held no effect group across its boundary; the current
     // envelope states that explicitly (ADR 0099 §9).
     fixture["segment_state"]["outstanding_groups"] = serde_json::json!([]);
+    // Nor, therefore, any tool call counted against `max_tool_calls`
+    // (FIG-4546).
+    fixture["segment_state"]["held_tool_calls"] = serde_json::json!({});
     // The predecessor counted sleeps per kind; the current envelope carries the
     // run's issue-ordinal state instead (FIG-3586).
     fixture["segment_state"]["commands"] =
@@ -891,6 +895,7 @@ fn the_current_envelope_carries_no_dead_send_ordinal() {
         pending_summary: Vec::new(),
         effect_omissions: std::collections::BTreeMap::new(),
         outstanding_groups: Vec::new(),
+        held_tool_calls: Default::default(),
         worker_recovery: Default::default(),
     };
     let wire = serde_json::to_value(&segment_state).expect("serialize current segment state");
@@ -951,6 +956,7 @@ fn a_segment_boundary_carries_at_most_the_cap_per_node_of_pending_summary() {
         pending_summary: writer.pending(),
         effect_omissions: writer.omissions(),
         outstanding_groups: Vec::new(),
+        held_tool_calls: Default::default(),
         worker_recovery: Default::default(),
     })
     .expect("encode the boundary's segment state");
@@ -1019,10 +1025,10 @@ fn declined_boundary_is_warned_and_counted() {
 #[test]
 fn durable_exhaustion_has_a_typed_process_failure_surface() {
     let previous = EXECUTION_BOUND_EXHAUSTION_LOUD.swap(false, Ordering::SeqCst);
-    let output =
-        process_lashlang_execution_result(Err(lashlang::RuntimeError::InstructionBudgetExceeded {
-            limit: 1,
-        }));
+    let output = process_lashlang_execution_result(
+        Err(lashlang::RuntimeError::InstructionBudgetExceeded { limit: 1 }),
+        None,
+    );
     EXECUTION_BOUND_EXHAUSTION_LOUD.store(previous, Ordering::SeqCst);
     assert!(matches!(
         output,

@@ -72,7 +72,7 @@ pub fn process_work_wiring_for_registry(
 fn process_execution_env_fixture_spec() -> crate::ProcessExecutionEnvSpec {
     crate::ProcessExecutionEnvSpec::new(
         crate::AdmittedPluginConfig::default(),
-        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
     )
 }
 
@@ -572,7 +572,7 @@ pub fn standard_test_policy() -> crate::SessionPolicy {
             "mock-model",
             test_model_metadata("mock-model"),
         )),
-        ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
+        ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
     }
 }
 
@@ -2126,8 +2126,14 @@ pub fn mock_assembled_turn(session_id: &SessionId, summary: &str) -> AssembledTu
     AssembledTurn {
         state: SessionSnapshot {
             session_id: SessionId::from(session_id.to_string()),
-            policy: SessionPolicy::new(crate::TurnBudget::Unbounded),
-            ..SessionSnapshot::new(SessionPolicy::new(crate::TurnBudget::Unbounded))
+            policy: SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            ),
+            ..SessionSnapshot::new(SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            ))
         },
         outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
             text: summary.to_string(),

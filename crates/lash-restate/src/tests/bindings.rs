@@ -140,6 +140,7 @@ pub(super) async fn backend_and_process_worker()
     let core = lash::LashCore::standard_builder(
         lash_core::Backend::from(Arc::clone(&backend)),
         lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
     )
     .serve_test_model(
         lash_core::testing::TestProvider::builder()

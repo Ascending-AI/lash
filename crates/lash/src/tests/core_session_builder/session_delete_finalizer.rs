@@ -54,6 +54,7 @@ async fn closing_fixture_under(
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -424,6 +425,7 @@ async fn an_immediate_delivery_runs_under_the_configured_attempt_budget() -> Res
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .recovery_pass_budget(lash_core::engine::RecoveryPassBudget {
         attempt: std::time::Duration::from_millis(BUDGET_MS),
@@ -546,6 +548,7 @@ async fn delete_delivery_exhausts_its_budget(
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .recovery_pass_budget(lash_core::engine::RecoveryPassBudget {
         attempt: std::time::Duration::from_millis(BUDGET_MS),

@@ -315,25 +315,29 @@ impl World {
             })
             .build()
             .into_handle();
-        let mut builder = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .plugin(lash_core::testing::process_engine_plugin_fixture())
-            .models(std::sync::Arc::new(
-                lash::ModelRegistry::new()
-                    .register(
-                        "mock-model",
-                        lash::RegisteredModel::new(
-                            lash::ModelMetadata::builder("mock-model")
-                                .context_window_tokens(200_000)
-                                .build()
-                                .expect("model metadata"),
-                            provider,
-                        ),
-                    )
-                    .expect("one key registers"),
-            ))
-            .model("mock-model");
+        let mut builder = lash::LashCore::standard_builder(
+            backend,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .plugin(lash_core::testing::process_engine_plugin_fixture())
+        .models(std::sync::Arc::new(
+            lash::ModelRegistry::new()
+                .register(
+                    "mock-model",
+                    lash::RegisteredModel::new(
+                        lash::ModelMetadata::builder("mock-model")
+                            .context_window_tokens(200_000)
+                            .build()
+                            .expect("model metadata"),
+                        provider,
+                    ),
+                )
+                .expect("one key registers"),
+        ))
+        .model("mock-model");
         if let Some(restorer) = restorer {
             builder = builder.trigger_route_restorer(restorer);
         }

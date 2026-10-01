@@ -409,6 +409,7 @@ fn persisted_commit(session: &SessionId) -> lash_core::RuntimeCommit {
         session_id: session.clone(),
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
     lash_core::RuntimeCommit::persisted_state_for_test(&state)

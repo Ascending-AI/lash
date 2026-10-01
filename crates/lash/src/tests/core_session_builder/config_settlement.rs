@@ -8,6 +8,7 @@ async fn settled_config_survives_park_without_pending_graph_nodes() -> Result<()
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .models(test_catalog(
         mock_provider(),
@@ -74,6 +75,7 @@ async fn commanded_model_survives_an_incidental_default_spec_reopen() -> Result<
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .models(test_catalog(
         mock_provider(),

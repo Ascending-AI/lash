@@ -407,7 +407,10 @@ impl GeneratedBackendFaultHarness {
         let store = self.create_store(&session_id).await?;
         let state = RuntimeSessionState {
             session_id: session_id.clone(),
-            ..RuntimeSessionState::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+            ..RuntimeSessionState::new(SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            ))
         };
         let (commit, _) = RuntimeCommit::persisted_state_for_test(&state)
             .with_operation(OperationId::turn(
@@ -511,7 +514,11 @@ impl GeneratedBackendFaultHarness {
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from(session_id.to_string()),
                 relation: SessionRelation::Root,
-                config: SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+                config: SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                    lash_core::MaxToolCalls::new(1024),
+                )
+                .into(),
                 head: SessionCreationHead::CommittedByCreator,
             })
             .await

@@ -279,6 +279,17 @@ pub trait ConformanceTurnRunner: Send + Sync {
         );
     }
 
+    /// Kills every execution of a process segment the tier is running now,
+    /// the way the worker running it dies, and leaves each to the tier's
+    /// recovery: a redelivery of the same invocation replaying its journal
+    /// on Restate. Answers how many executions it killed; a segment that is
+    /// suspended on its engine has no execution to kill, and its next
+    /// resumption replays its journal all the same. A runner that cannot
+    /// kill a process's worker says so by panicking.
+    async fn kill_process_workers(&self) -> usize {
+        panic!("this tier's turn runner cannot kill a process's worker");
+    }
+
     /// Starts `registration` on the tier's engine, serving its segment with
     /// `body` until `crash` fires, then kills that execution where it stands,
     /// the way the process running it dies, and leaves the segment open for

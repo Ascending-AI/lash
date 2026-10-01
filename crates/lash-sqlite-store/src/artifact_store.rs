@@ -914,7 +914,10 @@ mod tests {
         let (_dir, store) = store().await;
         let spec = lash_core_execution::ProcessExecutionEnvSpec::new(
             lash_core_execution::AdmittedPluginConfig::default(),
-            lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+            lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+                lash_core_execution::MaxToolCalls::new(1024),
+            ),
         );
         let bytes = spec.to_store_bytes().expect("encode environment");
         let env_ref = spec.stable_ref().expect("environment reference");

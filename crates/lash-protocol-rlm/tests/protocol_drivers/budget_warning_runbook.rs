@@ -50,7 +50,7 @@ fn scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_se
             lash_core::ModelMetadata::builder("scripted-budget-model")
                     .context_window_tokens(41_000).build().expect("model spec"),
         )),
-                ..SessionPolicy::new(TurnBudget::Unbounded)
+                ..SessionPolicy::new(TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024))
             };
             let store = lash_core::runtime::admit_session_view(
                 &backend.session_store_factory(),

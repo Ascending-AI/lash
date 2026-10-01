@@ -42,7 +42,11 @@ async fn ingress_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: SessionRelation::Root,
-            config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+            config: lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            )
+            .into(),
             head: SessionCreationHead::CommittedByCreator,
         },
     )

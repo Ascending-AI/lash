@@ -416,7 +416,10 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
     assert_eq!(identity.definition_id.as_ref(), Some(&definition_id));
     let execution_env_ref = ProcessExecutionEnvSpec::new(
         Default::default(),
-        lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
+        lash::runtime::SessionPolicy::new(
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        ),
     )
     .stable_ref()
     .expect("derive process execution environment identity");

@@ -15,6 +15,7 @@ pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
         chronological_projection: Arc<crate::ChronologicalProjection>,
         turn_context: crate::TurnContext,
+        execution_env_spec: crate::ProcessExecutionEnvSpec,
     ) -> Self;
 
     /// The tool-execution context this run lends its tool calls.
@@ -78,6 +79,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
         chronological_projection: Arc<crate::ChronologicalProjection>,
         turn_context: crate::TurnContext,
+        execution_env_spec: crate::ProcessExecutionEnvSpec,
     ) -> Self {
         Self {
             dispatch,
@@ -91,15 +93,14 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             // recorded `F` with `with_fleet_format`, as every context over a
             // durable store must (the session's and the process runner's).
             fleet_format: crate::FleetFormat::current(),
-            execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-                crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
-            ),
+            execution_env_spec,
             process_execution: None,
             started_process_ids: Arc::default(),
             nested_effect_error: Arc::default(),
             incorporation_ledger: Arc::default(),
             opener_groups: Arc::default(),
+            cell_tool_calls: Arc::default(),
+            tool_call_limit_refusal: Arc::default(),
             unrecorded_sources: crate::runtime::effect::UnrecordedSessionSources::default(),
             parent_invocation: None,
             turn_phase_probe: None,

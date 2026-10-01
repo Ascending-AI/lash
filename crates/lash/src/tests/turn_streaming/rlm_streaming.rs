@@ -13,6 +13,7 @@ pub(super) async fn pending_host_tool_completion_parks_turn_and_resolves_through
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(tool_roundtrip_provider(), mock_model_spec())
     .tools(Arc::new(PendingAppTools::new(key_tx)))
@@ -147,6 +148,7 @@ pub(super) async fn stream_emits_chronological_tool_events_without_prose_polluti
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(tool_roundtrip_provider(), mock_model_spec())
     .tools(Arc::new(AppTools))
@@ -246,6 +248,7 @@ pub(super) async fn interleaved_standard_parts_keep_order_through_store_history_
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(provider, mock_model_spec())
     .tools(Arc::new(AppTools))

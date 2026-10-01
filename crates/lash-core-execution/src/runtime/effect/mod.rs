@@ -207,7 +207,8 @@ mod tests {
 mod captured_environment_row_tests {
     #[test]
     fn an_environment_load_journal_row_stays_under_the_intent_budget() {
-        let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
+        let policy =
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
         let mut plugin_config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));
         plugin_config.insert(
             "protocol",

@@ -8,11 +8,11 @@ use crate::{ModelConfig, ModelKey, ModelUnavailable, RuntimeModels};
 
 pub use lash_sansio::format_tool_output_content;
 pub use lash_sansio::session_model::{
-    ConversationRecord, ErrorEnvelope, FailureCode, Message, MessageRole, Namespace,
+    ConversationRecord, ErrorEnvelope, FailureCode, MaxToolCalls, Message, MessageRole, Namespace,
     NoProgressBudget, Part, PartKind, ProtocolEvent, SessionStreamEvent, StreamMessageKind,
-    TokenUsage, TokenUsageOverflow, TurnBudget, TurnFailureCode, TurnFailureKind,
-    make_error_envelope, make_error_event, reassign_part_ids, render_prompt,
-    render_transcript_prompt, shared_parts,
+    TokenUsage, TokenUsageOverflow, ToolCallLimitExceeded, ToolCallLimitScope, TurnBudget,
+    TurnFailureCode, TurnFailureKind, make_error_envelope, make_error_event, reassign_part_ids,
+    render_prompt, render_transcript_prompt, shared_parts,
 };
 
 pub type SessionHistoryRecord = lash_sansio::session_model::SessionHistoryRecord<ProtocolEvent>;
@@ -190,6 +190,10 @@ pub struct SessionSpec {
     /// against (ADR 0026). `None` keeps the base policy's.
     pub attachment_acceptance: Option<std::sync::Arc<AttachmentCapabilitySnapshot>>,
     pub turn_budget: Option<TurnBudget>,
+    /// The tool-call limit: the total one cell may make, and the number a
+    /// process may hold at once. `None` keeps the base policy's; a root
+    /// session has no base to keep, so it must state one.
+    pub max_tool_calls: Option<MaxToolCalls>,
     /// Whether the session's turns run autonomously. `None` keeps the base
     /// policy's.
     pub autonomous: Option<bool>,
@@ -227,6 +231,7 @@ impl SessionSpec {
             reasoning: None,
             attachment_acceptance: None,
             turn_budget: None,
+            max_tool_calls: None,
             autonomous: None,
             no_progress_budget: None,
             charge_safety: None,
@@ -267,6 +272,13 @@ impl SessionSpec {
 
     pub fn turn_budget(mut self, turn_budget: TurnBudget) -> Self {
         self.turn_budget = Some(turn_budget);
+        self
+    }
+
+    /// The tool-call limit: the total one cell may make, and the number a
+    /// process may hold at once.
+    pub fn max_tool_calls(mut self, max_tool_calls: MaxToolCalls) -> Self {
+        self.max_tool_calls = Some(max_tool_calls);
         self
     }
 
@@ -379,6 +391,9 @@ impl SessionSpec {
         if let Some(turn_budget) = self.turn_budget {
             policy.turn_budget = turn_budget;
         }
+        if let Some(max_tool_calls) = self.max_tool_calls {
+            policy.max_tool_calls = max_tool_calls;
+        }
         if let Some(autonomous) = self.autonomous {
             policy.autonomous = autonomous;
         }
@@ -471,10 +486,61 @@ mod tests {
         assert!(serialized.get("payload").is_some());
     }
 
+    /// FIG-4546: `max_tool_calls` has no default. A recorded policy or
+    /// session head that states none is refused at load, typed by the field
+    /// it lacks, and zero is not a limit.
+    #[test]
+    fn recorded_config_without_max_tool_calls_is_refused() {
+        let policy = SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(8));
+        let head = crate::PersistedSessionConfig::from(&policy);
+        for (name, complete) in [
+            (
+                "policy",
+                serde_json::to_value(&policy).expect("serialize complete policy"),
+            ),
+            (
+                "session head",
+                serde_json::to_value(&head).expect("serialize complete head"),
+            ),
+        ] {
+            assert_eq!(complete["max_tool_calls"], 8, "{name} records the limit");
+            let decode = |value: serde_json::Value| -> Result<(), String> {
+                if name == "policy" {
+                    serde_json::from_value::<SessionPolicy>(value)
+                        .map(drop)
+                        .map_err(|error| error.to_string())
+                } else {
+                    serde_json::from_value::<crate::PersistedSessionConfig>(value)
+                        .map(drop)
+                        .map_err(|error| error.to_string())
+                }
+            };
+            decode(complete.clone()).expect("the complete record decodes");
+
+            let mut missing = complete.clone();
+            missing
+                .as_object_mut()
+                .expect("the record is a JSON object")
+                .remove("max_tool_calls");
+            let error = decode(missing).expect_err("a missing max_tool_calls must fail");
+            assert!(
+                error.contains("missing field `max_tool_calls`"),
+                "{name}: the refusal names max_tool_calls: {error}"
+            );
+
+            let mut zero = complete;
+            zero["max_tool_calls"] = serde_json::json!(0);
+            decode(zero).expect_err("a zero max_tool_calls must fail");
+        }
+    }
+
     #[test]
     fn session_policy_rejects_missing_turn_budget() {
-        let mut value = serde_json::to_value(SessionPolicy::new(crate::TurnBudget::Unbounded))
-            .expect("serialize complete policy");
+        let mut value = serde_json::to_value(SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
+        .expect("serialize complete policy");
         value
             .as_object_mut()
             .expect("policy is a JSON object")
@@ -495,8 +561,11 @@ mod tests {
     /// process.
     #[test]
     fn a_default_no_progress_budget_is_absent_from_the_serialized_policy() {
-        let value = serde_json::to_value(SessionPolicy::new(crate::TurnBudget::Unbounded))
-            .expect("serialize policy");
+        let value = serde_json::to_value(SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
+        .expect("serialize policy");
         assert!(
             value.get("no_progress_budget").is_none(),
             "the default bound must not widen the persisted shape: {value}"
@@ -515,14 +584,18 @@ mod tests {
     /// absent so the default shape does not widen.
     #[test]
     fn charge_safety_round_trips_through_the_durable_policy_shape() {
-        let default_value = serde_json::to_value(SessionPolicy::new(crate::TurnBudget::Unbounded))
-            .expect("serialize default policy");
+        let default_value = serde_json::to_value(SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
+        .expect("serialize default policy");
         assert!(
             default_value.get("charge_safety").is_none(),
             "the safe default must not widen the persisted shape: {default_value}"
         );
 
-        let mut policy = SessionPolicy::new(crate::TurnBudget::Unbounded);
+        let mut policy =
+            SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
         policy.charge_safety = ChargeSafetyPolicy::AcceptDuplicateBilling {
             max_unsafe_retries: 2,
             max_duplicate_cost_tokens: Some(4_096),
@@ -535,7 +608,7 @@ mod tests {
 
     #[test]
     fn session_spec_states_charge_safety_for_creation() {
-        let base = SessionPolicy::new(crate::TurnBudget::Unbounded);
+        let base = SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
         let appetite = ChargeSafetyPolicy::AcceptDuplicateBilling {
             max_unsafe_retries: 3,
             max_duplicate_cost_tokens: Some(8_192),
@@ -562,7 +635,7 @@ mod tests {
         for budget in [NoProgressBudget::bounded(3), NoProgressBudget::Unbounded] {
             let policy = SessionPolicy {
                 no_progress_budget: budget,
-                ..SessionPolicy::new(crate::TurnBudget::Unbounded)
+                ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
             };
             let value = serde_json::to_value(&policy).expect("serialize policy");
             assert!(value.get("no_progress_budget").is_some(), "{value}");
@@ -575,7 +648,7 @@ mod tests {
     fn session_policy_serializes_the_recorded_model_and_no_transport() {
         let policy = SessionPolicy {
             model: Some(recorded("mock-model")),
-            ..SessionPolicy::new(crate::TurnBudget::Unbounded)
+            ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
         };
 
         let value = serde_json::to_value(&policy).expect("serialize policy");
@@ -670,7 +743,7 @@ mod tests {
                 recorded("parent-model")
                     .with_reasoning(ReasoningSelection::Effort("high".to_string())),
             ),
-            ..SessionPolicy::new(crate::TurnBudget::Unbounded)
+            ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
         };
         let models = CountingModels::serving(&["parent-model"]);
         let child = SessionSpec::inherit()
@@ -694,7 +767,7 @@ mod tests {
                 recorded("parent-model")
                     .with_reasoning(ReasoningSelection::Effort("high".to_string())),
             ),
-            ..SessionPolicy::new(crate::TurnBudget::Unbounded)
+            ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
         };
         let models = CountingModels::serving(&["parent-model", "child-model"]);
         let child = SessionSpec::inherit()
@@ -723,7 +796,7 @@ mod tests {
 
     #[test]
     fn a_spec_naming_an_unserved_key_or_reasoning_without_a_model_is_refused() {
-        let base = SessionPolicy::new(crate::TurnBudget::Unbounded);
+        let base = SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
         let models = CountingModels::serving(&["served"]);
         assert!(matches!(
             SessionSpec::inherit()
@@ -753,7 +826,7 @@ mod tests {
                 recorded("parent-model")
                     .with_reasoning(ReasoningSelection::Effort("high".to_string())),
             ),
-            ..SessionPolicy::new(crate::TurnBudget::Unbounded)
+            ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
         };
         let models = CountingModels::serving(&["parent-model", "plain-model"]);
         match SessionSpec::inherit()
@@ -787,7 +860,8 @@ mod tests {
 
     #[test]
     fn session_policy_persists_generation_options_only_when_set() {
-        let mut policy = SessionPolicy::new(crate::TurnBudget::Unbounded);
+        let mut policy =
+            SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
         let value = serde_json::to_value(&policy).expect("serialize policy");
         assert!(
             value.get("generation").is_none(),
@@ -825,7 +899,7 @@ mod tests {
                 seed: Some(9),
                 ..Default::default()
             },
-            ..SessionPolicy::new(crate::TurnBudget::Unbounded)
+            ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
         }
     }
 
@@ -865,7 +939,7 @@ mod tests {
                 stop_sequences: Vec::new(),
                 ..Default::default()
             },
-            ..SessionPolicy::new(crate::TurnBudget::Unbounded)
+            ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
         };
 
         let child = resolve(

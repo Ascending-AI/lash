@@ -709,6 +709,10 @@ async fn host_effect_ledger_observes_a_settled_pending_call_under_its_call_id() 
         attachment_store,
         Arc::new(crate::ChronologicalProjection::default()),
         crate::TurnContext::default(),
+        crate::ProcessExecutionEnvSpec::new(
+            crate::AdmittedPluginConfig::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
+        ),
     );
     let completed = execution
         .pending_completion_dispatch_outcome(

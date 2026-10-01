@@ -45,15 +45,19 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
     let double = crate::state::test_support::test_double().await;
     let stores = double.engine_stores().session_store_factory();
     let processes = double.engine_stores().process_registry();
-    let core = LashCore::standard_builder(double.lash_backend(), TurnBudget::Unbounded)
-        .serve_test_model(provider, model.clone())
-        .commit_budget(CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(QueuedWorkBatchingConfig::new(1024))
-        .build(LeaseOwnerIdentity::opaque(
-            "agent-service-fork-contract",
-            "test-boot",
-        ))
-        .expect("fork contract core");
+    let core = LashCore::standard_builder(
+        double.lash_backend(),
+        TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .serve_test_model(provider, model.clone())
+    .commit_budget(CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(QueuedWorkBatchingConfig::new(1024))
+    .build(LeaseOwnerIdentity::opaque(
+        "agent-service-fork-contract",
+        "test-boot",
+    ))
+    .expect("fork contract core");
     // A session delete closes the session as a journaled effect, so it runs in
     // the service's own discard workflow, as the service deletes a chat.
     crate::state::test_support::serve_chat_discard(&double, &core).await;
@@ -64,7 +68,7 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
             model.clone(),
         )),
         session_id: Some(SessionId::from(SOURCE_SESSION.to_string())),
-        ..SessionPolicy::new(TurnBudget::Unbounded)
+        ..SessionPolicy::new(TurnBudget::Unbounded, lash::MaxToolCalls::new(1024))
     };
     let source = admitted_view(
         &stores,

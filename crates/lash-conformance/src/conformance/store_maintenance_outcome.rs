@@ -312,7 +312,10 @@ async fn commit_generation(
     let mut state = crate::RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),
         head_revision: expected_head_revision,
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.set_tool_state_snapshot(Some(
         crate::ToolState::default().with_generation_for_conformance(generation),

@@ -16,6 +16,7 @@ fn persisted_state_hydrates_the_recorded_model_without_live_rebinding() {
             model: Some(recorded.clone()),
             attachment_acceptance: Default::default(),
             turn_budget: crate::TurnBudget::Unbounded,
+            max_tool_calls: crate::MaxToolCalls::new(1024),
             autonomous: false,
             no_progress_budget: crate::NoProgressBudget::default(),
             charge_safety: crate::ChargeSafetyPolicy::default(),
@@ -219,7 +220,10 @@ fn fig1123_reasoning_retention_policy_survives_session_head_cold_decode() {
             context: crate::OpenAiReasoningContext::CurrentTurn,
         },
     };
-    let mut config = crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded);
+    let mut config = crate::PersistedSessionConfig::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    );
     config.model = Some(crate::ModelConfig::new(crate::RecordedModel::mint(
         crate::ModelKey::new("model"),
         lash_core_llm::model::ModelMetadata::builder("model")

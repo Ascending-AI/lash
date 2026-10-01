@@ -6,12 +6,12 @@ fn core_builder_takes_no_transport(
     backend: lash::Backend,
     provider: lash::provider::ProviderHandle,
 ) {
-    let _ = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+    let _ = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(1024))
         .provider(provider);
 }
 
 fn core_builder_selects_a_key_not_metadata(backend: lash::Backend, model: lash::ModelMetadata) {
-    let _ = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded).model(model);
+    let _ = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(1024)).model(model);
 }
 
 fn a_session_takes_no_transport(core: lash::LashCore, provider: lash::provider::ProviderHandle) {

@@ -419,6 +419,7 @@ mod tests {
             session_id: SessionId::from("budget-nodes"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         };
         let node = crate::SessionNodeRecord {
@@ -458,6 +459,7 @@ mod tests {
             session_id: SessionId::from("budget-adoption-rows"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         };
         let budget = CommitBudget::new(CommitBudgetLimit::Unbounded, CommitBudgetLimit::bounded(2));
@@ -488,6 +490,7 @@ mod tests {
             session_id: SessionId::from("budget-bytes"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         };
         let budget = CommitBudget::bounded(128, 512);
@@ -574,6 +577,7 @@ mod tests {
             session_id: SessionId::from("budget-follow-on"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         };
         let budget = CommitBudget::new(
@@ -611,6 +615,7 @@ mod tests {
             session_id: SessionId::from("budget-agent-frame"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         };
         let budget = CommitBudget::new(
@@ -643,6 +648,7 @@ mod tests {
             session_id: SessionId::from("budget-turn-result"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         };
         let budget = CommitBudget::new(
@@ -675,6 +681,7 @@ mod tests {
             session_id: SessionId::from("budget-all-families"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         };
         state.ensure_agent_frame_initialized();
@@ -777,6 +784,7 @@ mod tests {
             session_id: SessionId::from("budget-failed-settlement"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         };
         let unbounded =

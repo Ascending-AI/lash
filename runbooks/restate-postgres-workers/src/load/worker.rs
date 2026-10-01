@@ -489,7 +489,10 @@ impl LoadWorker {
             lash_core::AdmittedPluginConfig::default(),
             lash_core::SessionPolicy {
                 model: Some(self.model.clone()),
-                ..lash_core::SessionPolicy::new(lash::TurnBudget::Unbounded)
+                ..lash_core::SessionPolicy::new(
+                    lash::TurnBudget::Unbounded,
+                    lash::MaxToolCalls::new(1024),
+                )
             },
         );
         let env_ref = self

@@ -293,6 +293,7 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
         runtime_services,
         RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         )),
         lash_core::testing::runtime_lease_owner(),
     )
@@ -368,6 +369,7 @@ async fn preopened_store_binds_without_remapping_initial_frame() {
         policy: policy.clone(),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
     state.ensure_agent_frame_initialized();
@@ -448,6 +450,7 @@ async fn park_returns_error_when_final_commit_fails() {
             policy: standard_test_policy(),
             ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
             ))
         },
         lash_core::testing::runtime_lease_owner(),
@@ -499,6 +502,7 @@ async fn storeless_append_rejects_inactive_ancestor_before_mutation() {
         runtime_services,
         RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         )),
         lash_core::testing::runtime_lease_owner(),
     )
@@ -602,6 +606,7 @@ async fn completed_turns_are_persisted_in_session_graph() {
         runtime_services,
         RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         )),
         lash_core::testing::runtime_lease_owner(),
     )

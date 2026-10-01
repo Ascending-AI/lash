@@ -8,10 +8,14 @@ use lash_core::core_internal::ToolChildHostRuntimeOps as _;
 const SEED: u64 = 0x5c_f107;
 
 fn builder(backend: lash_core::Backend) -> crate::core::LashCoreBuilder {
-    LashCore::standard_builder(backend, crate::TurnBudget::Unbounded)
-        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(mock_provider(), mock_model_spec())
+    LashCore::standard_builder(
+        backend,
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    )
+    .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+    .serve_test_model(mock_provider(), mock_model_spec())
 }
 
 /// What the backend's tool-child host holds now, asked by installing this

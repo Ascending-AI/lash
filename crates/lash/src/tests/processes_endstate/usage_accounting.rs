@@ -148,7 +148,10 @@ async fn process_usage_and_prune(backend: lash_core::Backend) -> Result<()> {
         lash_core::AdmittedPluginConfig::default(),
         lash_core::SessionPolicy {
             model: Some(recorded_model(mock_model_spec())),
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            ..lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            )
         },
     );
     let env_ref = lash_core::publish_process_execution_env(

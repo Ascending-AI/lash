@@ -271,7 +271,7 @@ fn probe_context_with<'run>(
         observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
         ),
         owner: crate::ExecutionOwner::SessionFrame {
             session_id: SessionId::from("session"),
@@ -298,6 +298,10 @@ fn probe_context_with<'run>(
         attachment_store,
         Arc::new(crate::ChronologicalProjection::default()),
         crate::TurnContext::default(),
+        crate::ProcessExecutionEnvSpec::new(
+            crate::AdmittedPluginConfig::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
+        ),
     );
     context = context.with_tool_child_host(host);
     if let Some(guard) = wiring {

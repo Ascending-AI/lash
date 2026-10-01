@@ -619,7 +619,11 @@ mod tests {
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from("mutation-session"),
                 relation: SessionRelation::Root,
-                config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+                config: lash_core::SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                    lash_core::MaxToolCalls::new(1024),
+                )
+                .into(),
                 head: SessionCreationHead::CommittedByCreator,
             })
             .await
@@ -632,6 +636,7 @@ mod tests {
             turn_index: 1,
             ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
             ))
         };
         state.set_tool_state_snapshot(Some(tool_state(1)));

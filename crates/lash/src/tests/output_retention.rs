@@ -186,6 +186,7 @@ async fn oversized_tool_output_is_retained_before_it_enters_history(
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .output_retention(POLICY)
     .serve_test_model(tool_calling_provider(), mock_model_spec())

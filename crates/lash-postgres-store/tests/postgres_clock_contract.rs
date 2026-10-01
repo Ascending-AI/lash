@@ -253,6 +253,7 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
             relation: SessionRelation::Root,
             config: lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
+                lash_core_execution::MaxToolCalls::new(1024),
             )
             .into(),
             head: SessionCreationHead::CommittedByCreator,
@@ -373,6 +374,7 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
         session_id: session.clone(),
         ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
         ))
     };
     let mut command_commit = RuntimeCommit::persisted_state_for_test(&state);
@@ -607,6 +609,7 @@ async fn final_turn_commit_stamps_follow_the_injected_store_clock() {
             relation: SessionRelation::Root,
             config: lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
+                lash_core_execution::MaxToolCalls::new(1024),
             )
             .into(),
             head: SessionCreationHead::CommittedByCreator,
@@ -618,6 +621,7 @@ async fn final_turn_commit_stamps_follow_the_injected_store_clock() {
         session_id: SessionId::from(session_id.clone()),
         ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
         ))
     };
     store

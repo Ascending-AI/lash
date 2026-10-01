@@ -477,9 +477,7 @@ impl LashRuntime {
             turn_control: Arc::clone(&turn_control),
             protocol_reply: Default::default(),
             live_opener: std::sync::Mutex::new(None),
-            opener_state: crate::session::OpenerState::new(
-                self.host.core.control.opener_work_bound,
-            ),
+            opener_state: crate::session::OpenerState::default(),
             turn_cancel: None,
             children_stop: CancellationToken::new(),
             turn_observations: super::turn_observation_cursor(

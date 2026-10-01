@@ -731,18 +731,23 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
             std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &backend,
         );
-        lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .serve_test_model(
-                provider,
-                lash::ModelMetadata::builder("test-model")
-                    .context_window_tokens(4096)
-                    .build()
-                    .expect("model spec"),
-            )
-            .build(crate::test_core_owner())
-            .unwrap_or_else(|error| panic!("build {name} ownership core: {error:?}"))
+        lash::LashCore::rlm_builder(
+            backend,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+            factory,
+        )
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_model(
+            provider,
+            lash::ModelMetadata::builder("test-model")
+                .context_window_tokens(4096)
+                .build()
+                .expect("model spec"),
+        )
+        .build(crate::test_core_owner())
+        .unwrap_or_else(|error| panic!("build {name} ownership core: {error:?}"))
     };
 
     // The foreground entry point on an engine with a server behind it: the

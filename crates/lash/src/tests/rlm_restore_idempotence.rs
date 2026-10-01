@@ -127,7 +127,7 @@ fn policy() -> SessionPolicy {
                 .build()
                 .expect("model spec"),
         )),
-        ..SessionPolicy::new(TurnBudget::Unbounded)
+        ..SessionPolicy::new(TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
     }
 }
 

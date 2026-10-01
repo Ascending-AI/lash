@@ -14,6 +14,7 @@ async fn generation_changes_are_patches_and_a_reopen_writes_nothing() -> Result<
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;

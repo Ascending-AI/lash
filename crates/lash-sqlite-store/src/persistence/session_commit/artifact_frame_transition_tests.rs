@@ -20,6 +20,7 @@ fn first_commit_may_end_its_own_appended_frame_open() {
                 assignment: lash_core_execution::AgentFrameAssignment::unconfigured(
                     lash_core_execution::SessionPolicy::new(
                         lash_core_execution::TurnBudget::Unbounded,
+                        lash_core_execution::MaxToolCalls::new(1024),
                     ),
                 ),
             },
@@ -188,6 +189,7 @@ async fn committed_first_frame(
         session_id,
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
         ))
     };
     state.ensure_agent_frame_initialized_with_clock(clock);

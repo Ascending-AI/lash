@@ -102,6 +102,7 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
     let source = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         text_provider("resume-provider", "resume-model", "source-provider"),
@@ -111,6 +112,7 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
     let receiving = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         text_provider("resume-provider", "resume-model", "receiving-provider"),
@@ -190,6 +192,7 @@ async fn a_failed_journal_retirement_is_retried_by_the_delete_obligation() -> Re
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.into(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -259,6 +262,7 @@ async fn parent_relation_is_read_back_and_a_conflicting_create_is_refused() -> R
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -333,6 +337,7 @@ async fn resume_addresses_the_parked_owner_registry_not_the_receiving_core() -> 
     let source = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         text_provider(
@@ -346,6 +351,7 @@ async fn resume_addresses_the_parked_owner_registry_not_the_receiving_core() -> 
     let receiving = explicit_ephemeral_facets(LashCore::standard_builder(
         receiving_backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         text_provider(

@@ -67,6 +67,7 @@ async fn core_shutdown_visits_protocol_then_common_factories_and_continues_after
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         lash_core::TurnBudget::Unbounded,
+        lash_core::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .protocol_plugin(Arc::new(ShutdownRecordingPluginFactory {
@@ -118,6 +119,7 @@ async fn plugin_surface_streams_as_semantic_turn_event() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(Arc::new(SurfacePluginFactory))
@@ -179,6 +181,7 @@ async fn registered_static_tools_appear_in_tool_state() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .tools(Arc::new(AppTools))
@@ -197,6 +200,7 @@ async fn apply_tool_state_and_membership_update_live_catalog() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .tools(Arc::new(AppTools))
@@ -250,6 +254,7 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .tools(Arc::new(AppTools))
@@ -271,10 +276,14 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
         session_id: SessionId::from("persisted-tools"),
         policy: lash_core::SessionPolicy {
             model: Some(recorded_model(mock_model_spec())),
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            ..lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            )
         },
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
     state.set_tool_state_snapshot(Some(persisted_tool_state));
@@ -282,6 +291,7 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
     let reopened_core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .tools(Arc::new(AppTools))
@@ -356,11 +366,14 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
             .into_handle();
         let double = restate_double(SEED).await;
         let standard_core = explicit_ephemeral_facets(
-            LashCore::builder(double.lash_backend(), crate::TurnBudget::Unbounded).protocol_plugin(
-                Arc::new(crate::plugins::StandardProtocolPluginFactory::with_config(
-                    standard_config,
-                )),
-            ),
+            LashCore::builder(
+                double.lash_backend(),
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            )
+            .protocol_plugin(Arc::new(
+                crate::plugins::StandardProtocolPluginFactory::with_config(standard_config),
+            )),
         )
         .serve_test_model(standard_provider, mock_model_spec())
         .tools(Arc::new(LongTextTools))
@@ -497,6 +510,7 @@ async fn builder_configured_tools_and_hooks_are_never_discarded(backend: Backend
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(provider, mock_model_spec())
     .tools(Arc::new(BuilderSentinelTools {

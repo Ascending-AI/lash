@@ -36,6 +36,7 @@ async fn persisted_record_decode_store(
         session_id: session_id.clone(),
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
         ))
     };
     store
@@ -203,6 +204,7 @@ async fn seed_failure_evidence_session(
         session_id: SessionId::from(session_id.to_string()),
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
         ))
     };
     let mut commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state);
@@ -402,8 +404,11 @@ async fn concurrent_first_commits_return_one_typed_head_revision_conflict() {
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation: lash_core_execution::SessionRelation::Root,
-        config: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
-            .into(),
+        config: lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
+        )
+        .into(),
         head: lash_core_execution::SessionCreationHead::CommittedByCreator,
     };
     factory
@@ -531,8 +536,11 @@ async fn postgres_delete_permanently_fences_stale_handles_and_session_id_reuse()
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation: lash_core_execution::SessionRelation::Root,
-        config: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
-            .into(),
+        config: lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
+        )
+        .into(),
         head: lash_core_execution::SessionCreationHead::CommittedByCreator,
     };
     factory
@@ -544,6 +552,7 @@ async fn postgres_delete_permanently_fences_stale_handles_and_session_id_reuse()
         session_id: session_id.clone(),
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
         ))
     };
     state.ensure_agent_frame_initialized();
@@ -799,8 +808,11 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("postgres-wrong-database-live-attachment"),
         relation: lash_core_execution::SessionRelation::Root,
-        config: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
-            .into(),
+        config: lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
+        )
+        .into(),
         head: lash_core_execution::SessionCreationHead::CommittedByCreator,
     };
     live_store
@@ -904,6 +916,7 @@ async fn admitted_input_fixture(
         session_id: session_id.clone(),
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
         ))
     };
     let seeded = store
@@ -1377,6 +1390,7 @@ async fn root_admission_and_head_commit_round_trips_are_pinned() {
         session_id: session_id.clone(),
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
         ))
     };
     let (seed_commit, _) = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state)
@@ -1617,6 +1631,7 @@ async fn postgres_gc_sweep_statement_count_is_dead_set_invariant_when_configured
         session_id: session_id.clone(),
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
         ))
     };
     store
@@ -1767,6 +1782,7 @@ async fn postgres_batch_session_delete_writes_one_cancel_event_per_park() {
             relation: lash_core_execution::SessionRelation::Root,
             config: lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
+                lash_core_execution::MaxToolCalls::new(1024),
             )
             .into(),
             head: lash_core_execution::SessionCreationHead::CommittedByCreator,

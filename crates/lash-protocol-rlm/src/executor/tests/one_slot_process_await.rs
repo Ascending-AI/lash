@@ -58,7 +58,10 @@ async fn run_one_slot_process_await() {
                 .build()
                 .expect("one-slot process await test model"),
         )),
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let engine = || {
         lash_lashlang_runtime::LashlangProcessEngine::new(

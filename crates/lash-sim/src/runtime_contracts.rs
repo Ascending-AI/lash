@@ -824,6 +824,7 @@ mod tests {
                 acceptance: None,
                 state: lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
+                    lash_core::MaxToolCalls::new(1024),
                 )),
                 outcome,
                 assistant_output: lash_core::facade_support::AssistantOutput {

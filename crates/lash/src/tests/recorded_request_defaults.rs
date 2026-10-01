@@ -171,6 +171,7 @@ async fn two_sessions_under_two_model_keys_each_keep_their_request_defaults_acro
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .models(Arc::clone(&models) as Arc<dyn lash_core::RuntimeModels>)
     .model(KEY_ONE)

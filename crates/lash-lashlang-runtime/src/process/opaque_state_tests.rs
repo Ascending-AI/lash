@@ -125,6 +125,7 @@ async fn parent_state_decode_never_compiles_regexp() {
         pending_summary: Vec::new(),
         effect_omissions: std::collections::BTreeMap::new(),
         outstanding_groups: Vec::new(),
+        held_tool_calls: Default::default(),
         worker_recovery: Default::default(),
     })
     .expect("encode the envelope");

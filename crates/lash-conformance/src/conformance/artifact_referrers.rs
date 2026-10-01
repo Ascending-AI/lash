@@ -129,7 +129,10 @@ where
     let module_bytes = artifact.to_store_bytes().expect("module bytes");
     let env = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        ),
     );
     let env_ref = env.stable_ref().expect("env ref");
     let env_bytes = env.to_store_bytes().expect("env bytes");
@@ -245,7 +248,10 @@ where
     let bytes = artifact.to_store_bytes().expect("module bytes");
     let env = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        ),
     );
     let env_ref = env.stable_ref().expect("env ref");
     let env_bytes = env.to_store_bytes().expect("env bytes");
@@ -424,7 +430,10 @@ where
             );
             lash_core::AdmittedPluginConfig::new(plugin_config, 0)
         },
-        lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        ),
     );
     let first_ref = spec.stable_ref().expect("first captured digest");
     let second_ref = spec.clone().stable_ref().expect("second captured digest");

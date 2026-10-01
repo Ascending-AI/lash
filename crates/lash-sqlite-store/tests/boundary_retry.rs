@@ -40,7 +40,10 @@ fn commit(boundary: &str, key: &str, revision: u64) -> RuntimeCommit {
     let state = RuntimeSessionState {
         session_id: "root".into(),
         head_revision: revision,
-        ..RuntimeSessionState::new(SessionPolicy::new(TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(SessionPolicy::new(
+            TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        ))
     };
     commit_state(boundary, key, &state)
 }
@@ -72,7 +75,10 @@ async fn semantic_boundary_retry_after_head_advance(boundary: &str, key: &str) {
     admit_root(&store).await;
     let state = RuntimeSessionState {
         session_id: "root".into(),
-        ..RuntimeSessionState::new(SessionPolicy::new(TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(SessionPolicy::new(
+            TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        ))
     };
     let first = semantic_commit_state(boundary, key, &state);
     let original = store
@@ -156,7 +162,10 @@ async fn initial_park_exact_commit_retry_after_head_advance() {
     admit_root(&store).await;
     let mut state = RuntimeSessionState {
         session_id: "root".into(),
-        ..RuntimeSessionState::new(SessionPolicy::new(TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(SessionPolicy::new(
+            TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        ))
     };
     // Mirror lifecycle's content-addressed operation for an empty pending graph.
     // Its private unit test also pins derivation for a nonempty graph.
@@ -220,7 +229,10 @@ async fn append_identity_replays_after_head_advance() {
     admit_root(&store).await;
     let mut state = RuntimeSessionState {
         session_id: "root".into(),
-        ..RuntimeSessionState::new(SessionPolicy::new(TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(SessionPolicy::new(
+            TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        ))
     };
     let nodes = vec![lash_core_execution::SessionAppendNode::plugin(
         "audit",

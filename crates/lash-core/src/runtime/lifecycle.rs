@@ -165,7 +165,7 @@ impl LashRuntime {
             .map_err(SessionError::Plugin)?;
         // A state no commit has recorded is a new session's: its creator's
         // policy is the one it will record, so a defaulted state (e.g.
-        // `RuntimeSessionState::new(SessionPolicy::new(TurnBudget::Unbounded))`)
+        // `RuntimeSessionState::new(SessionPolicy::new(TurnBudget::Unbounded, MaxToolCalls::new(1024)))`)
         // takes it. A recorded policy is never filled or replaced from the
         // opener's (FIG-4531): a head that records no model is refused
         // below, whatever the opener selects.
@@ -710,8 +710,7 @@ impl LashRuntime {
         .map(|loaded| loaded.state);
         let state = loaded.unwrap_or_else(|| RuntimeSessionState {
             session_id: parked.session_id.clone(),
-            policy: parked.policy.clone(),
-            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+            ..RuntimeSessionState::new(parked.policy.clone())
         });
         Self::from_environment_for_executor(
             env,
@@ -785,6 +784,7 @@ mod tests {
             session_id: SessionId::from("recorded-without-model"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         };
         recorded.head_revision = 3;
@@ -803,6 +803,7 @@ mod tests {
             session_id: SessionId::from("never-committed"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         };
         let created = opened_with_a_model(unrecorded)
@@ -820,6 +821,7 @@ mod tests {
             session_id: SessionId::from("park-identity"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         };
         state.ensure_agent_frame_initialized();
@@ -893,6 +895,7 @@ mod tests {
                 policy,
                 ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
                 ))
             },
             crate::testing::runtime_lease_owner(),
@@ -975,6 +978,7 @@ mod tests {
                 policy,
                 ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
                 ))
             },
             crate::testing::runtime_lease_owner(),

@@ -12,7 +12,11 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> 
         .into_handle();
     let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets_with_budget(
-        LashCore::standard_builder(double.lash_backend(), crate::TurnBudget::Unbounded),
+        LashCore::standard_builder(
+            double.lash_backend(),
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ),
         crate::CommitBudget::new(
             crate::CommitBudgetLimit::Unbounded,
             crate::CommitBudgetLimit::bounded(CONFIGURED_ROW_LIMIT),

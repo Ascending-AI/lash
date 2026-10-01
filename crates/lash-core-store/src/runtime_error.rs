@@ -13,6 +13,7 @@ mod cause;
 mod classification;
 pub use cause::{GroupChildCapability, RuntimeErrorCause};
 pub(crate) mod model_unavailable;
+mod tool_call_limit;
 pub(crate) use classification::RuntimeErrorClass;
 pub use classification::TurnFailureCause;
 
@@ -450,10 +451,12 @@ pub enum RuntimeErrorCode {
     /// of Node exiting on an unsettled top-level await (ADR 0099 §11 clause 5,
     /// ADR 0062). A host lifetime contract, not a catchable exception.
     AggregateAwaitUnsettled,
-    /// Opening an effect group would take its logical opener past the work it
-    /// may retain at once (ADR 0099 §9). Refused whole, before any child is
-    /// dispatched; a group already accepted is never refused this way.
-    EffectGroupOpenerBoundExceeded,
+    /// A tool call would take its cell or process past the session's
+    /// recorded `max_tool_calls` (ADR 0099 §9, FIG-4546). Refused whole,
+    /// before any child is dispatched; the typed half is
+    /// [`RuntimeErrorCause::MaxToolCallsExceeded`]. The program's failure,
+    /// not the host's: every replay refuses the same call.
+    MaxToolCallsExceeded,
     RuntimeEffectInvocationSubject,
     RuntimeEffectScopeMismatch,
     RuntimeEffectLocalExecutorMismatch,
@@ -835,7 +838,7 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectGroupDrainDeferred => "runtime_effect_group_drain_deferred",
             Self::RuntimeEffectGroupShape => "runtime_effect_group_shape",
             Self::AggregateAwaitUnsettled => "aggregate_await_unsettled",
-            Self::EffectGroupOpenerBoundExceeded => "effect_group_opener_bound_exceeded",
+            Self::MaxToolCallsExceeded => "max_tool_calls_exceeded",
             Self::RuntimeEffectInvocationSubject => "runtime_effect_invocation_subject",
             Self::RuntimeEffectScopeMismatch => "runtime_effect_scope_mismatch",
             Self::RuntimeEffectLocalExecutorMismatch => "runtime_effect_local_executor_mismatch",
@@ -1113,7 +1116,7 @@ impl RuntimeErrorCode {
             "runtime_effect_group_drain_deferred" => Self::RuntimeEffectGroupDrainDeferred,
             "runtime_effect_group_shape" => Self::RuntimeEffectGroupShape,
             "aggregate_await_unsettled" => Self::AggregateAwaitUnsettled,
-            "effect_group_opener_bound_exceeded" => Self::EffectGroupOpenerBoundExceeded,
+            "max_tool_calls_exceeded" => Self::MaxToolCallsExceeded,
             "runtime_effect_invocation_subject" => Self::RuntimeEffectInvocationSubject,
             "runtime_effect_scope_mismatch" => Self::RuntimeEffectScopeMismatch,
             "runtime_effect_local_executor_mismatch" => Self::RuntimeEffectLocalExecutorMismatch,
@@ -1466,6 +1469,7 @@ impl RuntimeError {
             | RuntimeErrorCause::EffectGroupChildUnroutable { .. }
             | RuntimeErrorCause::IngressReservedSourceKey { .. }
             | RuntimeErrorCause::ModelUnavailable { .. }
+            | RuntimeErrorCause::MaxToolCallsExceeded { .. }
             | RuntimeErrorCause::StoreRefusal { .. } => None,
         }
     }

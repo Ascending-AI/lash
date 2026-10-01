@@ -432,7 +432,10 @@ async fn process_map_fixture(workers: lash_vm_client::service::Service) {
                 .build()
                 .expect("L1 process test model"),
         ))),
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let traced_engine = || {
         // The process controls reach the engine through the worker's tool

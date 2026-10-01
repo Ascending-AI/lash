@@ -140,6 +140,7 @@ fn redelivery_of(first: &LashCore) -> Result<LashCore> {
             None,
         ),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())

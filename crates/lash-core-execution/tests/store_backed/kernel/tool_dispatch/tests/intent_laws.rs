@@ -125,6 +125,10 @@ fn runtime_execution_for_intent_law(
         attachment_store,
         Arc::new(crate::ChronologicalProjection::default()),
         crate::TurnContext::default(),
+        crate::ProcessExecutionEnvSpec::new(
+            crate::AdmittedPluginConfig::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
+        ),
     )
     .with_cancellation_token(cancellation)
 }
@@ -1422,7 +1426,7 @@ async fn an_attempt_holds_its_large_captured_environment_before_realizing_a_star
     );
     let spec = crate::ProcessExecutionEnvSpec::new(
         crate::AdmittedPluginConfig::new(plugin_config, 0),
-        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
     );
     let env_ref = spec.stable_ref().expect("captured digest");
     let intent = crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {

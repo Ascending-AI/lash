@@ -106,6 +106,28 @@ fn process_bridge_factories(
     ]
 }
 
+/// The producers the `max_tool_calls` laws run over (FIG-4546): a cell's
+/// `Promise.all` and `Promise.allSettled`, whose limit is the cell's total,
+/// and the process bridge's aggregate, whose limit is what the process holds
+/// at once.
+fn limit_producers(
+    backend: &lash_core::Backend,
+    engine_stores: Arc<dyn lash_core::StoreSet>,
+) -> Vec<lash_conformance::ToolBatchProducer> {
+    let mut in_process = lash_conformance::lashlang_process_aggregate_producer(
+        process_bridge_factories(backend),
+        Arc::new(move || engine_stores.process_registry()),
+    );
+    // The handler already lends the turn the controller a Restate host hands
+    // it; the task proxy models that shape for in-process tiers.
+    in_process.through_task_proxy = false;
+    vec![
+        lash_conformance::rlm_promise_all_producer(cell_bridge_factories(backend), false),
+        lash_conformance::rlm_promise_all_settled_producer(cell_bridge_factories(backend), false),
+        in_process,
+    ]
+}
+
 /// Both producers on the Restate server double: the scenario's turn runs
 /// inside a live `LashTestHandlerHost` handler, where its tool batch's
 /// leaves are group children on the invocation's journal, and the process
@@ -121,8 +143,10 @@ mod restate_double {
     /// `scenario_finished`;
     /// the crash, cut and segment-recovery routes keep the trait's panicking
     /// defaults.
-    struct DoubleTurnRunner {
-        backend: lash_restate_test::RestateTestBackend,
+    pub(super) struct DoubleTurnRunner<
+        Stores: lash_core::StoreSet + ?Sized = lash_sqlite_store::SqliteStoreSet,
+    > {
+        pub(super) backend: lash_restate_test::RestateTestBackend<Stores>,
     }
 
     /// `attempt` as a `HandlerAttempt`: the same factory, its
@@ -144,7 +168,9 @@ mod restate_double {
     }
 
     #[async_trait::async_trait]
-    impl lash_conformance::ConformanceTurnRunner for DoubleTurnRunner {
+    impl<Stores: lash_core::StoreSet + ?Sized> lash_conformance::ConformanceTurnRunner
+        for DoubleTurnRunner<Stores>
+    {
         /// The double keeps every journal it records; a finished scenario's
         /// completed ones are dead weight to the next.
         async fn scenario_finished(&self) {
@@ -176,6 +202,25 @@ mod restate_double {
                 )
                 .await
                 .expect("the double crashes and redrives the scenario's turn");
+        }
+
+        /// The double runs a segment as a `run` invocation of its process
+        /// workflow: crashing the attempt drops it where it stands, and the
+        /// server replays the invocation. The workflow's other handlers only
+        /// wait on the segment's promises; they run nothing of the process.
+        async fn kill_process_workers(&self) -> usize {
+            let server = self.backend.server();
+            let workflow = self.backend.service_name("LashProcessWorkflow");
+            server
+                .invocations()
+                .into_iter()
+                .filter(|invocation| {
+                    invocation.status == "running"
+                        && invocation.target.starts_with(&workflow)
+                        && invocation.target.ends_with("/run")
+                })
+                .filter(|invocation| server.crash(&invocation.id))
+                .count()
         }
 
         /// Process segments run in the double's process workflow: the
@@ -223,6 +268,44 @@ mod restate_double {
                 ),
                 in_process,
             ],
+            Arc::new(DoubleTurnRunner { backend: double })
+                as Arc<dyn lash_conformance::ConformanceTurnRunner>,
+        )
+    });
+
+    // FIG-4546 on the double over SQLite: the session's recorded
+    // `max_tool_calls` is a cell's total and what a process holds at once.
+    lash_conformance::tool_call_limit_tests!({
+        let double =
+            lash_restate_test::backend(0x7001_4546, lash_restate_test::ServerConfig::default())
+                .await
+                .expect("start the Restate server double");
+        let backend = double.lash_backend();
+        let host = backend.effect_host() as Arc<dyn EffectHost>;
+        (
+            double.clone(),
+            "restate-double",
+            host,
+            Arc::clone(double.engine_stores()),
+            limit_producers(&backend, Arc::clone(double.engine_stores())),
+            Arc::new(DoubleTurnRunner { backend: double })
+                as Arc<dyn lash_conformance::ConformanceTurnRunner>,
+        )
+    });
+
+    lash_conformance::tool_call_limit_process_tests!({
+        let double =
+            lash_restate_test::backend(0x7001_4547, lash_restate_test::ServerConfig::default())
+                .await
+                .expect("start the Restate server double");
+        let backend = double.lash_backend();
+        let host = backend.effect_host() as Arc<dyn EffectHost>;
+        (
+            double.clone(),
+            "restate-double",
+            host,
+            Arc::clone(double.engine_stores()),
+            limit_producers(&backend, Arc::clone(double.engine_stores())),
             Arc::new(DoubleTurnRunner { backend: double })
                 as Arc<dyn lash_conformance::ConformanceTurnRunner>,
         )
@@ -300,4 +383,80 @@ mod restate_double {
             budget,
         );
     }
+}
+
+/// The `max_tool_calls` laws on the Restate server double over PostgreSQL
+/// (FIG-4546).
+mod restate_double_postgres {
+    use super::*;
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "service fixture reads its PostgreSQL connection and mints fresh session ids"
+    )]
+    async fn fixture() -> (
+        (
+            tempfile::TempDir,
+            lash_restate_test::RestateTestBackend<dyn lash_core::StoreSet>,
+        ),
+        &'static str,
+        Arc<dyn EffectHost>,
+        Arc<dyn lash_core::StoreSet>,
+        Vec<lash_conformance::ToolBatchProducer>,
+        Arc<dyn lash_conformance::ConformanceTurnRunner>,
+    ) {
+        let url = std::env::var("LASH_POSTGRES_DATABASE_URL")
+            .expect("the PostgreSQL RLM laws require a provisioned PostgreSQL service");
+        let attachments = tempfile::tempdir().expect("attachment byte store");
+        let bytes = Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+            attachments.path(),
+        ));
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time after epoch")
+            .as_nanos();
+        let double = lash_restate_test::backend_with_store_set(
+            (nonce & u128::from(u64::MAX)) as u64,
+            lash_restate_test::ServerConfig::default(),
+            lash_restate_test::DeploymentHooks::default(),
+            move |clock| async move {
+                let storage = lash_postgres_store::PostgresStorage::connect(&url)
+                    .await
+                    .map_err(|error| lash_restate_test::BackendError::Stores(error.to_string()))?;
+                Ok(Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
+                    &storage,
+                    bytes,
+                    lash_core::WakeDeliveryConfig::default(),
+                    clock,
+                )) as Arc<dyn lash_core::StoreSet>)
+            },
+        )
+        .await
+        .expect("start the Restate double over PostgreSQL");
+        let backend = double.lash_backend();
+        let prefix: &'static str =
+            Box::leak(format!("rlm-tool-call-limit-pg-{nonce}").into_boxed_str());
+        eprintln!("RLM max_tool_calls tier: PostgreSQL, session prefix {prefix}");
+        (
+            (attachments, double.clone()),
+            prefix,
+            backend.effect_host() as Arc<dyn EffectHost>,
+            Arc::clone(double.engine_stores()),
+            limit_producers(&backend, Arc::clone(double.engine_stores())),
+            Arc::new(restate_double::DoubleTurnRunner { backend: double }),
+        )
+    }
+
+    lash_conformance::tool_call_limit_tests!(
+        #[ignore = "requires PostgreSQL; run scripts/ci/with-service.sh pg16 -- bash scripts/ci/store-tests.sh pg-rlm-tool-call-limit"]
+        {
+            fixture().await
+        }
+    );
+    lash_conformance::tool_call_limit_process_tests!(
+        #[ignore = "requires PostgreSQL; run scripts/ci/with-service.sh pg16 -- bash scripts/ci/store-tests.sh pg-rlm-tool-call-limit"]
+        {
+            fixture().await
+        }
+    );
 }

@@ -530,7 +530,10 @@ mod tests {
         let clock = crate::SystemClock;
         let mut state = RuntimeSessionState {
             session_id: SessionId::from(session_id.to_string()),
-            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            ))
         };
         state.ensure_agent_frame_initialized_with_clock(&clock);
         state.append_active_conversation_messages_with_clock(
@@ -846,7 +849,10 @@ mod tests {
         let clock = crate::SystemClock;
         let mut state = RuntimeSessionState {
             session_id: SessionId::from("frame-replacement"),
-            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            ))
         };
         state.ensure_agent_frame_initialized_with_clock(&clock);
         state.append_active_conversation_messages_with_clock(

@@ -267,21 +267,25 @@ async fn world(seed: u64) -> World {
         })
         .build()
         .into_handle();
-    let core = lash::LashCore::standard_builder(layered, lash::TurnBudget::Unbounded)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(
-            provider,
-            lash_core::ModelMetadata::builder("mock-model")
-                .context_window_tokens(200_000)
-                .build()
-                .expect("model spec"),
-        )
-        .build(lash_core::LeaseOwnerIdentity::opaque(
-            "lash-restate-test",
-            "root-close",
-        ))
-        .expect("build the lash core");
+    let core = lash::LashCore::standard_builder(
+        layered,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .serve_test_model(
+        provider,
+        lash_core::ModelMetadata::builder("mock-model")
+            .context_window_tokens(200_000)
+            .build()
+            .expect("model spec"),
+    )
+    .build(lash_core::LeaseOwnerIdentity::opaque(
+        "lash-restate-test",
+        "root-close",
+    ))
+    .expect("build the lash core");
     World {
         backend,
         core,

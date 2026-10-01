@@ -247,7 +247,10 @@ async fn start_request(
         lash_core::AdmittedPluginConfig::default(),
         lash_core::SessionPolicy {
             model: Some(model.clone()),
-            ..lash_core::SessionPolicy::new(lash::TurnBudget::Unbounded)
+            ..lash_core::SessionPolicy::new(
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            )
         },
     );
     Ok(lash_core::ProcessStartRequest::new(

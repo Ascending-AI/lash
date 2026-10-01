@@ -148,7 +148,10 @@ impl BackendRunner {
                         session_id: self.session_id.clone(),
                         node_id: format!("{}:missing-fork-node", self.session_id).into(),
                         relation: SessionRelation::Root,
-                        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                        policy: lash_core::SessionPolicy::new(
+                            lash_core::TurnBudget::Unbounded,
+                            lash_core::MaxToolCalls::new(1024),
+                        ),
                         plugin_config: Default::default(),
                     })
                     .await
@@ -178,7 +181,10 @@ impl BackendRunner {
                             )),
                             source_node_id: format!("{}:foreign-node", self.session_id).into(),
                         },
-                        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                        policy: lash_core::SessionPolicy::new(
+                            lash_core::TurnBudget::Unbounded,
+                            lash_core::MaxToolCalls::new(1024),
+                        ),
                         plugin_config: Default::default(),
                     })
                     .await
@@ -211,7 +217,10 @@ impl BackendRunner {
                             source_session_id: self.session_id.clone(),
                             source_node_id: node_id.clone().into(),
                         },
-                        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                        policy: lash_core::SessionPolicy::new(
+                            lash_core::TurnBudget::Unbounded,
+                            lash_core::MaxToolCalls::new(1024),
+                        ),
                         plugin_config: Default::default(),
                     })
                     .await
@@ -244,7 +253,10 @@ impl BackendRunner {
                             source_node_id: format!("{}:rewind-source-node", self.session_id)
                                 .into(),
                         },
-                        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                        policy: lash_core::SessionPolicy::new(
+                            lash_core::TurnBudget::Unbounded,
+                            lash_core::MaxToolCalls::new(1024),
+                        ),
                         plugin_config: Default::default(),
                     })
                     .await
@@ -369,7 +381,11 @@ pub(super) async fn selected_observer_intents(
                 source_node_id: "foreign-history-provenance".into(),
             },
             pending_observer_intents: vec![intent.clone()],
-            config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+            config: lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            )
+            .into(),
             head: SessionCreationHead::CommittedByCreator,
         };
         let source_id = SessionId::from(format!("selected-history-{nonce}-{index}"));

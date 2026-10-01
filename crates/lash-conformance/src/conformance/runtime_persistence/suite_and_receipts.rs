@@ -70,7 +70,10 @@ pub async fn head_and_window_reads_agree_for_each_named_session(store: Arc<dyn R
     admit_conformance_session(&store, &admitted_only).await;
     let state = RuntimeSessionState {
         session_id: committed.clone(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     commit_runtime_state_for_test(
         &store,
@@ -153,7 +156,10 @@ pub async fn session_plugin_config_round_trips_through_the_committed_head(
     expected.insert("conformance-plugin", serde_json::json!({"turn_cap": 12}));
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("session-plugin-config"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.authority.plugin_config = expected.clone();
 
@@ -199,8 +205,10 @@ pub async fn session_plugin_config_round_trips_through_the_committed_head(
 pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     store: Arc<dyn RuntimeStore>,
 ) {
-    let mut state =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
     state.session_id = SessionId::from("execution-state-replace-then-clear".to_string());
     state.set_execution_state_snapshot(Some(b"initial-execution-state".to_vec().into()));
 
@@ -270,7 +278,10 @@ pub async fn commit_rejects_carried_nondefault_node_budget(store: Arc<dyn Runtim
     const CONFIGURED_NODE_LIMIT: usize = 1;
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     let parent = sample_session_node(&SessionId::from("root"), "budget-frame", None);
     let child = sample_session_node(
@@ -308,7 +319,10 @@ pub async fn commit_rejects_carried_nondefault_byte_budget(store: Arc<dyn Runtim
     const CONFIGURED_BYTE_LIMIT: usize = 64;
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     let budget = crate::CommitBudget::new(
         crate::CommitBudgetLimit::bounded(CONFIGURED_BYTE_LIMIT),
@@ -336,7 +350,10 @@ pub async fn commit_rejects_carried_nondefault_byte_budget(store: Arc<dyn Runtim
 pub(super) fn commit_budget_conformance_fixture(byte_limit: usize) -> RuntimeCommit {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     RuntimeCommit::persisted_state_for_test_with_budget(
         &state,
@@ -447,7 +464,10 @@ pub async fn commit_with_every_payload_family_inside_budget_succeeds(store: Arc<
     const BYTE_LIMIT: usize = 64 * 1024;
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.ensure_agent_frame_initialized();
     // A turn's terminal commit, so it may carry the follow-on a frame switch
@@ -596,7 +616,10 @@ pub async fn checkpoint_restore_rejects_turn_index_without_increment_headroom(
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         turn_index,
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     commit_runtime_state_for_test(
         &store,
@@ -644,7 +667,10 @@ pub async fn checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overfl
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         token_usage,
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     commit_runtime_state_for_test(
         &store,

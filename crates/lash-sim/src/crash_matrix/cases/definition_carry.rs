@@ -213,19 +213,24 @@ fn core(
             std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &backend,
         );
-        lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-            .plugin(Arc::new(Factory(store.clone())))
-            .plugin(Arc::new(
-                lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
-                    lash_core::lifetime::session_or_starter,
-                ),
-            ))
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-            .recovery_lease(super::recovery_lease())
-            .serve_test_model(provider, super::process::model_spec()?)
-            .build(owner)
-            .map_err(|error| error.to_string())
+        lash::LashCore::rlm_builder(
+            backend,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+            factory,
+        )
+        .plugin(Arc::new(Factory(store.clone())))
+        .plugin(Arc::new(
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                lash_core::lifetime::session_or_starter,
+            ),
+        ))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .recovery_lease(super::recovery_lease())
+        .serve_test_model(provider, super::process::model_spec()?)
+        .build(owner)
+        .map_err(|error| error.to_string())
     })
 }
 

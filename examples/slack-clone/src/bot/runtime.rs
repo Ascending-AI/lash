@@ -1,6 +1,6 @@
 //! Building the bot's `LashCore` — the standard-mode embedding.
 //!
-//! `LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)` gives a native tool loop and plain chat turns:
+//! `LashCore::standard_builder(backend, lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(1024))` gives a native tool loop and plain chat turns:
 //! the model answers in prose and calls host tools directly. That is the classic
 //! chat-bot shape and the reason this example, not `agent-workbench`, is the
 //! repo's standard-mode reference. Nothing here touches Lashlang, code cells,
@@ -233,7 +233,7 @@ pub async fn build_core(
             lash::RegisteredModel::new(model.clone(), provider.clone()),
         )
         .context("register the bot's model")?;
-    let builder = LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+    let builder = LashCore::standard_builder(backend, lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(1024))
         .models(Arc::new(models))
         // `session_spec` replaces the builder's whole spec, so it must precede
         // `model`, `attachment_acceptance`, which write into that same spec.

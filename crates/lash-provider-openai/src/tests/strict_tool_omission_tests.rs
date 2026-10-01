@@ -207,33 +207,37 @@ async fn core(
     let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
         .await
         .expect("Restate server double");
-    let core = LashCore::standard_builder(double.lash_backend(), lash::TurnBudget::Unbounded)
-        .models(std::sync::Arc::new(
-            lash::ModelRegistry::new()
-                .register(
-                    "gpt-5.4",
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("gpt-5.4")
-                            .context_window_tokens(16_000)
-                            .build()
-                            .expect("valid model spec"),
-                        provider,
-                    ),
-                )
-                .expect("register the test model"),
-        ))
-        .model("gpt-5.4")
-        .tools(Arc::new(StaticToolProvider::new(
-            vec![tool_definition()],
-            OmissionProbe { seen },
-        )))
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            format!("strict-omission-{label}"),
-            format!("strict-omission-{label}-boot"),
-        ))
-        .expect("core");
+    let core = LashCore::standard_builder(
+        double.lash_backend(),
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .models(std::sync::Arc::new(
+        lash::ModelRegistry::new()
+            .register(
+                "gpt-5.4",
+                lash::RegisteredModel::new(
+                    lash::ModelMetadata::builder("gpt-5.4")
+                        .context_window_tokens(16_000)
+                        .build()
+                        .expect("valid model spec"),
+                    provider,
+                ),
+            )
+            .expect("register the test model"),
+    ))
+    .model("gpt-5.4")
+    .tools(Arc::new(StaticToolProvider::new(
+        vec![tool_definition()],
+        OmissionProbe { seen },
+    )))
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        format!("strict-omission-{label}"),
+        format!("strict-omission-{label}-boot"),
+    ))
+    .expect("core");
     // A core built over `double.lash_backend()` does not hold the double: the
     // caller keeps it to the end of the case (FIG-3723).
     (core, double)

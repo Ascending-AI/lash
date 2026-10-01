@@ -20,6 +20,7 @@ async fn sqlite_a_partial_admission_rolls_back_through_both_entry_points() {
                 relation: lash_core_execution::SessionRelation::Root,
                 config: lash_core_execution::SessionPolicy::new(
                     lash_core_execution::TurnBudget::Unbounded,
+                    lash_core_execution::MaxToolCalls::new(1024),
                 )
                 .into(),
                 head: lash_core_execution::SessionCreationHead::CommittedByCreator,
@@ -63,6 +64,7 @@ async fn sqlite_an_admission_holds_its_rows_across_a_displaced_fence() {
             relation: lash_core_execution::SessionRelation::Root,
             config: lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
+                lash_core_execution::MaxToolCalls::new(1024),
             )
             .into(),
             head: lash_core_execution::SessionCreationHead::CommittedByCreator,

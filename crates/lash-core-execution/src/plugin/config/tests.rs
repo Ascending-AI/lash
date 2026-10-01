@@ -178,7 +178,10 @@ fn counters() -> (ConfigRegistry, Arc<AtomicUsize>, Arc<AtomicUsize>) {
 }
 
 fn head(registry: &ConfigRegistry, revision: u64) -> crate::PersistedSessionConfig {
-    let mut config = crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded);
+    let mut config = crate::PersistedSessionConfig::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    );
     config.plugin_config = registry
         .resolve_creation(None, &PluginOptions::default(), None, true)
         .expect("creation config");

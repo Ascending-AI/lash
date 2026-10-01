@@ -76,14 +76,18 @@ async fn fixture_over_with_batching(
     let backend = layer(double.lash_backend());
     let release = Arc::new(Notify::new());
     let calls = Arc::new(AtomicUsize::new(0));
-    let core = LashCore::standard_builder(backend, crate::TurnBudget::Unbounded)
-        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(batching)
-        .serve_test_model(
-            scripted_provider(Arc::clone(&release), Arc::clone(&calls)),
-            mock_model_spec(),
-        )
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = LashCore::standard_builder(
+        backend,
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    )
+    .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(batching)
+    .serve_test_model(
+        scripted_provider(Arc::clone(&release), Arc::clone(&calls)),
+        mock_model_spec(),
+    )
+    .build(crate::testing::runtime_lease_owner())?;
     Ok(Fixture {
         core,
         _double: double,
@@ -770,7 +774,8 @@ async fn a_drive_never_runs_on_a_session_opened_to_observe() -> Result<()> {
         .output()
         .await?;
 
-    let mut policy = lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded);
+    let mut policy =
+        lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
     policy.session_id = Some(session_id.clone());
     let store = lash_core::runtime::admit_session_view(
         &fixture.core.store_factory,

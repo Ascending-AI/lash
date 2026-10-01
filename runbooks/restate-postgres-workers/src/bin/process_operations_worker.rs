@@ -160,7 +160,11 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from(session_id.to_string()),
                 relation: SessionRelation::Root,
-                config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+                config: lash_core::SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                    lash_core::MaxToolCalls::new(1024),
+                )
+                .into(),
                 head: SessionCreationHead::CommittedByCreator,
             })
             .await
@@ -299,7 +303,11 @@ async fn prepare(storage: &PostgresStorage) -> Result<()> {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(SESSION_ID.to_string()),
             relation: SessionRelation::Root,
-            config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+            config: lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            )
+            .into(),
             head: SessionCreationHead::CommittedByCreator,
         })
         .await

@@ -88,7 +88,7 @@ fn policy() -> SessionPolicy {
                 .build()
                 .expect("model spec"),
         )),
-        ..SessionPolicy::new(TurnBudget::Unbounded)
+        ..SessionPolicy::new(TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024))
     }
 }
 

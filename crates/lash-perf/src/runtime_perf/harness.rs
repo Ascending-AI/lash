@@ -762,8 +762,12 @@ fn benchmark_standard_builder(
     backend: lash::Backend,
     provider: ProviderHandle,
 ) -> lash::LashCoreBuilder {
-    lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .serve_test_model(provider, benchmark_model_spec())
+    lash::LashCore::standard_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .serve_test_model(provider, benchmark_model_spec())
 }
 
 fn benchmark_rlm_builder(
@@ -774,6 +778,7 @@ fn benchmark_rlm_builder(
     lash::LashCore::rlm_builder(
         backend,
         lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS),
+        lash::MaxToolCalls::new(1024),
         factory,
     )
     .serve_test_model(provider, benchmark_model_spec())

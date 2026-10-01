@@ -361,7 +361,10 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
         // against a stub provider, so a driver that mistakes a tool-call-free
         // response for a tool-calling one spins here forever instead of
         // failing. The budget is well above the iterations the scenario needs.
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::bounded(8))
+        ..lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::bounded(8),
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let session_id = if mixed {
         "discovery-refusal-mixed"

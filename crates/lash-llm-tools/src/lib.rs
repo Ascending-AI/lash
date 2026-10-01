@@ -332,6 +332,7 @@ mod tests {
             Self {
                 snapshot: RuntimeSessionState::new(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
+                    lash_core::MaxToolCalls::new(1024),
                 )),
                 requests: Mutex::new(Vec::new()),
                 response_text: String::new(),
@@ -465,9 +466,9 @@ mod tests {
             snapshot: RuntimeSessionState {
                 policy: lash_core::SessionPolicy {
                     model: model_spec("root-model", Some("fast")),
-                    ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                    ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024))
                 },
-                ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+                ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024)))
             },
             requests: Mutex::new(Vec::new()),
             response_text:
@@ -534,10 +535,14 @@ mod tests {
             snapshot: RuntimeSessionState {
                 policy: lash_core::SessionPolicy {
                     model: Some(recorded),
-                    ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                    ..lash_core::SessionPolicy::new(
+                        lash_core::TurnBudget::Unbounded,
+                        lash_core::MaxToolCalls::new(1024),
+                    )
                 },
                 ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
+                    lash_core::MaxToolCalls::new(1024),
                 ))
             },
             requests: Mutex::new(Vec::new()),
@@ -565,10 +570,14 @@ mod tests {
             snapshot: RuntimeSessionState {
                 policy: lash_core::SessionPolicy {
                     model: model_spec("root-model", None),
-                    ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                    ..lash_core::SessionPolicy::new(
+                        lash_core::TurnBudget::Unbounded,
+                        lash_core::MaxToolCalls::new(1024),
+                    )
                 },
                 ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
+                    lash_core::MaxToolCalls::new(1024),
                 ))
             },
             requests: Mutex::new(Vec::new()),

@@ -28,7 +28,7 @@ pub async fn prune_and_late_transfer_fences(
     .expect("start claim");
     let spec = crate::ProcessExecutionEnvSpec::new(
         crate::AdmittedPluginConfig::default(),
-        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
     );
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env");
@@ -218,7 +218,7 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
     let spec = |budget| {
         crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(budget),
+            crate::SessionPolicy::new(budget, crate::MaxToolCalls::new(1024)),
         )
     };
     let spec_b = spec(crate::TurnBudget::Unbounded);
@@ -433,7 +433,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
     let spec = |budget| {
         crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(budget),
+            crate::SessionPolicy::new(budget, crate::MaxToolCalls::new(1024)),
         )
     };
     let spec_a = spec(crate::TurnBudget::Bounded(
@@ -812,7 +812,7 @@ pub async fn two_starts_share_one_captured_environment(
     );
     let spec = crate::ProcessExecutionEnvSpec::new(
         crate::AdmittedPluginConfig::new(plugin_config, 0),
-        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
     );
     let stores = crate::ProcessStartStores {
         registry: registry.as_ref(),

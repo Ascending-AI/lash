@@ -175,7 +175,7 @@ first_party_codes! {
         Self::RuntimeEffectGroupDrainDeferred,
         Self::RuntimeEffectGroupShape,
         Self::AggregateAwaitUnsettled,
-        Self::EffectGroupOpenerBoundExceeded,
+        Self::MaxToolCallsExceeded,
         Self::RuntimeEffectToolChildCancellationAuthority,
         Self::RuntimeEffectToolChildCompletionRouting,
         Self::RuntimeEffectToolChildRequestAdmission,

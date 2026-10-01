@@ -580,28 +580,32 @@ fn core(backend: lash::Backend, observed: &ProviderArgs) -> Result<lash::LashCor
         .build();
     let artifacts = lashlang::LashlangArtifacts::of_backend(&backend);
     let worker_recovery = backend.worker_recovery();
-    lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .models(Arc::new(
-            lash::ModelRegistry::new()
-                .register(
-                    MODEL_KEY,
-                    lash::RegisteredModel::new(model()?, provider.into_handle()),
-                )
-                .map_err(|error| anyhow!("register the model: {error}"))?,
-        ))
-        .model(MODEL_KEY)
-        .plugin(Arc::new(process::ProcessEnginePlugin(
-            artifacts,
-            worker_recovery,
-        )))
-        .recovery_lease(recovery_lease())
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "lash-upgrade-node",
-            format!("{build}-{}", std::process::id()),
-        ))
-        .map_err(anyhow::Error::from)
+    lash::LashCore::standard_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .models(Arc::new(
+        lash::ModelRegistry::new()
+            .register(
+                MODEL_KEY,
+                lash::RegisteredModel::new(model()?, provider.into_handle()),
+            )
+            .map_err(|error| anyhow!("register the model: {error}"))?,
+    ))
+    .model(MODEL_KEY)
+    .plugin(Arc::new(process::ProcessEnginePlugin(
+        artifacts,
+        worker_recovery,
+    )))
+    .recovery_lease(recovery_lease())
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        "lash-upgrade-node",
+        format!("{build}-{}", std::process::id()),
+    ))
+    .map_err(anyhow::Error::from)
 }
 
 fn scripted_reply(text: String) -> lash_core::llm::types::LlmResponse {

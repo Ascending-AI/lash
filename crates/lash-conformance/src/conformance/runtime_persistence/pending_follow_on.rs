@@ -71,7 +71,10 @@ async fn commit_switch(
 ) -> (RuntimeSessionState, crate::store::PendingFollowOn) {
     let mut state = RuntimeSessionState {
         session_id: session(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.ensure_agent_frame_initialized();
     let owed = follow_on(
@@ -290,7 +293,10 @@ pub async fn pending_follow_on_refuses_every_other_commit_that_would_drop_it(
 pub async fn pending_follow_on_frame_is_current_on_every_head_write(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: session(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.ensure_agent_frame_initialized();
     let elsewhere = follow_on(crate::session_graph::frame_node_id(&session(), "elsewhere"));

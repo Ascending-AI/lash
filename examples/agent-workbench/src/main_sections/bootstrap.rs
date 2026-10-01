@@ -297,6 +297,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     let builder = LashCore::rlm_builder(
         lash::Backend::new(backend.clone()),
         lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS),
+        lash::MaxToolCalls::new(1024),
         factory,
     )
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -309,6 +310,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     .session_spec(
         lash::SessionSpec::new()
             .turn_budget(lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS))
+            .max_tool_calls(lash::MaxToolCalls::new(1024))
             .no_progress_budget(lash::NoProgressBudget::bounded(
                 WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS,
             ))

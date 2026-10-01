@@ -773,7 +773,7 @@ async fn strict_mcp_dispatch_context<'h>(
         observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
         ),
         owner: crate::ExecutionOwner::SessionFrame {
             session_id: SessionId::from("session"),
@@ -825,7 +825,7 @@ async fn dispatch_context<'h>(ports: crate::support::DispatchPorts<'h>) -> ToolD
         observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
         ),
         owner: crate::ExecutionOwner::SessionFrame {
             session_id: SessionId::from("session"),
@@ -885,7 +885,7 @@ async fn projection_policy_dispatch_context<'h>(
         observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
         ),
         owner: crate::ExecutionOwner::SessionFrame {
             session_id: SessionId::from("session"),
@@ -1058,7 +1058,7 @@ async fn pinned_contract_dispatch_context<'h>(
         observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
         ),
         owner: crate::ExecutionOwner::SessionFrame {
             session_id: SessionId::from("session"),
@@ -1128,7 +1128,7 @@ async fn authority_hidden_dispatch_context<'h>(
         observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
         ),
         owner: crate::ExecutionOwner::SessionFrame {
             session_id: SessionId::from("session"),
@@ -1178,7 +1178,7 @@ async fn exact_dispatch_context_with_plugins<'h>(
         observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
         ),
         owner: crate::ExecutionOwner::SessionFrame {
             session_id: SessionId::from("session"),
@@ -1312,7 +1312,7 @@ async fn pending_dispatch_context<'h>(
         observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
         ),
         owner: crate::ExecutionOwner::SessionFrame {
             session_id: SessionId::from("session"),
@@ -1503,6 +1503,10 @@ async fn retry_ladder_survives_a_later_pending_completion() {
         attachment_store,
         Arc::new(crate::ChronologicalProjection::default()),
         crate::TurnContext::default(),
+        crate::ProcessExecutionEnvSpec::new(
+            crate::AdmittedPluginConfig::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
+        ),
     );
     let completed = execution
         .pending_completion_dispatch_outcome(

@@ -73,8 +73,10 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
     reset(&storage).await;
     let pool = storage.pool().clone();
     let factory = storage.session_store_factory();
-    let policy =
-        lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded);
+    let policy = lash_core_execution::SessionPolicy::new(
+        lash_core_execution::TurnBudget::Unbounded,
+        lash_core_execution::MaxToolCalls::new(1024),
+    );
 
     async fn resident_node_ids(pool: &sqlx::PgPool) -> Vec<String> {
         sqlx::query_scalar::<_, String>("SELECT node_id FROM lash_graph_nodes ORDER BY node_id")

@@ -3,6 +3,7 @@ pub(super) async fn remote_reset_and_transcript_projection_agree() -> Result<()>
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(retrying_visible_stream_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;

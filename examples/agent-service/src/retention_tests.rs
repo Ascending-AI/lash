@@ -28,7 +28,7 @@ async fn production_retention_pass_reclaims_each_store_residue_class() {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("retention-session"),
         relation: SessionRelation::Root,
-        config: SessionPolicy::new(TurnBudget::Unbounded).into(),
+        config: SessionPolicy::new(TurnBudget::Unbounded, lash::MaxToolCalls::new(1024)).into(),
         head: SessionCreationHead::CommittedByCreator,
     };
     let catalog: Arc<dyn DeploymentStore> = factory.clone();

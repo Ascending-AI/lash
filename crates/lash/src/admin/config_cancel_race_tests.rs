@@ -122,6 +122,7 @@ async fn cancelled_config_command_before_current_ask_is_typed() -> Result<()> {
     let core = crate::tests::explicit_ephemeral_facets(LashCore::standard_builder(
         backend,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .models(crate::tests::test_catalog(
         crate::testing::TestProvider::builder()

@@ -1095,7 +1095,7 @@ async fn a_reserved_delivery_recovers_through_its_obligation_into_one_bound_proc
     // starts, the way a registration publishes it.
     let spec = crate::ProcessExecutionEnvSpec::new(
         crate::AdmittedPluginConfig::default(),
-        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
     );
     let env_ref = spec.stable_ref().expect("stable env ref");
     handles
@@ -1334,7 +1334,7 @@ async fn a_completed_child_whose_bind_was_lost_is_bound_not_started_again(
     let session_id = SessionId::from(SESSION);
     let spec = crate::ProcessExecutionEnvSpec::new(
         crate::AdmittedPluginConfig::default(),
-        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
     );
     let env_ref = spec.stable_ref().expect("stable env ref");
     handles
@@ -2025,7 +2025,7 @@ async fn captured_delivery_refusals(handles: ProcessTriggerRetentionHandles) {
     let session = SessionId::from("captured-route-matrix");
     let spec = crate::ProcessExecutionEnvSpec::new(
         crate::AdmittedPluginConfig::default(),
-        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
     );
     let env_ref = spec.stable_ref().expect("environment identity");
     handles

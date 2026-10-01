@@ -570,7 +570,10 @@ pub async fn an_older_admission_redriven_after_a_model_change_is_fenced_out(
     let rerun = crate::RuntimeSessionState {
         session_id: law.parts.session_id.clone(),
         policy,
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     // Root A's own final commit, with other content, and a commit of a turn
     // the store never saw: neither is the stored commit's exact replay.

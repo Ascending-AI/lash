@@ -125,7 +125,10 @@ fn final_commit(
 fn state_with_tool_generation(generation: u64) -> RuntimeSessionState {
     let mut state = RuntimeSessionState {
         session_id: session_id(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.set_tool_state_snapshot(Some(
         ToolState::default().with_generation_for_conformance(generation),
@@ -630,7 +633,10 @@ async fn law_turn_inputs_apply_once_in_order(
     settlement.completed_inputs.push(inputs.completion());
     let state = RuntimeSessionState {
         session_id: session_id(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     let commit = final_commit(
         RuntimeCommit::persisted_state_for_test(&state),

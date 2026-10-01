@@ -86,6 +86,7 @@ async fn witness(
                 let core = lash::LashCore::standard_builder(
                     double.lash_backend(),
                     lash::TurnBudget::Unbounded,
+                    lash::MaxToolCalls::new(1024),
                 )
                 .serve_test_model(
                     ProviderHandle::new(provider.into_components()),

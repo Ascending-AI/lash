@@ -81,7 +81,8 @@ fn catalog() -> Catalog {
 }
 
 fn snapshot() -> PersistedSessionConfig {
-    let mut config = PersistedSessionConfig::new(crate::TurnBudget::Unbounded);
+    let mut config =
+        PersistedSessionConfig::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
     config.model = Some(
         ModelConfig::new(recorded("session-model"))
             .with_reasoning(ReasoningSelection::Effort("low".to_string())),
@@ -166,8 +167,10 @@ fn recorded_render_survives_run_and_detached_environment_round_trip() {
     let decoded: ResolvedRun = serde_json::from_slice(&encoded).expect("decode run");
     assert_eq!(decoded.render, Some(record.clone()));
 
-    let mut state =
-        crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let mut state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
     crate::session_state::adopt_resolved_run(&mut state, &decoded);
     let env = state.process_execution_env_spec(&state.policy);
     assert_eq!(env.render, Some(record.clone()));
@@ -417,7 +420,8 @@ fn a_reasoning_override_for_a_session_without_a_model_is_refused() {
         reasoning: Some(ReasoningSelection::Effort("high".to_string())),
         ..RunOverrides::default()
     });
-    let bare = PersistedSessionConfig::new(crate::TurnBudget::Unbounded);
+    let bare =
+        PersistedSessionConfig::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
     assert!(matches!(
         spec.resolve(&bare, None, TerminationPolicy::default(), &catalog()),
         Err(RunResolveError::ReasoningWithoutModel)

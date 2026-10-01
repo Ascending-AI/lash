@@ -29,7 +29,10 @@ fn budget(nodes: u32, bytes: u64) -> HistoryBudget {
 fn state(session_id: &str) -> RuntimeSessionState {
     RuntimeSessionState {
         session_id: SessionId::from(session_id),
-        ..RuntimeSessionState::new(SessionPolicy::new(TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(SessionPolicy::new(
+            TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        ))
     }
 }
 
@@ -444,7 +447,7 @@ pub async fn history_fork_respects_ceiling(store: Arc<dyn ConformanceDeployment>
             node_id: middle[0].clone(),
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
-            policy: SessionPolicy::new(TurnBudget::Unbounded),
+            policy: SessionPolicy::new(TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024)),
             plugin_config: Default::default(),
         })
         .await
@@ -477,7 +480,7 @@ pub async fn history_fork_respects_ceiling(store: Arc<dyn ConformanceDeployment>
             node_id: middle[0].clone(),
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
-            policy: SessionPolicy::new(TurnBudget::Unbounded),
+            policy: SessionPolicy::new(TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024)),
             plugin_config: Default::default(),
         })
         .await
@@ -513,7 +516,7 @@ async fn fork_at(store: &dyn ConformanceDeployment, child: &SessionId, node_id: 
             node_id: node_id.clone(),
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
-            policy: SessionPolicy::new(TurnBudget::Unbounded),
+            policy: SessionPolicy::new(TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024)),
             plugin_config: Default::default(),
         })
         .await

@@ -95,6 +95,7 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
             LashCore::rlm_builder(
                 backend.clone(),
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
                 lash_protocol_rlm::RlmProtocolPluginFactory::new(
                     lash_protocol_rlm::RlmProtocolPluginConfig::builder()
                         .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -111,17 +112,21 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
                 ),
             )
         } else {
-            LashCore::standard_builder(double.lash_backend(), crate::TurnBudget::Unbounded)
-                .protocol_plugin(Arc::new(
-                    lash_protocol_standard::StandardProtocolPluginFactory::with_config(
-                        lash_protocol_standard::StandardProtocolConfig {
-                            discovery: Some(lash_core::ToolDiscovery {
-                                operation: "search".into(),
-                            }),
-                            ..lash_protocol_standard::StandardProtocolConfig::default()
-                        },
-                    ),
-                ))
+            LashCore::standard_builder(
+                double.lash_backend(),
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            )
+            .protocol_plugin(Arc::new(
+                lash_protocol_standard::StandardProtocolPluginFactory::with_config(
+                    lash_protocol_standard::StandardProtocolConfig {
+                        discovery: Some(lash_core::ToolDiscovery {
+                            operation: "search".into(),
+                        }),
+                        ..lash_protocol_standard::StandardProtocolConfig::default()
+                    },
+                ),
+            ))
         };
         let core = explicit_ephemeral_facets(builder)
             .serve_test_model(provider, mock_model_spec())

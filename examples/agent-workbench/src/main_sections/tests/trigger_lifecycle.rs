@@ -234,7 +234,11 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash::persistence::SessionRelation::Root,
-            config: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded).into(),
+            config: lash::runtime::SessionPolicy::new(
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            )
+            .into(),
             head: lash::persistence::SessionCreationHead::CommittedByCreator,
         })
         .await

@@ -184,23 +184,26 @@ async fn one_turn_run(seed: u64, worker: bool) -> lash_restate_test::DropWatch {
         })
         .build()
         .into_handle();
-    let core =
-        lash::LashCore::standard_builder(backend.lash_backend(), lash::TurnBudget::Unbounded)
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .serve_test_model(
-                provider,
-                lash_core::ModelMetadata::builder("mock-model")
-                    .context_window_tokens(200_000)
-                    .build()
-                    .expect("model spec"),
-            )
-            .tools(Arc::new(CountingTool) as Arc<dyn lash_core::ToolProvider>)
-            .build(lash_core::LeaseOwnerIdentity::opaque(
-                "lash-restate-test",
-                "drop",
-            ))
-            .expect("build the lash core");
+    let core = lash::LashCore::standard_builder(
+        backend.lash_backend(),
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .serve_test_model(
+        provider,
+        lash_core::ModelMetadata::builder("mock-model")
+            .context_window_tokens(200_000)
+            .build()
+            .expect("model spec"),
+    )
+    .tools(Arc::new(CountingTool) as Arc<dyn lash_core::ToolProvider>)
+    .build(lash_core::LeaseOwnerIdentity::opaque(
+        "lash-restate-test",
+        "drop",
+    ))
+    .expect("build the lash core");
     if worker {
         // A deployment serves its process segments with the core's durable
         // worker, which holds the core's configuration.

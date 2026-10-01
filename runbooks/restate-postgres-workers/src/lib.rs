@@ -508,6 +508,7 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
     let mut builder = lash::LashCore::rlm_builder(
         lash::Backend::new(config.backend.clone()),
         lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
         factory,
     )
         .models(Arc::new(lash::ModelRegistry::new().register(

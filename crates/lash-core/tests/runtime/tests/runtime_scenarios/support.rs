@@ -171,6 +171,7 @@ impl RuntimeScenarioContext {
             session_id: session_id.clone(),
             ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
             ))
         };
         state.ensure_agent_frame_initialized();

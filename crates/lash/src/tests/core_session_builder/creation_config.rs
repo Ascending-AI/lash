@@ -105,6 +105,7 @@ async fn counting_core(
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .models(test_catalog(
         capturing_provider(captures),

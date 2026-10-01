@@ -885,6 +885,7 @@ impl World {
             policy: policy.clone(),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         };
         // The law supplies the session's state, so it states what the

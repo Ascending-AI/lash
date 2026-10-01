@@ -2164,7 +2164,10 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
                 .build()
                 .expect("TypeScript signal test model"),
         ))),
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
         table.backend().clone(),
@@ -2300,7 +2303,10 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
                 .build()
                 .expect("TypeScript cross-turn test model"),
         ))),
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
         table.backend().clone(),
@@ -2438,7 +2444,10 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
                 .build()
                 .expect("TypeScript process handle id test model"),
         ))),
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
         registry: registry.clone(),

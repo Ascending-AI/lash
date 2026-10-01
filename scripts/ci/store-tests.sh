@@ -163,6 +163,7 @@ postgres_slot_test() {
 # variation into the table for those buys nothing.
 declare -A uniform_store_suites=(
   [pg-rlm-frame-open]="//crates/lash-protocol-rlm:frame_open_redrive__test|restate_double_postgres::|lash-internal-protocol-rlm|--test frame_open_redrive|cargo-test|include-ignored,nocapture"
+  [pg-rlm-tool-call-limit]="//crates/lash-protocol-rlm:tool_batch_parallelism__test|restate_double_postgres::|lash-internal-protocol-rlm|--test tool_batch_parallelism|cargo-test|include-ignored,nocapture"
   [pg-artifact-referrers]="//crates/lash:artifact_referrers_evidence__test||lash-runtime|--test artifact_referrers_evidence --features rlm,restate,sqlite,testing|cargo-test|nocapture"
   [pg-attachment-referrers]="//crates/lash:attachment_referrers_evidence__test||lash-runtime|--test attachment_referrers_evidence --features rlm,restate,sqlite,testing|cargo-test|nocapture"
   [pg-model-keys]="//crates/lash:model_keys__test||lash-runtime|--test model_keys --features restate,sqlite,testing|cargo-test|include-ignored,nocapture"

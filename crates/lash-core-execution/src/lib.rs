@@ -858,7 +858,10 @@ pub use session_graph::{
 pub use session_model::ModelBinding;
 pub(crate) use session_model::RuntimeSessionPolicy;
 
-pub use session_model::{ChargeSafetyPolicy, NoProgressBudget, SessionPolicy, TurnBudget};
+pub use session_model::{
+    ChargeSafetyPolicy, MaxToolCalls, NoProgressBudget, SessionPolicy, ToolCallLimitExceeded,
+    ToolCallLimitScope, TurnBudget,
+};
 pub use session_model::{ProtocolEvent, SessionHistoryRecord};
 pub use store::{
     AdmissionRefusal, AdoptedAttachmentCondemnation, AppendRequestIdentity, AttachmentCondemnation,

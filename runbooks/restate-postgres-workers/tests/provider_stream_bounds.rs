@@ -73,6 +73,7 @@ async fn witness(stores: Arc<dyn StoreSet>, label: &str) -> Result<()> {
     let core = lash::LashCore::standard_builder(
         lash::Backend::new(engine.clone()),
         lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
     )
     .serve_test_model(
         ProviderHandle::new(provider.into_components()),

@@ -539,7 +539,10 @@ async fn run_composition_case(
         .map_err(|failure| failure.reason)?;
     let mut state = RuntimeSessionState {
         session_id: session_id.clone(),
-        ..RuntimeSessionState::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        ))
     };
     let prefix =
         stamped_commit(backend, &state, "composition-prefix").map_err(|failure| failure.reason)?;
@@ -736,6 +739,7 @@ async fn run_seed(
         session_id: session_id.clone(),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
 
@@ -977,7 +981,11 @@ fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
         relation: SessionRelation::Root,
-        config: SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+        config: SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
+        .into(),
         head: SessionCreationHead::CommittedByCreator,
     }
 }

@@ -28,6 +28,13 @@ mod recorded_execution_controls;
 
 const EXAMPLE_BINDING_KEY: &str = "example.call_path";
 
+fn unbounded_policy() -> lash_core::SessionPolicy {
+    lash_core::SessionPolicy::new(
+        lash_core::TurnBudget::Unbounded,
+        lash_core::MaxToolCalls::new(1024),
+    )
+}
+
 #[test]
 fn runtime_replay_round_trip_retains_minting_emission_key() {
     let replay = lash_core::runtime::RuntimeReplay {
@@ -700,7 +707,7 @@ fn process_start_requests_round_trip_core_values() {
                     parallel_tool_calls: None,
                     projection_provenance: Default::default(),
                 },
-                ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                ..unbounded_policy()
             },
         ))
         .stable_ref()
@@ -1128,9 +1135,7 @@ fn remote_turn_result_maps_core_semantics() {
     let turn = lash_core::facade_support::AssembledTurn {
         turn_input_acceptance: None,
         turn_cancel_input_outcome: Default::default(),
-        state: lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-        )),
+        state: lash_core::SessionSnapshot::new(unbounded_policy()),
         outcome: lash_core::facade_support::TurnOutcome::Finished(
             lash_core::facade_support::TurnFinish::AssistantMessage {
                 text: "done".to_string(),
@@ -1301,9 +1306,7 @@ fn assert_terminal_call_record_converts_and_validates(
     let turn = lash_core::facade_support::AssembledTurn {
         turn_input_acceptance: None,
         turn_cancel_input_outcome: Default::default(),
-        state: lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-        )),
+        state: lash_core::SessionSnapshot::new(unbounded_policy()),
         outcome: if cancelled {
             lash_core::facade_support::TurnOutcome::Stopped(
                 lash_core::facade_support::TurnStop::Cancelled {
@@ -1952,7 +1955,7 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
     }
 
     let read_view = lash_core::SessionReadView::from_snapshot(&lash_core::SessionSnapshot::new(
-        lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        unbounded_policy(),
     ));
     let remote = RemoteSessionObservationEvent::from_core(
         8,
@@ -1968,10 +1971,9 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
         RemoteSessionObservationEventPayload::Committed
     ));
 
-    let resident_read_view =
-        lash_core::SessionReadView::from_snapshot(&lash_core::SessionSnapshot::new(
-            lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-        ));
+    let resident_read_view = lash_core::SessionReadView::from_snapshot(
+        &lash_core::SessionSnapshot::new(unbounded_policy()),
+    );
     let remote = RemoteSessionObservationEvent::from_core(
         9,
         event(

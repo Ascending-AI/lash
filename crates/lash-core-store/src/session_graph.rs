@@ -493,6 +493,10 @@ pub struct PersistedSessionConfig {
     /// snapshotted per root in its recorded
     /// [`ResolvedRun`](crate::run_spec::ResolvedRun).
     pub turn_budget: crate::TurnBudget,
+    /// The tool-call limit (FIG-4546): the total one cell may make and the
+    /// number a process may hold at once. Required on the wire: a head that
+    /// states none is refused at load, never defaulted.
+    pub max_tool_calls: crate::MaxToolCalls,
     /// Whether the session's turns run autonomously.
     pub autonomous: bool,
     /// The bound on consecutive provider attempts within one turn that
@@ -540,7 +544,7 @@ impl PersistedSessionConfig {
     /// The session policy this config records. Only the session binding is
     /// not config, and starts unbound.
     pub fn session_policy(&self) -> crate::SessionPolicy {
-        let mut policy = crate::SessionPolicy::new(self.turn_budget);
+        let mut policy = crate::SessionPolicy::new(self.turn_budget, self.max_tool_calls);
         policy.model = self.model.clone();
         policy.attachment_acceptance = self.attachment_acceptance.clone();
         policy.autonomous = self.autonomous;
@@ -550,19 +554,22 @@ impl PersistedSessionConfig {
         policy
     }
 
-    /// Builds an empty persisted config carrying the required per-turn budget.
+    /// Builds an empty persisted config carrying the required per-turn budget
+    /// and tool-call limit.
     ///
     /// Store implementors reading durable session heads populate the model
-    /// fields from the row; the budget has no default by doctrine,
-    /// so every construction names `TurnBudget::Bounded(n)` or `Unbounded`
-    /// explicitly. The other execution controls start at the values
+    /// fields from the row; the budget and the limit have no default by
+    /// doctrine, so every construction names `TurnBudget::Bounded(n)` or
+    /// `Unbounded`, and a `MaxToolCalls`, explicitly. The other execution
+    /// controls start at the values
     /// [`SessionPolicy::new`](crate::SessionPolicy::new) states.
-    pub fn new(turn_budget: crate::TurnBudget) -> Self {
-        let neutral = crate::SessionPolicy::new(turn_budget);
+    pub fn new(turn_budget: crate::TurnBudget, max_tool_calls: crate::MaxToolCalls) -> Self {
+        let neutral = crate::SessionPolicy::new(turn_budget, max_tool_calls);
         Self {
             model: None,
             attachment_acceptance: std::sync::Arc::default(),
             turn_budget,
+            max_tool_calls,
             autonomous: neutral.autonomous,
             no_progress_budget: neutral.no_progress_budget,
             charge_safety: neutral.charge_safety,
@@ -587,6 +594,7 @@ impl From<&crate::SessionPolicy> for PersistedSessionConfig {
             model: policy.model.clone(),
             attachment_acceptance: policy.attachment_acceptance.clone(),
             turn_budget: policy.turn_budget,
+            max_tool_calls: policy.max_tool_calls,
             autonomous: policy.autonomous,
             no_progress_budget: policy.no_progress_budget,
             charge_safety: policy.charge_safety.clone(),

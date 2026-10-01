@@ -309,7 +309,10 @@ async fn commit_switch_owing(
 ) -> crate::store::PendingFollowOn {
     let mut state = RuntimeSessionState {
         session_id: session_id.clone(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.ensure_agent_frame_initialized();
     let owed = crate::store::PendingFollowOn {
@@ -363,7 +366,10 @@ pub async fn a_steering_spec_must_match_a_pending_follow_ons_shape(store: Arc<dy
         .expect("admit the parent's starting input");
     let state = RuntimeSessionState {
         session_id: session_id.clone(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     let recorded = crate::ResolvedRun {
         base: RuntimeCommit::persisted_state_for_test(&state).config,

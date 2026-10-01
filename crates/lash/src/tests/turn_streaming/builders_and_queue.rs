@@ -10,6 +10,7 @@ pub(super) async fn turn_run_uses_the_engine_host_without_explicit_effects() -> 
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -43,11 +44,15 @@ pub(super) async fn turn_run_uses_the_engine_host_without_explicit_effects() -> 
 #[tokio::test]
 pub(super) async fn plain_turn_entry_points_each_run_under_their_own_turn() -> Result<()> {
     let double = restate_double(SEED).await;
-    let core = LashCore::standard_builder(double.lash_backend(), crate::TurnBudget::Unbounded)
-        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(mock_provider(), mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = LashCore::standard_builder(
+        double.lash_backend(),
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    )
+    .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+    .serve_test_model(mock_provider(), mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("durable-default-effect-host")
         .created()
@@ -114,6 +119,7 @@ pub(super) async fn turn_id_sets_execution_scope_and_trace_identity() -> Result<
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -154,6 +160,7 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(provider, mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -213,6 +220,7 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -299,6 +307,7 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(Arc::new(
@@ -365,6 +374,7 @@ async fn answering_core(answer: &'static str) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         crate::testing::TestProvider::builder()
@@ -450,6 +460,7 @@ pub(super) async fn a_turn_journals_its_request_by_digest_and_no_sentinel_step()
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double.lash_backend(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;

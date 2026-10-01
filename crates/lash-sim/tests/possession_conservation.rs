@@ -478,7 +478,7 @@ impl PossessionWorld {
         // Engine rows must name the captured environment they run under.
         let env_ref = ProcessExecutionEnvSpec::new(
             AdmittedPluginConfig::default(),
-            SessionPolicy::new(TurnBudget::Unbounded),
+            SessionPolicy::new(TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024)),
         )
         .stable_ref()
         .expect("env spec content-addresses");

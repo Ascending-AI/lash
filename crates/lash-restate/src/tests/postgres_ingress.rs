@@ -103,7 +103,11 @@ async fn backend_for(
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from(session_id),
                 relation: lash_core::SessionRelation::Root,
-                config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+                config: lash_core::SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                    lash_core::MaxToolCalls::new(1024),
+                )
+                .into(),
                 head: lash_core::SessionCreationHead::CommittedByCreator,
             },
         )

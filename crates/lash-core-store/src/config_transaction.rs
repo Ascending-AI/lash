@@ -42,6 +42,7 @@ pub struct CoreConfig {
     )]
     pub attachment_acceptance: std::sync::Arc<crate::provider::AttachmentCapabilitySnapshot>,
     pub turn_budget: crate::TurnBudget,
+    pub max_tool_calls: crate::MaxToolCalls,
     pub autonomous: bool,
     pub no_progress_budget: crate::NoProgressBudget,
     pub charge_safety: crate::ChargeSafetyPolicy,
@@ -56,6 +57,7 @@ impl CoreConfig {
             model: config.model.clone(),
             attachment_acceptance: std::sync::Arc::clone(&config.attachment_acceptance),
             turn_budget: config.turn_budget,
+            max_tool_calls: config.max_tool_calls,
             autonomous: config.autonomous,
             no_progress_budget: config.no_progress_budget,
             charge_safety: config.charge_safety.clone(),
@@ -69,6 +71,7 @@ impl CoreConfig {
         config.model = self.model.clone();
         config.attachment_acceptance = std::sync::Arc::clone(&self.attachment_acceptance);
         config.turn_budget = self.turn_budget;
+        config.max_tool_calls = self.max_tool_calls;
         config.autonomous = self.autonomous;
         config.no_progress_budget = self.no_progress_budget;
         config.charge_safety = self.charge_safety.clone();
@@ -255,6 +258,7 @@ mod tests {
     fn head() -> crate::PersistedSessionConfig {
         let mut config = crate::PersistedSessionConfig::from(&crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
         ));
         config.config_revision = 4;
         config

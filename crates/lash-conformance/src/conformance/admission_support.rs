@@ -227,7 +227,10 @@ pub(crate) async fn head_commit(
     let state = crate::RuntimeSessionState {
         session_id: session_id.clone(),
         head_revision: revision,
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     crate::RuntimeCommit::persisted_state_for_test(&state)
 }

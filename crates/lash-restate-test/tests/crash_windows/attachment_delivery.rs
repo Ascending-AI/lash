@@ -448,21 +448,25 @@ fn core(harness: &Harness) -> lash::LashCore {
         })
         .build()
         .into_handle();
-    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(
-            provider,
-            lash::ModelMetadata::builder("attachment-delivery")
-                .context_window_tokens(100_000)
-                .build()
-                .unwrap(),
-        )
-        .build(lash_core::LeaseOwnerIdentity::opaque(
-            "attachment-delivery",
-            "test",
-        ))
-        .unwrap();
+    let core = lash::LashCore::standard_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+    .serve_test_model(
+        provider,
+        lash::ModelMetadata::builder("attachment-delivery")
+            .context_window_tokens(100_000)
+            .build()
+            .unwrap(),
+    )
+    .build(lash_core::LeaseOwnerIdentity::opaque(
+        "attachment-delivery",
+        "test",
+    ))
+    .unwrap();
     let worker =
         lash_core_worker::DurableProcessWorker::new(core.durable_process_worker_config().unwrap())
             .unwrap();

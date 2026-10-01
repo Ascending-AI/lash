@@ -1630,7 +1630,7 @@ mod tests {
                 )
                 .with_reasoning(crate::ReasoningSelection::Effort("high".to_string())),
             ),
-            ..SessionPolicy::new(crate::TurnBudget::Unbounded)
+            ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
         };
 
         let onto_plain = root_request().with_model(crate::ModelKey::new(PLAIN));
@@ -1687,7 +1687,7 @@ mod tests {
                     .expect("the key mints"),
             )
         };
-        let bare = SessionPolicy::new(crate::TurnBudget::Unbounded);
+        let bare = SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
         let mut request = root_request();
         request.record_default_model(Some(minted(PLAIN)));
 
@@ -1696,7 +1696,7 @@ mod tests {
 
         let starter = SessionPolicy {
             model: Some(minted(THINKER)),
-            ..SessionPolicy::new(crate::TurnBudget::Unbounded)
+            ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
         };
         let facts = child_facts(&starter, &request).expect("the starter's model resolves");
         assert_eq!(

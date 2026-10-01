@@ -951,7 +951,7 @@ fn runtime_policy() -> crate::SessionPolicy {
                 .build()
                 .expect("valid test model"),
         )),
-        ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
+        ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
     }
 }
 

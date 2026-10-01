@@ -220,7 +220,10 @@ pub async fn upload_staging_identities_are_distinct_guarded_and_fenced_independe
 fn state(session: &str) -> RuntimeSessionState {
     let mut state = RuntimeSessionState {
         session_id: session.into(),
-        ..RuntimeSessionState::new(SessionPolicy::new(TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(SessionPolicy::new(
+            TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        ))
     };
     state.ensure_agent_frame_initialized();
     state
@@ -601,7 +604,7 @@ pub async fn session_referrer_waits_for_graph_retirement(h: AttachmentReferrerHa
             node_id: node,
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
-            policy: SessionPolicy::new(TurnBudget::Unbounded),
+            policy: SessionPolicy::new(TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024)),
             plugin_config: Default::default(),
         })
         .await

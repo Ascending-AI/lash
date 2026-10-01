@@ -346,14 +346,16 @@ fn core_over(
         .build()
         .into_handle();
     let catalog = Arc::new(std::sync::OnceLock::new());
-    let mut builder =
-        LashCore::standard_builder(double.lash_backend(), crate::TurnBudget::Unbounded)
-            .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(
-                crate::QueuedWorkBatchingConfig::new(1)
-                    .with_max_follow_on_recoveries(max_recoveries),
-            )
-            .serve_test_model(provider, mock_model_spec());
+    let mut builder = LashCore::standard_builder(
+        double.lash_backend(),
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    )
+    .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(
+        crate::QueuedWorkBatchingConfig::new(1).with_max_follow_on_recoveries(max_recoveries),
+    )
+    .serve_test_model(provider, mock_model_spec());
     if work == Work::FollowOn {
         builder = builder
             .tools(Arc::new(AgentFrameSwitchTools))

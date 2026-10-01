@@ -135,7 +135,10 @@ async fn persisted_provider_response(
         // against a stub provider, so a driver that mistakes a tool-call-free
         // response for a tool-calling one spins here forever instead of
         // failing. The budget is well above the iterations the scenario needs.
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::bounded(8))
+        ..lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::bounded(8),
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let handler = super::tests::open_turn_handler(&double, session_id).await;
     let scoped_controller =

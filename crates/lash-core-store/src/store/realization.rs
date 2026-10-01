@@ -188,6 +188,7 @@ mod tests {
         let metrics = crate::operational_metrics::TestMetrics::install();
         let state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
         ));
         let store = FacadeTestStore {
             materialized_session: Some(state.session_id.clone()),
@@ -214,6 +215,7 @@ mod tests {
         let metrics = crate::operational_metrics::TestMetrics::install();
         let state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
         ));
         let store = FacadeTestStore {
             materialized_session: Some(state.session_id.clone()),
@@ -248,6 +250,7 @@ mod tests {
         let metrics = crate::operational_metrics::TestMetrics::install();
         let state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
         ));
         let commit = RuntimeCommit::persisted_state_for_test(&state);
 
@@ -289,6 +292,7 @@ mod tests {
         let metrics = crate::operational_metrics::TestMetrics::install();
         let state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
         ));
         let store = FacadeTestStore {
             materialized_session: Some(state.session_id.clone()),
@@ -323,6 +327,7 @@ mod tests {
             session_id: SessionId::from("loose-store-session"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         };
         state.ensure_agent_frame_initialized();
@@ -350,6 +355,7 @@ mod tests {
             session_id: SessionId::from("boundary-budget"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         };
         let store = FacadeTestStore {
@@ -400,6 +406,7 @@ mod tests {
     async fn verified_commit_rejects_nonadvancing_store_receipt() {
         let mut state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
         ));
         state.ensure_agent_frame_initialized();
         let store = FacadeTestStore {
@@ -415,6 +422,7 @@ mod tests {
     async fn verified_commit_preserves_nonadvancing_receipt_replay() {
         let mut state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
         ));
         state.ensure_agent_frame_initialized();
         let store = FacadeTestStore {

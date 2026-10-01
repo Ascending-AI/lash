@@ -28,6 +28,7 @@ fn the_workbench_bounds_both_turn_work_and_turn_stalling() {
     // The workbench's own policy, resolved the way the runtime resolves it.
     let spec = lash::SessionSpec::new()
         .turn_budget(lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS))
+        .max_tool_calls(lash::MaxToolCalls::new(1024))
         .no_progress_budget(lash::NoProgressBudget::bounded(
             WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS,
         ));
@@ -38,7 +39,10 @@ fn the_workbench_bounds_both_turn_work_and_turn_stalling() {
 
     let policy = spec
         .resolve_against(
-            &lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
+            &lash::runtime::SessionPolicy::new(
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            ),
             &lash::EmptyModels,
         )
         .expect("a spec naming no model resolves without a catalog");

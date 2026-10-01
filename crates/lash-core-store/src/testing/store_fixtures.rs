@@ -103,6 +103,7 @@ pub fn session_store_request(
             session_id: Some(SessionId::from(session_id.to_string())),
             autonomous: false,
             turn_budget: crate::TurnBudget::Unbounded,
+            max_tool_calls: crate::MaxToolCalls::new(1024),
             no_progress_budget: Default::default(),
             charge_safety: Default::default(),
             generation: crate::GenerationOptions::default(),

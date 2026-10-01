@@ -58,20 +58,24 @@ fn deployment_core(
         })
         .build()
         .into_handle();
-    lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(provider, model_spec())
-        .tools(Arc::new(CountingTool {
-            executions: Arc::clone(executions),
-            output: json!({"result": "counted"}),
-        }) as Arc<dyn lash_core::ToolProvider>)
-        .plugin(Arc::new(ProcessEngines(factory)))
-        .build(lash_core::LeaseOwnerIdentity::opaque(
-            "lash-restate-test",
-            "cold-recovery",
-        ))
-        .expect("fresh session driver, process engine and tool context source")
+    lash::LashCore::standard_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+    .serve_test_model(provider, model_spec())
+    .tools(Arc::new(CountingTool {
+        executions: Arc::clone(executions),
+        output: json!({"result": "counted"}),
+    }) as Arc<dyn lash_core::ToolProvider>)
+    .plugin(Arc::new(ProcessEngines(factory)))
+    .build(lash_core::LeaseOwnerIdentity::opaque(
+        "lash-restate-test",
+        "cold-recovery",
+    ))
+    .expect("fresh session driver, process engine and tool context source")
 }
 
 fn live(engine: &Engine) -> &LiveRestateBackend {

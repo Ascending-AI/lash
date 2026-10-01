@@ -1134,12 +1134,28 @@ async fn execute_code_in_worker_scope(
             {
                 state.cancel_code_execution();
             }
-            let message = crate::feedback::render_runtime_failure(code, &failure);
-            return exec_response_from(
-                host.into_collected(),
-                Some(lash_core::CellFailure::new(kind, message)),
-                None,
-            );
+            // A `max_tool_calls` refusal is reported in its own words, at the
+            // call that met it: the model reads the limit, not the channel the
+            // refusal travelled on.
+            let tool_call_limit = match &failure.error {
+                lashlang::RuntimeError::AggregateHostControl { source }
+                    if lash_lashlang_runtime::is_tool_call_limit_failure(&failure.error) =>
+                {
+                    Some(source.message().to_owned())
+                }
+                _ => None,
+            };
+            let message = match &tool_call_limit {
+                Some(refusal) => {
+                    lashlang::format_source_diagnostic(code, failure.span, refusal, &[])
+                }
+                None => crate::feedback::render_runtime_failure(code, &failure),
+            };
+            let mut cell_failure = lash_core::CellFailure::new(kind, message);
+            if tool_call_limit.is_some() {
+                cell_failure.tool_call_limit = ctx.tool_call_limit_refusal();
+            }
+            return exec_response_from(host.into_collected(), Some(cell_failure), None);
         }
     };
     exec_response_from(host.into_collected(), None, terminal_finish)
@@ -1263,6 +1279,12 @@ fn lashlang_runtime_feedback_kind(
     match error {
         _ if host_cancelled => lash_core::CellFailureKind::Host,
         lashlang::RuntimeError::HostCancelled => lash_core::CellFailureKind::Host,
+        // The session's `max_tool_calls` refused the cell's tool calls
+        // (FIG-4546): the program asked for more than its recorded limit, and
+        // every replay refuses the same call.
+        error if lash_lashlang_runtime::is_tool_call_limit_failure(error) => {
+            lash_core::CellFailureKind::Program
+        }
         // An aggregate with no members is the program's defect: the host ends
         // the cell uncatchably (ADR 0099 §11 clause 5), but a retry of the
         // identical cell fails the same way (FIG-4547).

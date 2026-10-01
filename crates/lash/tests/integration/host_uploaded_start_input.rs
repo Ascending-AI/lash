@@ -78,23 +78,27 @@ fn core(engine: &Engine) -> lash::LashCore {
     let backend = LayeredBackend::over(engine.backend())
         .with_session_work(session_work)
         .into_backend();
-    lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .models(Arc::new(
-            lash::ModelRegistry::new()
-                .register(
-                    "mock-model",
-                    lash::RegisteredModel::new(mock_model_metadata(), provider),
-                )
-                .unwrap(),
-        ))
-        .model("mock-model")
-        .build(lash_core::LeaseOwnerIdentity::opaque(
-            "uploaded-start",
-            "boot",
-        ))
-        .unwrap()
+    lash::LashCore::standard_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+    .models(Arc::new(
+        lash::ModelRegistry::new()
+            .register(
+                "mock-model",
+                lash::RegisteredModel::new(mock_model_metadata(), provider),
+            )
+            .unwrap(),
+    ))
+    .model("mock-model")
+    .build(lash_core::LeaseOwnerIdentity::opaque(
+        "uploaded-start",
+        "boot",
+    ))
+    .unwrap()
 }
 
 fn cleanup(backend: &lash_core::Backend) -> ArtifactCleanupRelay {
@@ -184,7 +188,10 @@ fn request(input: lash_core::AttachmentRef) -> lash_core::ProcessStartRequest {
                 lash_core::SessionStartPoint::Empty,
                 lash_core::SessionPolicy {
                     model,
-                    ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                    ..lash_core::SessionPolicy::new(
+                        lash_core::TurnBudget::Unbounded,
+                        lash_core::MaxToolCalls::new(1024),
+                    )
                 },
                 lash_core::PluginOptions::default(),
             )),

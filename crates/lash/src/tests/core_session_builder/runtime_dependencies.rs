@@ -17,18 +17,26 @@ async fn peer_coherence_builder() -> crate::core::LashCoreBuilder {
 }
 
 fn peer_coherence_builder_over(backend: lash_core::Backend) -> crate::core::LashCoreBuilder {
-    LashCore::standard_builder(backend, crate::TurnBudget::Unbounded)
-        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(mock_provider(), mock_model_spec())
+    LashCore::standard_builder(
+        backend,
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    )
+    .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+    .serve_test_model(mock_provider(), mock_model_spec())
 }
 
 #[tokio::test]
 async fn commit_budget_is_required_for_builder_construction_and_deserialization() {
     let error = expect_build_error(
-        LashCore::standard_builder(double_backend().await, crate::TurnBudget::Unbounded)
-            .serve_test_model(mock_provider(), mock_model_spec())
-            .build(crate::testing::runtime_lease_owner()),
+        LashCore::standard_builder(
+            double_backend().await,
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        )
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner()),
         "builder must reject a missing commit budget",
     );
     assert!(matches!(error, EmbedError::MissingCommitBudget));
@@ -43,10 +51,14 @@ async fn commit_budget_is_required_for_builder_construction_and_deserialization(
 #[tokio::test]
 async fn queued_work_action_reserve_is_required() {
     let error = expect_build_error(
-        LashCore::standard_builder(double_backend().await, crate::TurnBudget::Unbounded)
-            .serve_test_model(mock_provider(), mock_model_spec())
-            .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .build(crate::testing::runtime_lease_owner()),
+        LashCore::standard_builder(
+            double_backend().await,
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        )
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .build(crate::testing::runtime_lease_owner()),
         "builder must reject a missing queued-work action reserve",
     );
     assert!(matches!(error, EmbedError::MissingQueuedWorkBatching));
@@ -82,6 +94,7 @@ async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()
         LashCore::rlm_builder(
             core_backend.clone(),
             crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
             rlm_factory(factory_backend),
         )
         .serve_test_model(mock_provider(), mock_model_spec())
@@ -122,6 +135,7 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
     let core = LashCore::standard_builder(
         store_backend_with_clock(clock).await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     )
     .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
@@ -396,6 +410,7 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -426,7 +441,10 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
     let source_policy = lash_core::SessionPolicy {
         model: source_model,
         session_id: Some(SessionId::from("orphaned-fork-source")),
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let source_request = lash_core::SessionStoreCreateRequest {
         owning_process_id: None,
@@ -444,6 +462,7 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
         policy: source_policy,
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
     source_state.ensure_agent_frame_initialized();
@@ -523,6 +542,7 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -537,7 +557,10 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
         // open rather than silently discarded (FIG-1558).
         model: source_model,
         session_id: Some(SessionId::from("fork-observer-source")),
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let source_store = lash_core::runtime::admit_session_view(
         &factory,
@@ -557,6 +580,7 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
         policy,
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
     source_state.ensure_agent_frame_initialized();
@@ -779,7 +803,10 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
             session_id: SessionId::from("fork-observer-branch"),
             ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy {
                 model: branch_read.config.model.clone(),
-                ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                ..lash_core::SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                    lash_core::MaxToolCalls::new(1024),
+                )
             })
         })
         .await?;
@@ -958,12 +985,16 @@ async fn duplicate_only_fork_intents_are_canonical(
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let policy = lash_core::SessionPolicy {
         session_id: Some(source_session_id.clone()),
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let source_store = lash_core::runtime::admit_session_view(
         &factory,
@@ -982,6 +1013,7 @@ async fn duplicate_only_fork_intents_are_canonical(
         policy,
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
     source_state.ensure_agent_frame_initialized();
@@ -1094,7 +1126,10 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
             relation: lash_core::SessionRelation::Root,
             config: lash_core::SessionPolicy {
                 model: Some(recorded_model(mock_model_spec())),
-                ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                ..lash_core::SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                    lash_core::MaxToolCalls::new(1024),
+                )
             }
             .into(),
             head: lash_core::SessionCreationHead::Config,
@@ -1104,6 +1139,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -1176,6 +1212,7 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -1217,7 +1254,10 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
                 },
                 config: lash_core::SessionPolicy {
                     model: Some(recorded_model(mock_model_spec())),
-                    ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                    ..lash_core::SessionPolicy::new(
+                        lash_core::TurnBudget::Unbounded,
+                        lash_core::MaxToolCalls::new(1024),
+                    )
                 }
                 .into(),
                 head: lash_core::SessionCreationHead::Config,
@@ -1358,6 +1398,7 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .generation(host_generation.clone())
@@ -1380,7 +1421,10 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
             seed: Some(9),
             ..Default::default()
         },
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let source_store = lash_core::runtime::admit_session_view(
         &factory,
@@ -1400,6 +1444,7 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
         policy: source_policy,
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
     source_state.ensure_agent_frame_initialized();

@@ -298,16 +298,20 @@ fn catalog(entries: &[Entry<'_>]) -> Arc<ModelRegistry> {
 /// A core over `entries`, whose first key is the default.
 fn core(double: &Double, entries: &[Entry<'_>], worker: &str) -> LashCore {
     let default_key = entries.first().expect("the catalog has a default key").key;
-    LashCore::standard_builder(double.double.lash_backend(), lash::TurnBudget::Unbounded)
-        .models(catalog(entries))
-        .model(default_key)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "model-keys-worker",
-            worker,
-        ))
-        .expect("the host core builds")
+    LashCore::standard_builder(
+        double.double.lash_backend(),
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .models(catalog(entries))
+    .model(default_key)
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        "model-keys-worker",
+        worker,
+    ))
+    .expect("the host core builds")
 }
 
 async fn created_on(core: &LashCore, id: &str, key: &str) -> lash::LashSession {
@@ -444,12 +448,15 @@ fn core_over(
     catalog: &Arc<LiveCatalog>,
     plugins: Vec<Arc<dyn lash::plugins::PluginFactory>>,
 ) -> LashCore {
-    let mut builder =
-        LashCore::standard_builder(double.double.lash_backend(), lash::TurnBudget::Unbounded)
-            .models(Arc::clone(catalog) as Arc<dyn lash::RuntimeModels>)
-            .model(KIMI)
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1));
+    let mut builder = LashCore::standard_builder(
+        double.double.lash_backend(),
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .models(Arc::clone(catalog) as Arc<dyn lash::RuntimeModels>)
+    .model(KIMI)
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1));
     for plugin in plugins {
         builder = builder.plugin(plugin);
     }
@@ -1274,17 +1281,20 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(
             )
         })
         .expect("the catalog names each key once");
-    let core =
-        LashCore::standard_builder(double.double.lash_backend(), lash::TurnBudget::Unbounded)
-            .models(Arc::new(registry))
-            .model(THINKER)
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-            .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                "model-keys-worker",
-                "keys-reasoning",
-            ))
-            .expect("the host core builds");
+    let core = LashCore::standard_builder(
+        double.double.lash_backend(),
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .models(Arc::new(registry))
+    .model(THINKER)
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        "model-keys-worker",
+        "keys-reasoning",
+    ))
+    .expect("the host core builds");
 
     // Creation: a key with no reasoning controls cannot record an effort.
     let created = core
@@ -1994,19 +2004,25 @@ async fn a_host_process_start_refuses_unsupported_inherited_reasoning_before_rec
             )
             .with_reasoning(high),
         ),
-        ..lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded)
+        ..lash::runtime::SessionPolicy::new(
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )
     };
-    let host =
-        LashCore::standard_builder(double.double.lash_backend(), lash::TurnBudget::Unbounded)
-            .models(registry)
-            .model(THINKER)
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-            .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                "host-reasoning",
-                "boot",
-            ))
-            .expect("the host core builds");
+    let host = LashCore::standard_builder(
+        double.double.lash_backend(),
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .models(registry)
+    .model(THINKER)
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        "host-reasoning",
+        "boot",
+    ))
+    .expect("the host core builds");
     let environment = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::AdmittedPluginConfig::default(),
         policy.clone(),
@@ -2083,6 +2099,7 @@ async fn a_host_process_start_refuses_unsupported_inherited_reasoning_before_rec
     create_request.model = Some(ModelKey::new(GLM));
     create_request.policy = Some(lash::runtime::SessionPolicy::new(
         lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
     ));
     let first = start_on(&double, &host, "host-reasoning-repaired", accepted.clone())
         .await

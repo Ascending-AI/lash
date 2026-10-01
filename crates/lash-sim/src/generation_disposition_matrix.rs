@@ -436,16 +436,20 @@ async fn runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value() {
     let engine = crate::backend::SimEngine::new(0x4122)
         .await
         .expect("sim engine");
-    let core = lash::LashCore::standard_builder(engine.backend(), lash::TurnBudget::Unbounded)
-        .generation(lash_core::GenerationOptions {
-            output_token_cap: NonZeroUsize::new(32_000),
-            ..Default::default()
-        })
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(provider, model)
-        .build(crate::sim_process_owner())
-        .expect("runtime core");
+    let core = lash::LashCore::standard_builder(
+        engine.backend(),
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .generation(lash_core::GenerationOptions {
+        output_token_cap: NonZeroUsize::new(32_000),
+        ..Default::default()
+    })
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .serve_test_model(provider, model)
+    .build(crate::sim_process_owner())
+    .expect("runtime core");
     let session = crate::open_created_session(&core, "matrix-cap")
         .await
         .expect("session");
@@ -500,18 +504,21 @@ async fn protocol_owned_stop_is_absent_from_the_wire_and_reported_suppressed() {
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
-    let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-        .generation(lash_core::GenerationOptions {
-            stop_sequences: vec![
-                crate::provider_variations::TYPESCRIPT_CLOSE_DELIMITER.to_string(),
-            ],
-            ..Default::default()
-        })
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(provider, model)
-        .build(crate::sim_process_owner())
-        .expect("RLM core");
+    let core = lash::LashCore::rlm_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+        factory,
+    )
+    .generation(lash_core::GenerationOptions {
+        stop_sequences: vec![crate::provider_variations::TYPESCRIPT_CLOSE_DELIMITER.to_string()],
+        ..Default::default()
+    })
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .serve_test_model(provider, model)
+    .build(crate::sim_process_owner())
+    .expect("RLM core");
     let session = crate::open_created_session(&core, "matrix-stop")
         .await
         .expect("session");

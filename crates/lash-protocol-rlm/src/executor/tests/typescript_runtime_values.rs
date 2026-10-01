@@ -37,7 +37,10 @@ pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomn
                 .build()
                 .expect("TypeScript runtime-value process test model"),
         ))),
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
         table.backend().clone(),

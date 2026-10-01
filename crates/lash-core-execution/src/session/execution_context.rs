@@ -119,6 +119,17 @@ pub struct RuntimeExecutionContext<'run> {
     /// [`OpenerState`](crate::session::OpenerState): the opener's owner hands
     /// one state to every phase context it builds.
     pub(crate) opener_groups: Arc<std::sync::Mutex<crate::session::OpenerGroupRegistry>>,
+    /// The tool calls this context's cell has made, per group key, counted
+    /// against the session's recorded `max_tool_calls` (FIG-4546). A turn
+    /// builds a fresh context per cell, so this is the cell's own total; a
+    /// redrive re-executes the cell and forms the same groups in the same
+    /// order, so it refuses the same call. Shared by clones and `to_static`.
+    /// A process counts what it holds instead, in `opener_groups`.
+    pub(crate) cell_tool_calls: Arc<std::sync::Mutex<std::collections::BTreeMap<String, usize>>>,
+    /// The latest `max_tool_calls` refusal this execution met, kept typed for
+    /// the language runtime that reports the failed cell or process: its own
+    /// error channel carries the refusal's class, code and message only.
+    pub(crate) tool_call_limit_refusal: Arc<std::sync::Mutex<Option<crate::ToolCallLimitExceeded>>>,
     /// The host's durable closing seam (ADR 0099 §7), which the opener's end
     /// finalizes through. `None` on Restate, whose engine-side group index is
     /// the twin, and wherever no host wired one.
@@ -519,6 +530,8 @@ impl<'run> RuntimeExecutionContext<'run> {
             nested_effect_error: Arc::clone(&self.nested_effect_error),
             incorporation_ledger: Arc::clone(&self.incorporation_ledger),
             opener_groups: Arc::clone(&self.opener_groups),
+            cell_tool_calls: Arc::clone(&self.cell_tool_calls),
+            tool_call_limit_refusal: Arc::clone(&self.tool_call_limit_refusal),
             #[cfg(any(test, feature = "testing"))]
             live_opener_guard: self.live_opener_guard.clone(),
             #[cfg(any(test, feature = "testing"))]
@@ -761,6 +774,13 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     pub(super) fn attachment_acceptance(&self) -> &crate::provider::AttachmentCapabilitySnapshot {
         &self.execution_env_spec.policy.attachment_acceptance
+    }
+
+    /// The session's recorded tool-call limit, as this execution runs under
+    /// it: a root's snapshot for a turn, the recorded environment for a
+    /// process.
+    pub(super) fn max_tool_calls(&self) -> crate::MaxToolCalls {
+        self.execution_env_spec.policy.max_tool_calls
     }
 
     pub fn with_execution_env_spec(

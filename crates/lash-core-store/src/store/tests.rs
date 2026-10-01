@@ -17,7 +17,10 @@ fn test_message(id: &str) -> crate::Message {
 fn state_with_persisted_initial_frame(session_id: &str) -> crate::RuntimeSessionState {
     let mut state = crate::RuntimeSessionState {
         session_id: SessionId::from(session_id),
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.ensure_agent_frame_initialized();
     state.mark_node_ids_persisted(
@@ -63,7 +66,10 @@ fn intent_fixture() -> RuntimeCommit {
     let mut state = crate::RuntimeSessionState {
         session_id: SessionId::from("golden-session"),
         turn_index: 7,
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.ensure_agent_frame_initialized();
     let graph_data = state.session_graph.data_mut();
@@ -220,7 +226,10 @@ fn first_persisted_state_commit_derives_and_installs_node_ids() {
             Some(placeholder.into()),
         )
         .expect("first-commit fixture graph is valid"),
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     let operation = OperationId::new(
         crate::ExecutionScope::runtime_operation("first-commit"),
@@ -411,7 +420,7 @@ fn intent_hash_golden_vector() {
     // FIG-4236: the usage deltas left the intent (ADR 0125).
     assert_eq!(
         intent_fixture().turn_commit_hash().expect("golden intent"),
-        "bead92b40f4b1e4610c5c3df4ee06539f6d66c2d61478685f11553270fc9724a"
+        "42359869259802ce545652b639d3f87403e233ae4bcd76bb4d05e4cbb941605c"
     );
 }
 
@@ -420,7 +429,7 @@ fn cancellation_evidence_changes_intent_hash_from_current_shape() {
     let legacy = intent_fixture();
     assert_eq!(
         legacy.turn_commit_hash().expect("legacy intent"),
-        "bead92b40f4b1e4610c5c3df4ee06539f6d66c2d61478685f11553270fc9724a",
+        "42359869259802ce545652b639d3f87403e233ae4bcd76bb4d05e4cbb941605c",
         "absent cancellation evidence keeps the current plain-commit preimage"
     );
 
@@ -454,7 +463,7 @@ fn failure_evidence_changes_intent_hash_from_current_shape() {
     let baseline_hash = baseline.turn_commit_hash().expect("baseline intent");
     assert_eq!(
         baseline_hash,
-        "bead92b40f4b1e4610c5c3df4ee06539f6d66c2d61478685f11553270fc9724a"
+        "42359869259802ce545652b639d3f87403e233ae4bcd76bb4d05e4cbb941605c"
     );
 
     let mut with_evidence = baseline;
@@ -485,7 +494,10 @@ fn session_head_meta_takes_its_identity_from_the_row_key() {
         SessionHeadPayload {
             schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
             session_id: SessionId::from("keyed-session"),
-            config: crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded),
+            config: crate::PersistedSessionConfig::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            ),
             current_frame_node_id: None,
             published_by_drive: false,
         },
@@ -509,7 +521,10 @@ fn session_head_meta_refuses_a_head_json_naming_another_session() {
         SessionHeadPayload {
             schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
             session_id: SessionId::from("impostor-session"),
-            config: crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded),
+            config: crate::PersistedSessionConfig::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            ),
             current_frame_node_id: None,
             published_by_drive: false,
         },
@@ -537,7 +552,7 @@ fn session_head_meta_refuses_a_head_json_missing_its_session_id() {
     // the row key is what decides whether that is this session's identity.
     let payload: SessionHeadPayload = serde_json::from_value(serde_json::json!({
         "schema_version": SESSION_HEAD_META_SCHEMA_VERSION,
-        "config": crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded),
+        "config": crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
     }))
     .expect("a head payload without a session id still decodes");
 
@@ -574,7 +589,10 @@ fn session_head_payload_bytes_match_the_legacy_meta_format() {
         schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
         session_id: SessionId::from("column-owned-head"),
         head_revision: 41,
-        config: crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded),
+        config: crate::PersistedSessionConfig::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ),
         current_frame_node_id: None,
         checkpoint_ref: Some(BlobRef("checkpoint".to_string())),
         leaf_node_id: Some("leaf".to_string()),
@@ -584,7 +602,10 @@ fn session_head_payload_bytes_match_the_legacy_meta_format() {
         SessionHeadPayload {
             schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
             session_id: SessionId::from("column-owned-head"),
-            config: crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded),
+            config: crate::PersistedSessionConfig::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            ),
             current_frame_node_id: None,
             published_by_drive: false,
         },
@@ -784,6 +805,7 @@ fn node_derivation_guard_rejects_frame_open_rogue_id() {
         reason: crate::AgentFrameReason::initial(),
         assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
         )),
     };
 
@@ -845,6 +867,7 @@ fn frame_node_identity_is_stable_across_operation_realization() {
                 reason: crate::AgentFrameReason::initial(),
                 assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
                 )),
             },
         }],

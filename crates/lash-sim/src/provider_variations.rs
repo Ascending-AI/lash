@@ -475,16 +475,21 @@ mod tests {
             std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &backend,
         );
-        let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-            .generation(GenerationOptions {
-                stop_sequences: vec![TYPESCRIPT_CLOSE_DELIMITER.to_string()],
-                ..GenerationOptions::default()
-            })
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .serve_test_model(provider, model)
-            .build(crate::sim_process_owner())
-            .expect("RLM core");
+        let core = lash::LashCore::rlm_builder(
+            backend,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+            factory,
+        )
+        .generation(GenerationOptions {
+            stop_sequences: vec![TYPESCRIPT_CLOSE_DELIMITER.to_string()],
+            ..GenerationOptions::default()
+        })
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_model(provider, model)
+        .build(crate::sim_process_owner())
+        .expect("RLM core");
         let session = crate::open_created_session(&core, "rlm-stop-honoring-boundary")
             .await
             .expect("RLM session");

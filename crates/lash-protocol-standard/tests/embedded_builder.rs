@@ -40,7 +40,10 @@ async fn embedded_runtime_builder_loads_state_from_store() {
         session_id: SessionId::from("stored-session"),
         policy: SessionPolicy {
             model: test_model(),
-            ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            ..SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            )
         },
         turn_index: 3,
         token_usage: TokenUsage {
@@ -52,6 +55,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
         },
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
     state.ensure_agent_frame_initialized();
@@ -108,10 +112,14 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
         session_id: SessionId::from("alpha"),
         policy: SessionPolicy {
             model: test_model(),
-            ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            ..SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            )
         },
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
     let store = lash_core::runtime::admit_session_view(

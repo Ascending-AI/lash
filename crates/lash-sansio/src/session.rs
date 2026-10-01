@@ -89,6 +89,10 @@ pub struct CellFailure {
     /// The measured run limit, kept typed through the plugin and host result.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker_limit: Option<crate::worker_limit::WorkerLimit>,
+    /// The session's `max_tool_calls` refusal, when that is why the cell
+    /// failed (FIG-4546), kept typed through the plugin and host result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_limit: Option<crate::session_model::ToolCallLimitExceeded>,
 }
 
 impl CellFailure {
@@ -97,11 +101,20 @@ impl CellFailure {
             kind,
             message: message.into(),
             worker_limit: None,
+            tool_call_limit: None,
         }
     }
 
     pub fn with_worker_limit(mut self, limit: crate::worker_limit::WorkerLimit) -> Self {
         self.worker_limit = Some(limit);
+        self
+    }
+
+    pub fn with_tool_call_limit(
+        mut self,
+        exceeded: crate::session_model::ToolCallLimitExceeded,
+    ) -> Self {
+        self.tool_call_limit = Some(exceeded);
         self
     }
 }

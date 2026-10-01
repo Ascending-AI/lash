@@ -79,21 +79,25 @@ fn services(backend: lash_core::Backend, authority: lash_restate::RestateAuthori
         })
         .build()
         .into_handle();
-    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(
-            provider,
-            lash_core::ModelMetadata::builder("mock-model")
-                .context_window_tokens(200_000)
-                .build()
-                .unwrap(),
-        )
-        .build(lash_core::LeaseOwnerIdentity::opaque(
-            "workload-delete",
-            "law",
-        ))
-        .unwrap();
+    let core = lash::LashCore::standard_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+    .serve_test_model(
+        provider,
+        lash_core::ModelMetadata::builder("mock-model")
+            .context_window_tokens(200_000)
+            .build()
+            .unwrap(),
+    )
+    .build(lash_core::LeaseOwnerIdentity::opaque(
+        "workload-delete",
+        "law",
+    ))
+    .unwrap();
     Services { core, authority }
 }
 

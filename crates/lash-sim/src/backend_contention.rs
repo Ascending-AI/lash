@@ -217,7 +217,11 @@ fn store_request(session_id: &SessionId) -> SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
         relation: SessionRelation::Root,
-        config: SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+        config: SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
+        .into(),
         head: SessionCreationHead::CommittedByCreator,
     }
 }
@@ -298,6 +302,7 @@ async fn stale_head_transaction_is_rejected(
         head_revision: expected_head_revision,
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
     store
@@ -309,6 +314,7 @@ async fn stale_head_transaction_is_rejected(
         head_revision: expected_head_revision,
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
     let err = store
@@ -345,6 +351,7 @@ async fn final_commit_retry_and_conflict_are_fenced(
         session_id: SessionId::from(session_id.to_string()),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
     let operation =
@@ -369,6 +376,7 @@ async fn final_commit_retry_and_conflict_are_fenced(
         turn_index: 1,
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
     let (changed_commit, _) = RuntimeCommit::persisted_state_for_test(&changed_state)

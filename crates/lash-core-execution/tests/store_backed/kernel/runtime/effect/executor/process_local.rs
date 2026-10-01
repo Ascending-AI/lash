@@ -11,7 +11,7 @@ mod tests {
         let pin = crate::testing::host_pin_claim_for_testing();
         let spec = crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
         );
         let env_ref = crate::publish_process_execution_env(store.as_ref(), &pin, &spec)
             .await
@@ -197,7 +197,7 @@ mod tests {
             double.lash_backend().process_env_store();
         let env_spec = crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
         );
         let env_ref = env_spec.stable_ref().expect("stable environment reference");
         let command = start_envelope(
@@ -326,7 +326,7 @@ mod tests {
         let registry: Arc<dyn crate::ProcessRegistry> = double.lash_backend().process_registry();
         let env_spec = crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
         );
         let env_ref = env_spec.stable_ref().expect("stable environment reference");
         let bytes = env_spec.to_store_bytes().expect("encode environment");
@@ -429,7 +429,7 @@ mod tests {
         let env = |budget: crate::TurnBudget| {
             crate::ProcessExecutionEnvSpec::new(
                 crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(budget),
+                crate::SessionPolicy::new(budget, crate::MaxToolCalls::new(1024)),
             )
         };
         let first_env = env(crate::TurnBudget::Unbounded);
@@ -598,7 +598,7 @@ mod tests {
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let env_spec = crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
         );
         let process_work = Arc::new(PokeAlwaysFails {
             pokes: AtomicUsize::new(0),
@@ -766,7 +766,7 @@ mod tests {
             .expect("register the key's process");
         let env_spec = crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
         );
         let env_ref = env_spec.stable_ref().expect("stable environment reference");
         assert_ne!(

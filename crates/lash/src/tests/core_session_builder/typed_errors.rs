@@ -43,6 +43,7 @@ fn core(backend: lash_core::Backend) -> LashCore {
     explicit_ephemeral_facets(LashCore::standard_builder(
         backend,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())
@@ -272,6 +273,7 @@ async fn state_law(postgres: bool) -> Result<()> {
             let core = explicit_ephemeral_facets(LashCore::standard_builder(
                 backend.clone(),
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
             .serve_test_model(mock_provider(), mock_model_spec())
             .plugin(Arc::new(StateHook {

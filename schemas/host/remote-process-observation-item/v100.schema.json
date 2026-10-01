@@ -44,6 +44,17 @@
         "message": {
           "type": "string"
         },
+        "tool_call_limit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolCallLimitExceeded"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The session's `max_tool_calls` refusal, when that is why the cell\nfailed (FIG-4546), kept typed through the plugin and host result."
+        },
         "worker_limit": {
           "anyOf": [
             {
@@ -340,6 +351,12 @@
           "type": "string"
         }
       ]
+    },
+    "MaxToolCalls": {
+      "description": "The number of tool calls one execution may make: the host's required\ndecision, with no default and no built-in ceiling (FIG-4546).\n\nWhat it counts depends on the execution. A cell \u2014 one code cell of a turn,\nor one tool step of a protocol without cells \u2014 may make at most this many\ntool calls in total. A process may hold at most this many at once: a call\ncounts from its acceptance until the process no longer depends on it, so\na long-running process is bounded in what it retains, never in what it\ndoes over its life. The call that passes the limit fails with\n[`ToolCallLimitExceeded`]; every call under it runs untouched. The limit\npaces nothing: rate limits and throttling are the host's own.",
+      "format": "uint",
+      "minimum": 1,
+      "type": "integer"
     },
     "ProcessCursor": {
       "description": "Opaque process cursor: `lashpc3:<epoch>:<process-reference>:<position>:<sequence>`.",
@@ -743,6 +760,53 @@
         "limit_chars"
       ],
       "type": "object"
+    },
+    "ToolCallLimitExceeded": {
+      "additionalProperties": false,
+      "description": "A tool call refused by the session's [`MaxToolCalls`]: the program asked\nfor more tool calls than its recorded limit admits.\n\nIt is the program's failure, never the host's: the limit is recorded\nconfig and the count is a fact of the program's own history, so a replay\nor a redrive refuses the same call. Nothing of the refused calls is\njournaled or dispatched.",
+      "properties": {
+        "counted": {
+          "description": "The calls counted against the limit before the refused ones: made so\nfar by a cell, held now by a process.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "limit": {
+          "$ref": "#/$defs/MaxToolCalls",
+          "description": "The recorded `max_tool_calls` the execution runs under."
+        },
+        "requested": {
+          "description": "The calls refused together: one for a single call, an aggregate's\nunique tool calls for an aggregate.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "scope": {
+          "$ref": "#/$defs/ToolCallLimitScope"
+        }
+      },
+      "required": [
+        "scope",
+        "limit",
+        "counted",
+        "requested"
+      ],
+      "type": "object"
+    },
+    "ToolCallLimitScope": {
+      "description": "Which execution a [`MaxToolCalls`] limit refused.",
+      "oneOf": [
+        {
+          "const": "cell",
+          "description": "A cell: the limit is the total it may make.",
+          "type": "string"
+        },
+        {
+          "const": "process",
+          "description": "A process: the limit is what it may hold at once.",
+          "type": "string"
+        }
+      ]
     },
     "ToolFailureClass": {
       "enum": [

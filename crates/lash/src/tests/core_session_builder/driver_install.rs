@@ -50,6 +50,7 @@ async fn a_core_built_while_a_dropped_cores_drive_is_in_flight_drives_on_its_own
     let core_v1 = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         tagged_provider("v1", Arc::clone(&calls), Some(held.clone())),
@@ -84,6 +85,7 @@ async fn a_core_built_while_a_dropped_cores_drive_is_in_flight_drives_on_its_own
     let core_v2 = explicit_ephemeral_facets(LashCore::standard_builder(
         backend,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         tagged_provider("v2", Arc::clone(&calls), None),

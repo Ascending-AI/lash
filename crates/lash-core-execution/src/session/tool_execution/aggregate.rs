@@ -91,6 +91,11 @@ pub enum ToolAggregateOutcome {
     /// Infrastructure failure or host cancellation (§10 L3): raised on the
     /// caller's host-control channel, never as a leaf rejection.
     HostControl(String),
+    /// The aggregate's tool calls would pass the session's recorded
+    /// `max_tool_calls` (FIG-4546). The whole aggregate is refused before
+    /// anything of it is journaled or dispatched. The program's failure, not
+    /// the host's: a replay refuses the same aggregate.
+    ToolCallLimitExceeded(crate::ToolCallLimitExceeded),
 }
 
 /// Where the immediate prefix decided the aggregate, if it did.
@@ -297,6 +302,9 @@ impl RuntimeExecutionContext<'_> {
         &self,
         error: crate::RuntimeEffectControllerError,
     ) -> ToolAggregateOutcome {
+        if let Some(exceeded) = error.tool_call_limit_exceeded() {
+            return ToolAggregateOutcome::ToolCallLimitExceeded(exceeded);
+        }
         if !error.journaled {
             self.record_nested_effect_error(error.clone());
         }

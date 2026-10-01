@@ -1,4 +1,6 @@
+mod execution_result;
 mod segment_state;
+use execution_result::{process_lashlang_execution_result, process_lashlang_failure};
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use segment_state::capture_segment;
 mod definition_holds;
@@ -250,6 +252,11 @@ struct LashlangSegmentState {
     /// unsettled; the successor segment reattaches these cursors and the
     /// process terminal closes them.
     outstanding_groups: Vec<lash_core::EffectGroupHandle>,
+    /// The tool calls each held group counts against the session's
+    /// `max_tool_calls` (FIG-4546), by group key. The successor segment is
+    /// the same process, so it holds the same calls: it reuses these
+    /// reservations rather than counting the groups again or not at all.
+    held_tool_calls: BTreeMap<String, usize>,
     /// The worker accounting the body carries across this boundary
     /// (ADR 0123). Absent from a handover written before it existed: that
     /// successor reserves boundary 0's successor with fresh totals.
@@ -622,7 +629,10 @@ async fn run_lashlang_process_scoped(
     if let Some(segment_state) = segment_state.as_mut() {
         ctx.restore_started_process_ids(&segment_state.started_process_ids);
         ctx.restore_incorporation_ledger(segment_state.incorporation_ledger.clone());
-        ctx.restore_outstanding_groups(std::mem::take(&mut segment_state.outstanding_groups));
+        ctx.restore_outstanding_groups(
+            std::mem::take(&mut segment_state.outstanding_groups),
+            &segment_state.held_tool_calls,
+        );
     }
     let ordinals = ReplayOrdinals::restore(segment_state.as_ref());
     let run = crate::LashlangReplayRun::new(
@@ -851,12 +861,14 @@ async fn execute_lashlang(
     Ok(match run {
         lash_vm_broker::BrokeredEnd::Complete { value, .. } => process_lashlang_execution_result(
             Ok(rmp_serde::from_slice(&value.0).map_err(|e| infra(e.to_string()))?),
+            None,
         )
         .into(),
         lash_vm_broker::BrokeredEnd::GuestError { error, .. } => process_lashlang_execution_result(
             Err(rmp_serde::from_slice::<lashlang::RuntimeFailure>(&error.0)
                 .map_err(|e| infra(e.to_string()))?
                 .error),
+            host.ctx.tool_call_limit_refusal(),
         )
         .into(),
         lash_vm_broker::BrokeredEnd::Suspended { checkpoint } => {
@@ -1673,63 +1685,6 @@ fn process_trace_session_id(originator: &lash_core::ProcessOriginator) -> Option
         lash_core::ProcessOriginator::Session { session_id, .. } => Some(session_id.clone()),
         lash_core::ProcessOriginator::Host { .. } => None,
     }
-}
-
-fn process_lashlang_execution_result(
-    result: Result<lashlang::ExecutionOutcome, lashlang::RuntimeError>,
-) -> lash_core::ProcessAwaitOutput {
-    match result {
-        Ok(lashlang::ExecutionOutcome::Finished(value)) => {
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                lashlang_value_to_json(&value)
-                    .unwrap_or_else(|err| serde_json::json!({ "error": err.to_string() })),
-            ))
-        }
-        Ok(lashlang::ExecutionOutcome::Failed(value)) => process_lashlang_failure(
-            LashlangProcessFailureCode::ProcessFailed,
-            value.to_string(),
-            Some(
-                lashlang_value_to_json(&value)
-                    .unwrap_or_else(|err| serde_json::json!({ "error": err.to_string() })),
-            ),
-        ),
-        Ok(lashlang::ExecutionOutcome::Continued) => {
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                serde_json::Value::Null,
-            ))
-        }
-        Err(err) => {
-            let exhausted = err.is_execution_bound_exhausted();
-            #[cfg(any(test, feature = "testing"))]
-            assert!(
-                !EXECUTION_BOUND_EXHAUSTION_LOUD.load(Ordering::SeqCst) || !exhausted,
-                "confidence durable process exhausted a required Lashlang bound: {err}"
-            );
-            process_lashlang_failure(
-                if exhausted {
-                    LashlangProcessFailureCode::ProcessExecutionBoundExhausted
-                } else {
-                    LashlangProcessFailureCode::ProcessRuntimeError
-                },
-                crate::host_lifetime_failure_message(&err).unwrap_or_else(|| err.to_string()),
-                None,
-            )
-        }
-    }
-}
-
-fn process_lashlang_failure(
-    code: LashlangProcessFailureCode,
-    message: impl Into<String>,
-    raw: Option<serde_json::Value>,
-) -> lash_core::ProcessAwaitOutput {
-    let mut failure = lash_core::ToolFailure::runtime(
-        lash_core::ToolFailureClass::Execution,
-        code.as_str(),
-        message,
-    );
-    failure.raw = raw.map(lash_core::ToolValue::untrusted_json);
-    lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::failure(failure))
 }
 
 fn process_lashlang_cancelled(message: impl Into<String>) -> lash_core::ProcessAwaitOutput {

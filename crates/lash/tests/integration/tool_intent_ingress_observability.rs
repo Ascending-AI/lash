@@ -36,28 +36,32 @@ async fn test_core() -> lash::Result<(lash::LashCore, ProcessId, ProcessId)> {
         targets.push(process);
     }
     let [process, other_process] = <[ProcessId; 2]>::try_from(targets).expect("two targets");
-    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .models(std::sync::Arc::new(
-            lash::ModelRegistry::new()
-                .register(
-                    "intent-ingress-observability-model",
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("intent-ingress-observability-model")
-                            .context_window_tokens(4_096)
-                            .build()
-                            .expect("valid model"),
-                        lash::provider::ProviderHandle::unconfigured(),
-                    ),
-                )
-                .expect("register the test model"),
-        ))
-        .model("intent-ingress-observability-model")
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "intent-ingress-observability-worker",
-            "intent-ingress-observability-boot",
-        ))?;
+    let core = lash::LashCore::standard_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .models(std::sync::Arc::new(
+        lash::ModelRegistry::new()
+            .register(
+                "intent-ingress-observability-model",
+                lash::RegisteredModel::new(
+                    lash::ModelMetadata::builder("intent-ingress-observability-model")
+                        .context_window_tokens(4_096)
+                        .build()
+                        .expect("valid model"),
+                    lash::provider::ProviderHandle::unconfigured(),
+                ),
+            )
+            .expect("register the test model"),
+    ))
+    .model("intent-ingress-observability-model")
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        "intent-ingress-observability-worker",
+        "intent-ingress-observability-boot",
+    ))?;
     let _session = crate::created_session(&core, SESSION).await.open().await?;
     Ok((core, process, other_process))
 }

@@ -6,7 +6,7 @@ fn main() {
         schema_version: 1,
         session_id: SessionId::from("session"),
         head_revision: 1,
-        config: PersistedSessionConfig::new(lash_core::TurnBudget::Unbounded),
+        config: PersistedSessionConfig::new(lash_core::TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024)),
         current_frame_node_id: None,
         checkpoint_ref: None,
         leaf_node_id: None,

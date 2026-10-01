@@ -66,6 +66,15 @@ use lash_sansio::sync::MutexExt as _;
 use pretty_assertions::assert_eq;
 
 mod budget;
+mod limit;
+
+pub use limit::{
+    holding_producers, staged_producers,
+    tool_call_limit_admits_the_limit_and_refuses_the_group_past_it,
+    tool_call_limit_counts_what_a_process_holds_across_a_worker_kill,
+    tool_call_limit_refuses_the_same_call_across_a_crash, tool_call_limit_staged_calls,
+    turn_staged_producers,
+};
 
 /// How long activation may stall while planned leaves have not started.
 ///
@@ -137,6 +146,23 @@ impl ToolBatchPlan {
 /// make the runtime issue one plan as one group.
 pub type ToolBatchScript = Arc<dyn Fn(&ToolBatchPlan) -> Vec<crate::LlmResponse> + Send + Sync>;
 
+/// A provider script that issues `plan` as two groups, one after the other:
+/// its first `usize` leaves, then the rest.
+pub type ToolBatchStagedScript =
+    Arc<dyn Fn(&ToolBatchPlan, usize) -> Vec<crate::LlmResponse> + Send + Sync>;
+
+/// What the session's `max_tool_calls` counts on a producer's surface
+/// (FIG-4546).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolCallLimitUnit {
+    /// One code cell: every call the cell makes, across its groups.
+    Cell,
+    /// One step of a protocol without cells: the step's one group.
+    Step,
+    /// One process: the calls it holds at once.
+    Process,
+}
+
 /// A fresh process registry for one scenario, supplied by the tier.
 ///
 /// Only a producer whose group runs *inside a process* needs one. It is a
@@ -180,6 +206,17 @@ pub struct ToolBatchProducer {
     /// producer that leaves this false exercises only the `'static` shortcut
     /// and never reaches the proxy.
     pub through_task_proxy: bool,
+    /// What the session's `max_tool_calls` counts on this surface.
+    pub limit_unit: ToolCallLimitUnit,
+    /// The script that issues a plan as two groups in sequence, where the
+    /// surface can spell one: both in one cell, in two steps of a protocol
+    /// without cells, or both in one process body.
+    pub staged: Option<ToolBatchStagedScript>,
+    /// The script that issues a plan's first leaves as a race, whose losers
+    /// the opener keeps holding once it settles, and then the rest as a
+    /// second group, where the surface holds groups past their consumer: a
+    /// process body.
+    pub holding: Option<ToolBatchStagedScript>,
 }
 
 impl std::fmt::Debug for ToolBatchProducer {
@@ -258,6 +295,23 @@ pub fn parallel_model_tool_calls_producer(
         routes: named_routes(),
         process_registry: None,
         through_task_proxy: false,
+        limit_unit: ToolCallLimitUnit::Step,
+        staged: Some(Arc::new(|plan, first| {
+            let calls = |leaves: &[(usize, &ToolBatchLeaf)]| {
+                model_response(
+                    leaves
+                        .iter()
+                        .map(|(position, leaf)| {
+                            native_call(format!("parallel-call-{position}"), &leaf.tool, *position)
+                        })
+                        .collect(),
+                )
+            };
+            let leaves = plan.leaves.iter().enumerate().collect::<Vec<_>>();
+            let (first, rest) = leaves.split_at(first.min(leaves.len()));
+            vec![calls(first), calls(rest)]
+        })),
+        holding: None,
     }
 }
 
@@ -276,6 +330,9 @@ pub fn batch_sugar_producer(
         routes: named_routes(),
         process_registry: None,
         through_task_proxy: false,
+        limit_unit: ToolCallLimitUnit::Step,
+        staged: None,
+        holding: None,
     }
 }
 
@@ -315,6 +372,9 @@ pub fn batch_wrappers_beside_native_calls_producer(
         routes: named_routes(),
         process_registry: None,
         through_task_proxy: false,
+        limit_unit: ToolCallLimitUnit::Step,
+        staged: None,
+        holding: None,
     }
 }
 
@@ -347,6 +407,11 @@ pub fn rlm_promise_all_producer(
         routes: rlm_routes(grants),
         process_registry: None,
         through_task_proxy: false,
+        limit_unit: ToolCallLimitUnit::Cell,
+        staged: Some(Arc::new(|plan, first| {
+            rlm_staged_cell_script(plan, first, "Promise.all")
+        })),
+        holding: None,
     }
 }
 
@@ -363,6 +428,11 @@ pub fn rlm_promise_all_settled_producer(
         routes: rlm_routes(grants),
         process_registry: None,
         through_task_proxy: false,
+        limit_unit: ToolCallLimitUnit::Cell,
+        staged: Some(Arc::new(|plan, first| {
+            rlm_staged_cell_script(plan, first, "Promise.allSettled")
+        })),
+        holding: None,
     }
 }
 
@@ -371,12 +441,47 @@ pub fn rlm_promise_all_settled_producer(
 const RLM_CELL_DIALECT: &str = "typescript";
 
 fn aggregate_calls(plan: &ToolBatchPlan, indent: &str) -> String {
+    staged_calls(plan, 0..plan.leaves.len(), indent)
+}
+
+/// The calls of the leaves in `positions`, one per line.
+fn staged_calls(plan: &ToolBatchPlan, positions: std::ops::Range<usize>, indent: &str) -> String {
     plan.leaves
         .iter()
         .enumerate()
+        .filter(|(position, _)| positions.contains(position))
         .map(|(position, leaf)| format!("{indent}tools.{}({{ position: {position} }})", leaf.tool))
         .collect::<Vec<_>>()
         .join(",\n")
+}
+
+/// Two aggregates awaited one after the other: the first `first` leaves, then
+/// the rest.
+fn staged_aggregates(plan: &ToolBatchPlan, first: usize, aggregate: &str, indent: &str) -> String {
+    let first = first.min(plan.leaves.len());
+    format!(
+        "{indent}const first = await {aggregate}([\n{}\n{indent}]);\n\
+         {indent}const rest = await {aggregate}([\n{}\n{indent}]);",
+        staged_calls(plan, 0..first, &format!("{indent}  ")),
+        staged_calls(plan, first..plan.leaves.len(), &format!("{indent}  ")),
+    )
+}
+
+/// One cell that awaits the plan as two aggregates in sequence, so both
+/// count against the one cell's `max_tool_calls`.
+fn rlm_staged_cell_script(
+    plan: &ToolBatchPlan,
+    first: usize,
+    aggregate: &str,
+) -> Vec<crate::LlmResponse> {
+    let body = format!(
+        "{}\nfinish([first, rest]);",
+        staged_aggregates(plan, first, aggregate, "")
+    );
+    vec![model_response(vec![crate::LlmOutputPart::Text {
+        text: format!("<{RLM_CELL_DIALECT}>\n{body}\n</{RLM_CELL_DIALECT}>"),
+        response_meta: None,
+    }])]
 }
 
 /// The cell `aggregate` issues over the plan.
@@ -430,6 +535,36 @@ pub fn lashlang_process_aggregate_producer(
         routes: named_routes(),
         process_registry: Some(registry),
         through_task_proxy: true,
+        limit_unit: ToolCallLimitUnit::Process,
+        staged: Some(Arc::new(|plan, first| {
+            let body = format!(
+                "const group = async () => {{\n{}\n  return [first, rest];\n}};\n\
+                 const handle = await processes.start({{ definition: group }});\n\
+                 finish(await handle);",
+                staged_aggregates(plan, first, "Promise.all", "  ")
+            );
+            vec![model_response(vec![crate::LlmOutputPart::Text {
+                text: format!("<{RLM_CELL_DIALECT}>\n{body}\n</{RLM_CELL_DIALECT}>"),
+                response_meta: None,
+            }])]
+        })),
+        holding: Some(Arc::new(|plan, first| {
+            let first = first.min(plan.leaves.len());
+            let body = format!(
+                "const group = async () => {{\n\
+                 \x20 const first = await Promise.race([\n{}\n  ]);\n\
+                 \x20 const rest = await Promise.all([\n{}\n  ]);\n\
+                 \x20 return [first, rest];\n}};\n\
+                 const handle = await processes.start({{ definition: group }});\n\
+                 finish(await handle);",
+                staged_calls(plan, 0..first, "    "),
+                staged_calls(plan, first..plan.leaves.len(), "    "),
+            );
+            vec![model_response(vec![crate::LlmOutputPart::Text {
+                text: format!("<{RLM_CELL_DIALECT}>\n{body}\n</{RLM_CELL_DIALECT}>"),
+                response_meta: None,
+            }])]
+        })),
     }
 }
 
@@ -597,6 +732,18 @@ impl Rendezvous {
         self.shared.lock_recover().expired.clone()
     }
 
+    /// Counts `gate` as started for the waiters, without logging a leaf: a
+    /// law's own signal, for a leaf whose dependency names the gate and not
+    /// a sibling.
+    fn open_gate(&self, gate: &str) {
+        let started = {
+            let mut shared = self.shared.lock_recover();
+            shared.started.push(gate.to_string());
+            shared.started.len()
+        };
+        let _ = self.notify.send(started);
+    }
+
     /// Lets every waiter through, now and from now on.
     fn release(&self) {
         self.released.store(true, Ordering::SeqCst);
@@ -688,6 +835,11 @@ struct ScenarioState {
     /// them"; a present one is the reverse-dependency case.
     dependencies: BTreeMap<String, Vec<String>>,
     model_calls: AtomicUsize,
+    /// The session's `max_tool_calls`, when the scenario states its own.
+    max_tool_calls: Option<usize>,
+    /// Every `max_tool_calls` refusal the model was shown, in the order it
+    /// was shown them: the refusal's own sentence, read off the request.
+    refusals: std::sync::Mutex<Vec<String>>,
 }
 
 impl ScenarioState {
@@ -700,6 +852,8 @@ impl ScenarioState {
             rendezvous: Arc::new(Rendezvous::new(plan.tools(), schedule.gated)),
             dependencies,
             model_calls: AtomicUsize::new(0),
+            max_tool_calls: schedule.max_tool_calls,
+            refusals: std::sync::Mutex::default(),
         }
     }
 
@@ -902,6 +1056,8 @@ enum ScenarioEnd {
     Finished { replies: Vec<String> },
     /// The turn did not settle within its budget.
     DeadlockBudgetExpired { budget: Duration },
+    /// The turn ended some other way than finishing.
+    Ended { outcome: String },
 }
 
 /// The schedule one scenario runs under.
@@ -911,20 +1067,26 @@ struct Schedule {
     gated: bool,
     /// The turn's deadlock budget.
     budget: Duration,
+    /// The session's `max_tool_calls`, when the scenario states its own
+    /// rather than the fixture policy's.
+    max_tool_calls: Option<usize>,
 }
 
 impl Schedule {
     const GATED: Self = Self {
         gated: true,
         budget: TURN_BUDGET,
+        max_tool_calls: None,
     };
     const SERIAL_SAFE: Self = Self {
         gated: false,
         budget: TURN_BUDGET,
+        max_tool_calls: None,
     };
     const NEGATIVE_CONTROL: Self = Self {
         gated: true,
         budget: SERIAL_BUDGET,
+        max_tool_calls: None,
     };
 }
 
@@ -1119,6 +1281,7 @@ async fn run_scenario_on_session(
         leaf_window: rendezvous.leaf_window(),
         end,
         model_calls: state.model_calls.load(Ordering::SeqCst),
+        refusals: state.refusals.lock_recover().clone(),
     }
 }
 
@@ -1133,6 +1296,8 @@ struct ScenarioObservations {
     leaf_window: Option<(Instant, Instant)>,
     end: ScenarioEnd,
     model_calls: usize,
+    /// Every `max_tool_calls` refusal the model was shown.
+    refusals: Vec<String>,
 }
 
 impl ScenarioObservations {
@@ -1176,7 +1341,7 @@ impl ScenarioObservations {
     fn replies(&self) -> &[String] {
         match &self.end {
             ScenarioEnd::Finished { replies } => replies,
-            ScenarioEnd::DeadlockBudgetExpired { .. } => &[],
+            ScenarioEnd::DeadlockBudgetExpired { .. } | ScenarioEnd::Ended { .. } => &[],
         }
     }
 }
@@ -1251,9 +1416,17 @@ async fn drive_turn(
     turn_controller: Option<crate::ScopedEffectController<'_>>,
     budget: Duration,
 ) -> ScenarioEnd {
-    let closing = || {
+    // A protocol with cells closes its turn with `finish`; a model reply in
+    // prose closes one without.
+    let closing_text = match producer.limit_unit {
+        ToolCallLimitUnit::Step => "group complete".to_string(),
+        ToolCallLimitUnit::Cell | ToolCallLimitUnit::Process => {
+            format!("<{RLM_CELL_DIALECT}>\nfinish(\"group complete\");\n</{RLM_CELL_DIALECT}>")
+        }
+    };
+    let closing = move || {
         model_response(vec![crate::LlmOutputPart::Text {
-            text: "group complete".to_string(),
+            text: closing_text.clone(),
             response_meta: None,
         }])
     };
@@ -1274,6 +1447,12 @@ async fn drive_turn(
                 .count();
             let next = script.get(step).cloned();
             let state = Arc::clone(&state);
+            // What the model is shown of a `max_tool_calls` refusal, in the
+            // refusal's own words.
+            if let Some(refusal) = limit::refusal_in(&format!("{:?}", request.messages)) {
+                state.refusals.lock_recover().push(refusal);
+            }
+            let closing = closing.clone();
             async move {
                 state.model_calls.fetch_add(1, Ordering::SeqCst);
                 Ok(next.unwrap_or_else(closing))
@@ -1297,10 +1476,16 @@ async fn drive_turn(
     host.providers.models = crate::testing::standard_test_models(model.into_handle());
     let mut policy = crate::testing::mock_session_policy();
     policy.session_id = Some(world.session_id.clone());
+    if let Some(max_tool_calls) = world.state.max_tool_calls {
+        policy.max_tool_calls = crate::MaxToolCalls::new(max_tool_calls);
+    }
     let state = crate::RuntimeSessionState {
         session_id: world.session_id.clone(),
         policy: policy.clone(),
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     // A producer whose group runs inside a process needs four things this
     // runtime otherwise has no reason to own: the engines its own plugins
@@ -1401,12 +1586,19 @@ async fn drive_turn(
     )
     .await
     .expect("run the tool-group parallelism conformance turn");
-    assert!(
-        matches!(turn.outcome, crate::TurnOutcome::Finished(_)),
-        "the group turn must finish: {:?}; turn issues: {:?}",
-        turn.outcome,
-        turn.errors,
-    );
+    if !matches!(turn.outcome, crate::TurnOutcome::Finished(_)) {
+        // A scenario that states its own `max_tool_calls` reads how its turn
+        // ended; every other scenario's turn finishes.
+        assert!(
+            world.state.max_tool_calls.is_some(),
+            "the group turn must finish: {:?}; turn issues: {:?}",
+            turn.outcome,
+            turn.errors,
+        );
+        return ScenarioEnd::Ended {
+            outcome: format!("{:?}; turn issues: {:?}", turn.outcome, turn.errors),
+        };
+    }
     ScenarioEnd::Finished {
         replies: consumer_replies(&turn),
     }
@@ -1599,12 +1791,13 @@ fn position_of(
 /// Fails with the message the law owes a serial tier: which members never
 /// started, and which ones did.
 fn assert_every_leaf_started(context: &str, plan: &ToolBatchPlan, observed: &ScenarioObservations) {
-    let budget = match observed.end {
+    let budget = match &observed.end {
         ScenarioEnd::DeadlockBudgetExpired { budget } => format!(
             " The turn did not settle within {budget:?}; {} of {} members answered.",
             observed.answered().len(),
             plan.width()
         ),
+        ScenarioEnd::Ended { outcome } => format!(" The turn did not finish: {outcome}."),
         ScenarioEnd::Finished { .. } => String::new(),
     };
     assert!(

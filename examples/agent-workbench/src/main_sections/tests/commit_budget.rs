@@ -35,9 +35,13 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
     assert_eq!(default_pending_age, std::time::Duration::from_secs(30));
 
     let backend = double.lash_backend();
-    let error = match lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .serve_workbench_model(trigger_registration_provider(), test_model())
-        .build(crate::test_core_owner())
+    let error = match lash::LashCore::standard_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .serve_workbench_model(trigger_registration_provider(), test_model())
+    .build(crate::test_core_owner())
     {
         Ok(_) => panic!("builder must not invent a commit budget"),
         Err(error) => error,
@@ -45,10 +49,14 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
     assert!(matches!(error, lash::EmbedError::MissingCommitBudget));
 
     let backend = double.lash_backend();
-    let error = match lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .serve_workbench_model(trigger_registration_provider(), test_model())
-        .commit_budget(bounded)
-        .build(crate::test_core_owner())
+    let error = match lash::LashCore::standard_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .serve_workbench_model(trigger_registration_provider(), test_model())
+    .commit_budget(bounded)
+    .build(crate::test_core_owner())
     {
         Ok(_) => panic!("builder must not invent a queued-work action reserve"),
         Err(error) => error,
@@ -56,10 +64,14 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
     assert!(matches!(error, lash::EmbedError::MissingQueuedWorkBatching));
 
     let backend = double.lash_backend();
-    let configured = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .serve_workbench_model(trigger_registration_provider(), test_model())
-        .commit_budget(bounded)
-        .queued_work_batching(batching)
-        .build(crate::test_core_owner());
+    let configured = lash::LashCore::standard_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .serve_workbench_model(trigger_registration_provider(), test_model())
+    .commit_budget(bounded)
+    .queued_work_batching(batching)
+    .build(crate::test_core_owner());
     assert!(configured.is_ok(), "an explicit commit budget should build");
 }

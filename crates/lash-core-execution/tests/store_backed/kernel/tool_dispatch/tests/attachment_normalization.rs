@@ -116,7 +116,11 @@ async fn durable_attachment_context<'h>(
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("session"),
         relation: crate::SessionRelation::Root,
-        config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+        config: crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        )
+        .into(),
         head: crate::SessionCreationHead::CommittedByCreator,
     };
     crate::SessionCatalogStore::admit_session(factory.as_ref(), &request)
@@ -350,6 +354,10 @@ async fn deferred_completion_after_hook_attachment_is_normalized_before_recordin
         attachment_store,
         Arc::new(crate::ChronologicalProjection::default()),
         crate::TurnContext::default(),
+        crate::ProcessExecutionEnvSpec::new(
+            crate::AdmittedPluginConfig::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
+        ),
     );
 
     let outcome = execution

@@ -38,6 +38,12 @@ pub enum RuntimeErrorCause {
     ModelUnavailable {
         model_key: Box<crate::ModelKey>,
     },
+    /// A tool call passed the session's recorded `max_tool_calls`
+    /// (FIG-4546): the typed half of
+    /// [`RuntimeErrorCode::MaxToolCallsExceeded`].
+    MaxToolCallsExceeded {
+        exceeded: Box<crate::ToolCallLimitExceeded>,
+    },
 }
 
 impl RuntimeErrorCause {

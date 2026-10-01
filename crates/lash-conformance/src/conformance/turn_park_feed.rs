@@ -81,7 +81,10 @@ async fn commit_turn(
     let state = RuntimeSessionState {
         session_id: session_id.clone(),
         head_revision,
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     let commit = RuntimeCommit::persisted_state_with_operation_for_testing(
         &state,

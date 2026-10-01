@@ -585,6 +585,7 @@ lash_conformance::runtime_persistence_reopenable_tests!({
                     relation: lash_core_execution::SessionRelation::Root,
                     config: lash_core_execution::SessionPolicy::new(
                         lash_core_execution::TurnBudget::Unbounded,
+                        lash_core_execution::MaxToolCalls::new(1024),
                     )
                     .into(),
                     head: lash_core_execution::SessionCreationHead::CommittedByCreator,
@@ -1069,6 +1070,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
             relation: lash_core_execution::SessionRelation::Root,
             config: lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
+                lash_core_execution::MaxToolCalls::new(1024),
             )
             .into(),
             head: lash_core_execution::SessionCreationHead::CommittedByCreator,
@@ -1189,7 +1191,10 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         let state = lash_core_execution::RuntimeSessionState {
             session_id: SessionId::from(session_id.to_string()),
             ..lash_core_execution::RuntimeSessionState::new(
-                lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+                lash_core_execution::SessionPolicy::new(
+                    lash_core_execution::TurnBudget::Unbounded,
+                    lash_core_execution::MaxToolCalls::new(1024),
+                ),
             )
         };
         completion_store
@@ -1466,6 +1471,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
             relation: lash_core_execution::SessionRelation::default(),
             config: lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
+                lash_core_execution::MaxToolCalls::new(1024),
             )
             .into(),
             head: lash_core_execution::SessionCreationHead::CommittedByCreator,
@@ -1509,6 +1515,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         session_id: SessionId::from(SESSION_ID.to_string()),
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
         ))
     };
     let operation = lash_core_execution::OperationId::turn(SESSION_ID, TURN_ID, "final");

@@ -401,9 +401,14 @@ pub(crate) mod test_support {
             std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &backend,
         );
-        let mut builder = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-            .tool_source_policy(tool_source_policy)
-            .models(Arc::new(crate::OpenRouterModels { provider }));
+        let mut builder = LashCore::rlm_builder(
+            backend,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+            factory,
+        )
+        .tool_source_policy(tool_source_policy)
+        .models(Arc::new(crate::OpenRouterModels { provider }));
         if let Some(tools) = tools {
             builder = builder.tools(tools);
         }

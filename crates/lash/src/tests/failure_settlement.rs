@@ -65,8 +65,11 @@ impl TestBackend {
         protocol: Option<Arc<dyn lash_core::plugin::ProtocolSessionPlugin>>,
         plugins: Vec<Arc<dyn PluginFactory>>,
     ) -> LashCore {
-        let builder =
-            LashCore::standard_builder(self.backend.clone(), crate::TurnBudget::Unbounded);
+        let builder = LashCore::standard_builder(
+            self.backend.clone(),
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        );
         let builder = match protocol {
             Some(protocol) => builder.protocol_plugin(
                 lash_core::testing::test_standard_protocol_factory_with_runtime_state(
@@ -303,6 +306,7 @@ async fn a_send_receipt_withdraws_input_before_drive() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         counting_text_provider(Arc::clone(&provider_calls), Arc::clone(&requests)),

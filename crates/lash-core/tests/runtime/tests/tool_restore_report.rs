@@ -80,6 +80,7 @@ fn state_for(session_id: &SessionId) -> RuntimeSessionState {
         policy: standard_test_policy(),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     }
 }
@@ -997,6 +998,7 @@ async fn require_refuses_a_process_child_whose_inherited_snapshot_lost_a_member(
             policy: standard_test_policy(),
             ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
             ))
         },
         lash_core::testing::runtime_lease_owner(),

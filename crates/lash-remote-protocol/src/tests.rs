@@ -1863,7 +1863,10 @@ fn remote_process_env_ref_is_validated_but_serializes_as_string() {
 #[test]
 fn remote_process_env_persistence_dtos_validate() {
     let request = RemotePersistProcessEnvRequest {
-        env_spec: RemoteProcessExecutionEnvSpec::new(RemoteTurnBudget::Unbounded),
+        env_spec: RemoteProcessExecutionEnvSpec::new(
+            RemoteTurnBudget::Unbounded,
+            lash_sansio::MaxToolCalls::new(1024).non_zero(),
+        ),
     };
     request.validate().expect("valid persist env request");
 
@@ -1914,7 +1917,10 @@ fn process_execution_policy_carries_session_generation_options() {
             },
             reasoning: Default::default(),
         }),
-        ..RemoteProcessExecutionPolicy::new(RemoteTurnBudget::Unbounded)
+        ..RemoteProcessExecutionPolicy::new(
+            RemoteTurnBudget::Unbounded,
+            lash_sansio::MaxToolCalls::new(1024).non_zero(),
+        )
     };
     assert!(
         serde_json::to_value(&policy)

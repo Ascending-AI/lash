@@ -96,7 +96,10 @@ async fn build_runtime(parts: &Parts) -> crate::LashRuntime {
     let state = crate::RuntimeSessionState {
         session_id: parts.session_id.clone(),
         policy: policy.clone(),
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     let tools: Arc<dyn crate::ToolProvider> = Arc::new(PassRefusal {
         pass: Arc::clone(&parts.pass),

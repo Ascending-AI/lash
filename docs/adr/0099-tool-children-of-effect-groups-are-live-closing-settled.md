@@ -898,39 +898,60 @@ universal byte rejection "would be a separate product contract". Intent payloads
 keep their existing hard admission bounds. A `batch` wrapper takes at most
 `BATCH_MEMBER_CEILING` (64) members, configurable downward
 (`crates/lash-protocol-standard/src/lib.rs`), and the flattened group is
-admitted whole against the retained-work bound
+admitted whole against the session's `max_tool_calls`
 ([ADR 0116](0116-tools-are-opaque.md) §2.5).
 
 A boundary is never declined for an unsettled child: the handover carries the
-opener's outstanding group cursors. A completed group retires as a whole under a
-live opener: when a new group
-would pass the bound, the opener retires its oldest held group — its losers run
-to their own terminals, their ranks are incorporated, the group is closed and
-its units released — and tries again, so the bound refuses only when nothing
-is left to retire. The recorded settlements are the identity fence a reopen is
-served from, and the point of retirement is a fact of the opener's own
-deterministic history, so a replay retires the same groups at the same point.
+opener's outstanding group cursors, and with each the tool calls it counts
+against the limit below. A group a process holds after an early decision stops
+counting once every loser of it has settled: when a new group would pass the
+limit, the process releases its oldest held groups whose last rank is recorded —
+their ranks are incorporated, the groups are closed — and tries again. It never
+waits for a call that is still running: a running call is held, and the limit
+refuses. Settlement is durable and only moves forward, so a group released at
+one point is settled on every replay of that point, and a replay releases the
+same groups there. The recorded settlements are the identity fence a reopen is
+served from.
 
-**The accounting units and the bound.** The retained-work unit is the **unique
-child execution** — a tool invocation or a timer — from its group's acceptance
-to the moment its opener stops depending on it: the group is consumed to
-exhaustion and incorporated, it is retired, or the opener ends. Operand
-positions are not host work; the position-to-child mapping lives in the VM
-(§10 L4). An opener reserves a group's units before the group is journaled or
-any child dispatched, reuses the reservation when the same group is formed
-again on replay or reattached across a segment, admits a group the journal
-already accepted whatever the current bound says, and refuses a fresh group
-that does not fit **whole**, with
-`RuntimeErrorCode::EffectGroupOpenerBoundExceeded`. The bound is host
-configuration (`OpenerWorkBound`, 1024 unique children by default). The
-parent-side command units an aggregate costs its opener's journal are
+**The limit and its unit (FIG-4546).** The session's `max_tool_calls` is
+required host configuration with no default and no built-in ceiling: recorded at
+creation, changed only by the core `set_max_tool_calls` config command, and read
+from the record — a root's snapshot, a process's recorded environment — by every
+replay, redrive and reopen. A changed limit therefore binds from the next root
+and the next process start, and never refuses work already accepted. The unit
+is the **unique tool invocation**; a timer is not a tool call and is not
+counted, and operand positions are not host work (the position-to-child mapping
+lives in the VM, §10 L4). What the limit counts depends on the execution:
+
+- **A cell** — one code cell of a turn, or one step of a protocol without
+  cells — counts every tool call it makes. The limit is its total; consuming a
+  group gives nothing back. A redrive re-executes the cell and forms the same
+  groups in the same order, so it refuses the same call.
+- **A process** counts the tool calls it holds at once: accepted, running, or
+  settled and still required, from its group's acceptance until the group is
+  consumed to exhaustion and incorporated, released as above, or the process
+  ends. It is not a total.
+
+A group's calls are admitted before anything of the group is journaled,
+announced or dispatched, an admission is reused when the same group is formed
+again on replay or reattached across a segment, and a group that does not fit
+is refused **whole** with `RuntimeErrorCode::MaxToolCallsExceeded` and its typed
+cause, `ToolCallLimitExceeded` (scope, limit, calls counted, calls refused). The
+refusal is the program's failure, never the host's, and is not retried: a
+standard-protocol step's calls each answer it as a tool failure, a cell fails
+as a `Program` failure carrying the typed cause, and a process fails with the
+same typed failure. Its message names the limit, so the model reads it in its
+feedback. Nothing is queued, paced, windowed or split: calls under the limit
+run exactly as they did, and rate limits are the host's own.
+
+The parent-side command units an aggregate costs its opener's journal are
 per group: one open, one clock sample when it holds timers, at most two
-`IncorporateGroupSettlements` records (at decision, and at retirement or the
+`IncorporateGroupSettlements` records (at decision, and at release or the
 opener's end) and one close; per child: one dispatch, one rank read per consumed or incorporated
 rank, and at most one cancel decision; per handover: one carried cursor per
-outstanding group. All are finite in the group's width and the width is bounded
-per opener, so an aggregate adds a bounded number of commands between two
-segment-boundary checks and **mid-aggregate VM suspension is not necessary**.
+outstanding group. All are finite in the group's width, so an aggregate adds a
+bounded number of commands between two segment-boundary checks and
+**mid-aggregate VM suspension is not necessary**.
 
 Every host reopens a closed group from its journal, so a reopen after close
 serves the recorded settlements regardless of finalizer timing.

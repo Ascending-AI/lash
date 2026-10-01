@@ -772,6 +772,7 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
             session_id: SessionId::from("progress-a-b-a-staged"),
             ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
             ))
         };
         lash_core::testing::stage_execution_state_components(
@@ -783,6 +784,7 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
             session_id: SessionId::from("progress-a-b-a-retry"),
             ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
             ))
         };
         lash_core::testing::stage_execution_state_components(&mut retry_runtime, durable_a)

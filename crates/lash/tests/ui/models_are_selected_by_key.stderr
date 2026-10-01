@@ -1,7 +1,7 @@
 error[E0599]: no method named `provider` found for struct `LashCoreBuilder` in the current scope
   --> tests/ui/models_are_selected_by_key.rs:10:10
    |
- 9 |       let _ = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+ 9 |       let _ = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(1024))
    |  _____________-
 10 | |         .provider(provider);
    | |         -^^^^^^^^ method not found in `LashCoreBuilder`
@@ -9,12 +9,12 @@ error[E0599]: no method named `provider` found for struct `LashCoreBuilder` in t
    |
 
 error[E0277]: the trait bound `ModelKey: From<ModelMetadata>` is not satisfied
-  --> tests/ui/models_are_selected_by_key.rs:14:90
+  --> tests/ui/models_are_selected_by_key.rs:14:121
    |
-14 |     let _ = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded).model(model);
-   |                                                                                    ----- ^^^^^ the trait `From<ModelMetadata>` is not implemented for `ModelKey`
-   |                                                                                    |
-   |                                                                                    required by a bound introduced by this call
+14 |     let _ = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(1024)).model(model);
+   |                                                                                                                   ----- ^^^^^ the trait `From<ModelMetadata>` is not implemented for `ModelKey`
+   |                                                                                                                   |
+   |                                                                                                                   required by a bound introduced by this call
    |
 help: `ModelKey` implements trait `From<T>`
   --> $WORKSPACE/crates/lash-core-llm/src/model.rs

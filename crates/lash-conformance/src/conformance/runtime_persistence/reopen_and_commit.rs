@@ -148,7 +148,10 @@ pub async fn gc_blobs(factory: ReopenableRuntimeStore) {
     // First commit writes a live checkpoint blob.
     let mut v1 = RuntimeSessionState {
         session_id: SessionId::from("gc-blobs"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     v1.set_tool_state_snapshot(Some(
         ToolState::default().with_generation_for_conformance(1),
@@ -165,7 +168,10 @@ pub async fn gc_blobs(factory: ReopenableRuntimeStore) {
     let mut v2 = RuntimeSessionState {
         session_id: SessionId::from("gc-blobs"),
         head_revision: v1_result.head_revision,
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     v2.set_tool_state_snapshot(Some(
         ToolState::default().with_generation_for_conformance(2),
@@ -265,7 +271,10 @@ pub async fn attachment_acquisition_preserves_receiving_referrer(store: Arc<dyn 
 pub async fn append_receipt_reopen(factory: ReopenableRuntimeStore) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     let nodes = vec![crate::SessionAppendNode::plugin(
         "append-receipt-reopen",
@@ -315,7 +324,10 @@ pub async fn runtime_reopen(factory: ReopenableRuntimeStore) {
         .expect("save meta");
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.set_tool_state_snapshot(Some(
         ToolState::default().with_generation_for_conformance(77),
@@ -709,7 +721,10 @@ pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
 ) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.ensure_agent_frame_initialized();
     let graph_data = state.session_graph.data_mut();
@@ -770,7 +785,10 @@ pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     let changed_state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         turn_index: 1,
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     let mut changed = RuntimeCommit::persisted_state_for_test(&changed_state);
     changed.turn_commit =
@@ -792,7 +810,10 @@ pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
 pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.ensure_agent_frame_initialized();
     let operation = crate::OperationId::turn("root", "realization-guard", "final");
@@ -809,6 +830,7 @@ pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimeSt
                 reason: AgentFrameReason::initial(),
                 assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
                 )),
             },
         }],
@@ -866,7 +888,10 @@ pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimeSt
 pub async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.ensure_agent_frame_initialized();
     let operation = crate::OperationId::turn("root", "guard-turn", "final");
@@ -910,7 +935,10 @@ pub async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimeSt
 pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.ensure_agent_frame_initialized();
     let frame_key =
@@ -925,6 +953,7 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
             reason: AgentFrameReason::new("original"),
             assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             )),
         },
     };
@@ -944,6 +973,7 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
             reason: AgentFrameReason::new("replacement"),
             assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             )),
         },
         ..original
@@ -983,7 +1013,10 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
 pub async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimeStore>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     let duplicate_node_id = caller_frame_node_id(&SessionId::from("root"), "duplicate");
     let commit = RuntimeCommit::persisted_state_with_graph_commit(
@@ -1027,7 +1060,10 @@ pub async fn committed_leaf_is_derived_from_the_terminal_appended_node(
 ) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     let first = sample_session_node(&SessionId::from("root"), "append-root", None);
     let second = sample_session_node(
@@ -1072,7 +1108,10 @@ pub async fn committed_leaf_is_derived_from_the_terminal_appended_node(
 pub async fn preserve_head_commit_reports_the_resident_leaf(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.ensure_agent_frame_initialized();
     let first = store
@@ -1109,7 +1148,10 @@ pub async fn preserve_head_commit_reports_the_resident_leaf(store: Arc<dyn Runti
 pub async fn empty_append_cannot_move_the_head(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("empty-append-head-move"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.ensure_agent_frame_initialized();
     let first = store

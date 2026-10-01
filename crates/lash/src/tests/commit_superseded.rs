@@ -98,6 +98,7 @@ impl Fixture {
         let core = explicit_ephemeral_facets(LashCore::standard_builder(
             backend,
             crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
         ))
         .serve_test_model(provider, mock_model_spec())
         .build(crate::testing::runtime_lease_owner())
@@ -189,6 +190,7 @@ async fn a_second_host_reads_refused_root_usage() -> Result<()> {
     let second_host = explicit_ephemeral_facets(LashCore::standard_builder(
         fixture.double.lash_backend(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         crate::testing::TestProvider::builder()

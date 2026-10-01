@@ -60,6 +60,7 @@ async fn ingress_core_over(
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         ingress_backend(backend, effect_host, process_env_store),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
@@ -71,7 +72,10 @@ async fn ingress_core_over(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
                     model: Some(recorded_model(mock_model_spec())),
-                    ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
+                    ..lash_core::SessionPolicy::new(
+                        crate::TurnBudget::Unbounded,
+                        crate::MaxToolCalls::new(1024),
+                    )
                 },
             ),
         )
@@ -132,6 +136,7 @@ async fn second_invocation_of(first: &LashCore) -> Result<LashCore> {
             None,
         ),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
@@ -143,7 +148,10 @@ async fn second_invocation_of(first: &LashCore) -> Result<LashCore> {
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
                     model: Some(recorded_model(mock_model_spec())),
-                    ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
+                    ..lash_core::SessionPolicy::new(
+                        crate::TurnBudget::Unbounded,
+                        crate::MaxToolCalls::new(1024),
+                    )
                 },
             ),
         )
@@ -165,7 +173,10 @@ async fn register_ingress_trigger_subscription(
         &lash_core::testing::host_pin_claim_for_testing(),
         &lash_core::ProcessExecutionEnvSpec::new(
             lash_core::AdmittedPluginConfig::default(),
-            lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            ),
         ),
     )
     .await?;
@@ -216,6 +227,7 @@ async fn ingress_core_with_trigger_store(
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         ingress_backend(backend, Some(effect_host), None),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
@@ -227,7 +239,10 @@ async fn ingress_core_with_trigger_store(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
                     model: Some(recorded_model(mock_model_spec())),
-                    ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
+                    ..lash_core::SessionPolicy::new(
+                        crate::TurnBudget::Unbounded,
+                        crate::MaxToolCalls::new(1024),
+                    )
                 },
             ),
         )
@@ -255,7 +270,10 @@ async fn host_register_trigger_realizes_and_fires(backend: lash_core::Backend) -
         &lash_core::testing::host_pin_claim_for_testing(),
         &lash_core::ProcessExecutionEnvSpec::new(
             lash_core::AdmittedPluginConfig::default(),
-            lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            ),
         ),
     )
     .await?;
@@ -493,7 +511,10 @@ async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Resu
         &lash_core::testing::host_pin_claim_for_testing(),
         &lash_core::ProcessExecutionEnvSpec::new(
             lash_core::AdmittedPluginConfig::default(),
-            lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            ),
         ),
     )
     .await?;
@@ -504,6 +525,7 @@ async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Resu
             None,
         ),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
@@ -515,7 +537,10 @@ async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Resu
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
                     model: Some(recorded_model(mock_model_spec())),
-                    ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
+                    ..lash_core::SessionPolicy::new(
+                        crate::TurnBudget::Unbounded,
+                        crate::MaxToolCalls::new(1024),
+                    )
                 },
             ),
         )
@@ -1173,7 +1198,10 @@ fn start_intent_with_env(session_id: &SessionId) -> lash_core::ToolIntent {
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
                     model: Some(recorded_model(mock_model_spec())),
-                    ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
+                    ..lash_core::SessionPolicy::new(
+                        crate::TurnBudget::Unbounded,
+                        crate::MaxToolCalls::new(1024),
+                    )
                 },
             ))
             .stable_ref()
@@ -2043,6 +2071,7 @@ async fn ingress_engine_core(
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(Arc::new(IngressAdmissionEngineFactory))
@@ -2054,7 +2083,10 @@ async fn ingress_engine_core(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
                     model: Some(recorded_model(mock_model_spec())),
-                    ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
+                    ..lash_core::SessionPolicy::new(
+                        crate::TurnBudget::Unbounded,
+                        crate::MaxToolCalls::new(1024),
+                    )
                 },
             ),
         )
@@ -2079,7 +2111,10 @@ fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::Too
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
                     model: Some(recorded_model(mock_model_spec())),
-                    ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
+                    ..lash_core::SessionPolicy::new(
+                        crate::TurnBudget::Unbounded,
+                        crate::MaxToolCalls::new(1024),
+                    )
                 },
             ))
             .stable_ref()
@@ -2093,7 +2128,10 @@ fn ingress_engine_env_spec() -> lash_core::ProcessExecutionEnvSpec {
         lash_core::AdmittedPluginConfig::default(),
         lash_core::SessionPolicy {
             model: Some(recorded_model(mock_model_spec())),
-            ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
+            ..lash_core::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            )
         },
     )
 }

@@ -65,7 +65,11 @@ impl AdmittedRoot {
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: crate::SessionRelation::Root,
-                config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+                config: crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                )
+                .into(),
                 head: crate::SessionCreationHead::CommittedByCreator,
             })
             .await
@@ -139,6 +143,7 @@ impl AdmittedRoot {
             session_id: self.session_id.clone(),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         };
         state.ensure_agent_frame_initialized();

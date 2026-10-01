@@ -35,6 +35,7 @@ fn builder(backend: lash_core::Backend) -> crate::core::LashCoreBuilder {
     explicit_ephemeral_facets(LashCore::standard_builder(
         backend,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
 }
@@ -134,7 +135,11 @@ async fn a_send_to_a_catalog_row_with_no_head_is_answered_creation_unrecorded() 
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(ID),
             relation: lash_core::SessionRelation::Root,
-            config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+            config: lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            )
+            .into(),
             head: lash_core::SessionCreationHead::CommittedByCreator,
         },
     )

@@ -55,8 +55,10 @@ impl crate::AttachmentRootSet for FixedAttachmentRoots {
 }
 
 pub fn default_state() -> RuntimeSessionState {
-    let mut state =
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
     state.ensure_agent_frame_initialized();
     state
 }
@@ -662,8 +664,10 @@ pub async fn advance_session_head(
                 .await
                 .expect("load the session binding")
                 .expect("the store is bound to a session");
-            let mut state =
-                RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+            let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            ));
             state.session_id = meta.session_id;
             state
         }
@@ -747,7 +751,11 @@ pub async fn recording_session_store(
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: crate::SessionRelation::Root,
-            config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+            config: crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            )
+            .into(),
             head: crate::SessionCreationHead::CommittedByCreator,
         })
         .await
@@ -887,8 +895,10 @@ impl TestRuntime {
             crate::PluginSpec::new().with_tool_provider(Arc::clone(&tools)),
         )));
         let plugin_host = crate::testing::test_plugin_host(factories);
-        let mut initial_state =
-            RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+        let mut initial_state = RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ));
         // The fixture session records what a creator records: each installed
         // owner's namespace from its defaults (FIG-4379).
         initial_state.authority.plugin_config = plugin_host

@@ -203,7 +203,10 @@ where
     let artifact = sample_module_artifact("delta");
     let env_spec = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        ),
     );
     let env_ref = env_spec.stable_ref().expect("stable env ref");
     let env_bytes = env_spec.to_store_bytes().expect("encode env");

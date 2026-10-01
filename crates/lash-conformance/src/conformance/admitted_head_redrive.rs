@@ -163,7 +163,10 @@ async fn build_runtime(parts: RedriveParts) -> crate::LashRuntime {
     let state = crate::RuntimeSessionState {
         session_id: parts.session_id.clone(),
         policy: policy.clone(),
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     // Each attempt is a fresh process: its executor starts empty.
     let protocol = Arc::new(CountingExecutionProtocol::default());

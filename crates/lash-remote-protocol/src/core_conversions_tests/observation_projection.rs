@@ -97,6 +97,7 @@ fn remote_observation_and_turn_input_exclude_reconnect_state() {
         },
         ..lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
     let observation = lash_core::facade_support::SessionObservation {

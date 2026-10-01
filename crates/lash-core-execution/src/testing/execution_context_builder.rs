@@ -251,7 +251,10 @@ impl<'run> TestExecutionContextBuilder<'run> {
             process_env_store,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+                crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ),
             ),
             turn_context: crate::TurnContext::default(),
             session_host_mode: TestSessionHostMode::Independent,
@@ -650,8 +653,8 @@ impl<'run> BuiltTestExecutionContext<'run> {
             attachment_store,
             Arc::new(crate::ChronologicalProjection::default()),
             self.turn_context,
-        )
-        .with_execution_env_spec(self.execution_env_spec);
+            self.execution_env_spec,
+        );
         let parent_invocation = self
             .runtime_parent_invocation
             .unwrap_or_else(|| code_execution_invocation(&session_id, self.protocol_iteration));

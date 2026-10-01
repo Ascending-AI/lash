@@ -1470,7 +1470,8 @@ finish("done through route");
             std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &backend,
         );
-        let core = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
+        let limit = lash::MaxToolCalls::new(1024);
+        let core = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, limit, factory)
             .serve_test_model(
                 provider,
                 lash::ModelMetadata::builder("mock-model")

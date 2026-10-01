@@ -97,36 +97,41 @@ impl Harness {
         .with_worker_service(lash::rlm::WorkerService::subprocess(
             std::env::var_os("LASH_OPERATOR_VM_WORKER").context("VM worker executable")?,
         ));
-        let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, protocol)
-            .models(Arc::new(
-                lash::ModelRegistry::new().register(
-                    "session-operator-mock",
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("session-operator-mock")
-                            .context_window_tokens(200_000)
-                            .build()
-                            .map_err(anyhow::Error::msg)?,
-                        provider,
-                    ),
-                )?,
-            ))
-            .model("session-operator-mock")
-            .commit_budget(lash::CommitBudget::bounded(4 * 1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .trace_jsonl_path(std::path::Path::new(&scratch).join("worker.trace.jsonl"))
-            .plugin(Arc::new(
-                lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
-                    lash_core::lifetime::starter,
+        let core = lash::LashCore::rlm_builder(
+            backend,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+            protocol,
+        )
+        .models(Arc::new(
+            lash::ModelRegistry::new().register(
+                "session-operator-mock",
+                lash::RegisteredModel::new(
+                    lash::ModelMetadata::builder("session-operator-mock")
+                        .context_window_tokens(200_000)
+                        .build()
+                        .map_err(anyhow::Error::msg)?,
+                    provider,
                 ),
-            ))
-            .plugin(Arc::new(FaultPlugin {
-                repaired: repaired.clone(),
-                pool: pool.clone(),
-            }))
-            .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                "session-operator",
-                format!("operator:{}", std::process::id()),
-            ))?;
+            )?,
+        ))
+        .model("session-operator-mock")
+        .commit_budget(lash::CommitBudget::bounded(4 * 1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .trace_jsonl_path(std::path::Path::new(&scratch).join("worker.trace.jsonl"))
+        .plugin(Arc::new(
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                lash_core::lifetime::starter,
+            ),
+        ))
+        .plugin(Arc::new(FaultPlugin {
+            repaired: repaired.clone(),
+            pool: pool.clone(),
+        }))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "session-operator",
+            format!("operator:{}", std::process::id()),
+        ))?;
         Ok(Self {
             core,
             engine,

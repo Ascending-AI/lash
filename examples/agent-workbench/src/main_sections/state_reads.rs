@@ -83,7 +83,10 @@ pub(crate) fn state_store_request(
     state: &AppState,
     session_id: &SessionId,
 ) -> lash::persistence::SessionStoreCreateRequest {
-    let mut policy = lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded);
+    let mut policy = lash::runtime::SessionPolicy::new(
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    );
     policy.session_id = Some(SessionId::from(session_id.to_string()));
     let selection = state.selected_model();
     policy.model = workbench_recorded_model(&selection.key())

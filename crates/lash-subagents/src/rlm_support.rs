@@ -20,6 +20,7 @@ pub(crate) fn build_session_request(
         policy: current_policy.clone(),
         ..SessionSnapshot::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
     let session_spec = SessionSpec::inherit();

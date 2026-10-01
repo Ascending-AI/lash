@@ -18,7 +18,11 @@ async fn commit_byte_budget_failure_reaches_the_host_as_terminal_and_actionable(
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets_with_budget(
-        LashCore::standard_builder(double_backend().await, crate::TurnBudget::Unbounded),
+        LashCore::standard_builder(
+            double_backend().await,
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ),
         crate::CommitBudget::new(
             crate::CommitBudgetLimit::bounded(CONFIGURED_BYTE_LIMIT),
             crate::CommitBudgetLimit::Unbounded,
@@ -71,7 +75,11 @@ async fn commit_node_budget_failure_reaches_the_host_as_terminal_and_actionable(
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets_with_budget(
-        LashCore::standard_builder(double_backend().await, crate::TurnBudget::Unbounded),
+        LashCore::standard_builder(
+            double_backend().await,
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ),
         crate::CommitBudget::new(
             crate::CommitBudgetLimit::Unbounded,
             crate::CommitBudgetLimit::bounded(CONFIGURED_NODE_LIMIT),
@@ -123,7 +131,11 @@ fn core_over_backend_with_commit_budget(
     commit_budget: crate::CommitBudget,
 ) -> Result<LashCore> {
     explicit_ephemeral_facets_with_budget(
-        LashCore::standard_builder(backend, crate::TurnBudget::Unbounded),
+        LashCore::standard_builder(
+            backend,
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ),
         commit_budget,
     )
     .serve_test_model(mock_provider(), mock_model_spec())
@@ -133,7 +145,10 @@ fn core_over_backend_with_commit_budget(
 fn pending_park_state(session_id: impl Into<SessionId>, text: &str) -> RuntimeSessionState {
     let policy = lash_core::SessionPolicy {
         model: Some(recorded_model(mock_model_spec())),
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let mut state = RuntimeSessionState::new(policy);
     state.session_id = session_id.into();

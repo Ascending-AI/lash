@@ -525,7 +525,10 @@ async fn measure_store_hardening_history_reads(
                     node_id: fork_point.clone(),
                     relation: lash_core::SessionRelation::Root,
                     pending_observer_intents: Vec::new(),
-                    policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                    policy: lash_core::SessionPolicy::new(
+                        lash_core::TurnBudget::Unbounded,
+                        lash_core::MaxToolCalls::new(1024),
+                    ),
                     plugin_config: Default::default(),
                 })
                 .await?;
@@ -646,6 +649,7 @@ async fn load_store_hardening_state(
         session_id: SessionId::from(session_id.to_string()),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     }))
 }
@@ -658,7 +662,11 @@ pub(super) fn runtime_perf_session_create_request(
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
         relation: lash_core::SessionRelation::Root,
-        config: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded).into(),
+        config: lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
+        .into(),
         head: lash_core::SessionCreationHead::CommittedByCreator,
     }
 }

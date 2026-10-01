@@ -103,7 +103,7 @@ mod tests {
         let backend = crate::support::sqlite_memory_store_backend().await;
         let spec = crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::default(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
         );
         let pin = crate::testing::host_pin_claim_for_testing();
         let inherited =

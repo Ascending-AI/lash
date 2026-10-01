@@ -140,7 +140,10 @@ pub async fn checkpoint_identity_is_independent_of_compression_profile(
         let mut state = if index == 0 {
             RuntimeSessionState {
                 session_id: session.clone(),
-                ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+                ..RuntimeSessionState::new(crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ))
             }
         } else {
             loaded_conformance_state(store, &session).await
@@ -186,7 +189,10 @@ pub async fn checkpoint_profile_change_preserves_refs_budget_and_atomic_root_lea
     admit_conformance_session(first_store, &session).await;
     let state = RuntimeSessionState {
         session_id: session.clone(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     let bytes = vec![b'a'; 12_288];
     let mut commit = RuntimeCommit::persisted_state_for_test(&state);

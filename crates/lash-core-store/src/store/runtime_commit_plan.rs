@@ -557,6 +557,7 @@ mod tests {
             session_id: SessionId::from("orphan-cancellation-evidence"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         };
         let mut commit = RuntimeCommit::persisted_state_for_test(&state);
@@ -588,6 +589,7 @@ mod tests {
             head_revision: i64::MAX as u64,
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         };
         let commit = RuntimeCommit::persisted_state_for_test(&state);
@@ -617,6 +619,7 @@ mod tests {
             session_id: "retired-leaf".into(),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         };
         let commit = RuntimeCommit::persisted_state_for_test(&state);

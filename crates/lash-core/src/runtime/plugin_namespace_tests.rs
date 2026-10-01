@@ -152,8 +152,10 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
             .plugins
             .is_empty()
     );
-    let mut runtime_state =
-        crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let mut runtime_state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    ));
     runtime_state.capture_plugin_states(&child);
     assert!(
         runtime_state.plugin_state().unwrap().plugins["neighbor-secret-key"]

@@ -214,6 +214,7 @@ mod tests {
             Self {
                 snapshot: RuntimeSessionState::new(SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
+                    lash_core::MaxToolCalls::new(1024),
                 )),
                 created: Mutex::new(Vec::new()),
             }
@@ -486,11 +487,15 @@ mod tests {
                 let mut snapshot = RuntimeSessionState {
                     policy: SessionPolicy {
                         model: model_spec("model"),
-                        ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                        ..SessionPolicy::new(
+                            lash_core::TurnBudget::Unbounded,
+                            lash_core::MaxToolCalls::new(1024),
+                        )
                     },
                     session_graph,
                     ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
+                        lash_core::MaxToolCalls::new(1024),
                     ))
                 };
                 snapshot.authority.plugin_config = lash_core::PluginConfig::for_protocol(Some(
@@ -628,10 +633,14 @@ mod tests {
             snapshot: RuntimeSessionState {
                 policy: SessionPolicy {
                     model: model_spec("model"),
-                    ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                    ..SessionPolicy::new(
+                        lash_core::TurnBudget::Unbounded,
+                        lash_core::MaxToolCalls::new(1024),
+                    )
                 },
                 ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
+                    lash_core::MaxToolCalls::new(1024),
                 ))
             },
             created: Mutex::new(Vec::new()),
@@ -697,10 +706,14 @@ mod tests {
             snapshot: RuntimeSessionState {
                 policy: SessionPolicy {
                     model: model_spec("model"),
-                    ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                    ..SessionPolicy::new(
+                        lash_core::TurnBudget::Unbounded,
+                        lash_core::MaxToolCalls::new(1024),
+                    )
                 },
                 ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
+                    lash_core::MaxToolCalls::new(1024),
                 ))
             },
             created: Mutex::new(Vec::new()),
@@ -753,10 +766,14 @@ mod tests {
             snapshot: RuntimeSessionState {
                 policy: SessionPolicy {
                     model: model_spec("model"),
-                    ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                    ..SessionPolicy::new(
+                        lash_core::TurnBudget::Unbounded,
+                        lash_core::MaxToolCalls::new(1024),
+                    )
                 },
                 ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
+                    lash_core::MaxToolCalls::new(1024),
                 ))
             },
             created: Mutex::new(Vec::new()),

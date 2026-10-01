@@ -437,8 +437,11 @@ fn root_session_request(session_id: &str) -> lash_core_execution::SessionStoreCr
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id),
         relation: lash_core_execution::SessionRelation::Root,
-        config: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
-            .into(),
+        config: lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
+        )
+        .into(),
         head: lash_core_execution::SessionCreationHead::CommittedByCreator,
     }
 }
@@ -452,7 +455,10 @@ async fn fork_session_rejects_a_malformed_target_session_id() {
         node_id: lash_core_execution::NodeId::from("missing-fork-point"),
         relation: lash_core_execution::SessionRelation::Root,
         pending_observer_intents: Vec::new(),
-        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+        policy: lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
+        ),
         plugin_config: Default::default(),
     };
     assert!(matches!(

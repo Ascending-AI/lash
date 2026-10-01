@@ -214,6 +214,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
             session_id,
             ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
             ))
         };
         lash_core::testing::stage_execution_state_components(&mut runtime_state, initial_snapshot)?;

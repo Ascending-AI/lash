@@ -82,7 +82,7 @@ fn session_policy() -> SessionPolicy {
                 .build()
                 .expect("trigger surface test model"),
         ))),
-        ..SessionPolicy::new(TurnBudget::Unbounded)
+        ..SessionPolicy::new(TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024))
     }
 }
 

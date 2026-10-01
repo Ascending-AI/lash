@@ -253,7 +253,10 @@ pub(super) async fn run_once_process_list_stress(
                     );
                     let spec = lash_core::ProcessExecutionEnvSpec::new(
                         lash_core::AdmittedPluginConfig::new(config, 0),
-                        lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                        lash_core::SessionPolicy::new(
+                            lash_core::TurnBudget::Unbounded,
+                            lash_core::MaxToolCalls::new(1024),
+                        ),
                     );
                     let env_ref = spec
                         .stable_ref()

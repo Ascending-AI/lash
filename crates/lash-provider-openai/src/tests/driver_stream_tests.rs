@@ -80,30 +80,34 @@ async fn reasoning_visibility_core(
         .await
         .expect("build the Restate server double");
     let backend = double.lash_backend();
-    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .models(std::sync::Arc::new(
-            lash::ModelRegistry::new()
-                .register(
-                    "provider/model",
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("provider/model")
-                            .context_window_tokens(16_000)
-                            .expose_thinking(expose_thinking)
-                            .build()
-                            .expect("valid model spec"),
-                        ProviderHandle::new(provider.into_components()),
-                    ),
-                )
-                .expect("register the test model"),
-        ))
-        .model("provider/model")
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "openai-reasoning-visibility-test",
-            "openai-reasoning-visibility-test-boot",
-        ))
-        .expect("core");
+    let core = lash::LashCore::standard_builder(
+        backend,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .models(std::sync::Arc::new(
+        lash::ModelRegistry::new()
+            .register(
+                "provider/model",
+                lash::RegisteredModel::new(
+                    lash::ModelMetadata::builder("provider/model")
+                        .context_window_tokens(16_000)
+                        .expose_thinking(expose_thinking)
+                        .build()
+                        .expect("valid model spec"),
+                    ProviderHandle::new(provider.into_components()),
+                ),
+            )
+            .expect("register the test model"),
+    ))
+    .model("provider/model")
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        "openai-reasoning-visibility-test",
+        "openai-reasoning-visibility-test-boot",
+    ))
+    .expect("core");
     (core, double)
 }
 
@@ -154,30 +158,34 @@ async fn openai_buffered_responses_runtime_preserves_reasoning_part_boundaries()
     let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
         .await
         .expect("build the Restate server double");
-    let core = lash::LashCore::standard_builder(double.lash_backend(), lash::TurnBudget::Unbounded)
-        .models(std::sync::Arc::new(
-            lash::ModelRegistry::new()
-                .register(
-                    "gpt-5.4",
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("gpt-5.4")
-                            .context_window_tokens(16_000)
-                            .expose_thinking(true)
-                            .build()
-                            .expect("valid model spec"),
-                        ProviderHandle::new(provider.into_components()),
-                    ),
-                )
-                .expect("register the test model"),
-        ))
-        .model("gpt-5.4")
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "openai-buffered-reasoning-boundaries-test",
-            "openai-buffered-reasoning-boundaries-test-boot",
-        ))
-        .expect("core");
+    let core = lash::LashCore::standard_builder(
+        double.lash_backend(),
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .models(std::sync::Arc::new(
+        lash::ModelRegistry::new()
+            .register(
+                "gpt-5.4",
+                lash::RegisteredModel::new(
+                    lash::ModelMetadata::builder("gpt-5.4")
+                        .context_window_tokens(16_000)
+                        .expose_thinking(true)
+                        .build()
+                        .expect("valid model spec"),
+                    ProviderHandle::new(provider.into_components()),
+                ),
+            )
+            .expect("register the test model"),
+    ))
+    .model("gpt-5.4")
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        "openai-buffered-reasoning-boundaries-test",
+        "openai-buffered-reasoning-boundaries-test-boot",
+    ))
+    .expect("core");
     let session =
         crate::tests::sessions::created_session(&core, "openai-buffered-reasoning-boundaries")
             .await

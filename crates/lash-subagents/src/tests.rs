@@ -100,7 +100,10 @@ fn static_capability_policy_fields_distinguish_inherit_set_and_clear() {
             seed: Some(77),
             ..Default::default()
         },
-        ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let spec = SessionSpec::inherit().model("child-model");
     let registry = CapabilityRegistry::new().with(Arc::new(StaticCapability::new("child", spec)));
@@ -175,10 +178,14 @@ fn capability_can_build_complete_spawn_request() {
     let current_snapshot = RuntimeSessionState {
         policy: SessionPolicy {
             model: model_spec("parent-model", None, 200_000),
-            ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            ..SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            )
         },
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
     let tool_access = lash_core::SessionToolAccess::ambient()
@@ -360,17 +367,24 @@ async fn spawn_uses_live_parent_provider_when_selecting_subagent_model() {
     // model spec.
     let stale_policy = SessionPolicy {
         model: model_spec("stale-parent", None, 200_000),
-        ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let live_policy = SessionPolicy {
         model: model_spec("live-parent", None, 1234),
-        ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let registry = Arc::new(default_registry(&BTreeMap::new()));
     let current_snapshot = RuntimeSessionState {
         policy: live_policy.clone(),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     };
     let tool_access = lash_core::SessionToolAccess::default();
@@ -1105,7 +1119,10 @@ async fn run_seed_probe_inner(
     let policy = SessionPolicy {
         model: model_spec("mock-model", None, 64_000),
         turn_budget: lash_core::TurnBudget::bounded(4),
-        ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        ..SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     // `agents.spawn(...)` starts a SessionTurn (subagent) process that the
     // engine drives through the worker installed on the double below — not
@@ -1155,6 +1172,7 @@ async fn run_seed_probe_inner(
             policy,
             ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
             ))
         },
         lash_core::LeaseOwnerIdentity::opaque(

@@ -1060,21 +1060,25 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
             lash_core::engine::BuildGeneration::for_test("cancellation-and-effects"),
         ),
     ));
-    let core = lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
-        .serve_test_model(
-            provider,
-            lash_core::ModelMetadata::new(
-                "fig-430-model",
-                std::num::NonZeroUsize::new(1024).expect("non-zero context window"),
-            ),
-        )
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "lash-restate-fig430-test",
-            "lash-restate-fig430-test-boot",
-        ))
-        .expect("build FIG-430 core");
+    let core = lash::LashCore::standard_builder(
+        backend.into(),
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .serve_test_model(
+        provider,
+        lash_core::ModelMetadata::new(
+            "fig-430-model",
+            std::num::NonZeroUsize::new(1024).expect("non-zero context window"),
+        ),
+    )
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        "lash-restate-fig430-test",
+        "lash-restate-fig430-test-boot",
+    ))
+    .expect("build FIG-430 core");
     let session = crate::tests::created_session(&core, session_id)
         .await
         .open()
@@ -1151,6 +1155,7 @@ pub(super) fn replay_test_state(
         policy: policy.clone(),
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     }
 }

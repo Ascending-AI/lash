@@ -3,7 +3,9 @@
 use std::sync::Arc;
 
 use crate::provider::AttachmentCapabilitySnapshot;
-use crate::{ChargeSafetyPolicy, ModelConfig, NoProgressBudget, SessionId, TurnBudget};
+use crate::{
+    ChargeSafetyPolicy, MaxToolCalls, ModelConfig, NoProgressBudget, SessionId, TurnBudget,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionPolicy {
@@ -20,6 +22,12 @@ pub struct SessionPolicy {
     /// Required turn-budget decision. A host must choose either a non-zero
     /// bound or explicit unbounded execution; absence is never interpreted.
     pub turn_budget: TurnBudget,
+    /// Required tool-call limit (FIG-4546): the total one cell may make, and
+    /// the number a process may hold at once. A host must state it; there is
+    /// no default and no built-in ceiling. Session config like the turn
+    /// budget: recorded at creation, changed only by a config command, and
+    /// read back from the record by every replay, redrive and reopen.
+    pub max_tool_calls: MaxToolCalls,
     /// Bound on consecutive provider attempts within one turn that commit no
     /// successful execution.
     ///
@@ -44,15 +52,16 @@ pub struct SessionPolicy {
 }
 
 impl SessionPolicy {
-    /// Construct a policy with an explicit turn budget, no model selected
-    /// and otherwise neutral settings.
-    pub fn new(turn_budget: TurnBudget) -> Self {
+    /// Construct a policy with an explicit turn budget and tool-call limit,
+    /// no model selected and otherwise neutral settings.
+    pub fn new(turn_budget: TurnBudget, max_tool_calls: MaxToolCalls) -> Self {
         Self {
             model: None,
             attachment_acceptance: Arc::default(),
             session_id: None,
             autonomous: false,
             turn_budget,
+            max_tool_calls,
             no_progress_budget: NoProgressBudget::default(),
             charge_safety: ChargeSafetyPolicy::default(),
             generation: crate::GenerationOptions::default(),

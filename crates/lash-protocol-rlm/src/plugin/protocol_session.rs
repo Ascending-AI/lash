@@ -460,7 +460,10 @@ mod tests {
                     .build()
                     .expect("model limits"),
             ))),
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            ..lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            )
         };
         let state = lash_core::SessionSnapshot {
             last_prompt_usage: Some(lash_core::TokenUsage {
@@ -519,7 +522,10 @@ mod tests {
                     .build()
                     .expect("model limits"),
             ))),
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            ..lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            )
         };
         let state = lash_core::SessionSnapshot {
             token_usage: lash_core::TokenUsage {
@@ -564,7 +570,10 @@ mod tests {
                     .build()
                     .expect("model limits"),
             ))),
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            ..lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            )
         };
         let state = lash_core::SessionSnapshot {
             last_prompt_usage: Some(lash_core::TokenUsage {
@@ -616,7 +625,10 @@ mod tests {
                     .build()
                     .expect("model limits"),
             ))),
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            ..lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            )
         };
         let state = lash_core::SessionSnapshot {
             last_prompt_usage: Some(lash_core::TokenUsage {

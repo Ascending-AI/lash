@@ -101,7 +101,10 @@ async fn acceptance_runtime_with_batching(
     let state = crate::RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),
         policy: policy.clone(),
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     Box::pin(
         crate::LashRuntime::builder(host, lease_owner)

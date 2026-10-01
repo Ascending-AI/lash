@@ -481,7 +481,10 @@ async fn whitespace_only_text_does_not_split_terminal_history() {
         // against a stub provider, so a driver that mistakes a tool-call-free
         // response for a tool-calling one spins here forever instead of
         // failing. The budget is well above the iterations the scenario needs.
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::bounded(8))
+        ..lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::bounded(8),
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let handler = open_turn_handler(&double, "whitespace-response-session").await;
     let scoped_controller = layered_scope(&handler, Arc::new(controller));
@@ -598,7 +601,10 @@ async fn standard_batch_members_are_children_of_the_steps_one_group() {
         // against a stub provider, so a driver that mistakes a tool-call-free
         // response for a tool-calling one spins here forever instead of
         // failing. The budget is well above the iterations the scenario needs.
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::bounded(8))
+        ..lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::bounded(8),
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let handler = open_turn_handler(&double, "standard-batch-session").await;
     let scoped_controller = layered_scope(&handler, Arc::new(controller.clone()));
@@ -763,7 +769,10 @@ async fn malformed_tool_arguments_are_refused_not_dispatched() {
                 .build()
                 .expect("valid model"),
         ))),
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::bounded(8))
+        ..lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::bounded(8),
+            lash_core::MaxToolCalls::new(1024),
+        )
     };
     let handler = open_turn_handler(&double, "malformed-args-session").await;
     let scoped_controller = layered_scope(&handler, Arc::new(controller));

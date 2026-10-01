@@ -213,6 +213,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     let first_core = explicit_ephemeral_facets(LashCore::rlm_builder(
         backend.clone().into(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
         first_factory,
     ))
     .serve_test_model(first_provider, mock_model_spec())
@@ -471,12 +472,16 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
     let session_id = "agent-frame-durable";
     let root_turn_id = "agent-frame-root-turn";
     let double = restate_double(0x0a9e_f5a1).await;
-    let core = LashCore::standard_builder(double.lash_backend(), crate::TurnBudget::Unbounded)
-        .serve_test_model(agent_frame_switch_provider(), mock_model_spec())
-        .tools(Arc::new(AgentFrameSwitchTools))
-        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = LashCore::standard_builder(
+        double.lash_backend(),
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    )
+    .serve_test_model(agent_frame_switch_provider(), mock_model_spec())
+    .tools(Arc::new(AgentFrameSwitchTools))
+    .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+    .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core.session(session_id).created().await.open().await?;
     let activities = RecordingEvents::default();
@@ -655,6 +660,7 @@ pub(super) async fn lashlang_execution_graph_store_observes_lashlang_process_fro
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
         rlm_factory(&backend.clone()).with_lashlang_execution_sink(
             Arc::clone(&graph_store) as Arc<dyn crate::tracing::TraceSink>
         ),
@@ -968,6 +974,7 @@ pub(super) async fn an_after_step_cancel_stops_at_the_step_boundary() -> Result<
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         gated_app_lookup_provider(
@@ -1041,6 +1048,7 @@ pub(super) async fn host_escalates_an_after_step_cancel_to_an_immediate_abort() 
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(
         gated_app_lookup_provider(

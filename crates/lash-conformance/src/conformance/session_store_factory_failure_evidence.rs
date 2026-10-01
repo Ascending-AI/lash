@@ -89,7 +89,10 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
     let state = crate::RuntimeSessionState {
         session_id: SessionId::from(SESSION_ID.to_string()),
         policy: policy.clone(),
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     let mut runtime = Box::pin(
         crate::LashRuntime::builder(host, crate::testing::runtime_lease_owner())

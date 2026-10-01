@@ -374,7 +374,10 @@ fn prompt_policy() -> lash_core::SessionPolicy {
             "standard-prompt-law",
             lash_core::testing::test_model_metadata("standard-prompt-law"),
         )),
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::bounded(4))
+        ..lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::bounded(4),
+            lash_core::MaxToolCalls::new(1024),
+        )
     }
 }
 

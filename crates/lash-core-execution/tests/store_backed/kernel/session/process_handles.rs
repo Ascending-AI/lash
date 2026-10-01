@@ -117,7 +117,11 @@ mod tests {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("session"),
             relation: crate::SessionRelation::Root,
-            config: crate::SessionPolicy::new(crate::TurnBudget::Unbounded).into(),
+            config: crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            )
+            .into(),
             head: crate::SessionCreationHead::CommittedByCreator,
         };
         crate::SessionCatalogStore::admit_session(factory.as_ref(), &request)
@@ -156,7 +160,10 @@ mod tests {
             observation_call_key: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+                crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ),
             ),
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: request.session_id.clone(),
@@ -178,6 +185,13 @@ mod tests {
             attachment_store,
             Arc::new(crate::ChronologicalProjection::default()),
             crate::TurnContext::default(),
+            crate::ProcessExecutionEnvSpec::new(
+                crate::AdmittedPluginConfig::default(),
+                crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ),
+            ),
         );
         assert!(attachment_backend.list().await.unwrap().is_empty());
         let handle = RuntimeExecutionContext::process_handle_json(&process.id.clone());
@@ -347,7 +361,10 @@ mod tests {
             observation_call_key: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+                crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ),
             ),
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: SessionId::from("session"),
@@ -369,6 +386,13 @@ mod tests {
             Arc::new(crate::RuntimeAttachmentStore::unavailable()),
             Arc::new(crate::ChronologicalProjection::default()),
             crate::TurnContext::default(),
+            crate::ProcessExecutionEnvSpec::new(
+                crate::AdmittedPluginConfig::default(),
+                crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ),
+            ),
         );
 
         let handle = lash_sansio::handle::handle_record_json(
@@ -459,7 +483,10 @@ mod tests {
             observation_call_key: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+                crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ),
             ),
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: SessionId::from("session"),
@@ -481,6 +508,13 @@ mod tests {
             Arc::new(crate::RuntimeAttachmentStore::unavailable()),
             Arc::new(crate::ChronologicalProjection::default()),
             crate::TurnContext::default(),
+            crate::ProcessExecutionEnvSpec::new(
+                crate::AdmittedPluginConfig::default(),
+                crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ),
+            ),
         );
 
         let unreadable: [(&str, serde_json::Value); 3] = [
@@ -622,7 +656,10 @@ mod tests {
             observation_call_key: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+                crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ),
             ),
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: SessionId::from("session"),
@@ -644,6 +681,13 @@ mod tests {
             Arc::new(crate::RuntimeAttachmentStore::unavailable()),
             Arc::new(crate::ChronologicalProjection::default()),
             crate::TurnContext::default(),
+            crate::ProcessExecutionEnvSpec::new(
+                crate::AdmittedPluginConfig::default(),
+                crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ),
+            ),
         );
         let handle = lash_sansio::handle::handle_record_json(
             &lash_sansio::handle::HandleId::process(&hidden_process.id),
@@ -987,7 +1031,10 @@ mod tests {
             observation_call_key: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::AdmittedPluginConfig::default(),
-                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+                crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ),
             ),
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: SessionId::from("session"),
@@ -1009,6 +1056,13 @@ mod tests {
             Arc::new(crate::RuntimeAttachmentStore::unavailable()),
             Arc::new(crate::ChronologicalProjection::default()),
             crate::TurnContext::default(),
+            crate::ProcessExecutionEnvSpec::new(
+                crate::AdmittedPluginConfig::default(),
+                crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ),
+            ),
         );
         let realized_handle = RuntimeExecutionContext::process_handle_json(&started.id.clone());
 

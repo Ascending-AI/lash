@@ -240,6 +240,7 @@ async fn pg_fence_encodes_again_when_f_moves() {
         session_id: session_id.clone(),
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
         ))
     };
     let receipt = store

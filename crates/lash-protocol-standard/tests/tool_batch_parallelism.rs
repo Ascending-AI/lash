@@ -267,6 +267,25 @@ lash_conformance::tool_batch_parallelism_tests!({
     )
 });
 
+// FIG-4546: the session's recorded `max_tool_calls` is each step's limit on
+// the standard protocol, whether the step spells its calls natively or through
+// `batch`.
+lash_conformance::tool_call_limit_tests!({
+    let (double, host, stores, runner) = double().await;
+    (
+        double,
+        "in-process",
+        host,
+        stores,
+        vec![
+            lash_conformance::batch_sugar_producer(offered()),
+            lash_conformance::batch_wrappers_beside_native_calls_producer(offered()),
+            lash_conformance::parallel_model_tool_calls_producer(offered()),
+        ],
+        runner,
+    )
+});
+
 lash_conformance::batch_sugar_tests!({
     let (double, host, stores, runner) = double().await;
     (

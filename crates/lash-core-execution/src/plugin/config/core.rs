@@ -211,6 +211,23 @@ impl ConfigCommand for SetTurnBudget {
     const NAME: &'static str = "set_turn_budget";
 }
 
+/// The tool-call limit the session runs under from its next root (FIG-4546):
+/// the total one cell may make, and the number a process may hold at once. A
+/// root already admitted keeps the limit it recorded, and so does a process
+/// already started: work the journal accepted is never refused by a later
+/// change.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetMaxToolCalls {
+    pub max_tool_calls: crate::MaxToolCalls,
+}
+
+impl ConfigCommand for SetMaxToolCalls {
+    type Owner = CoreConfigOwner;
+    type Output = ();
+    const NAME: &'static str = "set_max_tool_calls";
+}
+
 /// Whether the session's turns run autonomously from its next root. Every
 /// value is admissible.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -348,6 +365,12 @@ pub(super) fn registration() -> Result<RegisteredOwner, ConfigRegistrationError>
     reg.command::<SetTurnBudget>(|core, command| {
         changed(CoreConfig {
             turn_budget: command.turn_budget,
+            ..core.clone()
+        })
+    })?;
+    reg.command::<SetMaxToolCalls>(|core, command| {
+        changed(CoreConfig {
+            max_tool_calls: command.max_tool_calls,
             ..core.clone()
         })
     })?;

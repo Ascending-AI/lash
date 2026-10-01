@@ -2318,7 +2318,10 @@ async fn consume_wake(
         .map_err(|error| error.to_string())?
         .unwrap_or_else(|| RuntimeSessionState {
             session_id: session.clone(),
-            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            ))
         });
     let settling = |fence: &crate::store::DriveFence, label: &str| {
         let operation = crate::OperationId::new(

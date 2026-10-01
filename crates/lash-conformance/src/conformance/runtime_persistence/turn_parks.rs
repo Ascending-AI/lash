@@ -188,7 +188,10 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimeSto
         .expect("park the turn again");
     let state = RuntimeSessionState {
         session_id: session_id.clone(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     let other = RuntimeCommit::persisted_state_with_operation_for_testing(
         &state,

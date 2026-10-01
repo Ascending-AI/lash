@@ -944,7 +944,10 @@ impl Default for SessionHeadPayload {
         Self {
             schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
             session_id: default_root_session_id(),
-            config: crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded),
+            config: crate::PersistedSessionConfig::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            ),
             current_frame_node_id: None,
             published_by_drive: false,
         }

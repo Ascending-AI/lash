@@ -158,6 +158,7 @@ pub(super) async fn commit_teardown(
             session_id: fence.session().clone(),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         });
     let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state)

@@ -176,7 +176,10 @@ pub async fn plugin_state_boundary_trace(
     let handle = fixture.state(parent_id);
     let mut state = RuntimeSessionState {
         session_id: parent_id.into(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.refresh_plugin_states(&plugins);
     commit(&store, &mut state).await;
@@ -284,7 +287,10 @@ pub async fn plugin_state_boundary_trace(
     assert_eq!(handle.get("child-only"), None);
     let mut child_state = RuntimeSessionState {
         session_id: child_id.into(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     child_state.refresh_plugin_states(&child);
     commit(&child_store, &mut child_state).await;
@@ -322,7 +328,7 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) {
                 .build()
                 .unwrap(),
         )),
-        ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
+        ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
     };
     let state = RuntimeSessionState {
         session_id: id.into(),
@@ -467,7 +473,10 @@ async fn registration_state_law(
     assert_eq!(handle.generation(), 5);
     let mut state = RuntimeSessionState {
         session_id: id.into(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.refresh_plugin_states(&plugins);
     commit(&store, &mut state).await;

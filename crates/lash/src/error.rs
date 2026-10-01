@@ -6,7 +6,7 @@ use lash_sansio::SessionId;
 #[non_exhaustive]
 pub enum EmbedError {
     #[error(
-        "protocol plugin is required; call .protocol_plugin(...) or use LashCore::standard_builder(backend, lash::TurnBudget::bounded(...))/LashCore::rlm_builder(backend, lash::TurnBudget::bounded(...), ...)"
+        "protocol plugin is required; call .protocol_plugin(...) or use LashCore::standard_builder(backend, lash::TurnBudget::bounded(...), lash::MaxToolCalls::new(1024))/LashCore::rlm_builder(backend, lash::TurnBudget::bounded(...), lash::MaxToolCalls::new(1024), ...)"
     )]
     /// Returned when no protocol plugin was configured.
     MissingProtocolPlugin,
@@ -47,6 +47,12 @@ pub enum EmbedError {
     )]
     /// Returned when the session has no explicit turn budget.
     MissingTurnBudget,
+    #[error(
+        "max_tool_calls is required; SessionSpec must carry a MaxToolCalls: the total tool calls one cell may make, and the number a process may hold at once"
+    )]
+    /// Returned when the session has no explicit tool-call limit. There is
+    /// no default and no built-in ceiling.
+    MissingMaxToolCalls,
     #[error(
         "commit budget is required; provide explicit byte and node limits with .commit_budget(...)"
     )]
@@ -326,6 +332,7 @@ impl EmbedError {
             | Self::ModelUnknown(_)
             | Self::ReasoningRefused(_)
             | Self::MissingTurnBudget
+            | Self::MissingMaxToolCalls
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
             | Self::SessionDeleteStorage { .. }
@@ -384,6 +391,7 @@ impl EmbedError {
             | Self::ModelUnknown(_)
             | Self::ReasoningRefused(_)
             | Self::MissingTurnBudget
+            | Self::MissingMaxToolCalls
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
             | Self::StoreSessionMismatch { .. }
@@ -629,6 +637,7 @@ mod tests {
                 backend: "backend".to_string(),
             },
             EmbedError::MissingTurnBudget,
+            EmbedError::MissingMaxToolCalls,
             runtime_error(RuntimeErrorCode::MissingExecutionScopeId),
         ] {
             assert!(err.is_terminal(), "{err}");

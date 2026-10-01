@@ -212,6 +212,7 @@ fn root_state(session_id: &SessionId) -> RuntimeSessionState {
         policy: standard_test_policy(),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
         ))
     }
 }

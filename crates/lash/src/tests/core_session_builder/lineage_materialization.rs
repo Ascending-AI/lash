@@ -113,6 +113,7 @@ async fn ordinary_child_is_not_root_under_facade_and_engine_opens() -> Result<()
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .plugin(owner.clone())
     .serve_test_model(mock_provider(), mock_model_spec())

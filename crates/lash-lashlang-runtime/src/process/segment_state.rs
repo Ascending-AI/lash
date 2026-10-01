@@ -19,6 +19,7 @@ pub(super) fn capture_segment(
         pending_summary: host.effect_summary.pending(),
         effect_omissions: host.effect_summary.omissions(),
         outstanding_groups: host.ctx.outstanding_groups_snapshot(),
+        held_tool_calls: host.ctx.held_tool_calls_snapshot(),
         // The worker released at this boundary settled its measured usage,
         // so the budget holds everything the body consumed so far.
         worker_recovery: host.worker_recovery.crossed(

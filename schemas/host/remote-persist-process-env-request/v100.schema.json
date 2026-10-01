@@ -454,6 +454,12 @@
           "$ref": "#/$defs/RemoteGenerationOptions",
           "description": "Session-wide generation intent, mirroring `SessionPolicy.generation`.\nA remote peer that persists an execution policy without it would\nresume the session with uncontrolled sampling."
         },
+        "max_tool_calls": {
+          "description": "Required wire mirror of the session's tool-call limit.",
+          "format": "uint",
+          "minimum": 1,
+          "type": "integer"
+        },
         "model": {
           "anyOf": [
             {
@@ -480,6 +486,7 @@
       },
       "required": [
         "turn_budget",
+        "max_tool_calls",
         "no_progress_budget",
         "charge_safety"
       ],

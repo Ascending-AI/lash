@@ -500,7 +500,10 @@ pub async fn a_frame_cleanup_whose_claimant_died_is_retaken_at_its_lapse_and_set
     // The frame the delete ends.
     let mut state = crate::RuntimeSessionState {
         session_id: id.clone(),
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
     };
     state.ensure_agent_frame_initialized();
     store

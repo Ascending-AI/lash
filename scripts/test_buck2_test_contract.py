@@ -478,6 +478,7 @@ class WorkflowTests(unittest.TestCase):
                 "pg-attachment-referrers",
                 "pg-model-keys",
                 "pg-rlm-frame-open",
+                "pg-rlm-tool-call-limit",
                 "pg-pool-wait",
                 "pg-sim-backend-faults",
                 "pg-cross-backend",

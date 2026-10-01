@@ -19,7 +19,10 @@ pub fn window_state(
     fleet: super::FleetFormat,
 ) -> Result<LoadedSessionWindow, StoreError> {
     let config = read.config.clone();
-    let mut state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(config.turn_budget));
+    let mut state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+        config.turn_budget,
+        config.max_tool_calls,
+    ));
     let live_owned = crate::runtime::state::LiveOwnedSessionFacts::of(&state.policy);
     crate::runtime::state::adopt_durable_head(&mut state, read, live_owned, fleet)?;
     Ok(LoadedSessionWindow { state, config })

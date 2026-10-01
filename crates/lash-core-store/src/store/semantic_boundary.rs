@@ -167,6 +167,7 @@ mod semantic_boundary_request_identity_tests {
             session_id: SessionId::from("root"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
             ))
         };
         RuntimeCommit::persisted_state_with_operation_for_testing(
@@ -275,7 +276,10 @@ mod semantic_boundary_request_identity_tests {
                 .expect("original identity");
 
         let mut changed_config = commit.clone();
-        changed_config.config = crate::PersistedSessionConfig::new(crate::TurnBudget::bounded(7));
+        changed_config.config = crate::PersistedSessionConfig::new(
+            crate::TurnBudget::bounded(7),
+            crate::MaxToolCalls::new(1024),
+        );
         let (_, changed) = semantic_boundary_request_identity(
             &changed_config,
             SemanticBoundaryOperation::RecordConfig,
@@ -300,7 +304,10 @@ mod semantic_boundary_request_identity_tests {
             .expect("a freshly stamped commit must validate");
 
         let mut stale = commit.clone();
-        stale.config = crate::PersistedSessionConfig::new(crate::TurnBudget::bounded(3));
+        stale.config = crate::PersistedSessionConfig::new(
+            crate::TurnBudget::bounded(3),
+            crate::MaxToolCalls::new(1024),
+        );
         let error = stale
             .validate_operation_session()
             .expect_err("a stamp that no longer matches its content must be refused");

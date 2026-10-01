@@ -462,7 +462,10 @@ fn tool_context_with_provider<'run>(
         observation_call_key: None,
         execution_env_spec: lash_core::ProcessExecutionEnvSpec::new(
             lash_core::AdmittedPluginConfig::default(),
-            lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            ),
         ),
         owner: lash_core::ExecutionOwner::SessionFrame {
             session_id: SessionId::from(SESSION.to_string()),
@@ -1845,6 +1848,13 @@ async fn execution_context_attempt_dispatch_binds_the_direct_client() {
             Arc::new(lash_core::facade_support::RuntimeAttachmentStore::unavailable()),
             Arc::new(lash_core::facade_support::ChronologicalProjection::default()),
             lash_core::TurnContext::default(),
+            lash_core::ProcessExecutionEnvSpec::new(
+                lash_core::AdmittedPluginConfig::default(),
+                lash_core::SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                    lash_core::MaxToolCalls::new(1024),
+                ),
+            ),
         );
 
         lash_core::RuntimeEffectController::execute_effect(

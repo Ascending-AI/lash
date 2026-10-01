@@ -22,6 +22,7 @@ async fn invalidated_live_observation_recovers_with_an_authoritative_snapshot() 
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend().await,
         crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
     ))
     .serve_test_model(mock_provider(), mock_model_spec())
     .live_replay_store(replay.clone())
