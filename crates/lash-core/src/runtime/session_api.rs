@@ -724,7 +724,7 @@ impl LashRuntime {
         protocol_turn_options: crate::ProtocolTurnOptions,
         core_prompt: crate::PromptLayer,
         policy_prompt: crate::PromptLayer,
-    ) -> Result<Option<Arc<str>>, PluginOperationInvokeError> {
+    ) -> Result<Option<Arc<str>>, crate::PluginError> {
         let mut capability_prompt = crate::PromptLayer::new();
         for contribution in context_contributions {
             capability_prompt.add_contribution(contribution);
@@ -738,8 +738,7 @@ impl LashRuntime {
                 protocol_turn_options,
                 turn_context: crate::TurnContext::new(),
             })
-            .await
-            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?
+            .await?
         {
             capability_prompt.add_contribution(contribution);
         }

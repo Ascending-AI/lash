@@ -31,6 +31,115 @@ impl lash_core::facade_support::TraceSink for CompactorCrash {
     }
 }
 
+/// A changed prompt hook after a journaled summary parks the administrative
+/// command without settling it or publishing a frame (FIG-4572).
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture results are established by setup"
+)]
+pub async fn a_compaction_redriven_with_a_changed_prompt_parks_without_settling(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let protocol = StandardFrameLawProtocol::shared();
+    let model = law_model(ModelScript {
+        turns: vec![
+            (protocol.answer("answer 1"), 1),
+            (protocol.answer("answer 2"), 1),
+        ],
+    });
+    let mut law = LawSession::open(
+        prefix,
+        "compaction-prompt-divergence",
+        effect_host,
+        stores,
+        runner,
+        protocol,
+        model.provider.clone(),
+    )
+    .await;
+    law.parts.compaction.compactor = LawCompactor::Standard;
+    for root in ["root-1", "root-2"] {
+        law.enqueue(root).await;
+        law.run_root(root).await;
+    }
+    let before = law.head().await;
+    let receipt = law.submit_compaction("compact").await;
+    let prompt_plugin = |text: &'static str| {
+        Arc::new(crate::plugin::StaticPluginFactory::new(
+            "conformance-compaction-prompt",
+            crate::facade_support::PluginSpec::new().with_prompt_contributor(Arc::new(
+                move |_ctx| {
+                    Box::pin(async move {
+                        Ok(vec![crate::PromptContribution::environment(
+                            "Overlay", text,
+                        )])
+                    })
+                },
+            )),
+        )) as Arc<dyn PluginFactory>
+    };
+    law.parts.host_plugins.push(prompt_plugin("first worker"));
+    let crashing = drive_attempt(&law.parts, Some(FrameOpenCrash::AfterSummary), None);
+    law.parts.host_plugins = vec![prompt_plugin("replacement worker")];
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(90),
+        law.runner.run_crashed_then_redriven_turn(
+            admit(crate::ExecutionScope::turn(
+                &law.session_id,
+                format!("{}-compact", law.prefix),
+            )),
+            crashing,
+            drive_attempt(&law.parts, None, Some(tx)),
+        ),
+    )
+    .await
+    .expect("the divergent redrive stops");
+    let redrive = rx.recv().await.expect("the redrive executed");
+    let settlement = law.compaction_outcome(&receipt).await;
+    assert!(
+        settlement.is_none(),
+        "a journaled summary's divergent replay must never settle Failed: {settlement:?}"
+    );
+    let error = redrive.expect_err("the divergent command aborts");
+    assert_eq!(error.code, crate::RuntimeErrorCode::EffectReplayDivergence);
+    assert_eq!(error.turn_failure_cause(), crate::TurnFailureCause::Parked);
+    let park = law
+        .store
+        .load_turn_park(&law.session_id)
+        .await
+        .expect("read the command root's park")
+        .expect("the command root parks for an operator");
+    let crate::store::ParkReason::EffectReplayDivergence {
+        effect_kind,
+        message,
+    } = &park.reason
+    else {
+        panic!("the command keeps its own park classification: {park:?}");
+    };
+    assert_eq!(effect_kind, "direct");
+    assert!(
+        message.contains("command.request.instructions"),
+        "{message}"
+    );
+    assert!(
+        law.store
+            .root_terminal(&law.session_id, &park.turn_id)
+            .await
+            .expect("read the command root's terminal")
+            .is_none(),
+        "a parked command remains non-terminal"
+    );
+    let after = law.head().await;
+    assert_eq!(after.head_revision, before.head_revision);
+    assert_eq!(after.current_frame_node_id, before.current_frame_node_id);
+    assert_eq!(model.summary_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(model.turn_calls.load(Ordering::SeqCst), 2);
+}
+
 /// An administrative compaction submitted to the command lane, then applied
 /// by a drive killed at `crash` and redriven. With `input_after`, an input
 /// queued behind the compaction runs in the same drive, after it.

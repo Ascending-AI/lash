@@ -783,22 +783,53 @@ async fn build_runtime(parts: &LawParts, crash: Option<FrameOpenCrash>) -> crate
             })
             .collect(),
     };
+    let factories = parts
+        .protocol
+        .plugins()
+        .into_iter()
+        .chain(compaction)
+        .chain(parts.host_plugins.iter().cloned())
+        .collect::<Vec<_>>();
     let builder =
         crate::LashRuntime::builder(parts.host.clone(), crate::testing::runtime_lease_owner())
             .with_session_id(&parts.session_id)
             .with_policy(policy)
-            .with_plugin_factories(
-                parts
-                    .protocol
-                    .plugins()
-                    .into_iter()
-                    .chain(compaction)
-                    .chain(parts.host_plugins.iter().cloned())
-                    .collect(),
-            );
+            .with_plugin_factories(factories.clone());
     let builder = if law.storeless {
         builder
     } else {
+        let builder =
+            match crate::conformance::helpers::load_window_state(&parts.store, &parts.session_id)
+                .await
+                .expect("read the law's resident state")
+            {
+                Some(state) => {
+                    let authority = crate::plugin::SessionAuthorityContext {
+                        tool_access: state.authority.tool_access.clone(),
+                        subagent: state.authority.subagent.clone(),
+                        plugin_config: state.admitted_plugin_config(),
+                    };
+                    let request = match state.plugin_state() {
+                        Some(snapshot) => crate::plugin::PluginSessionRequest::rematerialization(
+                            parts.session_id.clone(),
+                            snapshot,
+                            authority,
+                        ),
+                        None => crate::plugin::PluginSessionRequest::creation(
+                            parts.session_id.clone(),
+                            authority,
+                        ),
+                    };
+                    let plugins = crate::plugin::PluginHost::new(factories)
+                        .isolated_registry()
+                        .build_session(request)
+                        .expect("rematerialize the law's plugins");
+                    builder
+                        .with_initial_state(state)
+                        .with_plugin_session(plugins)
+                }
+                None => builder,
+            };
         builder.with_store(crate::conformance::helpers::session_view(
             &parts.store,
             parts.session_id.clone(),
@@ -1758,6 +1789,7 @@ macro_rules! frame_open_redrive_tests {
             (a_root_resumed_on_a_fresh_journal_continues_from_its_own_frame_on_the_engine_path,
                 Engine));
         $crate::frame_open_redrive_tests!(@once [$(#[$attr])*] $fixture;
+            a_compaction_redriven_with_a_changed_prompt_parks_without_settling,
             compact_with_production_compactor_crash_matrix,
             a_session_deleted_during_an_open_keeps_nothing_of_it,
             a_fork_made_during_an_open_never_sees_its_seed,

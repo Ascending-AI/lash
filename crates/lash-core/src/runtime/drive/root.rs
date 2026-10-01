@@ -273,6 +273,7 @@ impl LashRuntime {
                     });
                 }
                 Err(crate::runtime::session_api::CommandDrainStop::Failed(error)) => {
+                    self.record_turn_park_after_abort(&error, &root, None).await;
                     return Err(drive_abort(Some(&root), error));
                 }
             }

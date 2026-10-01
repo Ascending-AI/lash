@@ -42,6 +42,25 @@ enum CompactionRun {
     Failed(RuntimeError),
 }
 
+impl CompactionRun {
+    /// Only a compaction refusal settles Failed. Invocation faults keep the
+    /// command open for redrive or an operator, with their original cause.
+    fn failure(error: crate::plugin::ContextError) -> Result<Self, RuntimeError> {
+        let error = match error {
+            crate::plugin::ContextError::Plugin(crate::PluginError::Runtime(error)) => error,
+            crate::plugin::ContextError::Plugin(crate::PluginError::RuntimeEffectController(
+                error,
+            )) => error.into_runtime_error(),
+            error => error.into_turn_failure(RuntimeErrorCode::ContextCompaction),
+        };
+        if error.turn_failure_cause().aborts_invocation() || error.is_session_retirement() {
+            Err(error)
+        } else {
+            Ok(Self::Failed(error))
+        }
+    }
+}
+
 /// The frame switch an administrative compaction commits (ADR 0113 §3.1):
 /// the frame it left, what its seed carries out of that frame, and the
 /// compaction's own execution, which gates the ended frame's cleanup.
@@ -148,8 +167,9 @@ impl LashRuntime {
     /// the same history and reads its summary back from its journal. The
     /// frame key derives from the session, the compaction's scope and the
     /// frame it leaves. A failure that is the compaction's own (its prompt,
-    /// its compactor, its frame open) is [`CompactionRun::Failed`]; a
-    /// failure to read the session or record the base is the run's error.
+    /// its compactor, its frame open) is [`CompactionRun::Failed`]. Invocation
+    /// faults, including replay divergences, remain typed run errors and
+    /// leave the command unsettled.
     async fn run_compaction(
         &mut self,
         instructions: Option<String>,
@@ -186,12 +206,7 @@ impl LashRuntime {
         .await
         {
             Ok(system_prompt) => system_prompt,
-            Err(error) => {
-                return Ok(CompactionRun::Failed(RuntimeError::new(
-                    RuntimeErrorCode::ContextCompaction,
-                    format!("the compaction's system prompt failed: {error}"),
-                )));
-            }
+            Err(error) => return CompactionRun::failure(error.into()),
         };
         let ctx = crate::CompactionContext {
             session_id: self.state.session_id.clone(),
@@ -206,12 +221,7 @@ impl LashRuntime {
         let compaction = match plugin_session.compact_context(&ctx).await {
             Ok(Some(compaction)) => compaction,
             Ok(None) => return Ok(CompactionRun::NothingToCompact),
-            Err(error) => {
-                return Ok(CompactionRun::Failed(RuntimeError::new(
-                    RuntimeErrorCode::ContextCompaction,
-                    format!("context compaction failed: {error}"),
-                )));
-            }
+            Err(error) => return CompactionRun::failure(error),
         };
         drop(ctx);
         let frame_key = compaction_frame_key(
@@ -228,7 +238,7 @@ impl LashRuntime {
             .await
         {
             Ok(opened) => opened,
-            Err(error) => return Ok(CompactionRun::Failed(error)),
+            Err(error) => return CompactionRun::failure(crate::PluginError::Runtime(error).into()),
         };
         if !opened.result.opened {
             return Ok(CompactionRun::NothingToCompact);

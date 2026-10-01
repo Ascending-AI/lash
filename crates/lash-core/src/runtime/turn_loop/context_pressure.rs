@@ -180,7 +180,6 @@ impl LashRuntime {
                         policy_prompt,
                     )
                     .await
-                    .map_err(|err| crate::PluginError::Session(err.to_string()))
                 })
             })
         };
