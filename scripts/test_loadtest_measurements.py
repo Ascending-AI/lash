@@ -255,7 +255,7 @@ class MeasurementsTests(unittest.TestCase):
 
     def check_pool_archive(self, samples):
         run, operations, _, witness = evidence()
-        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent.parent / 'target') as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             log = Path(tmp) / 'load.log'
             rows = [run, *operations, *samples, *witness_evidence(), witness]
             log.write_text(''.join('load measurement ' + json.dumps(row) + '\n' for row in rows))
