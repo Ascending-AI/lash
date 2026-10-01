@@ -1233,6 +1233,56 @@ class DependentTestLabelTests(unittest.TestCase):
             labels,
         )
 
+    def test_local_tail_exclusion_keeps_regular_dependents(self) -> None:
+        scope = ci_plan.DevTestScope((), False, False, False, ())
+        labels, builds = ci_plan.affected_buck2_labels(
+            scope, {"//crates/lash-restate:lash-restate__unit_test"},
+            ["//crates/lash-sim:lash-sim__unit_test"], {},
+            include_deferred=False,
+        )
+        self.assertEqual(["//crates/lash-restate:lash-restate__unit_test"], labels)
+        self.assertEqual(["//:schema_checks"], builds)
+
+    def test_ci_pr_selection_matches_pre_change_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inventory = root / ci_plan.TARGET_INVENTORY
+            inventory.parent.mkdir(parents=True)
+            inventory.write_text(json.dumps({
+                "workspace_dev_test_targets": ["//crates/fast:fast__test"],
+                "workspace_test_batches": {},
+                "packages": [
+                    {"manifest": f"crates/{name}/Cargo.toml", "targets": [{
+                        "kind": "test", "label": f"//crates/{name}:{name}__test",
+                        "build_label": f"//crates/{name}:{name}__test", "tags": tags,
+                    }]}
+                    for name, tags in (
+                        ("fast", []), ("slow", ["dev-deferred"]), ("service", ["manual"])
+                    )
+                ],
+            }))
+            for name in ("fast", "slow", "service"):
+                directory = root / f"crates/{name}"
+                directory.mkdir(parents=True)
+                (directory / "BUCK").write_text("")
+            # Serialized selection from the assembler before it had a local
+            # deferred policy. CI must preserve labels, builds and their order.
+            cases = [
+                (["crates/fast/src/lib.rs", "crates/slow/src/lib.rs"], {},
+                 b'[["//crates/fast:fast__test", "//crates/slow:slow__test"], ["//:schema_checks"]]'),
+                (["crates/slow/Cargo.toml"], {},
+                 b'[["//:dev_tests", "//crates/slow:slow__test"], ["//:schema_checks"]]'),
+                (["Cargo.lock"], {"broad": True, "tail": ["//crates/slow:slow__test"]},
+                 b'[["//:dev_tests", "//crates/slow:slow__test", "//crates/lash:ui_fixtures", "//crates/lash:facade_completeness"], ["//:schema_checks"]]'),
+                (["crates/service/src/lib.rs"], {},
+                 b'[[], ["//crates/service:service__test", "//:schema_checks"]]'),
+                (["docs/guide.md"], {}, b'[[], []]'),
+            ]
+            for paths, options, before in cases:
+                with self.subTest(paths=paths):
+                    after = json.dumps(ci_plan.pr_affected_targets(paths, root, **options)).encode()
+                    self.assertEqual(before, after)
+
 
 class LawTickLaneTests(unittest.TestCase):
     def test_no_law_constructs_fresh_deployment_lanes(self) -> None:

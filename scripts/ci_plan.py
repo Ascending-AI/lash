@@ -1700,6 +1700,7 @@ def affected_buck2_labels(
     tail: list[str],
     batches: Mapping[str, list[str]],
     package_builds: Mapping[str, tuple[str, ...]] | None = None,
+    include_deferred: bool = True,
 ) -> tuple[list[str], list[str]]:
     """The (`buck2 test`, `buck2 build`) label lists one dev-test scope selects.
 
@@ -1716,8 +1717,12 @@ def affected_buck2_labels(
     whole `//:dev_tests` suite; the facade seal rides a facade diff; a touched
     package no selected label covers gets its inventory build labels. The
     `//:schema_checks` build aggregate runs whenever either list is non-empty.
+    `include_deferred` lets the local pre-land gate leave the tail to the
+    hourly main run; CI keeps the default selection.
     """
 
+    if not include_deferred:
+        tail = []
     members = set(members) | set(tail)
     labels = ["//:dev_tests", *tail] if scope.broad else batch_labels(members, batches)
     if scope.facade:

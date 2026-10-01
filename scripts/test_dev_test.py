@@ -267,15 +267,22 @@ class DevTestTests(unittest.TestCase):
         result = self.invoke("--dependents", "--dry-run")
         self.assertEqual(result.returncode, 0, result.stderr)
         planned = json.loads(result.stdout)
-        # The whole suite, and every deferred test the gate can run.
+        # Query failure still runs the whole dev suite, leaving deferred tests
+        # to main unless explicitly requested.
         self.assertEqual(planned["commands"], [
             ["kiln", "build", "//:schema_checks"],
-            ["kiln", "test", "//:dev_tests", "//crates/slow:slow__test"],
+            ["kiln", "test", "//:dev_tests"],
         ])
+        self.assertEqual(planned["skipped_deferred"], ["//crates/slow:slow__test"])
+        included = json.loads(self.invoke("--dependents", "--include-deferred", "--dry-run").stdout)
+        self.assertEqual(included["commands"][-1], [
+            "kiln", "test", "//:dev_tests", "//crates/slow:slow__test",
+        ])
+        self.assertEqual(included["skipped_deferred"], [])
         self.assertEqual(planned["selection"], "suite")
         self.assertIn("reverse-dependency query failed", result.stderr)
 
-    def test_dependents_run_deferred_reverse_dependencies_and_name_the_rest(self):
+    def test_dependents_skip_deferred_reverse_dependencies_unless_included(self):
         query = self.bin / "buck2"
         query.write_text(
             "#!/bin/sh\nprintf '%s\\n' \"$*\" > .git/query-args\n"
@@ -291,8 +298,17 @@ class DevTestTests(unittest.TestCase):
         self.assertEqual(planned["commands"], [
             ["kiln", "build", "//:schema_checks"],
             ["kiln", "test", "//crates/dependent:dependent__test",
-             "//crates/example:first", "//crates/slow:slow__test"],
+             "//crates/example:first"],
         ])
+        self.assertEqual(planned["skipped_deferred"], ["//crates/slow:slow__test"])
+        included = json.loads(self.invoke("--dependents", "--include-deferred", "--dry-run").stdout)
+        self.assertEqual(included["commands"][-1], [
+            "kiln", "test", "//crates/dependent:dependent__test",
+            "//crates/example:first", "//crates/slow:slow__test",
+        ])
+        self.assertEqual(included["skipped"], planned["skipped"])
+        self.assertEqual(included["skipped_deferred"], [])
+        self.assertNotEqual(included["id"], planned["id"])
         self.assertEqual(planned["skipped"], [
             "//crates/slow:service__test",
             "//crates/slow:trunk__test",
@@ -305,8 +321,41 @@ class DevTestTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("dev-test: SKIPPED 3 affected tests", result.stdout)
         self.assertIn("//crates/slow:service__test //crates/slow:trunk__test", result.stdout)
+        self.assertIn("dev-test: skipped 1 dev-deferred targets (run hourly on main): "
+                      "//crates/slow:slow__test", result.stdout)
+        result = self.invoke("--dependents", "--include-deferred")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("dev-deferred targets", result.stdout)
         # Without `--dependents` nothing was queried, so nothing is named.
         self.assertEqual(json.loads(self.invoke("--dry-run").stdout)["skipped"], [])
+
+    def test_broad_dependents_skip_the_tail_and_the_flag_restores_it(self):
+        (self.root / "scripts/unknown.py").write_text("# shared tooling\n")
+        planned = json.loads(self.invoke("--dependents", "--dry-run").stdout)
+        self.assertEqual(planned["commands"][-1], ["kiln", "test", "//:dev_tests"])
+        self.assertEqual(planned["skipped_deferred"], ["//crates/slow:slow__test"])
+        included = json.loads(self.invoke("--dependents", "--include-deferred", "--dry-run").stdout)
+        self.assertEqual(included["commands"][-1], [
+            "kiln", "test", "//:dev_tests", "//crates/slow:slow__test",
+        ])
+        self.assertEqual(included["skipped_deferred"], [])
+
+    def test_touched_deferred_only_package_is_built_when_its_test_is_skipped(self):
+        self.git("checkout", "--", "crates/example/src/lib.rs")
+        (self.root / "crates/slow/src/lib.rs").write_text("pub fn slow() { let _ = 1; }\n")
+        query = self.bin / "buck2"
+        query.write_text("#!/bin/sh\necho root//crates/slow:slow__test\n")
+        planned = json.loads(self.invoke("--dependents", "--dry-run").stdout)
+        self.assertEqual(planned["commands"], [[
+            "kiln", "build", "//crates/slow:service__test",
+            "//crates/slow:slow__test", "//crates/slow:trunk__test", "//:schema_checks",
+        ]])
+        self.assertEqual(planned["skipped_deferred"], ["//crates/slow:slow__test"])
+        included = json.loads(self.invoke("--dependents", "--include-deferred", "--dry-run").stdout)
+        self.assertEqual(included["commands"], [
+            ["kiln", "build", "//:schema_checks"],
+            ["kiln", "test", "//crates/slow:slow__test"],
+        ])
 
     def report(self, statuses):
         outside = tempfile.TemporaryDirectory()

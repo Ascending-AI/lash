@@ -13,7 +13,8 @@ for development. Lash uses the checksum-pinned official Buck2 executable and
 the existing NativeLink pool. `kiln test` runs the cacheable developer partition;
 it does not run every correctness gate. While editing, prefer an owning target
 and `--test_arg=<filter>`. Run `python3 scripts/dev-test.py --dependents` before
-landing: it runs every test that depends on the change. See [the build guide](docs/agents/hermetic-build.md) for partitions,
+landing: it runs affected dev-suite tests and leaves dev-deferred tests to the
+hourly main run. Add `--include-deferred` to run those too. See [the build guide](docs/agents/hermetic-build.md) for partitions,
 reports, features and service gates.
 Prefer `kiln check` for compiler feedback: it checks metadata without linking.
 Use `kiln build` when you need full libraries or executables.

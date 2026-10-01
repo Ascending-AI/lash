@@ -65,9 +65,12 @@ kiln gate lash <fork> -- python3 scripts/dev-test.py --dependents
 
 It diffs the merge base with `origin/main` against the commits, the working
 tree and untracked files together. A Buck2 `rdeps` query over the touched
-packages selects every dev-suite and `dev-deferred` test that depends on them;
-a shared input, a package manifest or a failed query selects `//:dev_tests` and
-every `dev-deferred` test instead. The tests run through `kiln test` on the
+packages selects every dev-suite test that depends on them; a shared input,
+a package manifest or a failed query selects `//:dev_tests` instead.
+The gate names the affected `dev-deferred` labels it skips, which run hourly on
+main. Add `--include-deferred` to restore their selection, including all deferred
+labels on a broad plan. CI's PR selection still includes the tail labels.
+The tests run through `kiln test` on the
 pool at the default `--jobs`, never serially, and cached verdicts bound the
 cost, so there is no sampling. Every planned command runs, also after one
 fails. The closing lines give the target count and name

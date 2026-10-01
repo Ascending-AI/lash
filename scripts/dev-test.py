@@ -213,7 +213,7 @@ def reverse_dependencies(packages: list[str]) -> set[str] | None:
     return {root_cell_label(line.split()[0]) for line in result.stdout.splitlines() if line.strip()}
 
 
-def plan(base: str, dependents: bool) -> dict:
+def plan(base: str, dependents: bool, include_deferred: bool = False) -> dict:
     identity = input_id(base)
     paths = changed_files(base)
     packages, broad, facade, commands = select(paths, script_gates())
@@ -224,24 +224,20 @@ def plan(base: str, dependents: bool) -> dict:
     if dependents and (packages or broad):
         query = None if broad else reverse_dependencies(packages)
         broad = query is None
-        # `--dependents` is the pre-land gate: besides the dev-suite members
-        # it runs the dev-deferred tests the change can reach, which nothing
-        # else runs before main does, and names the tests it leaves out.
+        # Split the reachable tests so deferred and manual skips are reported
+        # separately. The shared assembler applies the deferred policy.
         selected, deferred, skipped = ci_plan.dependent_test_labels(query, ROOT)
         if not broad:
             members = selected
-    # A change under a package's directory also runs that package's
-    # `dev-deferred` labels: the tail leg is merge-group-only in CI, so a
-    # change to a deferred test's inputs (#2109's corpus expectations file)
-    # otherwise lands untested. This holds on a broad plan too -- a package
-    # manifest widens the selection but is still a deferred test's input.
-    # The label assembly is ci_plan.affected_buck2_labels: the same selection
-    # the pull-request leg of `buck2-tests` runs in CI.
+    # CI and package-scoped iteration keep the touched packages' tail.
+    # `--dependents` leaves it to the hourly main run unless opted back in.
     tail = sorted({*ci_plan.pr_tail_labels(paths, ROOT), *deferred})
+    run_deferred = not dependents or include_deferred
     scope = ci_plan.DevTestScope(tuple(sorted(packages)), broad, facade, False, ())
     package_builds = ci_plan.package_build_labels(set(packages), ROOT)
     labels, builds = ci_plan.affected_buck2_labels(
-        scope, members, tail, batches, package_builds
+        scope, members, tail, batches, package_builds,
+        include_deferred=run_deferred,
     )
     if builds:
         commands.append(["kiln", "build", *builds])
@@ -256,6 +252,7 @@ def plan(base: str, dependents: bool) -> dict:
         "selection": "suite" if broad else "dependents" if dependents else "packages",
         "commands": commands,
         "skipped": skipped,
+        "skipped_deferred": [] if run_deferred else tail,
         "remaining": ["Required CI gates; this is focused local validation, not full CI"],
     }
     result["id"] = hashlib.sha256(json.dumps(result, sort_keys=True).encode()).hexdigest()
@@ -426,6 +423,9 @@ def gate_summary(planned: dict, ran: list[tuple[list[str], int, Path]], seconds:
     if planned.get("skipped"):
         lines.append(f"dev-test: SKIPPED {len(planned['skipped'])} affected tests this gate never runs "
                      "(service-backed, Cargo-owned or trunk-only): " + " ".join(planned["skipped"]))
+    if planned.get("skipped_deferred"):
+        lines.append(f"dev-test: skipped {len(planned['skipped_deferred'])} dev-deferred targets "
+                     "(run hourly on main): " + " ".join(planned["skipped_deferred"]))
     return passed, lines
 
 
@@ -526,6 +526,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", help="Comparison revision; defaults to merge-base with origin/main")
     parser.add_argument("--dependents", action="store_true", help="Include Buck2 reverse dependencies")
+    parser.add_argument("--include-deferred", action="store_true", help="Include dev-deferred targets in the pre-land gate")
     parser.add_argument("--dry-run", action="store_true", help="Print the exact plan as JSON without executing")
     parser.add_argument("--verbose", action="store_true", help="Stream each command's output instead of logging it and summarizing failures")
     args = parser.parse_args()
@@ -538,7 +539,7 @@ def main() -> int:
     else:
         base = git("merge-base", "HEAD", "origin/main").decode().strip()
     try:
-        planned = plan(base, args.dependents)
+        planned = plan(base, args.dependents, args.include_deferred)
     except (RuntimeError, KeyError, ValueError, OSError) as error:
         parser.error(str(error))
     if args.dry_run:
