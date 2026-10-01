@@ -366,7 +366,10 @@ impl World {
                 store,
                 self.session_id.clone(),
             );
-            crate::testing::runtime_helpers::advance_session_head(&recording, |_| {}).await;
+            crate::testing::runtime_helpers::advance_session_head(&recording, |state| {
+                state.policy = self.policy();
+            })
+            .await;
         }
         if failing || (last && self.script.ending == Ending::Failed) {
             let usage = failed_usage();
@@ -424,6 +427,12 @@ impl World {
         })
     }
 
+    fn policy(&self) -> crate::SessionPolicy {
+        let mut policy = crate::testing::mock_session_policy();
+        policy.session_id = Some(self.session_id.clone());
+        policy
+    }
+
     /// A fresh runtime over the tier's host and stores, loading the session
     /// the earlier executions committed.
     #[expect(
@@ -451,8 +460,7 @@ impl World {
             ))
                 as Arc<dyn crate::facade_support::PluginFactory>])
             .collect::<Vec<_>>();
-        let mut policy = crate::testing::mock_session_policy();
-        policy.session_id = Some(self.session_id.clone());
+        let policy = self.policy();
         let store =
             crate::conformance::law_session_store(self.tier.stores.as_ref(), &self.session_id)
                 .await;
