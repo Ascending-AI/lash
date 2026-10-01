@@ -182,6 +182,24 @@ endpoints = ["PC"]
 shards = 1
 timeout_seconds = 180
 
+# What a root recorded decides its replay and its restart, on a live server:
+# the response-phase replay law (FIG-4390: a response hook added or removed
+# between a root's first attempt and its replay never changes the response it
+# serves) and the recorded turn budget's restart law (FIG-4376: a deployment
+# restarted under an unbounded core still stops each root at its session's
+# recorded budget). One endpoint bind per shard: each law brings its
+# deployment up on it in turn.
+[suites.recorded-roots]
+label = "//crates/lash:lash__unit_test"
+cwd = "crates/lash"
+filters = [
+  "tests::response_phase_replay::live_",
+  "tests::recorded_execution_controls::live_a_recorded_budget_bounds_every_root_after_a_deployment_restart",
+]
+endpoints = ["RR"]
+shards = 1
+timeout_seconds = 240
+
 [suites.remote-cancellation]
 label = "//crates/lash-restate:lash-restate__unit_test"
 cwd = "crates/lash-restate"

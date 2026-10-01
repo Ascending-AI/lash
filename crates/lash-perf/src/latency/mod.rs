@@ -216,7 +216,11 @@ pub async fn run(run: LatencyRun) -> anyhow::Result<i32> {
     let mut reports = Vec::new();
     let mut samples = Vec::new();
     for spec in &specs {
+        // The case's window on the wall clock, for a wrapper that records
+        // host load beside the run (`scripts/latency_load_record.py`).
+        println!("latency case {}: started", spec.name);
         let (report, case_samples) = runner::run_case(spec, &env).await?;
+        println!("latency case {}: finished", spec.name);
         reports.push(report);
         samples.extend(case_samples);
         let gate_timings = lash_sqlite_store::take_gate_timings();

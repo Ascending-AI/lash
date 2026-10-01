@@ -718,31 +718,39 @@ fn endless_provider(calls: &Arc<AtomicUsize>) -> ProviderHandle {
         .into_handle()
 }
 
+/// The line prefix the Restate suite runner reads as a completed step
+/// (`PROGRESS_MARKER` in `scripts/ci/restate_suite.py`): the live law is
+/// bounded per root, not by its four roots together, which a starved host's
+/// replay leg stretches.
+const PROGRESS_MARKER: &str = "[restate-suite progress] ";
+
 /// A session's recorded budget bounds its roots after the engine restarts
 /// under a core whose own budget is unbounded (figments' re-pin at
 /// 257bef60f3 ran such a root past 500 model calls). One session is created
 /// with the budget, the other is given it by `SetTurnBudget`; then the
-/// `first` deployment goes away, and a new one over its stores opens both
-/// under an unbounded core. Each root, driven on the engine's own
-/// reopen and on a host open, stops after exactly [`RECORDED_TURNS`] model
-/// calls, typed: the next call is never made.
+/// `first` deployment goes away, and `restart` brings up a new one over its
+/// stores, which opens both under an unbounded core. Each root, driven on the
+/// engine's own reopen and on a host open, stops after exactly
+/// [`RECORDED_TURNS`] model calls, typed: the next call is never made.
+/// `prefix` names the law's sessions.
 async fn a_recorded_budget_bounds_every_root_after_an_engine_restart(
-    first: lash_restate_test::RestateTestBackend,
-    restart_seed: u64,
+    first: lash_core::Backend,
+    restart: impl AsyncFnOnce() -> lash_core::Backend,
+    prefix: &str,
 ) -> Result<()> {
-    const CREATED: &str = "restart-created-bounded";
-    const COMMANDED: &str = "restart-commanded-bounded";
+    let created = format!("{prefix}-created-bounded");
+    let commanded = format!("{prefix}-commanded-bounded");
     let calls = Arc::new(AtomicUsize::new(0));
     {
-        let creator = core_over(first.lash_backend(), endless_provider(&calls))?;
+        let creator = core_over(first, endless_provider(&calls))?;
         create_with_budget(
             &creator,
-            CREATED,
+            &created,
             crate::TurnBudget::bounded(RECORDED_TURNS),
         )
         .await?;
-        create_with_budget(&creator, COMMANDED, crate::TurnBudget::Unbounded).await?;
-        let session = creator.session(COMMANDED).open().await?;
+        create_with_budget(&creator, &commanded, crate::TurnBudget::Unbounded).await?;
+        let session = creator.session(commanded.as_str()).open().await?;
         let revision = session.admin().config().revision().await?;
         let outcome = apply(
             &session,
@@ -761,15 +769,15 @@ async fn a_recorded_budget_bounds_every_root_after_an_engine_restart(
             "{outcome:?}"
         );
     }
-    let second = redeploy(first, restart_seed).await;
+    let second = restart().await;
     let unbounded = explicit_ephemeral_facets(LashCore::standard_builder(
-        second.lash_backend(),
+        second,
         crate::TurnBudget::Unbounded,
     ))
     .serve_test_model(endless_provider(&calls), mock_model_spec())
     .tools(Arc::new(AppTools))
     .build(crate::testing::runtime_lease_owner())?;
-    for id in [CREATED, COMMANDED] {
+    for id in [created.as_str(), commanded.as_str()] {
         assert_eq!(
             shape(
                 &engine_driven_turn(&unbounded, id, "look it all up").await?,
@@ -778,6 +786,7 @@ async fn a_recorded_budget_bounds_every_root_after_an_engine_restart(
             stopped_at(RECORDED_TURNS),
             "{id}: the engine's reopen after the restart runs the recorded budget"
         );
+        eprintln!("{PROGRESS_MARKER}{id}: the engine-driven root stopped at its budget");
         let opened = unbounded.session(id).open().await?;
         let output = opened
             .send(TurnInput::text("look it all up again"))
@@ -788,8 +797,30 @@ async fn a_recorded_budget_bounds_every_root_after_an_engine_restart(
             stopped_at(RECORDED_TURNS),
             "{id}: a host open under the unbounded core runs the recorded budget"
         );
+        eprintln!("{PROGRESS_MARKER}{id}: the host-opened root stopped at its budget");
     }
     Ok(())
+}
+
+/// The law on the server double: the restart is a new double over `first`'s
+/// stores.
+async fn after_a_restart_of_the_double(
+    first: lash_restate_test::RestateTestBackend,
+    restart_seed: u64,
+) -> Result<()> {
+    let backend = first.lash_backend();
+    let mut second = None;
+    a_recorded_budget_bounds_every_root_after_an_engine_restart(
+        backend,
+        async || {
+            let double = redeploy(first, restart_seed).await;
+            let backend = double.lash_backend();
+            second = Some(double);
+            backend
+        },
+        "restart",
+    )
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -797,7 +828,7 @@ async fn a_recorded_budget_bounds_every_root_after_an_engine_restart_on_sqlite()
     let first = lash_restate_test::backend(0x4376_0002, lash_restate_test::ServerConfig::default())
         .await
         .expect("build the first deployment over SQLite");
-    a_recorded_budget_bounds_every_root_after_an_engine_restart(first, 0x4376_0003).await
+    after_a_restart_of_the_double(first, 0x4376_0003).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -813,5 +844,57 @@ async fn a_recorded_budget_bounds_every_root_after_an_engine_restart_on_postgres
     )
     .await
     .expect("build the first deployment over PostgreSQL");
-    a_recorded_budget_bounds_every_root_after_an_engine_restart(first, 0x4376_0005).await
+    after_a_restart_of_the_double(first, 0x4376_0005).await
+}
+
+/// The law on a live `restate-server` (the `recorded-roots` suite of
+/// `scripts/restate-suites.toml`): the restart replaces the deployment with a
+/// new engine and endpoint over its stores, registered with the same server.
+/// The server's state outlives a run, so each run names its own sessions.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires an isolated Restate server; run by the recorded-roots suite"]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the live law reads the suite's server and endpoint addresses"
+)]
+async fn live_a_recorded_budget_bounds_every_root_after_a_deployment_restart() -> Result<()> {
+    let env = |name: &str| {
+        std::env::var(name).unwrap_or_else(|_| panic!("the live suite's environment sets {name}"))
+    };
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("wall clock after the epoch")
+        .as_nanos();
+    let prefix = format!("recorded-budget-restart-{nonce}");
+    let first =
+        lash_restate_test::live::LiveRestateBackend::start(lash_restate_test::live::LiveConfig {
+            ingress_url: env("RESTATE_INGRESS_URL"),
+            admin_url: env("RESTATE_ADMIN_URL"),
+            endpoint_bind: env("RR_BIND").parse().expect("a socket address"),
+            endpoint_url: env("RR_URL"),
+            run_tag: prefix.clone(),
+            namespace: lash_restate::RestateNamespace::default(),
+        })
+        .await
+        .expect("serve the first live deployment");
+    let mut second = None;
+    let result = a_recorded_budget_bounds_every_root_after_an_engine_restart(
+        first.lash_backend(),
+        async || {
+            let rebuilt = first
+                .rebuild()
+                .await
+                .expect("restart the live deployment over its stores");
+            let backend = rebuilt.lash_backend();
+            second = Some(rebuilt);
+            backend
+        },
+        &prefix,
+    )
+    .await;
+    if let Some(second) = &second {
+        second.finish().await;
+    }
+    first.finish().await;
+    result
 }

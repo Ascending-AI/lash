@@ -16,6 +16,8 @@ mod oracle_coverage_tests;
 #[cfg(test)]
 mod recorded_reality;
 #[cfg(test)]
+mod recorded_termination_redrive;
+#[cfg(test)]
 mod request_snapshot;
 #[cfg(test)]
 mod tool_call_replay;

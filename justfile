@@ -257,8 +257,10 @@ effect-group-conformance-e2e:
 # The load workload's deletion and behavior evidence replay laws also run
 # here, through the production delete handler; and the session drive's
 # continuation law (FIG-4523): a drive crashed around its handoff redrives one
-# successor, in root-bound legs and, replayed, in legs of one root. Suite
-# wiring lives in `scripts/restate-suites.toml`.
+# successor, in root-bound legs and, replayed, in legs of one root; and the
+# facade's recorded-root laws (FIG-4390's response-phase replay, FIG-4376's
+# deployment restart under a recorded turn budget). Suite wiring lives in
+# `scripts/restate-suites.toml`.
 server-double-e2e:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -279,6 +281,8 @@ server-double-e2e:
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite load-behavior-replay --leg replay
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite session-driver --leg live
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite session-driver --leg replay
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite recorded-roots --leg live
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite recorded-roots --leg replay
 
 # The crash-point matrix (FIG-3849) with a live `restate-server` as its engine
 # (FIG-3872): every active cell of `lash_sim::crash_matrix::MATRIX` over its
@@ -359,7 +363,16 @@ crash-matrix-restate-e2e:
 # and the raw sample ledger land under the artifact directory. The harness
 # builds in the release profile — the same build the release's perf guard
 # measures — so the budget binds optimized code, not a debug binary.
-latency-gate:
+#
+# Arguments are forwarded to `lash-perf latency`, so one case can be run
+# alone: `just latency-gate --cases fast --fast-samples 1050 --lanes 1`.
+#
+# `scripts/latency_load_record.py` samples the host's load averages and CPU
+# pressure through the run into `latency-load.json` and marks the run
+# unqualified when the 1-minute load reaches the core count during the fast
+# case (FIG-3843's quiet-host rule). `scripts/latency_slope.py` then reads
+# the ledger's accept-to-admission slope and ordinal-bin medians.
+latency-gate *args:
   #!/usr/bin/env bash
   set -euo pipefail
   if [ -n "${KILN_GATE_ID:-}" ] && [ -z "${LASH_GATE_SLOT_OVERRIDE:-}" ]; then
@@ -384,18 +397,24 @@ latency-gate:
   set +e
   LASH_LATENCY_WORKER_BIND="127.0.0.1:$((LASH_E2E_PORT_BASE + 39))" \
     timeout --kill-after=30 5400 \
-    python3 "{{repo}}/scripts/ci/restate_suite.py" serve \
+    python3 "{{repo}}/scripts/latency_load_record.py" \
+      --out "$artifacts/latency-load.json" \
+      -- python3 "{{repo}}/scripts/ci/restate_suite.py" serve \
       --name "$gate" \
       --port-base "$((LASH_E2E_PORT_BASE + 36))" \
       --keep-log "$artifacts/restate-server.log" \
       -- "$binary" latency \
         --out "$artifacts/latency-report.json" \
         --samples-out "$artifacts/latency-samples.json" \
-        --store-dir "$artifacts/stores" 2>&1 | tee "$log"
+        --store-dir "$artifacts/stores" {{args}} 2>&1 | tee "$log"
   status="${PIPESTATUS[0]}"
   set -e
 
-  grep -E '^latency gate: ' "$log" || true
+  grep -E '^latency (gate|load record): ' "$log" || true
+  if [ -s "$artifacts/latency-samples.json" ]; then
+    python3 "{{repo}}/scripts/latency_slope.py" "$artifacts/latency-samples.json" \
+      | tee "$artifacts/latency-slope.txt" || true
+  fi
   if [ "$status" -ne 0 ]; then
     echo "latency gate failed (exit $status); log: $log" >&2
     exit "$status"
