@@ -128,6 +128,12 @@ mod recorded_execution_controls_under_replay {
     lash_conformance::turn_config_tests!(@law [] {
         always_replay_harness("recorded-core-prompt-redrive").await
     }; (a_redrive_builds_the_core_prompt_its_root_recorded, "turn-config-recorded-core-prompt-redrive"));
+
+    // FIG-4567: so are the request defaults of the root's model binding,
+    // capture allowlists included.
+    lash_conformance::turn_config_tests!(@law [] {
+        always_replay_harness("recorded-request-defaults-redrive").await
+    }; (a_redrive_calls_the_model_with_the_request_defaults_its_root_recorded, "turn-config-recorded-request-defaults-redrive"));
 }
 
 // FIG-4389's recorded termination law on the double's other legs: under

@@ -343,6 +343,12 @@ mod recorded_execution_controls_live {
     ] {
         live_harness("recorded-termination-redrive").await
     }; (a_redrive_assembles_the_terminal_its_root_recorded_termination_decides, "turn-config-recorded-termination-redrive"));
+
+    lash_conformance::turn_config_tests!(@law [
+        #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    ] {
+        live_harness("recorded-request-defaults-redrive").await
+    }; (a_redrive_calls_the_model_with_the_request_defaults_its_root_recorded, "turn-config-recorded-request-defaults-redrive"));
 }
 
 // The turn runs inside a live handler: its tool call opens a real Restate

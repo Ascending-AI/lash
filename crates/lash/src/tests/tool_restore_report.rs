@@ -280,9 +280,9 @@ async fn require_refuses_a_drive_rebuild_that_lost_a_tool_source() -> Result<()>
     let session_id = SessionId::from("fig-3367-queued");
     let seeding = restate_double(SEED).await;
     seed_session_with_a_persisted_tool(&seeding.lash_backend(), &session_id).await?;
-    // The strict build is a new deployment over the same stores: its engine
-    // drives with the strict core's driver.
-    let strict = redeploy(seeding, SEED + 1).await;
+    // The strict build is the deployment restarted over the same stores: its
+    // engine drives with the strict core's driver.
+    let strict = redeploy(seeding).await;
     let strict_core = explicit_ephemeral_facets(LashCore::standard_builder(
         strict.lash_backend(),
         crate::TurnBudget::Unbounded,

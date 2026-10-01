@@ -189,23 +189,21 @@ pub(crate) async fn restate_double(seed: u64) -> lash_restate_test::RestateTestB
         .expect("build the Restate double")
 }
 
-/// A new deployment over `double`'s stores after `double` is gone: a restart
-/// whose engine runs the driver of the first core built over it. One engine
-/// serves one core's driver, so a law about another build's drive redeploys
-/// rather than building a second core over the same engine.
+/// `double`'s deployment restarted ([`RestateTestBackend::restart`]): the
+/// process behind it is gone and a new one serves it, over the same stores
+/// and the same Restate state, under the same authority. Its engine runs the
+/// driver of the first core built over it. One engine serves one core's
+/// driver, so a law about another build's drive redeploys rather than
+/// building a second core over the same engine.
+///
+/// [`RestateTestBackend::restart`]: lash_restate_test::RestateTestBackend::restart
 pub(crate) async fn redeploy(
     double: lash_restate_test::RestateTestBackend,
-    seed: u64,
 ) -> lash_restate_test::RestateTestBackend {
-    let stores = Arc::clone(double.engine_stores());
-    drop(double);
-    lash_restate_test::backend_with(
-        seed,
-        lash_restate_test::ServerConfig::default(),
-        move |_| stores,
-    )
-    .await
-    .expect("redeploy the Restate double over the same stores")
+    double
+        .restart()
+        .await
+        .expect("restart the Restate double's deployment")
 }
 
 /// A PostgreSQL store set on a database of its own, with what must outlive

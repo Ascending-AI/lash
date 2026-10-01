@@ -1197,6 +1197,7 @@ mod plugin_stack;
 mod processes_endstate;
 mod recorded_core_prompt;
 mod recorded_execution_controls;
+mod recorded_request_defaults;
 #[cfg(feature = "rlm")]
 mod redrive_residue;
 mod response_phase_replay;

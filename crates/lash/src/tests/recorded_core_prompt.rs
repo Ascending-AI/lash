@@ -111,14 +111,20 @@ const RECORDED: [(&str, Option<&str>); 3] = [
     (GAMMA, None),
 ];
 
-/// The last request `served` made for `id`.
-fn last_request_of(served: &Served, id: &str) -> LlmRequest {
+/// Every request `served` made for `id`, in order.
+fn requests_of(served: &Served, id: &str) -> Vec<LlmRequest> {
     served
         .lock_recover()
         .iter()
-        .rev()
-        .find(|request| request.scope.session_id.as_str() == id)
+        .filter(|request| request.scope.session_id.as_str() == id)
         .cloned()
+        .collect()
+}
+
+/// The last request `served` made for `id`.
+fn last_request_of(served: &Served, id: &str) -> LlmRequest {
+    requests_of(served, id)
+        .pop()
         .unwrap_or_else(|| panic!("{id}: the provider served no request"))
 }
 
@@ -188,19 +194,22 @@ async fn each_session_is_served_the_prompts_it_was_created_with() -> Result<()> 
     Ok(())
 }
 
+/// How long a root sent after a restart may take to answer. A root the
+/// restarted deployment cannot run never answers: its attempts fail until
+/// the server pauses it. The bound turns that hang into a failure.
+const ANSWERS_WITHIN: std::time::Duration = std::time::Duration::from_secs(120);
+
 /// Sessions created on one engine with different prompts keep them, the
 /// core prompt they recorded and their model's request defaults across an
-/// engine restart: the `first` deployment goes away and a new one over its
-/// stores runs a core with another prompt and other defaults for the same
-/// model key. Each root, driven on the engine's own reopen and on a host
-/// open, is served exactly as its session recorded.
+/// engine restart. Each session runs a root first, so it restarts with
+/// history and the cancellation binding its first root recorded (FIG-4567).
+/// Then the `first` deployment's process goes away and a new one serves it
+/// over the same stores and the same Restate state, running a core with
+/// another prompt and other defaults for the same model key. Each root,
+/// driven on the engine's own reopen and on a host open, answers and is
+/// served exactly as its session recorded.
 async fn sessions_keep_their_prompts_and_request_defaults_across_a_restart(
     first: lash_restate_test::RestateTestBackend,
-    restart: impl FnOnce(
-        lash_restate_test::RestateTestBackend,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = lash_restate_test::RestateTestBackend>>,
-    >,
 ) -> Result<()> {
     let served: Served = Arc::default();
     {
@@ -211,8 +220,21 @@ async fn sessions_keep_their_prompts_and_request_defaults_across_a_restart(
             creating_core_defaults(),
         )?;
         create_all(&creator).await?;
+        for (id, own) in RECORDED {
+            creator
+                .session(id)
+                .durable()
+                .await?
+                .send(TurnInput::text("before the restart"))
+                .output()
+                .await?;
+            assert_served_as_recorded(&last_request_of(&served, id), id, own, "before the restart");
+            first
+                .settle_session_drive(&lash_core::SessionId::from(id))
+                .await;
+        }
     }
-    let second = restart(first).await;
+    let second = redeploy(first).await;
     let redeployed = core_with_defaults(
         second.lash_backend(),
         &served,
@@ -220,13 +242,23 @@ async fn sessions_keep_their_prompts_and_request_defaults_across_a_restart(
         redeployed_core_defaults(),
     )?;
     for (id, own) in RECORDED {
-        redeployed
-            .session(id)
-            .durable()
-            .await?
-            .send(TurnInput::text("after the restart, on the engine's reopen"))
-            .output()
-            .await?;
+        let before = requests_of(&served, id).len();
+        tokio::time::timeout(
+            ANSWERS_WITHIN,
+            redeployed
+                .session(id)
+                .durable()
+                .await?
+                .send(TurnInput::text("after the restart, on the engine's reopen"))
+                .output(),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("{id}: a root sent after the restart answers"))?;
+        assert_eq!(
+            requests_of(&served, id).len(),
+            before + 1,
+            "{id}: the root sent after the restart made its model call"
+        );
         assert_served_as_recorded(
             &last_request_of(&served, id),
             id,
@@ -248,31 +280,18 @@ async fn sessions_keep_their_prompts_and_request_defaults_across_a_restart(
     Ok(())
 }
 
-fn redeploy_with_seed(
-    seed: u64,
-) -> impl FnOnce(
-    lash_restate_test::RestateTestBackend,
-) -> std::pin::Pin<
-    Box<dyn std::future::Future<Output = lash_restate_test::RestateTestBackend>>,
-> {
-    move |double| Box::pin(redeploy(double, seed))
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sessions_keep_their_prompts_and_request_defaults_across_a_restart_on_sqlite_memory()
 -> Result<()> {
     let first = lash_restate_test::backend(0x4397_0001, lash_restate_test::ServerConfig::default())
         .await
         .expect("build the first deployment over SQLite memory");
-    sessions_keep_their_prompts_and_request_defaults_across_a_restart(
-        first,
-        redeploy_with_seed(0x4397_0002),
-    )
-    .await
+    sessions_keep_their_prompts_and_request_defaults_across_a_restart(first).await
 }
 
 /// Every await suspends and every resumption replays the root from its
-/// journal: the replayed roots are served as their sessions recorded.
+/// journal, on the restarted deployment as on the first: the replayed roots
+/// are served as their sessions recorded.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sessions_keep_their_prompts_and_request_defaults_across_a_restart_under_always_replay()
 -> Result<()> {
@@ -282,20 +301,7 @@ async fn sessions_keep_their_prompts_and_request_defaults_across_a_restart_under
     )
     .await
     .expect("build the first always-replay deployment over SQLite memory");
-    sessions_keep_their_prompts_and_request_defaults_across_a_restart(first, |double| {
-        Box::pin(async move {
-            let stores = Arc::clone(double.engine_stores());
-            drop(double);
-            lash_restate_test::backend_with(
-                0x4397_0004,
-                lash_restate_test::ServerConfig::default().always_replay(true),
-                move |_| stores,
-            )
-            .await
-            .expect("redeploy the always-replay double over the same stores")
-        })
-    })
-    .await
+    sessions_keep_their_prompts_and_request_defaults_across_a_restart(first).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -314,11 +320,7 @@ async fn sessions_keep_their_prompts_and_request_defaults_across_a_restart_on_sq
     )
     .await
     .expect("build the first deployment over a SQLite file");
-    sessions_keep_their_prompts_and_request_defaults_across_a_restart(
-        first,
-        redeploy_with_seed(0x4397_0006),
-    )
-    .await
+    sessions_keep_their_prompts_and_request_defaults_across_a_restart(first).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -334,9 +336,5 @@ async fn sessions_keep_their_prompts_and_request_defaults_across_a_restart_on_po
     )
     .await
     .expect("build the first deployment over PostgreSQL");
-    sessions_keep_their_prompts_and_request_defaults_across_a_restart(
-        first,
-        redeploy_with_seed(0x4397_0008),
-    )
-    .await
+    sessions_keep_their_prompts_and_request_defaults_across_a_restart(first).await
 }

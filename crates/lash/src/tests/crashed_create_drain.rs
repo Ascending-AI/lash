@@ -426,7 +426,7 @@ async fn a_session_drained_after_a_crashed_create_reopens_on_a_new_deployment(
         let crashed = crashed_create(&core, &id).await?;
         drain_an_append(&core, &crashed.store, &id, append.ancestor()).await?;
     }
-    let restarted = redeploy(double, SEED + 1).await;
+    let restarted = redeploy(double).await;
     let core = core_over(&restarted, 512)?;
     let turn = tokio::time::timeout(std::time::Duration::from_secs(60), async {
         core.session(id.as_str())

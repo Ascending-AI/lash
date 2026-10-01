@@ -1383,6 +1383,8 @@ mod command_settlement;
 pub use command_settlement::*;
 mod recorded_core_prompt;
 pub use recorded_core_prompt::*;
+mod recorded_request_defaults;
+pub use recorded_request_defaults::*;
 
 /// The tool a looping model calls on every iteration of its turn.
 const LOOKUP_TOOL: &str = "turn_config_lookup_probe";

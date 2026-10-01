@@ -569,6 +569,8 @@ pub enum StartError {
     Discovery(String),
     #[error("the server needs a Tokio runtime to run attempts on")]
     NoRuntime,
+    #[error("deployment {0} is not registered")]
+    UnknownDeployment(ids::DeploymentId),
 }
 
 /// What an introspection read reports about one invocation.
@@ -792,6 +794,52 @@ impl RestateTestServer {
         };
         self.shared.activity.notify_waiters();
         Ok(id)
+    }
+
+    /// Restart the deployment `id` on `endpoint`: the process behind the
+    /// deployment went away and a new one serves it, as a restarted worker
+    /// does under `restate-server`. The server keeps everything it holds —
+    /// journals, object state, promises and timers — and the deployment
+    /// keeps its id, label, URI and hooks, so an invocation pinned to it
+    /// runs its next attempt on `endpoint`. An attempt running when the
+    /// process went away is dropped and replayed there.
+    pub async fn restart_deployment(
+        &self,
+        id: &ids::DeploymentId,
+        endpoint: Endpoint,
+    ) -> Result<(), StartError> {
+        let catalog = Catalog::discover(&endpoint)
+            .await
+            .map_err(StartError::Discovery)?;
+        let mut state = self.shared.lock();
+        {
+            let mut deployments = self.shared.deployments();
+            let served = deployments
+                .iter_mut()
+                .find(|deployment| &deployment.id == id)
+                .ok_or_else(|| StartError::UnknownDeployment(id.clone()))?;
+            *served = Arc::new(Deployment {
+                id: served.id.clone(),
+                label: served.label.clone(),
+                uri: served.uri.clone(),
+                endpoint,
+                catalog,
+                hooks: served.hooks.clone(),
+            });
+        }
+        let running = state
+            .invocations
+            .iter()
+            .enumerate()
+            .filter(|(_, invocation)| &invocation.pinned_deployment == id)
+            .map(|(index, _)| InvKey(index))
+            .collect::<Vec<_>>();
+        for key in running {
+            state.crash(&self.shared, key);
+        }
+        drop(state);
+        self.shared.activity.notify_waiters();
+        Ok(())
     }
 
     /// Start a server and register `endpoint` on it.

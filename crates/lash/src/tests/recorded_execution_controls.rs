@@ -795,18 +795,15 @@ async fn a_recorded_budget_bounds_every_root_after_an_engine_restart(
     Ok(())
 }
 
-/// The law on the server double: the restart is a new double over `first`'s
-/// stores.
-async fn after_a_restart_of_the_double(
-    first: lash_restate_test::RestateTestBackend,
-    restart_seed: u64,
-) -> Result<()> {
+/// The law on the server double: the restart is `first`'s deployment
+/// restarted over its stores.
+async fn after_a_restart_of_the_double(first: lash_restate_test::RestateTestBackend) -> Result<()> {
     let backend = first.lash_backend();
     let mut second = None;
     a_recorded_budget_bounds_every_root_after_an_engine_restart(
         backend,
         async || {
-            let double = redeploy(first, restart_seed).await;
+            let double = redeploy(first).await;
             let backend = double.lash_backend();
             second = Some(double);
             backend
@@ -821,7 +818,7 @@ async fn a_recorded_budget_bounds_every_root_after_an_engine_restart_on_sqlite()
     let first = lash_restate_test::backend(0x4376_0002, lash_restate_test::ServerConfig::default())
         .await
         .expect("build the first deployment over SQLite");
-    after_a_restart_of_the_double(first, 0x4376_0003).await
+    after_a_restart_of_the_double(first).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -837,7 +834,7 @@ async fn a_recorded_budget_bounds_every_root_after_an_engine_restart_on_postgres
     )
     .await
     .expect("build the first deployment over PostgreSQL");
-    after_a_restart_of_the_double(first, 0x4376_0005).await
+    after_a_restart_of_the_double(first).await
 }
 
 /// The law on a live `restate-server` (the `recorded-roots` suite of

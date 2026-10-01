@@ -104,6 +104,16 @@ pub struct RestateTestBackend<Stores: StoreSet + ?Sized = lash_sqlite_store::Sql
     jobs: Arc<ParkedJobs>,
     loans: Arc<crate::open_handler::Loans>,
     authority: RestateAuthorityId,
+    seat: Arc<Seat>,
+}
+
+/// What [`RestateTestBackend::restart`] rebuilds a backend's process from:
+/// the deployment it serves, the label it registered under and its
+/// endpoint's segment budget.
+struct Seat {
+    deployment: DeploymentId,
+    label: String,
+    segment_effect_budget: Option<u64>,
 }
 
 impl<Stores: StoreSet + ?Sized> Clone for RestateTestBackend<Stores> {
@@ -119,6 +129,7 @@ impl<Stores: StoreSet + ?Sized> Clone for RestateTestBackend<Stores> {
             jobs: Arc::clone(&self.jobs),
             loans: Arc::clone(&self.loans),
             authority: self.authority.clone(),
+            seat: Arc::clone(&self.seat),
         }
     }
 }
@@ -277,6 +288,7 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
             jobs: self.jobs,
             loans: self.loans,
             authority: self.authority,
+            seat: self.seat,
         }
     }
 
@@ -358,8 +370,6 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
     {
         let first_label = first_label.into();
         let (stores, ports) = make_stores(Arc::clone(&clock) as Arc<dyn lash_core::Clock>).await?;
-        let connection =
-            RestateConnection::with_transport(server.ingress_url(), server.transport());
         // The server's first deployment journals under the seed's authority;
         // a deployment beside it under one of its own.
         let authority = RestateAuthorityId::new(if beside {
@@ -369,64 +379,74 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
         })
         .map_err(|error| BackendError::Authority(error.to_string()))?;
         let engine_stores = decorate_stores(ports);
-        let restate = Arc::new(RestateEngine::new(
-            Arc::clone(&engine_stores),
-            RestateConfig::new(
-                connection.clone(),
-                connection.clone(),
-                authority.clone(),
-                server.config().build_generation.clone(),
-            )
-            .with_namespace(namespace.clone()),
-        ));
-        // The endpoint exists before any core over this backend does, so it
-        // serves processes on whatever worker the fixture installs later.
-        let processes = RestateProcessWorkerSlot::new();
-        let jobs = Arc::new(ParkedJobs::default());
-        let serving = RestateProcessServing::from(processes.clone());
-        let serving = match segment_effect_budget {
-            Some(budget) => serving.with_segment_effect_budget_selector(move |_| budget),
-            None => serving,
-        };
-        let loans = Arc::new(crate::open_handler::Loans::default());
-        let builder = bind_handler_host(
-            restate.endpoint_builder(serving),
-            HandlerHost {
-                jobs: Arc::clone(&jobs),
-                authority: authority.clone(),
-                build_generation: restate.build_generation().clone(),
-                namespace: namespace.clone(),
-            },
+        let (process, endpoint) = Process::start(
+            &server,
+            &engine_stores,
+            &authority,
+            &namespace,
+            segment_effect_budget,
+            &first_label,
         )
-        .map_err(BackendError::HandlerHostName)?;
-        let builder = if namespace.is_default() {
-            builder.bind(crate::open_handler::HandlerLender {
-                loans: Arc::clone(&loans),
-            })
-        } else {
-            builder
-        };
-        // An in-process deployment is registered through the Rust API; the
-        // engine's registration still runs its name check against the
-        // server's admin API first, and the double acknowledges the admin
-        // registration it then sends.
-        restate
-            .register_deployment(&format!("restate-test:{}", deployment_name(&first_label)))
-            .await?;
-        server
-            .register_with(builder.build(), first_label, first_hooks)
+        .await?;
+        let deployment = server
+            .register_with(endpoint, first_label.clone(), first_hooks)
             .await?;
         Ok(Self {
             server,
-            restate,
+            restate: process.restate,
             stores,
             engine_stores,
             clock,
-            connection,
-            processes,
-            jobs,
-            loans,
+            connection: process.connection,
+            processes: process.processes,
+            jobs: process.jobs,
+            loans: process.loans,
             authority,
+            seat: Arc::new(Seat {
+                deployment,
+                label: first_label,
+                segment_effect_budget,
+            }),
+        })
+    }
+
+    /// Restart this backend's deployment, as a worker restart or a redeploy
+    /// of the same build does under `restate-server`: the process is gone and
+    /// a new one — a new engine with its services, an empty session-driver
+    /// slot and an empty process-worker slot — serves the same deployment
+    /// over the same stores. Everything Restate keeps across a restart stays:
+    /// the server with its journals, object state, promises and timers, the
+    /// clock, the namespace and the authority the stores' cancellation
+    /// bindings name. An attempt running when the process went away is
+    /// dropped and replayed on the new one.
+    ///
+    /// A core built over the returned backend is the redeployed worker. One
+    /// built over the backend this consumed has no deployment left to run on.
+    pub async fn restart(self) -> Result<Self, BackendError> {
+        let (process, endpoint) = Process::start(
+            &self.server,
+            &self.engine_stores,
+            &self.authority,
+            &self.restate.namespace().clone(),
+            self.seat.segment_effect_budget,
+            &self.seat.label,
+        )
+        .await?;
+        self.server
+            .restart_deployment(&self.seat.deployment, endpoint)
+            .await?;
+        Ok(Self {
+            server: self.server,
+            restate: process.restate,
+            stores: self.stores,
+            engine_stores: self.engine_stores,
+            clock: self.clock,
+            connection: process.connection,
+            processes: process.processes,
+            jobs: process.jobs,
+            loans: process.loans,
+            authority: self.authority,
+            seat: self.seat,
         })
     }
 
@@ -1040,6 +1060,86 @@ mod handler_host {
 pub(crate) use handler_host::bind_handler_host;
 
 /// A registration URI's last segment for the deployment labelled `label`.
+/// One process serving a backend's deployment: lash-restate's engine over the
+/// backend's stores and what its endpoint holds. A restart replaces all of it.
+struct Process {
+    restate: Arc<RestateEngine>,
+    connection: RestateConnection,
+    processes: RestateProcessWorkerSlot,
+    jobs: Arc<ParkedJobs>,
+    loans: Arc<crate::open_handler::Loans>,
+}
+
+impl Process {
+    /// Build the engine and its endpoint, and run the engine's registration
+    /// check against `server`. The caller registers the returned endpoint.
+    async fn start(
+        server: &RestateTestServer,
+        engine_stores: &Arc<dyn StoreSet>,
+        authority: &RestateAuthorityId,
+        namespace: &RestateNamespace,
+        segment_effect_budget: Option<u64>,
+        label: &str,
+    ) -> Result<(Self, restate_sdk::endpoint::Endpoint), BackendError> {
+        let connection =
+            RestateConnection::with_transport(server.ingress_url(), server.transport());
+        let restate = Arc::new(RestateEngine::new(
+            Arc::clone(engine_stores),
+            RestateConfig::new(
+                connection.clone(),
+                connection.clone(),
+                authority.clone(),
+                server.config().build_generation.clone(),
+            )
+            .with_namespace(namespace.clone()),
+        ));
+        // The endpoint exists before any core over this backend does, so it
+        // serves processes on whatever worker the fixture installs later.
+        let processes = RestateProcessWorkerSlot::new();
+        let jobs = Arc::new(ParkedJobs::default());
+        let serving = RestateProcessServing::from(processes.clone());
+        let serving = match segment_effect_budget {
+            Some(budget) => serving.with_segment_effect_budget_selector(move |_| budget),
+            None => serving,
+        };
+        let loans = Arc::new(crate::open_handler::Loans::default());
+        let builder = bind_handler_host(
+            restate.endpoint_builder(serving),
+            HandlerHost {
+                jobs: Arc::clone(&jobs),
+                authority: authority.clone(),
+                build_generation: restate.build_generation().clone(),
+                namespace: namespace.clone(),
+            },
+        )
+        .map_err(BackendError::HandlerHostName)?;
+        let builder = if namespace.is_default() {
+            builder.bind(crate::open_handler::HandlerLender {
+                loans: Arc::clone(&loans),
+            })
+        } else {
+            builder
+        };
+        // An in-process deployment is registered through the Rust API; the
+        // engine's registration still runs its name check against the
+        // server's admin API first, and the double acknowledges the admin
+        // registration it then sends.
+        restate
+            .register_deployment(&format!("restate-test:{}", deployment_name(label)))
+            .await?;
+        Ok((
+            Self {
+                restate,
+                connection,
+                processes,
+                jobs,
+                loans,
+            },
+            builder.build(),
+        ))
+    }
+}
+
 fn deployment_name(label: &str) -> String {
     if label.is_empty() {
         "first".to_owned()
