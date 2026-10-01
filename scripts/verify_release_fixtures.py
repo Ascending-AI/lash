@@ -12,7 +12,13 @@ import re
 import subprocess
 import sys
 
-from capture_release_fixtures import LEGS, MANIFEST_SCHEMA, ROOT, TAG_COMPONENT
+from capture_release_fixtures import (
+    LEGS,
+    MANIFEST_SCHEMA,
+    ROOT,
+    TAG_COMPONENT,
+    git_env,
+)
 
 
 class VerificationError(ValueError):
@@ -42,6 +48,7 @@ def verify(corpus: Path, repo: Path = ROOT, *, forbidden: list[bytes] | None = N
         result = subprocess.run(
             ["git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"],
             cwd=repo, capture_output=True, text=True, check=False,
+            env=git_env(),
         )
         if result.returncode or manifest["source_commit"] != result.stdout.strip():
             raise VerificationError("source_commit does not match the tag's commit")

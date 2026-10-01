@@ -156,6 +156,37 @@ LEGS = (
 TAG_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 MANIFEST_SCHEMA = "lash.release-fixtures-manifest.v1"
 
+# `git` variables that attach an invocation to a different repository, index,
+# object store or namespace than the directory it runs in, or that inject the
+# configuration a parent `git` process passes to its children. They leak out
+# of hooks, wrappers and CI environments; a capture or verification must run
+# against the repository named by its argument, never the ambient one.
+GIT_AMBIENT = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_NAMESPACE",
+    "GIT_PREFIX",
+    "GIT_QUARANTINE_PATH",
+    "GIT_CEILING_DIRECTORIES",
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+)
+
+
+def git_env() -> dict[str, str]:
+    """The ambient environment minus the variables that steer git elsewhere."""
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if name not in GIT_AMBIENT
+        and not name.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
+    }
+
 
 class CaptureError(RuntimeError):
     """The capture cannot proceed: bad arguments, sources, or environment."""
@@ -163,7 +194,8 @@ class CaptureError(RuntimeError):
 
 def git(repo: Path, *args: str) -> str:
     result = subprocess.run(
-        ["git", *args], cwd=repo, capture_output=True, text=True, check=False
+        ["git", *args], cwd=repo, capture_output=True, text=True, check=False,
+        env=git_env(),
     )
     if result.returncode != 0:
         raise CaptureError(
@@ -226,7 +258,7 @@ def run_generators(repo: Path, legs: tuple[Leg, ...]) -> None:
             done.add(command_key)
             print("+ " + " ".join(argv), flush=True)
             result = subprocess.run(
-                argv, cwd=repo, env={**os.environ, **env_overlay}, check=False
+                argv, cwd=repo, env={**git_env(), **env_overlay}, check=False
             )
             if result.returncode != 0:
                 raise CaptureError(
@@ -239,7 +271,7 @@ def verify_tag(repo: Path, tag: str) -> str:
     """Require HEAD to be the tagged commit; return that commit."""
     resolved = subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}^{{commit}}"],
-        cwd=repo, capture_output=True, text=True, check=False,
+        cwd=repo, capture_output=True, text=True, check=False, env=git_env(),
     )
     if resolved.returncode != 0 or not resolved.stdout.strip():
         raise CaptureError(f"tag {tag} does not resolve to a commit")

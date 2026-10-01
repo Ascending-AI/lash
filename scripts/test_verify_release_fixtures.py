@@ -12,22 +12,43 @@ import sqlite3
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 import capture_release_fixtures as capture
 
 
 class ReleaseFixtureLaws(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR"))
+        self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.repo = Path(self.temp.name)
+        # Repo-attachment variables leak out of hooks, wrappers and CI
+        # environments; neither the fixture plumbing nor the verifier may
+        # honor them, so the whole fixture runs under a polluted set.
+        ambient = mock.patch.dict(os.environ, {
+            "GIT_DIR": str(self.repo / "ambient.git"),
+            "GIT_WORK_TREE": str(self.repo / "ambient-tree"),
+            "GIT_INDEX_FILE": str(self.repo / "ambient-index"),
+            "GIT_NAMESPACE": "ambient",
+            "GIT_CONFIG_PARAMETERS": "'core.bare=true'",
+        })
+        ambient.start()
+        self.addCleanup(ambient.stop)
+        # The synthetic repo needs no ambient git configuration either: point
+        # both files at a path that does not exist.
+        self.git_environment = {
+            **capture.git_env(),
+            "GIT_CONFIG_GLOBAL": str(self.repo / "gitconfig-none"),
+            "GIT_CONFIG_SYSTEM": str(self.repo / "gitconfig-none"),
+        }
         for args in (
             ["init", "-q"],
             ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
              "commit", "--allow-empty", "-qm", "fixture baseline"],
             ["tag", "v1.0.0"],
         ):
-            subprocess.run(["git", *args], cwd=self.repo, check=True, capture_output=True)
+            subprocess.run(["git", *args], cwd=self.repo, check=True,
+                           capture_output=True, env=self.git_environment)
         self.dest = self.repo / "corpus"
         self.dest.mkdir()
         self.manifest_legs = []
