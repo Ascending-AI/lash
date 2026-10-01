@@ -73,6 +73,25 @@ class BatchRunnerTests(unittest.TestCase):
         self.assertIn('PASS: 1 test binaries in batch', result.stdout)
         self.assertFalse((self.root / 'pwned').exists())
 
+    def test_a_multiline_value_stays_one_assignment(self):
+        value = 'first line\nSECOND=leaked\n'
+        member = self.binary(
+            'member',
+            'test "$VALUE" = $\'first line\\nSECOND=leaked\\n\' && test -z "${SECOND:-}" && test "$LAST" = kept\n',
+        )
+        result = self.run_batch('1', '2', 'VALUE=' + value, 'LAST=kept', member)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_a_binary_path_holding_an_equals_sign_still_runs(self):
+        directory = self.root / 'mode=opt'
+        directory.mkdir()
+        member = directory / 'member'
+        member.write_text('#!/usr/bin/env bash\ntest "$1" = "a=b" && echo ran-with-argument\nexit 3\n')
+        member.chmod(0o755)
+        result = self.run_batch('1', '1', 'NAME=value', str(member), 'a=b')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('ran-with-argument', result.stderr)
+
     def test_a_filter_matching_no_member_fails_the_batch(self):
         empty = (
             'echo; echo "running 0 tests"; echo\n'

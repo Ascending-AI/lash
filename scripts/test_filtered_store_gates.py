@@ -152,7 +152,7 @@ class Fixture(unittest.TestCase):
         self.env.update(TEST_SRCDIR=str(self.root), TEST_WORKSPACE=".", LASH_BATCH_JOBS="1")
         return self.run_command([
             "bash", str(TOOLS / "test_batch_runner.sh"), str(len(members)),
-            *(str(member) for member in members), *args,
+            *(part for member in members for part in ("0", str(member))), *args,
         ])
 
     def gate(self, suite, trusted=True, **cache_env):

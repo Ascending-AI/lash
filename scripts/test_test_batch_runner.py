@@ -42,7 +42,7 @@ class BatchRunnerTests(unittest.TestCase):
             manifest.write_text("_main/first\n_main/second\n")
             xml = root / "test.xml"
             result = subprocess.run(
-                ["bash", str(RUNNER), "2", "_main/first", "_main/second", *args],
+                ["bash", str(RUNNER), "2", "0", "_main/first", "0", "_main/second", *args],
                 cwd=root, text=True, capture_output=True, timeout=10,
                 env=dict(os.environ, TEST_SRCDIR=tmp, TEST_WORKSPACE="_main",
                          TEST_TMPDIR=str(logs), LASH_BATCH_MANIFEST=str(manifest),
@@ -132,7 +132,7 @@ class BatchRunnerTests(unittest.TestCase):
             manifest.write_text("".join(f"_main/{name}\n" for name in names))
             result = subprocess.run(
                 ["bash", str(RUNNER), str(len(names)),
-                 *(f"_main/{name}" for name in names)],
+                 *(part for name in names for part in ("0", f"_main/{name}"))],
                 cwd=root, text=True, capture_output=True, timeout=20,
                 env=dict(os.environ, TEST_SRCDIR=tmp, TEST_WORKSPACE="_main",
                          TEST_TMPDIR=str(logs), LASH_BATCH_MANIFEST=str(manifest),
