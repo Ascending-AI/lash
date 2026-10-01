@@ -316,7 +316,8 @@ class WorkflowTests(unittest.TestCase):
 
     def test_feature_compile_clippy_and_schema_use_their_matching_operations(self) -> None:
         feature = step(self.ci["jobs"]["feature-lanes"], "Compile every feature lane")["run"]
-        self.assertIn("hermetic-build.sh build", feature)
+        self.assertIn("hermetic-build.sh check", feature)
+        self.assertNotIn("hermetic-build.sh build", feature)
         self.assertIn("//:feature_lane_compile", feature)
         self.assertIn("hermetic-build.sh clippy", feature)
         self.assertIn("//:feature_lane_clippy", feature)
@@ -369,7 +370,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("schedule", parsed["on"])
         warm = parsed["jobs"]["warm-buck2"]
         self.assertIn("scripts/hermetic-build.sh clippy", str(warm))
-        self.assertIn("scripts/ci/buck2-test.sh", str(warm))
+        self.assertNotIn("scripts/ci/buck2-test.sh", str(warm))
+        self.assertEqual("false", parsed["concurrency"]["cancel-in-progress"])
         configure = step(warm, "Configure Buck2 shared cache")
         self.assertEqual("cache", configure["id"])
         save = step(warm, "Save pinned Buck2 tools")
@@ -377,8 +379,53 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(
             "${{ steps.cache.outputs.tool-cache-key }}", save["with"]["key"]
         )
+        self.assertIn("always()", save["if"])
+        self.assertIn("steps.cache.outcome == 'success'", save["if"])
         self.assertIn("github.ref == 'refs/heads/main'", save["if"])
         self.assertIn("steps.cache.outputs.tool-cache-hit != 'true'", save["if"])
+
+    def test_warmer_builds_the_partition_and_live_restate_binaries_without_tests(self) -> None:
+        warm = workflow("cache-warm.yml")["jobs"]["warm-buck2"]
+        run = step(warm, "Warm test binaries")["run"]
+        inventory = json.loads((ROOT / "tools/buck2/target-inventory.json").read_text())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "scripts").mkdir()
+            driver = root / "scripts/hermetic-build.sh"
+            driver.write_text("#!/bin/bash\nprintf '%s\\n' \"$@\" > argv\n")
+            driver.chmod(0o755)
+            result = subprocess.run(["bash", "-c", run], cwd=root, capture_output=True, text=True)
+            self.assertEqual(0, result.returncode, result.stderr)
+            argv = (root / "argv").read_text().splitlines()
+        self.assertEqual("build", argv[0])
+        labels = {arg for arg in argv if arg.startswith("//")}
+        expected = {
+            "//:workspace_tests",
+            "//crates/lash:ui_fixtures",
+            "//crates/lash:facade_completeness",
+            "//crates/lash-restate:lash-restate__unit_test",
+            "//crates/lash-vm-worker:lash-vm-worker__bin",
+        }
+        self.assertEqual(expected, labels)
+        partition = set(inventory["workspace_test_suite_labels"])
+        self.assertLessEqual(set(inventory["workspace_core_suite_labels"]), partition)
+        self.assertLessEqual(set(inventory["workspace_tail_suite_labels"]), partition)
+        for item in warm["steps"]:
+            self.assertNotRegex(item.get("run", ""), r"hermetic-build\.sh test|buck2-test\.sh")
+
+    def test_heavy_suite_cache_keys_features_and_saves_only_main(self) -> None:
+        job = self.ci["jobs"]["heavy-tests"]
+        cache = step(job, "Cache heavy-suite Cargo builds")
+        self.assertRegex(cache["uses"], r"^Swatinem/rust-cache@[0-9a-f]{40}$")
+        settings = cache["with"]
+        self.assertEqual("heavy-suites-v1", settings["shared-key"])
+        self.assertEqual("${{ env.LASH_CI_FEATURES }}", settings["key"])
+        self.assertEqual("${{ github.ref == 'refs/heads/main' }}", settings["save-if"])
+        self.assertIs(False, settings["cache-bin"])
+        self.assertIsNot(False, settings.get("cache-targets"))
+        self.assertIsNot(False, settings.get("add-rust-environment-hash-key"))
+        self.assertLess(job["steps"].index(step(job, "Install Rust toolchain")), job["steps"].index(cache))
+        self.assertLess(job["steps"].index(cache), job["steps"].index(step(job, "Test heavy suites")))
 
     def test_every_remote_test_leg_keeps_reports_and_failure_artifacts(self) -> None:
         jobs = self.ci["jobs"]

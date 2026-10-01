@@ -22,7 +22,7 @@ name: Cache warm
 # The Cargo job serves fork pull requests only, so it runs on the schedule and
 # on dispatch, not on every push.
 #
-# Nothing here is gating, and nothing in ci.yml saves.
+# Nothing here is gating. CI saves the separate Cargo heavy-suite cache on main.
 on:
   push:
     branches: [main]
@@ -30,10 +30,10 @@ on:
     - cron: "17 4 * * *"
   workflow_dispatch:
 
-# Only the newest tree is worth warming; an older run's key is already stale.
+# Let the active warm finish so frequent pushes cannot starve the cache.
 concurrency:
   group: ci-cache-warm-main
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -100,9 +100,16 @@ jobs:
           scripts/hermetic-build.sh clippy --jobs 32 --materializations none \
             //:workspace_clippy //:feature_lane_clippy
 
-      - name: Warm deterministic test actions
+      # Build the same binaries as the core and tail partition, plus the
+      # live Restate harness and its VM worker, without executing tests.
+      - name: Warm test binaries
         shell: bash
-        run: scripts/ci/buck2-test.sh cache-warm //:workspace_tests //crates/lash:ui_fixtures //crates/lash:facade_completeness
+        run: |
+          set -euo pipefail
+          scripts/hermetic-build.sh build --jobs 32 --materializations none \
+            //:workspace_tests //crates/lash:ui_fixtures //crates/lash:facade_completeness \
+            //crates/lash-restate:lash-restate__unit_test \
+            //crates/lash-vm-worker:lash-vm-worker__bin
 
       - name: Remove client credentials
         if: always()
@@ -113,7 +120,9 @@ jobs:
       # saves the cache, so pull request refs cannot evict useful entries.
       - name: Save pinned Buck2 tools
         if: >-
-          github.ref == 'refs/heads/main'
+          always()
+          && github.ref == 'refs/heads/main'
+          && steps.cache.outcome == 'success'
           && steps.cache.outputs.tool-cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

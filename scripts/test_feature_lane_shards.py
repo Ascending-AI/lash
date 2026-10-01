@@ -273,7 +273,7 @@ class WorkflowTests(unittest.TestCase):
         selector = 'python3 scripts/ci/feature_lane_shards.py "$FEATURE_LANE_SHARD" '
         compile_run = self.flat(self.steps["Compile every feature lane"]["run"])
         for command in (
-            selector + "//:feature_lane_compile -- scripts/hermetic-build.sh build --jobs",
+            selector + "//:feature_lane_compile -- scripts/hermetic-build.sh check --jobs",
             selector + "//:feature_lane_clippy -- scripts/hermetic-build.sh clippy --jobs",
         ):
             with self.subTest(command=command):

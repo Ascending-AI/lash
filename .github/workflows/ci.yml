@@ -730,7 +730,7 @@ jobs:
         shell: bash
         run: |
           python3 scripts/ci/feature_lane_shards.py "$FEATURE_LANE_SHARD" //:feature_lane_compile -- \
-            scripts/hermetic-build.sh build \
+            scripts/hermetic-build.sh check \
             --jobs 32 --materializations none \
             --build-report "${RUNNER_TEMP}/feature-build-report.json" \
             --event-log "${RUNNER_TEMP}/feature-events.json-lines"
@@ -1177,6 +1177,16 @@ jobs:
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
+
+      # rust-cache also hashes rustc, Cargo.lock and the Cargo configuration.
+      # Keep this job's feature set separate and save only under main scope.
+      - name: Cache heavy-suite Cargo builds
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
+          shared-key: heavy-suites-v1
+          key: ${{ env.LASH_CI_FEATURES }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Node for browser projection gates
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
