@@ -8,7 +8,11 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
-use lash_vm_protocol::{CodecRefusal, DecodeLimits, FRAME_MAGIC, FrameCodec};
+use lash_vm_protocol::{
+    CodecRefusal, DecodeLimits, EffectKind, EffectRequest, EffectRequestId, EncodedPayload,
+    ExecutionLease, FRAME_MAGIC, FrameCodec, FrameEpoch, MessageFence, OwnerEpoch, WorkerFrame,
+    WorkerMessage,
+};
 
 struct CountingAllocator;
 
@@ -119,5 +123,31 @@ fn hostile_frames_are_refused_with_bounded_allocation() {
         "deep",
         &frame(&codec, payload.len() as u32, &payload),
         |refusal| matches!(refusal, CodecRefusal::DepthExceeded { .. }),
+    );
+}
+
+/// FIG-4433: a frame is serialized once, into the allocation that is sent. A
+/// large effect value is not copied again to put its header before it.
+#[test]
+fn a_frame_is_encoded_into_one_allocation_of_its_size() {
+    const VALUE_BYTES: usize = 512 * 1024;
+    let frame = WorkerFrame {
+        header: MessageFence::new(ExecutionLease(1), OwnerEpoch(1), FrameEpoch(1)).next_header(),
+        message: WorkerMessage::EffectRequest(EffectRequest {
+            id: EffectRequestId(0),
+            kind: EffectKind::ResourceOperation,
+            payload: EncodedPayload(vec![b'x'; VALUE_BYTES]),
+        }),
+    };
+    let (bytes, allocated) = allocated_during(|| codec().encode_worker(&frame));
+    let bytes = bytes.expect("the frame encodes");
+    assert_eq!(
+        codec().decode_worker(&bytes).expect("the frame decodes"),
+        frame
+    );
+    assert!(
+        allocated < (VALUE_BYTES + VALUE_BYTES / 2) as u64,
+        "encoding a {}-byte frame allocated {allocated} bytes",
+        bytes.len()
     );
 }

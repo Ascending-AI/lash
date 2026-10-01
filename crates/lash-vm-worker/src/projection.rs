@@ -2,7 +2,7 @@
 use crate::worker::{Fences, cpu_nanos};
 use lash_vm_client::{
     PoolError, ProjectionRead,
-    ipc::{read_frame, write_frame},
+    ipc::{FrameSource, write_frame},
 };
 use lash_vm_protocol::*;
 use lashlang::{
@@ -15,6 +15,9 @@ use std::time::{Duration, Instant};
 
 pub(crate) struct Wire {
     pipe: Mutex<UnixStream>,
+    /// The worker's one inbound source: this wire and its server read the
+    /// same socket.
+    inbound: Arc<Mutex<FrameSource>>,
     codec: FrameCodec,
     fences: Arc<Mutex<Fences>>,
     namespace: String,
@@ -22,12 +25,14 @@ pub(crate) struct Wire {
 impl Wire {
     pub fn new(
         pipe: UnixStream,
+        inbound: Arc<Mutex<FrameSource>>,
         codec: FrameCodec,
         fences: Arc<Mutex<Fences>>,
         namespace: String,
     ) -> Self {
         Self {
             pipe: Mutex::new(pipe),
+            inbound,
             codec,
             fences,
             namespace,
@@ -84,11 +89,15 @@ impl Wire {
                 ),
             }),
         )?;
-        let bytes = read_frame(
-            &mut pipe,
-            &self.codec,
-            Instant::now() + Duration::from_secs(86_400),
-        )?;
+        let bytes = self
+            .inbound
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .read_frame(
+                &mut pipe,
+                &self.codec,
+                Instant::now() + Duration::from_secs(86_400),
+            )?;
         let frame = self.codec.decode_parent(&bytes)?;
         self.fences
             .lock()

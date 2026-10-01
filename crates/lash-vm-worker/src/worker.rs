@@ -4,7 +4,9 @@ use std::time::{Duration, Instant};
 
 use crate::PoolError;
 use lash_vm_client::RunContext;
-use lash_vm_client::ipc::{Bootstrap, read_frame, write_frame};
+#[cfg(test)]
+use lash_vm_client::ipc::read_frame;
+use lash_vm_client::ipc::{Bootstrap, FrameSource, write_frame, write_frames};
 use lash_vm_protocol::*;
 use lashlang::{
     AbilityOp, AbilityOutcome, Entry, ExecutionBound, ExecutionBounds, ModuleArtifact,
@@ -14,6 +16,11 @@ use lashlang::{
 pub(crate) struct Server<'frontend> {
     frontend: &'frontend dyn crate::Frontend,
     pipe: UnixStream,
+    /// The parent's frames, shared with the run's projection reads.
+    inbound: Arc<Mutex<FrameSource>>,
+    /// The run's projection wire, made at its start and reused by every
+    /// effect answer (FIG-4433).
+    wire: Option<Arc<crate::projection::Wire>>,
     codec: FrameCodec,
     bootstrap: Bootstrap,
     instance: VmInstance,
@@ -41,20 +48,22 @@ impl Fences {
         codec: &FrameCodec,
         message: WorkerMessage,
     ) -> Result<Vec<u8>, PoolError> {
-        let bytes = encode_worker(codec, self.outgoing.next_header_copy(), message)?;
+        let bytes = encode_worker(codec, self.outgoing.next_header_copy(), message).1?;
         self.outgoing.next_header();
         Ok(bytes)
     }
 }
 
+/// The frame's bytes, and its message back for the sender to keep.
 fn encode_worker(
     codec: &FrameCodec,
     header: MessageHeader,
     message: WorkerMessage,
-) -> Result<Vec<u8>, PoolError> {
+) -> (WorkerMessage, Result<Vec<u8>, PoolError>) {
     let kind = message.kind();
-    codec
-        .encode_worker(&WorkerFrame { header, message })
+    let frame = WorkerFrame { header, message };
+    let bytes = codec
+        .encode_worker(&frame)
         .map_err(|refusal| match refusal {
             CodecRefusal::FrameTooLarge { limit, declared } => {
                 InfrastructureOutcome::WorkerLimitExceeded {
@@ -67,7 +76,8 @@ fn encode_worker(
                 .into()
             }
             refusal => refusal.into(),
-        })
+        });
+    (frame.message, bytes)
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -104,6 +114,8 @@ impl<'frontend> Server<'frontend> {
         let mut server = Self {
             frontend,
             pipe,
+            inbound: Arc::default(),
+            wire: None,
             codec,
             bootstrap,
             instance: VmInstance::pristine(),
@@ -186,11 +198,16 @@ impl<'frontend> Server<'frontend> {
     ) -> Result<(), PoolError> {
         loop {
             // Host waits have no execution deadline. EOF terminates the entry.
-            let bytes = match read_frame(
-                &mut self.pipe,
-                &self.codec,
-                Instant::now() + Duration::from_secs(86_400),
-            ) {
+            let received = self
+                .inbound
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .read_frame(
+                    &mut self.pipe,
+                    &self.codec,
+                    Instant::now() + Duration::from_secs(86_400),
+                );
+            let bytes = match received {
                 Ok(bytes) => bytes,
                 Err(PoolError::Infrastructure(InfrastructureOutcome::WorkerCrashed { .. })) => {
                     return Ok(());
@@ -284,13 +301,7 @@ impl<'frontend> Server<'frontend> {
                         (_, EffectOutcome::Cancelled) => VmResume::EffectCancelled,
                         (_, EffectOutcome::Value(value)) => {
                             let value: AbilityOutcome = self.decode(&value)?;
-                            let wire = Arc::new(crate::projection::Wire::new(
-                                self.pipe.try_clone().map_err(PoolError::io)?,
-                                self.codec.clone(),
-                                self.fences.clone(),
-                                self.projection_namespace.clone(),
-                            ));
-                            let value = wire.rebind_outcome(value);
+                            let value = self.wire()?.rebind_outcome(value);
                             VmResume::Effect(Ok(value))
                         }
                         (_, EffectOutcome::Unit) => VmResume::Effect(Ok(AbilityOutcome::Unit)),
@@ -331,6 +342,7 @@ impl<'frontend> Server<'frontend> {
                     self.instance.reset();
                     self.pending = None;
                     self.reissue = None;
+                    self.wire = None;
                     self.send(WorkerMessage::Cancelled)?;
                 }
                 ParentMessage::Reset => {
@@ -340,6 +352,7 @@ impl<'frontend> Server<'frontend> {
                     self.instance.reset();
                     self.pending = None;
                     self.reissue = None;
+                    self.wire = None;
                     self.owner = None;
                     self.fences
                         .lock()
@@ -356,6 +369,21 @@ impl<'frontend> Server<'frontend> {
                 ParentMessage::Shutdown => return Ok(()),
             }
         }
+    }
+    /// The run's projection wire, on this socket and under this run's fences.
+    fn wire(&mut self) -> Result<Arc<crate::projection::Wire>, PoolError> {
+        if let Some(wire) = &self.wire {
+            return Ok(wire.clone());
+        }
+        let wire = Arc::new(crate::projection::Wire::new(
+            self.pipe.try_clone().map_err(PoolError::io)?,
+            self.inbound.clone(),
+            self.codec.clone(),
+            self.fences.clone(),
+            self.projection_namespace.clone(),
+        ));
+        self.wire = Some(wire.clone());
+        Ok(wire)
     }
     fn decode<T: serde::de::DeserializeOwned>(
         &self,
@@ -383,6 +411,7 @@ impl<'frontend> Server<'frontend> {
             context = rmp_serde::from_slice(&description.body.0).map_err(PoolError::protocol)?;
         }
         self.projection_namespace = context.projection_namespace;
+        self.wire = None;
         self.capture_state_view = context.capture_state_view;
         self.observation_budget = start.limits.memory_limit_bytes;
         let execution_start = match start.state {
@@ -475,12 +504,7 @@ impl<'frontend> Server<'frontend> {
         );
         config.observe_execution = context.observe_execution;
         config.trace_runtime_errors = true;
-        let wire = Arc::new(crate::projection::Wire::new(
-            self.pipe.try_clone().map_err(PoolError::io)?,
-            self.codec.clone(),
-            self.fences.clone(),
-            self.projection_namespace.clone(),
-        ));
+        let wire = self.wire()?;
         for description in context.projected {
             let value = match description.scalar {
                 Some(value) => lashlang::ProjectedValue::scalar(description.name.clone(), value),
@@ -555,7 +579,8 @@ impl<'frontend> Server<'frontend> {
                 .map_err(PoolError::protocol)?,
         )
     }
-    fn respond(&mut self, message: WorkerMessage) -> Result<(), PoolError> {
+    /// Sends the step's answer, and hands its message back.
+    fn respond(&mut self, message: WorkerMessage) -> Result<WorkerMessage, PoolError> {
         // Encode while the serialization deadline is active. Reserve the
         // header after Responding without advancing the real fence yet.
         let mut fence = self
@@ -565,24 +590,37 @@ impl<'frontend> Server<'frontend> {
             .outgoing;
         fence.next_header();
         let header = fence.next_header();
-        let encode = |message| encode_worker(&self.codec, header, message);
-        let bytes = match encode(message) {
-            Err(PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded {
-                limit,
-            })) => encode(WorkerMessage::LimitExceeded { limit })?,
-            result => result?,
+        let (message, bytes) = match encode_worker(&self.codec, header, message) {
+            (
+                message,
+                Err(PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded {
+                    limit,
+                })),
+            ) => (
+                message,
+                encode_worker(&self.codec, header, WorkerMessage::LimitExceeded { limit }).1?,
+            ),
+            (message, bytes) => (message, bytes?),
         };
-        self.progress(WorkerPhase::Responding)?;
-        self.fences
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .outgoing
-            .next_header();
-        write_frame(
-            &mut self.pipe,
-            &bytes,
-            Instant::now() + Duration::from_secs(30),
-        )
+        // Responding and the answer leave in one write: nothing happens
+        // between them, and the parent then wakes once for both (FIG-4433).
+        let responding = {
+            let mut fences = self
+                .fences
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let responding = fences.encode(
+                &self.codec,
+                WorkerMessage::Progress {
+                    phase: WorkerPhase::Responding,
+                    cpu_nanos: cpu_nanos()?,
+                },
+            )?;
+            fences.outgoing.next_header();
+            responding
+        };
+        write_frames(&mut self.pipe, responding, &bytes, Duration::from_secs(30))?;
+        Ok(message)
     }
     fn deliver(&mut self, step: VmStep) -> Result<(), PoolError> {
         let message = match self.deliver_inner(step) {
@@ -591,7 +629,11 @@ impl<'frontend> Server<'frontend> {
             })) => WorkerMessage::LimitExceeded { limit },
             result => result?,
         };
-        self.respond(message)
+        // The request is kept as it was sent, without a copy of its payload.
+        if let WorkerMessage::EffectRequest(request) = self.respond(message)? {
+            self.pending = Some(request);
+        }
+        Ok(())
     }
     /// A step's observations as the payloads of the frames that carry them,
     /// each within the frame's bounds (FIG-4458); `None` when they outgrow
@@ -600,6 +642,9 @@ impl<'frontend> Server<'frontend> {
         &self,
         observations: &[lashlang::LashlangExecutionObservation],
     ) -> Result<Option<Vec<EncodedPayload>>, PoolError> {
+        if observations.is_empty() {
+            return Ok(Some(Vec::new()));
+        }
         let mut chunker = self.codec.observation_chunker()?;
         for observation in observations {
             let encoded = rmp_serde::to_vec_named(observation).map_err(PoolError::protocol)?;
@@ -704,13 +749,11 @@ impl<'frontend> Server<'frontend> {
                     fences.next_effect += 1;
                     id
                 };
-                let request = EffectRequest {
+                WorkerMessage::EffectRequest(EffectRequest {
                     id,
                     kind,
                     payload: EncodedPayload(payload),
-                };
-                self.pending = Some(request.clone());
-                WorkerMessage::EffectRequest(request)
+                })
             }
             VmStep::Parked(parked) => {
                 let bytes = ParkedRun {
@@ -912,5 +955,127 @@ mod tests {
             InfrastructureOutcome::WorkerLimitExceeded { limit }
         );
         assert!(!outcome.is_retryable());
+    }
+
+    /// Runs `effects` echo effects through a server on its own thread, and
+    /// answers the socket calls that thread made.
+    fn server_socket_calls(effects: usize) -> u64 {
+        let config =
+            lash_vm_client::PoolConfig::standard(lash_vm_client::WorkerEntry::helper("unused"));
+        let codec = FrameCodec::new(config.protocol.decode);
+        let (pipe, mut parent) = UnixStream::pair().expect("pipe");
+        let server = std::thread::spawn({
+            let codec = codec.clone();
+            let bootstrap = Bootstrap::from(&config);
+            move || {
+                let mut server =
+                    Server::new(pipe, codec, bootstrap, &crate::frontend::TypeScriptFrontend)
+                        .expect("server");
+                server.run(&mut None).expect("run");
+                lash_vm_client::ipc::socket_calls()
+            }
+        });
+        let deadline = || Instant::now() + Duration::from_secs(30);
+        let mut outgoing = MessageFence::new(ExecutionLease(1), OwnerEpoch(1), FrameEpoch(1));
+        let mut send = |parent: &mut UnixStream, message| {
+            let bytes = codec
+                .encode_parent(&ParentFrame {
+                    header: outgoing.next_header(),
+                    message,
+                })
+                .expect("parent frame");
+            write_frame(parent, &bytes, deadline()).expect("send");
+        };
+        let receive = |parent: &mut UnixStream| {
+            let bytes = read_frame(parent, &codec, deadline()).expect("worker frame");
+            codec.decode_worker(&bytes).expect("frame").message
+        };
+        assert!(matches!(receive(&mut parent), WorkerMessage::Ready { .. }));
+        send(
+            &mut parent,
+            ParentMessage::Start(Box::new(Start {
+                owner: VmOwner::new("session"),
+                program: ProgramSource::Source {
+                    dialect: "typescript".into(),
+                    text: format!(
+                        "for (let i = 0; i < {effects}; i++) {{ await tools.echo({{ value: i }}); }} finish(1);"
+                    ),
+                },
+                contexts: vec![ContextDescription {
+                    kind: "vm_run".into(),
+                    name: "context".into(),
+                    body: EncodedPayload(
+                        rmp_serde::to_vec_named(&RunContext {
+                            environment: lashlang::testing::harness::test_environment(),
+                            ..RunContext::default()
+                        })
+                        .expect("context"),
+                    ),
+                }],
+                state: StartState::Fresh,
+                limits: config.vm_limits,
+            })),
+        );
+        let mut answered = 0;
+        loop {
+            match receive(&mut parent) {
+                WorkerMessage::Progress { .. } => {}
+                WorkerMessage::EffectRequest(request) => {
+                    let outcome = match request.kind {
+                        EffectKind::CancelCheckpoint => {
+                            EffectOutcome::Checkpoint { cancelled: false }
+                        }
+                        EffectKind::ResourceOperation => {
+                            answered += 1;
+                            EffectOutcome::Value(EncodedPayload(
+                                rmp_serde::to_vec_named(&AbilityOutcome::Value(
+                                    lashlang::Value::Number(1.0),
+                                ))
+                                .expect("answer"),
+                            ))
+                        }
+                        EffectKind::Finish => {
+                            let AbilityOp::Finish(value) =
+                                rmp_serde::from_slice(&request.payload.0).expect("operation")
+                            else {
+                                panic!("a finish request carries its value")
+                            };
+                            EffectOutcome::Value(EncodedPayload(
+                                rmp_serde::to_vec_named(&AbilityOutcome::Value(value))
+                                    .expect("answer"),
+                            ))
+                        }
+                        other => panic!("unexpected effect {other:?}"),
+                    };
+                    send(
+                        &mut parent,
+                        ParentMessage::EffectResponse(EffectResponse {
+                            id: request.id,
+                            outcome,
+                        }),
+                    );
+                }
+                WorkerMessage::Complete { .. } => break,
+                other => panic!("expected Complete, received {other:?}"),
+            }
+        }
+        assert_eq!(answered, effects);
+        send(&mut parent, ParentMessage::Shutdown);
+        server.join().expect("server thread")
+    }
+
+    /// FIG-4433: one effect exchange costs the worker five socket calls: a
+    /// timeout and a read for the whole answer, then one write each for
+    /// Computing, Serializing, and Responding together with the next request.
+    #[test]
+    fn an_effect_exchange_costs_the_worker_five_socket_calls() {
+        const MORE: usize = 10;
+        let few = server_socket_calls(1);
+        let many = server_socket_calls(1 + MORE);
+        assert!(
+            many - few <= 5 * MORE as u64,
+            "{MORE} more effect exchanges cost the worker {} more socket calls",
+            many - few
+        );
     }
 }

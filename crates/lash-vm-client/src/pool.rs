@@ -612,7 +612,7 @@ impl Checkout {
             return Err(PoolError::QueueFull { bytes: bytes.len() });
         }
         self.outgoing.next_header();
-        worker.send(&frame, timeout)
+        worker.send_encoded(&bytes, timeout)
     }
     fn receive_control(&mut self, timeout: Duration) -> Result<WorkerMessage, PoolError> {
         let frame = self

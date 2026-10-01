@@ -125,21 +125,25 @@ impl FrameCodec {
 
     fn encode<T: Serialize>(&self, frame: &T) -> Result<Vec<u8>, CodecRefusal> {
         let limit = u64::from(self.limits.max_frame_bytes);
+        // The payload is serialized behind its header's place, so a frame is
+        // written once, into one allocation (FIG-4433). The writer's bound is
+        // then the whole frame's.
+        let mut bytes = Vec::with_capacity(
+            INITIAL_FRAME_CAPACITY
+                .min(self.limits.max_frame_bytes as usize)
+                .max(FRAME_HEADER_BYTES),
+        );
+        bytes.extend_from_slice(&FRAME_MAGIC);
+        bytes.extend_from_slice(&[0; 4]);
         let mut writer = CappedWriter {
-            bytes: Vec::new(),
-            limit: self
-                .limits
-                .max_frame_bytes
-                .saturating_sub(FRAME_HEADER_BYTES as u32) as usize,
+            bytes,
+            limit: self.limits.max_frame_bytes as usize,
             refused: None,
         };
         let result =
             frame.serialize(&mut rmp_serde::Serializer::new(&mut writer).with_struct_map());
         if let Some(declared) = writer.refused {
-            return Err(CodecRefusal::FrameTooLarge {
-                limit,
-                declared: declared + FRAME_HEADER_BYTES as u64,
-            });
+            return Err(CodecRefusal::FrameTooLarge { limit, declared });
         }
         result.map_err(|error| CodecRefusal::Malformed {
             reason: format!("frame does not encode: {error}"),
@@ -150,11 +154,9 @@ impl FrameCodec {
                 declared: FRAME_HEADER_BYTES as u64,
             });
         }
-        let payload = writer.bytes;
-        let mut bytes = Vec::with_capacity(FRAME_HEADER_BYTES + payload.len());
-        bytes.extend_from_slice(&FRAME_MAGIC);
-        bytes.extend_from_slice(&(payload.len() as u32).to_be_bytes());
-        bytes.extend_from_slice(&payload);
+        let mut bytes = writer.bytes;
+        let payload = (bytes.len() - FRAME_HEADER_BYTES) as u32;
+        bytes[FRAME_MAGIC.len()..FRAME_HEADER_BYTES].copy_from_slice(&payload.to_be_bytes());
         Ok(bytes)
     }
 
@@ -218,6 +220,10 @@ impl FrameCodec {
         })
     }
 }
+
+/// Room for a control frame, so the small frames of an effect exchange are
+/// encoded without growing.
+const INITIAL_FRAME_CAPACITY: usize = 256;
 
 // Stops serialization before extending the allocation beyond the frame cap.
 struct CappedWriter {

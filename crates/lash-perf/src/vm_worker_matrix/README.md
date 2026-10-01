@@ -27,6 +27,14 @@ Run it twenty times and inspect each log. It has no timing population. The
 measurement mode requires 10,000 observations per warm workload and 200 new
 worker processes per cold workload. It does not accept smaller samples.
 
+`--exchanges SAMPLES` runs only the warm effect-exchange populations, with
+`SAMPLES` cases each, and prints each one's nearest-rank p50/p99 with the frames
+and bytes a case moves. It is the paired before/after comparison for a change to
+the exchange path (FIG-4433): build the two revisions' executables, alternate
+them in one run, and compare the medians of at least five runs a side. The
+timings remain a shared-host population; the acceptance distribution is the full
+matrix above on a quiet host (FIG-4172).
+
 The translated profiler preserves its ten original feeds. Fresh-state churn
 uses one new owner per observation and reuses the worker only after ResetDone.
 Scalar and parallel workloads each contain 0, 1, 10 or 100 echo operations.

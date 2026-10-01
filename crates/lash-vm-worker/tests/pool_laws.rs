@@ -18,6 +18,35 @@ use std::time::{Duration, Instant};
 #[path = "pool_laws/native_oom.rs"]
 mod native_oom;
 
+/// Counts the bytes each thread allocates, for the laws that bound what the
+/// parent copies (FIG-4433).
+struct CountingAllocator;
+
+thread_local! {
+    static ALLOCATED_BYTES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+#[expect(
+    unsafe_code,
+    reason = "parent copies are measured with a counting global allocator, and GlobalAlloc is an unsafe trait"
+)]
+unsafe impl std::alloc::GlobalAlloc for CountingAllocator {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+        // The key is const-initialised and holds a Copy type, so charging it
+        // allocates nothing and cannot re-enter the allocator.
+        let _ = ALLOCATED_BYTES
+            .try_with(|bytes| bytes.set(bytes.get().saturating_add(layout.size() as u64)));
+        unsafe { std::alloc::System.alloc(layout) }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+        unsafe { std::alloc::System.dealloc(ptr, layout) }
+    }
+}
+
+#[global_allocator]
+static ALLOCATOR: CountingAllocator = CountingAllocator;
+
 fn config(mode: &str) -> PoolConfig {
     let mut entry = WorkerEntry::helper(env!("CARGO_BIN_EXE_lash-vm-worker-fixture"));
     if !mode.is_empty() {
@@ -1542,4 +1571,87 @@ fn oversized_incoming_and_parked_vm_state_preserves_its_typed_run_limit() {
             );
         }
     }
+}
+
+/// FIG-4433: the socket calls one effect exchange costs the parent are
+/// bounded by its frames: one write for the answer, and for each of the four
+/// frames that follow (Computing, Serializing, Responding and the next
+/// request) at most one timeout and one read. A header and its payload are
+/// never two reads, and a write that does not wait arms no timeout.
+#[test]
+fn an_effect_exchange_costs_the_parent_a_bounded_number_of_socket_calls() {
+    const EFFECTS: usize = 20;
+    let pool = WorkerPool::new(config("")).expect("pool");
+    let mut worker = checkout(&pool);
+    let mut message = worker
+        .start(start(
+            &format!(
+                "for (let i = 0; i < {EFFECTS}; i++) {{ await tools.echo({{ value: i }}); }} finish(1);"
+            ),
+            ExecutionMode::Foreground,
+        ))
+        .expect("start");
+    let mut exchanges = 0;
+    loop {
+        match message {
+            WorkerMessage::EffectRequest(request) => {
+                let counted = request.kind == EffectKind::ResourceOperation;
+                let response = answer(request);
+                let before = lash_vm_client::ipc::socket_calls();
+                message = worker.effect_result(response).expect("resume");
+                let calls = lash_vm_client::ipc::socket_calls() - before;
+                if counted {
+                    exchanges += 1;
+                    assert!(
+                        calls <= 1 + 2 * 4,
+                        "effect exchange {exchanges} cost the parent {calls} socket calls"
+                    );
+                }
+            }
+            WorkerMessage::Complete { .. } => break,
+            other => panic!("expected Complete, received {other:?}"),
+        }
+    }
+    assert_eq!(exchanges, EFFECTS);
+    worker.release().expect("reset");
+}
+
+/// FIG-4433: the parent encodes an effect answer once. Answering with a
+/// large value allocates one frame of its size, not one per encoding pass.
+#[test]
+fn a_large_effect_answer_is_encoded_once_by_the_parent() {
+    const VALUE_BYTES: usize = 512 * 1024;
+    let pool = WorkerPool::new(config("")).expect("pool");
+    let mut worker = checkout(&pool);
+    let mut message = worker
+        .start(start(
+            &format!(
+                "const value = await tools.echo({{ value: 'x'.repeat({VALUE_BYTES}) }}); finish(value.length);"
+            ),
+            ExecutionMode::Foreground,
+        ))
+        .expect("start");
+    let mut answered = 0;
+    loop {
+        match message {
+            WorkerMessage::EffectRequest(request) => {
+                let large = request.kind == EffectKind::ResourceOperation;
+                let response = answer(request);
+                let before = ALLOCATED_BYTES.with(std::cell::Cell::get);
+                message = worker.effect_result(response).expect("resume");
+                let allocated = ALLOCATED_BYTES.with(std::cell::Cell::get) - before;
+                if large {
+                    answered += 1;
+                    assert!(
+                        allocated < (VALUE_BYTES + VALUE_BYTES / 2) as u64,
+                        "answering with a {VALUE_BYTES}-byte value allocated {allocated} bytes in the parent"
+                    );
+                }
+            }
+            WorkerMessage::Complete { .. } => break,
+            other => panic!("expected Complete, received {other:?}"),
+        }
+    }
+    assert_eq!(answered, 1);
+    worker.release().expect("reset");
 }

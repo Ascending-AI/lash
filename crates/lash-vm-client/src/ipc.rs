@@ -16,6 +16,7 @@ pub struct Worker {
     pub(crate) measurements: Option<crate::measurements::SharedMeasurements>,
     pub(crate) process_epoch: Option<String>,
     pub(crate) used: bool,
+    inbound: FrameSource,
     pub pipe: UnixStream,
     pub codec: FrameCodec,
     pub cpu_nanos: u64,
@@ -70,6 +71,7 @@ impl Worker {
             measurements: None,
             process_epoch,
             used: false,
+            inbound: FrameSource::default(),
             pipe,
             codec: FrameCodec::new(config.protocol.decode),
             cpu_nanos: 0,
@@ -82,7 +84,16 @@ impl Worker {
 
     pub fn send(&mut self, frame: &ParentFrame, timeout: Duration) -> Result<(), PoolError> {
         let bytes = self.codec.encode_parent(frame).map_err(PoolError::from)?;
-        write_frame(&mut self.pipe, &bytes, Instant::now() + timeout)?;
+        self.send_encoded(&bytes, timeout)
+    }
+
+    /// Sends a frame this worker's codec has already encoded.
+    pub(crate) fn send_encoded(
+        &mut self,
+        bytes: &[u8],
+        timeout: Duration,
+    ) -> Result<(), PoolError> {
+        write_frame(&mut self.pipe, bytes, Instant::now() + timeout)?;
         if let Some(measurements) = &self.measurements {
             let mut measurements = measurements
                 .lock()
@@ -94,7 +105,10 @@ impl Worker {
     }
 
     pub fn receive(&mut self, deadline: Instant) -> Result<WorkerFrame, PoolError> {
-        let bytes = match read_frame(&mut self.pipe, &self.codec, deadline) {
+        let bytes = match self
+            .inbound
+            .read_frame(&mut self.pipe, &self.codec, deadline)
+        {
             Err(PoolError::Infrastructure(InfrastructureOutcome::WorkerCrashed { .. })) => {
                 if let Some(measurements) = &self.measurements {
                     measurements
@@ -231,6 +245,87 @@ impl From<&PoolConfig> for Bootstrap {
     }
 }
 
+thread_local! {
+    static SOCKET_CALLS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// The system calls this thread has made on worker sockets: every read,
+/// write and timeout change. A count, so a law can bound what one exchange
+/// costs without timing it (FIG-4433).
+pub fn socket_calls() -> u64 {
+    SOCKET_CALLS.with(std::cell::Cell::get)
+}
+
+fn count_socket_call() {
+    SOCKET_CALLS.with(|calls| calls.set(calls.get() + 1));
+}
+
+/// What one read asks the socket for. Larger frames finish in their own
+/// allocation.
+const INBOUND_BUFFER_BYTES: usize = 16 * 1024;
+
+/// One end's inbound frames (FIG-4433). A read takes whatever has arrived,
+/// so a frame's header and payload, and frames written together, cost one
+/// read between them. Every reader of a socket must share its source: bytes
+/// one reader took past its own frame are the next reader's.
+#[derive(Debug, Default)]
+pub struct FrameSource {
+    buffer: Vec<u8>,
+    /// The unread bytes are `buffer[start..end]`.
+    start: usize,
+    end: usize,
+}
+
+impl FrameSource {
+    /// The next whole frame. The deadline bounds the wait for all of it, and
+    /// a deadline already past refuses a frame that has already arrived.
+    pub fn read_frame(
+        &mut self,
+        pipe: &mut UnixStream,
+        codec: &FrameCodec,
+        deadline: Instant,
+    ) -> Result<Vec<u8>, PoolError> {
+        remaining(deadline)?;
+        if self.buffer.is_empty() {
+            self.buffer = vec![0; INBOUND_BUFFER_BYTES];
+        }
+        while self.end - self.start < FRAME_HEADER_BYTES {
+            if self.start > 0 {
+                self.buffer.copy_within(self.start..self.end, 0);
+                self.end -= self.start;
+                self.start = 0;
+            }
+            let partial = self.end > 0;
+            let read = read_some(pipe, &mut self.buffer[self.end..], deadline, partial)?;
+            self.end += read;
+        }
+        let unread = &self.buffer[self.start..self.end];
+        let len = codec
+            .frame_len(unread)
+            .map_err(PoolError::from)?
+            .ok_or_else(|| PoolError::protocol("incomplete frame header"))?;
+        if len <= unread.len() {
+            let frame = unread[..len].to_vec();
+            self.start += len;
+            if self.start == self.end {
+                self.start = 0;
+                self.end = 0;
+            }
+            return Ok(frame);
+        }
+        // The rest is read into the frame itself, and no further.
+        let mut frame = Vec::with_capacity(len);
+        frame.extend_from_slice(unread);
+        let arrived = frame.len();
+        self.start = 0;
+        self.end = 0;
+        frame.resize(len, 0);
+        read_until(pipe, &mut frame[arrived..], deadline, true)?;
+        Ok(frame)
+    }
+}
+
+/// Reads one frame from a socket no [`FrameSource`] reads.
 pub fn read_frame(
     pipe: &mut UnixStream,
     codec: &FrameCodec,
@@ -256,6 +351,28 @@ fn remaining(deadline: Instant) -> Result<Duration, PoolError> {
         ))
 }
 
+/// One read of at least one byte, within the deadline.
+fn read_some(
+    pipe: &mut UnixStream,
+    bytes: &mut [u8],
+    deadline: Instant,
+    partial: bool,
+) -> Result<usize, PoolError> {
+    loop {
+        pipe.set_read_timeout(Some(remaining(deadline)?))
+            .map_err(PoolError::io)?;
+        count_socket_call();
+        count_socket_call();
+        match pipe.read(bytes) {
+            Ok(0) if partial => return Err(PoolError::protocol("EOF in a partial frame")),
+            Ok(0) => return Err(PoolError::eof()),
+            Ok(n) => return Ok(n),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(PoolError::io(e)),
+        }
+    }
+}
+
 fn read_until(
     pipe: &mut UnixStream,
     mut bytes: &mut [u8],
@@ -263,20 +380,30 @@ fn read_until(
     mut partial: bool,
 ) -> Result<(), PoolError> {
     while !bytes.is_empty() {
-        pipe.set_read_timeout(Some(remaining(deadline)?))
-            .map_err(PoolError::io)?;
-        match pipe.read(bytes) {
-            Ok(0) if partial => return Err(PoolError::protocol("EOF in a partial frame")),
-            Ok(0) => return Err(PoolError::eof()),
-            Ok(n) => {
-                bytes = &mut bytes[n..];
-                partial = true;
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(e) => return Err(PoolError::io(e)),
-        }
+        let read = read_some(pipe, bytes, deadline, partial)?;
+        bytes = &mut bytes[read..];
+        partial = true;
     }
     Ok(())
+}
+
+/// Writes without waiting, for as much as the socket takes at once.
+fn write_ready(pipe: &UnixStream, bytes: &[u8]) -> std::io::Result<usize> {
+    // SIGPIPE stays suppressed as on the standard library's own writes; Apple
+    // sockets carry that as an option the library set when it made them.
+    #[cfg(not(target_vendor = "apple"))]
+    let flags = libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL;
+    #[cfg(target_vendor = "apple")]
+    let flags = libc::MSG_DONTWAIT;
+    count_socket_call();
+    // SAFETY: the pointer and length describe `bytes`, which outlives the
+    // call, and the descriptor is this open stream's.
+    #[expect(unsafe_code, reason = "a write that does not wait needs send(2) flags")]
+    let sent = unsafe { libc::send(pipe.as_raw_fd(), bytes.as_ptr().cast(), bytes.len(), flags) };
+    if sent < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(sent as usize)
 }
 
 pub fn write_frame(
@@ -285,9 +412,19 @@ pub fn write_frame(
     deadline: Instant,
 ) -> Result<(), PoolError> {
     while !bytes.is_empty() {
-        pipe.set_write_timeout(Some(remaining(deadline)?))
-            .map_err(PoolError::io)?;
-        match pipe.write(bytes) {
+        let wait = remaining(deadline)?;
+        // A frame the socket has room for needs no timeout (FIG-4433): only
+        // a write that has to wait arms one.
+        let written = match write_ready(pipe, bytes) {
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                pipe.set_write_timeout(Some(wait)).map_err(PoolError::io)?;
+                count_socket_call();
+                count_socket_call();
+                pipe.write(bytes)
+            }
+            written => written,
+        };
+        match written {
             Ok(0) => return Err(PoolError::eof()),
             Ok(n) => bytes = &bytes[n..],
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
@@ -295,4 +432,21 @@ pub fn write_frame(
         }
     }
     Ok(())
+}
+
+/// Writes a small frame and the one after it together, so the peer wakes
+/// once for both. A larger second frame is written on its own instead of
+/// being copied. Each write has `timeout`.
+pub fn write_frames(
+    pipe: &mut UnixStream,
+    mut first: Vec<u8>,
+    second: &[u8],
+    timeout: Duration,
+) -> Result<(), PoolError> {
+    if second.len() > INBOUND_BUFFER_BYTES {
+        write_frame(pipe, &first, Instant::now() + timeout)?;
+        return write_frame(pipe, second, Instant::now() + timeout);
+    }
+    first.extend_from_slice(second);
+    write_frame(pipe, &first, Instant::now() + timeout)
 }

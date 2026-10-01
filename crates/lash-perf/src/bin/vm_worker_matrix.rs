@@ -13,10 +13,13 @@ fn main() -> anyhow::Result<()> {
     if args.iter().any(|arg| arg == "--verify") {
         return matrix::verify();
     }
+    if let Some(warm) = args.windows(2).find(|p| p[0] == "--exchanges") {
+        return matrix::exchanges(warm[1].parse()?);
+    }
     let directory = args
         .windows(2)
         .find(|p| p[0] == "--out")
         .map(|p| std::path::PathBuf::from(&p[1]))
-        .ok_or_else(|| anyhow::anyhow!("pass --out DIRECTORY or --verify"))?;
+        .ok_or_else(|| anyhow::anyhow!("pass --out DIRECTORY, --exchanges SAMPLES or --verify"))?;
     matrix::measure(&directory, 10_000, 200)
 }

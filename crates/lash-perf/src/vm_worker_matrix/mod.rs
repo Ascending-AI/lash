@@ -53,6 +53,38 @@ pub fn verify() -> Result<()> {
     Ok(())
 }
 
+/// Warm effect exchanges only, for a paired before/after comparison in one
+/// run (FIG-4433). The timings are a population on a shared host; the frame
+/// and byte counts per exchange are exact.
+pub fn exchanges(warm: usize) -> Result<()> {
+    let pool = WorkerPool::new(config()?)?;
+    for case in workload::cases().into_iter().filter(|c| c.effects > 0) {
+        let before = pool.measurements().counters;
+        let mut exchange = Vec::new();
+        for index in 0..warm {
+            let observation = worker::run(&case, &pool, &VmOwner::new(format!("owner-{index}")))?;
+            exchange.extend(observation.exchange_ns);
+        }
+        let after = pool.measurements().counters;
+        ensure!(!exchange.is_empty(), "{} timed no exchange", case.name);
+        exchange.sort_unstable();
+        let rank = |percent: usize| exchange[(exchange.len() * percent).div_ceil(100) - 1];
+        let per_case = |after: u64, before: u64| (after - before) as f64 / warm as f64;
+        println!(
+            "exchange {} samples={} p50_ns={} p99_ns={} sent_frames_per_case={:.2} received_frames_per_case={:.2} sent_bytes_per_case={:.0} received_bytes_per_case={:.0}",
+            case.name,
+            exchange.len(),
+            rank(50),
+            rank(99),
+            per_case(after.ipc_sent_messages, before.ipc_sent_messages),
+            per_case(after.ipc_received_messages, before.ipc_received_messages),
+            per_case(after.ipc_sent_bytes, before.ipc_sent_bytes),
+            per_case(after.ipc_received_bytes, before.ipc_received_bytes),
+        );
+    }
+    Ok(())
+}
+
 pub fn measure(path: &Path, warm: usize, cold: usize) -> Result<()> {
     ensure!(
         warm >= 10_000 && cold >= 200,
