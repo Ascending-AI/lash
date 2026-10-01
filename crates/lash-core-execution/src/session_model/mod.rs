@@ -105,8 +105,12 @@ impl ModelBinding {
     pub fn bind_for_unjournaled_call(
         &self,
     ) -> Result<ProviderHandle, crate::RuntimeEffectControllerError> {
-        self.bind()
-            .map_err(|error| crate::RuntimeEffectControllerError::model_unavailable(&error))
+        self.bind().map_err(|error| {
+            crate::RuntimeEffectControllerError::model_unavailable(
+                &error.key,
+                format!("the recorded model cannot be bound on this worker: {error}"),
+            )
+        })
     }
 }
 

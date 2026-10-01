@@ -125,7 +125,7 @@ where
 /// terminates the invocation so deterministic failures cannot loop forever.
 pub(crate) fn handler_error_from_plugin(error: PluginError) -> HandlerError {
     if error.is_retryable() {
-        HandlerError::from(error)
+        crate::turn_handler::retried_attempt_failure(error.attempt_failure_text())
     } else {
         HandlerError::from(TerminalError::from_error(error))
     }

@@ -1167,35 +1167,81 @@ async fn a_partially_created_child_completes_from_its_recorded_creation_config_o
     .await;
 }
 
+/// The park Restate's exhausted retries of an attempt that failed with
+/// `failure` become, as the reconcile writes it from the engine's text.
+fn park_of_exhausted_retries(failure: &str) -> lash_core::store::ParkReason {
+    lash_core::store::ParkReason::engine_retry_exhausted(
+        8,
+        Some("500".to_string()),
+        format!("[500] Handler failed with retryable error: {failure}"),
+    )
+}
+
+/// The first attempt of a committed [`FAST`] child's process on a worker
+/// that does not serve the key: the registry, store and registration a
+/// retry needs, the context the attempt ran on, and how the attempt ended.
+struct UnservedCommittedChild {
+    registry: Arc<dyn ProcessRegistry>,
+    factory: Arc<dyn lash_core::DeploymentStore>,
+    registration: ProcessRegistration,
+    process_id: ProcessId,
+    context: Arc<ReplayableRecordingContext>,
+    ended: Result<Result<lash_core::ProcessRunOutcome, PluginError>, AttemptFailure>,
+}
+
+async fn unserved_committed_child(child: &str) -> UnservedCommittedChild {
+    let registry = process_registry();
+    let registration = keyed_registration_for(&SessionId::from(child)).await;
+    let process_id = registry
+        .register_process(registration.clone())
+        .await
+        .expect("register SessionTurn")
+        .id;
+    let factory = memory_session_store_factory().await;
+    commit_keyed_child(&registry, &factory, &registration, &process_id).await;
+    let worker = worker_for(
+        memory_engine_backend().await,
+        Arc::clone(&registry),
+        Arc::clone(&factory),
+        answering_provider("never asked"),
+        Vec::new(),
+    )
+    .await;
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let ended = context
+        .attempt
+        .run(Box::pin(run(
+            &worker,
+            &registry,
+            &process_id,
+            &registration,
+            Arc::clone(&context),
+            test_restate_authority_id(),
+            RestateNamespace::default(),
+        )))
+        .await;
+    UnservedCommittedChild {
+        registry,
+        factory,
+        registration,
+        process_id,
+        context,
+        ended,
+    }
+}
+
 /// FIG-4531: a model key this worker does not serve ends a session-turn
-/// attempt with the typed, retryable `ModelUnavailable`, whether the child
-/// is still to be created (the key cannot be minted) or already committed
-/// (its recorded binding cannot be bound). Neither is the generic
-/// plugin-session failure, and neither is the process's outcome.
+/// attempt with the typed, retried `ModelUnavailable`, whether the child is
+/// still to be created (the key cannot be minted) or already committed (its
+/// recorded binding cannot be bound). Neither is the generic plugin-session
+/// failure, and neither is the process's outcome. Either way the key
+/// reaches the park the engine's exhausted retries become (FIG-4631).
 #[tokio::test]
 async fn a_session_turn_key_this_worker_does_not_serve_retries_typed() {
-    fn assert_model_unavailable(result: Result<lash_core::ProcessRunOutcome, PluginError>) {
-        let error = match result {
-            Err(error) => error,
-            Ok(outcome) => panic!("an unserved key ends the attempt, got: {outcome:#?}"),
-        };
-        let code = match &error {
-            PluginError::Runtime(runtime) => Some(runtime.code.clone()),
-            PluginError::RuntimeEffectController(controller) => Some(controller.code.clone()),
-            _ => None,
-        };
-        assert_eq!(
-            code,
-            Some(lash_core::RuntimeErrorCode::ModelUnavailable),
-            "the refusal is typed model_unavailable: {error:?}"
-        );
-        assert!(
-            error.is_retryable() && !error.is_terminal(),
-            "a deployment that serves the key repairs it: {error:?}"
-        );
-    }
+    let key = lash_core::ModelKey::new(FAST);
 
-    // The child is still to be created: its key cannot be minted here.
+    // The child is still to be created: its key cannot be minted here. The
+    // fault is met outside any step, so the handler ends the attempt with it.
     let registry = process_registry();
     let child = SessionId::from("unserved-key-fresh-child");
     let registration = keyed_registration_for(&child).await;
@@ -1212,49 +1258,194 @@ async fn a_session_turn_key_this_worker_does_not_serve_retries_typed() {
         Vec::new(),
     )
     .await;
-    assert_model_unavailable(
-        run(
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let error = match context
+        .attempt
+        .run(Box::pin(run(
             &worker,
             &registry,
             &process_id,
             &registration,
-            Arc::new(ReplayableRecordingContext::default()),
+            Arc::clone(&context),
             test_restate_authority_id(),
             RestateNamespace::default(),
-        )
-        .await,
+        )))
+        .await
+        .expect("no step's fault ends the attempt of a child that cannot be created")
+    {
+        Err(error) => error,
+        Ok(outcome) => panic!("an unserved key ends the attempt, got: {outcome:#?}"),
+    };
+    let (code, model_key) = match &error {
+        PluginError::Runtime(runtime) => (Some(runtime.code.clone()), runtime.model_key()),
+        PluginError::RuntimeEffectController(controller) => {
+            (Some(controller.code.clone()), controller.model_key())
+        }
+        _ => (None, None),
+    };
+    assert_eq!(
+        code,
+        Some(lash_core::RuntimeErrorCode::ModelUnavailable),
+        "the refusal is typed model_unavailable: {error:?}"
+    );
+    assert_eq!(model_key, Some(&key), "the fault names the key: {error:?}");
+    assert!(
+        error.is_retryable() && !error.is_terminal(),
+        "a deployment that serves the key repairs it: {error:?}"
+    );
+    assert_eq!(
+        park_of_exhausted_retries(&error.attempt_failure_text()).model_key(),
+        Some(&key),
+        "the park of the exhausted retries names the key"
+    );
+    let ended = format!("{:?}", handler_error_from_plugin(error));
+    assert!(
+        ended.contains("Retryable") && ended.contains("lash.model_unavailable"),
+        "the handler ends the attempt retryably, with the fault's record: {ended}"
     );
 
-    // The child is committed: its recorded binding cannot be bound here.
-    let registry = process_registry();
-    let child = SessionId::from("unserved-key-committed-child");
-    let registration = keyed_registration_for(&child).await;
-    let process_id = registry
-        .register_process(registration.clone())
-        .await
-        .expect("register SessionTurn")
-        .id;
-    let factory = memory_session_store_factory().await;
-    commit_keyed_child(&registry, &factory, &registration, &process_id).await;
-    let worker = worker_for(
+    // The child is committed: its recorded binding cannot be bound here. The
+    // model call's step meets the fault, and the attempt ends there.
+    let committed = Box::pin(unserved_committed_child("unserved-key-committed-child")).await;
+    let ended = match committed.ended {
+        Err(ended) => ended,
+        Ok(returned) => panic!("the unbound model call ends the attempt, got: {returned:#?}"),
+    };
+    assert!(
+        ended.failure.starts_with("model_unavailable: "),
+        "the attempt fails with the typed code's text: {ended:?}"
+    );
+    assert_eq!(
+        park_of_exhausted_retries(&ended.failure).model_key(),
+        Some(&key),
+        "the park of the exhausted retries names the key: {ended:?}"
+    );
+}
+
+/// FIG-4631: a model bind fault is never journaled (FIG-4404). The step
+/// that met it leaves no record, so the retry of the same invocation on a
+/// deployment that serves the key runs the step again and completes. A
+/// journaled fault would replay as the same refusal on every attempt.
+#[tokio::test]
+async fn a_model_bind_fault_is_never_journaled_and_its_retry_runs_the_step_again() {
+    let committed = Box::pin(unserved_committed_child("never-journaled-bind-fault-child")).await;
+    let ended = match committed.ended {
+        Err(ended) => ended,
+        Ok(returned) => panic!("the unbound model call ends the attempt, got: {returned:#?}"),
+    };
+    {
+        let records = committed.context.records.lock_recover();
+        assert!(
+            !records.contains_key(&ended.effect),
+            "the step that met the fault journaled a record: {ended:?}"
+        );
+        for (effect, bytes) in records.iter() {
+            let record = String::from_utf8_lossy(bytes);
+            assert!(
+                !record.contains("model_unavailable"),
+                "step `{effect}` journaled the bind fault: {record}"
+            );
+        }
+    }
+    assert!(
+        committed
+            .context
+            .runs
+            .lock_recover()
+            .contains(&ended.effect),
+        "the step that met the fault was issued: {ended:?}"
+    );
+
+    // The engine's retry: the journal replays, and the step runs again on a
+    // deployment that binds the recorded model.
+    committed.context.start_replay_allowing_journal_extension();
+    let worker = worker_with_models(
         memory_engine_backend().await,
-        Arc::clone(&registry),
-        factory,
-        answering_provider("never asked"),
+        Arc::clone(&committed.registry),
+        Arc::clone(&committed.factory),
+        Arc::new(BindOnlyModels {
+            provider: answering_provider("the retry answered"),
+            mints: std::sync::atomic::AtomicUsize::new(0),
+        }) as Arc<dyn lash_core::RuntimeModels>,
         Vec::new(),
     )
     .await;
-    assert_model_unavailable(
-        run(
+    let outcome = committed
+        .context
+        .attempt
+        .run(Box::pin(run(
             &worker,
-            &registry,
-            &process_id,
-            &registration,
-            Arc::new(ReplayableRecordingContext::default()),
+            &committed.registry,
+            &committed.process_id,
+            &committed.registration,
+            Arc::clone(&committed.context),
             test_restate_authority_id(),
             RestateNamespace::default(),
-        )
-        .await,
+        )))
+        .await
+        .expect("no step's fault ends the retry")
+        .expect("the retry runs the model call on a deployment that serves the key");
+    assert_completed(&outcome);
+    assert!(
+        committed
+            .context
+            .records
+            .lock_recover()
+            .contains_key(&ended.effect),
+        "the retry journaled the step the fault had left unrecorded"
+    );
+}
+
+/// FIG-4631: a recording context ends an attempt the way the engine does.
+/// A step whose fault is retried journals nothing, nothing after it runs,
+/// and its text is all that is kept; a value is journaled.
+#[tokio::test]
+async fn a_recording_context_ends_the_attempt_at_a_retried_fault_and_journals_nothing() {
+    let fault = lash_core::RuntimeEffectControllerError::model_unavailable(
+        &lash_core::ModelKey::new(FAST),
+        "the recorded model cannot be bound on this worker",
+    )
+    .attempt_failure_text();
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let ran_past_the_fault = AtomicBool::new(false);
+    let ended = context
+        .attempt
+        .run(async {
+            let Json(value) = context
+                .run_json_or_retry_send("settled".to_string(), async { Ok::<u32, String>(7) })
+                .await
+                .expect("a value is journaled");
+            assert_eq!(value, 7);
+            let _ = context
+                .run_json_or_retry_send("faulted".to_string(), {
+                    let fault = fault.clone();
+                    async move { Err::<u32, String>(fault) }
+                })
+                .await;
+            ran_past_the_fault.store(true, Ordering::SeqCst);
+        })
+        .await
+        .expect_err("the fault ends the attempt");
+    assert_eq!(
+        ended,
+        AttemptFailure {
+            effect: "faulted".to_string(),
+            failure: fault,
+        }
+    );
+    assert!(
+        !ran_past_the_fault.load(Ordering::SeqCst),
+        "nothing runs after the step that ended the attempt"
+    );
+    let records = context.records.lock_recover();
+    assert_eq!(
+        records.get("settled").map(Vec::as_slice),
+        Some(br#"{"Ok":7}"#.as_slice()),
+        "a settled step journals its value"
+    );
+    assert!(
+        !records.contains_key("faulted"),
+        "the faulted step journaled nothing"
     );
 }
 

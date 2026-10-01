@@ -523,6 +523,19 @@ impl PluginError {
         }
     }
 
+    /// The text an engine fails a retried attempt with: this error's display
+    /// and, when it carries a typed attempt fault, that fault's record
+    /// ([`RuntimeEffectControllerError::attempt_failure_text`](crate::RuntimeEffectControllerError::attempt_failure_text)),
+    /// so the park of the engine's exhausted retries keeps the fault typed.
+    #[must_use]
+    pub fn attempt_failure_text(&self) -> String {
+        match self {
+            Self::Runtime(error) => error.attempt_failure_text(),
+            Self::RuntimeEffectController(error) => error.attempt_failure_text(),
+            error => error.to_string(),
+        }
+    }
+
     /// Whether retrying the identical plugin operation is explicitly safe.
     pub fn is_retryable(&self) -> bool {
         match self {

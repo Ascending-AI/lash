@@ -752,9 +752,10 @@ async fn initialize_session(
     }
     // No session, or a catalog row that records no head: nothing is recorded
     // for the session yet, so the recorded request creates it.
+    let named = request.model.clone();
     let mut plan = resolve_session_init(current, request)
         .await
-        .map_err(unserved_model_key)?;
+        .map_err(|error| unserved_model_key(named.as_ref(), error))?;
     plan.owning_process_id = Some(owning_process_id.clone());
     Box::pin(commit_fresh_session_init(current, plan)).await
 }
@@ -762,37 +763,45 @@ async fn initialize_session(
 /// An admitted start's model key this worker's models do not register: the
 /// start's admission minted nothing but judged the key, so a worker that
 /// cannot mint it is a deployment that does not serve it. Retried, typed
-/// `ModelUnavailable`, as a root's per-run key in the same position is.
-fn unserved_model_key(error: crate::PluginError) -> crate::PluginError {
-    match error {
-        crate::PluginError::Runtime(runtime)
+/// `ModelUnavailable` naming the key, as a root's per-run key in the same
+/// position is.
+fn unserved_model_key(
+    key: Option<&crate::ModelKey>,
+    error: crate::PluginError,
+) -> crate::PluginError {
+    match (key, error) {
+        (Some(key), crate::PluginError::Runtime(runtime))
             if runtime.code == crate::RuntimeErrorCode::ModelUnknown =>
         {
-            crate::PluginError::Runtime(crate::RuntimeError::new(
-                crate::RuntimeErrorCode::ModelUnavailable,
-                format!(
-                    "the start's model key is not served by this worker; the process retries \
-                     until a deployment serves it: {}",
-                    runtime.message
-                ),
-            ))
+            crate::PluginError::Runtime(
+                crate::RuntimeEffectControllerError::model_unavailable(
+                    key,
+                    format!(
+                        "the start's model key is not served by this worker; the process \
+                         retries until a deployment serves it: {}",
+                        runtime.message
+                    ),
+                )
+                .into_runtime_error(),
+            )
         }
-        error => error,
+        (_, error) => error,
     }
 }
 
-/// A session error from assembling a recorded session's runtime, with the
-/// recorded model this worker cannot bind kept typed and retryable, and a
-/// store error classified as every read of the reopen is.
+/// A session error from assembling a recorded session's runtime, with a
+/// store error classified as every read of the reopen is. Nothing on that
+/// path binds a model (FIG-4404), so the one model refusal it can meet is a
+/// recorded head that selects none: the terminal `ModelUnconfigured`.
 fn recorded_session_error(error: crate::SessionError) -> crate::PluginError {
     match error {
         crate::SessionError::Plugin(error) => error,
         crate::SessionError::Store { context, source } => {
             crate::PluginError::of_store_error(context, source)
         }
-        error @ crate::SessionError::ModelUnavailable { .. } => crate::PluginError::Runtime(
-            crate::RuntimeError::new(crate::RuntimeErrorCode::ModelUnavailable, error.to_string()),
-        ),
+        error @ crate::SessionError::ModelUnconfigured { .. } => {
+            crate::PluginError::Runtime(crate::runtime::drive::model_unconfigured(error))
+        }
         error => crate::PluginError::Session(error.to_string()),
     }
 }
@@ -1672,7 +1681,7 @@ mod tests {
             Some(&crate::RuntimeErrorCode::ModelUnknown),
             "admission refuses the key that was named: {refused:?}"
         );
-        let on_worker = unserved_model_key(refused);
+        let on_worker = unserved_model_key(unknown.model.as_ref(), refused);
         assert_eq!(
             runtime_code(&on_worker),
             Some(&crate::RuntimeErrorCode::ModelUnavailable)
@@ -1681,6 +1690,40 @@ mod tests {
             on_worker.is_retryable() && !on_worker.is_terminal(),
             "an admitted start's unserved key retries until a deployment serves it"
         );
+        let crate::PluginError::Runtime(on_worker) = on_worker else {
+            unreachable!("the code was read from a runtime error");
+        };
+        assert_eq!(
+            on_worker.model_key(),
+            Some(&crate::ModelKey::new("retired")),
+            "the fault names the start's key typed: {on_worker:?}"
+        );
+        assert_eq!(
+            crate::store::ParkReason::engine_retry_exhausted(
+                8,
+                None,
+                on_worker.attempt_failure_text()
+            )
+            .model_key(),
+            Some(&crate::ModelKey::new("retired")),
+            "the park of the exhausted retries names the key"
+        );
+    }
+
+    /// FIG-4631: a recorded session whose head selects no model is refused
+    /// typed and terminal when its runtime is assembled. Nothing on that
+    /// path binds a model, so no session error there is `ModelUnavailable`.
+    #[test]
+    fn a_recorded_session_with_no_model_is_terminal_model_unconfigured() {
+        let refused = recorded_session_error(crate::SessionError::ModelUnconfigured {
+            session_id: SessionId::from("recorded-without-model"),
+        });
+        assert_eq!(
+            runtime_code(&refused),
+            Some(&crate::RuntimeErrorCode::ModelUnconfigured),
+            "{refused:?}"
+        );
+        assert!(refused.is_terminal() && !refused.is_retryable());
     }
 
     /// FIG-4531: the default binding a host session-turn start recorded at

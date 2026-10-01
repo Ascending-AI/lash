@@ -340,20 +340,16 @@ trait TypedTurnPhase {
 
 impl LashRuntime {
     /// The recorded prompt budget queued-root admission measures against.
-    /// A session that selects no model has none, and its roots wait for a
-    /// deployment that can run them.
+    /// A session whose recorded config selects no model has none, and its
+    /// roots are refused: no deployment can run them.
     pub(super) fn max_context_tokens(&self) -> Result<usize, RuntimeError> {
         self.state
             .effective_policy()
             .context_window_tokens()
             .ok_or_else(|| {
-                RuntimeError::new(
-                    RuntimeErrorCode::ModelUnavailable,
-                    format!(
-                        "session `{}` selects no model, so its roots cannot be admitted",
-                        self.state.session_id
-                    ),
-                )
+                crate::runtime::drive::model_unconfigured(crate::SessionError::ModelUnconfigured {
+                    session_id: self.state.session_id.clone(),
+                })
             })
     }
 

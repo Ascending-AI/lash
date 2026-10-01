@@ -92,10 +92,10 @@ fn a_direct_completion_retries_an_unbound_model_instead_of_recording_it() {
             ..
         }
     ));
-    let fault = RuntimeEffectControllerError::model_unavailable(&lash_core::ModelUnavailable::new(
-        lash_core::ModelKey::new("kimi-k3@tensorx"),
-        lash_core::ModelUnavailableReason::UnknownKey,
-    ));
+    let fault = RuntimeEffectControllerError::model_unavailable(
+        &lash_core::ModelKey::new("kimi-k3@tensorx"),
+        "the recorded model cannot be bound on this worker",
+    );
     for kind in [
         lash_core::RuntimeEffectKind::Direct,
         lash_core::RuntimeEffectKind::LlmCall,
@@ -104,40 +104,53 @@ fn a_direct_completion_retries_an_unbound_model_instead_of_recording_it() {
     }
 }
 
+/// FIG-4608, FIG-4631: a model bind fault stays typed across the engine and
+/// the plugin boundary. The engine keeps only the failed attempt's text, so
+/// the fault's record rides it to the park of the exhausted retries; the
+/// plugin and runtime conversions keep the code, the key and the retry
+/// class. A Restate terminal is a journaled completion and is never read
+/// back as the retried fault, whatever its text carries.
 #[test]
-fn a_model_bind_fault_survives_the_restate_terminal_and_plugin_boundaries() {
+fn a_model_bind_fault_stays_typed_across_the_engine_and_plugin_boundaries() {
     let key = lash_core::ModelKey::new("fast\"@worker");
-    let fault = RuntimeEffectControllerError::model_unavailable(&lash_core::ModelUnavailable::new(
-        key.clone(),
-        lash_core::ModelUnavailableReason::UnknownKey,
-    ));
-    let terminal = TerminalError::new(format!(
-        "Handler failed with retryable error: {}",
-        fault.attempt_failure_text()
-    ));
-    let bridged = RuntimeEffectControllerError::from(RestateEffectError::Terminal {
-        effect: "child-llm-call".into(),
-        terminal,
-    });
-    assert_eq!(bridged.code, RuntimeErrorCode::ModelUnavailable);
-    assert_eq!(bridged.cause, fault.cause);
-    assert_eq!(bridged.model_key(), Some(&key));
-    assert!(bridged.message.contains("child-llm-call"));
-    assert!(!bridged.journaled);
-    let plugin = PluginError::RuntimeEffectController(bridged);
+    let fault = RuntimeEffectControllerError::model_unavailable(
+        &key,
+        "the recorded model cannot be bound on this worker",
+    );
+    for kind in [
+        lash_core::RuntimeEffectKind::Direct,
+        lash_core::RuntimeEffectKind::LlmCall,
+    ] {
+        assert!(
+            fault.journal_disposition(kind).is_retryable_derivation(),
+            "the fault is never the recorded result of {}",
+            kind.as_str()
+        );
+    }
+    let failure = fault.attempt_failure_text();
+    let park = lash_core::store::ParkReason::engine_retry_exhausted(
+        8,
+        Some("500".to_string()),
+        format!("[500] Handler failed with retryable error: {failure}"),
+    );
+    assert_eq!(park.model_key(), Some(&key));
+
+    let plugin = PluginError::RuntimeEffectController(fault.clone());
     assert!(plugin.is_retryable());
     assert!(!plugin.is_terminal());
+    assert_eq!(plugin.attempt_failure_text(), failure);
     let runtime = plugin.into_turn_failure(RuntimeErrorCode::Plugin);
     assert_eq!(runtime.code, RuntimeErrorCode::ModelUnavailable);
     assert_eq!(runtime.model_key(), Some(&key));
     assert!(runtime.is_retryable());
     assert!(!runtime.is_terminal());
+    assert_eq!(runtime.attempt_failure_text(), failure);
 
     for message in [
-        "model_unavailable: model fast is unavailable",
-        r#"failed {"fault":"lash.model_unavailable","model_key":null}"#,
-        r#"failed {"fault":"lash.model_unavailable","model_key":"fast""#,
-        r#"failed {"fault":"lash.unknown","model_key":"fast"}"#,
+        format!("Handler failed with retryable error: {failure}"),
+        "model_unavailable: model fast is unavailable".to_string(),
+        r#"failed {"fault":"lash.model_unavailable","model_key":null}"#.to_string(),
+        r#"failed {"fault":"lash.unknown","model_key":"fast"}"#.to_string(),
     ] {
         let error = RestateEffectError::Terminal {
             effect: "other-effect".into(),
@@ -148,6 +161,10 @@ fn a_model_bind_fault_survives_the_restate_terminal_and_plugin_boundaries() {
         assert_eq!(bridged.code, RuntimeErrorCode::EngineEffectController);
         assert_eq!(bridged.message, diagnostic);
         assert!(bridged.cause.is_none());
+        assert!(
+            !PluginError::RuntimeEffectController(bridged).is_retryable(),
+            "a Restate terminal is never retried: {diagnostic}"
+        );
     }
 }
 

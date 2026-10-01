@@ -8,6 +8,8 @@ use super::*;
 
 #[derive(Default)]
 pub(crate) struct PositionalReplayContext {
+    /// The attempt this context runs, which a step's retried fault ends.
+    pub(crate) attempt: AttemptEnd,
     pub(crate) sleeps: Mutex<Vec<u64>>,
     pub(crate) runs: Mutex<Vec<String>>,
     pub(crate) records: Mutex<Vec<(String, Vec<u8>)>>,
@@ -119,6 +121,8 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
             Ok(Json(value))
         })
     }
+
+    run_json_or_retry_send_ends_the_attempt!();
 
     fn start_process_workflow<'run>(
         &'run self,

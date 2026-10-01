@@ -205,6 +205,8 @@ impl RuntimeErrorCode {
             Self::ReasoningRefused => Terminal,
             // the model was adopted when it was set; this worker's deployment cannot bind it now.
             Self::ModelUnavailable => Retryable,
+            // the recorded config selects no model; the same record is refused again.
+            Self::ModelUnconfigured => Terminal,
             // the spec names an exact revision this worker's deployment does not register yet.
             Self::RunDefinitionUnavailable => Retryable,
             Self::RecordedRendererUnavailable => Retryable,

@@ -339,13 +339,22 @@ async fn drive_to_terminal(
                 .await
         }
     };
+    // One invocation as the engine sees it: its outcome, or the failure that
+    // ended the attempt, inside a step or between steps.
+    let run = |context: Arc<ReplayableRecordingContext>,
+               handover: Option<lash_core::SegmentHandover>| {
+        let invocation = run(Arc::clone(&context), handover);
+        async move {
+            match context.attempt.run(Box::pin(invocation)).await {
+                Ok(Ok(outcome)) => Ok(outcome),
+                Ok(Err(crashed)) => Err(crashed.to_string()),
+                Err(ended) => Err(ended.failure),
+            }
+        }
+    };
     // The retry of a crashed invocation: its settled steps replay, the step
     // it was inside never journaled, and it continues live from there.
     let retry = |context: &Arc<ReplayableRecordingContext>| {
-        context.records.lock_recover().retain(|_, bytes| {
-            !serde_json::from_slice::<serde_json::Value>(bytes)
-                .is_ok_and(|value| value.get("Err").is_some())
-        });
         context.start_replay_allowing_journal_extension();
     };
     let mut handover = None;
@@ -364,7 +373,7 @@ async fn drive_to_terminal(
             Ok(outcome) => outcome,
             Err(crashed) => {
                 assert!(
-                    crashed.to_string().contains("injected crash before the"),
+                    crashed.contains("injected crash before the"),
                     "only the injected crash interrupts the drive: {crashed}"
                 );
                 interrupted += 1;

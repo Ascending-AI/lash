@@ -58,6 +58,14 @@ pub fn parked_turn_failure(refusal: impl std::fmt::Display) -> HandlerError {
     HandlerError::from(ParkedTurn(refusal.to_string()))
 }
 
+/// How a handler ends an attempt the engine retries: a retryable failure
+/// whose text is the fault's `attempt_failure_text`. An engine keeps only
+/// that text, so a typed attempt fault rides it as a record, and the park
+/// the exhausted retries become reads the record back (FIG-4404).
+pub(crate) fn retried_attempt_failure(failure: String) -> HandlerError {
+    HandlerError::from(std::io::Error::other(failure))
+}
+
 /// Records the park of the turn a group tool child belongs to, when the child
 /// refused where it parks its opener and recorded nothing (FIG-3725): its
 /// tool drifted and it would run live, or its replay diverged. Its opener,

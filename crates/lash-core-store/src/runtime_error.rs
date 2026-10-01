@@ -237,6 +237,11 @@ pub enum RuntimeErrorCode {
     /// is the worker's deployment, not the session's intent: the engine
     /// retries the root, and its retry budget parks it.
     ModelUnavailable,
+    /// A recorded config selects no model, so the work it governs has
+    /// nothing to run a model call with. It is a recorded absence no
+    /// deployment can repair, so it is the work's outcome and is never
+    /// retried, unlike [`Self::ModelUnavailable`].
+    ModelUnconfigured,
     /// A root's run spec names a definition revision this worker does not
     /// register (FIG-3838). It is the deployment, not the input: the root
     /// retries, its retry budget parks it, and a redeploy that registers the
@@ -742,6 +747,7 @@ impl RuntimeErrorCode {
             Self::ModelUnknown => "model_unknown",
             Self::ReasoningRefused => "reasoning_refused",
             Self::ModelUnavailable => "model_unavailable",
+            Self::ModelUnconfigured => "model_unconfigured",
             Self::RunDefinitionUnavailable => "run_definition_unavailable",
             Self::RecordedRendererUnavailable => "recorded_renderer_unavailable",
             Self::OutputRetentionFailed => "output_retention_failed",
@@ -1021,6 +1027,7 @@ impl RuntimeErrorCode {
             "model_unknown" => Self::ModelUnknown,
             "reasoning_refused" => Self::ReasoningRefused,
             "model_unavailable" => Self::ModelUnavailable,
+            "model_unconfigured" => Self::ModelUnconfigured,
             "run_definition_unavailable" => Self::RunDefinitionUnavailable,
             "recorded_renderer_unavailable" => Self::RecordedRendererUnavailable,
             "output_retention_failed" => Self::OutputRetentionFailed,

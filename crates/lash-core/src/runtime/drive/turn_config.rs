@@ -138,13 +138,41 @@ impl LashRuntime {
     }
 }
 
-/// A turn whose recorded config selects no model has nothing to run a model
-/// call with: retried, never the turn's outcome (D3 Q3).
+/// A recorded config that selects no model has nothing to run a model call
+/// with. The absence is recorded, so no deployment repairs it and no retry
+/// changes it: the terminal `ModelUnconfigured`, as a session's open refuses
+/// the same head (FIG-4531).
 pub(crate) fn model_unconfigured(error: SessionError) -> RuntimeError {
     RuntimeError::new(
-        RuntimeErrorCode::ModelUnavailable,
-        format!("the turn's recorded config selects no model: {error}"),
+        RuntimeErrorCode::ModelUnconfigured,
+        format!("the recorded config selects no model: {error}"),
     )
+}
+
+/// Why a root's run spec did not resolve, as its `ResolveTurnConfig` step
+/// answers it. A model key this worker does not serve is the deployment's
+/// fault; a refused reasoning selection or shape is the spec's.
+fn run_resolve_fault(
+    hash: &impl std::fmt::Display,
+    error: crate::RunResolveError,
+) -> RuntimeEffectControllerError {
+    match error {
+        crate::RunResolveError::Model(error) => RuntimeEffectControllerError::model_unavailable(
+            &error.key,
+            format!(
+                "run spec `{hash}` names a model this worker does not serve; the root \
+                 retries until a deployment serves it: {error}"
+            ),
+        ),
+        crate::RunResolveError::Reasoning(error) => RuntimeEffectControllerError::new(
+            RuntimeErrorCode::ReasoningRefused,
+            format!("run spec `{hash}` is refused: {error}"),
+        ),
+        error => RuntimeEffectControllerError::new(
+            RuntimeErrorCode::RunShapeRefused,
+            format!("run spec `{hash}` could not be resolved: {error}"),
+        ),
+    }
 }
 
 /// The first execution of one `ResolveTurnConfig` step: it resolves the
@@ -242,24 +270,7 @@ impl RootSpec {
             .protocol_turn_options;
         spec.resolve(snapshot, definition, termination, self.models.as_ref())
             .map(|resolved| (resolved, run_options))
-            .map_err(|error| match error {
-                crate::RunResolveError::Model(error) => repairable(
-                    RuntimeErrorCode::ModelUnavailable,
-                    format!(
-                        "run spec `{}` names a model this worker does not serve; the root \
-                         retries until a deployment serves it: {error}",
-                        self.hash
-                    ),
-                ),
-                crate::RunResolveError::Reasoning(error) => RuntimeEffectControllerError::new(
-                    RuntimeErrorCode::ReasoningRefused,
-                    format!("run spec `{}` is refused: {error}", self.hash),
-                ),
-                error => RuntimeEffectControllerError::new(
-                    RuntimeErrorCode::RunShapeRefused,
-                    format!("run spec `{}` could not be resolved: {error}", self.hash),
-                ),
-            })
+            .map_err(|error| run_resolve_fault(&self.hash, error))
     }
 }
 
@@ -403,5 +414,103 @@ mod tests {
             Some(subagent),
             "the live plugin session must see the root view's subagent context"
         );
+    }
+
+    /// FIG-4631: a recorded config that selects no model is a recorded
+    /// absence no deployment repairs. It is the terminal `ModelUnconfigured`
+    /// wherever the runtime meets it, as a session's open refuses the same
+    /// head (FIG-4531), and never the retried `ModelUnavailable`.
+    #[tokio::test]
+    async fn a_recorded_config_that_selects_no_model_is_terminal_model_unconfigured() {
+        let session_id = crate::SessionId::from("recorded-without-model");
+        let at_the_turn = super::model_unconfigured(crate::SessionError::ModelUnconfigured {
+            session_id: session_id.clone(),
+        });
+
+        let mut runtime = Box::pin(
+            LashRuntime::builder(
+                crate::RuntimeHostConfig::new(
+                    crate::testing::sqlite_memory_store_backend().await,
+                    crate::CommitBudget::bounded(1024 * 1024, 512),
+                    crate::QueuedWorkBatchingConfig::new(1),
+                ),
+                crate::testing::runtime_lease_owner(),
+            )
+            .with_session_id(session_id.as_str())
+            .with_plugin_factories(crate::testing::test_standard_protocol_factories())
+            .with_policy(crate::SessionPolicy {
+                model: Some(crate::testing::test_model_config(
+                    "test-model",
+                    crate::ModelMetadata::builder("test-model")
+                        .context_window_tokens(1024)
+                        .build()
+                        .expect("model"),
+                )),
+                ..crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                )
+            })
+            .build(),
+        )
+        .await
+        .expect("runtime");
+        runtime.state.policy.model = None;
+        let at_root_admission = runtime
+            .max_context_tokens()
+            .expect_err("a config with no model has no prompt budget");
+
+        for refusal in [at_the_turn, at_root_admission] {
+            assert_eq!(
+                refusal.code,
+                crate::RuntimeErrorCode::ModelUnconfigured,
+                "{refusal:?}"
+            );
+            assert!(
+                refusal.is_terminal() && !refusal.is_retryable(),
+                "no retry changes a recorded absence: {refusal:?}"
+            );
+            assert_eq!(
+                refusal.turn_failure_cause(),
+                crate::TurnFailureCause::Outcome,
+                "the refusal is the work's outcome: {refusal:?}"
+            );
+            assert_eq!(refusal.model_key(), None);
+            assert!(
+                refusal.message.contains(session_id.as_str()),
+                "the refusal names the session: {refusal:?}"
+            );
+        }
+    }
+
+    /// FIG-4631: a run spec whose model key this worker does not serve ends
+    /// its resolution with the one `ModelUnavailable` fault: the key typed,
+    /// the attempt's fault, and the key in the text the engine keeps, so the
+    /// park of the exhausted retries names it.
+    #[test]
+    fn an_unserved_run_spec_key_is_the_typed_attempt_fault() {
+        let key = crate::ModelKey::new("kimi-k3@tensorx");
+        let fault = super::run_resolve_fault(
+            &"spec-hash",
+            crate::RunResolveError::Model(crate::ModelUnavailable::new(
+                key.clone(),
+                crate::ModelUnavailableReason::UnknownKey,
+            )),
+        );
+        assert_eq!(fault.code, crate::RuntimeErrorCode::ModelUnavailable);
+        assert_eq!(fault.model_key(), Some(&key), "{fault:?}");
+        assert!(
+            fault
+                .journal_disposition(crate::RuntimeEffectKind::ResolveTurnConfig)
+                .is_retryable_derivation(),
+            "the fault is never the resolution's recorded result"
+        );
+        assert!(!fault.is_terminal());
+        let park = crate::store::ParkReason::engine_retry_exhausted(
+            8,
+            None,
+            format!("[500] {}", fault.attempt_failure_text()),
+        );
+        assert_eq!(park.model_key(), Some(&key));
     }
 }

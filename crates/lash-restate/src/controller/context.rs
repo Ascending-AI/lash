@@ -369,9 +369,9 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
     /// [`run_json_send`](Self::run_json_send)'s. An `Err` ends this attempt
     /// retryably and writes nothing: the step carries no retry policy of its
     /// own, so the engine's invocation retry replays the journal up to it and
-    /// runs it again (FIG-3683). A context that cannot end an attempt — the
-    /// recording test contexts — records the fault and surfaces it as a
-    /// terminal error instead.
+    /// runs it again (FIG-3683). The fault's text is all the engine keeps of
+    /// the attempt, and nothing after the step runs in it: the returned
+    /// future never resolves to the fault.
     fn run_json_or_retry_send<'run, T, Fut>(
         &'run self,
         effect_name: String,
@@ -380,14 +380,7 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
     where
         'ctx: 'run,
         T: Serialize + DeserializeOwned + Send + 'static,
-        Fut: Future<Output = Result<T, String>> + Send + 'run,
-    {
-        let run = self.run_json_send::<Result<T, String>, _>(effect_name, None, future);
-        async move {
-            let Json(result) = run.await?;
-            result.map(Json).map_err(TerminalError::new)
-        }
-    }
+        Fut: Future<Output = Result<T, String>> + Send + 'run;
 
     /// Submits the process's workflow run.
     ///

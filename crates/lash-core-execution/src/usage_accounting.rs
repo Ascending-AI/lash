@@ -869,10 +869,8 @@ mod tests {
         )]));
         let unbound = |name: &str| {
             RuntimeEffectControllerError::model_unavailable(
-                &crate::provider::ModelUnavailable::new(
-                    crate::ModelKey::new(name),
-                    crate::provider::ModelUnavailableReason::UnknownKey,
-                ),
+                &crate::ModelKey::new(name),
+                "the recorded model cannot be bound on this worker",
             )
         };
         assert!(run.attempt_fault().is_none());

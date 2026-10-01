@@ -910,15 +910,20 @@ impl LashTurnImpl {
     }
 }
 
+/// The retried end of an attempt `error` aborted.
+fn retried_abort(error: &lash_core::RuntimeError) -> HandlerError {
+    crate::turn_handler::retried_attempt_failure(error.attempt_failure_text())
+}
+
 /// How a handler ends an attempt the kernel aborted.
 fn abort_failure(abort: DriveAbort) -> HandlerError {
     match abort {
         // A live fault: the invocation retries, replaying what it recorded.
-        DriveAbort::Retry(error) => HandlerError::from(error),
+        DriveAbort::Retry(error) => retried_abort(&error),
         // The park is durable; the invocation keeps its journal and pauses
         // after its attempt budget.
         DriveAbort::Parked { error, .. } => parked_turn_failure(error),
-        DriveAbort::Refused(error) if error.is_retryable() => HandlerError::from(error),
+        DriveAbort::Refused(error) if error.is_retryable() => retried_abort(&error),
         DriveAbort::Refused(error) => drive_refusal(&error),
     }
 }
@@ -1370,7 +1375,7 @@ async fn run_root_journal(
             return Err(abort_failure(abort));
         }
         Err(DriveAbort::Refused(error)) if error.is_retryable() => {
-            return Err(HandlerError::from(error));
+            return Err(retried_abort(&error));
         }
         Err(abort @ DriveAbort::Refused(_)) => {
             (RootOutcome::Released { root }, Err(abort_failure(abort)))

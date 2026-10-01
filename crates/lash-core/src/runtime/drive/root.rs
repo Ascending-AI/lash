@@ -97,7 +97,7 @@ impl LashRuntime {
                         .core
                         .durability
                         .queued_work_batching
-                        .admission_policy(self.max_context_tokens().map_err(DriveAbort::Retry)?),
+                        .admission_policy(self.max_context_tokens().map_err(&abort)?),
                     base: crate::store::SessionHeadRef {
                         // Read by the admission body on its first execution.
                         generation: 0,

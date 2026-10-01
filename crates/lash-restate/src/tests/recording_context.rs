@@ -190,6 +190,9 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
     }
 }
 
+#[macro_use]
+mod attempt;
+pub(crate) use attempt::{AttemptEnd, AttemptFailure, run_json_or_end_attempt};
 mod positional_replay;
 pub(super) use positional_replay::PositionalReplayContext;
 mod turn_cancel_gate;
@@ -198,6 +201,8 @@ pub(super) use turn_cancel_gate::*;
 
 #[derive(Default)]
 pub(super) struct RecordingContext {
+    /// The attempt this context runs, which a step's retried fault ends.
+    pub(super) attempt: AttemptEnd,
     endpoint: Option<Endpoint>,
     pub(super) block_sleeps: AtomicBool,
     pub(super) sleeps: Mutex<Vec<u64>>,
@@ -692,6 +697,8 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         })
     }
 
+    run_json_or_retry_send_ends_the_attempt!();
+
     fn start_process_workflow<'run>(
         &'run self,
         _namespace: &'run crate::RestateNamespace,
@@ -1028,6 +1035,8 @@ impl std::ops::Deref for ZeroPermitSemaphore {
 
 #[derive(Default)]
 pub(super) struct ReplayableRecordingContext {
+    /// The attempt this context runs, which a step's retried fault ends.
+    pub(super) attempt: AttemptEnd,
     pub(super) sleeps: Mutex<Vec<u64>>,
     pub(super) park_sleeps: AtomicBool,
     pub(super) sleep_started: tokio::sync::Notify,
@@ -2085,10 +2094,9 @@ fn is_process_command_journal_fact(effect_name: &str) -> bool {
 }
 
 /// Decodes one journaled record into its recorded effect. A step whose engine
-/// faults are retried journals its run's `Result` under these contexts — a
-/// recording context cannot end the attempt, so `run_json_or_retry_send`'s
-/// default wraps the record in `{"Ok": ...}` (or the fault in `{"Err": ...}`);
-/// a step whose faults are recorded journals the stamped record bare.
+/// faults are retried journals its record as `{"Ok": ...}` under these
+/// contexts, and its fault never ([`run_json_or_end_attempt`]); a step whose
+/// faults are recorded journals the stamped record bare.
 fn decode_recorded_runtime_effect(bytes: &[u8]) -> RecordedRuntimeEffect {
     let value: serde_json::Value = serde_json::from_slice(bytes).expect("decode journaled record");
     let unwrapped = match value {
@@ -2284,6 +2292,8 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
             Ok(Json(value))
         })
     }
+
+    run_json_or_retry_send_ends_the_attempt!();
 
     fn start_process_workflow<'run>(
         &'run self,

@@ -889,7 +889,7 @@ where
                 self.park_diverged_process(&process_id, &err, started).await;
                 Err(crate::parked_turn_failure(err))
             }
-            Err(err) if err.is_retryable() => Err(HandlerError::from(err)),
+            Err(err) if err.is_retryable() => Err(handler_error_from_plugin(err)),
             // Another owner carries the process, or no process is left to
             // end: this invocation stops without writing a terminal.
             Err(

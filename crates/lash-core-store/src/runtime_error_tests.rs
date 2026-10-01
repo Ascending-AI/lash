@@ -98,6 +98,7 @@ first_party_codes! {
         Self::ModelUnknown,
         Self::ReasoningRefused,
         Self::ModelUnavailable,
+        Self::ModelUnconfigured,
         Self::RunDefinitionUnavailable,
         Self::RecordedRendererUnavailable,
         Self::OutputRetentionFailed,
@@ -697,24 +698,13 @@ fn replay_refusals_park_the_turn() {
     }
 }
 
-/// Generation refusals keep their fields across journaling (FIG-4605).
-/// Their code spellings still round-trip as foreign codes on older decoders.
+/// Generation refusals keep their fields across journaling (FIG-4605): the
+/// stored refusal carries both generations in its typed cause, and this
+/// build decodes them back. Stored shapes change in place under the version
+/// freeze, so a build from before the cause does not decode this record:
+/// FIG-3619's older-decoder guarantee is retired until the 1.0 reset.
 #[test]
-fn a_stored_session_state_refusal_reads_as_a_foreign_code_before_the_codes_existed() {
-    let added = [
-        RuntimeErrorCode::SessionStateVersionUnsupported,
-        RuntimeErrorCode::SessionStateVersionNewerThanRuntime,
-    ];
-    // The decoder before this change is this `from_wire_code` without the two
-    // arms: every other spelling keeps its arm, and an unknown one falls
-    // through to `other => Self::ForeignCode(other.to_string())`.
-    let pre_change_decode = |spelling: &str| {
-        if added.iter().any(|code| code.as_str() == spelling) {
-            RuntimeErrorCode::ForeignCode(spelling.to_string())
-        } else {
-            RuntimeErrorCode::from_wire_code(spelling)
-        }
-    };
+fn a_stored_session_state_refusal_round_trips_with_its_generations() {
     for (error, code) in [
         (
             crate::StoreError::SessionStateVersionUnsupported {
@@ -764,23 +754,6 @@ fn a_stored_session_state_refusal_reads_as_a_foreign_code_before_the_codes_exist
                 && refused.message.contains(&current.to_string()),
             "the stored message names both generations: {}",
             refused.message
-        );
-
-        let spelling = stored["code"].as_str().expect("the code is a string");
-        let before = pre_change_decode(spelling);
-        assert_eq!(
-            before,
-            RuntimeErrorCode::ForeignCode(spelling.to_string()),
-            "a build without the code reads it as a foreign code"
-        );
-        assert!(
-            before.is_terminal(),
-            "a foreign code is a recorded outcome, not a retry"
-        );
-        assert_eq!(
-            serde_json::to_value(&before).expect("re-encode the foreign code"),
-            stored["code"],
-            "the foreign code re-encodes to the same bytes"
         );
 
         let decoded: RuntimeError =
@@ -844,7 +817,10 @@ fn an_unbound_model_is_the_attempts_fault_on_model_calls_alone() {
         key.clone(),
         crate::provider::ModelUnavailableReason::UnknownKey,
     );
-    let fault = RuntimeEffectControllerError::model_unavailable(&unavailable);
+    let fault = RuntimeEffectControllerError::model_unavailable(
+        &key,
+        format!("the recorded model cannot be bound on this worker: {unavailable}"),
+    );
     assert_eq!(fault.code, RuntimeErrorCode::ModelUnavailable);
     assert_eq!(fault.model_key(), Some(&key));
     assert!(fault.is_attempt_fault());
@@ -879,6 +855,11 @@ fn an_unbound_model_is_the_attempts_fault_on_model_calls_alone() {
     // The typed key survives both conversions and the wire.
     let runtime = fault.clone().into_runtime_error();
     assert_eq!(runtime.model_key(), Some(&key));
+    assert_eq!(
+        runtime.attempt_failure_text(),
+        fault.attempt_failure_text(),
+        "the fault's record rides the attempt's text from either error type"
+    );
     assert!(runtime.is_retryable());
     assert!(!runtime.is_terminal());
     let json = serde_json::to_value(&runtime).expect("serialize runtime error");

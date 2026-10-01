@@ -37,6 +37,13 @@ impl RuntimeError {
     pub fn model_key(&self) -> Option<&crate::ModelKey> {
         RuntimeErrorCause::model_key(self.cause.as_ref())
     }
+
+    /// [`RuntimeEffectControllerError::attempt_failure_text`], for a fault
+    /// that ends its attempt as a runtime error.
+    #[must_use]
+    pub fn attempt_failure_text(&self) -> String {
+        AttemptFault::failure_text(self, self.model_key())
+    }
 }
 
 impl RuntimeEffectControllerError {
@@ -53,19 +60,17 @@ impl RuntimeEffectControllerError {
             && matches!(kind, RuntimeEffectKind::LlmCall | RuntimeEffectKind::Direct)
     }
 
-    /// A recorded model this worker's deployment cannot bind, met by the
-    /// body of an unjournaled model call (FIG-4404). It is the attempt's
-    /// fault and never the call's outcome: the engine releases the step
-    /// unsealed and runs it again, until a deployment serves the key. The
-    /// error names the key typed, beside the message.
+    /// A model key this worker's deployment does not serve (FIG-4404): the
+    /// one way the fault is built, so it always names the key typed, beside
+    /// the message, and is always the attempt's fault. The key was adopted
+    /// when it was recorded, so the deployment is at fault, never the
+    /// recorded work: the engine ends the attempt, records nothing, and runs
+    /// it again until a deployment serves the key.
     #[must_use]
-    pub fn model_unavailable(source: &crate::provider::ModelUnavailable) -> Self {
-        let mut error = Self::new(
-            RuntimeErrorCode::ModelUnavailable,
-            format!("the recorded model cannot be bound on this worker: {source}"),
-        );
+    pub fn model_unavailable(model_key: &crate::ModelKey, message: impl Into<String>) -> Self {
+        let mut error = Self::new(RuntimeErrorCode::ModelUnavailable, message);
         error.cause = Some(RuntimeErrorCause::ModelUnavailable {
-            model_key: Box::new(source.key.clone()),
+            model_key: Box::new(model_key.clone()),
         });
         error.retryable_uncommitted_derivation()
     }
@@ -77,23 +82,7 @@ impl RuntimeEffectControllerError {
     /// exhausted retries become ([`AttemptFault::in_failure`]).
     #[must_use]
     pub fn attempt_failure_text(&self) -> String {
-        match AttemptFault::of(self).and_then(|fault| serde_json::to_string(&fault).ok()) {
-            Some(record) => format!("{self} {record}"),
-            None => self.to_string(),
-        }
-    }
-
-    /// Decode the typed fault an engine retained in a failed attempt's text.
-    /// Returns `None` when the text carries no valid fault record. The
-    /// surrounding prose supplies no classification or retry authority.
-    #[must_use]
-    pub fn from_attempt_failure_text(failure: &str) -> Option<Self> {
-        let AttemptFault::ModelUnavailable { model_key } = AttemptFault::in_failure(failure)?;
-        let mut error = Self::new(RuntimeErrorCode::ModelUnavailable, failure);
-        error.cause = Some(RuntimeErrorCause::ModelUnavailable {
-            model_key: Box::new(model_key),
-        });
-        Some(error)
+        AttemptFault::failure_text(self, self.model_key())
     }
 
     /// The recorded model key this error could not bind, when it is the
@@ -118,10 +107,19 @@ pub(crate) enum AttemptFault {
 }
 
 impl AttemptFault {
-    fn of(error: &RuntimeEffectControllerError) -> Option<Self> {
-        error.model_key().map(|model_key| Self::ModelUnavailable {
-            model_key: model_key.clone(),
-        })
+    /// `error`'s display and, when it could not bind `model_key`, the
+    /// record of that key.
+    fn failure_text(error: &dyn std::fmt::Display, model_key: Option<&crate::ModelKey>) -> String {
+        let record = model_key.and_then(|model_key| {
+            serde_json::to_string(&Self::ModelUnavailable {
+                model_key: model_key.clone(),
+            })
+            .ok()
+        });
+        match record {
+            Some(record) => format!("{error} {record}"),
+            None => error.to_string(),
+        }
     }
 
     /// The record `failure` carries, found where it starts: an engine

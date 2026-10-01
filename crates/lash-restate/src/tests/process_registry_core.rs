@@ -1074,13 +1074,20 @@ pub(super) async fn restate_external_ref_write_failure_preserves_inputs_for_exac
     let executor =
         || registry_local_executor(registry.clone()).with_process_env_store(env_store.clone());
 
-    let injected_error = host
-        .execute_effect(
+    // The reference write's step meets the fault, and the attempt ends there.
+    let injected_error = context
+        .attempt
+        .run(host.execute_effect(
             start_recovery_effect(env_store.as_ref(), start_key, &spec).await,
             executor(),
-        )
+        ))
         .await
-        .expect_err("injected post-registration start failure");
+        .expect_err("injected post-registration start failure")
+        .failure;
+    assert!(
+        injected_error.contains("injected external-ref write failure"),
+        "only the injected fault ends the attempt: {injected_error}"
+    );
     let record = the_only_process(registry.as_ref()).await;
     assert!(
         !record.is_terminal(),
@@ -1191,13 +1198,20 @@ pub(super) async fn restate_exact_retry_start_failure_does_not_cancel_the_first_
     registry.fail_next_external_ref_write(PluginError::Session(
         "injected external-ref write failure".to_string(),
     ));
-    let _ = host
-        .execute_effect(
+    let ended = context
+        .attempt
+        .run(host.execute_effect(
             start_recovery_effect(env_store.as_ref(), start_key, &spec).await,
             executor(),
-        )
+        ))
         .await
         .expect_err("the first attempt's reference write fails");
+    assert!(
+        ended
+            .failure
+            .contains("injected external-ref write failure"),
+        "only the injected fault ends the attempt: {ended:?}"
+    );
     let first = the_only_process(registry.as_ref()).await;
     assert!(first.external_ref.is_none() && !first.is_terminal());
 
