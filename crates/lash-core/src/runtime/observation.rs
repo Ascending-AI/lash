@@ -251,7 +251,10 @@ fn export_observation_state(runtime: &LashRuntime) -> (crate::SessionReadView, V
     // Observation publication is synchronous. When resident state has been
     // invalidated, project only the already-adopted durable snapshot; never
     // recapture live plugin/tool state before the async reload gate runs.
-    let read_view = runtime.read_view();
+    // An observer reads the session's record, never a root's execution
+    // view: that view outlives its root on resident state, and a replay
+    // re-installs it (FIG-4529).
+    let read_view = crate::SessionReadView::recorded_from_runtime_state(&runtime.state);
     (read_view, authority_fingerprint(&runtime.state))
 }
 

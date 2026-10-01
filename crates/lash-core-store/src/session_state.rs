@@ -1385,17 +1385,25 @@ pub(super) fn apply_persisted_session_config(
     state: &mut RuntimeSessionState,
     config: &crate::PersistedSessionConfig,
 ) {
-    state.policy.model = config.model.clone();
-    state.policy.attachment_acceptance = config.attachment_acceptance.clone();
-    state.policy.turn_budget = config.turn_budget;
-    state.policy.autonomous = config.autonomous;
-    state.policy.no_progress_budget = config.no_progress_budget;
-    state.policy.charge_safety = config.charge_safety.clone();
-    if let Some(prompt) = config.prompt.as_ref() {
-        state.policy.prompt = prompt.clone();
-    }
-    state.policy.generation = config.generation.clone();
+    apply_persisted_config_to_policy(&mut state.policy, config);
     state.config_revision = config.config_revision;
+}
+
+/// Write `config`'s policy-homed values onto `policy`.
+pub(crate) fn apply_persisted_config_to_policy(
+    policy: &mut SessionPolicy,
+    config: &crate::PersistedSessionConfig,
+) {
+    policy.model = config.model.clone();
+    policy.attachment_acceptance = config.attachment_acceptance.clone();
+    policy.turn_budget = config.turn_budget;
+    policy.autonomous = config.autonomous;
+    policy.no_progress_budget = config.no_progress_budget;
+    policy.charge_safety = config.charge_safety.clone();
+    if let Some(prompt) = config.prompt.as_ref() {
+        policy.prompt = prompt.clone();
+    }
+    policy.generation = config.generation.clone();
 }
 
 /// Restore-time headroom shared by every bare next-turn `turn_index + 1`.

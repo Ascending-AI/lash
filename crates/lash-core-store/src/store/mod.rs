@@ -60,7 +60,7 @@ mod session_config_views;
 mod session_view;
 pub use session_config_views::{
     execution_session_config_from_state, persisted_session_config_from_state,
-    root_snapshot_config_from_state,
+    recorded_session_policy_from_state, root_snapshot_config_from_state,
 };
 mod lease_owner;
 pub mod session_delete;

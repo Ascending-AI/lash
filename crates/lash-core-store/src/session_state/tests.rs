@@ -676,6 +676,38 @@ fn config_revision_round_trips_through_the_persisted_head_config() {
     assert_eq!(restored.policy.model, config.model);
 }
 
+/// FIG-4529: an observer's view of a state under a recorded root view reads
+/// the sticky config, while the state's own policy stays the root's.
+#[test]
+fn recorded_session_view_reads_the_sticky_config_under_a_root_view() {
+    let mut state =
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    state.session_id = SessionId::from("recorded-view-law");
+    state.policy.model = Some(recorded_model("sticky-route"));
+    let sticky = state.policy.clone();
+    assert_eq!(
+        crate::SessionReadView::recorded_from_runtime_state(&state)
+            .policy()
+            .model,
+        sticky.model,
+        "without a root view the recorded view is the resident policy"
+    );
+
+    let mut root = crate::store::persisted_session_config_from_state(&state);
+    root.model = Some(recorded_model("root-route"));
+    root.generation.seed = Some(7);
+    adopt_root_execution_config(&mut state, &root);
+
+    assert_eq!(state.policy.model, root.model, "the root runs its own view");
+    let recorded = crate::SessionReadView::recorded_from_runtime_state(&state);
+    assert_eq!(recorded.policy().model, sticky.model);
+    assert_eq!(recorded.policy().generation, sticky.generation);
+    assert_eq!(
+        crate::store::recorded_session_policy_from_state(&state).model,
+        sticky.model
+    );
+}
+
 #[test]
 fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlement() {
     let mut state =

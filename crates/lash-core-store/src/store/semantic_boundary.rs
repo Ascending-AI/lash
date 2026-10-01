@@ -185,9 +185,11 @@ mod semantic_boundary_request_identity_tests {
         // per-operation encoding-version bump and corpus replacement. To
         // refresh after an intentional grammar change:
         // . ./env.sh
-        // UPDATE_SEMANTIC_BOUNDARY_REQUEST_V1_GOLDEN=1 \
-        //   cargo test -p lash-internal-core-store --locked --lib \
-        //   semantic_boundary_request_identity_v1_golden_corpus
+        // kiln test //crates/lash-core-store:lash-core-store__unit_test \
+        //   --local-test-execution --no-test-cache \
+        //   --test_env UPDATE_SEMANTIC_BOUNDARY_REQUEST_V1_GOLDEN=1 \
+        //   --test_env "BUILD_WORKSPACE_DIRECTORY=$PWD" \
+        //   --test_arg=semantic_boundary_request_identity_v1_golden_corpus
         let rows = [
             ("record-config", "protocol-materialization", 3),
             ("create-session", "child-1", 3),

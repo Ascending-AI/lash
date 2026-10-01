@@ -330,6 +330,11 @@ async fn two_keys_sharing_a_provider_kind_select_their_own_transport(
         .await
         .expect("a registered key is accepted");
     assert_eq!(answer_of(on_kimi).await, "kimi answers");
+    assert_eq!(
+        recorded_key(&session).as_str(),
+        GLM,
+        "the session's view never shows a settled root's per-run key"
+    );
     let on_session = session
         .send(TurnInput::text("ask the session's model"))
         .await
@@ -345,22 +350,10 @@ async fn two_keys_sharing_a_provider_kind_select_their_own_transport(
         "only the kimi send reached the kimi transport, with kimi's wire model"
     );
     assert_eq!(glm.calls(), 1, "the default send reached the glm transport");
-    // A root's key is its execution view while it runs, replays included, so
-    // the session's own view is read once no root holds it.
-    let settled = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        loop {
-            let key = recorded_key(&session);
-            if key.as_str() == GLM {
-                return key;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-    })
-    .await;
-    assert!(
-        settled.is_ok(),
-        "a per-run key leaves the session's recorded model alone; the session shows `{}`",
-        recorded_key(&session)
+    assert_eq!(
+        recorded_key(&session).as_str(),
+        GLM,
+        "a per-run key leaves the session's recorded model alone"
     );
 }
 

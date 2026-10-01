@@ -953,7 +953,11 @@ impl LashSession {
         lash_core::facade_support::TurnAddress::new(observation.session_id(), turn_id)
     }
 
-    /// Returns a snapshot of the session policy.
+    /// Returns a snapshot of the session's recorded policy: the config its
+    /// commits write to the durable head. A root's per-run overrides (a
+    /// send's model key, prompt or generation options) are that root's
+    /// execution view and never show here, while it runs, after it settles
+    /// or on a replay.
     pub fn policy_snapshot(&self) -> SessionPolicy {
         self.runtime.observe().read_view.policy().clone()
     }
@@ -1243,7 +1247,8 @@ impl ObservableSession {
         SessionId::from(self.snapshot().session_id())
     }
 
-    /// Returns a snapshot of the session policy.
+    /// Returns a snapshot of the session's recorded policy, as
+    /// [`LashSession::policy_snapshot`] does.
     pub fn policy_snapshot(&self) -> SessionPolicy {
         self.snapshot().read_view.policy().clone()
     }
