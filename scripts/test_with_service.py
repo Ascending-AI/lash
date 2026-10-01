@@ -338,6 +338,33 @@ class WithServiceBehaviour(unittest.TestCase):
             self.assertEqual(1, len(published))
             self.assertIn(f"--publish 127.0.0.1:{port}:5432", published[0])
 
+    def test_pg16_trades_durability_for_speed_and_the_compat_lanes_do_not(self) -> None:
+        """pg16's container runs without fsync/synchronous_commit/full_page_writes.
+
+        The primary lane's database is throwaway, and its crash tests kill
+        lash processes or the engine, never the host OS, so the page cache is
+        all the durability it needs. The compatibility lanes run one fixed
+        catalog artifact, not per-test database churn, and keep the defaults.
+        """
+        for name, traded in (("pg16", True), ("pg14", False), ("pg18", False)):
+            with self.subTest(service=name), tempfile.TemporaryDirectory() as raw:
+                result, docker = self.run_wrapper(
+                    pathlib.Path(raw), [name, "--", "true"]
+                )
+                self.assertEqual(0, result.returncode, result.stderr)
+                published = [
+                    call
+                    for call in docker.logged()
+                    if call.startswith("run --detach")
+                ]
+                self.assertEqual(1, len(published))
+                for flag in ("fsync", "synchronous_commit", "full_page_writes"):
+                    with self.subTest(service=name, flag=flag):
+                        if traded:
+                            self.assertIn(f"-c {flag}=off", published[0])
+                        else:
+                            self.assertNotIn(f"{flag}=off", published[0])
+
     def test_the_container_is_removed_after_a_passing_command(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             directory = pathlib.Path(raw)

@@ -115,6 +115,20 @@ service_run_spec() {
         -c "max_connections=$((100 * POSTGRES_SLOT_COUNT))"
         -c max_locks_per_transaction=256
       )
+      # The primary lane's container is throwaway: lash's crash tests kill
+      # lash processes or the engine, never the host OS, so data in the page
+      # cache survives anything a suite does and fsync only matters for a
+      # host power loss (FIG-4721). With ~30 lanes each creating a database
+      # per test, the durable defaults made PostgreSQL the shared host's top
+      # CPU consumer. The compatibility lanes run one fixed catalog artifact
+      # against pg14/pg18 and keep the durable defaults.
+      if [ "$1" = pg16 ]; then
+        RUN_COMMAND+=(
+          -c fsync=off
+          -c synchronous_commit=off
+          -c full_page_writes=off
+        )
+      fi
       ;;
     s3)
       mapfile -t RUN_ARGS < <(lash_s3_run_args)
