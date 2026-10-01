@@ -84,6 +84,8 @@ pub struct PoolStats {
     pub restart_storm: bool,
 }
 struct State {
+    #[cfg(feature = "testing")]
+    measured_cpu_nanos: u64,
     idle: Vec<Worker>,
     workers: usize,
     queued_items: usize,
@@ -108,6 +110,8 @@ impl WorkerPool {
         let pool = Self(Arc::new(Pool {
             config,
             state: Mutex::new(State {
+                #[cfg(feature = "testing")]
+                measured_cpu_nanos: 0,
                 idle: Vec::new(),
                 workers: 0,
                 queued_items: 0,
@@ -139,6 +143,12 @@ impl WorkerPool {
             restart_storm: state.failed,
         }
     }
+    /// Worker CPU charged by this pool, including reset and reaped failures.
+    /// This is a measurement counter, independent of execution admission.
+    #[cfg(feature = "testing")]
+    pub fn measured_cpu(&self) -> Duration {
+        Duration::from_nanos(lock(&self.0.state).measured_cpu_nanos)
+    }
     /// Reserve the complete encoded input size, including the frame envelope.
     /// Queue admission checks both items and bytes before retaining any input.
     pub fn checkout(
@@ -148,11 +158,16 @@ impl WorkerPool {
         frame_epoch: FrameEpoch,
         budget: ExecutionBudget,
     ) -> Result<Checkout, PoolError> {
+        #[cfg(feature = "testing")]
+        let checkout_started = Instant::now();
         let deadline = Instant::now() + self.0.config.deadlines.checkout;
         let mut state = lock(&self.0.state);
         let mut queued = false;
         loop {
             if queued && Instant::now() >= deadline {
+                #[cfg(feature = "testing")]
+                self.0
+                    .report_deadline(&state, "checkout", checkout_started.elapsed(), &budget);
                 unqueue(&mut state, queued, queued_bytes);
                 return Err(PoolError::CheckoutTimedOut);
             }
@@ -179,6 +194,20 @@ impl WorkerPool {
                         return Err(PoolError::RestartStorm);
                     }
                     Err(error) => {
+                        #[cfg(feature = "testing")]
+                        if matches!(
+                            error,
+                            PoolError::Infrastructure(
+                                InfrastructureOutcome::WorkerUnresponsive { .. }
+                            )
+                        ) {
+                            self.0.report_deadline(
+                                &state,
+                                "checkout",
+                                checkout_started.elapsed(),
+                                &budget,
+                            );
+                        }
                         state.workers -= 1;
                         self.0.failed(&mut state);
                         self.0.available.notify_all();
@@ -195,6 +224,16 @@ impl WorkerPool {
             if let Some(worker) = worker {
                 unqueue(&mut state, queued, queued_bytes);
                 if let Err(error) = budget.admit(&self.0.config) {
+                    #[cfg(feature = "testing")]
+                    if matches!(
+                        error,
+                        PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded {
+                            limit: WorkerLimit::Deadline
+                        })
+                    ) {
+                        self.0
+                            .report_deadline(&state, "cumulative_cpu", Duration::ZERO, &budget);
+                    }
                     state.idle.push(worker);
                     self.0.available.notify_all();
                     return Err(error);
@@ -206,6 +245,10 @@ impl WorkerPool {
                     .ok_or_else(|| PoolError::protocol("lease space exhausted"))?;
                 let credited_cpu = worker.cpu_nanos;
                 return Ok(Checkout {
+                    #[cfg(feature = "testing")]
+                    admitted_at: Instant::now(),
+                    #[cfg(feature = "testing")]
+                    measured_cpu_receipt: std::cell::Cell::new(credited_cpu),
                     pool: self.0.clone(),
                     worker: Some(worker),
                     budget,
@@ -243,6 +286,9 @@ impl WorkerPool {
                 .checked_duration_since(Instant::now())
                 .filter(|d| !d.is_zero())
             else {
+                #[cfg(feature = "testing")]
+                self.0
+                    .report_deadline(&state, "checkout", checkout_started.elapsed(), &budget);
                 unqueue(&mut state, queued, queued_bytes);
                 return Err(PoolError::CheckoutTimedOut);
             };
@@ -257,6 +303,30 @@ impl WorkerPool {
 }
 
 impl Pool {
+    #[cfg(feature = "testing")]
+    fn report_deadline(
+        &self,
+        state: &State,
+        bound: &str,
+        elapsed: Duration,
+        budget: &ExecutionBudget,
+    ) {
+        let (attempts, cpu) = budget.totals();
+        eprintln!(
+            "WORKER_DEADLINE bound={bound} elapsed_ms={:.3} cpu_accounted_ms={:.3} attempts={attempts} checkout_ms={} compute_ms={} serialization_ms={} cumulative_cpu_ms={} workers={} idle={} max_workers={} queued_items={} queued_bytes={}",
+            elapsed.as_secs_f64() * 1000.0,
+            cpu.as_secs_f64() * 1000.0,
+            self.config.deadlines.checkout.as_millis(),
+            self.config.deadlines.compute.as_millis(),
+            self.config.deadlines.serialization.as_millis(),
+            self.config.deadlines.cumulative_cpu.as_millis(),
+            state.workers,
+            state.idle.len(),
+            self.config.max_workers,
+            state.queued_items,
+            state.queued_bytes,
+        );
+    }
     fn spawn_ready(&self) -> Result<Worker, PoolError> {
         self.spawn_ready_until(Instant::now() + self.config.protocol.no_response_watchdog)
     }
@@ -365,6 +435,10 @@ pub enum ParkOutcome {
 /// Owns one transport lease. Dropping without release kills and reaps the
 /// worker. A failed receive fences that lease before replenishing the pool.
 pub struct Checkout {
+    #[cfg(feature = "testing")]
+    admitted_at: Instant,
+    #[cfg(feature = "testing")]
+    measured_cpu_receipt: std::cell::Cell<u64>,
     pool: Arc<Pool>,
     worker: Option<Worker>,
     budget: ExecutionBudget,
@@ -384,6 +458,30 @@ pub struct Checkout {
     observed_bytes: u64,
 }
 impl Checkout {
+    fn charge_cpu(&self, cpu_nanos: u64) -> Result<(), PoolError> {
+        #[cfg(feature = "testing")]
+        {
+            let mut state = lock(&self.pool.state);
+            // Failed accounting can charge again when reaping. Measure each
+            // worker receipt once without changing execution-budget policy.
+            let delta = cpu_nanos.saturating_sub(self.measured_cpu_receipt.replace(cpu_nanos));
+            state.measured_cpu_nanos = state.measured_cpu_nanos.saturating_add(delta);
+        }
+        let result = self.budget.charge(
+            cpu_nanos.saturating_sub(self.credited_cpu),
+            &self.pool.config,
+        );
+        #[cfg(feature = "testing")]
+        if result.is_err() {
+            self.pool.report_deadline(
+                &lock(&self.pool.state),
+                "cumulative_cpu",
+                self.admitted_at.elapsed(),
+                &self.budget,
+            );
+        }
+        result
+    }
     pub fn take_observations(&mut self) -> Vec<EncodedPayload> {
         std::mem::take(&mut self.observations)
     }
@@ -546,10 +644,7 @@ impl Checkout {
                     self.discard();
                     return Err(PoolError::protocol("reset CPU accounting regressed"));
                 }
-                if let Err(error) = self
-                    .budget
-                    .charge(cpu_nanos - self.credited_cpu, &self.pool.config)
-                {
+                if let Err(error) = self.charge_cpu(cpu_nanos) {
                     self.discard();
                     return Err(error);
                 }
@@ -623,6 +718,21 @@ impl Checkout {
         let result = self.exchange_inner(message, timeout);
         if result.is_err() {
             self.discard();
+            #[cfg(feature = "testing")]
+            if matches!(
+                result,
+                Err(PoolError::Infrastructure(
+                    InfrastructureOutcome::WorkerLimitExceeded {
+                        limit: WorkerLimit::Deadline
+                    }
+                ))
+            ) {
+                eprintln!(
+                    "WORKER_DEADLINE_REAPED elapsed_ms={:.3} cpu_accounted_ms={:.3}",
+                    self.admitted_at.elapsed().as_secs_f64() * 1000.0,
+                    self.budget.totals().1.as_secs_f64() * 1000.0
+                );
+            }
         }
         result
     }
@@ -636,6 +746,8 @@ impl Checkout {
         self.send(message, timeout)?;
         let mut deadline = Instant::now() + timeout;
         let mut phase = None;
+        #[cfg(feature = "testing")]
+        let mut phase_started = Instant::now();
         loop {
             let received = self
                 .worker
@@ -645,7 +757,20 @@ impl Checkout {
             let frame = match received {
                 Err(PoolError::Infrastructure(InfrastructureOutcome::WorkerUnresponsive {
                     ..
-                })) if phase.is_some() => return Err(limit(WorkerLimit::Deadline)),
+                })) if phase.is_some() => {
+                    #[cfg(feature = "testing")]
+                    self.pool.report_deadline(
+                        &lock(&self.pool.state),
+                        match phase {
+                            Some(WorkerPhase::Computing) => "compute",
+                            Some(WorkerPhase::Serializing) => "serialization",
+                            _ => "responding",
+                        },
+                        phase_started.elapsed(),
+                        &self.budget,
+                    );
+                    return Err(limit(WorkerLimit::Deadline));
+                }
                 Err(PoolError::Infrastructure(InfrastructureOutcome::WorkerUnresponsive {
                     ..
                 })) => {
@@ -675,11 +800,14 @@ impl Checkout {
                             "invalid worker phase or CPU accounting",
                         ));
                     }
-                    self.budget
-                        .charge(cpu_nanos - self.credited_cpu, &self.pool.config)?;
+                    self.charge_cpu(cpu_nanos)?;
                     self.credited_cpu = cpu_nanos;
                     self.worker.as_mut().ok_or_else(PoolError::eof)?.cpu_nanos = cpu_nanos;
                     phase = Some(next);
+                    #[cfg(feature = "testing")]
+                    {
+                        phase_started = Instant::now();
+                    }
                     deadline = Instant::now()
                         + match next {
                             WorkerPhase::Computing => self.pool.config.deadlines.compute,
@@ -770,9 +898,7 @@ impl Checkout {
     fn discard_for(&mut self, failed: bool) {
         if let Some(worker) = self.worker.take() {
             let cpu = self.pool.discard(worker, failed);
-            let _ = self
-                .budget
-                .charge(cpu.saturating_sub(self.credited_cpu), &self.pool.config);
+            let _ = self.charge_cpu(cpu);
             self.credited_cpu = cpu;
             if self.started {
                 lock(&self.budget.0).replacement = true;

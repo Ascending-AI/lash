@@ -4,6 +4,30 @@ use lashlang::testing::ast_builders as b;
 
 const SEED: u64 = 0x5_2c05;
 
+struct GrowthMeasurement {
+    started: std::time::Instant,
+    pool: lash_vm_client::WorkerPool,
+}
+
+impl Drop for GrowthMeasurement {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "record host contention in the growth witness"
+    )]
+    fn drop(&mut self) {
+        eprintln!(
+            "FIG4474_GROWTH elapsed_ms={:.3} worker_cpu_ms={:.3} panicking={} pool={:?} loadavg={}",
+            self.started.elapsed().as_secs_f64() * 1000.0,
+            self.pool.measured_cpu().as_secs_f64() * 1000.0,
+            std::thread::panicking(),
+            self.pool.stats(),
+            std::fs::read_to_string("/proc/loadavg")
+                .unwrap_or_else(|_| "unavailable".into())
+                .trim(),
+        );
+    }
+}
+
 /// `finish { <name>: <expr>, .. }` — the shape every projection witness reads
 /// its bindings back with. ADR 0096 retired the Lashlang front-end, so these
 /// cells state their AST; the source each stood for is kept at the call site.
@@ -912,12 +936,26 @@ pub(super) fn measured_commit_growth_tracks_changed_state_not_session_size() {
 #[test]
 pub(super) fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
     block_on(async {
+        let started = std::time::Instant::now();
+        let state = RlmExecutionState::new();
+        let pool = state
+            .vm
+            .state()
+            .service()
+            .pool()
+            .expect("witness worker pool");
+        let measurement = GrowthMeasurement { started, pool };
         let mut source = String::new();
         for index in 0..300 {
             let payload = format!("note-{index}-{}", "n".repeat(3 * 1024 + 512));
             source.push_str(&format!("let mid_{index} = [\"{payload}\"];\n"));
         }
-        let mut state = execute_test_code_chunked(RlmExecutionState::new(), source).await;
+        let mut state = execute_test_code_chunked(state, source).await;
+        eprintln!(
+            "FIG4474_SEED elapsed_ms={:.3} worker_cpu_ms={:.3}",
+            measurement.started.elapsed().as_secs_f64() * 1000.0,
+            measurement.pool.measured_cpu().as_secs_f64() * 1000.0
+        );
         let full_state_bytes = state
             .vm
             .state()
