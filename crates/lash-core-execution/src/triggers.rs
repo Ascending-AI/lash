@@ -567,24 +567,62 @@ impl std::fmt::Display for TriggerRouteRefusal {
     }
 }
 
-impl From<TriggerRouteRefusal> for PluginError {
+/// The refusal as a delivery start's recorded outcome: its class stays typed
+/// in the error's code (FIG-4554).
+impl From<TriggerRouteRefusal> for crate::RuntimeEffectControllerError {
     fn from(refusal: TriggerRouteRefusal) -> Self {
-        PluginError::Session(refusal.to_string())
+        let code = match &refusal {
+            TriggerRouteRefusal::Unavailable { .. } => {
+                crate::RuntimeErrorCode::TriggerRouteUnavailable
+            }
+            TriggerRouteRefusal::Revoked { .. } => crate::RuntimeErrorCode::TriggerRouteRevoked,
+        };
+        Self::new(code, refusal.to_string())
     }
 }
 
 /// Reinstalls a captured provider route before a delivery executes.
 ///
-/// This runs for a delivery its emission's recorded receipt holds unbound,
-/// ahead of the start's recorded step: on the first attempt, on every replay
-/// of that emission, and on the relay's recovery. It is a live host service
-/// (FIG-4537), so a replay asks it again and a refusal there stops the
-/// replayed delivery. It may not widen the grant, consult a catalog, or
-/// resolve a replacement definition: the capture is the whole authority, and
-/// the only answers are "restored", "not right now", and "refused".
+/// It is a live host service that serves new work only (FIG-4554). A
+/// delivery's start asks it inside the start's recorded admission, and only
+/// while no process holds the start's key, so its answer, a refusal
+/// included, is that step's recorded outcome. A replay of the emission reads
+/// the record, and a redrive finds the process the key holds; neither asks
+/// again. It may not widen the grant, consult a catalog, or resolve a
+/// replacement definition: the capture is the whole authority, and the only
+/// answers are "restored", "not right now", and "refused".
 #[async_trait::async_trait]
 pub trait TriggerRouteRestorer: Send + Sync {
     async fn restore(&self, capture: &TriggerSourceCapture) -> Result<(), TriggerRouteRefusal>;
+}
+
+/// One delivery start's route restore: the host's restorer, and the capture
+/// the delivery's reservation recorded (FIG-4554).
+///
+/// The router hands it to the start's executor, and the start's recorded
+/// admission ([`register_process_start`](crate::runtime::register_process_start))
+/// consults it. It never travels in the start's command: the restorer is the
+/// host's wiring today, not part of what the journal records.
+#[derive(Clone)]
+pub struct TriggerRouteRestore(Arc<RouteRestore>);
+
+struct RouteRestore {
+    restorer: Arc<dyn TriggerRouteRestorer>,
+    capture: TriggerSourceCapture,
+}
+
+impl TriggerRouteRestore {
+    pub fn new(restorer: Arc<dyn TriggerRouteRestorer>, capture: TriggerSourceCapture) -> Self {
+        Self(Arc::new(RouteRestore { restorer, capture }))
+    }
+
+    pub(crate) fn restorer(&self) -> &dyn TriggerRouteRestorer {
+        self.0.restorer.as_ref()
+    }
+
+    pub(crate) fn capture(&self) -> &TriggerSourceCapture {
+        &self.0.capture
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -577,10 +577,10 @@ pub use triggers::{
     TriggerOccurrenceOutcome, TriggerOccurrenceReclamationReport,
     TriggerOccurrenceReclamationResult, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
     TriggerOperationError, TriggerOwnerScope, TriggerProviderRoute,
-    TriggerRetentionReconciliationReport, TriggerRouteRefusal, TriggerRouteRestorer,
-    TriggerSourceCapture, TriggerStore, TriggerSubscriptionDraft, TriggerSubscriptionFilter,
-    TriggerSubscriptionLifecycle, TriggerSubscriptionRecord, admit_trigger_registration_target,
-    trigger_handle_outcome_value,
+    TriggerRetentionReconciliationReport, TriggerRouteRefusal, TriggerRouteRestore,
+    TriggerRouteRestorer, TriggerSourceCapture, TriggerStore, TriggerSubscriptionDraft,
+    TriggerSubscriptionFilter, TriggerSubscriptionLifecycle, TriggerSubscriptionRecord,
+    admit_trigger_registration_target, trigger_handle_outcome_value,
 };
 
 pub(crate) mod facade_ops {}

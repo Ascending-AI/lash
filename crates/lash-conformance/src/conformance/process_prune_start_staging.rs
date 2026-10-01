@@ -210,6 +210,7 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
         session_catalog: None,
         executor: "conformance process start",
         starter,
+        trigger_route: None,
     };
     let (stores_a, stores_b) = (stores(&starter_a), stores(&starter_b));
     let spec = |budget| {
@@ -411,6 +412,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
         session_catalog: None,
         executor: "conformance process start",
         starter: &starter_a,
+        trigger_route: None,
     };
     let stores_b = crate::ProcessStartStores {
         registry: registry.as_ref(),
@@ -420,6 +422,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
         session_catalog: None,
         executor: "conformance process start",
         starter: &starter_b,
+        trigger_route: None,
     };
     let spec = |budget| {
         crate::ProcessExecutionEnvSpec::new(
@@ -809,6 +812,7 @@ pub async fn two_starts_share_one_captured_environment(
         executor: "shared environment law",
         starter: &starter,
         session_catalog: None,
+        trigger_route: None,
     };
     let mut records = Vec::new();
     for key in ["shared-environment-first", "shared-environment-second"] {

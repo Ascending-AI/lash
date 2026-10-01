@@ -80,6 +80,22 @@ async fn delivered_output(
     }
 }
 
+impl RuntimeEffectLocalExecutor<'_> {
+    /// Binds the attachment referrers a delivered process terminal is
+    /// acquired through before its receiver records it (ADR 0124).
+    pub fn with_process_attachments(
+        mut self,
+        attachments: Arc<dyn crate::AttachmentReferrers>,
+    ) -> Self {
+        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
+            &mut self.state
+        {
+            execution.attachments = Some(attachments);
+        }
+        self
+    }
+}
+
 impl ProcessLocalExecution {
     /// Execute `command`, issued by an effect of `receiver`: the scope that
     /// records what the command returns.
@@ -98,6 +114,7 @@ impl ProcessLocalExecution {
             turn_cancellation,
             effect_controller,
             attachments,
+            trigger_route,
             outcome_observer,
         } = self;
         let outcome = match command {
@@ -121,6 +138,7 @@ impl ProcessLocalExecution {
                         session_catalog: session_catalog.as_deref(),
                         executor: "process start on the local executor",
                         starter: &starter,
+                        trigger_route: trigger_route.as_ref(),
                     },
                     registration,
                     &observers,

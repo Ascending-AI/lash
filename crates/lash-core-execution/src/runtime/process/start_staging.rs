@@ -261,6 +261,10 @@ pub struct ProcessStartStores<'a> {
     /// The journal of the scope running the start: the authority of the
     /// start's `AwaitStart` guard (ADR 0113 §3.3).
     pub starter: &'a lash_sansio::EffectJournalIdentity,
+    /// The captured provider route a trigger delivery's start restores
+    /// inside the recorded admission this registration runs in. `None` for
+    /// every other start, and for a delivery with nothing to restore.
+    pub trigger_route: Option<&'a crate::TriggerRouteRestore>,
 }
 
 impl ProcessStartStores<'_> {
@@ -346,6 +350,7 @@ pub async fn register_process_start(
         ));
     };
     require_host_session_live(stores, &registration).await?;
+    restore_trigger_route(stores, &start_key).await?;
     match stage_and_register(stores, &start_key, registration, observers).await {
         Ok(registered) => {
             if let Some(ports) = stores.ports() {
@@ -405,6 +410,38 @@ async fn require_host_session_live(
             registration.refusal_name()
         ),
     ))
+}
+
+/// Ask the host to restore a trigger delivery's captured provider route,
+/// for a start no process holds yet (FIG-4554).
+///
+/// The restorer is a live host service, so it is asked here, inside the
+/// start's recorded admission, and never ahead of the command: a replay
+/// after the route was revoked reads the recorded registration instead of
+/// asking again. A refusal is the admission's outcome, recorded with its
+/// class, so a replay after the route came back reproduces it; the
+/// reservation stays owed, and its recovery starts it.
+///
+/// A process already holding the key is this start, registered by an attempt
+/// that never recorded it or by the delivery's first drive. The restorer
+/// serves new work only, so the retained start is served unasked.
+async fn restore_trigger_route(
+    stores: &ProcessStartStores<'_>,
+    start_key: &StartKey,
+) -> Result<(), RuntimeEffectControllerError> {
+    let Some(route) = stores.trigger_route else {
+        return Ok(());
+    };
+    if stores
+        .registry
+        .get_process_by_start_key(start_key)
+        .await?
+        .is_some()
+    {
+        return Ok(());
+    }
+    let restorer: &dyn crate::TriggerRouteRestorer = route.restorer();
+    Ok(restorer.restore(route.capture()).await?)
 }
 
 /// End `Start(key)` after a terminal refusal, unless a process already holds

@@ -423,6 +423,7 @@ where
     let session_catalog = execution.session_catalog;
     let turn_cancellation = execution.turn_cancellation;
     let attachments = execution.attachments;
+    let trigger_route = execution.trigger_route;
     let outcome = match command {
         ProcessCommand::Start {
             registration,
@@ -497,6 +498,7 @@ where
                         executor: "Restate process start",
                         starter: &starter,
                         session_catalog: session_catalog.as_deref(),
+                        trigger_route: trigger_route.as_ref(),
                     };
                     match lash_core::runtime::register_process_start(
                         &stores,
@@ -507,6 +509,16 @@ where
                     {
                         Ok(started) => Ok(Ok(started)),
                         Err(error) if error.is_terminal() => Ok(Err(error)),
+                        // An unavailable route is the start's outcome too:
+                        // recorded, a replay after the provider came back
+                        // answers as this attempt did, and the delivery's
+                        // recovery owns the retry (FIG-4554).
+                        Err(error)
+                            if error.code
+                                == lash_core::RuntimeErrorCode::TriggerRouteUnavailable =>
+                        {
+                            Ok(Err(error))
+                        }
                         Err(error) => Err(error.to_string()),
                     }
                 },

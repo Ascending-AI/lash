@@ -310,9 +310,10 @@ pub(super) struct Surface<'a> {
     /// Store read methods: a call to one is a fresh read of mutable state.
     pub(super) reads: &'a [&'a str],
     /// Live host services, as `(trait, method)`: a call to one consults the
-    /// host's state today. It is matched as a method call on any receiver, or
-    /// as a path call the trait's own name qualifies, so an unrelated
-    /// associated function of the same name is no hit.
+    /// host's state today. It is matched as a method call whose receiver is
+    /// declared with the trait ([`service_receivers`]), or as a path call the
+    /// trait's own name qualifies, so a method of the same name on any other
+    /// receiver is no hit.
     pub(super) services: &'a [(&'a str, &'a str)],
     /// Calls whose argument list is a recorded step's body.
     pub(super) steps: &'a [&'a str],
@@ -408,12 +409,17 @@ pub(super) fn survey(files: &[(String, String)], surface: &Surface<'_>) -> Resul
         trees.push(tokenize(source).map_err(|error| format!("{path}: {error}"))?);
     }
     let owning = replay_owning_types(&trees, surface);
+    let mut service_fields = BTreeSet::new();
+    for tokens in &trees {
+        collect_service_fields(tokens, surface, &mut service_fields);
+    }
     let mut fns = Vec::new();
     for (index, tokens) in trees.iter().enumerate() {
         let restate = files[index].0.contains("lash-restate/");
         let context = Context {
             surface,
             owning: &owning,
+            service_fields: &service_fields,
             restate,
         };
         collect_items(tokens, index, &[], &context, &mut fns);
@@ -600,6 +606,9 @@ struct Context<'a> {
     /// Types that hold a controller or journal context: the explicit replay
     /// impl types, and every struct or alias whose definition names one.
     owning: &'a BTreeSet<String>,
+    /// Every struct field declared with a live host service's trait, as
+    /// `(trait, field)`.
+    service_fields: &'a BTreeSet<(String, String)>,
     /// Whether the file is in `lash-restate`, where `Context` is Restate's.
     restate: bool,
 }
@@ -809,7 +818,11 @@ fn collect_items(
                             calls: Vec::new(),
                             body: body.to_vec(),
                         };
-                        walk_body(body, false, context.surface, &mut def);
+                        let receivers = Receivers {
+                            fields: context.service_fields,
+                            bound: service_receivers(&signature, body, context),
+                        };
+                        walk_body(body, false, context.surface, &receivers, &mut def);
                         out.push(def);
                         // Items nested in the body (inner fns) are items too.
                         collect_items(body, file, &[], context, out);
@@ -851,7 +864,13 @@ fn replay_seed(
 
 /// Walk a body, recording surface reads (and whether a recorded step's span
 /// contains each) and the names called outside every step.
-fn walk_body(tokens: &[Token], in_step: bool, surface: &Surface<'_>, def: &mut FnDef) {
+fn walk_body(
+    tokens: &[Token],
+    in_step: bool,
+    surface: &Surface<'_>,
+    receivers: &Receivers<'_>,
+    def: &mut FnDef,
+) {
     let mut i = 0;
     while i < tokens.len() {
         let token = &tokens[i];
@@ -879,7 +898,7 @@ fn walk_body(tokens: &[Token], in_step: bool, surface: &Surface<'_>, def: &mut F
                 let step = surface.steps.contains(&name)
                     || (method && name == "run" && matches!(receiver, Some("ctx")));
                 if step {
-                    walk_body(arguments, true, surface, def);
+                    walk_body(arguments, true, surface, receivers, def);
                 } else {
                     def.calls.push(CallSite {
                         name: name.to_string(),
@@ -893,7 +912,10 @@ fn walk_body(tokens: &[Token], in_step: bool, surface: &Surface<'_>, def: &mut F
                             None
                         };
                     let service = surface.services.iter().any(|(owner, service)| {
-                        *service == name && (method || qualifier == Some(*owner))
+                        *service == name
+                            && (qualifier == Some(*owner)
+                                || (method
+                                    && receivers.serve(owner, &receiver_chain(tokens, i - 1))))
                     });
                     if service || surface.reads.contains(&name) {
                         def.reads.push(ReadSite {
@@ -907,16 +929,254 @@ fn walk_body(tokens: &[Token], in_step: bool, surface: &Surface<'_>, def: &mut F
                         // be anything, so it carries no replay path by name.
                         def.unrecorded_calls.insert(name.to_string());
                     }
-                    walk_body(arguments, in_step, surface, def);
+                    walk_body(arguments, in_step, surface, receivers, def);
                 }
                 i = next;
                 continue;
             }
         }
         if let Kind::Group(_, inner) = &token.kind {
-            walk_body(inner, in_step, surface, def);
+            walk_body(inner, in_step, surface, receivers, def);
         }
         i += 1;
+    }
+}
+
+/// What a method call's receiver is resolved against, as `(trait,
+/// identifier)` pairs.
+struct Receivers<'a> {
+    /// Every struct field declared with a live host service's trait.
+    fields: &'a BTreeSet<(String, String)>,
+    /// The enclosing `fn`'s parameters and `let` bindings declared with one.
+    bound: BTreeSet<(String, String)>,
+}
+
+impl Receivers<'_> {
+    /// Whether the receiver `chain` (as [`receiver_chain`] gives it) is
+    /// declared with `owner`: it starts at such a parameter or binding, or
+    /// passes through such a field.
+    fn serve(&self, owner: &str, chain: &[&str]) -> bool {
+        let Some((root, path)) = chain.split_last() else {
+            return false;
+        };
+        let key = |ident: &str| (owner.to_string(), ident.to_string());
+        self.bound.contains(&key(root))
+            || path.iter().any(|ident| self.fields.contains(&key(ident)))
+    }
+}
+
+/// The identifiers of the receiver expression that ends at the `.` at `dot`:
+/// every field, binding and method name of the chain, `self.a.b().c` giving
+/// `c`, `b`, `a` and `self`.
+fn receiver_chain(tokens: &[Token], dot: usize) -> Vec<&str> {
+    let mut chain = Vec::new();
+    let mut end = dot;
+    loop {
+        // Step back over `?` and a call's argument list to the name before.
+        while end > 0
+            && (tokens[end - 1].is_punct('?') || tokens[end - 1].group(Delimiter::Paren).is_some())
+        {
+            end -= 1;
+        }
+        let Some(name) = end.checked_sub(1).and_then(|at| tokens[at].ident()) else {
+            break;
+        };
+        chain.push(name);
+        if end >= 2 && tokens[end - 2].is_punct('.') {
+            end -= 2;
+        } else {
+            break;
+        }
+    }
+    chain
+}
+
+/// The comma-separated pieces of `tokens`, a comma between a generic
+/// list's angle brackets separating nothing.
+fn split_commas(tokens: &[Token]) -> Vec<&[Token]> {
+    let mut pieces = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0;
+    for (at, token) in tokens.iter().enumerate() {
+        if token.is_punct('<') {
+            depth += 1;
+        } else if token.is_punct('>') && !(at > 0 && tokens[at - 1].is_punct('-')) {
+            depth = depth.saturating_sub(1);
+        } else if token.is_punct(',') && depth == 0 {
+            pieces.push(&tokens[start..at]);
+            start = at + 1;
+        }
+    }
+    pieces.push(&tokens[start..]);
+    pieces
+}
+
+/// Whether the token at `at` is a `:` that is not half of a `::`.
+fn is_single_colon(tokens: &[Token], at: usize) -> bool {
+    tokens[at].is_punct(':')
+        && !tokens.get(at + 1).is_some_and(|next| next.is_punct(':'))
+        && !(at > 0 && tokens[at - 1].is_punct(':'))
+}
+
+/// The name a `name: Type` piece declares and the identifiers of its type.
+fn declared(piece: &[Token]) -> Option<(&str, Vec<&str>)> {
+    let colon = (0..piece.len()).find(|&at| is_single_colon(piece, at))?;
+    let name = piece[..colon].last()?.ident()?;
+    Some((name, flatten_idents(&piece[colon + 1..])))
+}
+
+/// Every struct field declared with a live host service's trait, outside
+/// test items, as `(trait, field)`.
+fn collect_service_fields(
+    tokens: &[Token],
+    surface: &Surface<'_>,
+    out: &mut BTreeSet<(String, String)>,
+) {
+    let mut i = 0;
+    let mut skip_next_item = false;
+    while i < tokens.len() {
+        if tokens[i].is_punct('#')
+            && let Some(attribute) = tokens.get(i + 1).and_then(|t| t.group(Delimiter::Bracket))
+        {
+            skip_next_item |= is_test_attribute(attribute);
+            i += 2;
+            continue;
+        }
+        if let Some(body) = tokens[i].group(Delimiter::Brace) {
+            let is_struct = (0..i)
+                .rev()
+                .take_while(|&at| {
+                    !tokens[at].is_punct(';') && tokens[at].group(Delimiter::Brace).is_none()
+                })
+                .any(|at| tokens[at].ident() == Some("struct"));
+            if skip_next_item {
+                skip_next_item = false;
+            } else if is_struct {
+                for (name, ty) in split_commas(body).into_iter().filter_map(declared) {
+                    for (owner, _) in surface.services {
+                        if ty.contains(owner) {
+                            out.insert(((*owner).to_string(), name.to_string()));
+                        }
+                    }
+                }
+            } else {
+                collect_service_fields(body, surface, out);
+            }
+        } else if skip_next_item && tokens[i].is_punct(';') {
+            skip_next_item = false;
+        }
+        i += 1;
+    }
+}
+
+/// The parameters and bindings one `fn` may call a live host service
+/// through, as `(trait, identifier)`.
+///
+/// They are each parameter whose type names the trait (directly, or through
+/// a type parameter bounded by it), and each `let` binding whose annotation
+/// or initializer names the trait, a field declared with it, or another such
+/// binding. A delimiter tree carries no types, so this follows declarations
+/// and nothing else: a receiver reached only through a closure parameter, a
+/// `match` arm or a struct literal is not followed.
+fn service_receivers(
+    signature: &[Token],
+    body: &[Token],
+    context: &Context<'_>,
+) -> BTreeSet<(String, String)> {
+    let mut receivers = BTreeSet::new();
+    for (owner, _) in context.surface.services {
+        // The trait, and every type parameter the signature bounds by it.
+        let mut types = vec![*owner];
+        let parameters = signature
+            .iter()
+            .position(|token| token.group(Delimiter::Paren).is_some());
+        for (at, token) in signature.iter().enumerate() {
+            if Some(at) == parameters {
+                continue;
+            }
+            if token.ident() == Some(*owner) {
+                let bounded = (0..at)
+                    .rev()
+                    .take_while(|&before| !signature[before].is_punct(','))
+                    .find(|&before| {
+                        signature[before].ident().is_some()
+                            && signature
+                                .get(before + 1)
+                                .is_some_and(|next| next.is_punct(':'))
+                    });
+                if let Some(name) = bounded.and_then(|before| signature[before].ident()) {
+                    types.push(name);
+                }
+            }
+        }
+        let fields: BTreeSet<&str> = context
+            .service_fields
+            .iter()
+            .filter(|(trait_name, _)| trait_name == owner)
+            .map(|(_, name)| name.as_str())
+            .collect();
+        let mut names = BTreeSet::new();
+        if let Some(parameters) = parameters.and_then(|at| signature[at].group(Delimiter::Paren)) {
+            for (name, ty) in split_commas(parameters).into_iter().filter_map(declared) {
+                if ty.iter().any(|ident| types.contains(ident)) {
+                    names.insert(name);
+                }
+            }
+        }
+        loop {
+            let before = names.len();
+            collect_bindings(body, &types, &fields, &mut names);
+            if names.len() == before {
+                break;
+            }
+        }
+        receivers.extend(
+            names
+                .into_iter()
+                .map(|name| ((*owner).to_string(), name.to_string())),
+        );
+    }
+    receivers
+}
+
+/// Add to `names` every identifier a `let` in `tokens` binds from a statement
+/// that names one of `types`, of `fields` or of `names`.
+fn collect_bindings<'a>(
+    tokens: &'a [Token],
+    types: &[&str],
+    fields: &BTreeSet<&str>,
+    names: &mut BTreeSet<&'a str>,
+) {
+    for (at, token) in tokens.iter().enumerate() {
+        if let Kind::Group(_, inner) = &token.kind {
+            collect_bindings(inner, types, fields, names);
+        }
+        if token.ident() != Some("let") {
+            continue;
+        }
+        // The pattern runs to the `=` or the annotation's `:`; the statement
+        // to its `;` or the block it opens.
+        let rest = &tokens[at + 1..];
+        let end = rest
+            .iter()
+            .position(|token| token.is_punct(';') || token.group(Delimiter::Brace).is_some())
+            .unwrap_or(rest.len());
+        let statement = &rest[..end];
+        let Some(split) = (0..statement.len())
+            .find(|&at| statement[at].is_punct('=') || is_single_colon(statement, at))
+        else {
+            continue;
+        };
+        let (pattern, source) = statement.split_at(split);
+        let named = flatten_idents(source)
+            .iter()
+            .any(|ident| types.contains(ident) || fields.contains(ident) || names.contains(ident));
+        if named {
+            names.extend(flatten_idents(pattern).into_iter().filter(|ident| {
+                !matches!(*ident, "mut" | "ref")
+                    && ident.chars().next().is_some_and(char::is_lowercase)
+            }));
+        }
     }
 }
 

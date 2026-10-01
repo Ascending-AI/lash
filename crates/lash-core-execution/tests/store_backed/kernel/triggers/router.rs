@@ -557,6 +557,93 @@ mod tests {
         }
     }
 
+    /// FIG-4554: the route restorer serves new work only. A delivery whose
+    /// start registered before its bind was lost is redriven from the process
+    /// its start key holds, and a route revoked since is never asked.
+    #[tokio::test]
+    async fn a_redriven_delivery_whose_start_registered_never_asks_a_revoked_route() {
+        let world = router_world().await;
+        let source_key = empty_trigger_source_key("ui.button.pressed").expect("source key");
+        register(
+            world.store.as_ref(),
+            "redrive-register",
+            trigger_process_draft(&source_key, "redrive", world.env_ref.clone())
+                .with_source_capture(captured_provider_source()),
+        )
+        .await;
+        let reservation = world
+            .store
+            .ingest_occurrence(
+                TriggerOccurrenceRequest::new(
+                    "ui.button.pressed",
+                    source_key,
+                    serde_json::json!({"button": "Blue"}),
+                    "redrive-occurrence",
+                )
+                .with_source(serde_json::json!({"account": "a"})),
+            )
+            .await
+            .expect("reserve the delivery")
+            .reservations
+            .remove(0);
+        let occurrence_id = reservation.occurrence.occurrence_id.clone();
+        let subscription_id = reservation.subscription.subscription_id.clone();
+        let stub = |refusal: Option<TriggerRouteRefusal>| {
+            Arc::new(StubRestorer {
+                refusal,
+                calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                seen: Arc::new(Mutex::new(Vec::new())),
+            })
+        };
+
+        // The first drive restores the route and registers; its bind is lost.
+        let granted = stub(None);
+        router_with_restorer(
+            Arc::new(BindFailsOnce::new(Arc::clone(&world.store))),
+            Arc::clone(&world.registry),
+            Arc::clone(&world.process_env_store),
+            Some(Arc::clone(&granted)),
+        )
+        .await
+        .recover_delivery(&occurrence_id, &subscription_id)
+        .await
+        .expect_err("the first drive's bind is lost");
+        assert_eq!(
+            granted.calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the fresh start restored its route once"
+        );
+        let started = world
+            .registry
+            .get_process_by_start_key(&trigger_delivery_start_key(&reservation))
+            .await
+            .expect("read the start key")
+            .expect("the first drive registered the delivery's process");
+
+        // The provider revokes the route; the redrive binds the started
+        // process and asks nothing.
+        let revoked = stub(Some(TriggerRouteRefusal::Revoked {
+            provider_id: "ui-provider".to_string(),
+            message: "grant withdrawn".to_string(),
+        }));
+        let redriven = router_with_restorer(
+            Arc::clone(&world.store),
+            Arc::clone(&world.registry),
+            Arc::clone(&world.process_env_store),
+            Some(Arc::clone(&revoked)),
+        )
+        .await
+        .recover_delivery(&occurrence_id, &subscription_id)
+        .await
+        .expect("the redrive answers the process the first drive started");
+        assert_eq!(redriven, started.id);
+        assert_eq!(
+            revoked.calls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "a started delivery's redrive never asks the restorer"
+        );
+    }
+
     #[tokio::test]
     async fn trigger_store_accepts_a_target_label_independent_of_the_identity() {
         // FIG-2995: the target_label gate is gone. The label is host-facing

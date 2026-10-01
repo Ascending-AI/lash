@@ -756,10 +756,10 @@ impl TriggerRouter {
             command,
             attribution,
             causal_ref,
+            route,
         } = self
             .prepare_delivery_start(reservation)
-            .await
-            .map_err(|refusal| DeliveryStartFault::Delivery(refusal.into_error()))?;
+            .map_err(DeliveryStartFault::Delivery)?;
         let subscription = &reservation.subscription;
         let occurrence = &reservation.occurrence;
         let effect_id = command.effect_id();
@@ -806,6 +806,12 @@ impl TriggerRouter {
                     }
                     if let Some(engines) = self.process_engines.as_ref() {
                         executor = executor.with_process_engines(engines.clone());
+                    }
+                    // The start's recorded admission asks the host's
+                    // restorer: a replay reads the step's record, a refusal
+                    // included, and never asks again (FIG-4554).
+                    if let Some(route) = route {
+                        executor = executor.with_trigger_route(route);
                     }
                     executor
                 },
@@ -945,17 +951,9 @@ impl TriggerRouter {
         &self,
         reservation: &TriggerDeliveryReservation,
     ) -> Result<RecoveredDeliveryStart, TriggerDeliveryRecoveryError> {
-        let DeliveryStart { command, .. } = self
+        let DeliveryStart { command, route, .. } = self
             .prepare_delivery_start(reservation)
-            .await
-            .map_err(|refusal| match refusal {
-                DeliveryStartRefusal::Refused(error) => {
-                    TriggerDeliveryRecoveryError::Refused(error)
-                }
-                DeliveryStartRefusal::Retryable(error) => {
-                    TriggerDeliveryRecoveryError::Retryable(error)
-                }
-            })?;
+            .map_err(TriggerDeliveryRecoveryError::Refused)?;
         let registry = Arc::clone(self.process_work.registry());
         let port = Arc::clone(self.process_work.port());
         let execution = crate::runtime::effect::executor::ProcessLocalExecution {
@@ -979,6 +977,12 @@ impl TriggerRouter {
             turn_cancellation: None,
             effect_controller: None,
             attachments: None,
+            // The registration asks the host's restorer only while no
+            // process holds the start's key: a delivery whose start already
+            // registered is recovered unasked (FIG-4554). An unavailable
+            // route is retried under the same identity, and a revoked one
+            // refuses for good.
+            trigger_route: route,
             outcome_observer: None,
         };
         // A start records nothing into its caller: the relay has no journal,
@@ -987,7 +991,7 @@ impl TriggerRouter {
             "trigger-delivery-recovery:{}:{}",
             reservation.occurrence.occurrence_id, reservation.subscription.subscription_id
         ));
-        match execution.execute(&receiver, command).await {
+        match Box::pin(execution.execute(&receiver, command)).await {
             Ok(crate::ProcessEffectOutcome::Start { record, .. }) => {
                 Ok(RecoveredDeliveryStart::Registered(record.id))
             }
@@ -1005,11 +1009,16 @@ impl TriggerRouter {
 
     /// Everything one delivery's start needs, derived only from the
     /// reservation, so the first attempt and every recovery register the
-    /// identical process.
-    async fn prepare_delivery_start(
+    /// identical process. It consults nothing live: the captured route is
+    /// handed on for the start's recorded admission to restore (FIG-4554).
+    ///
+    /// # Errors
+    ///
+    /// The reservation can never start as reserved.
+    fn prepare_delivery_start(
         &self,
         reservation: &TriggerDeliveryReservation,
-    ) -> Result<DeliveryStart, DeliveryStartRefusal> {
+    ) -> Result<DeliveryStart, PluginError> {
         let subscription = &reservation.subscription;
         let occurrence = &reservation.occurrence;
         // Delivery validates against the contract this subscription captured at
@@ -1021,10 +1030,10 @@ impl TriggerRouter {
             .payload_schema
             .validate(&occurrence.payload)
             .map_err(|err| {
-                DeliveryStartRefusal::Refused(PluginError::Session(format!(
+                PluginError::Session(format!(
                     "invalid payload for trigger `{}`: {err}",
                     subscription.subscription_key
-                )))
+                ))
             })?;
         if let Some(source) = occurrence.source.as_ref() {
             subscription
@@ -1032,26 +1041,15 @@ impl TriggerRouter {
                 .config_schema
                 .validate(source)
                 .map_err(|err| {
-                    DeliveryStartRefusal::Refused(PluginError::Session(format!(
+                    PluginError::Session(format!(
                         "trigger `{}` occurrence source does not match the captured source contract: {err}",
                         subscription.subscription_key
-                    )))
+                    ))
                 })?;
         }
-        self.restore_captured_route(&subscription.source_capture)
-            .await
-            .map_err(|refusal| {
-                if refusal.is_retryable() {
-                    DeliveryStartRefusal::Retryable(refusal.into())
-                } else {
-                    DeliveryStartRefusal::Refused(refusal.into())
-                }
-            })?;
         let args =
-            materialize_trigger_process_args(&subscription.input_template, &occurrence.payload)
-                .map_err(DeliveryStartRefusal::Refused)?;
-        let target = apply_trigger_inputs(subscription.target.clone(), args)
-            .map_err(DeliveryStartRefusal::Refused)?;
+            materialize_trigger_process_args(&subscription.input_template, &occurrence.payload)?;
+        let target = apply_trigger_inputs(subscription.target.clone(), args)?;
         let causal_ref = delivery_causal_ref(reservation);
         let attribution = delivery_attribution(subscription);
         let trigger_occurrence_invocation =
@@ -1100,6 +1098,7 @@ impl TriggerRouter {
             },
             attribution,
             causal_ref,
+            route: self.captured_route(&subscription.source_capture),
         })
     }
 }
@@ -1316,12 +1315,14 @@ impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for BoundDeliver
     }
 }
 
-/// One delivery's prepared start: the process command, and the attribution
-/// and cause a journaled attempt records it under.
+/// One delivery's prepared start: the process command, the attribution and
+/// cause a journaled attempt records it under, and the captured route the
+/// start's admission restores.
 struct DeliveryStart {
     command: crate::ProcessCommand,
     attribution: crate::RuntimeAttribution,
     causal_ref: crate::CausalRef,
+    route: Option<TriggerRouteRestore>,
 }
 
 /// What a relay's registration of an unbound delivery's start answered.
@@ -1331,22 +1332,6 @@ enum RecoveredDeliveryStart {
     /// The delivery was bound, and its process pruned, since the relay read
     /// it: the registrar registered nothing (FIG-4369).
     AlreadyBound,
-}
-
-/// Why a delivery's start could not be prepared.
-enum DeliveryStartRefusal {
-    /// The reservation can never start as reserved.
-    Refused(PluginError),
-    /// A captured provider route is unavailable right now.
-    Retryable(PluginError),
-}
-
-impl DeliveryStartRefusal {
-    fn into_error(self) -> PluginError {
-        match self {
-            Self::Refused(error) | Self::Retryable(error) => error,
-        }
-    }
 }
 
 /// Release the pin a delivery's registration wrote on `process_id`, once the
@@ -1393,29 +1378,29 @@ impl TriggerDeliveryRecoveryError {
 }
 
 impl TriggerRouter {
-    /// Reinstalls the captured provider route for one unbound delivery.
+    /// The route restore one unbound delivery's start carries into its
+    /// recorded admission (FIG-4554).
     ///
     /// The restorer is a live host service handed only the recorded capture.
-    /// It runs ahead of the start's recorded step, so a replay consults it
-    /// again; the replay-read gate pins this call with that class (FIG-4537).
+    /// Nothing asks it here: the start's admission does, on the step's first
+    /// execution and while no process holds the start's key, so a replay and
+    /// a redrive answer from what was recorded.
     ///
     /// A resident source needs nothing. A provider route with no restorer wired
     /// is left as captured: the host that never installed a restorer has no
     /// revocation policy to consult, and inventing one here would be a fresh
     /// authorization decision. A restorer that answers `Unavailable` leaves the
-    /// reservation durable so the next attempt retries the identical delivery
+    /// reservation durable so its recovery retries the identical delivery
     /// identity; `Revoked` refuses visibly and nothing re-resolves the source.
-    async fn restore_captured_route(
-        &self,
-        capture: &TriggerSourceCapture,
-    ) -> Result<(), TriggerRouteRefusal> {
+    fn captured_route(&self, capture: &TriggerSourceCapture) -> Option<TriggerRouteRestore> {
         if matches!(capture.route, TriggerProviderRoute::Resident) {
-            return Ok(());
+            return None;
         }
-        let Some(restorer) = self.route_restorer.as_ref() else {
-            return Ok(());
-        };
-        restorer.restore(capture).await
+        let restorer = self.route_restorer.as_ref()?;
+        Some(TriggerRouteRestore::new(
+            Arc::clone(restorer),
+            capture.clone(),
+        ))
     }
 }
 

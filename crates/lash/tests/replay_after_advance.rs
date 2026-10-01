@@ -61,6 +61,18 @@ macro_rules! backend_laws {
 
             #[tokio::test]
             $(#[ignore = $service])?
+            async fn trigger_emit_replay_after_route_revocation_returns_recorded_start() {
+                families::trigger_route_revoked_after_start(StorageKind::$kind, $live).await;
+            }
+
+            #[tokio::test]
+            $(#[ignore = $service])?
+            async fn trigger_emit_replay_after_route_recovery_returns_recorded_unavailable() {
+                families::trigger_route_unavailable_at_start(StorageKind::$kind, $live).await;
+            }
+
+            #[tokio::test]
+            $(#[ignore = $service])?
             async fn session_signal_replay_after_prune_returns_recorded_event() {
                 families::signal(StorageKind::$kind, $live, Surface::Session, Advance::Prune).await;
             }

@@ -244,6 +244,10 @@ impl RuntimeErrorCode {
             Self::TriggerDeliveryRetired => Terminal,
             // the occurrence's tombstone outlives every redelivery it answers.
             Self::TriggerOccurrenceReclaimed => Terminal,
+            // the provider said nothing about the grant; the same delivery is asked again.
+            Self::TriggerRouteUnavailable => Retryable,
+            // the provider withdrew the captured grant, and nothing re-resolves it.
+            Self::TriggerRouteRevoked => Terminal,
             // the target was replaced by a retention tombstone.
             Self::ProcessNoLongerRetained => Terminal,
             // a newer incarnation durably superseded this one.

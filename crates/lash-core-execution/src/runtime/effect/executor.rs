@@ -183,6 +183,10 @@ pub struct ProcessLocalExecution {
     /// before the receiver records it (ADR 0124). `None` on a host with no
     /// durable attachment store: its terminals deliver nothing to hold.
     pub attachments: Option<Arc<dyn crate::AttachmentReferrers>>,
+    /// The captured provider route a trigger delivery's `Start` restores
+    /// inside its recorded admission (FIG-4554). `None` for every other
+    /// command.
+    pub trigger_route: Option<crate::TriggerRouteRestore>,
     pub(crate) outcome_observer: Option<ProcessOutcomeObserver>,
 }
 
@@ -719,26 +723,13 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     turn_cancellation: None,
                     effect_controller: None,
                     attachments: None,
+                    trigger_route: None,
                     outcome_observer: None,
                 },
             )),
             replay_trace: None,
             served_only: None,
         }
-    }
-
-    /// Binds the attachment referrers a delivered process terminal is
-    /// acquired through before its receiver records it (ADR 0124).
-    pub fn with_process_attachments(
-        mut self,
-        attachments: Arc<dyn crate::AttachmentReferrers>,
-    ) -> Self {
-        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
-            &mut self.state
-        {
-            execution.attachments = Some(attachments);
-        }
-        self
     }
 
     /// Binds the `ProcessStart` obligation ledger a committed `Start`

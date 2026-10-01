@@ -446,22 +446,29 @@ observer, event-log and lifecycle reads, the trigger store's listings, and the
 facade's session and process lookups) that runs on a replay path outside
 every recorded step. Its surface also holds the live host services a durable
 path consults (the trigger route restorer): a call to one outside every
-recorded step fails the same way. It parses the store and service traits, so a
-new trait method must be classified as a read, as a write or admission, or as
-a live service before the gate passes. A read the rule allows outside a step (a
-non-durable observation, a stop-only revalidation, an exempt store-side fact)
-and a live host service that serves only what the record names (the route
-restorer, which `prepare_delivery_start` hands the reservation's captured
-route ahead of the delivery start's step) are pinned in the gate's table with
-their class and reason, and a violation owned by an open ticket is pinned with
-that ticket; a pin that matches nothing fails as stale. The gate's
-self-tests plant a read ahead of a journaled command, including in the real
-facade, and require the gate to fail.
+recorded step fails the same way. A service call is matched by its receiver's
+declared trait (a field, parameter or binding declared with it), not by the
+method's bare name, so an unrelated method of the same name is no hit. It
+parses the store and service traits, so a new trait method must be classified
+as a read, as a write or admission, or as a live service before the gate
+passes. A read the rule allows outside a step (a non-durable observation, a
+stop-only revalidation, an exempt store-side fact) is pinned in the gate's
+table with its class and reason, and a violation owned by an open ticket is
+pinned with that ticket; a pin that matches nothing fails as stale. A live
+host service has no pin class: it serves new work only. The route restorer is
+asked inside the delivery start's recorded admission (`register_process_start`),
+and only while no process holds the start's key, so its answer, an unavailable
+or revoked route included, is that step's recorded outcome; a replay reads the
+record and a redrive finds the started process, and neither asks again. The
+gate's self-tests plant a read ahead of a journaled command, including in the
+real facade, and a restorer call ahead of the delivery start and of the
+Restate registration step, and require the gate to fail.
 
 The harness, `crates/lash/tests/replay_after_advance.rs`, records one durable
 operation per effect family (process start, trigger emit, signal, cancel,
 process await, durable wait), moves the store on (the target ended, pruned
-and compacted, the session deleted, the wait resolved again), then loses the handler attempt so the
+and compacted, the session deleted, the wait resolved again, the delivery's
+provider route revoked or restored), then loses the handler attempt so the
 engine replays its journal. The replay must answer the recorded outcome, write
 no registry row and send no new invocation. It runs on the Restate server
 double over SQLite memory, SQLite file and PostgreSQL, and on live Restate

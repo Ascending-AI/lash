@@ -101,10 +101,13 @@ const HOST_READS: &[&str] = &[
 
 /// Live host services, as `(trait, method)`: each answers from the host's
 /// wiring and policy today, not from the store. A replay path may consult
-/// one inside the recorded step whose outcome its answer becomes, or under a
-/// [`PinClass::LiveService`] pin that states why it stays live.
+/// one only inside the recorded step whose outcome its answer becomes. A call
+/// is matched by its receiver's declared trait, never by the method's bare
+/// name (FIG-4554).
 const HOST_SERVICES: &[(&str, &str)] = &[
-    // Reinstalls a delivery's captured provider route, or refuses it.
+    // Reinstalls a delivery's captured provider route, or refuses it. A
+    // delivery's start asks it inside its recorded admission
+    // (`register_process_start`), off every replay path.
     ("TriggerRouteRestorer", "restore"),
 ];
 
@@ -249,10 +252,6 @@ enum PinClass {
     /// A live revalidation that can only stop stale work before its next
     /// effect, never choose different work (ADR 0105 §1).
     StopOnly(&'static str),
-    /// A live host service that serves the identity the record names or
-    /// refuses it (ADR 0119): it stays live on a replay, where a refusal can
-    /// stop the work it gates and no answer can choose different work.
-    LiveService(&'static str),
     /// Outside the rule, for the stated reason.
     Exempt(&'static str),
     /// A known violation another ticket owns; its fix deletes the pin.
@@ -322,19 +321,6 @@ const PINS: &[Pin] = &[
         class: PinClass::Exempt(
             "the lineage of the live enclosing process: immutable, and the process \
              cannot be pruned while it runs",
-        ),
-    },
-    // `prepare_delivery_start` restores the route ahead of the delivery
-    // start's recorded step, on the first attempt and on every replay
-    // (FIG-4537).
-    Pin {
-        file: TRIGGER_ROUTER,
-        text: "restorer.restore(capture).await",
-        count: 1,
-        class: PinClass::LiveService(
-            "the host's route restorer is handed only the capture the reservation recorded \
-             and consults no catalog or live configuration; it answers restored, or refuses \
-             the delivery before its start's step, and can select no other route or target",
         ),
     },
     Pin {
@@ -422,6 +408,7 @@ const STEP_BODIES: &[StepBody] = &[
 ];
 
 const TRIGGER_ROUTER: &str = "crates/lash-core-execution/src/triggers/router.rs";
+const RESTATE_PROCESS_COMMAND: &str = "crates/lash-restate/src/controller/process_command.rs";
 const LOAD_WORKER: &str = "runbooks/restate-postgres-workers/src/load/worker.rs";
 const LOAD_BEHAVIORS: &str = "runbooks/restate-postgres-workers/src/load/behaviors.rs";
 
@@ -530,7 +517,6 @@ fn check(hits: &[scan::Hit], pins: &[Pin]) -> Vec<String> {
     for pin in pins {
         if let PinClass::Observation(reason)
         | PinClass::StopOnly(reason)
-        | PinClass::LiveService(reason)
         | PinClass::Exempt(reason)
         | PinClass::Ticket(reason) = pin.class
             && reason.trim().is_empty()
@@ -843,20 +829,44 @@ mod self_test {
     fn a_host_service_call_outside_a_recorded_step_fails() {
         let found = hits(
             r#"
+            pub struct Router {
+                store: Arc<dyn TriggerStore>,
+                pub(crate) route_restorer: Option<Arc<dyn TriggerRouteRestorer>>,
+            }
             async fn prepare(&self, capture: &TriggerSourceCapture) -> Result<(), Refusal> {
-                self.route_restorer.restore(capture).await
+                self.route_restorer.as_ref()?.restore(capture).await
             }
             async fn start(&self, scoped: &ScopedEffectController<'_>) {
                 self.prepare(&capture).await?;
-                TriggerRouteRestorer::restore(restorer.as_ref(), &capture).await?;
+                TriggerRouteRestorer::restore(unnamed.as_ref(), &capture).await?;
                 scoped.execute_effect(envelope, executor).await
+            }
+            async fn bound(&self, scoped: &ScopedEffectController<'_>) {
+                if let Some(restorer) = self.route_restorer.as_ref() {
+                    restorer.restore(&capture).await?;
+                }
+            }
+            async fn handed<R>(scoped: &ScopedEffectController<'_>, host: &R, other: Arc<dyn TriggerRouteRestorer>)
+            where
+                R: TriggerRouteRestorer,
+            {
+                let cloned = Arc::clone(&other);
+                host.restore(&capture).await?;
+                cloned.restore(&capture).await
             }
             "#,
         );
-        assert_eq!(found.len(), 2, "{found:?}");
+        assert_eq!(found.len(), 5, "{found:?}");
         assert!(found.iter().all(|hit| hit.method == "restore"));
         assert_eq!(found[0].function, "prepare");
         assert_eq!(found[0].path, "called from `start`");
+        assert_eq!(
+            found
+                .iter()
+                .map(|hit| hit.function.as_str())
+                .collect::<Vec<_>>(),
+            ["prepare", "start", "bound", "handed", "handed"]
+        );
         assert!(
             check(&found, &[])
                 .iter()
@@ -874,6 +884,29 @@ mod self_test {
                 context
                     .run_json_or_retry_send(name, async move { restorer.restore(&capture).await })
                     .await
+            }
+            "#,
+        );
+        assert!(found.is_empty(), "{found:?}");
+    }
+
+    /// A method named as a live service is one only on a receiver declared
+    /// with the service's trait: any other `.restore(` on a replay path is
+    /// no hit (FIG-4554).
+    #[test]
+    fn a_same_named_method_on_another_receiver_is_no_service_call() {
+        let found = hits(
+            r#"
+            struct Router {
+                route_restorer: Option<Arc<dyn TriggerRouteRestorer>>,
+                ordinals: ReplayOrdinals,
+            }
+            async fn start(&self, scoped: &ScopedEffectController<'_>, snapshot: &Snapshot) {
+                self.ordinals.restore(snapshot);
+                let cursor = Cursor::open(&self.store);
+                cursor.restore(snapshot).await?;
+                snapshot.restore(&self.ordinals)?;
+                scoped.execute_effect(envelope, executor).await
             }
             "#,
         );
@@ -1087,15 +1120,46 @@ mod self_test {
     /// the delivery start's recorded step, fails the gate (FIG-4537).
     #[test]
     fn the_real_tree_fails_with_an_unrecorded_route_restore_before_the_delivery_start() {
+        for planted in [
+            "let _planted = self.route_restorer.as_ref().expect(\"wired\").restore(&subscription.source_capture);",
+            "if let Some(restorer) = self.route_restorer.as_ref() { let _planted = restorer.restore(&subscription.source_capture); }",
+        ] {
+            let failures = planted_tree(TRIGGER_ROUTER, "let args =", planted);
+            assert!(
+                failures.iter().any(|failure| failure.contains("_planted")
+                    && failure.contains("`restore`")
+                    && failure.contains("in `prepare_delivery_start`")),
+                "{planted}: {failures:?}"
+            );
+        }
+    }
+
+    /// An unrelated `.restore(` planted at the same place passes: its
+    /// receiver is not the route restorer (FIG-4554).
+    #[test]
+    fn the_real_tree_passes_with_an_unrelated_restore_before_the_delivery_start() {
         let failures = planted_tree(
             TRIGGER_ROUTER,
             "let args =",
-            "let _planted = restorer.restore(&subscription.source_capture).await;",
+            "let _planted = occurrence.payload.restore(&subscription.source_capture);",
+        );
+        assert!(failures.is_empty(), "{failures:?}");
+    }
+
+    /// The route restore moved out of the start's recorded admission, into
+    /// the Restate start ahead of its registration step, fails the gate
+    /// (FIG-4554).
+    #[test]
+    fn the_real_tree_fails_with_the_route_restored_ahead_of_the_restate_registration() {
+        let failures = planted_tree(
+            RESTATE_PROCESS_COMMAND,
+            "let stored_registration = registration.clone();",
+            "let restorer: Arc<dyn lash_core::TriggerRouteRestorer> = host_restorer(); let _planted = restorer.restore(&capture).await;",
         );
         assert!(
-            failures.iter().any(|failure| failure.contains("_planted")
-                && failure.contains("`restore`")
-                && failure.contains("in `prepare_delivery_start`")),
+            failures
+                .iter()
+                .any(|failure| failure.contains("_planted") && failure.contains("`restore`")),
             "{failures:?}"
         );
     }

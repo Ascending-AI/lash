@@ -164,6 +164,229 @@ pub async fn trigger_emit(kind: StorageKind, live: bool) {
     assert_replayed_as_recorded("trigger emit", Advance::PruneAndCompact, original, replayed);
 }
 
+/// The host's route restorer in the trigger-route laws: it answers what the
+/// law last set, and counts how often it was asked.
+#[derive(Default)]
+struct RouteProbe {
+    refusal: std::sync::Mutex<Option<lash_core::TriggerRouteRefusal>>,
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+impl RouteProbe {
+    fn answer(&self, refusal: Option<lash_core::TriggerRouteRefusal>) {
+        *self.refusal.lock().expect("probe lock") = refusal;
+    }
+
+    fn calls(&self) -> usize {
+        self.calls.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::TriggerRouteRestorer for RouteProbe {
+    async fn restore(
+        &self,
+        _capture: &lash_core::TriggerSourceCapture,
+    ) -> Result<(), lash_core::TriggerRouteRefusal> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        match self.refusal.lock().expect("probe lock").clone() {
+            None => Ok(()),
+            Some(refusal) => Err(refusal),
+        }
+    }
+}
+
+/// A world with one subscription on a captured provider route, the router
+/// that restores the route through `probe`, and the emission of one
+/// occurrence through it.
+async fn trigger_route_world(
+    kind: StorageKind,
+    live: bool,
+    tag: &str,
+    probe: &Arc<RouteProbe>,
+) -> (World, lash_core::facade_support::TriggerRouter, Operation) {
+    let world = World::new(kind, live, tag).await;
+    let backend = world.engine.backend();
+    let env_ref = lash_core::testing::publish_process_execution_env_for_testing(
+        backend.process_env_store().as_ref(),
+        &lash_core::testing::host_pin_claim_for_testing(),
+        &lash_core::ProcessExecutionEnvSpec::new(
+            lash_core::AdmittedPluginConfig::default(),
+            lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        ),
+    )
+    .await
+    .expect("publish the subscription's env");
+    backend
+        .trigger_store()
+        .execute_command(
+            "raa-route-subscription",
+            lash_core::TriggerCommand::Register {
+                owner_scope: lash_core::TriggerOwnerScope::host("replay-after-advance")
+                    .expect("a host owner scope"),
+                actor: lash_core::ProcessOriginator::host_scoped("replay-after-advance"),
+                draft: lash_core::TriggerSubscriptionDraft::for_process(
+                    "raa/route-delivery",
+                    env_ref,
+                    "raa.route",
+                    "raa-route-source",
+                    lash_core::ProcessInput::Engine {
+                        kind: "testing-fixture".to_string(),
+                        payload: json!({"law": "route"}),
+                    },
+                    lash_core::ProcessIdentity::labelled(
+                        "testing-fixture",
+                        Some("raa-route-delivery"),
+                    ),
+                )
+                .with_payload_schema(lash_core::LashSchema::any())
+                .with_source_capture(lash_core::TriggerSourceCapture::provider(
+                    ["raa", "route"],
+                    lash_core::LashSchema::any(),
+                    "raa-provider",
+                    json!({"grant": "opaque"}),
+                )),
+            },
+        )
+        .await
+        .expect("register the subscription")
+        .expect("the subscription registers");
+    let router = lash_core::facade_support::TriggerRouter::new(
+        backend.trigger_store(),
+        backend.process_work(),
+    )
+    .with_process_artifacts(
+        backend.process_env_store(),
+        lash_core::testing::process_engine_fixture(),
+    )
+    .with_route_restorer(Arc::clone(probe) as Arc<dyn lash_core::TriggerRouteRestorer>);
+    let operation: Operation = {
+        let router = router.clone();
+        Arc::new(move |scoped| {
+            let router = router.clone();
+            Box::pin(async move {
+                receipt(
+                    router
+                        .emit(
+                            lash_core::TriggerOccurrenceRequest::new(
+                                "raa.route",
+                                "raa-route-source",
+                                json!({"law": "route"}),
+                                "raa-route-occurrence",
+                            ),
+                            &scoped,
+                        )
+                        .await,
+                )
+            })
+        })
+    };
+    (world, router, operation)
+}
+
+/// A delivery recorded `Started` replays as started after its provider
+/// revoked the route (FIG-4554): the host's restorer was asked inside the
+/// start's recorded admission, and the replay reads that record and never
+/// asks it again.
+pub async fn trigger_route_revoked_after_start(kind: StorageKind, live: bool) {
+    let probe = Arc::new(RouteProbe::default());
+    let (world, _router, operation) =
+        trigger_route_world(kind, live, "route-revoked", &probe).await;
+    let (original, replayed) = replay_leg(
+        &world,
+        "raa-route-revoked",
+        operation,
+        async |recorded: &Value| {
+            assert_eq!(
+                recorded["deliveries"][0]["outcome"],
+                json!("started"),
+                "the first emission started its delivery: {recorded}"
+            );
+            assert_eq!(probe.calls(), 1, "the fresh start restored its route once");
+            probe.answer(Some(lash_core::TriggerRouteRefusal::Revoked {
+                provider_id: "raa-provider".to_string(),
+                message: "grant withdrawn".to_string(),
+            }));
+        },
+    )
+    .await;
+    assert_replayed_as_recorded(
+        "trigger emit over a route revoked since",
+        Advance::Prune,
+        original,
+        replayed,
+    );
+    assert_eq!(
+        probe.calls(),
+        1,
+        "the replay reads the recorded start and never asks the restorer"
+    );
+}
+
+/// A fresh start against an unavailable route records that refusal, typed,
+/// as the start's outcome (FIG-4554): its replay reproduces it after the
+/// provider came back, without asking the restorer. The reservation stays
+/// owed, and its recovery starts it under the same identity.
+pub async fn trigger_route_unavailable_at_start(kind: StorageKind, live: bool) {
+    let probe = Arc::new(RouteProbe::default());
+    probe.answer(Some(lash_core::TriggerRouteRefusal::Unavailable {
+        provider_id: "raa-provider".to_string(),
+        message: "connect timeout".to_string(),
+    }));
+    let (world, router, operation) =
+        trigger_route_world(kind, live, "route-unavailable", &probe).await;
+    let (original, replayed) = replay_leg(
+        &world,
+        "raa-route-unavailable",
+        operation,
+        async |recorded: &Value| {
+            let reason = recorded["deliveries"][0]["outcome"]["failed"]["reason"]
+                .as_str()
+                .unwrap_or_else(|| panic!("the first emission's delivery failed: {recorded}"));
+            assert!(
+                reason.contains("trigger_route_unavailable") && reason.contains("connect timeout"),
+                "the start records the typed refusal: {reason}"
+            );
+            assert_eq!(probe.calls(), 1, "the fresh start asked the restorer once");
+            probe.answer(None);
+        },
+    )
+    .await;
+    assert_replayed_as_recorded(
+        "trigger emit over a route restored since",
+        Advance::Prune,
+        original.clone(),
+        replayed,
+    );
+    assert_eq!(
+        probe.calls(),
+        1,
+        "the replay reads the recorded refusal and never asks the restorer"
+    );
+    let delivery = &original["deliveries"][0];
+    let recovered = router
+        .recover_delivery(
+            delivery["occurrence_id"]
+                .as_str()
+                .expect("an occurrence id"),
+            delivery["subscription_id"]
+                .as_str()
+                .expect("a subscription id"),
+        )
+        .await
+        .expect("the owed delivery's recovery starts it over the restored route");
+    assert_eq!(probe.calls(), 2, "the recovery is new work, and asks once");
+    assert!(
+        world
+            .registry()
+            .get_process(&recovered)
+            .await
+            .expect("read the recovered process")
+            .is_some(),
+        "the recovery registered the delivery's process"
+    );
+}
+
 /// Which surface a signal or cancel law drives.
 #[derive(Clone, Copy, Debug)]
 pub enum Surface {

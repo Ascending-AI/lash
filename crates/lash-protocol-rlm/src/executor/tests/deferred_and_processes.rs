@@ -1961,6 +1961,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
                     session_catalog: None,
                     executor: "the signal fixture",
                     starter: &starter,
+                    trigger_route: None,
                 },
                 registration,
                 &options.initial_observers,

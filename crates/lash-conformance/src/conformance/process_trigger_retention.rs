@@ -2187,7 +2187,7 @@ async fn captured_delivery_refusals(handles: ProcessTriggerRetentionHandles) {
         ))
     ));
     // The emission's ingest is a recorded step, so it needs a host that runs
-    // steps; the revoked route refuses the delivery before its start's step.
+    // steps; the revoked route refuses the delivery inside its start's step.
     let controller = InPlaceStepController;
     let scoped = crate::ScopedEffectController::borrowed(
         &controller,

@@ -314,6 +314,7 @@ impl World {
             session_catalog: None,
             executor: "definition conformance start",
             starter,
+            trigger_route: None,
         }
     }
 
