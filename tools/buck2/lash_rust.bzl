@@ -429,8 +429,24 @@ def lash_rust_integration_test(
         _named_deps(package_name, include_dev = True),
     )
 
+def _rust_doc_impl(ctx):
+    # The prelude always attaches a rustdoc test to `[doc]`. Every workspace
+    # library keeps `doctest = false`, so only the documentation is forwarded:
+    # an alias would make each doc label a test that compiles prose examples
+    # and bypasses the launcher that writes the JUnit report.
+    doc = ctx.attrs.doc[DefaultInfo]
+    return [DefaultInfo(
+        default_outputs = doc.default_outputs,
+        other_outputs = doc.other_outputs,
+    )]
+
+_rust_doc = rule(
+    impl = _rust_doc_impl,
+    attrs = {"doc": attrs.dep(providers = [DefaultInfo])},
+)
+
 def lash_rust_doc(name, crate, **_kwargs):
-    native.alias(name = name, actual = crate + "[doc]", visibility = ["PUBLIC"])
+    _rust_doc(name = name, doc = crate + "[doc]", visibility = ["PUBLIC"])
 
 def lash_rust_feature_library(
         name,

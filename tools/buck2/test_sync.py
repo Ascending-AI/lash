@@ -970,6 +970,19 @@ def check_feature_lane_executable_selection() -> None:
     )
 
 
+def check_documentation_targets_are_not_tests() -> None:
+    """Cargo runs no doctests here, so a doc label must not carry the prelude's."""
+    rules = (HERE / "lash_rust.bzl").read_text(encoding="utf-8")
+    macro = rules[rules.index("def lash_rust_doc("):].split("\ndef ", 1)[0]
+    assert '_rust_doc(name = name, doc = crate + "[doc]"' in macro
+    assert "alias" not in macro
+    rule = rules[rules.index("def _rust_doc_impl("):rules.index("def lash_rust_doc(")]
+    assert "ExternalRunnerTestInfo" not in rule and "sub_targets" not in rule
+    for manifest in sorted(ROOT.glob("crates/*/Cargo.toml")):
+        text = manifest.read_text(encoding="utf-8")
+        assert "[lib]" not in text or "doctest = false" in text, manifest
+
+
 def main() -> int:
     checks = [
         check_inventory,
@@ -989,6 +1002,7 @@ def main() -> int:
         check_direct_buck_generator,
         check_schema_source_inputs,
         check_feature_lane_executable_selection,
+        check_documentation_targets_are_not_tests,
     ]
     for check in checks:
         check()
