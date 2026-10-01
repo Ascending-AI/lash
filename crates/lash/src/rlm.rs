@@ -232,10 +232,13 @@ pub use lash_vm_worker::{
 };
 
 // The vocabulary this module's signatures name (the facade-completeness rule).
-pub use lash_lashlang_runtime::LashlangProcessFailureCode;
+pub use lash_lashlang_runtime::{
+    LashlangProcessFailureCode, LashlangRecordedRunSettings, LashlangRunSettings,
+};
+pub use lash_sansio::worker_limit::WorkerFrameKind;
 pub use lash_vm_client::service::CompiledModule;
 pub use lash_vm_client::{
-    CodecRefusal, DecodeLimits, InfrastructureOutcome, InspectedArtifact, PoolError,
-    ProcessMetadata, ProtocolBounds, ProtocolVersionRefusal, SupervisorEvidence, VmLimits,
-    WorkerLimit,
+    CodecRefusal, DecodeLimits, ExecutionClass, ExecutionReceipt, InfrastructureOutcome,
+    InspectedArtifact, PoolCounters, PoolError, PoolMeasurements, ProcessMetadata, ProtocolBounds,
+    ProtocolVersionRefusal, SupervisorEvidence, VmLimits, WorkerLimit,
 };
