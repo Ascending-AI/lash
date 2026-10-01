@@ -606,9 +606,10 @@ try {
     drop(core);
     let reopened = approval_test_core(
         &backend,
-        // The reopen must present the recorded provider pin: a different
-        // provider id is refused as `ProviderMismatch` (ADR 0066). The
-        // panicking completer still proves the read never reaches it.
+        // The reopen's registry must serve the session's recorded model key
+        // with the wire model it recorded (ADR 0066): a changed wire model is
+        // refused as `ModelUnavailable`. The panicking completer still proves
+        // the read never reaches it.
         lash::testing::TestProvider::builder()
             .kind("async-completion-redrive")
             .complete(|_| async { panic!("reading history must not invoke the provider") })

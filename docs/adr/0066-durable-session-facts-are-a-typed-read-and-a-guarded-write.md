@@ -41,9 +41,9 @@ transaction. An existing id refuses with `SessionAlreadyExists`.
 
 `SessionBuilder::open` opens an existing id and reads its recorded head.
 `UnknownSession` and `SessionDeleted` are typed refusals. The builder carries
-provider resolution, process-local plugin factories and tool-source policy;
-it carries no replacement session config. A resolver that cannot serve the
-recorded provider pin refuses with `ProviderMismatch`.
+the tool-source policy and the enqueue-only mode; it carries no replacement
+session config. A registry that cannot bind the recorded model key refuses
+its requests with `ModelUnavailable`.
 
 The protocol fills a missing final-answer format at creation: `Markdown` for a
 root and `RawFinalValue` for a child. Termination has no default fill, so its

@@ -2399,7 +2399,7 @@ run_lash_core_direct_model_mutation_evidence() {
     cargo mutants \
     -p lash-internal-core-llm \
     --file crates/lash-core-llm/src/model.rs \
-    --re 'ModelSpec::with_limits|ModelSpec::with_variant|ModelSpec::from_token_limits|ModelLimits::from_token_limits|ModelSpec::context_window_tokens|nonzero_token_limit|optional_nonzero_token_limit' \
+    --re 'ModelMetadata::new|ModelMetadata::with_limits|ModelMetadataBuilder::build|ModelLimits::validated|ModelMetadata::context_window_tokens|RecordedModel::context_window_tokens|ModelConfig::context_window_tokens' \
     --baseline skip \
     --jobs "$mutation_jobs" \
     --timeout "$timeout" \

@@ -209,9 +209,10 @@ pub enum RuntimeErrorCode {
     InvalidTurnCancelRequest,
     LiveReplay,
     LlmProvider,
-    /// A config command or a send named a model key the host's registry does
-    /// not register: refused typed before anything is enqueued, and nothing
-    /// changes.
+    /// A send or a config command named a model key the host's registry does
+    /// not register: a send is refused typed before anything is enqueued, a
+    /// config command is refused when its transaction resolves. Nothing
+    /// changes either way.
     ModelUnknown,
     /// A model a root recorded, or an admitted root's per-run key, has no
     /// binding on this worker. The model was adopted when it was set, so this

@@ -366,10 +366,11 @@ impl CurrentOwnerCapability {
         }
     }
 
-    // The provider pin is settled typed at open and at child-create
-    // (ADR 0066, `SessionPolicy::settle_provider_pin`), so a recorded/requested
-    // mismatch can no longer arrive here; the remaining resolution failures are
-    // host wiring faults and stay as plugin errors.
+    // The session's model is the binding it recorded; no open- or
+    // child-create-time selection can arrive here (ADR 0066), so the
+    // remaining resolution failures — a recorded key the registry does not
+    // serve or a changed wire model — are host wiring faults and stay as
+    // plugin errors.
     fn resolve_policy(&self) -> Result<RuntimeSessionPolicy, crate::PluginError> {
         self.host
             .resolve_owner_policy(&self.runtime_owner(), self.policy.clone())

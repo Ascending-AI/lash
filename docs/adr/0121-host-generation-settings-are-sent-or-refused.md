@@ -33,7 +33,7 @@ is still fully honored locally. The receipt splits the two halves into
 `thinking_summary` and `thinking_visibility`.
 
 **Reasoning resolves once.** `ModelCapability::reasoning_intent` resolves the
-model spec's `ReasoningSelection` against the host capability into
+session's recorded `ReasoningSelection` against the recorded capability into
 `Option<ReasoningIntent>`, where `ReasoningIntent` is
 `Effort(String) | Budget(u32) | Off`. `ProviderDefault` resolves to `None` and
 sends nothing. A budget map missing an advertised effort is
@@ -42,8 +42,8 @@ runtime seams, is that same resolution. It never rewrites the selection.
 
 `ReasoningCapability` is `{ efforts, encoding, disable, mandatory }`. `disable`
 is a plain flag saying the route accepts an explicit off. The route's dialect
-owns the wire form of off. There is no default effort in capability data: the
-default is the model spec's `variant`.
+owns the wire form of off. There is no default effort in capability data: a
+selection left unset records `ProviderDefault`, which sends nothing.
 
 **Each wire maps the intent in one plain function:**
 
@@ -78,12 +78,12 @@ A closed, serializable dialect travels with the host's route configuration.
 A custom trait object cannot supply the same durable and remote contract.
 
 **Generation options resolve once, against the wire.**
-`resolve_generation_policy` takes the request, the provider options and a
+`resolve_generation_policy` takes the request, the provider kind and a
 `GenerationWire` in which each adapter states what its wire carries for this
 call. It refuses everything else before the adapter does any I/O:
 
-- **Cap.** The effective cap is the request's, else
-  `ProviderOptions.max_output_tokens`. With neither set, an optional-cap wire
+- **Cap.** The effective cap is the request's, else the recorded model's
+  `ModelRequestDefaults.max_output_tokens`. With neither set, an optional-cap wire
   sends none, and Anthropic refuses with `output_token_cap_required`. Codex
   and `max_tokens_field: Omit` endpoints refuse any cap.
 - **Temperature.** A wire without a temperature field refuses one. A model
@@ -132,7 +132,7 @@ refuses an `omitted_sampling_pinned` outcome.
 - A mixed-model session that sets a session-wide temperature or seed must
   clear it for models or wires that cannot carry it
   (`GenerationOverlay::Replace`). A receipt cannot un-send a call.
-- Hosts on Anthropic set `ProviderOptions.max_output_tokens` or a request cap.
+- Hosts on Anthropic set `ModelRequestDefaults.max_output_tokens` or a request cap.
 - Hosts choose a preset or set
   `OpenAiCompat.reasoning`.
 - Replay-route ownership is exact. Opaque reasoning, tool-call and

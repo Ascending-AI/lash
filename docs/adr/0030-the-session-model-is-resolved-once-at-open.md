@@ -9,8 +9,9 @@ serve as mutable configuration.
 
 ## Decision
 
-The creator supplies the session configuration, including its model and
-provider pin. Catalog admission records the initial configuration head in the
+The creator supplies the session configuration, including its model: a key
+the core's registry mints into the recorded binding. Catalog admission
+records the initial configuration head in the
 same transaction as a new session row. `SessionCreationHead::Config` requests
 that head; `CommittedByCreator` leaves publication of the supplied runtime
 state to the creator's first commit. Rebinding an existing catalog id writes
@@ -20,14 +21,15 @@ The facade separates `create(SessionCreation)` from `open()`. Create refuses
 an existing id with `SessionAlreadyExists`. Open resolves an existing id,
 loads its recorded configuration, and refuses an unknown or deleted id.
 Opening does not select a new model or reconcile a host seed into the head.
-A provider supplied at open resolves the recorded pin; an incompatible
-provider is refused with `ProviderMismatch`.
+An open supplies no model: the recorded binding stands, and its key binds
+against the core's registry when a request runs. A key the registry does not
+serve, or one now serving another wire model, is refused `ModelUnavailable`.
 
 `effective_policy()` reads session policy directly. `FrameOpen` assignments
 are immutable history and retain the model recorded when the frame opens.
 Later configuration changes are typed config commands applied through a
 durable, revision-checked `ConfigTransaction` (ADR 0126). The core owner's commands cover
-provider, model, prompt, generation, attachment acceptance, the execution
+model and reasoning, prompt, generation, attachment acceptance, the execution
 controls and tool access; each plugin's commands cover its own namespace.
 
 The execution controls are the turn budget, autonomy, the no-progress budget
@@ -99,7 +101,7 @@ policy.
 
 ## Implementation
 
-- [Creation and open](../../crates/lash/src/session.rs), including recorded-state loading and provider-pin validation.
+- [Creation and open](../../crates/lash/src/session.rs), including recorded-state loading and recorded-model binding.
 - [Creation head contract](../../crates/lash-core-store/src/session_identity.rs).
 - [Session policy and immutable frames](../../crates/lash-core-store/src/session_state.rs).
 - [Durable configuration application and the per-root snapshot](../../crates/lash-core/src/runtime/drive/turn_config.rs).

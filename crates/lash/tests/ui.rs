@@ -59,7 +59,10 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/turn_context_has_no_prompt_or_drain_state.rs");
     t.compile_fail("tests/ui/core_builder_requires_a_backend.rs");
     t.compile_fail("tests/ui/core_builder_plugin_host_is_removed.rs");
-    t.compile_fail("tests/ui/model_selection_requires_variant.rs");
+    // FIG-4374: models are selected by registry key, and a recorded model is
+    // minted by the registry alone.
+    t.compile_fail("tests/ui/models_are_selected_by_key.rs");
+    t.compile_fail("tests/ui/recorded_model_is_minted_by_the_registry.rs");
     t.compile_fail("tests/ui/root_tool_provider_is_not_public.rs");
     t.compile_fail("tests/ui/session_admin_flat_methods_are_not_public.rs");
     t.compile_fail("tests/ui/effect_host_activation_methods_are_removed.rs");

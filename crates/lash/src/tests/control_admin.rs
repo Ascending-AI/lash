@@ -1408,7 +1408,7 @@ async fn config_admin_sets_persisted_tool_access() -> Result<()> {
 
 /// FIG-3373 / ADR 0089: a host-run related session is an ordinary session.
 /// `core.session(child).parent(parent)` admits it under its own Session
-/// Binding, records the Child relation, carries the provider pin, and runs a
+/// Binding, records the Child relation, records its model binding, and runs a
 /// turn — there is no second session model behind a child-admin facade.
 #[tokio::test]
 
