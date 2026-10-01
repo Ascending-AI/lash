@@ -200,17 +200,8 @@ def check_sizing() -> None:
         assert key not in test_compile_requests or test != target, key
         assert target == (request(kinds["target"]) if "target" in kinds else crate), key
         assert test == (request(kinds["test"]) if "test" in kinds else crate), key
-        # No recorded peak may exceed the request made for it: the action
-        # cgroup kills at the request once it is above the worker's slot
-        # share. A kind's peak is its own target's; the crate's is whichever
-        # target ran it, so the larger request has to cover it.
-        for kind, resolved in (("target", target), ("test", test)):
-            if kind in kinds:
-                assert kinds[kind]["samples"] >= sizes.MIN_SAMPLES, (key, kind)
-                assert kinds[kind]["peak_bytes"] <= resolved["memory_kb"] * 1024, (key, kind)
-        if key in measured_compile:
-            largest = max(target["memory_kb"], test["memory_kb"])
-            assert measured_compile[key]["peak_bytes"] <= largest * 1024, key
+        for kind in kinds:
+            assert kinds[kind]["samples"] >= sizes.MIN_SAMPLES, (key, kind)
 
     # An optimized configuration's request is its row where that is more than
     # the dev request, and never less than the dev request: the select can
@@ -228,23 +219,48 @@ def check_sizing() -> None:
             rendered = optimized_requests.get(key, {}).get(kind, dev)
             assert rendered == expected, (key, kind)
             assert (kind in optimized_requests.get(key, {})) == (expected != dev), (key, kind)
-            assert row["peak_bytes"] <= rendered["memory_kb"] * 1024, (key, kind)
     for key, kinds in optimized_requests.items():
         for kind, rendered in kinds.items():
             dev = compile_requests.get(key, default)
             if kind == "test":
                 dev = test_compile_requests.get(key, dev)
             assert all(rendered[field] >= dev[field] for field in dev), (key, kind)
+    evidence = load_json("compile-memory-evidence.json")
+    assert set(evidence) == {"crates", "clippy", "kinds", "optimized"}
+    assert evidence["crates"], "compile memory evidence is empty"
+    inventory = load_json("target-inventory.json")
+    identities = {
+        f"{package['package']}/{target['cargo'].replace('-', '_')}"
+        for package in inventory["packages"] for target in package["targets"]
+        if target.get("cargo")
+    }
+    assert set(evidence["crates"]) <= identities
+    for key, measured in evidence["crates"].items():
+        # Unjoined logs cannot name a target kind or optimized configuration.
+        # Use the largest resolved request; joined records below prove each
+        # target kind against its own request.
+        target = compile_requests.get(key, default)
+        requests = [target, test_compile_requests.get(key, target)]
+        requests += list(optimized_requests.get(key, {}).values())
+        sizes.check_compile_memory(measured, max(row["memory_kb"] for row in requests), key)
+    for profile, measured in (("kinds", evidence["kinds"]), ("optimized", evidence["optimized"])):
+        for key, kinds in measured.items():
+            assert set(kinds) <= {"target", "test"}, key
+            for kind, row in kinds.items():
+                resolved = compile_requests.get(key, default)
+                if kind == "test":
+                    resolved = test_compile_requests.get(key, resolved)
+                if profile == "optimized":
+                    resolved = optimized_requests.get(key, {}).get(kind, resolved)
+                sizes.check_compile_memory(row, resolved["memory_kb"], (profile, key, kind))
     for label, measured in measured_tests.items():
         assert label in test_requests or label in batches
         actual = test_requests.get(label, batches.get(label))
         assert actual["cpu_count"] >= measured["cpu_count"]
         assert actual["memory_kb"] >= measured["memory_kb"]
 
-    # A Clippy twin asks for its crate's Clippy row: never below the floor,
-    # never below the largest Clippy peak recorded for the crate (the cgroup
-    # kills at the request above the slot share), and only with enough
-    # samples to price it.
+    # A Clippy twin keeps its own floor and prices only Clippy samples.
+    # Its anonymous-memory contract is checked against its own platform.
     clippy_requests = bzl_value(text, "CLIPPY_REQUESTS")
     measured_clippy = load_json("clippy-sizes.json")
     import generate_model as model
@@ -263,7 +279,18 @@ def check_sizing() -> None:
         assert key in crates, f"Clippy row for no first-party crate: {key}"
         assert row["samples"] >= sizes.MIN_SAMPLES, key
         assert row["memory_kb"] >= sizes.CLIPPY_FLOOR_KB, key
-        assert row["peak_bytes"] <= row["memory_kb"] * 1024, key
+        if key not in evidence["clippy"]:
+            assert row["peak_bytes"] <= row["memory_kb"] * 1024, key
+    assert set(evidence["clippy"]) <= crates
+    for key, measured in evidence["clippy"].items():
+        if key in clippy_requests:
+            memory_kb = clippy_requests[key]["memory_kb"]
+        else:
+            target = compile_requests.get(key, default)
+            requests = [target, test_compile_requests.get(key, target)]
+            requests += list(optimized_requests.get(key, {}).values())
+            memory_kb = max(row["memory_kb"] for row in requests)
+        sizes.check_compile_memory(measured, memory_kb, ("clippy", key))
 
     # Compile requests resolve through one registered platform each; a test
     # run or batch states its request to the test executor directly.

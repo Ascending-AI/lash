@@ -303,6 +303,103 @@ class InForceTest(unittest.TestCase):
         self.assertEqual(sizes.test_run_table({}, current)[label], current[label])
 
 
+class AnonymousMemoryTest(unittest.TestCase):
+    def measured(self, anon, peak=8 * GIB, count=20):
+        return sizes.collect([usage(peak_bytes=peak, anon_peak_bytes=anon)] * count, {("lash-internal-core", "lash_core")})
+
+    def test_compile_prices_anonymous_memory_with_fixed_allowance(self):
+        # 1 GiB x 1.25 + 512 MiB = 1.75 GiB; seed a row to cross hysteresis.
+        row = sizes.table(self.measured(GIB), {KEY: {"cpu_count": 1, "memory_kb": 4 * 1024 * 1024}})[KEY]
+        self.assertEqual(row["memory_kb"], 1792 * 1024)
+        self.assertEqual(row["p99_peak_bytes"], GIB)
+        self.assertEqual(row["peak_bytes"], GIB)
+
+    def test_anonymous_policy_does_not_cap_need_at_previous_request(self):
+        line = usage(peak_bytes=8 * GIB, anon_peak_bytes=int(3.4 * GIB), requested_kb=4 * 1024 * 1024)
+        row = sizes.compile_row(sizes.collect([line] * 20, {("lash-internal-core", "lash_core")})[KEY], (1, 4 * 1024 * 1024))
+        self.assertEqual(row["memory_kb"], 4864 * 1024)
+
+    def test_legacy_records_keep_the_previous_formula(self):
+        for anon in ("-", "invalid"):
+            measured = self.measured(anon, peak=3 * GIB)
+            self.assertEqual(sizes.table(measured)[KEY]["memory_kb"], 3840 * 1024)
+        self.assertEqual(sizes.compile_row(self.measured(0)[KEY], (1, 4 * 1024 * 1024))["memory_kb"], sizes.DEFAULT_MEMORY_KB)
+
+    def test_legacy_contract_keeps_peak_floor_without_inventing_anonymous_data(self):
+        sample = self.measured("-", peak=3 * GIB)[KEY]
+        evidence = sizes.compile_evidence({KEY: sample})[KEY]
+        self.assertEqual(evidence["p99_anon_peak_bytes"], 0)
+        sizes.check_compile_memory(evidence, 3840 * 1024, KEY)
+        with self.assertRaises(AssertionError):
+            sizes.check_compile_memory(evidence, 2 * 1024 * 1024, KEY)
+
+    def test_compile_p99_ignores_one_anonymous_outlier(self):
+        lines = [usage(peak_bytes=8 * GIB, anon_peak_bytes=GIB)] * 199
+        lines += [usage(peak_bytes=8 * GIB, anon_peak_bytes=5 * GIB)]
+        sample = sizes.collect(lines, {("lash-internal-core", "lash_core")})[KEY]
+        row = sizes.compile_row(sample, (1, 4 * 1024 * 1024))
+        self.assertEqual(row["memory_kb"], 1792 * 1024)
+        sizes.check_compile_memory(sizes.compile_evidence({KEY: sample})[KEY], row["memory_kb"], KEY)
+
+    def test_compile_contract_rejects_exact_eighty_percent(self):
+        evidence = {"p99_anon_peak_bytes": 4 * GIB, "legacy_peak_bytes": 0, "oom_kills": 0, "samples": 20}
+        with self.assertRaises(AssertionError):
+            sizes.check_compile_memory(evidence, 5 * 1024 * 1024, KEY)
+        evidence["p99_anon_peak_bytes"] -= 1
+        sizes.check_compile_memory(evidence, 5 * 1024 * 1024, KEY)
+
+    def test_killed_compiles_remain_evidence_without_successful_samples(self):
+        for field in ("exit=137", "exit=247", "exit=-9", "exit=1\toom_kill=1"):
+            line = usage(wall_ms=10).replace("exit=0", field)
+            measured = sizes.collect([line], {("lash-internal-core", "lash_core")}, include_killed=True)
+            evidence = sizes.compile_evidence(measured)[KEY]
+            self.assertEqual(evidence["samples"], 0)
+            self.assertEqual(evidence["oom_kills"], 1)
+            with self.assertRaises(AssertionError):
+                sizes.check_compile_memory(evidence, 4 * 1024 * 1024, KEY)
+        self.assertEqual(sizes.collect([usage().replace("exit=0", "exit=1")], {("lash-internal-core", "lash_core")}), {})
+
+    def test_anonymous_kinds_and_optimized_rows_use_the_same_policy(self):
+        sample = self.measured(2 * GIB)[KEY]
+        rows = sizes.kind_table({(KEY, "target"): sample}, {KEY: {"cpu_count": 1, "memory_kb": 4 * 1024 * 1024}})
+        self.assertEqual(rows[KEY]["target"]["memory_kb"], 3 * 1024 * 1024)
+        optimized = sizes.optimized_table({(KEY, "target"): sample}, lambda *_: (1, 1572864), lambda *_: (1, 1572864))
+        self.assertEqual(optimized[KEY]["target"]["memory_kb"], 3 * 1024 * 1024)
+        # With only one low optimized sample the previous reservation stays.
+        sample = self.measured(0, count=1)[KEY]
+        optimized = sizes.optimized_table({(KEY, "target"): sample}, lambda *_: (1, 1572864), lambda *_: (1, 4 * 1024 * 1024))
+        self.assertEqual(optimized[KEY]["target"]["memory_kb"], 4 * 1024 * 1024)
+
+    def test_clippy_uses_anonymous_memory_with_its_own_floor(self):
+        line = usage(category="clippy", peak_bytes=8 * GIB, anon_peak_bytes=64 * 1024**2)
+        samples = sizes.collect([line] * 20, {("lash-internal-core", "lash_core")}, clippy=True)
+        self.assertEqual(sizes.collect([line] * 20, {("lash-internal-core", "lash_core")}), {})
+        row = sizes.clippy_table(samples)[KEY]
+        self.assertEqual(row["memory_kb"], 768 * 1024)
+        self.assertLess(row["memory_kb"], sizes.DEFAULT_MEMORY_KB)
+        legacy = usage(category="clippy", peak_bytes=64 * 1024**2)
+        old = sizes.collect([legacy] * 20, {("lash-internal-core", "lash_core")}, clippy=True)
+        self.assertEqual(sizes.clippy_table(old)[KEY]["memory_kb"], sizes.CLIPPY_FLOOR_KB)
+
+    def test_clippy_kills_reject_its_separate_request(self):
+        line = usage(category="clippy", wall_ms=10).replace("exit=0", "exit=137")
+        optimized_ops = frozenset({sizes.parse_record(line)["op"]})
+        samples = sizes.collect([line], {("lash-internal-core", "lash_core")}, optimized_ops, clippy=True, include_killed=True)
+        evidence = sizes.compile_evidence(samples)[KEY]
+        self.assertEqual(evidence["samples"], 0)
+        self.assertEqual(evidence["oom_kills"], 1)
+        with self.assertRaises(AssertionError):
+            sizes.check_compile_memory(evidence, sizes.CLIPPY_FLOOR_KB, ("clippy", KEY))
+
+    def test_test_runs_keep_cgroup_peaks_and_the_ninety_percent_rule(self):
+        label = "//crates/lash-core:runtime_turns__test"
+        line = usage(peak_bytes=3 * GIB, anon_peak_bytes=GIB).replace("test=-", f"test=run:-:{label}")
+        row = sizes.test_run_table(sizes.collect_test_runs([line] * 3, {label}))[label]
+        self.assertEqual(row["p99_peak_bytes"], 3 * GIB)
+        self.assertEqual(row["memory_kb"], 3840 * 1024)
+        self.assertEqual(sizes.HEADROOM, 0.9)
+
+
 class CategoryTableTest(unittest.TestCase):
     def test_a_category_counts_every_record_and_the_peak_no_row_sizes(self) -> None:
         crates = {("lash-internal-core", "lash_core")}

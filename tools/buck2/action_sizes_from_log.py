@@ -26,6 +26,10 @@ That rewrites `tools/buck2/action-sizes.json`,
 `tools/buck2/clippy-sizes.json`, `tools/buck2/category-sizes.json` and
 `tools/buck2/test-run-sizes.json` and runs `tools/buck2/sync.py`, which
 regenerates `tools/buck2/exec_sizes.bzl` (requests and pool budgets) from them.
+Compile rows' `peak_bytes` and `p99_peak_bytes` describe the sizing basis:
+anonymous memory where available, cgroup memory for legacy records. The separate
+`compile-memory-evidence.json` includes default rows and failed actions, so OOM
+records are never lost when sizing filters out unsuccessful compiles.
 Compile rows read only the Buck2 action shape (`tool=python3`), so older logs
 from the Bazel era add nothing to them; `--since <unix seconds>` drops older
 records when a window is wanted. `--report` prints, from the same logs, what
@@ -64,21 +68,18 @@ The rule, per `<package>/<crate>`:
   request itself; a p95 within 0.2 of a whole core rounds down because CPU is
   compressible: an action that briefly wants 2.1 cores on 2 runs slightly
   slower and does not fail.
-* `memory_kb` = the p99 need, never below the largest peak, rounded up to
-  256 MiB, never below the 1.5 GiB default, and never below the crate's entry
-  in `MINIMUM_MEMORY_KB`. A run's peak is the larger of `peak_bytes` and
-  `anon_peak_bytes`; its need is that peak x 1.25, or the request it ran under
-  when the peak stayed under 90% of that request: a run that fit with room
-  proves its request enough, and `memory.peak` includes page cache, which
-  fills whatever limit it is given. Rustc's memory is heap and not compressible, so no recorded
-  compile peak may exceed the request.
+* `memory_kb` = p99 anonymous peak x 1.25 plus 512 MiB, rounded up to
+  256 MiB and at least the 1.5 GiB default and `MINIMUM_MEMORY_KB` floor.
+  Anonymous peaks are sampled every 250 ms. The fixed allowance covers
+  sampling error and the working set of file-backed pages. Older records
+  without anonymous measurements keep the previous cgroup-peak rule.
 * At least 20 samples, or the row in force stays -- a crate in
   `MINIMUM_MEMORY_KB` keeps its floor even on too few or too small samples.
   Fewer samples are not enough for a p95.
 * A request is a platform property and so part of the action key: resizing a
   row re-executes every action of its targets on a cold cache. A refresh
   therefore keeps the row in force unless the request moves by a whole CPU or
-  by at least 512 MiB, or a recorded peak exceeds it.
+  by at least 512 MiB. Anonymous p99 must remain below 80% of the request.
 * A row that asks for no more than the defaults is dropped: absence from the
   file *is* the default request.
 
@@ -166,7 +167,8 @@ the compile fields are empty for it. The rule, per label:
   label Buck2 has run less often also counts its Bazel-era runs
   (`tool=test-setup.sh`): the wrapper differed, the libtest binary and its
   cgroup did not.
-* `memory_kb` = the p99 need as above, rounded up to 256 MiB, at least 1 GiB,
+* `memory_kb` = the p99 of `memory_need(max(peak, anon), request)`, rounded
+  up to 256 MiB, at least 1 GiB,
   and never below the label's entry in `TEST_RUN_MINIMUM_MEMORY_KB`. A
   measured row in force stays unless the request moves by a whole CPU or by
   at least 512 MiB, or the p99 peak reaches 90% of it. The
@@ -220,10 +222,12 @@ CPU_TOLERANCE = 0.2
 SHARE_CORES = 1.6
 # The pool caps a single action's request at 8 cores.
 MAX_CPU_COUNT = 8
-# Peak is what the action reached on one machine on one day; the margin keeps a
-# slightly larger input from being OOM-killed by the action cgroup. It sits on
-# each run's peak (see `memory_need`); the request is the p99 of those needs.
+# The proportional margin covers variation between inputs; compile anonymous
+# samples also get a fixed allowance for file-backed pages and sampling error.
+# Test runs and legacy compiles keep `memory_need`'s previous request bound.
 MEMORY_MARGIN = 1.25
+COMPILE_CACHE_BYTES = 512 * 1024 * 1024
+COMPILE_HEADROOM = 0.8
 # The share of its request a run may fill and still count as fitting it. A
 # test-run row holds its p99 peak under this share; the graph contracts check
 # it.
@@ -270,12 +274,26 @@ class Samples:
         # (cores, peak_bytes, requested_cpu)
         self.records: list[tuple[float, int, int]] = []
         self.needs: list[float] = []
+        self.legacy_peaks: list[int] = []
+        self.anon_peaks: list[int] = []
+        self.oom_kills = 0
 
     def observe(
-        self, cores: float, peak_bytes: int, requested_cpu: int, requested_kb: int = 0
+        self,
+        cores: float,
+        peak_bytes: int,
+        requested_cpu: int,
+        requested_kb: int = 0,
+        anon_peak_bytes: int | None = None,
     ) -> None:
-        self.records.append((cores, peak_bytes, requested_cpu))
-        self.needs.append(memory_need(peak_bytes, requested_kb))
+        basis = peak_bytes if anon_peak_bytes is None else anon_peak_bytes
+        self.records.append((cores, basis, requested_cpu))
+        if anon_peak_bytes is None:
+            self.legacy_peaks.append(peak_bytes)
+            self.needs.append(memory_need(peak_bytes, requested_kb))
+        else:
+            self.anon_peaks.append(anon_peak_bytes)
+            self.needs.append(anon_peak_bytes * MEMORY_MARGIN + COMPILE_CACHE_BYTES)
 
     def cpu_basis(self) -> list[float]:
         return [r[0] for r in self.records]
@@ -390,6 +408,7 @@ def collect(
     crates: set[tuple[str, str]],
     optimized_ops: frozenset[str] = frozenset(),
     clippy: bool = False,
+    *, include_killed: bool = False,
 ) -> dict[str, Samples]:
     """Keeps the Lash compile samples; every other record is skipped.
 
@@ -408,16 +427,17 @@ def collect(
         if record is None or record.get("tool") not in COMPILE_TOOLS:
             continue
         pair = (record.get("pkg", ""), record.get("crate", ""))
-        if pair not in crates or record.get("op", "-") in optimized_ops:
+        if pair not in crates or (not clippy and record.get("op", "-") in optimized_ops):
             continue
         if (record.get("category") == "clippy") != clippy:
             continue
         observe_compile(measured[f"{pair[0]}/{pair[1]}"], record)
-    return {key: samples for key, samples in measured.items() if samples.records}
+    return {key: samples for key, samples in measured.items() if samples.records or (include_killed and samples.oom_kills)}
 
 
 def observe_compile(samples: Samples, record: dict[str, str]) -> None:
-    """Adds one compile record when it is a sample: successful, a second long."""
+    """Keep sizing samples and retain kills even when they leave no sample."""
+    samples.oom_kills += oom_killed(record)
     if record.get("exit") != "0":
         return
     wall_ms = as_int(record.get("wall_ms"))
@@ -432,10 +452,24 @@ def observe_compile(samples: Samples, record: dict[str, str]) -> None:
         peak_bytes,
         as_int(record.get("requested_cpu")) or DEFAULT_CPU_COUNT,
         as_int(record.get("requested_kb")) or 0,
+        as_int(record.get("anon_peak_bytes")),
     )
 
 
-def collect_kinds(labelled, shared: set[str]) -> dict[tuple[str, str], Samples]:
+def oom_killed(record: dict[str, str]) -> bool:
+    """Explicit OOM counts, or SIGKILL exits conservatively treated as OOM.
+
+    The Rust wrapper returns -9 through Python's sys.exit, which the shell
+    observes as 247. Killing the wrapper itself yields 137. Usage logs do
+    not distinguish these kills from an external SIGKILL.
+    """
+    return (
+        bool(as_int(record.get("oom_kill")) or as_int(record.get("oom_kills")))
+        or record.get("exit") in {"-9", "137", "247"}
+    )
+
+
+def collect_kinds(labelled, shared: set[str], *, include_killed: bool = False) -> dict[tuple[str, str], Samples]:
     """The matched records of each shared identity, per `(key, kind)`.
 
     `labelled` is `action_categories_from_events.labelled_records`; `shared`
@@ -449,10 +483,10 @@ def collect_kinds(labelled, shared: set[str]) -> dict[tuple[str, str], Samples]:
             continue
         if key in shared and kind in TARGET_KINDS and not optimized:
             observe_compile(measured[(key, TARGET_KINDS[kind])], record)
-    return {group: samples for group, samples in measured.items() if samples.records}
+    return {group: samples for group, samples in measured.items() if samples.records or (include_killed and samples.oom_kills)}
 
 
-def collect_optimized(labelled) -> dict[tuple[str, str], Samples]:
+def collect_optimized(labelled, *, include_killed: bool = False) -> dict[tuple[str, str], Samples]:
     """The matched records of optimized-configuration compiles, per `(key, kind)`."""
     from action_categories_from_events import TARGET_KINDS
 
@@ -460,7 +494,7 @@ def collect_optimized(labelled) -> dict[tuple[str, str], Samples]:
     for key, kind, category, _emit, optimized, record in labelled:
         if optimized and kind in TARGET_KINDS and category != "clippy":
             observe_compile(measured[(key, TARGET_KINDS[kind])], record)
-    return {group: samples for group, samples in measured.items() if samples.records}
+    return {group: samples for group, samples in measured.items() if samples.records or (include_killed and samples.oom_kills)}
 
 
 TEST_MIN_SAMPLES = 3
@@ -659,11 +693,12 @@ def compile_row(
     p95 = percentile(samples.cpu_basis(), CPU_PERCENTILE) if samples.records else 0.0
     peak_bytes = samples.peak_bytes() if samples.records else 0
     memory_kb = max(
-        memory_kb_for(samples.needs, floor_kb, peak_bytes) if samples.records else 0,
+        memory_kb_for(samples.needs, floor_kb, max(samples.legacy_peaks, default=0))
+        if samples.records else floor_kb,
         minimum,
     )
     cpu_count, memory_kb = settled(
-        current, cpu_count_for(p95), memory_kb, max(peak_bytes, minimum * 1024)
+        current, cpu_count_for(p95), memory_kb, max(max(samples.legacy_peaks, default=0), minimum * 1024)
     )
     return {
         "cpu_count": cpu_count,
@@ -998,6 +1033,25 @@ def refresh(lines, crates: set[tuple[str, str]], inventory: dict, events: list) 
         collect_test_runs(lines, labels),
         {label: row for label, row in stored("test-run-sizes.json").items() if label in labels},
     )
+    # This refresh changes requests only for a >=512 MiB memory move. Keep
+    # CPU-only test corrections from changing unrelated test action digests.
+    for label, old in stored("test-run-sizes.json").items():
+        row = test_rows.get(label)
+        if row and abs(row["memory_kb"] - old["memory_kb"]) < MEMORY_HYSTERESIS_KB:
+            row["cpu_count"], row["memory_kb"] = old["cpu_count"], old["memory_kb"]
+    evidence = {
+        "crates": compile_evidence(collect(lines, crates, optimized_ops, include_killed=True)),
+        "clippy": compile_evidence(collect(lines, crates, optimized_ops, clippy=True, include_killed=True)),
+        "kinds": {},
+        "optimized": {},
+    }
+    for name, measured in (
+        ("kinds", collect_kinds(labelled, shared, include_killed=True)),
+        ("optimized", collect_optimized(labelled, include_killed=True)),
+    ):
+        for (key, kind), row in compile_evidence(measured).items():
+            evidence[name].setdefault(key, {})[kind] = row
+    (ROOT / "tools/buck2/compile-memory-evidence.json").write_text(render(evidence), encoding="utf-8")
     for name, rows in (
         ("action-sizes.json", crate_rows),
         ("target-kind-sizes.json", kind_rows),
@@ -1007,6 +1061,26 @@ def refresh(lines, crates: set[tuple[str, str]], inventory: dict, events: list) 
         ("test-run-sizes.json", test_rows),
     ):
         (ROOT / "tools/buck2" / name).write_text(render(rows), encoding="utf-8")
+
+
+def compile_evidence(measured: dict) -> dict:
+    """Safety measurements, including defaults and failed actions."""
+    return {
+        key: {
+            "p99_anon_peak_bytes": percentile(samples.anon_peaks, MEMORY_PERCENTILE) if samples.anon_peaks else 0,
+            "legacy_peak_bytes": max(samples.legacy_peaks, default=0),
+            "oom_kills": samples.oom_kills,
+            "samples": len(samples.records),
+        }
+        for key, samples in sorted(measured.items())
+    }
+
+
+def check_compile_memory(evidence: dict, memory_kb: int, identity: object) -> None:
+    """Reject anonymous p99 at 80% of the request and every recorded kill."""
+    assert evidence["oom_kills"] == 0, (identity, "OOM/SIGKILL in measurement window")
+    assert evidence["p99_anon_peak_bytes"] < COMPILE_HEADROOM * memory_kb * 1024, (identity, "compile p99 needs headroom")
+    assert evidence["legacy_peak_bytes"] <= memory_kb * 1024, (identity, "legacy peak exceeds request")
 
 
 def read_lines(paths: list[pathlib.Path], since: int) -> list[str]:

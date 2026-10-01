@@ -274,19 +274,27 @@ capacity and an undersized one is a throttled or killed action. The rule, in
   worker runs a one-CPU request under its slot share (1.67 cores at the least),
   not under a one-core quota. Above that, and for every test run, the request
   is `ceil(p95 - 0.2)`, capped at 8: there the cgroup's `cpu.max` is the request.
-- Memory is the p99 peak x 1.25, rounded up to 256 MiB, where a run's peak is
-  the larger of its cgroup peak and its sampled anonymous peak. A run that
-  stayed inside the request it ran under needs no more than that request. A
-  compile row never drops below its largest recorded peak or the 1.5 GiB
-  default; a test row never drops below 1 GiB.
+- Compile memory is p99 anonymous peak x 1.25 plus 512 MiB, rounded up to
+  256 MiB, with the existing 1.5 GiB default and per-crate floors. The anonymous
+  measurement is sampled every 250 ms and is a lower bound. The fixed allowance
+  covers sampling error and a working set of file-backed pages. Older records
+  without anonymous measurements use the previous cgroup-peak formula, including
+  its bound at a request the run fit inside and its largest-peak floor.
+- Test runs retain p99 of the larger of cgroup and anonymous peaks x 1.25,
+  bounded at a request the run fit inside, rounded up to 256 MiB and at least
+  1 GiB. Tests can retain mmap or tmpfs pages whose reclaim can cost time or
+  cannot proceed without swap. The logs do not distinguish these pages from
+  disposable page cache, so test reservations retain that conservative rule.
+  The [kernel's memory accounting](https://docs.kernel.org/admin-guide/cgroup-v2.html#memory-interface-files)
+  distinguishes anonymous memory, mmap-backed file pages and swap-backed shmem.
 - Buck2 resolves one execution platform per target, so a request covers every
   category the target runs: a library's metadata, rlib and Rustdoc actions
   share one, as do a test binary's check and link. The split that is possible
   is between targets. Clippy takes it: every generated Rust target has a
   Clippy twin, `<label>__clippy`, the same rule and attributes on a platform
   of its own, and `kiln clippy` builds the twin's `[clippy.txt]`. Its request
-  is the crate's row in `tools/buck2/clippy-sizes.json` (the compile rule
-  over Clippy's own records, at least 512 MiB), else the compile request.
+  is the crate's row in `tools/buck2/clippy-sizes.json` (the anonymous compile rule
+  over Clippy's own records, with a 512 MiB floor), else the compile request.
   First-party build-script runs and the schema actions are helper targets
   and request 512 MiB (`HELPER_ACTION_BUDGET`); a third-party build-script
   run keeps the default, because `ring`, `aws-lc-sys` and `rustix` do not
@@ -305,7 +313,8 @@ capacity and an undersized one is a throttled or killed action. The rule, in
   select's default branch, so its action keys do not depend on this table.
 - A request is a platform property and so part of the action key. A refresh
   keeps the row in force unless the request moves by a whole CPU or at least
-  512 MiB, or a recorded peak exceeds it: a smaller correction is not worth
+  512 MiB. The legacy fallback and test rows also move for unsafe peaks.
+  A smaller correction is not worth
   re-executing the row's targets on a cold cache.
 - Each remote action category takes its request from the target that runs it;
   `ACTION_CATEGORY_SIZES` in `tools/buck2/generate_model.py` names the source
@@ -314,7 +323,7 @@ capacity and an undersized one is a throttled or killed action. The rule, in
 
 Refresh the sizes from the workers' usage logs
 (`/workspace/kiln-executor/usage/actions.log*` on each pool box) with one
-command, then commit the files it rewrites:
+command, then commit the size and evidence files it rewrites:
 
 ```sh
 python3 tools/buck2/action_sizes_from_log.py --refresh --since <unix seconds> \
@@ -323,8 +332,8 @@ python3 tools/buck2/action_sizes_from_log.py --report --since <unix seconds> usa
 ```
 
 `--refresh` rewrites `action-sizes.json`, `target-kind-sizes.json`,
-`optimized-sizes.json`, `clippy-sizes.json`, `category-sizes.json` and
-`test-run-sizes.json` and runs `sync.py`, which
+`optimized-sizes.json`, `clippy-sizes.json`, `category-sizes.json`,
+`test-run-sizes.json` and `compile-memory-evidence.json`, then runs `sync.py`, which
 regenerates `exec_sizes.bzl`, including the execution platforms. `--report`
 prints reserved against used CPU and memory per Buck2 category. The usage log
 names an action's category and crate but not its target or what it emitted,
@@ -336,8 +345,17 @@ those builds executed. Without `--events` the target-kind rows stay as they
 are. A changed request changes the action key, so the first build after a
 refresh re-executes the resized targets. The graph contracts fail when a
 category in the rules or in `category-sizes.json` has no entry, when an action
-no row sizes peaked above its category's smallest request, when a compile row
-is below its recorded peak, and when a test row is below its p99 peak.
+no row sizes peaked above its category's smallest request, when compile p99
+anonymous memory reaches 80% of its request, when any compile was OOM-killed in
+the window, and when test p99 reaches 90% of its request. Compile cgroup peaks
+may exceed the request because page cache is reclaimable. Legacy records retain
+their cgroup-peak floor when no anonymous measurement exists. Evidence includes
+failed compiles and default rows. Joined records check each target kind and
+profile; unjoined records use the largest resolved request for their crate.
+Clippy records are kept apart and checked against their own resolved request.
+Usage logs currently omit an OOM counter, so SIGKILL exits are conservatively
+counted as OOMs, including the Rust wrapper's exit 247 for signal 9. Explicit
+`oom_kill` or `oom_kills` fields are accepted when available.
 
 When a compile is OOM-killed at its request (`rustc` exits on signal 9 with
 no output) and the build cannot wait for a refresh, raise every sized
