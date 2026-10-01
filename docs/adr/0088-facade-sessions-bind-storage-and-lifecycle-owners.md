@@ -53,7 +53,10 @@ a child the set cannot create is refused before the handoff. The worker binds
 the same set and builds the process's runtime from the captured environment;
 it supplies no policy or plugin config of its own. A child its worker's set
 cannot create is a terminal typed refusal (`session_config_refused`), never a
-retried infrastructure error.
+retried infrastructure error. A tool-declared session-turn start without a
+captured environment is `ExecutionEnvMissing` at intent admission, before any
+start command is recorded. Completed batches refuse together; pending declared
+starts settle the call with a non-retryable refusal.
 
 A deployment that needs an incompatible plugin set — another protocol, or
 owners whose recorded namespaces the first set does not register — runs it on

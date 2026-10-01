@@ -261,6 +261,11 @@ pub(super) fn admit_batch(
                 recorded: intent.owner().to_string(),
             });
         }
+        if let crate::ToolIntent::StartProcess(start) = intent
+            && let Some(refusal) = start.admission_refusal()
+        {
+            return Some(refusal);
+        }
     }
     None
 }

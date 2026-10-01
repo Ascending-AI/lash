@@ -1587,6 +1587,7 @@ mod recorded_child_facts_store_axis;
 mod recording_context;
 mod restate_redrive;
 mod session_failure_evidence_on_the_double;
+mod session_turn_intent_admission;
 mod substrate_lost;
 mod sync_hooks_retryable_faults;
 mod tool_batch_parallelism_on_the_double;

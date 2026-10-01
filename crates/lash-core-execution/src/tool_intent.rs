@@ -225,6 +225,15 @@ pub struct StartProcessIntent {
 }
 
 impl StartProcessIntent {
+    /// Shared admission for completed intent batches and pending declared starts.
+    pub(crate) fn admission_refusal(&self) -> Option<crate::ToolIntentRefusalReason> {
+        (matches!(
+            self.declaration.input,
+            crate::ProcessInput::SessionTurn { .. }
+        ) && self.declaration.env_ref.is_none())
+        .then_some(crate::ToolIntentRefusalReason::ExecutionEnvMissing)
+    }
+
     /// Both realization routes call this and nothing else, so every redrive
     /// of one declaration presents the same start key (ADR 0107).
     pub fn into_request(&self, identity: &ToolIntentIdentity) -> crate::ProcessStartRequest {

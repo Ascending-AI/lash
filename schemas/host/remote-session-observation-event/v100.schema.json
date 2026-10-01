@@ -1580,6 +1580,18 @@
         },
         {
           "properties": {
+            "reason": {
+              "const": "execution_env_missing",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "actual": {
               "format": "uint",
               "minimum": 0,

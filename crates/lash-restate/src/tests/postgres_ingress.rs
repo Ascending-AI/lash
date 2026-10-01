@@ -472,3 +472,27 @@ mod recorded_child_facts {
         fixture
     }; declared_start_child_runs_under_recorded_facts_on_a_worker_with_other_defaults);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
+async fn a_session_turn_intent_without_an_env_is_refused_before_recording_on_postgres() {
+    let Some(((database, attachments, double), _tier)) =
+        super::recorded_child_facts_store_axis::postgres_tier().await
+    else {
+        panic!("the session-turn intent admission law requires PostgreSQL");
+    };
+    super::session_turn_intent_admission::law(&double).await;
+    drop((database, attachments));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
+async fn a_declared_session_turn_without_an_env_is_refused_before_recording_on_postgres() {
+    let Some(((database, attachments, double), _tier)) =
+        super::recorded_child_facts_store_axis::postgres_tier().await
+    else {
+        panic!("the declared session-turn admission law requires PostgreSQL");
+    };
+    super::session_turn_intent_admission::declared_law(&double).await;
+    drop((database, attachments));
+}

@@ -132,7 +132,7 @@ fn tier(
 }
 
 /// A double whose every store is a SQLite file set under a fresh directory.
-async fn sqlite_file_tier() -> (
+pub(super) async fn sqlite_file_tier() -> (
     (
         tempfile::TempDir,
         lash_restate_test::RestateTestBackend<dyn lash_core::StoreSet>,

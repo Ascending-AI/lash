@@ -136,6 +136,9 @@ pub enum ToolIntentRefusalReason {
         recorded: u16,
     },
     IntentIndexOverflow,
+    /// A session-turn intent declares no captured environment. Admission
+    /// refuses it before recording a start; retrying cannot supply that fact.
+    ExecutionEnvMissing,
     CountBudgetExceeded {
         actual: usize,
         maximum: usize,
@@ -186,6 +189,7 @@ impl ToolIntentRefusalReason {
         match self {
             Self::UnsupportedProtocolVersion { .. } => "unsupported_protocol_version",
             Self::IntentIndexOverflow => "intent_index_overflow",
+            Self::ExecutionEnvMissing => "execution_env_missing",
             Self::CountBudgetExceeded { .. } => "count_budget_exceeded",
             Self::CanonicalByteBudgetExceeded { .. } => "canonical_byte_budget_exceeded",
             Self::PerKindBudgetExceeded { .. } => "per_kind_budget_exceeded",
@@ -208,6 +212,9 @@ impl ToolIntentRefusalReason {
                 format!("{code}: intent protocol version {recorded} is not this build's")
             }
             Self::IntentIndexOverflow => format!("{code}: the intent index does not fit in u32"),
+            Self::ExecutionEnvMissing => {
+                format!("{code}: a session-turn intent requires a captured execution env")
+            }
             Self::CountBudgetExceeded { actual, maximum } => {
                 format!(
                     "{code}: the attempt declared {actual} intents; at most {maximum} are admitted"

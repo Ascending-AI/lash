@@ -205,6 +205,7 @@ impl From<lash_core::ToolIntentRefusalReason> for RemoteToolIntentRefusalReason 
                 Self::UnsupportedProtocolVersion { recorded }
             }
             Core::IntentIndexOverflow => Self::IntentIndexOverflow,
+            Core::ExecutionEnvMissing => Self::ExecutionEnvMissing,
             Core::CountBudgetExceeded { actual, maximum } => {
                 Self::CountBudgetExceeded { actual, maximum }
             }

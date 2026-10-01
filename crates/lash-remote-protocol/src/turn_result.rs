@@ -509,6 +509,7 @@ pub enum RemoteToolIntentRefusalReason {
         recorded: u16,
     },
     IntentIndexOverflow,
+    ExecutionEnvMissing,
     CountBudgetExceeded {
         actual: usize,
         maximum: usize,

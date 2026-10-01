@@ -214,6 +214,9 @@ impl DeclaredStart {
                 },
             );
         }
+        if let Some(refusal) = self.start.admission_refusal() {
+            return Err(refusal);
+        }
         Ok(())
     }
 
