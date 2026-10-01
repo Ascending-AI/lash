@@ -120,6 +120,8 @@ macro_rules! turn_config_tests {
             (a_redrive_runs_under_the_execution_controls_its_root_recorded, "turn-config-recorded-controls-redrive"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (a_redrive_assembles_the_terminal_its_root_recorded_termination_decides, "turn-config-recorded-termination-redrive"));
+        $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
+            (a_missing_recorded_termination_is_a_typed_terminal_refusal, "turn-config-missing-recorded-termination"));
     };
     (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
         $($attr)*

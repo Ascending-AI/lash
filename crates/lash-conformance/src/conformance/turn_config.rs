@@ -1374,6 +1374,91 @@ fn termination(missing_done_fails: bool) -> crate::TerminationPolicy {
     }
 }
 
+/// A missing root record refuses terminal assembly without panicking,
+/// retrying, or losing its code at a plugin or host boundary (FIG-4508).
+#[expect(clippy::expect_used, reason = "conformance fixture results must exist")]
+pub async fn a_missing_recorded_termination_is_a_typed_terminal_refusal(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let models = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let parts = law_session(
+        prefix,
+        "missing-recorded-termination",
+        &effect_host,
+        &stores,
+        Arc::new(crate::SingleProviderResolver::new(recording_model(
+            &calls, &models,
+        ))),
+    )
+    .await;
+    let root = TurnId::from(format!("{prefix}-missing-recorded-termination-root"));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    runner
+        .run_turn(
+            admit(crate::ExecutionScope::turn(&parts.session_id, &root)),
+            Arc::new(move |scope| {
+                let parts = parts.clone();
+                let root = root.clone();
+                let tx = tx.clone();
+                Box::pin(async move {
+                    let mut runtime = build_runtime(parts).await;
+                    let result = runtime
+                        .finish_without_recorded_run_for_testing(
+                            root,
+                            crate::TurnOptions::new(
+                                tokio_util::sync::CancellationToken::new(),
+                                scope,
+                            ),
+                        )
+                        .await;
+                    let _ = tx.send(result);
+                    crate::ConformanceTurnEnd::Settled
+                })
+            }),
+        )
+        .await;
+    let error = rx
+        .recv()
+        .await
+        .expect("the commit attempt returned")
+        .expect_err("a root without its record cannot assemble a terminal");
+    let expected = crate::RuntimeErrorCode::from_wire_code("recorded_termination_unavailable");
+    assert_eq!(error.code, expected);
+    assert!(!error.is_retryable());
+    assert!(error.is_terminal());
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    let plugin = crate::plugin::PluginError::Runtime(error.clone());
+    let encoded = serde_json::to_vec(&plugin).expect("encode the plugin refusal");
+    let decoded: crate::plugin::PluginError =
+        serde_json::from_slice(&encoded).expect("decode the plugin refusal");
+    let returned = decoded.into_turn_failure(crate::RuntimeErrorCode::PluginFinalizeTurn);
+    assert_eq!(
+        returned.code, expected,
+        "the plugin boundary retains the cause"
+    );
+    assert!(!returned.is_retryable());
+    let host = crate::SessionError::Plugin(crate::plugin::PluginError::Runtime(returned));
+    let crate::SessionError::Plugin(crate::plugin::PluginError::Runtime(returned)) = host else {
+        panic!("the host retains the typed runtime refusal");
+    };
+    assert_eq!(returned.code, expected);
+    let controller = crate::RuntimeEffectControllerError::from(error);
+    let encoded = serde_json::to_vec(&controller).expect("encode the controller refusal");
+    let decoded: crate::RuntimeEffectControllerError =
+        serde_json::from_slice(&encoded).expect("decode the controller refusal");
+    let returned = crate::plugin::PluginError::RuntimeEffectController(decoded)
+        .into_turn_failure(crate::RuntimeErrorCode::PluginFinalizeTurn);
+    assert_eq!(
+        returned.code, expected,
+        "the controller boundary retains the cause"
+    );
+    assert!(!returned.is_retryable());
+}
+
 /// One attempt of `root` on a worker whose host termination policy is
 /// `termination`, under the protocol that ends its turn without `Done`.
 /// With `crash`, the attempt dies after the root's config record and before

@@ -147,6 +147,10 @@ pub enum RuntimeErrorCode {
     /// A durable record failed deterministic serialization before publication.
     /// Retrying the same value with the same build cannot change the result.
     RecordEncodingFailed,
+    /// Terminal assembly has no installed root record from which to read
+    /// its termination policy. Repair the root's recorded view before it
+    /// can commit; the worker's live policy cannot replace that record.
+    RecordedTerminationUnavailable,
     /// A process (re-)execution was handed an empty/non-persisted process id.
     /// Process execution identity is the persisted `process_id`; a retry that
     /// cannot present that stable id has lost its idempotency anchor.
@@ -668,6 +672,7 @@ impl RuntimeErrorCode {
                 "checkpoint_component_encoding_version_mismatch"
             }
             Self::RecordEncodingFailed => "record_encoding_failed",
+            Self::RecordedTerminationUnavailable => "recorded_termination_unavailable",
             Self::MissingProcessExecutionId => "missing_process_execution_id",
             Self::ExecutionStateCaptureFailed => "execution_state_capture_failed",
             Self::ResidentSessionReloadFailed => "resident_session_reload_failed",
@@ -931,6 +936,7 @@ impl RuntimeErrorCode {
         Self::StoreCommitByteBudgetExceeded,
         Self::CheckpointComponentEncodingVersionMismatch,
         Self::RecordEncodingFailed,
+        Self::RecordedTerminationUnavailable,
         Self::MissingProcessExecutionId,
         Self::ExecutionStateCaptureFailed,
         Self::ResidentSessionReloadFailed,
@@ -1132,6 +1138,7 @@ impl RuntimeErrorCode {
                 Self::CheckpointComponentEncodingVersionMismatch
             }
             "record_encoding_failed" => Self::RecordEncodingFailed,
+            "recorded_termination_unavailable" => Self::RecordedTerminationUnavailable,
             "missing_process_execution_id" => Self::MissingProcessExecutionId,
             "execution_state_capture_failed" => Self::ExecutionStateCaptureFailed,
             "resident_session_reload_failed" => Self::ResidentSessionReloadFailed,

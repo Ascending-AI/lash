@@ -171,18 +171,30 @@ mod recorded_termination {
         lash_conformance::turn_config_tests!(@law [] {
             super::memory_harness(true).await
         }; (a_redrive_assembles_the_terminal_its_root_recorded_termination_decides, "turn-config-recorded-termination-redrive"));
+
+        lash_conformance::turn_config_tests!(@law [] {
+            super::memory_harness(true).await
+        }; (a_missing_recorded_termination_is_a_typed_terminal_refusal, "turn-config-missing-recorded-termination"));
     }
 
     mod sqlite_file {
         lash_conformance::turn_config_tests!(@law [] {
             super::file_harness(false).await
         }; (a_redrive_assembles_the_terminal_its_root_recorded_termination_decides, "turn-config-recorded-termination-redrive"));
+
+        lash_conformance::turn_config_tests!(@law [] {
+            super::file_harness(false).await
+        }; (a_missing_recorded_termination_is_a_typed_terminal_refusal, "turn-config-missing-recorded-termination"));
     }
 
     mod sqlite_file_always_replay {
         lash_conformance::turn_config_tests!(@law [] {
             super::file_harness(true).await
         }; (a_redrive_assembles_the_terminal_its_root_recorded_termination_decides, "turn-config-recorded-termination-redrive"));
+
+        lash_conformance::turn_config_tests!(@law [] {
+            super::file_harness(true).await
+        }; (a_missing_recorded_termination_is_a_typed_terminal_refusal, "turn-config-missing-recorded-termination"));
     }
 }
 

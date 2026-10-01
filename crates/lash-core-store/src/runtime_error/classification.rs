@@ -130,6 +130,8 @@ impl RuntimeErrorCode {
             Self::CheckpointComponentEncodingVersionMismatch => Terminal,
             // serializing the same value with the same build fails the same way.
             Self::RecordEncodingFailed => Terminal,
+            // the root has no recorded policy; retrying cannot supply its missing authority.
+            Self::RecordedTerminationUnavailable => Terminal,
             // the process execution has no persisted id; wiring, not the attempt.
             Self::MissingProcessExecutionId => Terminal,
             // live executor state could not be captured; nothing was published and a redrive recaptures it.

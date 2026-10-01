@@ -370,6 +370,7 @@ impl PluginError {
                         crate::RuntimeErrorCode::WriterFenced
                             | crate::RuntimeErrorCode::StoreIncompatible
                             | crate::RuntimeErrorCode::UsageOwnerRetired
+                            | crate::RuntimeErrorCode::RecordedTerminationUnavailable
                     ) =>
             {
                 error
@@ -382,6 +383,7 @@ impl PluginError {
                         crate::RuntimeErrorCode::WriterFenced
                             | crate::RuntimeErrorCode::StoreIncompatible
                             | crate::RuntimeErrorCode::UsageOwnerRetired
+                            | crate::RuntimeErrorCode::RecordedTerminationUnavailable
                     ) =>
             {
                 error.into_runtime_error()

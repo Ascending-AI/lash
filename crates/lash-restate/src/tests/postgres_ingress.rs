@@ -433,6 +433,12 @@ mod recorded_termination {
         ] {
             super::harness(false).await
         }; (a_redrive_assembles_the_terminal_its_root_recorded_termination_decides, "turn-config-recorded-termination-redrive"));
+
+        lash_conformance::turn_config_tests!(@law [
+            #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
+        ] {
+            super::harness(false).await
+        }; (a_missing_recorded_termination_is_a_typed_terminal_refusal, "turn-config-missing-recorded-termination"));
     }
 
     mod always_replay {
@@ -441,5 +447,11 @@ mod recorded_termination {
         ] {
             super::harness(true).await
         }; (a_redrive_assembles_the_terminal_its_root_recorded_termination_decides, "turn-config-recorded-termination-redrive"));
+
+        lash_conformance::turn_config_tests!(@law [
+            #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
+        ] {
+            super::harness(true).await
+        }; (a_missing_recorded_termination_is_a_typed_terminal_refusal, "turn-config-missing-recorded-termination"));
     }
 }

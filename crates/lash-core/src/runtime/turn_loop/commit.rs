@@ -265,6 +265,51 @@ pub(in crate::runtime) struct LogicalTurnErrorContext<'error, 'run> {
 }
 
 impl LashRuntime {
+    /// Exercise terminal commit with a root whose installed run record was
+    /// lost. The conformance laws use the real commit path on each store.
+    #[cfg(feature = "testing")]
+    pub async fn finish_without_recorded_run_for_testing(
+        &mut self,
+        root: TurnId,
+        opts: TurnOptions<'_>,
+    ) -> Result<(), RuntimeError> {
+        self.state.authority.resolved_run = None;
+        let controller = opts.scoped_effect_controller();
+        let binding =
+            turn_control_binding(self.host.core.control.effect_host.as_ref(), &controller).await?;
+        let control = ActiveTurnControl::new(
+            binding.resolver(),
+            TurnAddress::new(&self.state.session_id, &root),
+        )
+        .await?;
+        let (observer, _observations) =
+            TurnObserver::open(opts.events_or_noop(), opts.turn_events_or_noop());
+        let admissions = LogicalTurnAdmissions::new(Vec::new(), Vec::new());
+        let pipeline = TurnBoundary::from_state_with_clock(
+            self.state.clone(),
+            Arc::clone(&self.host.core.clock),
+            self.state.turn_scope(&root),
+            self.host.core.durability.commit_budget,
+        );
+        self.finish_turn(TurnCommitContext {
+            finish: TurnFinishInput {
+                turn_pipeline: pipeline,
+                recorded_assembly: RecordedTurnAssembly::new(),
+                new_messages: crate::MessageSequence::default(),
+                turn_index: self.state.turn_index,
+                trace_turn_id: root,
+            },
+            admissions: &admissions,
+            scoped_effect_controller: &controller,
+            honoured_cancel: None,
+            drive_fence: None,
+            turn_control: &control,
+            observer: &observer,
+        })
+        .await
+        .map(|_| ())
+    }
+
     /// Commit one physical turn. A stopped turn's terminal, held since the
     /// turn recorded it, publishes only once this commit is accepted; a
     /// failed commit publishes none of it (ADR 0122).
@@ -284,24 +329,25 @@ impl LashRuntime {
     /// [`ResolvedRun`](crate::ResolvedRun). The logical-turn funnel installs
     /// that record before the root's first physical turn and every resident
     /// refresh re-installs it, so every commit of the root reads it.
-    #[expect(
-        clippy::expect_used,
-        reason = "every physical turn commits inside a root whose recorded view the funnel installed"
-    )]
-    fn recorded_termination(&self) -> crate::runtime::TerminationPolicy {
+    fn recorded_termination(&self) -> Result<crate::runtime::TerminationPolicy, RuntimeError> {
         self.state
             .authority
             .resolved_run
             .as_deref()
-            .expect("a committing turn runs under its root's recorded view")
-            .termination
-            .clone()
+            .map(|run| run.termination.clone())
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::RecordedTerminationUnavailable,
+                    "terminal assembly requires the root's recorded termination policy",
+                )
+            })
     }
 
     async fn commit_finished_turn(
         &mut self,
         context: TurnCommitContext<'_, '_>,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
+        let termination = self.recorded_termination()?;
         let TurnCommitContext {
             finish,
             admissions,
@@ -467,7 +513,6 @@ impl LashRuntime {
         // The root's recorded termination policy, never this worker's: a
         // replay or redrive on a worker with another policy assembles the
         // same terminal for the same recorded work (FIG-4389).
-        let termination = self.recorded_termination();
         let assembled = assembly.finish(assembled_state, cancellation.clone(), None, &termination);
 
         let Some(session) = self.session.as_ref() else {
