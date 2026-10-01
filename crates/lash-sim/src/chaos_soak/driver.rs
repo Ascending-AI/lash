@@ -125,14 +125,19 @@ pub struct Counts {
 
 /// The deployment every epoch runs: the standard protocol answering from the
 /// shared scripted model, a Lashlang process engine, and a recovery lease
-/// that competes at the rank of the build it runs.
-pub(super) fn soak_core(reached: Reached, rank: Arc<AtomicI64>) -> CoreBuild {
+/// that competes at the rank of the build it runs. `drain` is how much
+/// eligible turn-lane work one root takes.
+pub(super) fn soak_core(
+    reached: Reached,
+    rank: Arc<AtomicI64>,
+    drain: lash::DrainMode,
+) -> CoreBuild {
     Arc::new(move |backend, owner| {
         let model = process::model_spec()?;
         let processes = LashlangProcesses::over(&backend);
         lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024).with_drain_mode(drain))
             .recovery_lease(lash::RecoveryLeaseConfig {
                 generation_rank: rank.load(Ordering::SeqCst),
                 timings: soak_lease_timings(),
@@ -293,7 +298,20 @@ pub(super) struct Driver {
 }
 
 impl Driver {
+    /// A world under the default drain: every input is its own root.
     pub async fn new(seed: u64) -> Result<Self, String> {
+        Self::with_drain(seed, lash::DrainMode::default()).await
+    }
+
+    /// A world whose drain takes every eligible input into one root
+    /// (`DrainMode::All`), for a law about an input another input's root
+    /// admitted: the default drain never composes one (FIG-4457).
+    #[cfg(test)]
+    pub async fn composing(seed: u64) -> Result<Self, String> {
+        Self::with_drain(seed, lash::DrainMode::All).await
+    }
+
+    async fn with_drain(seed: u64, drain: lash::DrainMode) -> Result<Self, String> {
         let reached = Arc::new(tokio::sync::watch::channel(BTreeSet::new()).0);
         let rank = Arc::new(AtomicI64::new(0));
         // Time moves only when the soak moves it, and a retry waits out its
@@ -308,7 +326,7 @@ impl Driver {
         };
         let world = CrashWorld::on_server(
             seed,
-            soak_core(Arc::clone(&reached), Arc::clone(&rank)),
+            soak_core(Arc::clone(&reached), Arc::clone(&rank), drain),
             true,
             config,
         )

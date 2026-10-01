@@ -1174,6 +1174,7 @@ pub async fn a_joined_inputs_turn_scope_closes_with_its_admitting_root(
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
     let mut parts = DriveParts::new(prefix, "joined-scope-close", &effect_host, &stores, 8).await;
+    parts.compose_inputs();
     let registry = stores.process_registry();
     parts.host.control.scope_close = Arc::new(
         crate::RegistryScopeClose::new(Arc::clone(&registry), stores.clock())

@@ -81,18 +81,23 @@ impl Workload {
         // Deserialize first so duplicate typed fields cannot disappear into a Value map.
         let spec: WorkloadSpec = serde_json::from_str(json).context("decode workload v1")?;
         let value = serde_json::to_value(&spec)?;
-        static VALIDATOR: OnceLock<Result<jsonschema::JSONSchema, String>> = OnceLock::new();
+        static VALIDATOR: OnceLock<Result<jsonschema::Validator, String>> = OnceLock::new();
         let validator = VALIDATOR
             .get_or_init(|| {
                 serde_json::to_value(schema())
                     .map_err(|e| e.to_string())
                     .and_then(|value| {
-                        jsonschema::JSONSchema::compile(&value).map_err(|e| e.to_string())
+                        jsonschema::options()
+                            .with_draft(jsonschema::Draft::Draft7.detect(&value))
+                            .should_validate_formats(true)
+                            .build(&value)
+                            .map_err(|e| e.to_string())
                     })
             })
             .as_ref()
             .map_err(|e| anyhow::anyhow!("workload schema: {e}"))?;
-        if let Err(errors) = validator.validate(&value) {
+        if !validator.is_valid(&value) {
+            let errors = validator.iter_errors(&value);
             anyhow::bail!(
                 "invalid workload: {}",
                 errors.map(|e| e.to_string()).collect::<Vec<_>>().join("; ")

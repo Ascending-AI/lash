@@ -67,8 +67,8 @@ impl QueuedWorkBatchingConfig {
     /// Hosts may replace this latency bound with
     /// [`Self::with_max_pending_age`].
     pub const DEFAULT_MAX_PENDING_AGE: std::time::Duration = std::time::Duration::from_secs(30);
-    /// Default upper bound on pending next-turn inputs one idle admission absorbs
-    /// into a single turn.
+    /// Default upper bound on pending next-turn inputs one idle admission
+    /// offers the drain policy.
     ///
     /// Hosts may replace it with [`Self::with_max_turn_input_admission`].
     pub const DEFAULT_MAX_TURN_INPUT_CLAIM: usize = 64;
@@ -121,7 +121,8 @@ impl QueuedWorkBatchingConfig {
     /// Selects one of the two shipped drain shapes.
     ///
     /// Unset, Lash uses [`DrainMode::OneAtATime`](crate::DrainMode::OneAtATime):
-    /// one queued row per drain, strict FIFO, no token arithmetic.
+    /// one row per root, queued work and next-turn host input alike, strict
+    /// FIFO, no token arithmetic.
     pub fn with_drain_mode(mut self, mode: crate::DrainMode) -> Self {
         self.drain_policy = Some(crate::runtime::shared_drain_mode_policy(mode));
         self
@@ -185,7 +186,9 @@ impl QueuedWorkBatchingConfig {
     }
 
     /// Sets the maximum number of pending next-turn inputs one idle admission
-    /// absorbs into a single turn.
+    /// offers the drain policy. How many of them the root takes is the drain
+    /// policy's decision (ADR 0101 §5.2): the default takes one, so each
+    /// input is its own root.
     ///
     /// Direct and drained ingress share the bound because they share the admission
     /// (ADR 0069): a direct turn takes the head of the same queue a drain does.
@@ -205,7 +208,7 @@ impl QueuedWorkBatchingConfig {
     }
 
     /// Returns the maximum number of pending next-turn inputs one idle admission
-    /// absorbs into a single turn.
+    /// offers the drain policy.
     pub const fn max_turn_input_admission(&self) -> usize {
         self.max_turn_input_admission.get()
     }

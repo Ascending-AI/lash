@@ -418,3 +418,123 @@ fn bounded_encoder_capacity_does_not_double_past_the_cap() {
     assert!(std::io::Write::write_all(&mut writer, &[0]).is_err());
     assert_eq!(writer.bytes.len(), 10);
 }
+
+/// An observation-shaped value: a map holding a string and a small array.
+fn observation(index: u64) -> Vec<u8> {
+    #[derive(serde::Serialize)]
+    struct Observed {
+        site: String,
+        path: Vec<u64>,
+        occurrence: u64,
+    }
+    rmp_serde::to_vec_named(&Observed {
+        site: format!("process:main/{}", index % 7),
+        path: vec![0, index % 3, 1],
+        occurrence: index,
+    })
+    .expect("an observation encodes")
+}
+
+/// However many observations a step makes, each payload crosses in one
+/// frame within the codec's bounds and passes the bounds its receiver
+/// checks it against; together the payloads hold every observation, in
+/// order, and weigh what the chunker says (FIG-4458).
+#[test]
+fn observation_chunks_each_cross_in_one_frame_within_the_bounds() {
+    for limits in [
+        DecodeLimits::standard(),
+        DecodeLimits {
+            max_frame_bytes: 2048,
+            max_depth: 4,
+            max_nodes: 200,
+            max_allocation_bytes: 8192,
+        },
+        DecodeLimits {
+            max_frame_bytes: 1 << 20,
+            max_depth: 128,
+            max_nodes: 100_000,
+            max_allocation_bytes: 16 * 1024,
+        },
+    ] {
+        let codec = FrameCodec::new(limits);
+        let observations = (0..40_000).map(observation).collect::<Vec<_>>();
+        let mut chunker = codec.observation_chunker().expect("a chunker");
+        for observation in &observations {
+            chunker
+                .push(observation)
+                .expect("an observation fits a frame");
+        }
+        let bytes = chunker.bytes();
+        let chunks = chunker.finish();
+        assert!(chunks.len() > 1, "{limits:?}: the stream is chunked");
+        let mut fence = MessageFence::new(
+            ExecutionLease(u64::MAX),
+            OwnerEpoch(u64::MAX),
+            FrameEpoch(u64::MAX),
+        );
+        let mut received = Vec::new();
+        for chunk in &chunks {
+            codec
+                .check_payload(&chunk.0)
+                .unwrap_or_else(|refusal| panic!("{limits:?}: a chunk is refused: {refusal}"));
+            let frame = codec
+                .encode_worker(&WorkerFrame {
+                    header: fence.next_header(),
+                    message: WorkerMessage::Observations {
+                        payload: chunk.clone(),
+                    },
+                })
+                .unwrap_or_else(|refusal| panic!("{limits:?}: a frame is refused: {refusal}"));
+            assert!(frame.len() <= limits.max_frame_bytes as usize);
+            codec
+                .decode_worker(&frame)
+                .unwrap_or_else(|refusal| panic!("{limits:?}: a frame is refused: {refusal}"));
+            let values: Vec<serde_json::Value> = rmp_serde::from_slice(&chunk.0).expect("an array");
+            received.extend(values);
+        }
+        let sent = observations
+            .iter()
+            .map(|observation| {
+                rmp_serde::from_slice::<serde_json::Value>(observation).expect("an observation")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(received, sent, "{limits:?}: every observation, in order");
+        assert_eq!(
+            bytes,
+            chunks.iter().map(|chunk| chunk.0.len() as u64).sum::<u64>(),
+            "{limits:?}: the chunker weighs what crosses"
+        );
+    }
+}
+
+/// An observation that alone outgrows one frame is refused with the bound
+/// it outgrows, and the observations before it keep their chunks.
+#[test]
+fn an_observation_no_frame_carries_is_refused_with_its_bound() {
+    let limits = DecodeLimits {
+        max_frame_bytes: 2048,
+        max_depth: 4,
+        max_nodes: 200,
+        max_allocation_bytes: 64 * 1024,
+    };
+    let codec = FrameCodec::new(limits);
+    let mut chunker = codec.observation_chunker().expect("a chunker");
+    chunker.push(&observation(1)).expect("a small observation");
+
+    let long = rmp_serde::to_vec_named(&"x".repeat(4096)).expect("a string");
+    assert!(matches!(
+        chunker.push(&long),
+        Err(CodecRefusal::FrameTooLarge { limit: 2048, .. })
+    ));
+    let wide = rmp_serde::to_vec_named(&vec![0_u8; 200]).expect("an array");
+    assert_eq!(
+        chunker.push(&wide),
+        Err(CodecRefusal::NodeLimitExceeded { limit: 200 })
+    );
+    let deep = rmp_serde::to_vec_named(&vec![vec![vec![vec![0_u8]]]]).expect("nested arrays");
+    assert_eq!(
+        chunker.push(&deep),
+        Err(CodecRefusal::DepthExceeded { limit: 4 })
+    );
+    assert_eq!(chunker.finish().len(), 1);
+}

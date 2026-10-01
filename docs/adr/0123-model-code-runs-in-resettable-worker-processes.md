@@ -181,6 +181,17 @@ transport or pool:
   execution limit. The shared adapter service admits 64 MiB VM state,
   128 MiB frames, 256 MiB charged decode allocation and a 128 MiB queue.
   These bounds are explicit in its pool configuration.
+- **Execution observations.** A run that reports its execution (a durable
+  process body, or a traced cell) hands each step's observations to its
+  parent as `Observations` frames before the step's response. The worker
+  packs them into chunks of whole observations, each sized so that its frame
+  is within the decode bounds and its payload passes the receiver's own
+  check, so no transport bound limits how many observations a step makes:
+  the run's own budgets do. Fuel bounds how many it can make, and its heap
+  budget bounds the bytes a step holds and hands on, on both sides of the
+  pipe. A stream that outgrows the heap budget, or a single observation no
+  frame can carry, is the run's limit `WorkerLimit::Observations`: recorded
+  like fuel, heap or depth, never retried (FIG-4458).
 - **Infrastructure outcomes.** `WorkerCrashed`, `WorkerUnresponsive`,
   `ProtocolViolation`, `PayloadTooLarge` and `WorkerLimitExceeded` are kept
   apart from guest errors. EOF or exit is supervisor evidence, never worker
@@ -419,10 +430,10 @@ another host with capacity not at all, so it is never an execution's recorded
 outcome. A process body fails its attempt retryably. An RLM cell fails its
 attempt retryably too: it seals nothing, the model never sees the verdict, and
 the turn journals nothing after it, not even its cancellation peek, since the
-retry runs the cell again. Only a limit the run itself exhausted — fuel, heap
-or frame depth, measured by the VM against the run's own bounds — is recorded:
-the process terminal `process_execution_bound_exhausted`, or the cell's
-program failure (FIG-4451).
+retry runs the cell again. Only a limit the run itself exhausted — fuel, heap,
+frame depth or its observation stream, measured against the run's own bounds —
+is recorded: the process terminal `process_execution_bound_exhausted`, or the
+cell's program failure (FIG-4451, FIG-4458).
 
 A retryable worker infrastructure failure follows the same rule during cell
 setup as during execution. A crashed or unresponsive worker, a broken protocol

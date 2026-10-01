@@ -81,6 +81,18 @@ impl DriveParts {
         }
     }
 
+    /// The law's host takes every eligible next-turn input, up to the
+    /// admission bound, into one root (`DrainMode::All`): the law is about a
+    /// composed root, which the default drain never forms (FIG-4457).
+    pub(super) fn compose_inputs(&mut self) {
+        self.host.durability.queued_work_batching = self
+            .host
+            .durability
+            .queued_work_batching
+            .clone()
+            .with_drain_mode(crate::DrainMode::All);
+    }
+
     pub(super) async fn runtime(&self) -> crate::LashRuntime {
         self.runtime_over(Arc::clone(&self.store)).await
     }
@@ -725,7 +737,8 @@ pub async fn one_drive_admits_many_items(
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    let parts = DriveParts::new(prefix, "many-items", &effect_host, &stores, 8).await;
+    let mut parts = DriveParts::new(prefix, "many-items", &effect_host, &stores, 8).await;
+    parts.compose_inputs();
     let first = parts.enqueue("first", Some("many-items-root")).await;
     let second = parts.enqueue("second", None).await;
     let third = parts.enqueue("third", None).await;
@@ -1306,6 +1319,7 @@ pub async fn a_root_admission_survives_a_worker_crash_without_widening(
 ) {
     let mut parts =
         DriveParts::new(prefix, "admission-commit-crash", &effect_host, &stores, 8).await;
+    parts.compose_inputs();
     let crash = Arc::new(CrashAfterAdmission {
         inner: Arc::clone(&parts.store),
         fired: AtomicUsize::new(0),

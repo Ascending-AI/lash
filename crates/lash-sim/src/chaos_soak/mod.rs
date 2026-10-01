@@ -848,7 +848,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn a_second_held_input_uses_and_closes_its_admitted_root_scope() {
         let seed = 0x3943;
-        let mut driver = driver::Driver::new(seed).await.expect("world");
+        let mut driver = driver::Driver::composing(seed).await.expect("world");
         driver
             .step(
                 seed,

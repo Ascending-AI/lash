@@ -218,6 +218,7 @@ pub async fn run_specs_split_roots_in_admission_order(
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
     let mut parts = DriveParts::new(prefix, "run-spec-selector", &effect_host, &stores, 8).await;
+    parts.compose_inputs();
     let models = record_models(&mut parts);
     let mut inputs = Vec::new();
     for (key, spec) in [
@@ -654,6 +655,7 @@ pub async fn a_batch_shares_one_spec_that_each_root_resolves_once(
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
     let mut parts = DriveParts::new(prefix, "run-spec-batch", &effect_host, &stores, 2).await;
+    parts.compose_inputs();
     let models = record_models(&mut parts);
     let resolutions = Arc::new(AtomicUsize::new(0));
     parts.host.providers.run_definitions = definitions_with(CountingDefinition {
@@ -712,6 +714,7 @@ pub async fn a_batch_keeps_its_turn_lane_place_behind_the_command_lane(
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
     let mut parts = DriveParts::new(prefix, "run-spec-batch-order", &effect_host, &stores, 8).await;
+    parts.compose_inputs();
     let models = record_models(&mut parts);
     let before = enqueue(
         &parts,

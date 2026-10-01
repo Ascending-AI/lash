@@ -3380,14 +3380,32 @@ derive_mutation_jobs() {{
             runtime["commands"],
         )
 
-        floors = json.loads(LANE_TABLE.read_text(encoding="utf-8"))[
-            "feature_lane_test_floors"
-        ]
-        self.assertEqual([130], sorted(floors.values()))
-        self.assertTrue(
-            all("crates/lash:" in label for label in floors),
-            f"the runtime floor names an unexpected target: {sorted(floors)}",
+        inventory = json.loads(LANE_TABLE.read_text(encoding="utf-8"))
+        floors = inventory["feature_lane_test_floors"]
+        runtime_floors = {
+            label: floor for label, floor in floors.items() if "crates/lash:" in label
+        }
+        self.assertEqual([130], list(runtime_floors.values()))
+        self.assertNotIn(next(iter(runtime_floors)), inventory["feature_lane_test_args"])
+
+    def test_filtered_conformance_selections_hold_nonzero_floors(self) -> None:
+        """FIG-4470: provider and transport lanes compile every test target
+        but execute conformance only in the library harness, and the floor
+        counts that filtered selection, so it cannot silently select nothing."""
+        inventory = json.loads(LANE_TABLE.read_text(encoding="utf-8"))
+        floors = inventory["feature_lane_test_floors"]
+        arguments = inventory["feature_lane_test_args"]
+        filtered = {
+            label for label, args in arguments.items() if args == ["conformance"]
+        }
+        self.assertEqual(
+            {"lash-llm-transport", "lash-provider-anthropic",
+             "lash-provider-google", "lash-provider-openai"},
+            {label.split(":")[0].removeprefix("//crates/") for label in filtered},
         )
+        for label in filtered:
+            self.assertIn("__unit_test__fv_", label)
+            self.assertEqual(1, floors.get(label), label)
 
     def test_publish_time_version_injection_has_only_post_release_docs_commit(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

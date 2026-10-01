@@ -151,7 +151,7 @@ fn process_node_record() -> lash_trace::TraceRecord {
 
 /// The published observation-item schema: the snapshot graph and the node
 /// event record are typed trace shapes, not opaque JSON.
-fn published_observation_item_schema() -> jsonschema::JSONSchema {
+fn published_observation_item_schema() -> jsonschema::Validator {
     let schema: serde_json::Value = serde_json::from_str(include_str!(
         "../../../schemas/host/remote-process-observation-item/v100.schema.json"
     ))
@@ -160,7 +160,7 @@ fn published_observation_item_schema() -> jsonschema::JSONSchema {
         schema["x-lash-schema-version"],
         serde_json::json!(REMOTE_PROTOCOL_VERSION)
     );
-    jsonschema::JSONSchema::compile(&schema).expect("published observation item schema compiles")
+    jsonschema::validator_for(&schema).expect("published observation item schema compiles")
 }
 
 fn assert_process_observation_wire_contract(item: RemoteProcessObservationItem) {
@@ -176,11 +176,12 @@ fn assert_process_observation_wire_contract(item: RemoteProcessObservationItem) 
     body.as_object_mut()
         .expect("item object")
         .remove("protocol_version");
-    if let Err(errors) = validator.validate(&body) {
+    if !validator.is_valid(&body) {
+        let errors = validator.iter_errors(&body);
         panic!(
             "published schema rejected a real observation item:\n{}",
             errors
-                .map(|error| format!("{} at {}", error, error.instance_path))
+                .map(|error| format!("{} at {}", error, error.instance_path()))
                 .collect::<Vec<_>>()
                 .join("\n")
         );

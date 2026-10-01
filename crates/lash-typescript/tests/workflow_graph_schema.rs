@@ -74,9 +74,10 @@ finish(values);
         "../../../schemas/host/workflow-graph/v21.schema.json"
     ))
     .expect("published graph schema parses");
-    let validator = jsonschema::JSONSchema::compile(&schema).expect("graph schema compiles");
+    let validator = jsonschema::validator_for(&schema).expect("graph schema compiles");
     let value = serde_json::to_value(&graph).expect("real graph serializes");
-    if let Err(errors) = validator.validate(&value) {
+    if !validator.is_valid(&value) {
+        let errors = validator.iter_errors(&value);
         panic!(
             "published schema rejected a real graph:\n{}",
             errors
@@ -112,7 +113,7 @@ fn published_schema_requires_a_closed_workflow_diagnostic_classification() {
         "../../../schemas/host/workflow-graph/v21.schema.json"
     ))
     .expect("published schema parses");
-    let validator = jsonschema::JSONSchema::compile(&schema).expect("published schema compiles");
+    let validator = jsonschema::validator_for(&schema).expect("published schema compiles");
     for classification in ["definite", "advisory"] {
         value["main"]["nodes"][0]["type_facets"]["diagnostics"][0]["classification"] =
             serde_json::json!(classification);

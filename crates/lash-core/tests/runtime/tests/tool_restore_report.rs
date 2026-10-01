@@ -751,12 +751,20 @@ async fn preserve_persisted_open_refuses_direct_and_queued_turns() {
         .await
         .expect("park the enqueue-only open");
 
-    // The refused root answers both accepted rows, the queued one and the one
-    // the refused turn sent (FIG-4018), and leaves the tool surface untouched.
+    // The refused root answers the queued row it admitted (FIG-4018) and
+    // leaves the tool surface untouched. Under the default drain it admitted
+    // that row alone (FIG-4457): the refused turn's own row stays queued for a
+    // later drive, never answered by another input's root.
     let pending = lash_core::TurnInputStore::list_pending_turn_inputs(store.as_ref(), &session_id)
         .await
         .expect("list pending turn inputs");
-    assert!(pending.is_empty(), "the refused root answered its inputs");
+    assert!(
+        matches!(
+            pending.as_slice(),
+            [only] if format!("{only:?}").contains("run me anyway")
+        ),
+        "the refused root answered its queued row; the refused turn's row waits: {pending:?}"
+    );
     assert_persisted_surface_unchanged(&store, &session_id, persisted_generation).await;
 }
 

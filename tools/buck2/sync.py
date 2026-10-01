@@ -622,6 +622,11 @@ def inventory_payload(model_payload: dict, workspace_bzl: str, feature_bzl: str)
     )
     if not floors_match:
         raise SystemExit("generated table lacks FEATURE_LANE_TEST_FLOORS")
+    args_match = re.search(
+        r"FEATURE_LANE_TEST_ARGS = (\{.*?\})\n\nFEATURE_LANE_TEST_FLOORS", feature_bzl, re.S
+    )
+    if not args_match:
+        raise SystemExit("generated table lacks FEATURE_LANE_TEST_ARGS")
 
     result = dict(model_payload)
     result.update(
@@ -647,6 +652,7 @@ def inventory_payload(model_payload: dict, workspace_bzl: str, feature_bzl: str)
             "feature_lane_test_targets": list_value("FEATURE_LANE_TEST_TARGETS", feature_bzl),
             "feature_lane_clippy_targets": list_value("FEATURE_LANE_CLIPPY_TARGETS", feature_bzl),
             "feature_lanes": ast.literal_eval(lanes_match.group(1)),
+            "feature_lane_test_args": ast.literal_eval(args_match.group(1)),
             "feature_lane_test_floors": ast.literal_eval(floors_match.group(1)),
             "service_test_targets": {},
         }

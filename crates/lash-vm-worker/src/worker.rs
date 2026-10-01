@@ -24,6 +24,9 @@ pub(crate) struct Server<'frontend> {
     projection_namespace: String,
     capture_state_view: bool,
     cpu_ceiling: Option<libc::rlim_t>,
+    /// The run's heap budget, which also bounds the observations a step
+    /// holds until it hands them on (FIG-4458). `None` is unbounded.
+    observation_budget: Option<u64>,
 }
 
 pub(crate) struct Fences {
@@ -80,6 +83,7 @@ impl<'frontend> Server<'frontend> {
             projection_namespace: String::new(),
             capture_state_view: false,
             cpu_ceiling: None,
+            observation_budget: None,
         };
         server.send(WorkerMessage::Ready {
             protocol_version: WORKER_PROTOCOL_VERSION,
@@ -292,6 +296,7 @@ impl<'frontend> Server<'frontend> {
                 ParentMessage::Reset => {
                     self.cpu_ceiling = None;
                     self.capture_state_view = false;
+                    self.observation_budget = None;
                     self.instance.reset();
                     self.pending = None;
                     self.reissue = None;
@@ -333,6 +338,7 @@ impl<'frontend> Server<'frontend> {
         }
         self.projection_namespace = context.projection_namespace;
         self.capture_state_view = context.capture_state_view;
+        self.observation_budget = start.limits.memory_limit_bytes;
         let execution_start = match start.state {
             StartState::Fresh => VmExecutionStart::Session,
             StartState::Snapshot(state) => {
@@ -545,6 +551,35 @@ impl<'frontend> Server<'frontend> {
         };
         self.respond(message)
     }
+    /// A step's observations as the payloads of the frames that carry them,
+    /// each within the frame's bounds (FIG-4458); `None` when they outgrow
+    /// the run's heap budget, or one alone outgrows a frame.
+    fn observation_chunks(
+        &self,
+        observations: &[lashlang::LashlangExecutionObservation],
+    ) -> Result<Option<Vec<EncodedPayload>>, PoolError> {
+        let mut chunker = self.codec.observation_chunker()?;
+        for observation in observations {
+            let encoded = rmp_serde::to_vec_named(observation).map_err(PoolError::protocol)?;
+            match chunker.push(&encoded) {
+                Ok(()) => {}
+                Err(
+                    CodecRefusal::FrameTooLarge { .. }
+                    | CodecRefusal::NodeLimitExceeded { .. }
+                    | CodecRefusal::DepthExceeded { .. }
+                    | CodecRefusal::AllocationExceeded { .. },
+                ) => return Ok(None),
+                Err(refusal) => return Err(PoolError::protocol(refusal)),
+            }
+            if self
+                .observation_budget
+                .is_some_and(|budget| chunker.bytes() > budget)
+            {
+                return Ok(None);
+            }
+        }
+        Ok(Some(chunker.finish()))
+    }
     fn deliver_inner(&mut self, mut step: VmStep) -> Result<WorkerMessage, PoolError> {
         // Lazy reads use the compute phase and the same request fence.
         if let VmStep::Complete(complete) = &mut step {
@@ -557,12 +592,13 @@ impl<'frontend> Server<'frontend> {
             VmStep::Complete(step) => &step.observations,
             VmStep::GuestError(step) => &step.observations,
         };
-        if !observations.is_empty() {
-            self.send(WorkerMessage::Observations {
-                payload: EncodedPayload(
-                    rmp_serde::to_vec_named(observations).map_err(PoolError::protocol)?,
-                ),
-            })?;
+        let Some(chunks) = self.observation_chunks(observations)? else {
+            return Ok(WorkerMessage::LimitExceeded {
+                limit: WorkerLimit::Observations,
+            });
+        };
+        for payload in chunks {
+            self.send(WorkerMessage::Observations { payload })?;
         }
         let message = match step {
             VmStep::Suspended(suspended) => {

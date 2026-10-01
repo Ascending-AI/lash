@@ -1258,3 +1258,97 @@ fn one_slot_resource_operation_batch_parks_and_resumes() {
         );
     }
 }
+
+/// Iterations of the long loop: several times the few thousand at which a
+/// run's execution observations once outgrew one frame's decode bounds.
+const LONG_LOOP: u32 = 20_000;
+
+/// A run that reports its execution observations, as a durable process body
+/// or a traced cell does.
+fn observed(source: &str, mode: ExecutionMode) -> Start {
+    let mut input = start(source, mode);
+    input.contexts[0].body = EncodedPayload(
+        rmp_serde::to_vec_named(&RunContext {
+            environment: lashlang::testing::harness::test_environment(),
+            mode,
+            observe_execution: true,
+            ..RunContext::default()
+        })
+        .expect("context"),
+    );
+    input
+}
+
+fn long_loop() -> String {
+    format!("let n = 0; while (n < {LONG_LOOP}) {{ n++; }} finish(n);")
+}
+
+/// A long loop within its fuel, heap and depth budgets completes, and its
+/// execution observations cross in chunks that each pass the decode bounds
+/// the broker holds an observation payload to (FIG-4458).
+#[test]
+fn a_long_loop_streams_its_observations_in_chunks_within_the_decode_bounds() {
+    let cfg = config("");
+    let codec = FrameCodec::new(cfg.protocol.decode);
+    let pool = WorkerPool::new(cfg).expect("pool");
+    let mut worker = checkout(&pool);
+    let message = worker
+        .start(observed(&long_loop(), ExecutionMode::Foreground))
+        .expect("the long loop runs within its budgets");
+    assert!(matches!(
+        drive(&mut worker, message),
+        WorkerMessage::Complete { .. }
+    ));
+    let chunks = worker.take_observations();
+    let mut loop_steps = 0;
+    for chunk in &chunks {
+        codec
+            .check_payload(&chunk.0)
+            .expect("every observation chunk is within the decode bounds");
+        let observations: Vec<lashlang::LashlangExecutionObservation> =
+            rmp_serde::from_slice(&chunk.0).expect("an observation chunk");
+        loop_steps += observations
+            .iter()
+            .filter(|observation| {
+                matches!(
+                    observation,
+                    lashlang::LashlangExecutionObservation::NodeCompleted { .. }
+                )
+            })
+            .count();
+    }
+    assert!(
+        chunks.len() > 1,
+        "the stream is chunked: {} chunk(s)",
+        chunks.len()
+    );
+    assert!(
+        loop_steps >= LONG_LOOP as usize,
+        "every iteration is observed: {loop_steps} completed nodes"
+    );
+    worker.release().expect("reset");
+}
+
+/// A step whose observation stream outgrows the run's own heap budget ends
+/// with the run's typed limit, which no retry answers differently: never a
+/// protocol violation retried forever (FIG-4458).
+#[test]
+fn an_observation_stream_over_the_runs_heap_budget_is_its_typed_run_limit() {
+    let pool = WorkerPool::new(config("")).expect("pool");
+    let mut worker = checkout(&pool);
+    let pid = worker.pid().expect("pid");
+    let mut input = observed(&long_loop(), ExecutionMode::Foreground);
+    input.limits.memory_limit_bytes = Some(256 * 1024);
+    let outcome = match worker.start(input) {
+        Err(PoolError::Infrastructure(outcome)) => outcome,
+        other => panic!("expected the run's observation limit, received {other:?}"),
+    };
+    assert_eq!(
+        outcome,
+        InfrastructureOutcome::WorkerLimitExceeded {
+            limit: WorkerLimit::Observations
+        }
+    );
+    assert!(!outcome.is_retryable(), "the run's own limit is final");
+    assert_reaped(pid);
+}

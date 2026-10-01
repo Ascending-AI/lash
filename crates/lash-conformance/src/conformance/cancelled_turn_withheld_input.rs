@@ -212,6 +212,14 @@ impl Harness {
         })
     }
 
+    /// How many model requests the harness has seen.
+    fn request_count(&self) -> usize {
+        self.requests
+            .lock()
+            .map(|requests| requests.len())
+            .unwrap_or_default()
+    }
+
     fn request_mentions(&self, text: &str) -> usize {
         self.requests
             .lock()
@@ -433,8 +441,10 @@ async fn withheld_cancel_case(
     );
 
     // Deferred input is driven exactly once, in order, ahead of the next
-    // turn's own input: the next drive admits the deferred head first, under
-    // a root named by it (FIG-3600). Dropped input never reaches a turn.
+    // turn's own input: under the default drain each deferred input is its
+    // own root, named by it, and the next turn's root follows (FIG-3600,
+    // FIG-4457). Dropped input never reaches a turn.
+    let asked_before = harness.request_count();
     let run = harness
         .run(&next_turn_id, "carry on", CancellationToken::new())
         .await;
@@ -451,22 +461,41 @@ async fn withheld_cancel_case(
     let expected_delivered = match disposition {
         crate::TurnCancelUndeliveredInputPolicy::Defer => input_ids
             .iter()
-            .map(|input_id| (input_id.clone(), crate::TurnId::from(input_ids[0].as_str())))
+            .map(|input_id| (input_id.clone(), crate::TurnId::from(input_id.as_str())))
             .collect(),
         crate::TurnCancelUndeliveredInputPolicy::Drop => Vec::new(),
     };
     assert_eq!(
         delivered, expected_delivered,
-        "{case}: what the next turn delivers"
+        "{case}: what the drive delivers ahead of the next turn"
     );
+    let delivered_roots = delivered.len();
+    assert_eq!(
+        harness.request_count() - asked_before,
+        delivered_roots + 1,
+        "{case}: one model call per deferred input's root, then the next turn's"
+    );
+    let next_turn_request = harness.request_count() - 1;
+    let mut seen = asked_before;
     for text in texts {
-        let expected_mentions =
-            usize::from(disposition == crate::TurnCancelUndeliveredInputPolicy::Defer);
-        assert_eq!(
-            harness.request_mentions(text),
-            expected_mentions,
-            "{case}: the next turn's model sees `{text}` exactly as the disposition says"
-        );
+        let first = harness.first_request_rendering(text);
+        match disposition {
+            crate::TurnCancelUndeliveredInputPolicy::Defer => {
+                let first = first.unwrap_or_else(|| {
+                    panic!("{case}: a deferred input's root shows the model `{text}`")
+                });
+                assert!(
+                    first >= seen && first < next_turn_request,
+                    "{case}: the model first sees `{text}` in its own root, in enqueue order, \
+                     ahead of the next turn: request {first} of {asked_before}..{next_turn_request}"
+                );
+                seen = first + 1;
+            }
+            crate::TurnCancelUndeliveredInputPolicy::Drop => assert_eq!(
+                first, None,
+                "{case}: the model never sees the dropped `{text}`"
+            ),
+        }
     }
     assert!(
         harness

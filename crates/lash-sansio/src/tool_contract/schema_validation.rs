@@ -13,7 +13,7 @@ const COMPILED_SCHEMA_CACHE_SCHEMA_BYTES: usize = 16 * 1024 * 1024;
 
 struct CachedSchema {
     schema: Value,
-    compiled: Result<Arc<jsonschema::JSONSchema>, String>,
+    compiled: Result<Arc<jsonschema::Validator>, String>,
 }
 
 #[derive(Default)]
@@ -28,7 +28,7 @@ impl CompiledSchemaCache {
         &self,
         hash: &[u8; 32],
         schema: &Value,
-    ) -> Option<Result<Arc<jsonschema::JSONSchema>, String>> {
+    ) -> Option<Result<Arc<jsonschema::Validator>, String>> {
         self.entries
             .get(hash)
             .and_then(|entries| entries.iter().find(|entry| entry.schema == *schema))
@@ -40,7 +40,7 @@ impl CompiledSchemaCache {
         hash: [u8; 32],
         schema: &Value,
         serialized_bytes: usize,
-        compiled: Result<Arc<jsonschema::JSONSchema>, String>,
+        compiled: Result<Arc<jsonschema::Validator>, String>,
     ) {
         // The byte cap accounts for serialized schema input rather than the
         // validator's opaque heap use; the entry cap is a second backstop.
@@ -94,7 +94,7 @@ fn schema_content_fingerprint(schema: &Value) -> Result<([u8; 32], usize), Strin
     Ok((digest.finalize(), serialized_bytes))
 }
 
-fn compiled_schema(schema: &Value) -> Result<Arc<jsonschema::JSONSchema>, String> {
+fn compiled_schema(schema: &Value) -> Result<Arc<jsonschema::Validator>, String> {
     let (hash, serialized_bytes) = schema_content_fingerprint(schema)?;
     if let Some(cached) = compiled_schema_cache()
         .lock_recover()
@@ -104,7 +104,10 @@ fn compiled_schema(schema: &Value) -> Result<Arc<jsonschema::JSONSchema>, String
     }
 
     let compiled = reject_non_local_references(schema).and_then(|()| {
-        jsonschema::JSONSchema::compile(schema)
+        jsonschema::options()
+            .with_draft(jsonschema::Draft::Draft7.detect(schema))
+            .should_validate_formats(true)
+            .build(schema)
             .map(Arc::new)
             .map_err(|error| error.to_string())
     });
@@ -119,17 +122,7 @@ fn compiled_schema(schema: &Value) -> Result<Arc<jsonschema::JSONSchema>, String
 
 pub(super) fn validate_schema(schema: &Value, value: &Value) -> Result<(), String> {
     let compiled = compiled_schema(schema)?;
-    if compiled.is_valid(value) {
-        return Ok(());
-    }
-    compiled
-        .validate(value)
-        .map_err(|mut errors| match errors.next() {
-            Some(error) => format_validation_error(error),
-            // `is_valid` already said the value is invalid, so the iterator always
-            // yields at least one error; report rather than panic if it ever does not.
-            None => "value does not match the schema".to_string(),
-        })
+    compiled.validate(value).map_err(format_validation_error)
 }
 
 pub fn validate_tool_input(contract: &ToolContract, args: &Value) -> Result<(), String> {
@@ -164,7 +157,7 @@ fn reject_non_local_references(schema: &Value) -> Result<(), String> {
 }
 
 fn format_validation_error(error: jsonschema::ValidationError<'_>) -> String {
-    let instance_path = error.instance_path.to_string();
+    let instance_path = error.instance_path().to_string();
     if instance_path.is_empty() {
         error.to_string()
     } else {
@@ -177,6 +170,102 @@ mod tests {
     use super::*;
     use crate::{LashSchema, ToolDefinition};
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn unversioned_schemas_keep_draft7_validation() {
+        let email = LashSchema::new(serde_json::json!({ "type": "string", "format": "email" }));
+        assert!(
+            email
+                .validate(&serde_json::json!("sam@example.com"))
+                .is_ok()
+        );
+        assert!(email.validate(&serde_json::json!("invalid")).is_err());
+
+        let reference = LashSchema::new(serde_json::json!({
+            "$ref": "#/definitions/Value",
+            "definitions": { "Value": { "type": "string" } },
+            "maxLength": 1
+        }));
+        assert!(reference.validate(&serde_json::json!("long")).is_ok());
+        assert!(reference.validate(&serde_json::json!(42)).is_err());
+
+        let tuple = LashSchema::new(serde_json::json!({
+            "type": "array", "items": [{ "type": "string" }], "additionalItems": false
+        }));
+        assert!(tuple.validate(&serde_json::json!(["item"])).is_ok());
+        assert!(tuple.validate(&serde_json::json!([42])).is_err());
+        assert!(
+            tuple
+                .validate(&serde_json::json!(["item", "extra"]))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn declared_draft4_and_draft6_keep_their_keywords() {
+        for (draft, accepts_other) in [("04", true), ("06", false)] {
+            let schema = LashSchema::new(serde_json::json!({
+                "$schema": format!("http://json-schema.org/draft-{draft}/schema#"),
+                "type": "string", "const": "expected"
+            }));
+            assert!(schema.validate(&serde_json::json!("expected")).is_ok());
+            assert_eq!(
+                schema.validate(&serde_json::json!("other")).is_ok(),
+                accepts_other
+            );
+            assert!(schema.validate(&serde_json::json!(42)).is_err());
+        }
+    }
+
+    #[test]
+    fn international_formats_remain_assertions() {
+        for (format, valid, invalid) in [
+            ("idn-hostname", "münchen.de", "bad..hostname"),
+            ("idn-email", "sam@münchen.de", "invalid"),
+        ] {
+            let schema = LashSchema::new(serde_json::json!({ "type": "string", "format": format }));
+            assert!(
+                schema.validate(&serde_json::json!(valid)).is_ok(),
+                "{format}"
+            );
+            assert!(
+                schema.validate(&serde_json::json!(invalid)).is_err(),
+                "{format}"
+            );
+        }
+    }
+
+    #[test]
+    fn declared_draft202012_validates_prefix_items_and_closed_unevaluated_properties() {
+        let schema = LashSchema::new(serde_json::json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "$defs": {
+                "Pair": {
+                    "type": "array",
+                    "prefixItems": [{ "type": "string" }, { "type": "integer" }],
+                    "items": false,
+                    "minItems": 2
+                }
+            },
+            "allOf": [{ "properties": { "pair": { "$ref": "#/$defs/Pair" } }, "required": ["pair"] }],
+            "unevaluatedProperties": false
+        }));
+        assert!(
+            schema
+                .validate(&serde_json::json!({ "pair": ["item", 42] }))
+                .is_ok()
+        );
+        for invalid in [
+            serde_json::json!({ "pair": [42, "item"] }),
+            serde_json::json!({ "pair": ["item", 42, "extra"] }),
+            serde_json::json!({ "pair": ["item"] }),
+            serde_json::json!({ "pair": ["item", 42], "extra": true }),
+            serde_json::json!({}),
+        ] {
+            assert!(schema.validate(&invalid).is_err(), "{invalid}");
+        }
+    }
 
     #[test]
     fn repeated_schema_compilation_reuses_the_cached_validator() {
@@ -196,12 +285,10 @@ mod tests {
         let hash = [7; 32];
         let first_schema = serde_json::json!({ "type": "string" });
         let second_schema = serde_json::json!({ "type": "integer" });
-        let first = Arc::new(
-            jsonschema::JSONSchema::compile(&first_schema).expect("compile first validator"),
-        );
-        let second = Arc::new(
-            jsonschema::JSONSchema::compile(&second_schema).expect("compile second validator"),
-        );
+        let first =
+            Arc::new(jsonschema::validator_for(&first_schema).expect("compile first validator"));
+        let second =
+            Arc::new(jsonschema::validator_for(&second_schema).expect("compile second validator"));
         let mut cache = CompiledSchemaCache::default();
         cache.insert(hash, &first_schema, 17, Ok(first.clone()));
         cache.insert(hash, &second_schema, 18, Ok(second.clone()));
@@ -317,7 +404,7 @@ mod tests {
 
         let error = schema.validate(&serde_json::json!(42)).unwrap_err();
 
-        assert!(error.starts_with("Invalid reference:"), "{error}");
+        assert_eq!(error, "Pointer '/definitions/Missing' does not exist");
     }
 
     #[test]
@@ -354,18 +441,12 @@ mod tests {
             "$ref": "https://example.com/schema.json"
         });
 
-        let compiled = jsonschema::JSONSchema::compile(&schema).unwrap();
-        let error = compiled
-            .validate(&serde_json::json!(42))
-            .unwrap_err()
-            .next()
-            .expect("external reference resolution produces an error")
+        let error = jsonschema::validator_for(&schema)
+            .expect_err("external references must fail during validator construction")
             .to_string();
 
-        assert!(
-            error.contains("`resolve-http` feature or a custom resolver is required"),
-            "{error}"
-        );
+        assert!(error.contains("https://example.com/schema.json"), "{error}");
+        assert!(error.contains("retriev"), "{error}");
     }
 
     #[test]

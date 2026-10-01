@@ -1812,6 +1812,21 @@ mod root_control {
     (a_command_roots_redrive_replays_its_recorded_outcome, "drive-command-root-redrive"),
     ]);
 
+    lash_conformance::queued_input_roots_tests!({
+        let Some((lock, storage)) = storage().await else {
+            return;
+        };
+        reset(storage.pool()).await;
+        let ((attachments, double), stores, host, runner) = double_law_backend(&storage).await;
+        (
+            (lock, storage, attachments, double),
+            "pg-queued-input-roots",
+            host,
+            stores,
+            runner,
+        )
+    });
+
     lash_conformance::root_answers_its_rows_tests!({
         let Some((lock, storage)) = storage().await else {
             return;

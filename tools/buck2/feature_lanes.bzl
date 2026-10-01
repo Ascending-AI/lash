@@ -917,7 +917,6 @@ FEATURE_LANE_TEST_TARGETS = [
     "//crates/lash-core-store:lash-core-store__unit_test__fv_74aeccd7",
     "//crates/lash-core-store:lash-core-store__unit_test__fv_a6ec35dc",
     "//crates/lash-llm-transport:lash-llm-transport__unit_test__fv_55598223",
-    "//crates/lash-llm-transport:property__test__fv_55598223",
     "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test__fv_6f437b1d",
     "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test__fv_b01c73b5",
     "//crates/lash-plugin-process-controls:lash-plugin-process-controls__unit_test__fv_a9c5397e",
@@ -926,14 +925,8 @@ FEATURE_LANE_TEST_TARGETS = [
     "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_78568fbe",
     "//crates/lash-protocol-rlm:protocol_drivers__test__fv_78568fbe",
     "//crates/lash-protocol-rlm:tool_batch_parallelism__test__fv_78568fbe",
-    "//crates/lash-provider-anthropic:charge_safety__test__fv_0e80edc8",
     "//crates/lash-provider-anthropic:lash-provider-anthropic__unit_test__fv_0e80edc8",
-    "//crates/lash-provider-anthropic:property__test__fv_0e80edc8",
-    "//crates/lash-provider-google:block_identity__test__fv_47d4d6e6",
-    "//crates/lash-provider-google:charge_safety__test__fv_47d4d6e6",
     "//crates/lash-provider-google:lash-provider-google__unit_test__fv_47d4d6e6",
-    "//crates/lash-provider-google:property__test__fv_47d4d6e6",
-    "//crates/lash-provider-openai:codex_websocket_runtime__test__fv_5d5669b4",
     "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_5d5669b4",
     "//crates/lash-regress:integration__test__fv_419bd085",
     "//crates/lash-regress:integration__test__fv_7f10c809",
@@ -982,7 +975,29 @@ FEATURE_LANE_CLIPPY_TARGETS = [
     "//examples/slack-clone:slack-clone__unit_test__fv_bffc6554",
 ]
 
+FEATURE_LANE_TEST_ARGS = {
+    "//crates/lash-llm-transport:lash-llm-transport__unit_test__fv_55598223": [
+        "conformance"
+    ],
+    "//crates/lash-provider-anthropic:lash-provider-anthropic__unit_test__fv_0e80edc8": [
+        "conformance"
+    ],
+    "//crates/lash-provider-google:lash-provider-google__unit_test__fv_47d4d6e6": [
+        "conformance"
+    ],
+    "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_5d5669b4": [
+        "conformance"
+    ],
+    "//crates/lash-vm-worker:pool_laws__test__fv_8b24350f": [
+        "synthetic_next_and_plain_workers_refuse_each_other_at_the_handshake"
+    ]
+}
+
 FEATURE_LANE_TEST_FLOORS = {
+    "//crates/lash-llm-transport:lash-llm-transport__unit_test__fv_55598223": 1,
+    "//crates/lash-provider-anthropic:lash-provider-anthropic__unit_test__fv_0e80edc8": 1,
+    "//crates/lash-provider-google:lash-provider-google__unit_test__fv_47d4d6e6": 1,
+    "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_5d5669b4": 1,
     "//crates/lash:lash__unit_test__fv_5b9f21e0": 130
 }
 

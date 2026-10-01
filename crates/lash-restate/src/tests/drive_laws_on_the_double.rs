@@ -1,7 +1,8 @@
 //! The session drive's laws on the in-process server double: the drive
 //! admission laws (FIG-3600, ADR 0105), the root start marker (L-S8) and the
 //! queued, frame-switch and frame-open redrives (FIG-3748,
-//! FIG-3788, FIG-4110) and the bound-trigger duplicate (FIG-4297). Each runs
+//! FIG-3788, FIG-4110), the queued input roots (FIG-4457) and the
+//! bound-trigger duplicate (FIG-4297). Each runs
 //! through the endpoint's real handlers with the Restate server simulated in
 //! process.
 
@@ -111,6 +112,20 @@ lash_conformance::queued_after_commit_redrive_tests!({
     let stores = harness.law_stores();
     let prefix: &'static str =
         Box::leak(format!("restate-queued-redrive-{}", harness.run_nonce()).into_boxed_str());
+    (harness, prefix, effect_host, stores, turn_runner)
+});
+
+// FIG-4457: two queued inputs, the second sent while the first one's drive
+// is down, get their own roots under the default drain, and a cancel of one
+// leaves the other untouched.
+lash_conformance::queued_input_roots_tests!({
+    let harness =
+        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let effect_host = harness.endpoint_host();
+    let turn_runner = harness.turn_runner();
+    let stores = harness.law_stores();
+    let prefix: &'static str =
+        Box::leak(format!("restate-queued-input-roots-{}", harness.run_nonce()).into_boxed_str());
     (harness, prefix, effect_host, stores, turn_runner)
 });
 

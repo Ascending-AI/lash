@@ -1,4 +1,43 @@
 use super::*;
+use lash_core::runtime::{QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection};
+
+#[derive(Clone, Copy, Debug)]
+enum OracleDrainPolicy {
+    All,
+    SameKeyAndAuthority,
+}
+
+impl QueuedDrainPolicy for OracleDrainPolicy {
+    fn name(&self) -> &str {
+        match self {
+            Self::All => "oracle_all",
+            Self::SameKeyAndAuthority => "oracle_same_key_and_authority",
+        }
+    }
+
+    fn select_drain(&self, request: &QueuedDrainRequest<'_>) -> QueuedDrainSelection {
+        match self {
+            Self::All => QueuedDrainSelection::everything(request),
+            Self::SameKeyAndAuthority => {
+                let Some(head) = request.candidates().first() else {
+                    return QueuedDrainSelection::head_only();
+                };
+                if head.merge_key.is_none() {
+                    return QueuedDrainSelection::head_only();
+                }
+                QueuedDrainSelection::leading(
+                    request
+                        .candidates()
+                        .iter()
+                        .take_while(|row| {
+                            row.merge_key == head.merge_key && row.authority == head.authority
+                        })
+                        .count(),
+                )
+            }
+        }
+    }
+}
 
 #[derive(Debug)]
 struct AdvancingDifferentialClock(std::sync::atomic::AtomicU64);
@@ -89,12 +128,37 @@ fn oracle_row_id(batch: &lash_core::runtime::QueuedWorkBatch) -> String {
 struct BatchOracleRow {
     id: &'static str,
     merge_key: Option<&'static str>,
+    principal: Option<&'static str>,
+    elevation: Option<&'static str>,
+}
+
+impl BatchOracleRow {
+    const fn new(id: &'static str, merge_key: Option<&'static str>) -> Self {
+        Self {
+            id,
+            merge_key,
+            principal: None,
+            elevation: None,
+        }
+    }
+
+    const fn with_authority(
+        mut self,
+        principal: &'static str,
+        elevation: Option<&'static str>,
+    ) -> Self {
+        self.principal = Some(principal);
+        self.elevation = elevation;
+        self
+    }
 }
 
 struct BatchOracleFixture {
     name: &'static str,
     max_rows: usize,
     rows: &'static [BatchOracleRow],
+    all: &'static [&'static [&'static str]],
+    grouped: &'static [&'static [&'static str]],
 }
 
 const BATCH_ORACLE_FIXTURES: &[BatchOracleFixture] = &[
@@ -102,69 +166,88 @@ const BATCH_ORACLE_FIXTURES: &[BatchOracleFixture] = &[
         name: "max_rows_one",
         max_rows: 1,
         rows: &[
-            BatchOracleRow {
-                id: "max1-a1",
-                merge_key: Some("a"),
-            },
-            BatchOracleRow {
-                id: "max1-a2",
-                merge_key: Some("a"),
-            },
+            BatchOracleRow::new("max1-a1", Some("a")),
+            BatchOracleRow::new("max1-a2", Some("a")),
         ],
+        all: &[&["max1-a1"], &["max1-a2"]],
+        grouped: &[&["max1-a1"], &["max1-a2"]],
     },
     BatchOracleFixture {
         name: "bound_at_key_change",
         max_rows: 2,
         rows: &[
-            BatchOracleRow {
-                id: "bound-a1",
-                merge_key: Some("a"),
-            },
-            BatchOracleRow {
-                id: "bound-a2",
-                merge_key: Some("a"),
-            },
-            BatchOracleRow {
-                id: "bound-b1",
-                merge_key: Some("b"),
-            },
+            BatchOracleRow::new("bound-a1", Some("a")),
+            BatchOracleRow::new("bound-a2", Some("a")),
+            BatchOracleRow::new("bound-b1", Some("b")),
         ],
+        all: &[&["bound-a1", "bound-a2"], &["bound-b1"]],
+        grouped: &[&["bound-a1", "bound-a2"], &["bound-b1"]],
+    },
+    BatchOracleFixture {
+        name: "same_key_max_rows",
+        max_rows: 2,
+        rows: &[
+            BatchOracleRow::new("max2-a1", Some("a")),
+            BatchOracleRow::new("max2-a2", Some("a")),
+            BatchOracleRow::new("max2-a3", Some("a")),
+        ],
+        all: &[&["max2-a1", "max2-a2"], &["max2-a3"]],
+        grouped: &[&["max2-a1", "max2-a2"], &["max2-a3"]],
     },
     BatchOracleFixture {
         name: "never_interleaved",
         max_rows: 64,
         rows: &[
-            BatchOracleRow {
-                id: "never-a1",
-                merge_key: Some("a"),
-            },
-            BatchOracleRow {
-                id: "never-n1",
-                merge_key: None,
-            },
-            BatchOracleRow {
-                id: "never-a2",
-                merge_key: Some("a"),
-            },
+            BatchOracleRow::new("never-a1", Some("a")),
+            BatchOracleRow::new("never-n1", None),
+            BatchOracleRow::new("never-n2", None),
+            BatchOracleRow::new("never-a2", Some("a")),
         ],
+        all: &[&["never-a1", "never-n1", "never-n2", "never-a2"]],
+        grouped: &[&["never-a1"], &["never-n1"], &["never-n2"], &["never-a2"]],
     },
     BatchOracleFixture {
         name: "physical_a_b_a",
         max_rows: 64,
         rows: &[
-            BatchOracleRow {
-                id: "aba-a1",
-                merge_key: Some("a"),
-            },
-            BatchOracleRow {
-                id: "aba-b1",
-                merge_key: Some("b"),
-            },
-            BatchOracleRow {
-                id: "aba-a2",
-                merge_key: Some("a"),
-            },
+            BatchOracleRow::new("aba-a1", Some("a")),
+            BatchOracleRow::new("aba-b1", Some("b")),
+            BatchOracleRow::new("aba-a2", Some("a")),
         ],
+        all: &[&["aba-a1", "aba-b1", "aba-a2"]],
+        grouped: &[&["aba-a1"], &["aba-b1"], &["aba-a2"]],
+    },
+    BatchOracleFixture {
+        name: "principal_a_b_a",
+        max_rows: 64,
+        rows: &[
+            BatchOracleRow::new("principal-a1", Some("a")).with_authority("alice", None),
+            BatchOracleRow::new("principal-a2", Some("a")).with_authority("alice", None),
+            BatchOracleRow::new("principal-b1", Some("a")).with_authority("bob", None),
+            BatchOracleRow::new("principal-a3", Some("a")).with_authority("alice", None),
+        ],
+        all: &[&[
+            "principal-a1",
+            "principal-a2",
+            "principal-b1",
+            "principal-a3",
+        ]],
+        grouped: &[
+            &["principal-a1", "principal-a2"],
+            &["principal-b1"],
+            &["principal-a3"],
+        ],
+    },
+    BatchOracleFixture {
+        name: "elevation_a_b_a",
+        max_rows: 64,
+        rows: &[
+            BatchOracleRow::new("elevation-a1", Some("a")).with_authority("alice", None),
+            BatchOracleRow::new("elevation-b1", Some("a")).with_authority("alice", Some("admin")),
+            BatchOracleRow::new("elevation-a2", Some("a")).with_authority("alice", None),
+        ],
+        all: &[&["elevation-a1", "elevation-b1", "elevation-a2"]],
+        grouped: &[&["elevation-a1"], &["elevation-b1"], &["elevation-a2"]],
     },
 ];
 
@@ -172,7 +255,7 @@ const BATCH_ORACLE_FIXTURES: &[BatchOracleFixture] = &[
 const ADMISSION_GAP_ROOT: &str = "admission-gap-root";
 
 /// Admit `root` headed by the session's first open turn-work batch, composed
-/// under `max_rows`; `None` once no turn work is open.
+/// under `max_rows` and the explicit host drain policy; `None` once no turn work is open.
 #[expect(
     clippy::expect_used,
     reason = "test support: the literal oracle's store answers each call; a refusal panics the oracle by design"
@@ -182,6 +265,7 @@ async fn admit_oracle_root(
     fence: &lash_core::store::DriveFence,
     root: &str,
     max_rows: usize,
+    drain_policy: OracleDrainPolicy,
 ) -> Option<lash_core::store::RootAdmission> {
     let head = store
         .list_open_queued_work(fence.session())
@@ -196,6 +280,7 @@ async fn admit_oracle_root(
         lash_core::store::AdmittedHead::Batch(head.batch_id),
     );
     request.policy = lash_core::testing::queued_work_admission_policy(max_rows);
+    request.policy.drain_policy = Arc::new(drain_policy);
     Some(
         store
             .admit_root(&request)
@@ -326,101 +411,95 @@ async fn coalesced_batches_match_literal_oracles_on_every_backend() {
     let run_nonce = run_nonce();
 
     for fixture in BATCH_ORACLE_FIXTURES {
-        let fixture_root = sqlite_root.path().join(fixture.name);
-        let fixture_nonce = format!("{run_nonce}-{}", fixture.name);
-        let mut runners = runners_for_case(
-            CaseName::QueuedWorkAdmissionReleased,
-            &fixture_root,
-            &postgres,
-            &database_url,
-            &fixture_nonce,
-        )
-        .await;
-        for runner in &mut runners {
-            let store = runner.store();
-            for row in fixture.rows {
-                let mut draft = oracle_wake_draft(&runner.session_id, row.id);
-                draft.merge_key = row.merge_key.map(str::to_string);
-                store
-                    .enqueue_queued_work(draft)
+        for (policy, expected) in [
+            (OracleDrainPolicy::All, fixture.all),
+            (OracleDrainPolicy::SameKeyAndAuthority, fixture.grouped),
+        ] {
+            let fixture_root = sqlite_root.path().join(fixture.name).join(policy.name());
+            let fixture_nonce = format!("{run_nonce}-{}-{}", fixture.name, policy.name());
+            let mut runners = runners_for_case(
+                CaseName::QueuedWorkAdmissionReleased,
+                &fixture_root,
+                &postgres,
+                &database_url,
+                &fixture_nonce,
+            )
+            .await;
+            let mut baseline = None;
+            for runner in &mut runners {
+                let store = runner.store();
+                for row in fixture.rows {
+                    let mut draft = oracle_wake_draft(&runner.session_id, row.id);
+                    draft.merge_key = row.merge_key.map(str::to_string);
+                    draft.authority = QueuedWorkAuthority {
+                        principal: row.principal.map(str::to_string),
+                        elevation: row.elevation.map(str::to_string),
+                    };
+                    store
+                        .enqueue_queued_work(draft)
+                        .await
+                        .expect("enqueue literal-oracle row");
+                }
+                let owner = LeaseOwnerIdentity::opaque(
+                    format!("literal-oracle-{}", runner.name),
+                    format!("literal-oracle-{}:incarnation", runner.name),
+                );
+                let fence = store
+                    .seal_drive_epoch_for_test(
+                        &runner.session_id,
+                        &owner,
+                        "coalesced-batch-oracle-executor",
+                        SESSION_LEASE_TTL_MS,
+                    )
                     .await
-                    .expect("enqueue literal-oracle row");
+                    .expect("seal literal-oracle drive")
+                    .acquired()
+                    .expect("literal-oracle drive is free");
+                let mut observed = Vec::new();
+                for index in 0.. {
+                    let root = format!("literal-oracle-root-{index}");
+                    let Some(admission) =
+                        admit_oracle_root(&store, &fence, &root, fixture.max_rows, policy).await
+                    else {
+                        break;
+                    };
+                    observed.push(admitted_row_ids(&admission));
+                    end_oracle_root(&store, &fence, &root, &admission).await;
+                }
+                assert_eq!(
+                    observed,
+                    expected,
+                    "{} backend violated literal batch oracle {} under {}",
+                    runner.name,
+                    fixture.name,
+                    policy.name()
+                );
+                if let Some(baseline) = &baseline {
+                    assert_eq!(
+                        &observed,
+                        baseline,
+                        "{} backend diverged for {} under {}",
+                        runner.name,
+                        fixture.name,
+                        policy.name()
+                    );
+                } else {
+                    baseline = Some(observed);
+                }
+                store
+                    .supersede_drive_epoch_for_test(&fence)
+                    .await
+                    .expect("release literal-oracle drive");
+                runner.close_reopened_postgres_pool().await;
             }
-            let owner = LeaseOwnerIdentity::opaque(
-                format!("literal-oracle-{}", runner.name),
-                format!("literal-oracle-{}:incarnation", runner.name),
-            );
-            let fence = store
-                .seal_drive_epoch_for_test(
-                    &runner.session_id,
-                    &owner,
-                    "coalesced-batch-oracle-executor",
-                    SESSION_LEASE_TTL_MS,
-                )
-                .await
-                .expect("seal literal-oracle drive")
-                .acquired()
-                .expect("literal-oracle drive is free");
-            let mut observed = Vec::new();
-            for index in 0.. {
-                let root = format!("literal-oracle-root-{index}");
-                let Some(admission) =
-                    admit_oracle_root(&store, &fence, &root, fixture.max_rows).await
-                else {
-                    break;
-                };
-                observed.push(admitted_row_ids(&admission));
-                end_oracle_root(&store, &fence, &root, &admission).await;
-            }
-            match fixture.name {
-                "max_rows_one" => assert_eq!(
-                    observed,
-                    vec![vec!["max1-a1".to_string()], vec!["max1-a2".to_string()]],
-                    "{} backend violated literal batch oracle max_rows_one",
-                    runner.name
-                ),
-                "bound_at_key_change" => assert_eq!(
-                    observed,
-                    vec![
-                        vec!["bound-a1".to_string(), "bound-a2".to_string()],
-                        vec!["bound-b1".to_string()],
-                    ],
-                    "{} backend violated literal batch oracle bound_at_key_change",
-                    runner.name
-                ),
-                "never_interleaved" => assert_eq!(
-                    observed,
-                    vec![
-                        vec!["never-a1".to_string()],
-                        vec!["never-n1".to_string()],
-                        vec!["never-a2".to_string()],
-                    ],
-                    "{} backend violated literal batch oracle never_interleaved",
-                    runner.name
-                ),
-                "physical_a_b_a" => assert_eq!(
-                    observed,
-                    vec![
-                        vec!["aba-a1".to_string()],
-                        vec!["aba-b1".to_string()],
-                        vec!["aba-a2".to_string()],
-                    ],
-                    "{} backend violated literal batch oracle physical_a_b_a",
-                    runner.name
-                ),
-                other => panic!("missing literal assertion for batch oracle {other}"),
-            }
-            store
-                .supersede_drive_epoch_for_test(&fence)
-                .await
-                .expect("release literal-oracle drive");
-            runner.close_reopened_postgres_pool().await;
         }
     }
 
     eprintln!(
         "PASSED literal coalesced-batch oracles; \
-         compared_backends=[sqlite-memory,sqlite,postgres]; cases=4"
+         compared_backends=[sqlite-memory,sqlite,postgres]; fixtures={}; policies=2; cases={}",
+        BATCH_ORACLE_FIXTURES.len(),
+        BATCH_ORACLE_FIXTURES.len() * 2
     );
 }
 
@@ -495,9 +574,15 @@ async fn interrupted_admission_identity_stands_over_a_later_row() {
             .expect("seal first admission-gap drive")
             .acquired()
             .expect("first admission-gap drive is free");
-        let admission = admit_oracle_root(&store, &fence, ADMISSION_GAP_ROOT, 64)
-            .await
-            .expect("original admission-gap composition exists");
+        let admission = admit_oracle_root(
+            &store,
+            &fence,
+            ADMISSION_GAP_ROOT,
+            64,
+            OracleDrainPolicy::All,
+        )
+        .await
+        .expect("original admission-gap composition exists");
         assert_eq!(
             admitted_row_ids(&admission),
             vec!["gap-w1".to_string(), "gap-w3".to_string()],
@@ -554,9 +639,15 @@ async fn interrupted_admission_identity_stands_over_a_later_row() {
             runner.name
         );
         end_oracle_root(&store, &fence, ADMISSION_GAP_ROOT, &redriven).await;
-        let later = admit_oracle_root(&store, &fence, "admission-gap-later-root", 64)
-            .await
-            .expect("later admission-gap row remains separate");
+        let later = admit_oracle_root(
+            &store,
+            &fence,
+            "admission-gap-later-root",
+            64,
+            OracleDrainPolicy::All,
+        )
+        .await
+        .expect("later admission-gap row remains separate");
         assert_eq!(
             admitted_row_ids(&later),
             vec!["gap-w2".to_string()],

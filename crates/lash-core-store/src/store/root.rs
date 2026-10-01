@@ -456,8 +456,8 @@ pub trait RootStore: Send + Sync {
     ///
     /// The first call composes from the session's open rows (no root admitted
     /// them): an input head takes the next-turn prefix (up to
-    /// `request.max_inputs`), a batch head the ready queued-work prefix under
-    /// `request.policy`, each stopping at the other table's earliest open row
+    /// `request.max_inputs`), a batch head the ready queued-work prefix, each
+    /// as much of it as `request.policy`'s drain policy selects, each stopping at the other table's earliest open row
     /// ([`TurnLaneStop`](super::TurnLaneStop)). When the prefix reaches the
     /// head, the same transaction binds every member to the root
     /// (`admitted_root`, `admitted_by = 'admit'`) and delivers its ingress

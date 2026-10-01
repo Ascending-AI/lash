@@ -76,7 +76,7 @@ pub struct McpElicitationRequest<'a> {
     pub params: &'a CreateElicitationRequestParams,
     /// Sealed request context supplied by Lash.
     pub context: &'a McpRequestContext,
-    validator: Option<&'a jsonschema::JSONSchema>,
+    validator: Option<&'a jsonschema::Validator>,
 }
 
 impl McpElicitationRequest<'_> {
@@ -442,14 +442,10 @@ impl ClientHandler for LashMcpClientHandler {
     }
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "iterate over a non-empty validator error list guarded by `if let Err(...)` on the same line, so next() is always Some"
-)]
 fn validate_elicitation_response(
     request: &CreateElicitationRequestParams,
     response: &CreateElicitationResult,
-    validator: Option<&jsonschema::JSONSchema>,
+    validator: Option<&jsonschema::Validator>,
 ) -> Result<(), McpElicitationValidationError> {
     match response.action {
         ElicitationAction::Accept => match request {
@@ -464,11 +460,10 @@ fn validate_elicitation_response(
                         "requested schema was not compiled before answer validation",
                     )
                 })?;
-                if let Err(mut errors) = validator.validate(content) {
-                    let error = errors.next().expect("validation failure includes an error");
+                if let Err(error) = validator.validate(content) {
                     return Err(McpElicitationValidationError::new(format!(
                         "answer does not match requested schema at `{}`: {error}",
-                        error.instance_path
+                        error.instance_path()
                     )));
                 }
                 Ok(())
@@ -495,7 +490,7 @@ fn validate_elicitation_response(
 
 fn compile_elicitation_response_validator(
     request: &CreateElicitationRequestParams,
-) -> Result<Option<jsonschema::JSONSchema>, McpElicitationValidationError> {
+) -> Result<Option<jsonschema::Validator>, McpElicitationValidationError> {
     let CreateElicitationRequestParams::FormElicitationParams {
         requested_schema, ..
     } = request
@@ -507,9 +502,10 @@ fn compile_elicitation_response_validator(
             "requested schema could not be compiled: {error}"
         ))
     })?;
-    jsonschema::JSONSchema::options()
+    jsonschema::options()
+        .with_draft(jsonschema::Draft::Draft7.detect(&schema))
         .should_validate_formats(true)
-        .compile(&schema)
+        .build(&schema)
         .map(Some)
         .map_err(|error| {
             McpElicitationValidationError::new(format!(

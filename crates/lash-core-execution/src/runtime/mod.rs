@@ -167,8 +167,8 @@ pub use process::{ConsumerHold, PinnedTriggerDelivery, SessionTurnOutcome, Trigg
 pub use queued_drain_policy::default_queued_drain_policy;
 pub(crate) use queued_drain_policy::shared_drain_mode_policy;
 pub use queued_drain_policy::{
-    DrainMode, DrainModePolicy, QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest,
-    QueuedDrainSelection,
+    DrainMode, DrainModePolicy, QueuedDrainCandidate, QueuedDrainFamily, QueuedDrainPolicy,
+    QueuedDrainRequest, QueuedDrainSelection,
 };
 pub use session_catalog::*;
 pub use state::{RuntimeCheckpointComponents, RuntimeSessionState};

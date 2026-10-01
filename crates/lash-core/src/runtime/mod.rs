@@ -328,8 +328,8 @@ pub use process::{ConsumerHold, PinnedTriggerDelivery, SessionTurnOutcome, Trigg
 pub use process::{ProcessStartStores, RegisteredProcessStart, register_process_start};
 pub use queued_drain_policy::default_queued_drain_policy;
 pub use queued_drain_policy::{
-    DrainMode, DrainModePolicy, QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest,
-    QueuedDrainSelection,
+    DrainMode, DrainModePolicy, QueuedDrainCandidate, QueuedDrainFamily, QueuedDrainPolicy,
+    QueuedDrainRequest, QueuedDrainSelection,
 };
 pub use scenario_contracts::{RUNTIME_SCENARIO_CONTRACTS, ScenarioContractSpec};
 pub use state::{RuntimeCheckpointComponents, RuntimeSessionState};

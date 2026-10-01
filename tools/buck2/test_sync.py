@@ -842,6 +842,84 @@ def check_schema_source_inputs() -> None:
         )
 
 
+def check_feature_lane_executable_selection() -> None:
+    """A filtered lane test names the executables it filters (FIG-4470).
+
+    `cargo test -p X <filter>` compiles every test target and runs the filter in
+    each, so a variant per target would carry the filter into integration
+    binaries that never match it. Lanes compile those with `cargo check --tests`
+    and execute the filter only in an explicitly selected harness.
+    """
+    from unittest import mock
+
+    sys.path.insert(0, str(HERE))
+    import generate_model as generator
+
+    def emit(arguments, subcommand="test"):
+        library = {"name": "example", "kind": ["lib"], "test": True}
+        targets = [library, *(
+            {"name": name, "kind": ["test"], "test": True}
+            for name in ("process_model", "other")
+        ), {"name": "app", "kind": ["bin"], "test": True}]
+        graph = generator.FeatureLaneGraph.__new__(generator.FeatureLaneGraph)
+        graph.by_name = {"example": {"targets": targets}}
+        graph.library_of = mock.Mock(return_value=library)
+        graph.emit_target = mock.Mock(
+            side_effect=lambda package, resolution, target, kind, runnable, args:
+            f"{target['name']}:{kind}"
+        )
+        graph.units = []
+        graph.test_args = {}
+        command = generator.feature_variants.parse_command(
+            ["cargo", subcommand, "-p", "example", "--no-default-features", *arguments]
+        )
+        tests: list[str] = []
+        with mock.patch.object(generator, "cargo_test_policy", return_value=(False, "")):
+            compiled = graph.emit_root_targets(command, {"example": []}, tests)
+        return graph, compiled, tests, graph.emit_target.call_args_list
+
+    for flags in (["conformance"], ["--tests", "conformance"],
+                  ["--all-targets", "--", "conformance"],
+                  ["--tests", "--test", "process_model", "conformance"]):
+        try:
+            emit(flags)
+        except ValueError as error:
+            assert re.search("filtered feature tests require.*--lib.*--bins.*--test", str(error))
+        else:
+            raise AssertionError(f"unselected filtered feature test accepted: {flags}")
+    graph, compiled, tests, calls = emit(["--lib", "conformance"])
+    assert compiled == tests == ["example:unit-test"]
+    assert calls[0].args[-1] == ["conformance"]
+    assert graph.test_args == {"example:unit-test": ["conformance"]}
+
+    graph, compiled, tests, calls = emit(["--tests"], subcommand="check")
+    assert "other:test" in compiled and tests == [] and graph.test_args == {}
+    for call in calls:
+        assert not call.args[4] and call.args[-1] == []
+
+    for order in ((False, True), (True, False)):
+        graph = generator.FeatureLaneGraph.__new__(generator.FeatureLaneGraph)
+        graph.chunks = {}
+        graph._chunk_names = set()
+        graph._runnable_chunks = set()
+        for runnable in order:
+            graph.add_chunk("example", "unit", "filtered" if runnable else "build",
+                            runnable=runnable)
+        assert graph.chunks == {"example": [("unit", "filtered")]}
+        graph.add_chunk("example", "unit", "filtered", runnable=True)
+        try:
+            graph.add_chunk("example", "unit", "another filter", runnable=True)
+        except ValueError as error:
+            assert "conflicting executable selections" in str(error)
+        else:
+            raise AssertionError("conflicting executable selections accepted")
+
+    inventory = load_json("target-inventory.json")
+    assert set(inventory["feature_lane_test_args"]) <= set(
+        inventory["feature_lane_test_targets"]
+    )
+
+
 def main() -> int:
     checks = [
         check_inventory,
@@ -859,6 +937,7 @@ def main() -> int:
         check_buildscript_metadata_bridge,
         check_direct_buck_generator,
         check_schema_source_inputs,
+        check_feature_lane_executable_selection,
     ]
     for check in checks:
         check()

@@ -249,6 +249,191 @@ impl std::io::Write for CappedWriter {
     }
 }
 
+/// The largest MessagePack array header: a marker and a 32-bit count.
+const MAX_ARRAY_HEADER_BYTES: u64 = 5;
+
+/// How much a byte string's header grows from an empty one's, at most: an
+/// 8-bit length becomes a 32-bit one.
+const MAX_BIN_HEADER_GROWTH: u64 = 3;
+
+/// Packs a step's execution observations into the payloads of
+/// [`WorkerMessage::Observations`](crate::WorkerMessage::Observations)
+/// frames (FIG-4458).
+///
+/// Each observation arrives encoded as one MessagePack value, and each
+/// payload is an array of whole observations, in order, sized so that its
+/// frame is within the codec's bounds and the payload itself passes
+/// [`FrameCodec::check_payload`]. So no transport bound limits how many
+/// observations a step makes: the run's own budgets do, its fuel how many it
+/// can make and its heap how many bytes its worker holds and hands on
+/// ([`ObservationChunker::bytes`]). Only an observation that alone outgrows
+/// one frame is refused.
+#[derive(Debug)]
+pub struct ObservationChunker {
+    limits: DecodeLimits,
+    /// The largest payload one frame carries.
+    max_payload_bytes: u64,
+    chunks: Vec<crate::EncodedPayload>,
+    /// The payload bytes of every closed chunk.
+    closed_bytes: u64,
+    /// The open chunk's observations, without its array header.
+    open: Vec<u8>,
+    count: u64,
+    charge: Charge,
+}
+
+impl FrameCodec {
+    /// A chunker whose payloads cross in frames within this codec's bounds.
+    pub fn observation_chunker(&self) -> Result<ObservationChunker, CodecRefusal> {
+        // The envelope around a payload, under the largest header any lease
+        // can carry.
+        let envelope = self.encode_worker(&WorkerFrame {
+            header: crate::MessageHeader {
+                lease: crate::ExecutionLease(u64::MAX),
+                owner_epoch: crate::OwnerEpoch(u64::MAX),
+                frame_epoch: crate::FrameEpoch(u64::MAX),
+                sequence: crate::TransportSequence(u64::MAX),
+            },
+            message: crate::WorkerMessage::Observations {
+                payload: crate::EncodedPayload(Vec::new()),
+            },
+        })?;
+        let envelope_charge = measure_structure(&envelope[FRAME_HEADER_BYTES..], self.limits)?;
+        let by_frame = u64::from(self.limits.max_frame_bytes)
+            .saturating_sub(envelope.len() as u64 + MAX_BIN_HEADER_GROWTH);
+        let by_allocation = self
+            .limits
+            .max_allocation_bytes
+            .saturating_sub(envelope_charge.allocation);
+        Ok(ObservationChunker {
+            limits: self.limits,
+            max_payload_bytes: by_frame.min(by_allocation),
+            chunks: Vec::new(),
+            closed_bytes: 0,
+            open: Vec::new(),
+            count: 0,
+            charge: Charge::default(),
+        })
+    }
+}
+
+impl ObservationChunker {
+    /// Adds one encoded observation after every earlier one. An observation
+    /// no frame can carry, even alone, is refused with the bound it
+    /// outgrows.
+    pub fn push(&mut self, observation: &[u8]) -> Result<(), CodecRefusal> {
+        let charge = measure_structure(observation, self.limits)?;
+        if !self.admits(
+            self.count,
+            self.charge,
+            self.open.len() as u64,
+            charge,
+            observation,
+        ) {
+            self.close();
+            if !self.admits(0, Charge::default(), 0, charge, observation) {
+                return Err(self.refusal(charge, observation));
+            }
+        }
+        self.open.extend_from_slice(observation);
+        self.count += 1;
+        self.charge.nodes += charge.nodes;
+        self.charge.allocation += charge.allocation;
+        self.charge.depth = self.charge.depth.max(charge.depth);
+        Ok(())
+    }
+
+    /// The payload bytes of every chunk so far, the open one included: what
+    /// the step's observations cost the worker that holds them and the
+    /// parent that receives them.
+    pub fn bytes(&self) -> u64 {
+        self.closed_bytes
+            + if self.count == 0 {
+                0
+            } else {
+                array_header(self.count).len() as u64 + self.open.len() as u64
+            }
+    }
+
+    /// The payloads, in order.
+    pub fn finish(mut self) -> Vec<crate::EncodedPayload> {
+        self.close();
+        self.chunks
+    }
+
+    /// Whether a chunk of `count` observations, `open_bytes` long and
+    /// charged `open`, admits one more.
+    fn admits(
+        &self,
+        count: u64,
+        open: Charge,
+        open_bytes: u64,
+        charge: Charge,
+        observation: &[u8],
+    ) -> bool {
+        let count = count + 1;
+        // The array is one more value, and nests its observations one deeper.
+        count <= u64::from(u32::MAX)
+            && open.nodes + charge.nodes < self.limits.max_nodes
+            && (count * CONTAINER_ELEMENT_CHARGE)
+                .saturating_add(open.allocation + charge.allocation)
+                <= self.limits.max_allocation_bytes
+            && open.depth.max(charge.depth) < self.limits.max_depth
+            && MAX_ARRAY_HEADER_BYTES + open_bytes + observation.len() as u64
+                <= self.max_payload_bytes
+    }
+
+    /// The bound an observation that no frame carries outgrows.
+    fn refusal(&self, charge: Charge, observation: &[u8]) -> CodecRefusal {
+        if charge.nodes >= self.limits.max_nodes {
+            CodecRefusal::NodeLimitExceeded {
+                limit: self.limits.max_nodes,
+            }
+        } else if charge.depth >= self.limits.max_depth {
+            CodecRefusal::DepthExceeded {
+                limit: self.limits.max_depth,
+            }
+        } else if MAX_ARRAY_HEADER_BYTES + observation.len() as u64 > self.max_payload_bytes {
+            CodecRefusal::FrameTooLarge {
+                limit: u64::from(self.limits.max_frame_bytes),
+                declared: MAX_ARRAY_HEADER_BYTES + observation.len() as u64,
+            }
+        } else {
+            CodecRefusal::AllocationExceeded {
+                limit: self.limits.max_allocation_bytes,
+                requested: CONTAINER_ELEMENT_CHARGE.saturating_add(charge.allocation),
+            }
+        }
+    }
+
+    fn close(&mut self) {
+        if self.count == 0 {
+            return;
+        }
+        let mut payload = array_header(self.count);
+        payload.append(&mut self.open);
+        self.closed_bytes += payload.len() as u64;
+        self.chunks.push(crate::EncodedPayload(payload));
+        self.count = 0;
+        self.charge = Charge::default();
+    }
+}
+
+/// The MessagePack header of an array of `count` values.
+fn array_header(count: u64) -> Vec<u8> {
+    if count < 16 {
+        vec![0x90 | count as u8]
+    } else if let Ok(count) = u16::try_from(count) {
+        let mut header = vec![0xdc];
+        header.extend_from_slice(&count.to_be_bytes());
+        header
+    } else {
+        let mut header = vec![0xdd];
+        header.extend_from_slice(&(count as u32).to_be_bytes());
+        header
+    }
+}
+
 /// Accumulates a byte stream and yields whole frames.
 ///
 /// The buffer never holds more than one header and one bounded payload: the
@@ -320,6 +505,22 @@ impl FrameReader {
 /// Walks the payload's MessagePack structure, charging depth, values and
 /// declared allocation, without allocating for any of it.
 fn charge_structure(payload: &[u8], limits: DecodeLimits) -> Result<(), CodecRefusal> {
+    measure_structure(payload, limits).map(|_| ())
+}
+
+/// What one payload charged a decode's bounds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Charge {
+    nodes: u64,
+    allocation: u64,
+    /// The most containers open around any container the payload holds:
+    /// wrapped in one more container, the payload nests one deeper.
+    depth: u32,
+}
+
+/// [`charge_structure`], answering what the payload charged.
+fn measure_structure(payload: &[u8], limits: DecodeLimits) -> Result<Charge, CodecRefusal> {
+    let mut depth = 0;
     let mut walk = StructureWalk {
         payload,
         position: 0,
@@ -342,6 +543,7 @@ fn charge_structure(payload: &[u8], limits: DecodeLimits) -> Result<(), CodecRef
                     limit: limits.max_depth,
                 });
             }
+            depth = depth.max(open.len() as u32);
             open.push(children);
         }
     }
@@ -350,7 +552,11 @@ fn charge_structure(payload: &[u8], limits: DecodeLimits) -> Result<(), CodecRef
             extra: (payload.len() - walk.position) as u64,
         });
     }
-    Ok(())
+    Ok(Charge {
+        nodes: walk.nodes,
+        allocation: walk.charged,
+        depth,
+    })
 }
 
 struct StructureWalk<'a> {

@@ -35,14 +35,19 @@ pub enum WorkerLimit {
     Fuel,
     Heap,
     Depth,
+    /// A step's execution observations outgrew the run's heap budget, which
+    /// bounds the stream a worker holds and hands its parent, or a single
+    /// observation outgrew what one frame carries (FIG-4458).
+    Observations,
     Deadline,
 }
 
 impl WorkerLimit {
     /// Whether this limit is a verdict of the host and the attempt that met
     /// it rather than of the run. Fuel, heap and frame depth are measured by
-    /// the VM against the run's own bounds, so every execution of the run
-    /// meets them at the same point. A deadline is the host's clock, or its
+    /// the VM against the run's own bounds, and a step's observations
+    /// against its heap budget, so every execution of the run meets them at
+    /// the same point. A deadline is the host's clock, or its
     /// cumulative CPU and attempt accounting: a replay, or another host with
     /// capacity, answers it differently (FIG-4451).
     pub const fn is_host_verdict(self) -> bool {
@@ -108,6 +113,7 @@ mod tests {
             (WorkerLimit::Fuel, false),
             (WorkerLimit::Heap, false),
             (WorkerLimit::Depth, false),
+            (WorkerLimit::Observations, false),
             (WorkerLimit::Deadline, true),
         ] {
             assert_eq!(limit.is_host_verdict(), host_verdict, "{limit:?}");

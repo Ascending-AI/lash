@@ -9,7 +9,9 @@ restores the count.
 
 The labels and floors come from `tools/buck2/target-inventory.json`, which the
 generator writes. A variant's name is a hash of its resolved closure, so no
-caller reconstructs it.
+caller reconstructs it. A lane command's name filter (`cargo test ... --lib
+conformance`) is part of what the variant executes, so the count applies the
+same libtest arguments: a floor on a filtered selection counts that selection.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ INVENTORY = ROOT / "tools" / "buck2" / "target-inventory.json"
 CASE = re.compile(r": test$", re.MULTILINE)
 
 
-def floors() -> dict[str, int]:
+def floors() -> tuple[dict[str, int], dict[str, list[str]]]:
     inventory = json.loads(INVENTORY.read_text(encoding="utf-8"))
     values = inventory["feature_lane_test_floors"]
     if not isinstance(values, dict) or not all(
@@ -34,11 +36,19 @@ def floors() -> dict[str, int]:
         for label, floor in values.items()
     ):
         raise ValueError("feature_lane_test_floors must map labels to integers")
-    return values
+    arguments = inventory["feature_lane_test_args"]
+    if not isinstance(arguments, dict) or not all(
+        isinstance(label, str)
+        and isinstance(args, list)
+        and all(isinstance(arg, str) for arg in args)
+        for label, args in arguments.items()
+    ):
+        raise ValueError("feature_lane_test_args must map labels to string lists")
+    return values, arguments
 
 
 def main() -> int:
-    expected = floors()
+    expected, arguments = floors()
     if not expected:
         raise SystemExit("feature_lane_test_floors is empty")
     report_dir = pathlib.Path(os.environ.get("RUNNER_TEMP", ROOT / ".buck2" / "ci-reports"))
@@ -78,7 +88,7 @@ def main() -> int:
         )
         executable = resolved.stdout.strip()
         listing = subprocess.run(
-            [executable, "--list"],
+            [executable, *arguments.get(label, []), "--list"],
             cwd=ROOT,
             check=True,
             capture_output=True,

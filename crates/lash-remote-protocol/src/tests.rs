@@ -630,10 +630,10 @@ fn remote_cancelled_stop_requires_and_preserves_evidence() {
 fn remote_turn_cancel_envelopes_round_trip() {
     let request_schema =
         serde_json::to_value(schemars::schema_for!(RemoteTurnCancelRequest)).unwrap();
-    let request_schema = jsonschema::JSONSchema::compile(&request_schema).unwrap();
+    let request_schema = jsonschema::validator_for(&request_schema).unwrap();
     let receipt_schema =
         serde_json::to_value(schemars::schema_for!(RemoteTurnCancelReceipt)).unwrap();
-    let receipt_schema = jsonschema::JSONSchema::compile(&receipt_schema).unwrap();
+    let receipt_schema = jsonschema::validator_for(&receipt_schema).unwrap();
     let request = RemoteTurnCancelRequest {
         session_id: SessionId::from("session"),
         turn_id: TurnId::from("turn"),

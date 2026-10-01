@@ -254,7 +254,9 @@ impl SendBuilder {
 
     /// The host's id for this input. It is the idempotency key **and** the
     /// root the input starts: it is stored verbatim as the row's source key,
-    /// so the input's root is `TurnId(id)`.
+    /// so the input's root is `TurnId(id)`. Under the default drain every
+    /// next-turn input is its own root; a drain policy that takes several
+    /// inputs into one root runs them under the first one's root.
     ///
     /// A retry validates the original submission digest, including after
     /// settlement. Identical content returns the original acceptance; changed

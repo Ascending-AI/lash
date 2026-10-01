@@ -1046,6 +1046,9 @@ async fn execute_code_in_worker_scope(
                     lash_vm_protocol::WorkerLimit::Fuel => Some("instruction budget exceeded"),
                     lash_vm_protocol::WorkerLimit::Heap => Some("logical memory limit exceeded"),
                     lash_vm_protocol::WorkerLimit::Depth => Some("frame depth limit exceeded"),
+                    lash_vm_protocol::WorkerLimit::Observations => {
+                        Some("execution observations exceeded their bound")
+                    }
                     lash_vm_protocol::WorkerLimit::Deadline => None,
                 },
                 _ => None,

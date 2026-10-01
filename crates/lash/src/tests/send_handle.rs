@@ -49,6 +49,17 @@ async fn fixture(batch: usize) -> Result<Fixture> {
     fixture_over(batch, |backend| backend).await
 }
 
+/// [`fixture`] whose drain takes every eligible input into one root
+/// (`DrainMode::All`), for the laws about an input another input's root
+/// answers: the default drain gives each input its own root (FIG-4457).
+async fn composing_fixture() -> Result<Fixture> {
+    fixture_over_with_batching(
+        crate::QueuedWorkBatchingConfig::new(4).with_drain_mode(crate::DrainMode::All),
+        |backend| backend,
+    )
+    .await
+}
+
 /// [`fixture`] over the double's backend as `layer` rebuilds it.
 async fn fixture_over(
     batch: usize,
@@ -644,7 +655,7 @@ async fn a_withdrawn_send_answers_cancelled_without_output() -> Result<()> {
 /// "my drive ran it", so it neither ceded nor refused (review of #2290,
 /// MEDIUM-4).
 async fn an_input_answered_inside_another_root_resolves_answered_with_that_root() -> Result<()> {
-    let fixture = fixture(4).await?;
+    let fixture = composing_fixture().await?;
     let session = fixture
         .core
         .session("send-shared-root")
@@ -906,7 +917,7 @@ async fn a_cancel_reaches_a_root_past_its_frame_switch() -> Result<()> {
 }
 
 async fn cancel_finds_the_consuming_root_before_application() -> Result<()> {
-    let fixture = fixture(4).await?;
+    let fixture = composing_fixture().await?;
     let session = fixture
         .core
         .session("cancel-bound-input")

@@ -182,9 +182,6 @@ load(
 
 lash_rust_feature_test(
     name = "block_identity__test__fv_47d4d6e6",
-    args = [
-        "conformance",
-    ],
     crate_features = [
         "default",
         "testing",
@@ -216,9 +213,6 @@ lash_rust_feature_test(
 
 lash_rust_feature_test(
     name = "charge_safety__test__fv_47d4d6e6",
-    args = [
-        "conformance",
-    ],
     crate_features = [
         "default",
         "testing",
@@ -396,9 +390,6 @@ lash_rust_feature_test(
 
 lash_rust_feature_test(
     name = "property__test__fv_47d4d6e6",
-    args = [
-        "conformance",
-    ],
     crate_features = [
         "default",
         "testing",
