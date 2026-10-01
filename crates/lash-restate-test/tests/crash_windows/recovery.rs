@@ -142,7 +142,7 @@ async fn record_where(
     id: &ProcessId,
     matches: impl Fn(&lash_core::ProcessRecord) -> bool,
 ) -> lash_core::ProcessRecord {
-    tokio::time::timeout(BOUND, async {
+    let reached = tokio::time::timeout(BOUND, async {
         loop {
             let record = engine
                 .lash_backend()
@@ -157,8 +157,58 @@ async fn record_where(
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
-    .await
-    .expect("process reaches the required state")
+    .await;
+    match reached {
+        Ok(record) => record,
+        Err(_) => panic!(
+            "process {id} did not reach the required state within {BOUND:?}:\n{}",
+            stalled_process(engine, id).await
+        ),
+    }
+}
+
+/// What a process that missed its bound looks like (FIG-4612): its record's
+/// wait and park, its latest handover, and every invocation the server holds
+/// for it that is open or journaled a step, with those steps. The suite
+/// prints only the tail of the server's log, which names no step a silent
+/// stall stopped at.
+async fn stalled_process(engine: &Engine, id: &ProcessId) -> String {
+    use std::fmt::Write as _;
+    let mut report = String::new();
+    let backend = engine.lash_backend();
+    match backend.process_registry().get_process(id).await {
+        Ok(Some(record)) => {
+            let _ = writeln!(
+                report,
+                "record: terminal={} wait={:?} park={:?}",
+                record.is_terminal(),
+                record.wait,
+                record.park
+            );
+        }
+        other => {
+            let _ = writeln!(report, "record: {other:?}");
+        }
+    }
+    let latest = backend
+        .stores()
+        .process_continuations()
+        .latest_segment_handover(id)
+        .await
+        .map(|handover| handover.map(|handover| handover.segment_ordinal));
+    let _ = writeln!(report, "latest handover: {latest:?}");
+    for invocation in engine.invocations(id.as_str()).await {
+        let steps = engine.run_names(&invocation.id).await.unwrap_or_default();
+        if invocation.status == "completed" && steps.is_empty() {
+            continue;
+        }
+        let _ = writeln!(
+            report,
+            "{} {}: {steps:?}",
+            invocation.target, invocation.status
+        );
+    }
+    report
 }
 
 fn signal_wait(record: &lash_core::ProcessRecord) -> bool {
