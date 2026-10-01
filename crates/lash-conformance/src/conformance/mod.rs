@@ -199,7 +199,8 @@ pub use session_graph_append::*;
 pub use session_graph_state_machine::*;
 pub use session_history::*;
 pub use session_ingress::{
-    SESSION_INGRESS_SESSION_ID, SessionIngressHandles, session_ingress_session_request,
+    IngressAdmissionProbe, IngressAdmissionSnapshot, SESSION_INGRESS_SESSION_ID,
+    SessionIngressHandles, session_ingress_session_request,
 };
 pub use session_store_factory::*;
 pub use session_store_factory_failure_evidence::*;

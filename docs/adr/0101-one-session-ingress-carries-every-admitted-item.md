@@ -285,6 +285,11 @@ the reducer identities ingress stamped on it, so a resubmission from another
 build is the same request; the lane refuses a changed one as
 `ConfigSubmitError::ChangedContent`. System source-key namespaces belong to
 their item kinds.
+Admission reserves `command:` for session commands and `process:` for process
+wakes. Input and queued-work producers enforce this before deduplication or
+allocation, and a mixed input request is refused atomically. Plugin commands
+queue their inputs as one request, with generated keys under `input:command:`;
+an admission refusal retains its typed cause through command settlement to the host.
 
 Terminal items stay in place as tombstones. Tombstones preserve kind, source
 key, sequence, submitted delivery, digest, terminal cause, and terminal time,

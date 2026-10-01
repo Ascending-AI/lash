@@ -957,6 +957,9 @@ fn enqueue_pending_turn_inputs_conn(
     let session_id = batch.session_id();
     ensure_session_not_deleted_conn(tx, session_id)?;
     ensure_session_not_closing_conn(tx, session_id)?;
+    for draft in batch.drafts() {
+        support::validate_turn_input_source_key(draft)?;
+    }
     let ids = batch
         .drafts()
         .iter()

@@ -491,6 +491,9 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
             .await?;
         ensure_session_not_deleted_tx(&mut tx, session_id).await?;
         ensure_session_not_closing_tx(&mut tx, session_id).await?;
+        for draft in batch.drafts() {
+            support::validate_turn_input_source_key(draft)?;
+        }
         // The session's write authority, held to the commit: every ingress
         // producer takes it before it allocates, so the absences read below
         // hold and the block allocated below is contiguous (FIG-3842).

@@ -218,6 +218,7 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
     nonce: u64,
 ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
     use lash_core_execution::store_backend_support as support;
+    support::validate_queued_work_draft(batch)?;
     let sql = crate::turn_ingress::turn_ingress_sql();
     let submission_digest = support::queued_work_submission_digest(batch)?;
     if let Some(source_key) = batch.source_key.as_deref() {

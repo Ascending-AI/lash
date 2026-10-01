@@ -196,6 +196,7 @@ async fn enqueue_queued_work_with_outcome_tx(
     batch: &QueuedWorkBatchDraft,
     now: u64,
 ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
+    lash_core_execution::store_backend_support::validate_queued_work_draft(batch)?;
     let claim = lash_core_execution::ReferrerClaim::unguarded(
         lash_core_execution::ArtifactReferrer::Session(batch.session_id.clone()),
     )

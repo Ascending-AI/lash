@@ -12,6 +12,7 @@ macro_rules! session_ingress_tests {
     ($fixture:block) => {
         $crate::session_ingress_tests!(@catalogue $fixture; [
             (every_ingress_producer_shares_the_session_sequence, "ingress-shared-sequence"),
+            (ingress_reserved_source_keys_are_refused_before_admission, "ingress-reserved-source-keys"),
             (the_drive_epoch_seal_is_idempotent_per_admission, "ingress-drive-epoch-seal"),
             (concurrent_seals_serialize, "ingress-concurrent-seals"),
         ]);

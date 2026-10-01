@@ -231,6 +231,14 @@ impl SessionAdmin {
                         return Err(EmbedError::Plugin(lash_core::PluginError::Invoke(message)));
                     }
                     lash_core::runtime::SessionCommandSettlement::Applied {
+                        outcome:
+                            lash_core::runtime::SessionCommandOutcome::PluginOperation {
+                                outcome:
+                                    lash_core::runtime::PluginOperationCommandOutcome::Refused { error },
+                            },
+                        ..
+                    } => return Err(EmbedError::Runtime(*error)),
+                    lash_core::runtime::SessionCommandSettlement::Applied {
                         receipt,
                         outcome:
                             lash_core::runtime::SessionCommandOutcome::PluginOperation {

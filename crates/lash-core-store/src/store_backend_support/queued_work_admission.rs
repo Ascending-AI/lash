@@ -10,6 +10,51 @@
 use crate::store::StoreError;
 use crate::{BatchId, QueuedWorkBatchDraft, SessionId, TurnId};
 
+fn require_source_key_kind(
+    session_id: &SessionId,
+    source_key: Option<&str>,
+    kind: &'static str,
+) -> Result<(), StoreError> {
+    let Some(source_key) = source_key else {
+        return Ok(());
+    };
+    let owner = if source_key.starts_with("command:") {
+        Some("session_command")
+    } else if source_key.starts_with("process:") {
+        Some("process_wake")
+    } else {
+        None
+    };
+    if owner.is_some_and(|owner| owner != kind) {
+        return Err(StoreError::IngressReservedSourceKey {
+            session_id: session_id.clone(),
+            kind,
+            source_key: source_key.to_owned(),
+        });
+    }
+    Ok(())
+}
+
+/// Validate a queued producer before deduplication or allocation. Reserved
+/// prefixes belong to ingress kinds, and a wake must also prove its source.
+pub fn validate_queued_work_draft(draft: &QueuedWorkBatchDraft) -> Result<(), StoreError> {
+    let kind = match draft.kind() {
+        crate::QueuedWorkKind::Control => "session_command",
+        crate::QueuedWorkKind::Turn => "process_wake",
+    };
+    require_source_key_kind(&draft.session_id, draft.source_key.as_deref(), kind)?;
+    draft
+        .validate_process_wake_source()
+        .map_err(StoreError::Backend)
+}
+
+/// Inputs cannot use the command or wake namespace, even on a retry.
+pub fn validate_turn_input_source_key(
+    draft: &crate::PendingTurnInputDraft,
+) -> Result<(), StoreError> {
+    require_source_key_kind(&draft.session_id, draft.source_key.as_deref(), "input")
+}
+
 /// How one queued-work draft is answered.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum QueuedWorkDraftAdmission {

@@ -1149,6 +1149,42 @@ fn assert_identity_conflict(refused: std::result::Result<Vec<crate::SendHandle>,
     );
 }
 
+#[tokio::test]
+async fn send_batch_refuses_reserved_source_keys_without_admitting_other_members() -> Result<()> {
+    let fixture = fixture(1).await?;
+    fixture
+        .core
+        .session("reserved-batch")
+        .create(crate::SessionCreation::default())
+        .await?;
+    let session = fixture.core.session("reserved-batch").open().await?;
+    for key in [
+        "command:refresh_tool_catalog:foreign",
+        "process:foreign:event:1:wake",
+    ] {
+        let refused = session
+            .send_batch([
+                ("host:must-roll-back", TurnInput::text("valid member")),
+                (key, TurnInput::text("reserved member")),
+            ])
+            .await;
+        let Err(EmbedError::Runtime(error)) = refused else {
+            panic!("a mixed reserved-key batch must be refused");
+        };
+        assert_eq!(error.code.as_str(), "ingress_reserved_source_key");
+        assert!(error.is_terminal());
+        let recorded = serde_json::to_value(&error)?;
+        assert_eq!(recorded["cause"]["source_key"], key);
+        assert!(session.durable().pending_turn_inputs().await?.is_empty());
+    }
+    assert_eq!(
+        fixture.calls.load(Ordering::SeqCst),
+        0,
+        "a refused batch drives nothing"
+    );
+    Ok(())
+}
+
 /// One batch answers one handle per input, in request order, and each input
 /// is answered by the root that applied it (FIG-3842). Resending the batch
 /// answers the same inputs and runs nothing again. A batch naming an

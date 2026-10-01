@@ -15,6 +15,8 @@ pub enum PluginOperationInvokeError {
     UnexpectedSession(String),
     #[error("plugin operation failed: {0}")]
     Failed(String),
+    #[error("plugin input admission refused: {0}")]
+    AdmissionRefused(Box<crate::RuntimeError>),
 }
 
 #[derive(Clone)]

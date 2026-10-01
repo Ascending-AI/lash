@@ -106,6 +106,133 @@ impl crate::plugin::PluginOperation for HostNoteCommand {
 
 impl crate::plugin::PluginCommand for HostNoteCommand {}
 
+struct HostQueueCommand;
+
+impl crate::plugin::PluginOperation for HostQueueCommand {
+    const NAME: &'static str = "conformance_host_queue";
+    const DESCRIPTION: &'static str = "Queue inputs from a host command.";
+    const SESSION_PARAM: crate::plugin::SessionParam = crate::plugin::SessionParam::Required;
+    type Args = Vec<Option<String>>;
+    type Output = serde_json::Value;
+}
+
+impl crate::plugin::PluginCommand for HostQueueCommand {}
+
+/// A command's queued inputs use input keys, and a reserved-key refusal is
+/// retained as a typed settlement. A mixed directive request admits nothing.
+#[expect(clippy::expect_used, reason = "conformance-law fixture")]
+pub async fn plugin_queued_turns_preserve_reserved_source_key_refusals(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let protocol = StandardFrameLawProtocol::shared();
+    let model = law_model(ModelScript {
+        turns: vec![(protocol.answer("queued answer"), 1); 3],
+    });
+    let mut law = LawSession::open(
+        prefix,
+        "reserved-plugin-input",
+        effect_host,
+        stores,
+        runner,
+        protocol,
+        model.provider.clone(),
+    )
+    .await;
+    law.parts
+        .host_plugins
+        .push(Arc::new(crate::plugin::StaticPluginFactory::new(
+            "reserved-plugin-input",
+            crate::facade_support::PluginSpec::new()
+                .with_plugin_command_typed::<HostQueueCommand, _, _>(|_, keys| async move {
+                    Ok(
+                        crate::plugin::PluginOperationOutcome::new(serde_json::Value::Null)
+                            .with_directives(
+                                keys.into_iter()
+                                    .map(|source_key| {
+                                        crate::plugin::PluginRuntimeDirective::QueueTurn {
+                                            input: crate::TurnInput::text("plugin input"),
+                                            source_key,
+                                        }
+                                    })
+                                    .collect(),
+                            ),
+                    )
+                }),
+        )));
+    for (index, key) in [
+        "command:refresh_tool_catalog:foreign",
+        "process:foreign:event:1:wake",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let receipt = law
+            .submit_command(
+                crate::SessionCommand::RunPluginCommand {
+                    name: <HostQueueCommand as crate::plugin::PluginOperation>::NAME.into(),
+                    args: serde_json::json!(["host:must-roll-back", key]),
+                },
+                &format!("refused-{index}"),
+            )
+            .await;
+        law.enqueue("drive after refusal").await;
+        law.run_root(&format!("refused-{index}")).await;
+        let outcome = law
+            .command_outcome(&receipt)
+            .await
+            .expect("command settled");
+        let recorded = serde_json::to_value(&outcome).expect("encode durable settlement");
+        assert_eq!(
+            recorded["outcome"]["kind"], "refused",
+            "the refusal stays typed: {recorded}"
+        );
+        assert_eq!(
+            recorded["outcome"]["error"]["code"],
+            "ingress_reserved_source_key"
+        );
+        assert_eq!(recorded["outcome"]["error"]["cause"]["source_key"], key);
+        assert!(
+            law.store
+                .list_pending_turn_inputs(&law.session_id)
+                .await
+                .expect("list inputs")
+                .is_empty(),
+            "no input from the mixed directive request survives"
+        );
+    }
+    let receipt = law
+        .submit_command(
+            crate::SessionCommand::RunPluginCommand {
+                name: <HostQueueCommand as crate::plugin::PluginOperation>::NAME.into(),
+                args: serde_json::json!([null]),
+            },
+            "generated-key",
+        )
+        .await;
+    law.run_root("generated-key").await;
+    let Some(crate::SessionCommandOutcome::PluginOperation {
+        outcome:
+            crate::PluginOperationCommandOutcome::Completed {
+                pending_turn_inputs,
+                ..
+            },
+    }) = law.command_outcome(&receipt).await
+    else {
+        panic!("a generated input key is accepted");
+    };
+    assert_eq!(pending_turn_inputs.len(), 1);
+    assert!(
+        pending_turn_inputs[0]
+            .source_key
+            .as_deref()
+            .expect("generated input key")
+            .starts_with("input:")
+    );
+}
+
 /// A plugin task that appends the note its arguments name.
 struct HostNoteTask;
 

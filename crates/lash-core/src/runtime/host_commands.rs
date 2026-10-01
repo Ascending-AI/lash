@@ -259,8 +259,13 @@ impl LashRuntime {
                 // settlement is written over the durable head.
                 self.invalidate_resident_session_state();
                 self.reload_invalidated_resident_session_state().await?;
-                crate::runtime::PluginOperationCommandOutcome::Failed {
-                    message: error.to_string(),
+                match error {
+                    PluginOperationInvokeError::AdmissionRefused(error) => {
+                        crate::runtime::PluginOperationCommandOutcome::Refused { error }
+                    }
+                    error => crate::runtime::PluginOperationCommandOutcome::Failed {
+                        message: error.to_string(),
+                    },
                 }
             }
         };
@@ -446,28 +451,40 @@ impl LashRuntime {
         // A queued turn lands before the settlement names it. A turn with no
         // source key takes one from the command, so a redrive of the
         // unsettled command enqueues the same turn once.
-        let mut pending_turn_inputs = Vec::new();
+        let mut inputs = Vec::new();
         for (index, directive) in directives.into_iter().enumerate() {
             match directive {
                 crate::PluginRuntimeDirective::QueueTurn { input, source_key } => {
                     let source_key = source_key
-                        .unwrap_or_else(|| format!("command:{batch_id}:queue-turn:{index}"));
-                    let pending = self
-                        .enqueue_turn_input(
-                            input,
-                            crate::TurnInputIngress::NextTurn,
-                            Some(source_key),
-                        )
-                        .await
-                        .map_err(|err| {
-                            PluginOperationInvokeError::Failed(format!(
-                                "failed to queue plugin turn request: {err}"
-                            ))
-                        })?;
-                    pending_turn_inputs.push(pending);
+                        .unwrap_or_else(|| format!("input:command:{batch_id}:queue-turn:{index}"));
+                    inputs.push((input, Some(source_key)));
                 }
             }
         }
+        let pending_turn_inputs = if inputs.is_empty() {
+            Vec::new()
+        } else {
+            let store = self
+                .session
+                .as_ref()
+                .and_then(|session| session.history_store())
+                .ok_or_else(|| {
+                    PluginOperationInvokeError::Failed(
+                        "plugin input requires a session store".into(),
+                    )
+                })?;
+            super::durable_queue::enqueue_turn_inputs_to_store(
+                self.state.session_id.clone(),
+                store,
+                &self.ingress_relay(),
+                inputs,
+                crate::TurnInputIngress::NextTurn,
+                crate::RunSpec::default(),
+            )
+            .await
+            .map_err(|error| PluginOperationInvokeError::AdmissionRefused(Box::new(error)))?
+            .0
+        };
         Ok(crate::runtime::PluginOperationCommandOutcome::Completed {
             plugin_id,
             output,

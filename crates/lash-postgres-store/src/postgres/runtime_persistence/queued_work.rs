@@ -9,9 +9,6 @@ impl PostgresStore {
         &self,
         batch: QueuedWorkBatchDraft,
     ) -> Result<QueuedWorkBatch, StoreError> {
-        batch
-            .validate_process_wake_source()
-            .map_err(StoreError::Backend)?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
@@ -27,9 +24,6 @@ impl PostgresStore {
         &self,
         batch: QueuedWorkBatchDraft,
     ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
-        batch
-            .validate_process_wake_source()
-            .map_err(StoreError::Backend)?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]

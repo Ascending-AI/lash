@@ -196,6 +196,9 @@ pub enum PluginOperationCommandOutcome {
     /// The operation failed: nothing of it committed, and the command is
     /// settled, so it is never applied again.
     Failed { message: String },
+    /// Queued input was refused at admission. The cause is retained for the
+    /// submitting host, and none of the operation's inputs were admitted.
+    Refused { error: Box<crate::RuntimeError> },
     /// A host cancelled the task after a drive admitted it, and its drive
     /// found the cancel requested before or once the task's code returned
     /// (FIG-4391, FIG-4453): nothing of the task committed, and the command

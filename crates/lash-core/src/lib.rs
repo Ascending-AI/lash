@@ -16,6 +16,7 @@
 pub use async_trait::async_trait;
 
 pub use lash_core_execution::ExecutionOwner;
+pub use lash_core_execution::IngressReservedSourceKeyRefusal;
 pub use lash_core_execution::admitted_scope_wire;
 pub use lash_core_execution::compat;
 pub use lash_core_execution::direct;

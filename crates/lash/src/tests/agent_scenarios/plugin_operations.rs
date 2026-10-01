@@ -34,6 +34,55 @@ fn outcome(value: String, label: &str) -> PluginOperationOutcome<String> {
 }
 
 #[test]
+fn agent_scenario_plugin_reserved_source_key_refusal_is_typed() -> Result<()> {
+    run_async_test_on_stack_budget("reserved-plugin-keys", || async {
+        let spec = lash_core::facade_support::PluginSpec::new()
+            .with_plugin_command_typed::<Command, _, _>(|_, key| async move {
+                Ok(
+                    PluginOperationOutcome::new(String::new()).with_directives(vec![
+                        crate::plugins::PluginRuntimeDirective::QueueTurn {
+                            input: TurnInput::text("plugin input"),
+                            source_key: Some(key),
+                        },
+                    ]),
+                )
+            });
+        let double = restate_double(SEED).await;
+        let core = explicit_ephemeral_facets(LashCore::standard_builder(
+            double.lash_backend(),
+            crate::TurnBudget::Unbounded,
+        ))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .plugin(Arc::new(StaticPluginFactory::new("accept", spec)))
+        .build(crate::testing::runtime_lease_owner())?;
+        let session = core
+            .session("reserved-plugin-keys")
+            .created()
+            .await
+            .open()
+            .await?;
+        for key in [
+            "command:refresh_tool_catalog:foreign",
+            "process:foreign:event:1:wake",
+        ] {
+            let refused = session
+                .plugin_operations()
+                .run_command::<Command>(key.into())
+                .await;
+            let Err(EmbedError::Runtime(error)) = refused else {
+                panic!("plugin refusal must reach the host typed");
+            };
+            assert_eq!(error.code.as_str(), "ingress_reserved_source_key");
+            let recorded = serde_json::to_value(&error)?;
+            assert_eq!(recorded["cause"]["source_key"], key);
+            assert!(session.durable().pending_turn_inputs().await?.is_empty());
+        }
+        Ok(())
+    })
+}
+
+#[test]
 pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
     run_async_test_on_stack_budget("plugin-operations", || async {
         let entered = Arc::new(tokio::sync::Notify::new());

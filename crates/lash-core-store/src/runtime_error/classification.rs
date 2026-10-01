@@ -208,6 +208,7 @@ impl RuntimeErrorCode {
             Self::RunSpecMismatch => Terminal,
             // the same address names the same unknown turn again.
             Self::TurnAddressUnknown => Terminal,
+            Self::IngressReservedSourceKey => Terminal,
             // a plugin refusal over the same inputs.
             Self::Plugin => Terminal,
             // the selected queued work cannot be admitted; the same selection is refused again.

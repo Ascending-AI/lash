@@ -21,7 +21,7 @@ pub use process_lifecycle_sql::{
 pub use queued_work_admission::{
     QueuedWorkDraftAdmission, TurnAddressEvidence, decide_queued_work_draft_admission,
     decode_ingress_terminal, queued_work_submission_digest, require_known_turn_address,
-    turn_address_evidence,
+    turn_address_evidence, validate_queued_work_draft, validate_turn_input_source_key,
 };
 pub use run_spec_admission::{
     RunSpecAdmission, check_running_root_run_spec, check_steering_run_spec,

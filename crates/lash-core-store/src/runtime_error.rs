@@ -234,6 +234,8 @@ pub enum RuntimeErrorCode {
     /// nor one with its final commit recorded (ADR 0101 §5.1): refused before
     /// acceptance, with no row and no sequence number.
     TurnAddressUnknown,
+    /// Admission refused a source key reserved for another ingress kind.
+    IngressReservedSourceKey,
     Plugin,
     QueuedWork,
     /// One queued row alone renders larger than the whole model context window,
@@ -515,6 +517,18 @@ pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) ->
         err @ crate::store::StoreError::IngressTurnAddressUnknown { .. } => {
             RuntimeError::new(RuntimeErrorCode::TurnAddressUnknown, err.to_string())
         }
+        ref err @ crate::store::StoreError::IngressReservedSourceKey {
+            ref session_id,
+            kind,
+            ref source_key,
+        } => RuntimeError::new(RuntimeErrorCode::IngressReservedSourceKey, err.to_string())
+            .with_cause(RuntimeErrorCause::IngressReservedSourceKey {
+                refusal: Box::new(IngressReservedSourceKeyRefusal {
+                    session_id: session_id.clone(),
+                    ingress_kind: kind.to_owned(),
+                    source_key: source_key.clone(),
+                }),
+            }),
         err @ (crate::store::StoreError::SessionClosing { .. }
         | crate::store::StoreError::SessionDeleted { .. }) => runtime_error_from_store_commit(err),
         err => RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()),
@@ -533,7 +547,8 @@ pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> Runtime
         | crate::store::StoreError::PendingTurnInputBatchDuplicate { .. }
         | crate::store::StoreError::RunSpecHashCollision { .. }
         | crate::store::StoreError::PendingTurnInputRunSpecMismatch { .. }
-        | crate::store::StoreError::IngressTurnAddressUnknown { .. }) => {
+        | crate::store::StoreError::IngressTurnAddressUnknown { .. }
+        | crate::store::StoreError::IngressReservedSourceKey { .. }) => {
             runtime_error_from_turn_input_admission(err)
         }
         crate::store::StoreError::Contended => RuntimeError::new(
@@ -695,6 +710,7 @@ impl RuntimeErrorCode {
             Self::RunShapeRefused => "run_shape_refused",
             Self::RunSpecMismatch => "run_spec_mismatch",
             Self::TurnAddressUnknown => "turn_address_unknown",
+            Self::IngressReservedSourceKey => "ingress_reserved_source_key",
             Self::Plugin => "plugin",
             Self::QueuedWork => "queued_work",
             Self::QueuedWorkRowExceedsContextWindow => "queued_work_row_exceeds_context_window",
@@ -955,6 +971,7 @@ impl RuntimeErrorCode {
         Self::RunShapeRefused,
         Self::RunSpecMismatch,
         Self::TurnAddressUnknown,
+        Self::IngressReservedSourceKey,
         Self::Plugin,
         Self::QueuedWork,
         Self::QueuedWorkRowExceedsContextWindow,
@@ -1157,6 +1174,7 @@ impl RuntimeErrorCode {
             "run_shape_refused" => Self::RunShapeRefused,
             "run_spec_mismatch" => Self::RunSpecMismatch,
             "turn_address_unknown" => Self::TurnAddressUnknown,
+            "ingress_reserved_source_key" => Self::IngressReservedSourceKey,
             "plugin" => Self::Plugin,
             "queued_work" => Self::QueuedWork,
             "queued_work_row_exceeds_context_window" => Self::QueuedWorkRowExceedsContextWindow,
@@ -1358,6 +1376,15 @@ impl<'de> serde::Deserialize<'de> for RuntimeErrorCode {
         Ok(Self::from_wire_code(&code))
     }
 }
+/// The identity of a submission refused for using another ingress kind's
+/// reserved source-key namespace.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct IngressReservedSourceKeyRefusal {
+    pub session_id: SessionId,
+    pub ingress_kind: String,
+    pub source_key: String,
+}
+
 /// Typed terminal cause retained when a controller-owned runtime effect must
 /// abort through the generic runtime error boundary.
 ///
@@ -1368,6 +1395,10 @@ impl<'de> serde::Deserialize<'de> for RuntimeErrorCode {
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum RuntimeErrorCause {
+    IngressReservedSourceKey {
+        #[serde(flatten)]
+        refusal: Box<IngressReservedSourceKeyRefusal>,
+    },
     StoreRefusal {
         refusal: Box<crate::store::StoreRefusal>,
     },
@@ -1619,6 +1650,7 @@ impl RuntimeError {
         match self.cause.as_ref()? {
             RuntimeErrorCause::SessionDeleted { session_id } => Some(session_id),
             RuntimeErrorCause::ArtifactReferrerEnded { .. }
+            | RuntimeErrorCause::IngressReservedSourceKey { .. }
             | RuntimeErrorCause::StoreRefusal { .. } => None,
         }
     }

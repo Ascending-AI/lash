@@ -9,9 +9,6 @@ impl SqliteStore {
         &self,
         batch: QueuedWorkBatchDraft,
     ) -> Result<QueuedWorkBatch, StoreError> {
-        batch
-            .validate_process_wake_source()
-            .map_err(StoreError::Backend)?;
         let nonce = self.commit_count.fetch_add(1, AtomicOrdering::Relaxed);
         let now = self.clock.timestamp_ms();
         self.conn
@@ -47,9 +44,6 @@ impl SqliteStore {
         &self,
         batch: QueuedWorkBatchDraft,
     ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
-        batch
-            .validate_process_wake_source()
-            .map_err(StoreError::Backend)?;
         let nonce = self.commit_count.fetch_add(1, AtomicOrdering::Relaxed);
         let now = self.clock.timestamp_ms();
         self.conn

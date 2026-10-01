@@ -1760,6 +1760,7 @@ macro_rules! frame_open_redrive_tests {
             dirty_park_while_busy_is_recoverable_and_loses_nothing,
             plugin_state_dirty_park_reparks_from_the_recorded_head,
             command_cancellation_before_admission_withdraws_it,
+            plugin_queued_turns_preserve_reserved_source_key_refusals,
             a_lowered_budget_refuses_a_stranded_command_once_per_drive,
             raising_the_budget_settles_a_stranded_command,
             an_over_budget_command_settles_failed_at_its_bare_commits_size,
