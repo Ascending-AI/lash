@@ -104,7 +104,7 @@ silently become a whole-catalog blob sweep.
 | Host or platform mutation receipt | Namespace replay eligibility | Explicit host retention through the trigger-store primitive. |
 | Fired occurrence | Committed delivery fan-out | Transactional reconciliation after zero delivery rows remain. |
 | Non-fired occurrence | Factory audit history | Explicit non-fired audit cutoff, never delivery reconciliation. |
-| Occurrence tombstone | Factory redelivery fence for one reclaimed occurrence identity | Explicit host deletion through `forget_trigger_tombstones(written_before_epoch_ms)`, after the host vouches that its source will no longer redeliver the selected identities. Reclaim never deletes these tombstones (ADR 0021, FIG-4610). |
+| Occurrence tombstone | Factory redelivery fence for one reclaimed occurrence identity | Explicit host deletion through `forget_trigger_tombstones(written_before_epoch_ms)`, after the host vouches that its source stops redelivering the selected identities. Reclaim never deletes these tombstones (ADR 0021, FIG-4610). |
 | Trigger delivery | Process run | Process-retention policy under ADR 0021. |
 | Attachment condemnation | Factory condemnation protocol | Adoption and discharge under §6. |
 

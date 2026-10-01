@@ -240,6 +240,7 @@ pub async fn build_core(
         .session_spec(
             SessionSpec::new()
                 .turn_budget(lash::TurnBudget::Unbounded)
+                .max_tool_calls(lash::MaxToolCalls::new(1024))
                 .plugin(
                     lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
                     StandardTurnOptions {
