@@ -2,7 +2,12 @@
 use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
 use lash_core::engine::*;
 use lash_core::store::*;
-use lash_core::{SessionDriver, SessionId, SessionWorkEngine, TurnId};
+use lash_core::{
+    EffectAddress, RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectEnvelope,
+    RuntimeEffectInvocation, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, SessionDriver,
+    SessionId, SessionWorkEngine, TurnId,
+};
+use std::future::Future;
 use std::num::NonZeroUsize;
 use std::sync::{
     Arc,
@@ -40,23 +45,72 @@ fn redrive_unsettled() -> lash_core::RuntimeError {
         "the session admits no turn input while its park names an unsettled redrive",
     )
 }
-#[async_trait::async_trait]
-impl SessionDriver for Driver {
-    async fn admit(
+/// One admission of a witness driver, recorded as the kernel records its own:
+/// the `AdmitDrive` step of `ordinal` on the drive's admission scope. `decide`
+/// reads live state, so it runs only as the step's first execution; a replay
+/// of the drive decodes the verdict that execution journaled and never runs
+/// it. A fault of `decide` is the attempt's, never the step's outcome: the
+/// engine's retry decides the admission again.
+async fn recorded_admission<Fut>(
+    controller: &lash_core::ScopedEffectController<'_>,
+    request: &DriveRequest,
+    ordinal: u32,
+    decide: impl FnOnce() -> Fut + Send,
+) -> Result<AdmitVerdict, DriveAbort>
+where
+    Fut: Future<Output = Result<AdmitVerdict, lash_core::RuntimeError>> + Send,
+{
+    let address = EffectAddress::new(
+        controller.execution_scope().clone(),
+        drive_admission_replay_key(&request.request, ordinal),
+    )
+    .map_err(|error| DriveAbort::Refused(lash_core::RuntimeError::from(error)))?;
+    let envelope = RuntimeEffectEnvelope::new(
+        RuntimeEffectInvocation::new(
+            address,
+            RuntimeAttribution::for_session(request.session.clone()),
+            format!("drive-admission-{ordinal}"),
+        ),
+        RuntimeEffectCommand::AdmitDrive {
+            request: Box::new(AdmitRequest {
+                session: request.session.clone(),
+                request: request.request.clone(),
+                build_generation: request.build_generation.clone(),
+            }),
+        },
+    );
+    controller
+        .execute_effect(
+            envelope,
+            RuntimeEffectLocalExecutor::testing(move |_| async move {
+                match decide().await {
+                    Ok(verdict) => Ok(RuntimeEffectOutcome::AdmitDrive {
+                        verdict: Box::new(verdict),
+                    }),
+                    Err(fault) => Err(lash_core::RuntimeEffectControllerError::from(fault)
+                        .retryable_uncommitted_derivation()),
+                }
+            }),
+        )
+        .await
+        .and_then(RuntimeEffectOutcome::into_admit_drive)
+        .map_err(|error| DriveAbort::Retry(error.into_runtime_error()))
+}
+
+impl Driver {
+    /// What the session admits now, read from its store.
+    async fn decide_admission(
         &self,
-        _: lash_core::ScopedEffectController<'_>,
         request: &DriveRequest,
         ordinal: u32,
-    ) -> Result<AdmitVerdict, DriveAbort> {
+    ) -> Result<AdmitVerdict, lash_core::RuntimeError> {
         self.admits.fetch_add(1, Ordering::SeqCst);
         if self.admission_fails.load(Ordering::SeqCst) {
-            return Err(DriveAbort::Retry(
-                if self.redrive_unsettled.load(Ordering::SeqCst) {
-                    redrive_unsettled()
-                } else {
-                    fault()
-                },
-            ));
+            return Err(if self.redrive_unsettled.load(Ordering::SeqCst) {
+                redrive_unsettled()
+            } else {
+                fault()
+            });
         }
         if self.command_only {
             return Ok(AdmitVerdict::Idle);
@@ -97,6 +151,20 @@ impl SessionDriver for Driver {
                 head: self.input.clone(),
             },
         )))
+    }
+}
+#[async_trait::async_trait]
+impl SessionDriver for Driver {
+    async fn admit(
+        &self,
+        controller: lash_core::ScopedEffectController<'_>,
+        request: &DriveRequest,
+        ordinal: u32,
+    ) -> Result<AdmitVerdict, DriveAbort> {
+        recorded_admission(&controller, request, ordinal, || {
+            self.decide_admission(request, ordinal)
+        })
+        .await
     }
     async fn run_root(
         &self,
@@ -1662,14 +1730,13 @@ struct StartedRootDriver {
     executions: AtomicUsize,
     effects: AtomicUsize,
 }
-#[async_trait::async_trait]
-impl SessionDriver for StartedRootDriver {
-    async fn admit(
+impl StartedRootDriver {
+    /// What the session admits now, read from its store.
+    async fn decide_admission(
         &self,
-        _: lash_core::ScopedEffectController<'_>,
         request: &DriveRequest,
         ordinal: u32,
-    ) -> Result<AdmitVerdict, DriveAbort> {
+    ) -> Result<AdmitVerdict, lash_core::RuntimeError> {
         self.admits.fetch_add(1, Ordering::SeqCst);
         if self
             .store
@@ -1691,6 +1758,20 @@ impl SessionDriver for StartedRootDriver {
                 head: self.input.clone(),
             },
         )))
+    }
+}
+#[async_trait::async_trait]
+impl SessionDriver for StartedRootDriver {
+    async fn admit(
+        &self,
+        controller: lash_core::ScopedEffectController<'_>,
+        request: &DriveRequest,
+        ordinal: u32,
+    ) -> Result<AdmitVerdict, DriveAbort> {
+        recorded_admission(&controller, request, ordinal, || {
+            self.decide_admission(request, ordinal)
+        })
+        .await
     }
     async fn run_root(
         &self,

@@ -491,10 +491,7 @@ async fn reconcile_tick(
             clock: clock.as_ref(),
             duties: lash_core::runtime::recovery_lease::RecoveryDuties::ALL,
             relays: &relays,
-            lanes: &lash_core::runtime::drive::RelayLanes::new(
-                Arc::clone(&clock),
-                lash_core::engine::RecoveryPassBudget::default(),
-            ),
+            lanes: &super::helpers::law_tick_lanes(Arc::clone(&clock)),
         },
         &lash_core::engine::ReconcileCursor::default(),
         std::num::NonZeroUsize::new(64).unwrap_or(std::num::NonZeroUsize::MIN),
