@@ -32,8 +32,23 @@ if ! [[ "$member_count" =~ ^[1-9][0-9]*$ ]] || ((member_count > $#)); then
     echo "FAIL: invalid batch member count '$member_count' for $# arguments" >&2
     exit 1
 fi
-members=("${@:1:member_count}")
-shift "$member_count"
+# Each member arrives as `<n> <n NAME=value assignments> <binary>`: the
+# environment its own Rust test target declares, then the binary.
+members=()
+member_envs=()
+for ((member = 0; member < member_count; member++)); do
+    env_count=${1:-}
+    if ! [[ "$env_count" =~ ^[0-9]+$ ]] || ((env_count + 2 > $#)); then
+        echo "FAIL: invalid environment count '$env_count' for batch member $member" >&2
+        exit 1
+    fi
+    shift
+    assignments=("${@:1:env_count}")
+    shift "$env_count"
+    member_envs+=("$(printf '%s\n' "${assignments[@]}")")
+    members+=("$1")
+    shift
+done
 args=("$@")
 list_only=0
 help_only=0
@@ -45,21 +60,24 @@ done
 declare -a pids=()
 declare -a names=()
 run_member() {
-    local rloc="$1" name started code elapsed
+    local rloc="$1" environment="$2" name started code elapsed
+    local -a assignments=()
+    [[ -n $environment ]] && mapfile -t assignments <<<"$environment"
     name="$(basename "$rloc")"
     started=${EPOCHREALTIME/./}
-    "$rloc" "${args[@]}" >"$logs/$name.log" 2>&1
+    /usr/bin/env "${assignments[@]}" "$rloc" "${args[@]}" >"$logs/$name.log" 2>&1
     code=$?
     elapsed=$((${EPOCHREALTIME/./} - started))
     printf '%d %d.%03d %s\n' "$code" $((elapsed / 1000000)) \
         $((elapsed % 1000000 / 1000)) "$rloc" >> "$logs/status"
 }
 
-for rloc in "${members[@]}"; do
+for index in "${!members[@]}"; do
+    rloc=${members[index]}
     while [ "$(jobs -rp | wc -l)" -ge "$jobs_cap" ]; do
         sleep 0.05
     done
-    run_member "$rloc" &
+    run_member "$rloc" "${member_envs[index]}" &
     pids+=("$!")
     names+=("$rloc")
 done

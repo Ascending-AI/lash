@@ -3256,24 +3256,28 @@ test_suite(
 filegroup(
     name = "workflow_graph_schema",
     srcs = ["schemas/host/workflow-graph/v21.schema.json"],
+    copy = False,
     visibility = ["PUBLIC"],
 )
 
 filegroup(
     name = "dialect_deviation_register",
     srcs = ["docs/adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md"],
+    copy = False,
     visibility = ["PUBLIC"],
 )
 
 filegroup(
     name = "host_schemas",
     srcs = glob(["schemas/host/*/*.schema.json"]),
+    copy = False,
     visibility = ["PUBLIC"],
 )
 
 filegroup(
     name = "cargo_metadata",
     srcs = ["Cargo.lock", "Cargo.toml"],
+    copy = False,
     visibility = ["PUBLIC"],
 )
 
@@ -3345,6 +3349,7 @@ filegroup(
         "scripts/slack-clone-full-host-e2e.py",
         "scripts/slack-clone-live-model-ui.py",
     ],
+    copy = False,
     visibility = ["PUBLIC"],
 )
 
@@ -3356,18 +3361,21 @@ filegroup(
         "scripts/confidence-gate.sh",
         "scripts/worktree-gate-env.sh",
     ],
+    copy = False,
     visibility = ["PUBLIC"],
 )
 
 filegroup(
     name = "perf_guard_budgets",
     srcs = ["scripts/perf_guard_budgets.json"],
+    copy = False,
     visibility = ["PUBLIC"],
 )
 
 filegroup(
     name = "perf_duration_level_shifts",
     srcs = ["scripts/perf_duration_level_shifts.json"],
+    copy = False,
     visibility = ["PUBLIC"],
 )
 
@@ -3380,12 +3388,14 @@ export_file(
 export_file(
     name = "Cargo.toml",
     src = "Cargo.toml",
+    mode = "reference",
     visibility = ["PUBLIC"],
 )
 
 export_file(
     name = "Cargo.lock",
     src = "Cargo.lock",
+    mode = "reference",
     visibility = ["PUBLIC"],
 )
 

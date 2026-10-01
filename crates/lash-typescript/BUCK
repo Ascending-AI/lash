@@ -320,6 +320,7 @@ filegroup(
         "tests/differential/sessions/generated/**",
         "tests/test262/census/**",
     ]),
+    copy = False,
     visibility = ["PUBLIC"],
 )
 
@@ -339,12 +340,14 @@ lash_batch_test(
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),
+    copy = False,
     visibility = ["PUBLIC"],
 )
 
 filegroup(
     name = "package_files",
     srcs = glob(["**"], exclude = ["BUCK"]),
+    copy = False,
     visibility = ["PUBLIC"],
 )
 

@@ -734,7 +734,12 @@ def target_support(
 
 
 def filegroups(package_name: str) -> str:
-    """Package files other packages' targets name as inputs."""
+    """Package files other packages' targets name as inputs.
+
+    Every generated filegroup is a symlink tree (`copy = False`): a test that
+    names one finds its files at their checkout paths, as Cargo and Bazel
+    runfiles showed them, instead of only under a copied `buck-out` directory.
+    """
     chunks = []
     for name, spec in PACKAGE_POLICY.get("filegroups", {}).get(package_name, {}).items():
         if "glob" in spec:
@@ -745,6 +750,7 @@ def filegroups(package_name: str) -> str:
             "filegroup(\n"
             f"    name = {quote(name)},\n"
             f"    srcs = {srcs},\n"
+            "    copy = False,\n"
             '    visibility = ["PUBLIC"],\n'
             ")\n\n"
         )
@@ -1182,11 +1188,13 @@ def render_package(package: dict, features: list[str], worker_tests: bool = Fals
         "filegroup(\n"
         "    name = \"rust_sources\",\n"
         "    srcs = glob([\"**/*.rs\"]),\n"
+        "    copy = False,\n"
         "    visibility = [\"PUBLIC\"],\n"
         ")\n\n"
         "filegroup(\n"
         "    name = \"package_files\",\n"
         "    srcs = glob([\"**\"], exclude = [\"BUCK\"]),\n"
+        "    copy = False,\n"
         "    visibility = [\"PUBLIC\"],\n"
         ")\n"
     )

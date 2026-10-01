@@ -60,5 +60,6 @@ test_helper_bundle(
     visibility = ["PUBLIC"],
 )
 
-export_file(name = "target_inventory", src = "target-inventory.json", visibility = ["PUBLIC"])
+# Tests read the inventory at its checkout path, so it is exported by reference.
+export_file(name = "target_inventory", src = "target-inventory.json", mode = "reference", visibility = ["PUBLIC"])
 export_file(name = "ui_fixtures_runner.py", src = "ui_fixtures_runner.py", visibility = ["PUBLIC"])

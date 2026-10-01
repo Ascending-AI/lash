@@ -249,12 +249,14 @@ export_file(
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),
+    copy = False,
     visibility = ["PUBLIC"],
 )
 
 filegroup(
     name = "package_files",
     srcs = glob(["**"], exclude = ["BUCK"]),
+    copy = False,
     visibility = ["PUBLIC"],
 )
 

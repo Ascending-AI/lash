@@ -147,6 +147,15 @@ fixture to its owning test. Other runtime inputs remain conservative where tests
 read package sources. Bytecode caches and `node_modules` do not become Rust
 compile inputs. Add an embedded asset and its declaration together.
 
+A test runs from the project root. `CARGO_MANIFEST_DIR` and
+`CARGO_BIN_EXE_<name>` are project-relative at compile and run time, so they
+resolve on any runner. Generated filegroups are symlink trees and runtime files
+are exported by reference: a declared file is visible at its checkout path,
+whichever package owns it. Each cross-package input keeps a name derived from
+its label, so two packages' `:rust_sources` never displace each other. The
+wrapper and batch runner pass the Rust test's own environment; they do not use
+the prelude's env injector, whose file records the writing host's paths.
+
 For a narrowed boundary, compare sibling-only and shared-helper edits. The first
 should recompile only its owner; the second should recompile both. Count
 compilation independently from tests that scan source at runtime.

@@ -138,7 +138,7 @@ class ClippyPolicyTests(unittest.TestCase):
             namespace,
         )
         environment = namespace["_cargo_env"]("package", "crate", "crates/package", "1.0")
-        self.assertEqual(environment["CARGO_MANIFEST_DIR"], ".")
+        self.assertEqual(environment["CARGO_MANIFEST_DIR"], "crates/package")
         self.assertEqual(
             environment["KILN_RELATIVE_CARGO_MANIFEST_DIR"], "crates/package"
         )
@@ -158,7 +158,9 @@ class ClippyPolicyTests(unittest.TestCase):
             "FIRST_PARTY_RUST_LINT_FLAGS + FIRST_PARTY_CLIPPY_LINT_FLAGS",
             source,
         )
-        self.assertEqual(source.count("resources = compile_data,"), 4)
+        self.assertEqual(
+            source.count("resources = _resources(package_compile_data, extra_compile_data),"), 4
+        )
         # Package compile data joins the sources; cross-package compile data
         # selects the repository-rooted source tree.
         self.assertEqual(
@@ -176,7 +178,7 @@ class ClippyPolicyTests(unittest.TestCase):
             source,
         )
         self.assertIn(
-            "resources = package_files + extra_compile_data + extra_data", source
+            "resources = _resources(package_files, extra_compile_data + extra_data)", source
         )
         self.assertIn(
             '_srcs("build.rs", ["build/**/*.rs"]) + data,\n        extra_srcs,\n    ))',

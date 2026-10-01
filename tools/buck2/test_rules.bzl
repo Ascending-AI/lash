@@ -40,6 +40,13 @@ test_helper_bundle = rule(
 
 def _external_test_impl(ctx):
     test_info = ctx.attrs.test[DefaultInfo]
+    # The native rust_test's own command and environment, not its RunInfo:
+    # that wraps the binary in the prelude's env injector, whose env file
+    # holds absolute paths of the host that wrote it. Carried here, artifact
+    # values render project-relative like every other test input.
+    native_test = ctx.attrs.test[ExternalRunnerTestInfo]
+    env = dict(native_test.env)
+    env.update(ctx.attrs.env)
     local = read_root_config("kiln", "execution_mode", "remote") == "local"
     default_executor = CommandExecutorConfig(
         local_enabled = local,
@@ -63,11 +70,10 @@ def _external_test_impl(ctx):
         ),
         ExternalRunnerTestInfo(
             type = "custom",
-            command = [ctx.attrs.runner[RunInfo]] + ctx.attrs.prefix + [
-                ctx.attrs.test[RunInfo],
+            command = [ctx.attrs.runner[RunInfo]] + ctx.attrs.prefix + native_test.command + [
                 "--lash-libtest-args",
             ] + ctx.attrs.args,
-            env = ctx.attrs.env,
+            env = env,
             labels = ctx.attrs.labels,
             run_from_project_root = True,
             use_project_relative_paths = True,
@@ -92,7 +98,7 @@ _external_test = rule(
         "prefix": attrs.list(attrs.arg()),
         "properties": attrs.dict(attrs.string(), attrs.string()),
         "runner": attrs.dep(providers = [RunInfo]),
-        "test": attrs.dep(providers = [DefaultInfo, RunInfo]),
+        "test": attrs.dep(providers = [DefaultInfo, ExternalRunnerTestInfo]),
     },
 )
 

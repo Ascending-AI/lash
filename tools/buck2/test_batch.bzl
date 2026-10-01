@@ -9,8 +9,17 @@ def _batch_impl(ctx):
         cmd_args("/usr/bin/bash", helpers.project("test_batch_launcher.sh"), hidden = helpers),
         str(len(ctx.attrs.members)),
     ]
+    # Each member is `<n> <n env assignments> <binary>`: the native test's own
+    # command and environment (see `_external_test_impl`), so its artifact
+    # values render project-relative and the runner sees one binary per member.
     for test in ctx.attrs.members:
-        command.append(test[RunInfo])
+        native_test = test[ExternalRunnerTestInfo]
+        if len(native_test.command) != 1:
+            fail("{} must run as a single binary to join a batch".format(test.label))
+        command.append(str(len(native_test.env)))
+        for name, value in sorted(native_test.env.items()):
+            command.append(cmd_args(name, "=", value, delimiter = ""))
+        command.extend(native_test.command)
     return [
         DefaultInfo(),
         ExternalRunnerTestInfo(
@@ -60,7 +69,7 @@ _batch_test = rule(
         "helpers": attrs.dep(),
         "jobs": attrs.int(),
         "memory_kb": attrs.string(),
-        "members": attrs.list(attrs.dep(providers = [RunInfo])),
+        "members": attrs.list(attrs.dep(providers = [ExternalRunnerTestInfo])),
     },
 )
 

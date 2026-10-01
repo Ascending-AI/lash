@@ -25,7 +25,9 @@ _OPTIMIZED_FLAGS = [
 def _cargo_env(package_name, crate_name, manifest_dir, version, extra = {}):
     result = {
         "CARGO_CRATE_NAME": crate_name,
-        "CARGO_MANIFEST_DIR": ".",
+        # Project-relative at compile and run time alike: tests run from the
+        # project root, where this names the package directory.
+        "CARGO_MANIFEST_DIR": manifest_dir,
         "CARGO_PKG_NAME": package_name,
         "CARGO_PKG_VERSION": version,
         "KILN_RELATIVE_CARGO_MANIFEST_DIR": manifest_dir,
@@ -113,6 +115,19 @@ def _source_attrs(name, manifest_dir, crate_root, package_srcs, workspace_srcs):
         "kiln_repo_rooted_srcs": True,
         "srcs_filegroup": ":" + tree,
     }
+
+def _resources(files, labels):
+    """Name a package file by its path and another target by its label.
+
+    Buck2 names an unnamed resource by its output's short path, so two
+    packages' `:rust_sources` filegroups would share one name and all but one
+    would silently drop out of the binary's inputs.
+    """
+    result = {path: path for path in files}
+    for label in labels:
+        parts = [part for part in label.replace(":", "/").split("/") if part]
+        result["__lash_inputs__/" + "/".join(parts)] = label
+    return result
 
 def _data(patterns = ["**"], exclude = []):
     return glob(patterns, exclude = _IGNORED + exclude + ["**/*.rs"])
@@ -210,7 +225,6 @@ def lash_rust_library(
         _rustc_flags(package_name, declared_features),
     )
     package_compile_data = _data(compile_data_patterns)
-    compile_data = package_compile_data + extra_compile_data
     source_attrs = _resource_attrs(exec_properties)
     source_attrs.update(_source_attrs(
         name,
@@ -227,7 +241,7 @@ def lash_rust_library(
         env = env,
         features = crate_features,
         named_deps = _named_deps(package_name),
-        resources = compile_data,
+        resources = _resources(package_compile_data, extra_compile_data),
         rustc_flags = flags,
         visibility = ["PUBLIC"],
         **source_attrs
@@ -255,7 +269,6 @@ def lash_rust_binary(
     if library:
         deps[library_crate_name] = library
     package_compile_data = _data(compile_data_patterns, data_exclude)
-    compile_data = package_compile_data + extra_compile_data
     source_attrs = _resource_attrs(exec_properties)
     source_attrs.update(_source_attrs(
         name,
@@ -272,7 +285,7 @@ def lash_rust_binary(
         env = _cargo_env(package_name, crate_name, manifest_dir, version, rustc_env),
         features = crate_features,
         named_deps = deps,
-        resources = compile_data,
+        resources = _resources(package_compile_data, extra_compile_data),
         rustc_flags = _rustc_flags(package_name, declared_features),
         labels = tags,
         visibility = ["PUBLIC"],
@@ -329,7 +342,7 @@ def _rust_test(
         env = compile_env,
         features = crate_features,
         named_deps = named_deps,
-        resources = package_files + extra_compile_data + extra_data,
+        resources = _resources(package_files, extra_compile_data + extra_data),
         rustc_flags = flags,
         labels = ["lash.internal_test_binary"],
         visibility = [],
@@ -441,7 +454,6 @@ def lash_rust_feature_library(
         _rustc_flags(package_name, declared_features),
     )
     package_compile_data = _data(compile_data_patterns)
-    compile_data = package_compile_data + extra_compile_data
     source_attrs = _resource_attrs(exec_properties)
     source_attrs.update(_source_attrs(
         name,
@@ -458,7 +470,7 @@ def lash_rust_feature_library(
         env = env,
         features = crate_features,
         named_deps = _variant_named_deps(package_name, False, variant_deps, extra_deps, None, None),
-        resources = compile_data,
+        resources = _resources(package_compile_data, extra_compile_data),
         rustc_flags = flags,
         labels = tags,
         visibility = ["PUBLIC"],
@@ -493,7 +505,6 @@ def _feature_binary(name, package_name, named_deps, **kwargs):
     compile_data_patterns = kwargs.pop("compile_data_patterns", [])
     data_exclude = kwargs.pop("data_exclude", [])
     package_compile_data = _data(compile_data_patterns, data_exclude)
-    compile_data = package_compile_data + extra_compile_data
     source_attrs = _resource_attrs(exec_properties)
     source_attrs.update(_source_attrs(
         name,
@@ -510,7 +521,7 @@ def _feature_binary(name, package_name, named_deps, **kwargs):
         env = _cargo_env(package_name, crate_name, manifest_dir, version, rustc_env),
         features = crate_features,
         named_deps = named_deps,
-        resources = compile_data,
+        resources = _resources(package_compile_data, extra_compile_data),
         rustc_flags = _rustc_flags(package_name, declared_features),
         labels = tags,
         visibility = ["PUBLIC"],

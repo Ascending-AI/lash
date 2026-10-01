@@ -2,11 +2,13 @@
 filegroup(
     name = "shared_rust_sources",
     srcs = glob(["shared/**/*.rs"]),
+    copy = False,
     visibility = ["PUBLIC"],
 )
 
 filegroup(
     name = "typescript_host_flow_cells",
     srcs = glob(["typescript-host-flows/*.ts"]),
+    copy = False,
     visibility = ["PUBLIC"],
 )

@@ -412,6 +412,7 @@ filegroup(
     srcs = [
         "tests/support/cold_process_effect_driver.rs",
     ],
+    copy = False,
     visibility = ["PUBLIC"],
 )
 
@@ -420,6 +421,7 @@ filegroup(
     srcs = [
         "tests/support/durable_read_fixture.rs",
     ],
+    copy = False,
     visibility = ["PUBLIC"],
 )
 
@@ -428,6 +430,7 @@ filegroup(
     srcs = [
         "tests/support/queued_admission_atomicity.rs",
     ],
+    copy = False,
     visibility = ["PUBLIC"],
 )
 
@@ -451,12 +454,14 @@ lash_batch_test(
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),
+    copy = False,
     visibility = ["PUBLIC"],
 )
 
 filegroup(
     name = "package_files",
     srcs = glob(["**"], exclude = ["BUCK"]),
+    copy = False,
     visibility = ["PUBLIC"],
 )
 

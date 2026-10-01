@@ -41,7 +41,7 @@ INPUT_SHA256 = {
 # invocation a full verification, rather than trusting an on-disk receipt.
 OUTPUT_SHA256 = {
     "decls/rust_rules.bzl": "89ee8309c0f24763adb0bc0276243c022640f489c17223f0597152e188c07885",
-    "rust/build.bzl": "ae4377e979bd1e6089016a87f2ee31bf7dc56c31ec6cad8c06220cfdfd9a4712",
+    "rust/build.bzl": "d9f1e5fbe12a381f812ab55694905bc84e1971af6000eed50a9984c4b41c3125",
     "rust/cargo_buildscript.bzl": "ff69fa677037ce6414d80b326f0565168ced5e0a916d0e7f456df4cfc07420a8",
     "rust/clippy_configuration.bzl": "9f7db7c7c8e0f34d65e0a71f1eebfb36ffd8749e6061123cab71a46d548d16a2",
     "rust/failure_filter.bzl": "6ec035fcd09446d60560711c37532f8d749401c50e50767ac8eebcddcb2a9e03",
@@ -68,6 +68,7 @@ PREVIOUS_OUTPUT_SHA256 = {
         "3bed58d24563a0e9c4274d5c5530a9c18c600ee1b3e8e7f6bcddd3a482be16fa",
         "ac1bbf9c1a7084a9756af83edf8dfbbedb47269010d54149187cf1b1b6f56b34",
         "51f2f65902b39bb78ebe818d4484f959b6e6a95ce6a8f65ba1e844ebe34d28e6",
+        "ae4377e979bd1e6089016a87f2ee31bf7dc56c31ec6cad8c06220cfdfd9a4712",
     },
     "rust/cargo_buildscript.bzl": {
         "49e261487744c64fda39e73f15a0c440fa4af8ae9a4cb6f4ec12bcb4257ff607",
@@ -478,6 +479,29 @@ def narrow_transitive_source_inputs(text: str) -> str:
     return text
 
 
+RELATIVE_BINARY_ANCHOR = """    # First-party Lash tests intentionally use the repository-relative Cargo
+"""
+
+RELATIVE_BINARY_ENV = """    # Cargo's `CARGO_BIN_EXE_<name>` names a binary a first-party test
+    # executes. rustc_action.py would absolutize it to the compile action's own
+    # sandbox, which no test run shares; project-relative, it resolves from the
+    # project-root cwd every Lash test runs in.
+    if "KILN_RELATIVE_CARGO_MANIFEST_DIR" in plain_env:
+        for key in [key for key in path_env if key.startswith("CARGO_BIN_EXE_")]:
+            plain_env[key] = path_env.pop(key)
+
+    # First-party Lash tests intentionally use the repository-relative Cargo
+"""
+
+
+def preserve_relative_binary_env(text: str) -> str:
+    if RELATIVE_BINARY_ENV in text:
+        return text
+    if text.count(RELATIVE_BINARY_ANCHOR) != 1:
+        raise ValueError("Rust relative manifest directory comment changed")
+    return text.replace(RELATIVE_BINARY_ANCHOR, RELATIVE_BINARY_ENV, 1)
+
+
 def transform(relative: str, text: str) -> str:
     if relative == "rust/sources.bzl":
         return add_checkout_source_projection(text)
@@ -545,7 +569,7 @@ def transform(relative: str, text: str) -> str:
     text = add_load(text, relative)
     text = wrap_actions(text)
     if relative == "rust/build.bzl":
-        text = preserve_relative_manifest_dir(text)
+        text = preserve_relative_binary_env(preserve_relative_manifest_dir(text))
         text = narrow_transitive_source_inputs(text)
         text = remap_repo_rooted_sources(text)
         old = '''        _lintify("W", is_clippy, toolchain_info.warn_lints),
@@ -626,7 +650,7 @@ def upgrade_previous(relative: str, text: str) -> str:
     if relative == "decls/rust_rules.bzl":
         return add_repo_rooted_srcs_attr(text)
     if relative == "rust/build.bzl":
-        return remap_repo_rooted_sources(narrow_transitive_source_inputs(preserve_relative_manifest_dir(text)))
+        return remap_repo_rooted_sources(narrow_transitive_source_inputs(preserve_relative_binary_env(preserve_relative_manifest_dir(text))))
     if relative != "rust/cargo_buildscript.bzl":
         raise ValueError("no previous-overlay upgrade for {}".format(relative))
     encoded = '''        rust_toolchain_info.rustc_flags,
