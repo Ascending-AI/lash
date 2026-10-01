@@ -120,8 +120,9 @@ declare -A uniform_store_suites=(
   [pg-rlm-frame-open]="//crates/lash-protocol-rlm:frame_open_redrive__test|restate_double_postgres::|lash-internal-protocol-rlm|--test frame_open_redrive|cargo-test|include-ignored,nocapture"
   [pg-artifact-referrers]="//crates/lash:artifact_referrers_evidence__test||lash-runtime|--test artifact_referrers_evidence --features rlm,restate,sqlite,testing|cargo-test|nocapture"
   [pg-attachment-referrers]="//crates/lash:attachment_referrers_evidence__test||lash-runtime|--test attachment_referrers_evidence --features rlm,restate,sqlite,testing|cargo-test|nocapture"
-  [pg-pool-wait]="//crates/lash-perf:lash-perf__unit_test|postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads|lash-perf||nextest|"
-  [pg-sim-backend-faults]="//crates/lash-sim:lash-sim__unit_test|postgres_backend_fault|lash-sim|--lib|nextest-ci|"
+  [pg-model-keys]="//crates/lash:model_keys__test||lash-runtime|--test model_keys --features restate,sqlite,testing|cargo-test|include-ignored,nocapture"
+  [pg-pool-wait]="//crates/lash-perf:lash-perf__unit_test|postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads|lash-perf||nextest|include-ignored"
+  [pg-sim-backend-faults]="//crates/lash-sim:lash-sim__unit_test|postgres_backend_fault|lash-sim|--lib|nextest-ci|include-ignored"
   [pg-cross-backend]="//crates/lash-sim:cross_backend_store_differential__test||lash-sim|--test cross_backend_store_differential|nextest-ci|include-ignored,single-threaded,nocapture"
   [s3-attachment-differential]="//crates/lash-sim:cross_backend_store_differential__test|attachment_blob_store_differential_agrees|lash-sim|--test cross_backend_store_differential|cargo-test|include-ignored,nocapture"
 )
@@ -279,6 +280,7 @@ case "${suite}" in
         --features synthetic-next
       cargo_test cargo test -p lash-internal-restate --locked --lib postgres_ingress -- --ignored
     fi
+    run_uniform_store_suite pg-model-keys
     ;;
 
   s3-store)

@@ -265,10 +265,10 @@ impl BackendFaultLane {
                 postgres: None,
             })),
             BackendFaultKind::Postgres => {
-                let Some(database) = crate::postgres_test_isolation::isolated_database().await
-                else {
-                    return Ok(None);
-                };
+                let database = lash_postgres_store::testing::IsolatedDatabase::create(
+                    &lash_postgres_store::testing::required_database_url(),
+                )
+                .await;
                 let storage = lash_postgres_store::PostgresStorage::connect(database.url())
                     .await
                     .map_err(|error| format!("connect postgres fault store: {error}"))?;

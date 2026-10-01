@@ -66,18 +66,8 @@ async fn reset(pool: &sqlx::PgPool) {
     }
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the service-gated test fixture reads its injected PostgreSQL URL"
-)]
-fn database_url() -> Option<String> {
-    match std::env::var("LASH_POSTGRES_DATABASE_URL") {
-        Ok(url) if !url.is_empty() => Some(url),
-        _ if std::env::var("LASH_REQUIRE_POSTGRES").as_deref() == Ok("1") => {
-            panic!("LASH_POSTGRES_DATABASE_URL is required for the PostgreSQL ingress laws")
-        }
-        _ => None,
-    }
+fn database_url() -> String {
+    lash_postgres_store::testing::required_database_url()
 }
 
 async fn backend_for(
@@ -87,7 +77,7 @@ async fn backend_for(
     lash_core::Backend,
     Arc<dyn lash_core::RuntimeStore>,
 )> {
-    let url = database_url()?;
+    let url = database_url();
     let lock = DatabaseLock::acquire(&url).await;
     let storage = lash_postgres_store::PostgresStorage::connect(&url)
         .await
@@ -145,7 +135,7 @@ mod usage_accounting {
     use super::*;
 
     async fn tier() -> (impl Send, lash_conformance::UsageAccountingTier) {
-        let url = database_url().expect("usage laws require the PostgreSQL service");
+        let url = database_url();
         let lock = DatabaseLock::acquire(&url).await;
         let storage = lash_postgres_store::PostgresStorage::connect(&url)
             .await
@@ -215,7 +205,7 @@ mod cancelled_turn_withheld_input {
 async fn process_start_store_refusals_and_transient_faults_on_postgres() {
     use super::process_start_store_refusals::{Fault, Step, server_config, start_store_fault_law};
 
-    let url = database_url().expect("the PostgreSQL start laws require a database");
+    let url = database_url();
     let _lock = DatabaseLock::acquire(&url).await;
     for seed in 0x4204_0000..0x4204_0014 {
         for step in [Step::Claim, Step::Settle] {
@@ -260,7 +250,7 @@ async fn a_reattached_emission_reports_the_deliveries_its_committed_attempt_star
         SEEDS, a_reattached_emission_reports_the_deliveries_its_committed_attempt_started,
     };
 
-    let url = database_url().expect("the PostgreSQL reattach law requires a database");
+    let url = database_url();
     let _lock = DatabaseLock::acquire(&url).await;
     for seed in SEEDS {
         let storage = lash_postgres_store::PostgresStorage::connect(&url)
@@ -293,7 +283,7 @@ async fn a_reattached_emission_reports_the_deliveries_its_committed_attempt_star
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "PostgreSQL service leg: kiln gate with pg16"]
 async fn remote_after_step_waits_for_committed_boundary_postgres() {
-    let url = database_url().expect("PostgreSQL service is required");
+    let url = database_url();
     let _lock = DatabaseLock::acquire(&url).await;
     let storage = lash_postgres_store::PostgresStorage::connect(&url)
         .await
@@ -350,7 +340,7 @@ async fn duplicate_signal_after_wait_advances_does_not_resolve_next_wait_on_post
         duplicate_signal_after_wait_advances_law,
     };
 
-    let url = database_url().expect("the PostgreSQL signal laws require a database");
+    let url = database_url();
     let _lock = DatabaseLock::acquire(&url).await;
     let (registry, _attachments) = postgres_process_registry(&url).await;
     duplicate_signal_after_wait_advances_law(registry).await;
@@ -363,7 +353,7 @@ async fn duplicate_signal_after_wait_advances_does_not_resolve_next_wait_on_post
 async fn partial_signal_replay_rejects_changed_request_before_resolution_on_postgres() {
     use super::process_signal_admission::partial_signal_replay_rejects_changed_request_law;
 
-    let url = database_url().expect("the PostgreSQL signal laws require a database");
+    let url = database_url();
     let _lock = DatabaseLock::acquire(&url).await;
     let (registry, _attachments) = postgres_process_registry(&url).await;
     partial_signal_replay_rejects_changed_request_law(registry).await;
@@ -384,7 +374,7 @@ mod recorded_termination {
         Arc<dyn lash_core::StoreSet>,
         Arc<dyn lash_conformance::ConformanceTurnRunner>,
     ) {
-        let url = database_url().expect("the recorded termination law requires PostgreSQL");
+        let url = database_url();
         let lock = DatabaseLock::acquire(&url).await;
         let storage = lash_postgres_store::PostgresStorage::connect(&url)
             .await

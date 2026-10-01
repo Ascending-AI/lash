@@ -27,6 +27,15 @@ groups and for dispatches. The commands and test selection live in
 [CI workflow](../../.github/workflows/ci.yml). Service tests need their require
 flags and a live service; a skipped service test is not law execution evidence.
 
+An explicitly selected PostgreSQL variant must fail without a non-empty
+`LASH_POSTGRES_DATABASE_URL`. Fixtures use
+`lash_postgres_store::testing::required_database_url()` before opening the
+service. Mark service variants `#[ignore]` so ordinary runs report them as
+ignored, and select them with `--include-ignored` inside the service gate.
+`pg-store` also executes the facade's `model_keys` laws, including their
+PostgreSQL and always-replay variants. Use `pg-model-keys` for that focused
+suite with the same wrapper.
+
 `just store-contract-soak` and `just runtime-persistence-soak` increase the
 property-case budgets on SQLite memory, SQLite file and PostgreSQL. Their
 PostgreSQL leg still requires a service. The storage differential is

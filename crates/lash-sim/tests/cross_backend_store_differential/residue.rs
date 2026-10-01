@@ -342,20 +342,7 @@ async fn residue_digest_covers_a_planted_sqlite_table() {
 #[tokio::test]
 #[ignore = "requires Postgres (LASH_POSTGRES_DATABASE_URL with --include-ignored)"]
 async fn residue_digest_covers_a_planted_postgres_table() {
-    let database_url = match std::env::var("LASH_POSTGRES_DATABASE_URL") {
-        Ok(database_url) if !database_url.is_empty() => database_url,
-        _ => {
-            assert_ne!(
-                std::env::var("LASH_REQUIRE_POSTGRES").as_deref(),
-                Ok("1"),
-                "LASH_POSTGRES_DATABASE_URL must be set when LASH_REQUIRE_POSTGRES=1"
-            );
-            eprintln!(
-                "SKIPPED planted Postgres residue table; LASH_POSTGRES_DATABASE_URL is not set"
-            );
-            return;
-        }
-    };
+    let database_url = lash_postgres_store::testing::required_database_url();
     let mut database_lock = PgConnection::connect(&database_url)
         .await
         .expect("connect the Postgres advisory lock");

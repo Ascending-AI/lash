@@ -40,22 +40,6 @@ fn checkpoint_curve_config() -> CheckpointCurveConfig {
     CheckpointCurveConfig::new(8 * 1024, 2, 4, 8).expect("valid checkpoint curve test config")
 }
 
-fn require_postgres() -> bool {
-    let configured = ["LASH_POSTGRES_DATABASE_URL", "DATABASE_URL"]
-        .into_iter()
-        .any(|name| std::env::var(name).is_ok_and(|database_url| !database_url.trim().is_empty()));
-    if !configured {
-        assert!(
-            std::env::var_os("LASH_REQUIRE_POSTGRES").is_none(),
-            "LASH_POSTGRES_DATABASE_URL or DATABASE_URL must be set when LASH_REQUIRE_POSTGRES is set"
-        );
-        eprintln!(
-            "SKIPPED PostgreSQL runtime-perf test: no LASH_POSTGRES_DATABASE_URL or DATABASE_URL configured"
-        );
-    }
-    configured
-}
-
 fn postgres_database_url() -> String {
     ["LASH_POSTGRES_DATABASE_URL", "DATABASE_URL"]
         .into_iter()
@@ -64,15 +48,12 @@ fn postgres_database_url() -> String {
                 .ok()
                 .filter(|database_url| !database_url.trim().is_empty())
         })
-        .expect("PostgreSQL URL checked by require_postgres")
+        .expect("PostgreSQL tests require LASH_POSTGRES_DATABASE_URL or DATABASE_URL")
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads() {
-    if !require_postgres() {
-        return;
-    }
-
     let database =
         lash_postgres_store::testing::IsolatedDatabase::create(&postgres_database_url()).await;
     let storage = lash_postgres_store::PostgresStorage::connect(database.url())
@@ -97,11 +78,8 @@ async fn postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn affected_postgres_scenarios_leave_base_database_clean() {
-    if !require_postgres() {
-        return;
-    }
-
     let base_database =
         lash_postgres_store::testing::IsolatedDatabase::create(&postgres_database_url()).await;
     let base_storage = lash_postgres_store::PostgresStorage::connect(base_database.url())

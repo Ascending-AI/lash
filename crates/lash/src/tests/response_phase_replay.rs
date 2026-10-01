@@ -18,8 +18,9 @@
 //!
 //! Each runs with and without forced replay (every await suspends and
 //! replays the journal from the start), over SQLite memory, SQLite file and
-//! PostgreSQL. The PostgreSQL legs skip unless `LASH_POSTGRES_DATABASE_URL`
-//! is set (and fail without it under `LASH_REQUIRE_POSTGRES=1`).
+//! PostgreSQL. The PostgreSQL legs are ignored in ordinary runs and require
+//! `LASH_POSTGRES_DATABASE_URL` when selected with `--include-ignored`
+//! inside a PostgreSQL gate.
 
 use super::*;
 
@@ -68,20 +69,13 @@ impl HookChange {
     }
 }
 
-/// The PostgreSQL URL of the PostgreSQL legs, or `None` when they skip.
+/// The PostgreSQL URL required by the PostgreSQL legs.
 #[allow(
     clippy::disallowed_methods,
-    reason = "the PostgreSQL legs read the optional service URL"
+    reason = "the PostgreSQL legs read the required service URL"
 )]
-fn postgres_url() -> Option<String> {
-    let url = std::env::var("LASH_POSTGRES_DATABASE_URL")
-        .ok()
-        .filter(|url| !url.trim().is_empty());
-    assert!(
-        url.is_some() || std::env::var("LASH_REQUIRE_POSTGRES").as_deref() != Ok("1"),
-        "LASH_POSTGRES_DATABASE_URL must be set and non-empty when LASH_REQUIRE_POSTGRES=1"
-    );
-    url
+fn postgres_url() -> String {
+    lash_postgres_store::testing::required_database_url()
 }
 
 /// The double over `storage`, and what its stores need to outlive it, or
@@ -140,7 +134,7 @@ async fn world(storage: Storage, always_replay: bool) -> Option<World> {
             }
         }
         Storage::Postgres => {
-            let url = postgres_url()?;
+            let url = postgres_url();
             let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
             let storage = lash_postgres_store::PostgresStorage::connect(database.url())
                 .await
@@ -445,8 +439,9 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
 const CHECKPOINT_SUFFIX: &str = ":checkpoint:3";
 
 macro_rules! response_phase_replay_laws {
-    ($($name:ident: $change:expr, $storage:expr, $always_replay:expr;)*) => {
+    ($($(#[$attr:meta])* $name:ident: $change:expr, $storage:expr, $always_replay:expr;)*) => {
         $(
+            $(#[$attr])*
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $name() -> Result<()> {
                 a_changed_response_hook_set_does_not_change_the_served_response(
@@ -463,14 +458,18 @@ macro_rules! response_phase_replay_laws {
 response_phase_replay_laws! {
     removed_hook_sqlite_memory: HookChange::Removed, Storage::SqliteMemory, false;
     removed_hook_sqlite_file: HookChange::Removed, Storage::SqliteFile, false;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     removed_hook_postgres: HookChange::Removed, Storage::Postgres, false;
     added_hook_sqlite_memory: HookChange::Added, Storage::SqliteMemory, false;
     added_hook_sqlite_file: HookChange::Added, Storage::SqliteFile, false;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     added_hook_postgres: HookChange::Added, Storage::Postgres, false;
     removed_hook_sqlite_memory_always_replay: HookChange::Removed, Storage::SqliteMemory, true;
     removed_hook_sqlite_file_always_replay: HookChange::Removed, Storage::SqliteFile, true;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     removed_hook_postgres_always_replay: HookChange::Removed, Storage::Postgres, true;
     added_hook_sqlite_memory_always_replay: HookChange::Added, Storage::SqliteMemory, true;
     added_hook_sqlite_file_always_replay: HookChange::Added, Storage::SqliteFile, true;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     added_hook_postgres_always_replay: HookChange::Added, Storage::Postgres, true;
 }

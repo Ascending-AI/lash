@@ -64,14 +64,7 @@ pub async fn double(
             })
         }
         Tier::Postgres => {
-            let url = std::env::var("LASH_POSTGRES_DATABASE_URL")
-                .ok()
-                .filter(|url| !url.trim().is_empty());
-            assert!(
-                url.is_some() || std::env::var("LASH_REQUIRE_POSTGRES").as_deref() != Ok("1"),
-                "LASH_POSTGRES_DATABASE_URL must be set when LASH_REQUIRE_POSTGRES=1"
-            );
-            let url = url?;
+            let url = lash_postgres_store::testing::required_database_url();
             let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
             let storage = lash_postgres_store::PostgresStorage::connect(database.url())
                 .await

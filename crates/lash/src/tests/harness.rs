@@ -209,18 +209,11 @@ pub(crate) async fn redeploy(
 }
 
 /// A PostgreSQL store set on a database of its own, with what must outlive
-/// it; `None` when no PostgreSQL is configured (and it is not required).
+/// it. A selected PostgreSQL test requires the service URL.
 #[allow(clippy::disallowed_methods)] // FIG-2971: a test is a host; the gate's database URL is host configuration.
 pub(crate) async fn postgres_store_set()
 -> Option<(Arc<dyn lash_core::StoreSet>, Box<dyn std::any::Any>)> {
-    let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
-        assert!(
-            std::env::var("LASH_REQUIRE_POSTGRES").as_deref() != Ok("1"),
-            "LASH_REQUIRE_POSTGRES=1 but LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        eprintln!("skipping the PostgreSQL leg: LASH_POSTGRES_DATABASE_URL is not set");
-        return None;
-    };
+    let url = lash_postgres_store::testing::required_database_url();
     let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
     let storage = lash_postgres_store::PostgresStorage::connect(database.url())
         .await

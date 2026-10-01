@@ -88,10 +88,12 @@ async fn sqlite_generated_trigger_delivery_is_bound_and_settled() {
 }
 
 #[tokio::test]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn postgres_generated_trigger_delivery_is_bound_and_settled() {
-    let Some(database) = crate::postgres_test_isolation::isolated_database().await else {
-        return;
-    };
+    let database = lash_postgres_store::testing::IsolatedDatabase::create(
+        &lash_postgres_store::testing::required_database_url(),
+    )
+    .await;
     let storage = lash_postgres_store::PostgresStorage::connect(database.url())
         .await
         .expect("PostgreSQL storage");

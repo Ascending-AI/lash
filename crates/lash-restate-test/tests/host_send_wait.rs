@@ -323,21 +323,13 @@ enum Storage {
 
 const SEED: u64 = 0xd5_3837;
 
-/// The PostgreSQL server a law runs over: `None` when none is configured,
-/// which `LASH_REQUIRE_POSTGRES=1` refuses.
-fn postgres_url() -> Option<String> {
-    let url = std::env::var("LASH_POSTGRES_DATABASE_URL")
-        .ok()
-        .filter(|url| !url.trim().is_empty());
-    assert!(
-        url.is_some() || std::env::var("LASH_REQUIRE_POSTGRES").as_deref() != Ok("1"),
-        "LASH_POSTGRES_DATABASE_URL must be set and non-empty when LASH_REQUIRE_POSTGRES=1"
-    );
-    url
+/// The PostgreSQL server required by a selected PostgreSQL law.
+fn postgres_url() -> String {
+    lash_postgres_store::testing::required_database_url()
 }
 
-/// A backend on the double over `stores`, or `None` for PostgreSQL when no
-/// server is configured.
+/// A backend on the double over `stores`, requiring the PostgreSQL service
+/// when the PostgreSQL tier is selected.
 async fn backend_over(
     config: ServerConfig,
     stores: Stores,
@@ -381,7 +373,7 @@ async fn backend_over(
             Some((backend, Storage::Files { _root: root }))
         }
         Stores::Postgres => {
-            let url = postgres_url()?;
+            let url = postgres_url();
             let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
             let storage = lash_postgres_store::PostgresStorage::connect(database.url())
                 .await
@@ -1449,6 +1441,7 @@ async fn a_committed_root_answers_its_follower_while_the_session_wait_index_is_b
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn a_committed_root_answers_its_follower_while_the_session_wait_index_is_backlogged_on_postgres()
  {
     a_committed_root_answers_its_follower_while_the_session_wait_index_is_backlogged(
@@ -1459,6 +1452,7 @@ async fn a_committed_root_answers_its_follower_while_the_session_wait_index_is_b
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn a_committed_root_answers_its_follower_while_the_session_wait_index_is_backlogged_on_postgres_replaying()
  {
     a_committed_root_answers_its_follower_while_the_session_wait_index_is_backlogged(
@@ -1590,6 +1584,7 @@ async fn a_dropped_terminal_attach_leaves_no_second_server_invocation_on_sqlite_
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn a_dropped_terminal_attach_leaves_no_second_server_invocation_on_postgres() {
     a_dropped_terminal_attach_leaves_no_second_server_invocation(
         Stores::Postgres,
@@ -1599,6 +1594,7 @@ async fn a_dropped_terminal_attach_leaves_no_second_server_invocation_on_postgre
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn a_dropped_terminal_attach_leaves_no_second_server_invocation_on_postgres_replaying() {
     a_dropped_terminal_attach_leaves_no_second_server_invocation(
         Stores::Postgres,

@@ -361,35 +361,7 @@ async fn end_oracle_root(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "compares three durable backends; requires Postgres (`just push-gate`, or `LASH_POSTGRES_DATABASE_URL=... just cross-backend-store-soak`)"]
 async fn coalesced_batches_match_literal_oracles_on_every_backend() {
-    let database_url = match std::env::var("LASH_POSTGRES_DATABASE_URL") {
-        Ok(database_url) if !database_url.is_empty() => database_url,
-        Ok(_) => {
-            assert_ne!(
-                std::env::var("LASH_REQUIRE_POSTGRES").as_deref(),
-                Ok("1"),
-                "LASH_POSTGRES_DATABASE_URL must be non-empty when LASH_REQUIRE_POSTGRES=1"
-            );
-            eprintln!(
-                "SKIPPED literal coalesced-batch oracles; compared_backends=[]; \
-                 required_backends=[sqlite-memory,sqlite,postgres]; \
-                 reason=LASH_POSTGRES_DATABASE_URL is not set"
-            );
-            return;
-        }
-        Err(error) => {
-            assert_ne!(
-                std::env::var("LASH_REQUIRE_POSTGRES").as_deref(),
-                Ok("1"),
-                "LASH_POSTGRES_DATABASE_URL must be set when LASH_REQUIRE_POSTGRES=1: {error}"
-            );
-            eprintln!(
-                "SKIPPED literal coalesced-batch oracles; compared_backends=[]; \
-                 required_backends=[sqlite-memory,sqlite,postgres]; \
-                 reason=LASH_POSTGRES_DATABASE_URL is not set"
-            );
-            return;
-        }
-    };
+    let database_url = lash_postgres_store::testing::required_database_url();
     let mut database_lock = PgConnection::connect(&database_url)
         .await
         .expect("connect Postgres literal-oracle advisory lock");
@@ -506,21 +478,7 @@ async fn coalesced_batches_match_literal_oracles_on_every_backend() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "compares three durable backends; requires Postgres (`just push-gate`, or `LASH_POSTGRES_DATABASE_URL=... just cross-backend-store-soak`)"]
 async fn interrupted_admission_identity_stands_over_a_later_row() {
-    let database_url = match std::env::var("LASH_POSTGRES_DATABASE_URL") {
-        Ok(database_url) if !database_url.is_empty() => database_url,
-        _ => {
-            assert_ne!(
-                std::env::var("LASH_REQUIRE_POSTGRES").as_deref(),
-                Ok("1"),
-                "LASH_POSTGRES_DATABASE_URL must be set when LASH_REQUIRE_POSTGRES=1"
-            );
-            eprintln!(
-                "SKIPPED interrupted-admission later-row literal oracle; compared_backends=[]; \
-                 required_backends=[sqlite-memory,sqlite,postgres]"
-            );
-            return;
-        }
-    };
+    let database_url = lash_postgres_store::testing::required_database_url();
     let mut database_lock = PgConnection::connect(&database_url)
         .await
         .expect("connect Postgres later-row advisory lock");

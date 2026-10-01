@@ -801,6 +801,7 @@ async fn a_recorded_budget_bounds_every_root_after_an_engine_restart_on_sqlite()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn a_recorded_budget_bounds_every_root_after_an_engine_restart_on_postgres() -> Result<()> {
     let Some((stores, _held)) = postgres_store_set().await else {
         return Ok(());

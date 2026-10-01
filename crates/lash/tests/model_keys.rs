@@ -82,14 +82,7 @@ async fn double(tier: Tier, replay: bool, seed: u64) -> Option<Double> {
             })
         }
         Tier::Postgres => {
-            let url = std::env::var("LASH_POSTGRES_DATABASE_URL")
-                .ok()
-                .filter(|url| !url.trim().is_empty());
-            assert!(
-                url.is_some() || std::env::var("LASH_REQUIRE_POSTGRES").as_deref() != Ok("1"),
-                "LASH_POSTGRES_DATABASE_URL must be set when LASH_REQUIRE_POSTGRES=1"
-            );
-            let url = url?;
+            let url = lash_postgres_store::testing::required_database_url();
             let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
             let storage = lash_postgres_store::PostgresStorage::connect(database.url())
                 .await
@@ -703,6 +696,39 @@ async fn an_unknown_key_is_refused_before_anything_changes(tier: Tier, replay: b
 
 // ---- registration -----------------------------------------------------------
 
+#[test]
+fn postgres_variants_never_pass_without_a_database_url() {
+    let executable = std::env::current_exe().expect("model-keys test executable");
+    for variant in ["postgres", "postgres_always_replay"] {
+        let law = format!("two_keys_sharing_a_provider_kind_select_their_own_transport::{variant}");
+        for url in [None, Some(""), Some(" \t ")] {
+            let mut command = std::process::Command::new(&executable);
+            command
+                .args(["--exact", &law, "--include-ignored", "--nocapture"])
+                .env_remove("LASH_POSTGRES_DATABASE_URL")
+                .env_remove("LASH_REQUIRE_POSTGRES");
+            if let Some(url) = url {
+                command.env("LASH_POSTGRES_DATABASE_URL", url);
+            }
+            let output = command.output().expect("run the PostgreSQL variant");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                stdout.contains("running 1 test"),
+                "the selected variant executes: {stdout}\n{stderr}"
+            );
+            assert!(
+                !output.status.success() && stdout.contains("0 passed; 1 failed"),
+                "{law} with URL {url:?} must fail instead of passing vacuously: {stdout}\n{stderr}"
+            );
+            assert!(
+                stderr.contains("LASH_POSTGRES_DATABASE_URL"),
+                "the failure names the missing service configuration: {stdout}\n{stderr}"
+            );
+        }
+    }
+}
+
 macro_rules! tiered {
     ($law:ident, $seed:literal) => {
         mod $law {
@@ -729,11 +755,13 @@ macro_rules! tiered {
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
             async fn postgres() {
                 super::$law(Tier::Postgres, false, $seed + 5).await;
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
             async fn postgres_always_replay() {
                 super::$law(Tier::Postgres, true, $seed + 6).await;
             }

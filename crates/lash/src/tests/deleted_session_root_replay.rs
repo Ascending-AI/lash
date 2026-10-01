@@ -33,9 +33,9 @@
 //!
 //! Each runs on the Restate server double with and without forced replay
 //! (every await suspends and replays the journal from the start), over SQLite
-//! memory, SQLite file and PostgreSQL. The PostgreSQL legs skip unless
-//! `LASH_POSTGRES_DATABASE_URL` is set (and fail without it under
-//! `LASH_REQUIRE_POSTGRES=1`).
+//! memory, SQLite file and PostgreSQL. The PostgreSQL legs are ignored in
+//! ordinary runs and require `LASH_POSTGRES_DATABASE_URL` when selected
+//! with `--include-ignored` inside a PostgreSQL gate.
 //!
 //! The `recovered_follow_on_*` laws are the follow-on legs' control: with its
 //! session live, the recovery root records its decision between its seal and
@@ -216,20 +216,13 @@ impl Deleter {
     }
 }
 
-/// The PostgreSQL URL of the PostgreSQL legs, or `None` when they skip.
+/// The PostgreSQL URL required by the PostgreSQL legs.
 #[allow(
     clippy::disallowed_methods,
-    reason = "the PostgreSQL legs read the optional service URL"
+    reason = "the PostgreSQL legs read the required service URL"
 )]
-fn postgres_url() -> Option<String> {
-    let url = std::env::var("LASH_POSTGRES_DATABASE_URL")
-        .ok()
-        .filter(|url| !url.trim().is_empty());
-    assert!(
-        url.is_some() || std::env::var("LASH_REQUIRE_POSTGRES").as_deref() != Ok("1"),
-        "LASH_POSTGRES_DATABASE_URL must be set and non-empty when LASH_REQUIRE_POSTGRES=1"
-    );
-    url
+fn postgres_url() -> String {
+    lash_postgres_store::testing::required_database_url()
 }
 
 /// The world over `storage`, or `None` for a PostgreSQL leg without a
@@ -290,7 +283,7 @@ async fn world_bounded(
             (double, Some(files), None, None)
         }
         Storage::Postgres => {
-            let url = postgres_url()?;
+            let url = postgres_url();
             let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
             let storage = lash_postgres_store::PostgresStorage::connect(database.url())
                 .await
@@ -944,8 +937,9 @@ async fn a_changed_host_bound_does_not_change_the_recovery_decision(
 }
 
 macro_rules! changed_recovery_bound_laws {
-    ($($name:ident: $change:expr, $storage:expr, $always_replay:expr;)*) => {
+    ($($(#[$attr:meta])* $name:ident: $change:expr, $storage:expr, $always_replay:expr;)*) => {
         $(
+            $(#[$attr])*
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $name() -> Result<()> {
                 a_changed_host_bound_does_not_change_the_recovery_decision(
@@ -962,21 +956,26 @@ macro_rules! changed_recovery_bound_laws {
 changed_recovery_bound_laws! {
     changed_bound_before_decision_sqlite_memory: BoundChange::BeforeDecision, Storage::SqliteMemory, false;
     changed_bound_before_decision_sqlite_file: BoundChange::BeforeDecision, Storage::SqliteFile, false;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     changed_bound_before_decision_postgres: BoundChange::BeforeDecision, Storage::Postgres, false;
     changed_bound_after_decision_sqlite_memory: BoundChange::AfterDecision, Storage::SqliteMemory, false;
     changed_bound_after_decision_sqlite_file: BoundChange::AfterDecision, Storage::SqliteFile, false;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     changed_bound_after_decision_postgres: BoundChange::AfterDecision, Storage::Postgres, false;
     changed_bound_before_decision_sqlite_memory_always_replay: BoundChange::BeforeDecision, Storage::SqliteMemory, true;
     changed_bound_before_decision_sqlite_file_always_replay: BoundChange::BeforeDecision, Storage::SqliteFile, true;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     changed_bound_before_decision_postgres_always_replay: BoundChange::BeforeDecision, Storage::Postgres, true;
     changed_bound_after_decision_sqlite_memory_always_replay: BoundChange::AfterDecision, Storage::SqliteMemory, true;
     changed_bound_after_decision_sqlite_file_always_replay: BoundChange::AfterDecision, Storage::SqliteFile, true;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     changed_bound_after_decision_postgres_always_replay: BoundChange::AfterDecision, Storage::Postgres, true;
 }
 
 macro_rules! follow_on_recovery_laws {
-    ($($name:ident: $storage:expr, $always_replay:expr;)*) => {
+    ($($(#[$attr:meta])* $name:ident: $storage:expr, $always_replay:expr;)*) => {
         $(
+            $(#[$attr])*
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $name() -> Result<()> {
                 a_follow_on_recovery_root_drives_its_recorded_decision($storage, $always_replay)
@@ -989,15 +988,18 @@ macro_rules! follow_on_recovery_laws {
 follow_on_recovery_laws! {
     recovered_follow_on_sqlite_memory: Storage::SqliteMemory, false;
     recovered_follow_on_sqlite_file: Storage::SqliteFile, false;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     recovered_follow_on_postgres: Storage::Postgres, false;
     recovered_follow_on_sqlite_memory_always_replay: Storage::SqliteMemory, true;
     recovered_follow_on_sqlite_file_always_replay: Storage::SqliteFile, true;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     recovered_follow_on_postgres_always_replay: Storage::Postgres, true;
 }
 
 macro_rules! deleted_session_root_replay_laws {
-    ($($name:ident: $work:expr, $storage:expr, $always_replay:expr, $drive:expr;)*) => {
+    ($($(#[$attr:meta])* $name:ident: $work:expr, $storage:expr, $always_replay:expr, $drive:expr;)*) => {
         $(
+            $(#[$attr])*
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $name() -> Result<()> {
                 a_root_replayed_after_its_session_was_deleted_ends_typed(
@@ -1021,9 +1023,13 @@ deleted_session_root_replay_laws! {
     input_sqlite_file_closed: Work::Input, Storage::SqliteFile, false, Drive::Closed;
     input_sqlite_file_always_replay_held_open: Work::Input, Storage::SqliteFile, true, Drive::HeldOpen;
     input_sqlite_file_always_replay_closed: Work::Input, Storage::SqliteFile, true, Drive::Closed;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     input_postgres_held_open: Work::Input, Storage::Postgres, false, Drive::HeldOpen;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     input_postgres_closed: Work::Input, Storage::Postgres, false, Drive::Closed;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     input_postgres_always_replay_held_open: Work::Input, Storage::Postgres, true, Drive::HeldOpen;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     input_postgres_always_replay_closed: Work::Input, Storage::Postgres, true, Drive::Closed;
     command_sqlite_memory_held_open: Work::Command, Storage::SqliteMemory, false, Drive::HeldOpen;
     command_sqlite_memory_closed: Work::Command, Storage::SqliteMemory, false, Drive::Closed;
@@ -1033,9 +1039,13 @@ deleted_session_root_replay_laws! {
     command_sqlite_file_closed: Work::Command, Storage::SqliteFile, false, Drive::Closed;
     command_sqlite_file_always_replay_held_open: Work::Command, Storage::SqliteFile, true, Drive::HeldOpen;
     command_sqlite_file_always_replay_closed: Work::Command, Storage::SqliteFile, true, Drive::Closed;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     command_postgres_held_open: Work::Command, Storage::Postgres, false, Drive::HeldOpen;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     command_postgres_closed: Work::Command, Storage::Postgres, false, Drive::Closed;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     command_postgres_always_replay_held_open: Work::Command, Storage::Postgres, true, Drive::HeldOpen;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     command_postgres_always_replay_closed: Work::Command, Storage::Postgres, true, Drive::Closed;
     follow_on_sqlite_memory_held_open: Work::FollowOn, Storage::SqliteMemory, false, Drive::HeldOpen;
     follow_on_sqlite_memory_closed: Work::FollowOn, Storage::SqliteMemory, false, Drive::Closed;
@@ -1045,8 +1055,12 @@ deleted_session_root_replay_laws! {
     follow_on_sqlite_file_closed: Work::FollowOn, Storage::SqliteFile, false, Drive::Closed;
     follow_on_sqlite_file_always_replay_held_open: Work::FollowOn, Storage::SqliteFile, true, Drive::HeldOpen;
     follow_on_sqlite_file_always_replay_closed: Work::FollowOn, Storage::SqliteFile, true, Drive::Closed;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     follow_on_postgres_held_open: Work::FollowOn, Storage::Postgres, false, Drive::HeldOpen;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     follow_on_postgres_closed: Work::FollowOn, Storage::Postgres, false, Drive::Closed;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     follow_on_postgres_always_replay_held_open: Work::FollowOn, Storage::Postgres, true, Drive::HeldOpen;
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     follow_on_postgres_always_replay_closed: Work::FollowOn, Storage::Postgres, true, Drive::Closed;
 }

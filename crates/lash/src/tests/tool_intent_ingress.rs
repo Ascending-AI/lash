@@ -369,15 +369,13 @@ async fn host_register_trigger_realizes_and_fires_in_sqlite() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 #[allow(
     clippy::disallowed_methods,
     reason = "the test host reads the optional PostgreSQL service URL"
 )]
 async fn host_register_trigger_realizes_and_fires_in_postgres() -> Result<()> {
-    let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
-        eprintln!("skipping PostgreSQL ingress trigger test: database URL is not set");
-        return Ok(());
-    };
+    let url = lash_postgres_store::testing::required_database_url();
     let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
     let storage = lash_postgres_store::PostgresStorage::connect(database.url()).await?;
     let attachments = tempfile::tempdir().expect("PostgreSQL attachment directory");

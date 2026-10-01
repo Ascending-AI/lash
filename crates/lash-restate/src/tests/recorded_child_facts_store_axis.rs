@@ -160,13 +160,9 @@ pub(super) async fn sqlite_file_tier() -> (
 }
 
 /// A double whose every store is a PostgreSQL set in an isolated database,
-/// or `None` where no database is configured. The PostgreSQL law is
+/// requiring the configured service URL. The PostgreSQL law is
 /// registered under `postgres_ingress`, the selection the pg-store service
 /// leg runs.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the service-gated test fixture reads its injected PostgreSQL URL"
-)]
 pub(super) async fn postgres_tier() -> Option<(
     (
         lash_postgres_store::testing::IsolatedDatabase,
@@ -175,13 +171,7 @@ pub(super) async fn postgres_tier() -> Option<(
     ),
     lash_conformance::DeclaredStartTier,
 )> {
-    let url = match std::env::var("LASH_POSTGRES_DATABASE_URL") {
-        Ok(url) if !url.is_empty() => url,
-        _ if std::env::var("LASH_REQUIRE_POSTGRES").as_deref() == Ok("1") => {
-            panic!("LASH_POSTGRES_DATABASE_URL is required for the PostgreSQL declared-start law")
-        }
-        _ => return None,
-    };
+    let url = lash_postgres_store::testing::required_database_url();
     let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
     let storage = lash_postgres_store::PostgresStorage::connect(database.url())
         .await

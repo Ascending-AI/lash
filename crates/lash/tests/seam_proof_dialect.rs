@@ -104,14 +104,7 @@ async fn double(tier: Tier, seed: u64) -> Option<Double> {
             })
         }
         Tier::Postgres => {
-            let url = std::env::var("LASH_POSTGRES_DATABASE_URL")
-                .ok()
-                .filter(|url| !url.trim().is_empty());
-            assert!(
-                url.is_some() || std::env::var("LASH_REQUIRE_POSTGRES").as_deref() != Ok("1"),
-                "LASH_POSTGRES_DATABASE_URL must be set when LASH_REQUIRE_POSTGRES=1"
-            );
-            let url = url?;
+            let url = lash_postgres_store::testing::required_database_url();
             let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
             let storage = lash_postgres_store::PostgresStorage::connect(database.url())
                 .await
@@ -418,6 +411,7 @@ async fn a_suspended_session_keeps_its_selected_dialect_on_sqlite_file() {
 }
 
 #[tokio::test]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn a_suspended_session_keeps_its_selected_dialect_on_postgres() {
     a_suspended_session_keeps_its_selected_dialect(Tier::Postgres, 0x4319_0004).await;
 }

@@ -2368,35 +2368,7 @@ fn generated_catalog_covers_required_adversarial_shapes() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "compares three durable backends; requires Postgres (`just push-gate`, or `LASH_POSTGRES_DATABASE_URL=... just cross-backend-store-soak`)"]
 async fn cross_backend_store_differential_agrees() {
-    let database_url = match std::env::var("LASH_POSTGRES_DATABASE_URL") {
-        Ok(database_url) if !database_url.is_empty() => database_url,
-        Ok(_) => {
-            assert_ne!(
-                std::env::var("LASH_REQUIRE_POSTGRES").as_deref(),
-                Ok("1"),
-                "LASH_POSTGRES_DATABASE_URL must be non-empty when LASH_REQUIRE_POSTGRES=1"
-            );
-            eprintln!(
-                "SKIPPED cross-backend store differential; compared_backends=[]; \
-                 required_backends=[sqlite-memory,sqlite,postgres]; \
-                 reason=LASH_POSTGRES_DATABASE_URL is not set"
-            );
-            return;
-        }
-        Err(error) => {
-            assert_ne!(
-                std::env::var("LASH_REQUIRE_POSTGRES").as_deref(),
-                Ok("1"),
-                "LASH_POSTGRES_DATABASE_URL must be set when LASH_REQUIRE_POSTGRES=1: {error}"
-            );
-            eprintln!(
-                "SKIPPED cross-backend store differential; compared_backends=[]; \
-                 required_backends=[sqlite-memory,sqlite,postgres]; \
-                 reason=LASH_POSTGRES_DATABASE_URL is not set"
-            );
-            return;
-        }
-    };
+    let database_url = lash_postgres_store::testing::required_database_url();
     // `push-gate` runs workspace tests through nextest, so this test is a
     // separate process from the Postgres conformance tests. Hold their common
     // session-level advisory lock for the entire differential: both suites use

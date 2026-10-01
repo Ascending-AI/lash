@@ -117,10 +117,7 @@ struct Scratch {
 
 impl Scratch {
     async fn create() -> Option<Self> {
-        let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
-            eprintln!("finalize laws need LASH_POSTGRES_DATABASE_URL");
-            return None;
-        };
+        let url = lash_postgres_store::testing::required_database_url();
         let schema = format!("lashctl_finalize_{}", uuid::Uuid::new_v4().simple());
         let mut admin = PgConnection::connect(&url).await.expect("connect admin");
         sqlx::query(&format!("CREATE SCHEMA {schema}"))
@@ -170,6 +167,7 @@ const RETIRED: &str = "0123456789ab";
 /// `deployments_retained`). An engine it cannot read fails closed (exit 1).
 /// Nothing moves until all three clear.
 #[tokio::test]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn finalize_refuses_while_an_old_generation_is_live() {
     let Some(scratch) = Scratch::create().await else {
         return;
@@ -261,6 +259,7 @@ async fn finalize_refuses_while_an_old_generation_is_live() {
 /// finalize through. `finalize-hold` shows, sets and clears the one hold on
 /// the fleet row.
 #[tokio::test]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn finalize_honours_operator_hold() {
     let Some(scratch) = Scratch::create().await else {
         return;

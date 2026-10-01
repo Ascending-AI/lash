@@ -54,9 +54,9 @@ fn epoch(value: i64) -> Param {
 }
 
 /// The generic plan PostgreSQL executes for `sql` with `params`, as one
-/// string, or `None` when no database is configured.
+/// string. A selected planner witness requires PostgreSQL.
 async fn plan_for(sql: &str, params: &[Param]) -> Option<String> {
-    let url = std::env::var("LASH_POSTGRES_DATABASE_URL").ok()?;
+    let url = crate::testing::required_database_url();
     let database = crate::testing::IsolatedDatabase::create(&url).await;
     let storage = crate::PostgresStorage::connect(database.url())
         .await

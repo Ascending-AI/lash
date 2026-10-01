@@ -335,8 +335,7 @@ async fn on_sqlite_memory(
     .expect("the Restate double over SQLite memory stores")
 }
 
-/// The Restate double over PostgreSQL, with what must outlive it; `None`
-/// when no PostgreSQL is configured and none is required.
+/// The Restate double over the required PostgreSQL service, with its resources.
 #[allow(clippy::disallowed_methods)] // FIG-2971: a test is a host; the gate's database URL is host configuration.
 async fn on_postgres(
     config: lash_restate_test::ServerConfig,
@@ -344,14 +343,7 @@ async fn on_postgres(
     lash_restate_test::RestateTestBackend<dyn lash_core::StoreSet>,
     tempfile::TempDir,
 )> {
-    let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
-        assert!(
-            std::env::var("LASH_REQUIRE_POSTGRES").as_deref() != Ok("1"),
-            "LASH_REQUIRE_POSTGRES=1 but LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        eprintln!("skipping the PostgreSQL leg: LASH_POSTGRES_DATABASE_URL is not set");
-        return None;
-    };
+    let url = lash_postgres_store::testing::required_database_url();
     let attachments = tempfile::tempdir().expect("attachment byte store");
     let bytes = Arc::new(lash_core::facade_support::FileAttachmentStore::new(
         attachments.path(),
@@ -424,6 +416,7 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour_on_sqlite_memory_alwa
 }
 
 #[tokio::test]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn a_redriven_root_runs_under_its_recorded_behaviour_on_postgres() {
     let Some((double, _attachments)) = on_postgres(plain()).await else {
         return;
@@ -436,6 +429,7 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour_on_postgres() {
 }
 
 #[tokio::test]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn a_redriven_root_runs_under_its_recorded_behaviour_on_postgres_always_replay() {
     let Some((double, _attachments)) = on_postgres(always_replay()).await else {
         return;

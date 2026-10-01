@@ -214,11 +214,9 @@ fn operator_json_contract() {
 }
 
 #[tokio::test]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn operator_json_contract_postgres() {
-    let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
-        eprintln!("PostgreSQL leg needs LASH_POSTGRES_DATABASE_URL");
-        return;
-    };
+    let url = lash_postgres_store::testing::required_database_url();
     let schema = format!("lashctl_{}", uuid::Uuid::new_v4().simple());
     let mut admin = PgConnection::connect(&url)
         .await
@@ -463,11 +461,9 @@ async fn operator_json_contract_postgres() {
 }
 
 #[test]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 fn rolling_preflight_refuses_an_oversubscribed_budget() {
-    let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
-        assert_ne!(std::env::var("LASH_REQUIRE_POSTGRES").as_deref(), Ok("1"));
-        return;
-    };
+    let url = lash_postgres_store::testing::required_database_url();
     let (code, body) = run(
         &[
             "preflight",

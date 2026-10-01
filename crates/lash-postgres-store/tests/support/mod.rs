@@ -144,23 +144,7 @@ pub async fn reset(pool: &PgPool) {
 }
 
 pub fn database_url() -> Option<String> {
-    match std::env::var("LASH_POSTGRES_DATABASE_URL") {
-        Ok(database_url) if !database_url.is_empty() => Some(database_url),
-        Ok(_) => {
-            if std::env::var("LASH_REQUIRE_POSTGRES").as_deref() == Ok("1") {
-                panic!("LASH_POSTGRES_DATABASE_URL must be non-empty when LASH_REQUIRE_POSTGRES=1");
-            }
-            None
-        }
-        Err(error) => {
-            if std::env::var("LASH_REQUIRE_POSTGRES").as_deref() == Ok("1") {
-                panic!(
-                    "LASH_POSTGRES_DATABASE_URL must be set when LASH_REQUIRE_POSTGRES=1: {error}"
-                );
-            }
-            None
-        }
-    }
+    Some(lash_postgres_store::testing::required_database_url())
 }
 
 pub struct SharedDatabaseLock {

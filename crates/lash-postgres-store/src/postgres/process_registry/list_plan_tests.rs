@@ -21,7 +21,7 @@
 use super::*;
 
 async fn plan_for(filter: &lash_core_execution::ProcessListFilter) -> Option<String> {
-    let url = std::env::var("LASH_POSTGRES_DATABASE_URL").ok()?;
+    let url = crate::testing::required_database_url();
     let database = crate::testing::IsolatedDatabase::create(&url).await;
     let storage = crate::PostgresStorage::connect(database.url())
         .await

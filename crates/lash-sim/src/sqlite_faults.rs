@@ -1171,9 +1171,9 @@ mod tests {
     /// injector reaches the production write transaction and that every
     /// commit-boundary oracle holds there too.
     ///
-    /// Skips when `LASH_POSTGRES_DATABASE_URL` is unset; `LASH_REQUIRE_POSTGRES=1`
-    /// makes that a panic, so the CI lane cannot silently pass.
+    /// Ignored without the service gate; an explicit run requires PostgreSQL.
     #[tokio::test]
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     async fn postgres_backend_fault_seed_set_covers_every_fault_and_oracle() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let Some(report) = run_backend_fault_profile(

@@ -294,12 +294,14 @@ class StoreGateTests(Fixture):
         "pg-catalog-compatibility": ["committed_shape_artifact_matches_the_ddl_artifact",
                                      "a_compatible_expansion_still_reports_column_drift"],
         "pg-pool-wait": ["postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads"],
+        "pg-sim-backend-faults": ["postgres_backend_fault_seed_set_covers_every_fault_and_oracle"],
+        "pg-model-keys": ["two_keys_sharing_a_provider_kind_select_their_own_transport::postgres"],
         "s3-attachment-differential": ["attachment_blob_store_differential_agrees"],
         "pg-rlm-frame-open": ["restate_double_postgres::law"],
     }
 
     def test_pg_s3_restate_selector_rename_fails(self):
-        for suite in self.SUITES:
+        for suite in self.SUITES.keys() - {"pg-model-keys"}:
             with self.subTest(suite=suite):
                 self.env["FIXTURE_CASES"] = '[["renamed_law", false]]'
                 self.assert_failed(self.gate(suite), "no executable tests matched the runner arguments")
@@ -309,14 +311,21 @@ class StoreGateTests(Fixture):
                         FIXTURE_NO_REPORT="1")
         self.assert_failed(self.gate("pg-pool-wait"), "No such file or directory")
 
-    def test_pg_ignored_only_selection_fails(self):
+    def test_ignored_only_selection_without_include_ignored_fails(self):
+        self.env["FIXTURE_CASES"] = json.dumps(
+            [[name, True] for name in self.SUITES["pg-catalog-compatibility"]]
+        )
+        self.assert_failed(self.gate("pg-catalog-compatibility"),
+                           "no executable tests matched the runner arguments")
+
+    def test_pg_service_gate_executes_ignored_selection(self):
         self.env["FIXTURE_CASES"] = json.dumps([[name, True] for name in self.SUITES["pg-pool-wait"]])
-        self.assert_failed(self.gate("pg-pool-wait"), "no executable tests matched the runner arguments")
+        self.assert_passed(self.gate("pg-pool-wait"))
 
     def test_pg_s3_restate_empty_shard_union_fails(self):
         for suite, names in self.SUITES.items():
             with self.subTest(suite=suite):
-                ignored = suite not in ("pg-pool-wait", "pg-catalog-compatibility")
+                ignored = suite != "pg-catalog-compatibility"
                 self.env.update(FIXTURE_CASES=json.dumps([[name, ignored] for name in names]),
                                 FIXTURE_EMPTY_EXECUTION="1")
                 self.assert_failed(self.gate(suite),
@@ -325,7 +334,7 @@ class StoreGateTests(Fixture):
     def test_pg_s3_restate_one_case_union_with_empty_shard_passes(self):
         for suite, names in self.SUITES.items():
             with self.subTest(suite=suite):
-                ignored = suite not in ("pg-pool-wait", "pg-catalog-compatibility")
+                ignored = suite != "pg-catalog-compatibility"
                 self.env["FIXTURE_CASES"] = json.dumps([[name, ignored] for name in names])
                 result = self.gate(suite)
                 self.assert_passed(result)

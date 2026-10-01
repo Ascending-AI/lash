@@ -626,18 +626,7 @@ async fn minimize_diverging_prefix(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "compares the SQLite and PostgreSQL stores; requires Postgres (`just cross-backend-store-soak`, or LASH_POSTGRES_DATABASE_URL with --include-ignored)"]
 async fn generated_cross_backend_surface_differential_agrees() {
-    let database_url = match std::env::var("LASH_POSTGRES_DATABASE_URL") {
-        Ok(value) if !value.is_empty() => value,
-        _ if std::env::var("LASH_REQUIRE_POSTGRES").as_deref() == Ok("1") => {
-            panic!("LASH_POSTGRES_DATABASE_URL must be set when LASH_REQUIRE_POSTGRES=1")
-        }
-        _ => {
-            eprintln!(
-                "SKIPPED generated cross-backend surface differential: PostgreSQL is not configured"
-            );
-            return;
-        }
-    };
+    let database_url = lash_postgres_store::testing::required_database_url();
     let mut database_lock = PgConnection::connect(&database_url).await.unwrap();
     sqlx::query("SELECT pg_advisory_lock($1)")
         .bind(SHARED_DATABASE_LOCK_KEY)

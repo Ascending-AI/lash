@@ -148,14 +148,7 @@ async fn sqlite_runtime_assembly_refuses_deleted_without_writes() {
     reason = "test fixture reads the PostgreSQL service URL"
 )]
 async fn postgres_runtime_assembly(deleted: bool) {
-    let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
-        assert!(
-            std::env::var("LASH_REQUIRE_POSTGRES").is_err(),
-            "PostgreSQL is required"
-        );
-        eprintln!("skipping PostgreSQL runtime assembly: database URL is not set");
-        return;
-    };
+    let url = lash_postgres_store::testing::required_database_url();
     let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
     let storage = lash_postgres_store::PostgresStorage::connect(database.url())
         .await
@@ -175,11 +168,13 @@ async fn postgres_runtime_assembly(deleted: bool) {
 }
 
 #[tokio::test]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn postgres_runtime_assembly_refuses_absent_without_writes() {
     Box::pin(postgres_runtime_assembly(false)).await;
 }
 
 #[tokio::test]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn postgres_runtime_assembly_refuses_deleted_without_writes() {
     Box::pin(postgres_runtime_assembly(true)).await;
 }

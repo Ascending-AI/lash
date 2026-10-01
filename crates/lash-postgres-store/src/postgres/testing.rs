@@ -16,6 +16,10 @@
 
 use sqlx::{Connection, PgConnection};
 
+#[path = "testing/database_url.rs"]
+mod database_url;
+pub use database_url::required_database_url;
+
 /// Returns the production trigger-subscription listing SQL for conformance assertions.
 ///
 /// The filter no longer builds the statement; it selects one (FIG-3385). The

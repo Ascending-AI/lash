@@ -308,6 +308,7 @@ async fn a_facade_host_wraps_the_rlm_factory_and_its_stores_on_sqlite_file() {
 }
 
 #[tokio::test]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn a_facade_host_wraps_the_rlm_factory_and_its_stores_on_postgres() {
     a_facade_host_wraps_the_rlm_factory_and_its_stores(Tier::Postgres, 0x4373_0003).await;
 }

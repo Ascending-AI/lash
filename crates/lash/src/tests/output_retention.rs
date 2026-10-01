@@ -337,9 +337,8 @@ fn collect_retained(
     }
 }
 
-/// The Restate double over a fresh PostgreSQL store set, or `None` when no
-/// database URL is set. `LASH_REQUIRE_POSTGRES=1` makes a missing URL a
-/// failure, so a gate that promises the PostgreSQL leg cannot skip it.
+/// The Restate double over a fresh PostgreSQL store set. An explicitly
+/// selected PostgreSQL test requires the service URL.
 async fn postgres_double() -> Option<(lash_core::Backend, Box<dyn std::any::Any>)> {
     let (stores, held) = postgres_store_set().await?;
     let backend =
@@ -353,6 +352,7 @@ async fn oversized_tool_output_is_retained_before_it_enters_history_on_sqlite() 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn oversized_tool_output_is_retained_before_it_enters_history_on_postgres() -> Result<()> {
     let Some((backend, _held)) = postgres_double().await else {
         return Ok(());
@@ -372,6 +372,7 @@ async fn oversized_rlm_print_and_final_value_are_retained_before_they_enter_hist
 
 #[cfg(feature = "rlm")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn oversized_rlm_print_and_final_value_are_retained_before_they_enter_history_on_postgres()
 -> Result<()> {
     let Some((backend, _held)) = postgres_double().await else {

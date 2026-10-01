@@ -121,6 +121,7 @@ async fn eviction_recovers_the_facade_on_sqlite_file() {
 }
 
 #[tokio::test]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn eviction_recovers_the_facade_on_postgres() {
     on_double(Tier::Postgres, 0x4295_0003, "postgres").await;
 }
