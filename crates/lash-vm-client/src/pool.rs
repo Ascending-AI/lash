@@ -3,8 +3,12 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use crate::ipc::Worker;
+use crate::measurements::{
+    ExecutionClass, ExecutionReceipt, Measurements, PoolMeasurements, SharedMeasurements,
+};
 use crate::{PoolConfig, PoolError};
 use lash_vm_protocol::*;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Parent-owned accounting. Carry this same value across substrate re-drives
 /// and replacement checkouts. The pool never rewinds it or retries execution.
@@ -95,6 +99,8 @@ struct State {
     failed: bool,
 }
 struct Pool {
+    epoch: u64,
+    measurements: SharedMeasurements,
     config: PoolConfig,
     state: Mutex<State>,
     available: Condvar,
@@ -107,7 +113,10 @@ pub struct WorkerPool(Arc<Pool>);
 impl WorkerPool {
     pub fn new(config: PoolConfig) -> Result<Self, PoolError> {
         config.validate()?;
+        static NEXT_EPOCH: AtomicU64 = AtomicU64::new(1);
         let pool = Self(Arc::new(Pool {
+            epoch: NEXT_EPOCH.fetch_add(1, Ordering::Relaxed),
+            measurements: Arc::new(Mutex::new(Measurements::default())),
             config,
             state: Mutex::new(State {
                 #[cfg(feature = "testing")]
@@ -143,6 +152,25 @@ impl WorkerPool {
             restart_storm: state.failed,
         }
     }
+    /// Enable bounded receipts before admitting load. Overflow is explicit.
+    pub fn enable_execution_receipts(&self, capacity: usize) {
+        lock(&self.0.measurements).receipt_capacity = capacity;
+    }
+    pub fn measurements(&self) -> PoolMeasurements {
+        let state = lock(&self.0.state);
+        let measurements = lock(&self.0.measurements);
+        PoolMeasurements {
+            exporter: "lash-vm-client/pool-v1",
+            epoch: self.0.epoch,
+            workers: state.workers,
+            idle: state.idle.len(),
+            queued_items: state.queued_items,
+            queued_bytes: state.queued_bytes,
+            counters: measurements.counters,
+            units: crate::measurements::units(),
+            executions: measurements.executions.clone(),
+        }
+    }
     /// Worker CPU charged by this pool, including reset and reaped failures.
     /// This is a measurement counter, independent of execution admission.
     #[cfg(feature = "testing")]
@@ -160,6 +188,7 @@ impl WorkerPool {
     ) -> Result<Checkout, PoolError> {
         #[cfg(feature = "testing")]
         let checkout_started = Instant::now();
+        let queue_started = Instant::now();
         let deadline = Instant::now() + self.0.config.deadlines.checkout;
         let mut state = lock(&self.0.state);
         let mut queued = false;
@@ -168,18 +197,21 @@ impl WorkerPool {
                 #[cfg(feature = "testing")]
                 self.0
                     .report_deadline(&state, "checkout", checkout_started.elapsed(), &budget);
-                unqueue(&mut state, queued, queued_bytes);
+                self.0
+                    .unqueue(&mut state, queued, queued_bytes, queue_started);
                 return Err(PoolError::CheckoutTimedOut);
             }
             if state.failed {
-                unqueue(&mut state, queued, queued_bytes);
+                self.0
+                    .unqueue(&mut state, queued, queued_bytes, queue_started);
                 return Err(PoolError::RestartStorm);
             }
             let worker = if let Some(worker) = state.idle.pop() {
                 Some(worker)
             } else if state.workers < self.0.config.max_workers {
                 state.workers += 1;
-                unqueue(&mut state, queued, queued_bytes);
+                self.0
+                    .unqueue(&mut state, queued, queued_bytes, queue_started);
                 queued = false;
                 drop(state);
                 let spawned = self.0.spawn_ready_until(deadline);
@@ -221,8 +253,9 @@ impl WorkerPool {
             } else {
                 None
             };
-            if let Some(worker) = worker {
-                unqueue(&mut state, queued, queued_bytes);
+            if let Some(mut worker) = worker {
+                self.0
+                    .unqueue(&mut state, queued, queued_bytes, queue_started);
                 if let Err(error) = budget.admit(&self.0.config) {
                     #[cfg(feature = "testing")]
                     if matches!(
@@ -243,6 +276,14 @@ impl WorkerPool {
                     .next_lease
                     .checked_add(1)
                     .ok_or_else(|| PoolError::protocol("lease space exhausted"))?;
+                {
+                    let mut measurements = lock(&self.0.measurements);
+                    measurements.counters.checkouts += 1;
+                    if worker.used {
+                        measurements.counters.reuses += 1;
+                    }
+                }
+                worker.used = true;
                 let credited_cpu = worker.cpu_nanos;
                 return Ok(Checkout {
                     #[cfg(feature = "testing")]
@@ -263,6 +304,8 @@ impl WorkerPool {
                     observations: Vec::new(),
                     observation_budget: None,
                     observed_bytes: 0,
+                    execution_class: None,
+                    execution_recorded: false,
                 });
             }
             if !queued {
@@ -278,6 +321,7 @@ impl WorkerPool {
                         bytes: queued_bytes,
                     });
                 }
+                lock(&self.0.measurements).counters.queue_waits += 1;
                 state.queued_items += 1;
                 state.queued_bytes += queued_bytes;
                 queued = true;
@@ -289,7 +333,8 @@ impl WorkerPool {
                 #[cfg(feature = "testing")]
                 self.0
                     .report_deadline(&state, "checkout", checkout_started.elapsed(), &budget);
-                unqueue(&mut state, queued, queued_bytes);
+                self.0
+                    .unqueue(&mut state, queued, queued_bytes, queue_started);
                 return Err(PoolError::CheckoutTimedOut);
             };
             let (next, _) = self
@@ -303,6 +348,12 @@ impl WorkerPool {
 }
 
 impl Pool {
+    fn unqueue(&self, state: &mut State, queued: bool, bytes: usize, started: Instant) {
+        if queued {
+            lock(&self.measurements).counters.queue_delay_ns += nanos(started.elapsed());
+            unqueue(state, queued, bytes);
+        }
+    }
     #[cfg(feature = "testing")]
     fn report_deadline(
         &self,
@@ -332,6 +383,7 @@ impl Pool {
     }
     fn spawn_ready_until(&self, deadline: Instant) -> Result<Worker, PoolError> {
         let mut worker = Worker::spawn(&self.config)?;
+        worker.measurements = Some(self.measurements.clone());
         let deadline = deadline.min(Instant::now() + self.config.protocol.no_response_watchdog);
         let frame = worker.receive(deadline)?;
         let mut fence = MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0));
@@ -346,6 +398,11 @@ impl Pool {
                     env!("CARGO_PKG_VERSION"),
                     &crate_version,
                 )?;
+                let mut measurements = lock(&self.measurements);
+                if measurements.pending_replacements > 0 {
+                    measurements.pending_replacements -= 1;
+                    measurements.counters.replacements += 1;
+                }
                 Ok(worker)
             }
             _ => Err(PoolError::protocol(
@@ -368,6 +425,11 @@ impl Pool {
         }
     }
     fn discard(&self, mut worker: Worker, failed: bool) -> u64 {
+        {
+            let mut measurements = lock(&self.measurements);
+            measurements.counters.discards += 1;
+            measurements.pending_replacements += 1;
+        }
         let cpu = worker.terminate();
         drop(worker);
         let mut state = lock(&self.state);
@@ -456,6 +518,8 @@ pub struct Checkout {
     observation_budget: Option<u64>,
     /// The observation bytes the current step has handed over.
     observed_bytes: u64,
+    execution_class: Option<ExecutionClass>,
+    execution_recorded: bool,
 }
 impl Checkout {
     fn charge_cpu(&self, cpu_nanos: u64) -> Result<(), PoolError> {
@@ -546,6 +610,13 @@ impl Checkout {
             .limits
             .max_frame_depth
             .min(self.pool.config.vm_limits.max_frame_depth);
+        self.execution_class = Some(match &start.program {
+            ProgramSource::Artifact {
+                entry: ProgramEntry::Process { .. },
+                ..
+            } => ExecutionClass::Process,
+            _ => ExecutionClass::Cell,
+        });
         self.owner = Some(start.owner.clone());
         self.observation_budget = start.limits.memory_limit_bytes;
         self.started = true;
@@ -650,6 +721,7 @@ impl Checkout {
         let reply = self.receive_control(self.pool.config.protocol.no_response_watchdog);
         match reply {
             Ok(WorkerMessage::ResetDone { cpu_nanos }) => {
+                lock(&self.pool.measurements).counters.resets += 1;
                 if cpu_nanos < self.credited_cpu {
                     self.discard();
                     return Err(PoolError::protocol("reset CPU accounting regressed"));
@@ -814,6 +886,23 @@ impl Checkout {
                     self.charge_cpu(cpu_nanos)?;
                     self.credited_cpu = cpu_nanos;
                     self.worker.as_mut().ok_or_else(PoolError::eof)?.cpu_nanos = cpu_nanos;
+                    if !self.execution_recorded && next == WorkerPhase::Computing {
+                        if let Some(class_name) = self.execution_class {
+                            let worker = self.worker.as_ref().ok_or_else(PoolError::eof)?;
+                            let owner = self
+                                .owner
+                                .as_ref()
+                                .ok_or_else(|| PoolError::protocol("execution has no owner"))?;
+                            lock(&self.pool.measurements).execution(ExecutionReceipt {
+                                lease: self.lease().0,
+                                class_name,
+                                owner: owner.as_str().to_owned(),
+                                pid: worker.pid(),
+                                process_epoch: worker.process_epoch.clone(),
+                            });
+                        }
+                        self.execution_recorded = true;
+                    }
                     phase = Some(next);
                     #[cfg(feature = "testing")]
                     {

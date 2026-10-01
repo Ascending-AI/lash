@@ -43,8 +43,7 @@ def snapshot(root, proc=Path('/proc'), cgroup=Path('/sys/fs/cgroup')):
             'cpu_ticks_sum': sum(row['cpu_ticks'] for row in rows),
             'cgroup_memory_bytes': int((cgroup / 'memory.current').read_text()),
             'cgroup_peak_bytes': int((cgroup / 'memory.peak').read_text()),
-            'cgroup_cpu': pairs('cpu.stat'), 'cgroup_events': pairs('memory.events'),
-            'pool': {'status': 'PENDING', 'dependencies': ['FIG-4161', 'FIG-4162']}}
+            'cgroup_cpu': pairs('cpu.stat'), 'cgroup_events': pairs('memory.events')}
 
 
 if __name__ == '__main__':

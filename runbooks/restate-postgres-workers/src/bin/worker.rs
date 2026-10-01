@@ -74,6 +74,7 @@ trait E2eTurnWorkflow {
 
 #[derive(Clone)]
 struct AppState {
+    workers: lash::rlm::WorkerService,
     worker_id: String,
     storage: PostgresStorage,
     backend: Arc<lash_restate_postgres_workers_e2e::E2eBackend>,
@@ -123,7 +124,12 @@ impl AppState {
         let fail_once = env("LASH_E2E_FAIL_ONCE", "0") == "1";
         let witness = lash_restate_postgres_workers_e2e::witness::connect_witness().await?;
         let load = LoadContext::from_env()?;
+        let workers = lash::rlm::WorkerService::default();
+        if load.is_some() {
+            workers.pool()?.enable_execution_receipts(65_536);
+        }
         Ok(Self {
+            workers,
             worker_id,
             storage,
             backend,
@@ -139,6 +145,7 @@ impl AppState {
 
     fn build_core(&self) -> Result<lash::LashCore> {
         build_e2e_core(lash_restate_postgres_workers_e2e::E2eCoreConfig {
+            workers: self.workers.clone(),
             worker_id: self.worker_id.clone(),
             storage: self.storage.clone(),
             backend: Arc::clone(&self.backend),
@@ -819,7 +826,9 @@ async fn direct_health(State(state): State<AppState>) -> AxumJson<HealthResponse
     })
 }
 
-async fn load_resources() -> Result<AxumJson<serde_json::Value>, (StatusCode, String)> {
+async fn load_resources(
+    State(state): State<AppState>,
+) -> Result<AxumJson<serde_json::Value>, (StatusCode, String)> {
     let output = tokio::process::Command::new("python3")
         .args([
             "/opt/lash/loadtest_resources.py",
@@ -835,9 +844,15 @@ async fn load_resources() -> Result<AxumJson<serde_json::Value>, (StatusCode, St
             String::from_utf8_lossy(&output.stderr).into_owned(),
         ));
     }
-    serde_json::from_slice(&output.stdout)
-        .map(AxumJson)
-        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))
+    let mut resources: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let pool = state
+        .workers
+        .pool()
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    resources["pool"] = serde_json::to_value(pool.measurements())
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    Ok(AxumJson(resources))
 }
 
 async fn topology_attachment(

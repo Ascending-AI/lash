@@ -4,6 +4,7 @@ mod config;
 mod context;
 mod error;
 pub mod ipc;
+mod measurements;
 mod pool;
 mod remote_state;
 pub mod service;
@@ -13,6 +14,7 @@ pub use broker::PoolSlots;
 pub use config::{Deadlines, PoolConfig, WorkerEntry};
 pub use context::{ProjectionDescription, ProjectionRead, RunContext};
 pub use error::PoolError;
+pub use measurements::{ExecutionClass, ExecutionReceipt, PoolCounters, PoolMeasurements};
 pub use pool::{Checkout, ExecutionBudget, ParkOutcome, PoolStats, WorkerPool};
 pub use remote_state::{RemoteRestoreError, RemoteState, RemoteVm};
 

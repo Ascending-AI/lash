@@ -13,6 +13,9 @@ use lash_vm_protocol::{
 pub struct Worker {
     child: Child,
     reaped: bool,
+    pub(crate) measurements: Option<crate::measurements::SharedMeasurements>,
+    pub(crate) process_epoch: Option<String>,
+    pub(crate) used: bool,
     pub pipe: UnixStream,
     pub codec: FrameCodec,
     pub cpu_nanos: u64,
@@ -50,9 +53,23 @@ impl Worker {
         }
         let child = command.spawn().map_err(PoolError::io)?;
         drop(child_pipe);
+        #[cfg(target_os = "linux")]
+        let process_epoch = std::fs::read_to_string(format!("/proc/{}/stat", child.id()))
+            .ok()
+            .and_then(|text| {
+                text[text.rfind(')')? + 2..]
+                    .split_whitespace()
+                    .nth(19)
+                    .map(str::to_owned)
+            });
+        #[cfg(not(target_os = "linux"))]
+        let process_epoch = None;
         Ok(Self {
             child,
             reaped: false,
+            measurements: None,
+            process_epoch,
+            used: false,
             pipe,
             codec: FrameCodec::new(config.protocol.decode),
             cpu_nanos: 0,
@@ -65,12 +82,27 @@ impl Worker {
 
     pub fn send(&mut self, frame: &ParentFrame, timeout: Duration) -> Result<(), PoolError> {
         let bytes = self.codec.encode_parent(frame).map_err(PoolError::from)?;
-        write_frame(&mut self.pipe, &bytes, Instant::now() + timeout)
+        write_frame(&mut self.pipe, &bytes, Instant::now() + timeout)?;
+        if let Some(measurements) = &self.measurements {
+            let mut measurements = measurements
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            measurements.counters.ipc_sent_messages += 1;
+            measurements.counters.ipc_sent_bytes += bytes.len() as u64;
+        }
+        Ok(())
     }
 
     pub fn receive(&mut self, deadline: Instant) -> Result<WorkerFrame, PoolError> {
         let bytes = match read_frame(&mut self.pipe, &self.codec, deadline) {
             Err(PoolError::Infrastructure(InfrastructureOutcome::WorkerCrashed { .. })) => {
+                if let Some(measurements) = &self.measurements {
+                    measurements
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .counters
+                        .crashes += 1;
+                }
                 return Err(InfrastructureOutcome::WorkerCrashed {
                     evidence: self.exit_evidence(),
                 }
@@ -78,6 +110,13 @@ impl Worker {
             }
             result => result?,
         };
+        if let Some(measurements) = &self.measurements {
+            let mut measurements = measurements
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            measurements.counters.ipc_received_messages += 1;
+            measurements.counters.ipc_received_bytes += bytes.len() as u64;
+        }
         self.codec.decode_worker(&bytes).map_err(PoolError::from)
     }
 

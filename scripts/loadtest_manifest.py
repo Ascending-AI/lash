@@ -11,7 +11,7 @@ import yaml
 
 TARGETS = {'local', 'scaleway'}
 RESULT_JSONL = ('operations.jsonl', 'samples.jsonl', 'metrics.jsonl', 'faults.jsonl',
-                'sample_errors.jsonl', 'query_retries.jsonl', 'witness_evidence.jsonl')
+                'sample_errors.jsonl', 'query_retries.jsonl', 'witness_evidence.jsonl', 'pool_executions.jsonl')
 RESULT_JSON = ('witness.json', 'collection.json', 'summary.json', 'histograms.json')
 # Topology, build and placement evidence copied beside the measurement files so
 # the archive is self-contained. Files absent from a run are skipped; the

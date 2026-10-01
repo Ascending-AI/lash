@@ -93,6 +93,116 @@ def validate_resources(resources):
         require(sum(row[name] for row in processes) == resources[total], f'parent/child {name} total mismatch')
 
 
+POOL_COUNTER_UNITS = {name: 'count' for name in (
+    'checkouts', 'queue_waits', 'ipc_sent_messages', 'ipc_received_messages', 'resets', 'reuses',
+    'crashes', 'discards', 'replacements', 'cell_executions', 'process_executions', 'receipts_dropped')}
+POOL_COUNTER_UNITS.update(queue_delay_ns='nanoseconds', ipc_sent_bytes='bytes', ipc_received_bytes='bytes')
+POOL_GAUGE_UNITS = dict(workers='count', idle='count', queued_items='count', queued_bytes='bytes')
+
+
+def pool_identity(worker):
+    resources = worker['resources']
+    pids = {row['pid'] for row in resources['processes']}
+    parents = [row for row in resources['processes'] if row['parent_pid'] not in pids]
+    require(len(parents) == 1, 'pool has no unique parent process')
+    generation = resources.get('generation')
+    require(isinstance(generation, str) and generation, 'pool has no worker generation')
+    return (worker['node'], generation, parents[0]['epoch'], resources['pool']['epoch'])
+
+
+def pool_report(run, operations, samples):
+    """Require exporter-backed counters and independent workload/child evidence."""
+    counters = defaultdict(CounterDeltas)
+    receipts = {}
+    child_epochs = set()
+    epochs = {}
+    series = []
+    classes = Counter()
+    unsampled_classes = Counter()
+    try:
+        for sample in samples:
+            for worker in sample['workers']:
+                resources = worker['resources']
+                pool = resources.get('pool')
+                require(isinstance(pool, dict) and pool.get('exporter') == 'lash-vm-client/pool-v1',
+                        'missing pool exporter evidence')
+                require(isinstance(pool.get('epoch'), int) and pool['epoch'] > 0, 'missing pool epoch')
+                identity = pool_identity(worker)
+                previous = epochs.setdefault(worker['node'], identity)
+                require(previous == identity, 'pool epoch changed with an unobserved counter interval')
+                expected_units = {**POOL_GAUGE_UNITS, **POOL_COUNTER_UNITS}
+                require(pool.get('units') == expected_units, 'missing or invalid pool metric units')
+                values = pool.get('counters', {})
+                for name in expected_units:
+                    value = pool.get(name) if name in POOL_GAUGE_UNITS else values.get(name)
+                    require(type(value) is int and value >= 0, f'missing or invalid pool metric {name}')
+                require(pool['idle'] <= pool['workers'], 'pool idle workers exceed workers')
+                require(pool['queued_items'] != 0 or pool['queued_bytes'] == 0, 'pool queue occupancy mismatch')
+                require(values['receipts_dropped'] == 0, 'pool execution receipt overflow')
+                for name in POOL_COUNTER_UNITS:
+                    counters[name].add(identity, identity, values[name])
+                execution_rows = pool.get('executions')
+                require(isinstance(execution_rows, list), 'missing pool execution receipts')
+                observed_classes = Counter(row.get('class_name') for row in execution_rows)
+                require(set(observed_classes) <= {'cell', 'process'}, 'unknown pool execution class')
+                for kind in ('cell', 'process'):
+                    require(observed_classes[kind] == values[kind + '_executions'], 'pool execution counter/receipt mismatch')
+                leases = set()
+                for row in execution_rows:
+                    lease = row.get('lease')
+                    require(type(lease) is int and lease > 0 and lease not in leases, 'invalid or duplicate pool execution lease')
+                    leases.add(lease)
+                    key = (*identity, lease)
+                    require(receipts.get(key, row) == row, 'pool execution receipt changed')
+                    receipts[key] = row
+                pids = {row['pid'] for row in resources['processes']}
+                for proc in resources['processes']:
+                    if proc['parent_pid'] in pids:
+                        child_epochs.add((*identity, proc['pid'], proc['epoch']))
+                series.append(dict(node=identity[0], generation=identity[1], parent_epoch=identity[2],
+                                   pool_epoch=identity[3], observed_ns=worker['observed_ns'],
+                                   gauges={name: pool[name] for name in POOL_GAUGE_UNITS}, counters=values))
+        sessions, processes = set(), set()
+        def identities(value):
+            if isinstance(value, dict):
+                for name, item in value.items():
+                    if name == 'session_id' and isinstance(item, str):
+                        sessions.add(item)
+                    if name == 'process_id' and isinstance(item, str):
+                        processes.add(item)
+                    if name in {'started_process_ids', 'started'} and isinstance(item, list):
+                        processes.update(text for text in item if isinstance(text, str))
+                    identities(item)
+            elif isinstance(value, list):
+                for item in value:
+                    identities(item)
+        for row in operations:
+            identities(row['request'])
+            identities(row['response'])
+        matched = []
+        for key, row in receipts.items():
+            owner = row.get('owner')
+            require(isinstance(owner, str), 'pool receipt has no owner')
+            owned = (row['class_name'] == 'cell' and any(owner.startswith('rlm:' + session + ':') for session in sessions)
+                     or row['class_name'] == 'process' and owner.removeprefix('process:') in processes and owner.startswith('process:'))
+            if not owned:
+                continue
+            sampled = (*key[:-1], row.get('pid'), row.get('process_epoch')) in child_epochs
+            (classes if sampled else unsampled_classes)[row['class_name']] += 1
+            matched.append(dict(node=key[0], generation=key[1], parent_epoch=key[2], pool_epoch=key[3],
+                                resource_sampled=sampled, **row))
+        require(classes['cell'] > 0 and classes['process'] > 0,
+                'missing independently sampled run-owned pool cell or process execution evidence')
+        require(all(counters[name].total > 0 for name in ('ipc_sent_messages', 'ipc_sent_bytes', 'ipc_received_messages', 'ipc_received_bytes')),
+                'pool execution has no IPC traffic in the collection interval')
+        return dict(status='PASSED', reasons=[], units={**POOL_GAUGE_UNITS, **POOL_COUNTER_UNITS},
+                    counters={name: counter.total for name, counter in sorted(counters.items())},
+                    execution_classes=dict(classes), unsampled_execution_classes=dict(unsampled_classes),
+                    executions=matched, samples=series)
+    except (ValueError, KeyError, TypeError) as error:
+        return dict(status='INCOMPLETE', reasons=[str(error)], execution_classes=dict(classes), executions=[], samples=series)
+
+
 def deployment_memory(resources):
     return sum(row['cgroup_memory_bytes'] for row in resources)
 
@@ -562,7 +672,8 @@ def summarize(run, operations, samples, witness, faults=(), sample_errors=(), wi
                         and (key not in journal['maxima'] or journal['maxima'][key]['entries'] == 0)]
     inputs = recovery['inputs']
     unattributed = any(row['attribution']['status'] == 'UNATTRIBUTED' for row in gaps)
-    reasons = recovery['reasons'][:]
+    pool = pool_report(run, operations, samples)
+    reasons = recovery['reasons'][:] + pool['reasons']
     if unattributed:
         reasons.append('required collection intervals are missing')
     if unfinished:
@@ -593,7 +704,7 @@ def summarize(run, operations, samples, witness, faults=(), sample_errors=(), wi
             'physical_peak_bytes_by_node': physical_peaks, 'shared_snapshot_peak_bytes': snapshot_peak,
             'parks': {'sampled_transitions': parked_transitions, 'sampled_occupancy_ns': parked_ns,
                       'resolution': 'collector intervals; sub-interval parks are not observable'},
-            'pool': {'status': 'PENDING', 'dependencies': ['FIG-4161', 'FIG-4162']},
+            'pool': pool,
             'unavailable': {'postgres_lock_wait_duration': 'PostgreSQL provides current waiters, not cumulative per-lock time',
                             'remote_clock_offsets': 'no synchronized remote clock authority'},
             'recoveries': recovery['measurements'], 'faults_exercised': len(inputs),
@@ -616,6 +727,13 @@ def metric_rows(samples):
         for worker in sample['workers']:
             node, data = worker['node'], worker['resources']
             generation = data.get('generation')
+            pool = data.get('pool')
+            if isinstance(pool, dict):
+                for name, unit in {**POOL_GAUGE_UNITS, **POOL_COUNTER_UNITS}.items():
+                    value = pool.get(name) if name in POOL_GAUGE_UNITS else pool.get('counters', {}).get(name)
+                    if value is not None:
+                        yield metric(node, node, generation, 'pool_' + name, unit, value, pool_epoch=pool.get('epoch'),
+                                     parent_epoch=next((row['epoch'] for row in data['processes'] if row['parent_pid'] not in {proc['pid'] for proc in data['processes']}), None))
             for name in ['cgroup_memory_bytes', 'cgroup_peak_bytes', 'rss_sum_bytes']:
                 yield metric(node, node, generation, name, 'bytes', data[name])
             for proc in data['processes']:
@@ -678,6 +796,7 @@ def archive(log, output, recovery_only=False):
     (output / 'witness.json').write_text(json.dumps(witnesses[0], indent=2) + '\n')
     (output / 'collection.json').write_text(json.dumps({**runs[0], 'source_log_sha256': hashlib.sha256(log.read_bytes()).hexdigest(),
                                                      'scope': 'pipeline smoke; no baseline or budgets'}, indent=2) + '\n')
+    (output / 'pool_executions.jsonl').write_text('')
     # Recovery collection has its own qualification. Preserve its evidence even
     # when another measurement (for example restart counter gaps) is incomplete.
     reconcile_witness(runs[0], operations, witnesses[0], witness_evidence)
@@ -706,9 +825,10 @@ def archive(log, output, recovery_only=False):
     (output / 'collection_gaps.jsonl').write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in summary['collection_gaps']))
     (output / 'metrics.jsonl').write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in metric_rows(samples)))
     (output / 'histograms.json').write_text(json.dumps({'schema_version': 1, 'histograms': summary.pop('histograms')}, indent=2) + '\n')
+    (output / 'pool_executions.jsonl').write_text(''.join(json.dumps(dict(schema_version=1, run=runs[0]['run'], **row), sort_keys=True) + '\n' for row in summary['pool']['executions']))
     (output / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
     qualification = summary['qualification']['status']
-    print(f"load measurements qualification={qualification} operations={len(operations)} samples={len(samples)} journals={summary['journals']['invocations']} counter_series={len(summary['counters'])} recovery_inputs={summary['recovery_inputs']['status']} faults={summary['faults_exercised']} pool=PENDING results={output}")
+    print(f"load measurements qualification={qualification} operations={len(operations)} samples={len(samples)} journals={summary['journals']['invocations']} counter_series={len(summary['counters'])} recovery_inputs={summary['recovery_inputs']['status']} faults={summary['faults_exercised']} pool={summary['pool']['status']} results={output}")
     require(qualification == 'PASSED', f'load qualification is {qualification}: ' + '; '.join(summary['qualification']['reasons']))
 
 

@@ -377,9 +377,40 @@ available; older evidence without it remains `INCOMPLETE`.
 start epochs, CPU, RSS and peak RSS. The report validates the parent/child sums.
 Deployment memory is the sum of distinct worker cgroup memory values; process
 RSS is a separate diagnostic. Cgroup CPU, throttling and OOM counters retain
-their process epoch. Model-code pool queue, IPC, reset/crash counters and proof
-that cells and bodies run in the pool remain **PENDING** on FIG-4161 and
-FIG-4162. Descendant sampling is ready for that qualification.
+their process epoch. The runbook shares one host-owned worker service across
+its cells, compiler operations and durable bodies. The endpoint adds the actual
+pool exporter to the independent process/cgroup snapshot.
+
+Pool samples retain the deployment node, worker generation, parent start epoch
+and pool epoch. They include worker/idle/queue occupancy, queued bytes, cumulative
+queue waits and nanoseconds of queue delay, successfully transmitted and received
+framed IPC messages/bytes including handshakes and resets, clean reset/reuse counts,
+supervisor-observed EOF/crash counts, discards and successful replacement counts.
+A replacement includes a discarded worker's successor even when checkout starts
+it lazily. Guest errors, limits and cancellation are discards, with separate
+crash counts. Every metric declares its unit. An exporter-backed zero is valid;
+a missing counter is never inferred as zero.
+
+The load worker retains at most 65,536 execution receipts. A receipt records the
+first acknowledged compute phase of a lease, its cell/process class from the
+explicit program entry, owner, worker PID and Linux start epoch. Pure preparation
+is counted as checkout/IPC work and cannot supply either execution class. The
+collector reconciles the counters with the receipts, matches run-owned session
+and process IDs to workload responses, and matches worker PIDs/start epochs to
+independent descendant samples. It archives run-owned receipts in
+`pool_executions.jsonl`, with `resource_sampled` marking each match. Short-lived
+children can finish between samples; their receipts remain explicitly unsampled
+and cannot supply the required independent execution proof. Raw pool evidence
+remains in `samples.jsonl` and per-epoch measurements appear in `metrics.jsonl`.
+
+`summary.pool.status` is `PASSED` only with complete, reconciled measurements and
+at least one independently sampled run-owned cell and durable body. Missing
+metrics, either missing sampled execution class, receipt overflow or an unobserved
+parent/pool restart interval makes qualification `INCOMPLETE` and the checker
+exits unsuccessfully. Fault attribution and the separate recovery report remain
+available. Overall qualification cannot pass while pool qualification is
+incomplete. These checks establish collection completeness, with no latency,
+saturation or release budget.
 
 PostgreSQL enables `pg_stat_statements` and I/O timing for the load topology.
 The collector records transactions, WAL, connections, I/O time/block counts,

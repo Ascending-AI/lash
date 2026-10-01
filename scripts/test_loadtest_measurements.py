@@ -12,9 +12,14 @@ from loadtest_resources import descendants
 from loadtest_storage import physical
 
 
+POOL_COUNTERS = ('checkouts', 'queue_waits', 'queue_delay_ns', 'ipc_sent_messages', 'ipc_sent_bytes',
+                 'ipc_received_messages', 'ipc_received_bytes', 'resets', 'reuses', 'crashes',
+                 'discards', 'replacements', 'cell_executions', 'process_executions', 'receipts_dropped')
+
+
 def operation(key='one', outcome='answered', **fields):
     return dict(schema_version=1, record='operation', run='r', id=key, invocation_id=key,
-                subject_id=key, request={'synthetic': key}, response={'status': outcome}, error=None,
+                subject_id=key, request={'synthetic': key}, response={'status': outcome, 'session_id': 'load-r-one', 'host_processes': [{'process_id': 'body-one'}]}, error=None,
                 scenario='turn', phase='smoke', scheduled_ns=0, sent_ns=10, accepted_ns=20,
                 observed_ns=100, outcome=outcome, client_attempts=1, journal={'entries': 3, 'bytes': 40},
                 **fields)
@@ -28,7 +33,13 @@ def evidence():
     resources = {'processes': [{'pid': 1, 'parent_pid': 0, 'epoch': '1', 'rss_bytes': 30, 'cpu_ticks': 6}],
                  'rss_sum_bytes': 30, 'cpu_ticks_sum': 6, 'cgroup_memory_bytes': 100, 'cgroup_peak_bytes': 100,
                  'cgroup_cpu': {'usage_usec': 10, 'throttled_usec': 0, 'nr_throttled': 0},
-                 'cgroup_events': {'oom_kill': 0}, 'clock_ticks_per_second': 100}
+                 'cgroup_events': {'oom_kill': 0}, 'clock_ticks_per_second': 100, 'generation': 'g1'}
+    resources['processes'].append(dict(pid=2, parent_pid=1, epoch='2', rss_bytes=20, cpu_ticks=4))
+    resources.update(rss_sum_bytes=50, cpu_ticks_sum=10)
+    resources['pool'] = dict(exporter='lash-vm-client/pool-v1', epoch=1, workers=1, idle=1, queued_items=0, queued_bytes=0,
+                             counters={name: 0 for name in POOL_COUNTERS},
+                             units={name: 'nanoseconds' if name == 'queue_delay_ns' else 'bytes' if name.endswith('bytes') else 'count'
+                                    for name in (*POOL_COUNTERS, 'workers', 'idle', 'queued_items', 'queued_bytes')}, executions=[])
     sample = dict(schema_version=1, record='sample', run='r', monotonic_ns=0, collection_finished_ns=5,
                   workers=[{'node': 'worker', 'observed_ns': 5, 'resources': resources}],
                   postgres=dict(epoch='1', stats_reset='1', wal_reset='1', query_reset='1',
@@ -45,6 +56,12 @@ def evidence():
                  invocations=[dict(id='one', target_service_key='load-r-one', invoked_by_id=None, status='completed', retry_count=90)],
                  journals=[{'id': 'one', 'journal': {'entries': 3, 'bytes': 40}}])
     final['workers'][0]['observed_ns'] = 120
+    pool = final['workers'][0]['resources']['pool']
+    pool['counters'].update(checkouts=2, queue_waits=2, queue_delay_ns=40, ipc_sent_messages=4, ipc_sent_bytes=200,
+                            ipc_received_messages=8, ipc_received_bytes=400, resets=2, reuses=1,
+                            cell_executions=1, process_executions=1)
+    pool['executions'] = [dict(lease=index + 1, class_name=kind, owner=owner, pid=2, process_epoch='2')
+                          for index, (kind, owner) in enumerate([('cell', 'rlm:load-r-one:frame'), ('process', 'process:body-one')])]
     for node in final['restate']:
         node['metrics_observed_ns'] = 120
     final['restate'][0]['prometheus'] = final['restate'][0]['prometheus'].replace(' 7', ' 8')
@@ -219,12 +236,70 @@ class MeasurementsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             m.populations([row])
 
-    def test_complete_pipeline_reconciles_and_keeps_pool_pending(self):
+    def test_complete_pipeline_qualifies_pool(self):
         result = m.summarize(*evidence())
         self.assertEqual(result['population']['durable_terminal'], 1)
-        self.assertEqual(result['pool']['status'], 'PENDING')
+        self.assertEqual(result['pool']['status'], 'PASSED')
+        self.assertEqual(result['qualification']['status'], 'PASSED')
         self.assertIsNone(result['baseline'])
         self.assertEqual(result['shared_snapshot_peak_bytes'], 5)
+        run, operations, samples, witness = evidence()
+        pool = samples[-1]['workers'][0]['resources']['pool']
+        pool['counters']['cell_executions'] += 1
+        pool['executions'].append(dict(lease=3, class_name='cell', owner='rlm:load-r-one:short', pid=99, process_epoch='99'))
+        result = m.summarize(run, operations, samples, witness)
+        self.assertEqual(result['pool']['status'], 'PASSED')
+        self.assertEqual(result['pool']['execution_classes'], dict(cell=1, process=1))
+        self.assertEqual(result['pool']['unsampled_execution_classes'], dict(cell=1))
+        self.assertEqual([row['resource_sampled'] for row in result['pool']['executions']], [True, True, False])
+
+    def check_pool_archive(self, samples):
+        run, operations, _, witness = evidence()
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent.parent / 'target') as tmp:
+            log = Path(tmp) / 'load.log'
+            rows = [run, *operations, *samples, *witness_evidence(), witness]
+            log.write_text(''.join('load measurement ' + json.dumps(row) + '\n' for row in rows))
+            with contextlib.redirect_stdout(io.StringIO()):
+                m.archive(log, Path(tmp) / 'results')
+
+    def test_pool_required_metrics_cannot_be_missing(self):
+        for name in POOL_COUNTERS:
+            with self.subTest(metric=name):
+                samples = evidence()[2]
+                del samples[-1]['workers'][0]['resources']['pool']['counters'][name]
+                with self.assertRaises(ValueError):
+                    self.check_pool_archive(samples)
+
+    def test_pool_both_execution_classes_are_required(self):
+        for kind in ['cell', 'process']:
+            with self.subTest(kind=kind):
+                samples = evidence()[2]
+                pool = samples[-1]['workers'][0]['resources']['pool']
+                pool['executions'] = [row for row in pool['executions'] if row['class_name'] != kind]
+                with self.assertRaises(ValueError):
+                    self.check_pool_archive(samples)
+
+    def test_pool_receipts_reconcile_workload_and_child_epoch(self):
+        for field, value in [('owner', 'rlm:another-run:frame'), ('pid', 99), ('process_epoch', 'stale')]:
+            with self.subTest(field=field):
+                samples = evidence()[2]
+                samples[-1]['workers'][0]['resources']['pool']['executions'][0][field] = value
+                with self.assertRaises(ValueError):
+                    self.check_pool_archive(samples)
+
+    def test_pool_exporter_is_required_even_for_zero_counters(self):
+        samples = evidence()[2]
+        del samples[0]['workers'][0]['resources']['pool']['exporter']
+        with self.assertRaises(ValueError):
+            self.check_pool_archive(samples)
+
+    def test_pool_counter_regression_and_receipt_loss_fail(self):
+        for field in ['resets', 'receipts_dropped']:
+            with self.subTest(field=field):
+                samples = evidence()[2]
+                samples[0 if field == 'resets' else -1]['workers'][0]['resources']['pool']['counters'][field] = 3
+                with self.assertRaises(ValueError):
+                    self.check_pool_archive(samples)
 
     def test_population_missing_witness_fails(self):
         run, operations, samples, witness = evidence()
@@ -344,7 +419,7 @@ class MeasurementsTests(unittest.TestCase):
                               'faults.jsonl', 'summary.json', 'histograms.json', 'collection.json',
                               'witness.json', 'witness_evidence.jsonl', 'query_retries.jsonl',
                               'clock_anchors.jsonl', 'recovery_inputs.jsonl', 'recovery.json', 'normalized_faults.jsonl',
-                              'collection_gaps.jsonl'})
+                              'collection_gaps.jsonl', 'pool_executions.jsonl'})
             for path in output.iterdir():
                 values = [json.loads(line) for line in path.read_text().splitlines()] if path.suffix == '.jsonl' else [json.loads(path.read_text())]
                 self.assertTrue(all(row['schema_version'] == 1 for row in values))
@@ -658,10 +733,10 @@ class MeasurementsTests(unittest.TestCase):
                 rows = [run, *operations, *samples, *anchors, gap, *ledgers, witness]
                 log.write_text(''.join('load measurement ' + json.dumps(row) + '\n' for row in rows))
                 with contextlib.redirect_stdout(io.StringIO()):
-                    if attributed:
+                    if attributed and not epochs:
                         m.archive(log, Path(tmp) / 'results')
                     else:
-                        reason = 'counter epoch gap' if epochs else 'load qualification is FAILED'
+                        reason = 'load qualification is INCOMPLETE' if attributed else 'counter epoch gap' if epochs else 'load qualification is FAILED'
                         with self.assertRaisesRegex(ValueError, reason):
                             m.archive(log, Path(tmp) / 'results')
                 output = Path(tmp) / 'results' / 'fig-3790' / 'r'
@@ -674,7 +749,7 @@ class MeasurementsTests(unittest.TestCase):
                 if epochs and not attributed:
                     self.assertEqual(summary['verdict'], 'failed')
                 else:
-                    self.assertEqual(summary['qualification']['status'], 'PASSED' if attributed else 'FAILED')
+                    self.assertEqual(summary['qualification']['status'], 'INCOMPLETE' if attributed and epochs else 'PASSED' if attributed else 'FAILED')
                 if epochs:
                     self.assertTrue(all(row['unobserved_delta'] is None and not row['complete']
                                         for row in saved if row['record'] == 'counter_gap'))
@@ -697,7 +772,8 @@ class MeasurementsTests(unittest.TestCase):
 
     def test_faulted_counter_epoch_gap_keeps_unknown_delta_and_values(self):
         result = self.gap_summary(self.epoch_campaign())
-        self.assertEqual(result['qualification']['status'], 'PASSED')
+        self.assertEqual(result['qualification']['status'], 'INCOMPLETE')
+        self.assertIn('pool epoch changed', result['pool']['reasons'][0])
         gaps = [row for row in result['collection_gaps'] if row['record'] == 'counter_gap']
         self.assertEqual(len(gaps), 4)
         gap = next(row for row in gaps if row['counter'] == 'worker_usage_usec')
@@ -721,7 +797,8 @@ class MeasurementsTests(unittest.TestCase):
         fixture[2][1]['workers'][0]['observed_ns'] = 108001
         fixture[2][-1].update(monotonic_ns=130000, collection_finished_ns=135000)
         result = self.gap_summary(fixture)
-        self.assertEqual(result['qualification']['status'], 'PASSED')
+        self.assertEqual(result['qualification']['status'], 'INCOMPLETE')
+        self.assertIn('pool epoch changed', result['pool']['reasons'][0])
         gaps = [row for row in result['collection_gaps'] if row['record'] == 'counter_gap']
         self.assertEqual(len(gaps), 4)
         for gap in gaps:

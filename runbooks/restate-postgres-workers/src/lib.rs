@@ -459,6 +459,7 @@ pub fn restate_admin_url() -> String {
 
 #[derive(Clone)]
 pub struct E2eCoreConfig {
+    pub workers: lash::rlm::WorkerService,
     pub worker_id: String,
     pub storage: lash_postgres_store::PostgresStorage,
     pub backend: Arc<E2eBackend>,
@@ -502,7 +503,8 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
             .with_lashlang_abilities(LashlangAbilities::default().with_sleep()),
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &config.backend.clone().into(),
-    );
+    )
+    .with_worker_service(config.workers);
     if let Some(trace_dir) = config.trace_dir.as_ref() {
         factory = factory.with_lashlang_execution_jsonl_path(
             trace_dir.join(format!("{}.lashlang.jsonl", config.worker_id)),

@@ -807,6 +807,7 @@ pub(super) async fn assert_reopened_session_agrees(
         restate_authority_id()?,
     );
     let core = build_e2e_core(lash_restate_postgres_workers_e2e::E2eCoreConfig {
+        workers: lash::rlm::WorkerService::default(),
         worker_id: "runner-reopen".to_string(),
         storage: storage.clone(),
         backend,
