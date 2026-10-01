@@ -117,9 +117,6 @@ load(
 
 lash_rust_feature_test(
     name = "codex_websocket_runtime__test__fv_5d5669b4",
-    args = [
-        "conformance",
-    ],
     crate_features = [
         "default",
         "testing",

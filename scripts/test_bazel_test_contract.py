@@ -1367,6 +1367,44 @@ class CargoTargetSelectionTests(unittest.TestCase):
         for call in calls:
             self.assertEqual(list(command.test_args), call.args[-1])
 
+    def test_filtered_package_tests_require_an_explicit_executable_selection(self):
+        for flags in (["conformance"], ["--tests", "conformance"],
+                      ["--all-targets", "--", "conformance"],
+                      ["--tests", "--test", "process_model", "conformance"]):
+            with self.subTest(flags=flags), self.assertRaisesRegex(
+                ValueError, "filtered feature tests require.*--lib.*--bins.*--test"
+            ):
+                self.emit(flags)
+        _, compiled, tests, calls = self.emit(["--lib", "conformance"])
+        self.assertEqual(["example:unit-test"], compiled)
+        self.assertEqual(compiled, tests)
+        self.assertEqual(["conformance"], calls[0].args[-1])
+
+    def test_check_targets_have_no_executable_selection_or_runner_arguments(self):
+        _, compiled, tests, calls = self.emit(["--tests"], subcommand="check")
+        self.assertIn("other:test", compiled)
+        self.assertEqual([], tests)
+        for call in calls:
+            self.assertFalse(call.args[4])
+            self.assertEqual([], call.args[-1])
+
+    def test_executable_selection_wins_over_build_only_in_either_order(self):
+        sys.path.insert(0, str(ROOT / "tools/bazel"))
+        import generate_build_files as generator
+
+        for order in ((False, True), (True, False)):
+            graph = generator.FeatureLaneGraph.__new__(generator.FeatureLaneGraph)
+            graph.chunks = {}
+            graph._chunk_names = set()
+            graph._runnable_chunks = set()
+            for runnable in order:
+                graph.add_chunk("example", "unit", "filtered" if runnable else "build",
+                                runnable=runnable)
+            self.assertEqual({"example": [("unit", "filtered")]}, graph.chunks)
+            graph.add_chunk("example", "unit", "filtered", runnable=True)
+            with self.assertRaisesRegex(ValueError, "conflicting executable selections"):
+                graph.add_chunk("example", "unit", "another filter", runnable=True)
+
 
 class CargoResolutionTests(unittest.TestCase):
     def test_repeated_tree_markers_preserve_features_and_still_reject_drift(self):

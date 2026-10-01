@@ -199,6 +199,7 @@ commands = [
 ]
 
 [[lane]]
+# Compile all test targets, but execute conformance only in the library harness.
 name = "llm-transport-features"
 features = [
   "lash-internal-llm-transport/testing:on",
@@ -210,7 +211,8 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-llm-transport", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-llm-transport", "--lib", "--no-default-features", "--features", "testing", "--locked"],
   ["cargo", "check", "-p", "lash-internal-llm-transport", "--lib", "--no-default-features", "--features", "proptest-support", "--locked"],
-  ["cargo", "test", "-p", "lash-internal-llm-transport", "--features", "testing", "--locked", "conformance"],
+  ["cargo", "check", "-p", "lash-internal-llm-transport", "--tests", "--features", "testing", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-llm-transport", "--lib", "--features", "testing", "--locked", "conformance"],
 ]
 
 [[lane]]
@@ -361,6 +363,7 @@ commands = [
 ]
 
 [[lane]]
+# Compile all test targets, but execute conformance only in the library harness.
 name = "provider-testing-features"
 features = [
   "lash-internal-provider-anthropic/testing:on",
@@ -373,13 +376,16 @@ features = [
 commands = [
   ["cargo", "check", "-p", "lash-internal-provider-anthropic", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-provider-anthropic", "--lib", "--no-default-features", "--features", "testing", "--locked"],
-  ["cargo", "test", "-p", "lash-internal-provider-anthropic", "--features", "testing", "--locked", "conformance"],
+  ["cargo", "check", "-p", "lash-internal-provider-anthropic", "--tests", "--features", "testing", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-provider-anthropic", "--lib", "--features", "testing", "--locked", "conformance"],
   ["cargo", "check", "-p", "lash-internal-provider-google", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-provider-google", "--lib", "--no-default-features", "--features", "testing", "--locked"],
-  ["cargo", "test", "-p", "lash-internal-provider-google", "--features", "testing", "--locked", "conformance"],
+  ["cargo", "check", "-p", "lash-internal-provider-google", "--tests", "--features", "testing", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-provider-google", "--lib", "--features", "testing", "--locked", "conformance"],
   ["cargo", "check", "-p", "lash-internal-provider-openai", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-provider-openai", "--lib", "--no-default-features", "--features", "testing", "--locked"],
-  ["cargo", "test", "-p", "lash-internal-provider-openai", "--features", "testing", "--locked", "conformance"],
+  ["cargo", "check", "-p", "lash-internal-provider-openai", "--tests", "--features", "testing", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-provider-openai", "--lib", "--features", "testing", "--locked", "conformance"],
 ]
 
 # `lash-internal-core-store/otel-trace` gates only metric assertions in the

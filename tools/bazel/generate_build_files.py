@@ -1649,6 +1649,10 @@ FEATURE_LANE_CLIPPY_SCOPES = (
 # whose hash it alone knows.
 FEATURE_LANE_TEST_FLOORS = {
     ("lash-runtime", (), "unit-test"): 130,
+    ("lash-internal-llm-transport", ("proptest-support", "testing"), "unit-test"): 1,
+    ("lash-internal-provider-anthropic", ("default", "testing"), "unit-test"): 1,
+    ("lash-internal-provider-google", ("default", "testing"), "unit-test"): 1,
+    ("lash-internal-provider-openai", ("default", "testing"), "unit-test"): 1,
 }
 
 def feature_compile_data(package_name: str, features: list[str]) -> list[str]:
@@ -1778,6 +1782,7 @@ class FeatureLaneGraph:
         self.variants: dict[tuple[str, tuple[str, ...]], str] = {}
         self.chunks: dict[str, list[tuple[str, str]]] = {}
         self._chunk_names: set[tuple[str, str]] = set()
+        self._runnable_chunks: set[tuple[str, str]] = set()
         self.lanes: dict[str, dict[str, list[str]]] = {}
         self.units: list[dict] = []
         # Runnable variants of service-gated test targets: the partition
@@ -1810,11 +1815,22 @@ class FeatureLaneGraph:
                 return target
         return None
 
-    def add_chunk(self, package_name: str, name: str, text: str) -> None:
+    def add_chunk(
+        self, package_name: str, name: str, text: str, *, runnable: bool = False
+    ) -> None:
         key = (package_name, name)
         if key in self._chunk_names:
+            if runnable:
+                entries = self.chunks[package_name]
+                index = next(i for i, (entry, _) in enumerate(entries) if entry == name)
+                if key in self._runnable_chunks and entries[index][1] != text:
+                    raise ValueError(f"{package_name}/{name}: conflicting executable selections")
+                entries[index] = (name, text)
+                self._runnable_chunks.add(key)
             return
         self._chunk_names.add(key)
+        if runnable:
+            self._runnable_chunks.add(key)
         self.chunks.setdefault(package_name, []).append((name, text))
 
     def variant_deps_argument(
@@ -2222,6 +2238,7 @@ class FeatureLaneGraph:
             + self.variant_deps_argument(package_name, resolution)
                 + f"    version = {quote(package['version'])},\n"
                 ")\n\n",
+                runnable=runnable,
             )
             return f"//{directory}:{name}"
 
@@ -2264,6 +2281,7 @@ class FeatureLaneGraph:
             + self.variant_deps_argument(package_name, resolution)
                 + f"    version = {quote(package['version'])},\n"
                 ")\n\n",
+                runnable=runnable,
             )
             return f"//{directory}:{name}"
 
@@ -2310,6 +2328,7 @@ class FeatureLaneGraph:
             + self.variant_deps_argument(package_name, resolution)
             + f"    version = {quote(package['version'])},\n"
             ")\n\n",
+            runnable=runnable,
         )
         return f"//{directory}:{name}"
 
@@ -2392,11 +2411,15 @@ class FeatureLaneGraph:
         kinds = set(command.kinds)
         labels = []
         library = self.library_of(package_name)
-        # `cargo test -p X … <filter>` compiles every selected target and runs
-        # only the cases whose name contains the filter; libtest takes the same
-        # filter as a positional argument, so the variant runs the same subset.
-        args = list(command.test_args)
         runnable = command.subcommand == "test"
+        args = list(command.test_args) if runnable else []
+        if (runnable and any(not arg.startswith("-") for arg in args)
+                and (command.selector in feature_variants.DEV_SELECTORS
+                     or (command.selector not in ("--lib", "--bins") and not command.tests))):
+            raise ValueError(
+                f"{package_name}: filtered feature tests require --lib, --bins or --test; "
+                "compile the other targets with a separate cargo check --tests command"
+            )
         if library is not None and library.get("test", False) and command.unit_tests:
             label = self.emit_target(
                 package_name, resolution, library, "unit-test", runnable, args
@@ -2496,11 +2519,11 @@ def feature_lane_outputs(
     floors = {}
     for unit in graph.units:
         key = (unit["package"], tuple(unit["features"]), unit["kind"])
-        if key in FEATURE_LANE_TEST_FLOORS:
+        if key in FEATURE_LANE_TEST_FLOORS and unit["label"] in test_targets:
             floors[unit["label"]] = FEATURE_LANE_TEST_FLOORS[key]
     if len(floors) != len(FEATURE_LANE_TEST_FLOORS):
         raise SystemExit(
-            "feature-lane test floors name units no lane command compiles: "
+            "feature-lane test floors name units no lane command executes: "
             f"{sorted(FEATURE_LANE_TEST_FLOORS)}"
         )
     # The runtime OFF witness, `cargo check -p lash-runtime --lib

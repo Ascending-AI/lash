@@ -307,9 +307,6 @@ lash_rust_feature_test(
 
 lash_rust_feature_test(
     name = "property__test__fv_55598223",
-    args = [
-        "conformance",
-    ],
     crate_features = [
         "proptest-support",
         "testing",
