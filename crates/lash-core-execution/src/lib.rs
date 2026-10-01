@@ -843,8 +843,8 @@ pub use runtime::{
 pub(crate) use runtime::{
     AdmissionBoundary, AdmittedQueuedWork, ProcessEventSemantics, QueuedCheckpointTurnInput,
     QueuedCheckpointWork, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkCompletion,
-    QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkPayload, RuntimeSubject, TurnWorkPayload,
-    load_process_execution_env, materialize_process_event_semantics, prepare_process_event_append,
+    QueuedWorkEnqueueOutcome, QueuedWorkPayload, RuntimeSubject, load_process_execution_env,
+    materialize_process_event_semantics, prepare_process_event_append,
     prepare_process_registration, prepare_process_start, prepare_process_transition,
     process_event_invocation, process_wake_batch_draft, process_wake_input_from_event_payload,
     process_wake_turn_cause, process_wake_turn_text, require_event_replay,

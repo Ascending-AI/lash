@@ -456,6 +456,25 @@ async fn withdraw_while_queued_vs_cancel_while_running() {
         ),
         "a queued input withdraws: {withdrawn:?}"
     );
+    let lash_core::PendingTurnInputCancelOutcome::Cancelled(input) = &withdrawn else {
+        panic!("an open queued input is cancelled");
+    };
+    let terminal = input
+        .terminal()
+        .expect("the durable host returns the terminal tombstone");
+    assert_eq!(
+        terminal.cause,
+        lash_core::store::IngressTerminalCause::Cancelled
+    );
+    let again = session
+        .durable()
+        .cancel_pending_turn_input(&queued.input_id)
+        .await
+        .expect("read the cancelled tombstone");
+    let lash_core::PendingTurnInputCancelOutcome::AlreadyCancelled(again) = again else {
+        panic!("a second withdrawal reads the tombstone");
+    };
+    assert_eq!(again.terminal(), Some(terminal));
 
     let root = world
         .backend

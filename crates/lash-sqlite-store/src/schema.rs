@@ -462,7 +462,6 @@ CREATE TABLE IF NOT EXISTS turn_park_events (
     CONSTRAINT ck_turn_park_events_parked_reason CHECK ((kind = 'parked' AND reason_json IS NOT NULL AND cause IS NULL) OR (kind <> 'parked' AND reason_json IS NULL AND cause IS NOT NULL))
 );
 
-
 CREATE TABLE IF NOT EXISTS queued_work_batches (
     enqueue_seq       INTEGER NOT NULL,
     batch_id          TEXT NOT NULL UNIQUE,
@@ -470,6 +469,7 @@ CREATE TABLE IF NOT EXISTS queued_work_batches (
     source_key        TEXT,
     delivery_policy   TEXT NOT NULL,
     work_kind         TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
     authority_json    TEXT NOT NULL,
     merge_key         TEXT,
     enqueued_at_ms    INTEGER NOT NULL,
@@ -488,7 +488,7 @@ CREATE TABLE IF NOT EXISTS queued_work_batches (
     obligation_last_error TEXT,
     obligation_settled_at_ms INTEGER,
     CONSTRAINT ck_queued_work_batches_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
-    CONSTRAINT ck_queued_work_batches_work_kind CHECK (work_kind IN ('turn', 'control')),
+    CONSTRAINT ck_queued_work_batches_work_kind CHECK ((json_valid(payload_json) AND json_type(payload_json) = 'object' AND ((work_kind = 'turn' AND json_extract(payload_json, '$.type') = 'process_wake') OR (work_kind = 'control' AND json_extract(payload_json, '$.type') = 'session_command'))) IS TRUE),
     CONSTRAINT ck_queued_work_batches_delivery_policy CHECK (delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')),
     CONSTRAINT ck_queued_work_batches_admission_all_or_none CHECK ((admitted_root IS NULL) = (admitted_by IS NULL)),
     CONSTRAINT ck_queued_work_batches_terminal CHECK ((terminal_cause IS NULL AND terminal_at_ms IS NULL) OR (terminal_cause IN ('delivered', 'applied', 'cancelled', 'stale_config_revision') AND terminal_at_ms IS NOT NULL AND admitted_root IS NULL)),
@@ -506,15 +506,6 @@ CREATE INDEX IF NOT EXISTS idx_queued_work_batches_obligation_due
 CREATE INDEX IF NOT EXISTS idx_queued_work_batches_obligation_stalled
     ON queued_work_batches(obligation_id)
     WHERE obligation_state = 'stalled';
-
-CREATE TABLE IF NOT EXISTS queued_work_items (
-    batch_id      TEXT NOT NULL,
-    item_index    INTEGER NOT NULL,
-    item_id       TEXT NOT NULL,
-    payload_json  TEXT NOT NULL,
-    PRIMARY KEY (batch_id, item_index),
-    FOREIGN KEY (batch_id) REFERENCES queued_work_batches(batch_id) ON DELETE CASCADE
-);
 
 CREATE TABLE IF NOT EXISTS wake_redelivery_fences (
     session_id       TEXT NOT NULL,
@@ -739,7 +730,6 @@ CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_due
 CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_stalled
     ON artifact_cleanup_obligations(obligation_id)
     WHERE obligation_state = 'stalled';
-
 
 CREATE TABLE IF NOT EXISTS release_stamp (
     singleton           INTEGER PRIMARY KEY CONSTRAINT ck_release_stamp_singleton CHECK (singleton = 1),

@@ -97,7 +97,7 @@ impl SqliteStore {
                     let Some(row) = row else {
                         return Ok(None);
                     };
-                    let batch = queued_work_batch_from_conn(tx, row)?;
+                    let batch = queued_work_batch_from_row(row)?;
                     // A host cancel is a wake's terminal transition too: the
                     // fence lands with the tombstone, so a redelivery after
                     // vacuum is not admitted again (FIG-3545).
@@ -201,15 +201,12 @@ impl SqliteStore {
                             .map_err(sqlite_error)?;
                         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
                     };
-                    // Test seam: the window this snapshot closes is between the
-                    // batch rows above and their item rows below.
+                    // Pause after fetching the complete rows, before decoding their payloads.
                     #[cfg(feature = "testing")]
                     if let Some(injector) = hydration_pause.as_ref() {
                         injector.reach_queued_work_hydration();
                     }
-                    rows.into_iter()
-                        .map(|row| queued_work_batch_from_conn(tx, row))
-                        .collect()
+                    rows.into_iter().map(queued_work_batch_from_row).collect()
                 })();
                 Ok(outcome)
             })
@@ -292,15 +289,12 @@ impl SqliteStore {
                             .map_err(sqlite_error)?;
                         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
                     };
-                    // Test seam: the window this snapshot closes is between the
-                    // batch rows above and their item rows below.
+                    // Pause after fetching the complete rows, before decoding their payloads.
                     #[cfg(feature = "testing")]
                     if let Some(injector) = hydration_pause.as_ref() {
                         injector.reach_queued_work_hydration();
                     }
-                    rows.into_iter()
-                        .map(|row| queued_work_batch_from_conn(tx, row))
-                        .collect()
+                    rows.into_iter().map(queued_work_batch_from_row).collect()
                 })();
                 Ok(outcome)
             })

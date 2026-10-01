@@ -66,22 +66,14 @@ pub struct TurnCancelAffectedWake {
     /// The queued batch that carries the wake: the row a host withdrawal
     /// names.
     pub batch_id: crate::BatchId,
-    /// The wake's item in that batch: the identity its ingress obligation
-    /// is keyed on.
-    pub item_id: String,
     pub wake: crate::ProcessWakeDelivery,
     pub disposition: TurnCancelUndeliveredInputPolicy,
 }
 impl TurnCancelAffectedWake {
     /// The record of a wake a turn cancel deferred.
-    pub fn deferred(
-        batch_id: crate::BatchId,
-        item_id: String,
-        wake: crate::ProcessWakeDelivery,
-    ) -> Self {
+    pub fn deferred(batch_id: crate::BatchId, wake: crate::ProcessWakeDelivery) -> Self {
         Self {
             batch_id,
-            item_id,
             wake,
             disposition: TurnCancelUndeliveredInputPolicy::Defer,
         }
@@ -90,7 +82,6 @@ impl TurnCancelAffectedWake {
 impl PartialEq for TurnCancelAffectedWake {
     fn eq(&self, other: &Self) -> bool {
         self.batch_id == other.batch_id
-            && self.item_id == other.item_id
             && self.disposition == other.disposition
             && serde_json::to_value(&self.wake).ok() == serde_json::to_value(&other.wake).ok()
     }

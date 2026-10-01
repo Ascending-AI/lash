@@ -435,16 +435,12 @@ impl TerminalProcessWake {
 
     /// The wake a hydrated batch carries, if any.
     pub fn of_batch(batch: &crate::QueuedWorkBatch) -> Option<Self> {
-        batch
-            .items
-            .iter()
-            .find_map(|item| Self::of_payload(batch.source_key.clone(), &item.payload))
+        Self::of_payload(batch.source_key.clone(), &batch.payload)
     }
 }
 
 /// The affected-item records of the process wakes `batches` hold, each
-/// deferred (FIG-3543, ADR 0101 §10): one per wake item, in batch and item
-/// order. A cancel commit writes them for the wakes it released; batches that
+/// deferred (FIG-3543, ADR 0101 §10): one per batch, in batch order. A cancel commit writes them for the wakes it released; batches that
 /// hold no wake yield none.
 #[must_use]
 pub fn deferred_wake_records(
@@ -452,17 +448,14 @@ pub fn deferred_wake_records(
 ) -> Vec<crate::turn_control_vocabulary::TurnCancelAffectedWake> {
     batches
         .iter()
-        .flat_map(|batch| {
-            batch.items.iter().filter_map(|item| match &item.payload {
-                crate::QueuedWorkPayload::ProcessWake { wake } => Some(
-                    crate::turn_control_vocabulary::TurnCancelAffectedWake::deferred(
-                        batch.batch_id.clone(),
-                        item.item_id.clone(),
-                        (**wake).clone(),
-                    ),
+        .filter_map(|batch| match &batch.payload {
+            crate::QueuedWorkPayload::ProcessWake { wake } => Some(
+                crate::turn_control_vocabulary::TurnCancelAffectedWake::deferred(
+                    batch.batch_id.clone(),
+                    (**wake).clone(),
                 ),
-                crate::QueuedWorkPayload::SessionCommand { .. } => None,
-            })
+            ),
+            crate::QueuedWorkPayload::SessionCommand { .. } => None,
         })
         .collect()
 }

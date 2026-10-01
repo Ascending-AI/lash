@@ -284,11 +284,11 @@ impl DeliveryPolicy {
 /// key accidentally.
 ///
 /// This is also the durable ingress-family discriminator. [`Self::Control`]
-/// holds exactly when the row's payloads are session commands, because
-/// [`QueuedWorkBatchDraft::new`] derives the kind from the payloads and no
+/// holds exactly when the row's payload is a session command, because
+/// [`QueuedWorkBatchDraft::new`] derives the kind from the payload and no
 /// setter exists to break the correspondence. Store ordering projections
 /// therefore compare `work_kind` with [`Self::Control`]'s stable value for the
-/// session-command family rather than hydrating payloads.
+/// session-command family rather than decoding payloads.
 #[derive(
     Clone,
     Copy,
@@ -400,6 +400,13 @@ pub enum QueuedWorkPayload {
     SessionCommand { command: Box<SessionCommand> },
 }
 impl QueuedWorkPayload {
+    pub fn kind(&self) -> QueuedWorkKind {
+        match self {
+            Self::ProcessWake { .. } => QueuedWorkKind::Turn,
+            Self::SessionCommand { .. } => QueuedWorkKind::Control,
+        }
+    }
+
     pub fn process_wake(wake: ProcessWakeDelivery) -> Self {
         Self::ProcessWake {
             wake: Box::new(wake),
@@ -420,11 +427,7 @@ impl QueuedWorkPayload {
     }
 }
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-pub struct QueuedWorkItem {
-    pub item_id: String,
-    pub payload: QueuedWorkPayload,
-}
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct QueuedWorkBatch {
     pub batch_id: crate::BatchId,
     pub session_id: SessionId,
@@ -432,12 +435,11 @@ pub struct QueuedWorkBatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_key: Option<String>,
     pub delivery_policy: DeliveryPolicy,
-    pub kind: QueuedWorkKind,
     pub authority: QueuedWorkAuthority,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_key: Option<String>,
     pub enqueued_at_ms: u64,
-    pub items: Vec<QueuedWorkItem>,
+    pub payload: QueuedWorkPayload,
     /// The immutable digest admission recorded
     /// ([`QueuedWorkBatchDraft::submission_digest`]): a resubmission under the
     /// same source key must carry it (ADR 0101 §8).
@@ -449,17 +451,12 @@ pub struct QueuedWorkBatch {
     pub terminal: Option<crate::store::IngressTerminal>,
 }
 impl QueuedWorkBatch {
-    pub fn validate_payload_family(&self) -> Result<(), crate::StoreError> {
-        validate_payload_family(self.kind, self.items.iter().map(|item| &item.payload)).map_err(
-            |message| crate::StoreError::StoredDataCorrupt {
-                record_kind: "QueuedWorkBatch",
-                message,
-            },
-        )
+    pub fn kind(&self) -> QueuedWorkKind {
+        self.payload.kind()
     }
 
     pub fn work_class(&self) -> QueuedWorkClass {
-        self.kind.work_class()
+        self.kind().work_class()
     }
 
     pub fn is_session_command_work(&self) -> bool {
@@ -493,8 +490,8 @@ impl QueuedWorkEnqueueOutcome {
         matches!(self, Self::Existing(_))
     }
 }
-#[derive(Clone, Debug, serde::Deserialize)]
-#[serde(try_from = "QueuedWorkDraftWire")]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct QueuedWorkBatchDraft {
     pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -510,15 +507,15 @@ pub struct QueuedWorkBatchDraft {
     pub authority: QueuedWorkAuthority,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_key: Option<String>,
-    pub payloads: QueuedWorkBatchPayloads,
+    pub payload: QueuedWorkPayload,
 }
 impl QueuedWorkBatchDraft {
     pub fn new(
         session_id: impl Into<SessionId>,
         delivery_policy: DeliveryPolicy,
-        payloads: impl Into<QueuedWorkBatchPayloads>,
+        payload: impl Into<QueuedWorkPayload>,
     ) -> Self {
-        let payloads = payloads.into();
+        let payload = payload.into();
         Self {
             session_id: session_id.into(),
             source_key: None,
@@ -526,7 +523,7 @@ impl QueuedWorkBatchDraft {
             delivery_policy,
             authority: QueuedWorkAuthority::default(),
             merge_key: None,
-            payloads,
+            payload,
         }
     }
 
@@ -547,10 +544,10 @@ impl QueuedWorkBatchDraft {
         self
     }
 
-    /// There is deliberately no setter: the kind is a function of the payloads,
+    /// There is deliberately no setter: the kind is a function of the payload,
     /// so a producer cannot assert [`QueuedWorkKind::Control`] over turn work.
     pub fn kind(&self) -> QueuedWorkKind {
-        self.payloads.kind()
+        self.payload.kind()
     }
 
     pub fn with_authority(mut self, authority: QueuedWorkAuthority) -> Self {
@@ -598,47 +595,24 @@ impl QueuedWorkBatchDraft {
 
     /// Stored references carried by typed queued payloads, sorted and deduplicated.
     pub fn stored_attachment_ids(&self) -> Vec<crate::AttachmentId> {
-        let ids = std::collections::BTreeSet::new();
-        for payload in self.payloads.iter() {
-            match payload {
-                QueuedWorkPayload::ProcessWake { .. }
-                | QueuedWorkPayload::SessionCommand { .. } => {}
+        match &self.payload {
+            QueuedWorkPayload::ProcessWake { .. } | QueuedWorkPayload::SessionCommand { .. } => {
+                Vec::new()
             }
         }
-        ids.into_iter().collect()
     }
 
     pub fn validate_process_wake_source(&self) -> Result<(), String> {
-        let mut payloads = self.payloads.iter();
-        match (
-            self.process_wake_source.as_ref(),
-            payloads.next(),
-            payloads.next(),
-        ) {
-            (
-                Some(source),
-                Some(QueuedWorkPayload::ProcessWake { wake }),
-                None,
-            ) if wake.target_session_id == self.session_id
-                && wake.process_id == source.process_id
-                && wake.sequence == source.sequence
-                && source.sequence <= i64::MAX as u64
-                && self.source_key.as_deref()
-                    == Some(process_wake_source_key(&source.process_id, source.sequence).as_str()) =>
-            {
-                Ok(())
-            }
-            (None, _, _)
-                if !self.payloads
-                    .iter()
-                    .any(|payload| matches!(payload, QueuedWorkPayload::ProcessWake { .. })) =>
-            {
-                Ok(())
-            }
-            _ => Err(
-                "process-wake queued work requires one matching payload, structural source tuple, signed-64-bit sequence, target session, and source key"
-                    .to_string(),
-            ),
+        match (self.process_wake_source.as_ref(), &self.payload) {
+            (Some(source), QueuedWorkPayload::ProcessWake { wake })
+                if wake.target_session_id == self.session_id
+                    && wake.process_id == source.process_id
+                    && wake.sequence == source.sequence
+                    && source.sequence <= i64::MAX as u64
+                    && self.source_key.as_deref()
+                        == Some(process_wake_source_key(&source.process_id, source.sequence).as_str()) => Ok(()),
+            (None, QueuedWorkPayload::SessionCommand { .. }) => Ok(()),
+            _ => Err("process-wake queued work requires a matching structural source tuple, signed-64-bit sequence, target session, and source key".to_string()),
         }
     }
 }
@@ -679,44 +653,44 @@ fn queued_work_submission_preimage(
         "lash.queued-work-submission",
         QUEUED_WORK_SUBMISSION_FAMILY_VERSION,
     );
-    for payload in draft.payloads.iter() {
-        match payload {
-            QueuedWorkPayload::ProcessWake { wake } => {
-                identity.tag(1);
-                identity.string(wake.target_session_id.as_str());
-                identity.string(wake.process_id.as_str());
-                identity.u64(wake.sequence);
-                identity.string(&wake.event_type);
-                identity.string(&wake.input);
-                authority(&mut identity, &wake.authority);
-                match &wake.process_caused_by {
-                    Some(cause) => {
-                        identity.tag(1);
-                        identity.bytes(&crate::identity_json::payload_leaf(&serde_json::to_value(
-                            cause,
-                        )?));
-                    }
-                    None => identity.tag(0),
-                }
-            }
-            // A config transaction is the request its submitter wrote, never
-            // the reducer identities ingress stamped on it: a resubmission
-            // from another build asks the same thing.
-            QueuedWorkPayload::SessionCommand { command } => match command.as_ref() {
-                SessionCommand::ApplyConfigTransaction { transaction } => {
-                    identity.tag(4);
-                    identity.string(&transaction.id);
-                    identity.string(&transaction.digest()?);
-                }
-                command => {
-                    identity.tag(2);
+    let payload = &draft.payload;
+    match payload {
+        QueuedWorkPayload::ProcessWake { wake } => {
+            identity.tag(1);
+            identity.string(wake.target_session_id.as_str());
+            identity.string(wake.process_id.as_str());
+            identity.u64(wake.sequence);
+            identity.string(&wake.event_type);
+            identity.string(&wake.input);
+            authority(&mut identity, &wake.authority);
+            match &wake.process_caused_by {
+                Some(cause) => {
+                    identity.tag(1);
                     identity.bytes(&crate::identity_json::payload_leaf(&serde_json::to_value(
-                        command,
+                        cause,
                     )?));
                 }
-            },
+                None => identity.tag(0),
+            }
         }
+        // A config transaction is the request its submitter wrote, never
+        // the reducer identities ingress stamped on it: a resubmission
+        // from another build asks the same thing.
+        QueuedWorkPayload::SessionCommand { command } => match command.as_ref() {
+            SessionCommand::ApplyConfigTransaction { transaction } => {
+                identity.tag(4);
+                identity.string(&transaction.id);
+                identity.string(&transaction.digest()?);
+            }
+            command => {
+                identity.tag(2);
+                identity.bytes(&crate::identity_json::payload_leaf(&serde_json::to_value(
+                    command,
+                )?));
+            }
+        },
     }
+
     if draft.kind() == QueuedWorkKind::Control {
         identity.tag(3);
         identity.tag(match draft.delivery_policy {
@@ -771,20 +745,18 @@ impl AdmittedQueuedWork {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.batches.iter().all(|batch| batch.items.is_empty())
+        self.batches.is_empty()
     }
 
     /// Materializes checkpoint input from admitted work for runtime and conformance-suite implementors.
     pub fn materialize_queued_checkpoint_work(&self) -> QueuedCheckpointWork {
         let mut turn_causes = Vec::new();
         for batch in &self.batches {
-            for item in &batch.items {
-                match &item.payload {
-                    QueuedWorkPayload::ProcessWake { wake } => {
-                        turn_causes.push(crate::process_wake_turn_cause(wake));
-                    }
-                    QueuedWorkPayload::SessionCommand { .. } => {}
+            match &batch.payload {
+                QueuedWorkPayload::ProcessWake { wake } => {
+                    turn_causes.push(crate::process_wake_turn_cause(wake));
                 }
+                QueuedWorkPayload::SessionCommand { .. } => {}
             }
         }
         QueuedCheckpointWork { turn_causes }
@@ -796,11 +768,7 @@ impl AdmittedQueuedWork {
             return None;
         }
         let batch = self.batches.first()?;
-        if batch.kind != QueuedWorkKind::Control || batch.items.len() != 1 {
-            return None;
-        }
-        let item = batch.items.first()?;
-        match &item.payload {
+        match &batch.payload {
             QueuedWorkPayload::SessionCommand { command } => Some((batch, command.as_ref())),
             _ => None,
         }
@@ -812,11 +780,7 @@ impl AdmittedQueuedWork {
     pub fn session_commands(&self) -> Option<Vec<(&QueuedWorkBatch, &SessionCommand)>> {
         let mut commands = Vec::with_capacity(self.batches.len());
         for batch in &self.batches {
-            if batch.kind != QueuedWorkKind::Control || batch.items.len() != 1 {
-                return None;
-            }
-            let item = batch.items.first()?;
-            let QueuedWorkPayload::SessionCommand { command } = &item.payload else {
+            let QueuedWorkPayload::SessionCommand { command } = &batch.payload else {
                 return None;
             };
             commands.push((batch, command.as_ref()));
@@ -824,161 +788,15 @@ impl AdmittedQueuedWork {
         (!commands.is_empty()).then_some(commands)
     }
 }
-impl From<SessionCommand> for SessionCommandPayload {
+impl From<SessionCommand> for QueuedWorkPayload {
     fn from(command: SessionCommand) -> Self {
-        Self(QueuedWorkPayload::session_command(command))
+        Self::session_command(command)
     }
 }
-impl From<SessionCommand> for QueuedWorkBatchPayloads {
-    fn from(command: SessionCommand) -> Self {
-        Self::SessionCommand(command.into())
-    }
-}
-// Keep the established draft encoding while deriving kind from the typed body.
-impl serde::Serialize for QueuedWorkBatchDraft {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct(
-            "QueuedWorkBatchDraft",
-            5 + usize::from(self.source_key.is_some())
-                + usize::from(self.process_wake_source.is_some())
-                + usize::from(self.merge_key.is_some()),
-        )?;
-        state.serialize_field("session_id", &self.session_id)?;
-        if let Some(source) = &self.source_key {
-            state.serialize_field("source_key", source)?;
-        }
-        if let Some(source) = &self.process_wake_source {
-            state.serialize_field("process_wake_source", source)?;
-        }
-        state.serialize_field("delivery_policy", &self.delivery_policy)?;
-        state.serialize_field("kind", &self.kind())?;
-        state.serialize_field("authority", &self.authority)?;
-        if let Some(key) = &self.merge_key {
-            state.serialize_field("merge_key", key)?;
-        }
-        state.serialize_field("payloads", &self.payloads)?;
-        state.end()
-    }
-}
-impl TryFrom<QueuedWorkDraftWire> for QueuedWorkBatchDraft {
-    type Error = String;
-    fn try_from(wire: QueuedWorkDraftWire) -> Result<Self, Self::Error> {
-        if wire.kind != wire.payloads.kind() {
-            return Err("queued-work kind contradicts its payload family".into());
-        }
-        Ok(Self {
-            session_id: wire.session_id,
-            source_key: wire.source_key,
-            process_wake_source: wire.process_wake_source,
-            delivery_policy: wire.delivery_policy,
-            authority: wire.authority,
-            merge_key: wire.merge_key,
-            payloads: wire.payloads,
-        })
-    }
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct QueuedCheckpointWork {
     pub turn_causes: Vec<TurnCause>,
 }
-/// One command or a nonempty sequence of turn work, in the existing item order.
-#[derive(Clone, Debug)]
-pub enum QueuedWorkBatchPayloads {
-    /// Exactly one session command.
-    SessionCommand(SessionCommandPayload),
-    /// A nonempty sequence whose item order is preserved.
-    TurnWork {
-        /// The required first item.
-        first: TurnWorkPayload,
-        /// Remaining items in delivery order.
-        rest: Vec<TurnWorkPayload>,
-    },
-}
-impl From<TurnWorkPayload> for QueuedWorkBatchPayloads {
-    fn from(first: TurnWorkPayload) -> Self {
-        Self::TurnWork {
-            first,
-            rest: Vec::new(),
-        }
-    }
-}
-impl QueuedWorkBatchPayloads {
-    pub fn kind(&self) -> QueuedWorkKind {
-        match self {
-            Self::SessionCommand(_) => QueuedWorkKind::Control,
-            Self::TurnWork { .. } => QueuedWorkKind::Turn,
-        }
-    }
-
-    /// Visit the durable items in delivery order.
-    pub fn iter(&self) -> impl Iterator<Item = &QueuedWorkPayload> {
-        let (first, rest): (&QueuedWorkPayload, &[TurnWorkPayload]) = match self {
-            Self::SessionCommand(command) => (&command.0, &[]),
-            Self::TurnWork { first, rest } => (&first.0, rest),
-        };
-        std::iter::once(first).chain(rest.iter().map(|payload| &payload.0))
-    }
-}
-impl IntoIterator for QueuedWorkBatchPayloads {
-    type Item = QueuedWorkPayload;
-    type IntoIter = std::vec::IntoIter<QueuedWorkPayload>;
-    fn into_iter(self) -> Self::IntoIter {
-        match self {
-            Self::SessionCommand(command) => vec![command.0],
-            Self::TurnWork { first, rest } => std::iter::once(first.0)
-                .chain(rest.into_iter().map(|payload| payload.0))
-                .collect(),
-        }
-        .into_iter()
-    }
-}
-impl serde::Serialize for QueuedWorkBatchPayloads {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_seq(self.iter())
-    }
-}
-impl<'de> serde::Deserialize<'de> for QueuedWorkBatchPayloads {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let payloads = <Vec<QueuedWorkPayload> as serde::Deserialize>::deserialize(deserializer)?;
-        let kind = match payloads.first() {
-            Some(QueuedWorkPayload::SessionCommand { .. }) => QueuedWorkKind::Control,
-            Some(_) => QueuedWorkKind::Turn,
-            None => {
-                return Err(serde::de::Error::custom(
-                    "queued work requires at least one payload",
-                ));
-            }
-        };
-        validate_payload_family(kind, payloads.iter()).map_err(serde::de::Error::custom)?;
-        let mut payloads = payloads.into_iter();
-        let first = payloads
-            .next()
-            .ok_or_else(|| serde::de::Error::custom("queued work requires at least one payload"))?;
-        Ok(match first {
-            first @ QueuedWorkPayload::SessionCommand { .. } => {
-                Self::SessionCommand(SessionCommandPayload(first))
-            }
-            first => Self::TurnWork {
-                first: TurnWorkPayload(first),
-                rest: payloads.map(TurnWorkPayload).collect(),
-            },
-        })
-    }
-}
-#[derive(serde::Deserialize)]
-struct QueuedWorkDraftWire {
-    session_id: SessionId,
-    source_key: Option<String>,
-    process_wake_source: Option<ProcessWakeSource>,
-    delivery_policy: DeliveryPolicy,
-    kind: QueuedWorkKind,
-    authority: QueuedWorkAuthority,
-    merge_key: Option<String>,
-    payloads: QueuedWorkBatchPayloads,
-}
-
 pub fn process_wake_source_key(process_id: &ProcessId, sequence: u64) -> String {
     format!("process:{process_id}:event:{sequence}:wake")
 }
@@ -1012,48 +830,10 @@ pub fn process_wake_batch_draft_with_delivery_policy(
     QueuedWorkBatchDraft::new(
         wake.target_session_id.clone(),
         delivery_policy,
-        crate::TurnWorkPayload::process_wake(wake),
+        QueuedWorkPayload::process_wake(wake),
     )
     .with_source_key(source_key)
     .with_process_wake_source(process_id, sequence)
     .with_authority(authority)
     .with_merge_key(PROCESS_WAKE_MERGE_KEY)
-}
-/// A turn-work item; session commands cannot be constructed through this type.
-#[derive(Clone, Debug)]
-pub struct TurnWorkPayload(QueuedWorkPayload);
-impl TurnWorkPayload {
-    /// Wrap one durable process wake as turn work.
-    pub fn process_wake(wake: ProcessWakeDelivery) -> Self {
-        Self(QueuedWorkPayload::process_wake(wake))
-    }
-}
-/// Exactly one session command, validated by construction.
-#[derive(Clone, Debug)]
-pub struct SessionCommandPayload(QueuedWorkPayload);
-
-fn validate_payload_family<'a>(
-    kind: QueuedWorkKind,
-    mut payloads: impl Iterator<Item = &'a QueuedWorkPayload>,
-) -> Result<(), String> {
-    let first = payloads
-        .next()
-        .ok_or_else(|| "queued work requires at least one payload".to_string())?;
-    match kind {
-        QueuedWorkKind::Control
-            if matches!(first, QueuedWorkPayload::SessionCommand { .. })
-                && payloads.next().is_none() =>
-        {
-            Ok(())
-        }
-        QueuedWorkKind::Turn
-            if !matches!(first, QueuedWorkPayload::SessionCommand { .. })
-                && payloads.all(|payload| {
-                    !matches!(payload, QueuedWorkPayload::SessionCommand { .. })
-                }) =>
-        {
-            Ok(())
-        }
-        _ => Err("queued-work kind contradicts its payload family".into()),
-    }
 }

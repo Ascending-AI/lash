@@ -291,20 +291,10 @@ async fn enqueue_queued_work_with_outcome_tx(
         .bind(&batch.merge_key)
         .bind(now as i64)
         .bind(submission_digest.as_str())
+        .bind(encode_json(&batch.payload)?)
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-    for (index, payload) in batch.payloads.iter().enumerate() {
-        let item_id = format!("{batch_id}:item:{index}");
-        sqlx::query(sql.queued_items.insert_new.sql())
-            .bind(&batch_id)
-            .bind(index as i32)
-            .bind(item_id)
-            .bind(encode_json(payload)?)
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-    }
     // The admitted batch owes its session a drive (ADR 0109 §3), armed in
     // the transaction that admits it.
     crate::ingress_obligation::arm_queued_batch_tx(tx, &batch.session_id, &batch_id, now).await?;

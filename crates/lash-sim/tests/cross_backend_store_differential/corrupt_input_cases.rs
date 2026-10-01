@@ -25,8 +25,8 @@ pub(super) enum CorruptTarget {
     GraphNodeJson,
     /// `pending_turn_inputs.input_json`.
     PendingTurnInputJson,
-    /// `queued_work_items.payload_json`.
-    QueuedWorkItemPayloadJson,
+    /// `queued_work_batches.payload_json`.
+    QueuedWorkPayloadJson,
     /// The bytes of the checkpoint manifest blob the session head names.
     CheckpointManifestBlob,
 }
@@ -36,7 +36,7 @@ impl CorruptTarget {
         match self {
             Self::GraphNodeJson => "seed_corrupt_graph_node_json",
             Self::PendingTurnInputJson => "seed_corrupt_pending_turn_input_json",
-            Self::QueuedWorkItemPayloadJson => "seed_corrupt_queued_work_item_payload_json",
+            Self::QueuedWorkPayloadJson => "seed_corrupt_queued_work_payload_json",
             Self::CheckpointManifestBlob => "seed_corrupt_checkpoint_manifest_blob",
         }
     }
@@ -45,13 +45,14 @@ impl CorruptTarget {
         match self {
             Self::GraphNodeJson => "restore_graph_node_json",
             Self::PendingTurnInputJson => "restore_pending_turn_input_json",
-            Self::QueuedWorkItemPayloadJson => "restore_queued_work_item_payload_json",
+            Self::QueuedWorkPayloadJson => "restore_queued_work_payload_json",
             Self::CheckpointManifestBlob => "restore_checkpoint_manifest_blob",
         }
     }
 }
 
 /// Bytes that are not a valid encoding of any persisted record.
+const CORRUPT_QUEUED_PAYLOAD: &str = r#"{"type":"process_wake","wake":null}"#;
 const CORRUPT_TEXT: &str = "{\"fig-2841\": not-json";
 const CORRUPT_BYTES: &[u8] = &[0x00, 0xff, 0x00, 0xff];
 
@@ -150,12 +151,12 @@ pub(super) fn corrupt_queued_work_case() -> GeneratedCase {
                 owner: "corrupt-queued-work-owner",
             },
             drive(SurfaceMethod::ListPendingQueuedWork),
-            seed(CorruptTarget::QueuedWorkItemPayloadJson),
+            seed(CorruptTarget::QueuedWorkPayloadJson),
             drive(SurfaceMethod::ListQueuedWork),
             drive(SurfaceMethod::ListPendingQueuedWork),
             drive(SurfaceMethod::PendingSessionWorkOrdering),
             drive(SurfaceMethod::AdmitListedQueuedHead),
-            restore(CorruptTarget::QueuedWorkItemPayloadJson),
+            restore(CorruptTarget::QueuedWorkPayloadJson),
         ],
     }
 }
@@ -267,13 +268,11 @@ impl BackendRunner {
                             "SQLite corruption seam found no pending turn input"
                         );
                     }
-                    CorruptTarget::QueuedWorkItemPayloadJson => {
+                    CorruptTarget::QueuedWorkPayloadJson => {
                         backup.text = connection
                             .query_row(
-                                "SELECT payload_json FROM queued_work_items
-                                 WHERE batch_id IN
-                                     (SELECT batch_id FROM queued_work_batches
-                                      WHERE session_id = ?1)",
+                                "SELECT payload_json FROM queued_work_batches
+                                 WHERE session_id = ?1",
                                 [session_id.as_str()],
                                 |row| row.get::<_, String>(0),
                             )
@@ -281,11 +280,9 @@ impl BackendRunner {
                             .expect("read SQLite queued-work payload before corruption");
                         let changed = connection
                             .execute(
-                                "UPDATE queued_work_items SET payload_json = ?2
-                                 WHERE batch_id IN
-                                     (SELECT batch_id FROM queued_work_batches
-                                      WHERE session_id = ?1)",
-                                rusqlite::params![session_id.as_str(), CORRUPT_TEXT],
+                                "UPDATE queued_work_batches SET payload_json = ?2
+                                 WHERE session_id = ?1",
+                                rusqlite::params![session_id.as_str(), CORRUPT_QUEUED_PAYLOAD],
                             )
                             .expect("corrupt SQLite queued-work payload");
                         assert_eq!(
@@ -370,25 +367,21 @@ impl BackendRunner {
                         "Postgres corruption seam found no pending turn input"
                     );
                 }
-                CorruptTarget::QueuedWorkItemPayloadJson => {
+                CorruptTarget::QueuedWorkPayloadJson => {
                     backup.text = sqlx::query_scalar(
-                        "SELECT payload_json FROM lash_queued_work_items
-                         WHERE batch_id IN
-                             (SELECT batch_id FROM lash_queued_work_batches
-                              WHERE session_id = $1)",
+                        "SELECT payload_json FROM lash_queued_work_batches
+                                 WHERE session_id = $1",
                     )
                     .bind(session_id.as_str())
                     .fetch_optional(pool)
                     .await
                     .expect("read Postgres queued-work payload before corruption");
                     let result = sqlx::query(
-                        "UPDATE lash_queued_work_items SET payload_json = $2
-                         WHERE batch_id IN
-                             (SELECT batch_id FROM lash_queued_work_batches
-                              WHERE session_id = $1)",
+                        "UPDATE lash_queued_work_batches SET payload_json = $2
+                                 WHERE session_id = $1",
                     )
                     .bind(session_id.as_str())
-                    .bind(CORRUPT_TEXT)
+                    .bind(CORRUPT_QUEUED_PAYLOAD)
                     .execute(pool)
                     .await
                     .expect("corrupt Postgres queued-work payload");
@@ -504,13 +497,11 @@ pub(super) async fn restore_corrupt_record_raw(
                             )
                             .expect("restore SQLite pending turn input");
                     }
-                    CorruptTarget::QueuedWorkItemPayloadJson => {
+                    CorruptTarget::QueuedWorkPayloadJson => {
                         connection
                             .execute(
-                                "UPDATE queued_work_items SET payload_json = ?2
-                                 WHERE batch_id IN
-                                     (SELECT batch_id FROM queued_work_batches
-                                      WHERE session_id = ?1)",
+                                "UPDATE queued_work_batches SET payload_json = ?2
+                                 WHERE session_id = ?1",
                                 rusqlite::params![
                                     session_id.as_str(),
                                     backup.text.expect("queued-work backup is text")
@@ -557,12 +548,10 @@ pub(super) async fn restore_corrupt_record_raw(
                     .await
                     .expect("restore Postgres pending turn input");
                 }
-                CorruptTarget::QueuedWorkItemPayloadJson => {
+                CorruptTarget::QueuedWorkPayloadJson => {
                     sqlx::query(
-                        "UPDATE lash_queued_work_items SET payload_json = $2
-                         WHERE batch_id IN
-                             (SELECT batch_id FROM lash_queued_work_batches
-                              WHERE session_id = $1)",
+                        "UPDATE lash_queued_work_batches SET payload_json = $2
+                                 WHERE session_id = $1",
                     )
                     .bind(session_id.as_str())
                     .bind(backup.text.expect("queued-work backup is text"))

@@ -137,7 +137,7 @@ pub(super) async fn load_turn_cancel_request_tx(
 /// disposition, mode.
 pub(crate) type TurnCancelRequestRow = (String, Option<String>, Option<String>, String, String);
 
-/// One `lash_turn_cancel_affected_inputs` row: item id, payload, disposition,
+/// One `lash_turn_cancel_affected_inputs` row: ingress row id, payload, disposition,
 /// item kind and — for a held wake — its batch.
 pub(super) type TurnCancelAffectedRow = (String, String, String, String, Option<String>);
 
@@ -169,7 +169,6 @@ pub(super) fn turn_cancel_record_from_rows(
                     .affected_wakes
                     .push(lash_core_execution::TurnCancelAffectedWake {
                         batch_id: batch_id.into(),
-                        item_id,
                         wake: store_decode_json(&payload_json, "process wake")?,
                         disposition: applied_disposition,
                     });
@@ -285,7 +284,7 @@ pub(super) async fn append_turn_cancel_wake_tx(
     )
     .bind(session_id.as_str())
     .bind(turn_id.as_str())
-    .bind(&affected.item_id)
+    .bind(affected.batch_id.as_str())
     .bind(turn_cancel_undelivered_wire(affected.disposition))
     .bind(encode_json(&affected.wake)?)
     .bind(AFFECTED_WAKE_KIND)

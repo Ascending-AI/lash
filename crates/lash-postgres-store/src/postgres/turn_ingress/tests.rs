@@ -79,9 +79,9 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
     sqlx::query(
         "INSERT INTO lash_queued_work_batches
             (enqueue_seq, batch_id, session_id, delivery_policy, work_kind,
-             authority_json, submission_digest, enqueued_at_ms, admitted_root, admitted_by)
+             authority_json, submission_digest, enqueued_at_ms, payload_json, admitted_root, admitted_by)
          SELECT n, 'admitted-' || n, 'history', 'earliest_safe_boundary',
-                'turn', '{}', 'digest', 0, 'root', 'admit'
+                'turn', '{}', 'digest', 0, jsonb_build_object('type', 'process_wake')::text, 'root', 'admit'
          FROM generate_series(1, 10000) AS n",
     )
     .execute(&mut *connection)
@@ -90,8 +90,8 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
     sqlx::query(
         "INSERT INTO lash_queued_work_batches
             (enqueue_seq, batch_id, session_id, delivery_policy, work_kind,
-             authority_json, submission_digest, enqueued_at_ms)
-         VALUES (10001, 'open', 'history', 'earliest_safe_boundary', 'turn', '{}', 'digest', 0)",
+             authority_json, submission_digest, enqueued_at_ms, payload_json)
+         VALUES (10001, 'open', 'history', 'earliest_safe_boundary', 'turn', '{}', 'digest', 0, jsonb_build_object('type', 'process_wake')::text)",
     )
     .execute(&mut *connection)
     .await

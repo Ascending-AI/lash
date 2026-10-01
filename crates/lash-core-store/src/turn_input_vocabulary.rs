@@ -183,8 +183,14 @@ pub enum TurnInputState {
     PendingActive(ActiveTurnIngress),
     DeferredNextTurn,
     Accepted(ActiveTurnIngress),
-    Cancelled(TurnInputIngress),
-    Completed(TurnInputIngress),
+    Cancelled {
+        ingress: TurnInputIngress,
+        at_ms: u64,
+    },
+    Completed {
+        ingress: TurnInputIngress,
+        at_ms: u64,
+    },
 }
 impl TurnInputState {
     /// The only legal initial durable state for an input admitted under `ingress`.
@@ -202,20 +208,30 @@ impl TurnInputState {
         }
     }
 
-    /// Returns `None` for an unknown spelling or a state/scope pair the
-    /// persisted CHECKs forbid (`pending_active` under `next_turn` scope,
+    /// Returns `StoredDataCorrupt` for an unknown spelling, a terminal time
+    /// that disagrees with the state, or a state/scope pair the CHECKs forbid (`pending_active` under `next_turn` scope,
     /// `deferred_next_turn` under `active_turn` scope, or `accepted` under
     /// `next_turn` scope) — the same disagreement the type refuses to
     /// construct.
-    pub fn from_persisted(state: &str, ingress: TurnInputIngress) -> Option<Self> {
-        match (TurnInputStateKind::from_wire_str(state)?, ingress) {
+    pub fn from_persisted(
+        state: &str,
+        ingress: TurnInputIngress,
+        terminal_at_ms: Option<u64>,
+    ) -> Result<Self, crate::StoreError> {
+        let corrupt = || crate::StoreError::StoredDataCorrupt {
+            record_kind: "PendingTurnInput",
+            message: format!("invalid state, ingress or terminal time for `{state}`"),
+        };
+        let kind = TurnInputStateKind::from_wire_str(state).ok_or_else(corrupt)?;
+        match (kind, ingress, terminal_at_ms) {
             (
                 TurnInputStateKind::PendingActive,
                 TurnInputIngress::ActiveTurn {
                     turn_id,
                     min_boundary,
                 },
-            ) => Some(Self::PendingActive(ActiveTurnIngress {
+                None,
+            ) => Ok(Self::PendingActive(ActiveTurnIngress {
                 turn_id,
                 min_boundary,
             })),
@@ -225,16 +241,21 @@ impl TurnInputState {
                     turn_id,
                     min_boundary,
                 },
-            ) => Some(Self::Accepted(ActiveTurnIngress {
+                None,
+            ) => Ok(Self::Accepted(ActiveTurnIngress {
                 turn_id,
                 min_boundary,
             })),
-            (TurnInputStateKind::DeferredNextTurn, TurnInputIngress::NextTurn) => {
-                Some(Self::DeferredNextTurn)
+            (TurnInputStateKind::DeferredNextTurn, TurnInputIngress::NextTurn, None) => {
+                Ok(Self::DeferredNextTurn)
             }
-            (TurnInputStateKind::Cancelled, ingress) => Some(Self::Cancelled(ingress)),
-            (TurnInputStateKind::Completed, ingress) => Some(Self::Completed(ingress)),
-            _ => None,
+            (TurnInputStateKind::Cancelled, ingress, Some(at_ms)) => {
+                Ok(Self::Cancelled { ingress, at_ms })
+            }
+            (TurnInputStateKind::Completed, ingress, Some(at_ms)) => {
+                Ok(Self::Completed { ingress, at_ms })
+            }
+            _ => Err(corrupt()),
         }
     }
 
@@ -244,8 +265,8 @@ impl TurnInputState {
             Self::PendingActive(_) => TurnInputStateKind::PendingActive,
             Self::DeferredNextTurn => TurnInputStateKind::DeferredNextTurn,
             Self::Accepted(_) => TurnInputStateKind::Accepted,
-            Self::Cancelled(_) => TurnInputStateKind::Cancelled,
-            Self::Completed(_) => TurnInputStateKind::Completed,
+            Self::Cancelled { .. } => TurnInputStateKind::Cancelled,
+            Self::Completed { .. } => TurnInputStateKind::Completed,
         }
     }
 
@@ -259,7 +280,7 @@ impl TurnInputState {
         match self {
             Self::PendingActive(scope) | Self::Accepted(scope) => scope.clone().into(),
             Self::DeferredNextTurn => TurnInputIngress::NextTurn,
-            Self::Cancelled(ingress) | Self::Completed(ingress) => ingress.clone(),
+            Self::Cancelled { ingress, .. } | Self::Completed { ingress, .. } => ingress.clone(),
         }
     }
 
@@ -267,7 +288,9 @@ impl TurnInputState {
     pub fn active_turn_id(&self) -> Option<&TurnId> {
         match self {
             Self::PendingActive(scope) | Self::Accepted(scope) => Some(&scope.turn_id),
-            Self::Cancelled(ingress) | Self::Completed(ingress) => ingress.active_turn_id(),
+            Self::Cancelled { ingress, .. } | Self::Completed { ingress, .. } => {
+                ingress.active_turn_id()
+            }
             Self::DeferredNextTurn => None,
         }
     }
@@ -294,7 +317,7 @@ impl TurnInputState {
         match self {
             Self::DeferredNextTurn => true,
             Self::PendingActive(scope) => running != Some(&scope.turn_id),
-            Self::Accepted(_) | Self::Cancelled(_) | Self::Completed(_) => false,
+            Self::Accepted(_) | Self::Cancelled { .. } | Self::Completed { .. } => false,
         }
     }
 
@@ -561,6 +584,7 @@ fn turn_input_submission_preimage(
     Ok(identity.finish())
 }
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PendingTurnInput {
     pub input_id: crate::InputId,
     pub session_id: SessionId,
@@ -577,10 +601,6 @@ pub struct PendingTurnInput {
     /// (FIG-3838). An admission never mixes inputs whose specs differ.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_spec: Option<crate::run_spec::RunSpecHash>,
-    /// When the input's tombstone was written: set exactly when its state is
-    /// terminal (ADR 0101 §8). The state is the tombstone's cause.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub terminal_at_ms: Option<u64>,
 }
 
 /// Host-facing projection of one undelivered pending turn-input record.
@@ -684,15 +704,19 @@ impl PendingTurnInput {
     /// instant its terminal write recorded. `None` while it is open or
     /// accepted.
     pub fn terminal(&self) -> Option<crate::store::IngressTerminal> {
-        let cause = match self.state.kind() {
-            TurnInputStateKind::Completed => crate::store::IngressTerminalCause::Delivered,
-            TurnInputStateKind::Cancelled => crate::store::IngressTerminalCause::Cancelled,
-            TurnInputStateKind::PendingActive
-            | TurnInputStateKind::DeferredNextTurn
-            | TurnInputStateKind::Accepted => return None,
-        };
-        self.terminal_at_ms
-            .map(|at_ms| crate::store::IngressTerminal { cause, at_ms })
+        match &self.state {
+            TurnInputState::Completed { at_ms, .. } => Some(crate::store::IngressTerminal {
+                cause: crate::store::IngressTerminalCause::Delivered,
+                at_ms: *at_ms,
+            }),
+            TurnInputState::Cancelled { at_ms, .. } => Some(crate::store::IngressTerminal {
+                cause: crate::store::IngressTerminalCause::Cancelled,
+                at_ms: *at_ms,
+            }),
+            TurnInputState::PendingActive(_)
+            | TurnInputState::DeferredNextTurn
+            | TurnInputState::Accepted(_) => None,
+        }
     }
 
     /// Exposes accepted input to store and durable-substrate implementors while admitting and
@@ -746,7 +770,7 @@ impl PendingTurnInputCancelOutcome {
     /// Reports success to turn-input store implementors only for the transition performed by this
     /// cancellation attempt, not for an already-cancelled row.
     pub fn is_cancelled(&self) -> bool {
-        matches!(self, Self::Cancelled(_))
+        matches!(self, Self::Cancelled { .. })
     }
 
     /// Returns the durable input for every found cancellation outcome and `None` only when the

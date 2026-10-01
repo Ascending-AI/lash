@@ -10,13 +10,9 @@ pub(crate) fn decode_turn_input_ingress(
 pub(crate) fn decode_turn_input_state(
     value: String,
     ingress: lash_core_execution::TurnInputIngress,
+    terminal_at_ms: Option<u64>,
 ) -> Result<lash_core_execution::TurnInputState, StoreError> {
-    lash_core_execution::TurnInputState::from_persisted(&value, ingress).ok_or_else(|| {
-        stored_data_corrupt(
-            "TurnInputState",
-            format_args!("unknown or scope-illegal turn-input state `{value}`"),
-        )
-    })
+    lash_core_execution::TurnInputState::from_persisted(&value, ingress, terminal_at_ms)
 }
 
 pub(crate) fn decode_turn_input(
@@ -72,13 +68,12 @@ pub(crate) fn pending_turn_input_from_row(
         session_id: row.session_id,
         enqueue_seq: row.enqueue_seq,
         source_key: row.source_key,
-        state: decode_turn_input_state(row.state, ingress)?,
+        state: decode_turn_input_state(row.state, ingress, row.terminal_at_ms)?,
         enqueued_at_ms: row.enqueued_at_ms,
         input: decode_turn_input(row.input_json)?,
         run_spec: row
             .run_spec_hash
             .map(lash_core_execution::RunSpecHash::from_stored),
-        terminal_at_ms: row.terminal_at_ms,
     })
 }
 

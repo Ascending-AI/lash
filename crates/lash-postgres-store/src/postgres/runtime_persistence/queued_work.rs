@@ -76,7 +76,7 @@ impl PostgresStore {
             return Ok(None);
         };
         let row = queued_batch_row(row)?;
-        let batch = queued_work_batch_from_row(&mut tx, row).await?;
+        let batch = queued_work_batch_from_row(row)?;
         // A host cancel is a wake's terminal transition too: the fence lands
         // with the tombstone, so a redelivery after vacuum is not admitted
         // again (FIG-3545).
@@ -131,9 +131,6 @@ impl PostgresStore {
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        // One snapshot for the batch rows and their item rows. Under the
-        // default READ COMMITTED every statement re-snapshots, so a batch
-        // consumed between the two reads is seen as a header with no payloads.
         sqlx::query(
             crate::connection_sql::connection_sql()
                 .begin_repeatable_read_read_only
@@ -157,7 +154,7 @@ impl PostgresStore {
         .map_err(store_sqlx_error)?;
         let mut batches = Vec::new();
         for row in rows {
-            batches.push(queued_work_batch_from_row(&mut tx, queued_batch_row(row)?).await?);
+            batches.push(queued_work_batch_from_row(queued_batch_row(row)?)?);
         }
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(batches)
@@ -236,7 +233,7 @@ impl PostgresStore {
         .map_err(store_sqlx_error)?;
         let mut batches = Vec::new();
         for row in rows {
-            batches.push(queued_work_batch_from_row(&mut tx, queued_batch_row(row)?).await?);
+            batches.push(queued_work_batch_from_row(queued_batch_row(row)?)?);
         }
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(batches)

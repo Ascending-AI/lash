@@ -2262,9 +2262,9 @@ async fn consume_wake(
         .list_queued_work(&session)
         .await
         .map_err(|error| error.to_string())?;
-    let Some(batch) = queued.iter().find(|batch| batch.items.iter().any(|item| matches!(
-        &item.payload, QueuedWorkPayload::ProcessWake { wake } if wake.process_id == process_id && wake.sequence == sequence
-    ))) else { return Ok(false); };
+    let Some(batch) = queued.iter().find(|batch| matches!(
+        &batch.payload, QueuedWorkPayload::ProcessWake { wake } if wake.process_id == process_id && wake.sequence == sequence
+    )) else { return Ok(false); };
     // The turn lane is claimed in enqueue order, so only the head wake is
     // consumed by a settled claim. A wake behind it leaves through the other
     // terminal transition, a host cancel, which raises the same floor

@@ -307,7 +307,6 @@ CREATE TABLE IF NOT EXISTS lash_session_meta_pending_observer_intents (
     FOREIGN KEY (session_id) REFERENCES lash_session_meta(session_id) ON DELETE CASCADE
 );
 
-
 CREATE TABLE IF NOT EXISTS lash_runtime_turn_commits (
     session_id TEXT NOT NULL,
     turn_id TEXT NOT NULL,
@@ -419,7 +418,6 @@ CREATE TABLE IF NOT EXISTS lash_turn_park_events (
     CONSTRAINT ck_turn_park_events_parked_reason CHECK ((kind = 'parked' AND reason_json IS NOT NULL AND cause IS NULL) OR (kind <> 'parked' AND reason_json IS NULL AND cause IS NOT NULL))
 );
 
-
 CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
     enqueue_seq BIGINT NOT NULL,
     batch_id TEXT NOT NULL UNIQUE,
@@ -427,6 +425,7 @@ CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
     source_key TEXT,
     delivery_policy TEXT NOT NULL,
     work_kind TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
     authority_json TEXT NOT NULL,
     merge_key TEXT,
     enqueued_at_ms BIGINT NOT NULL,
@@ -445,7 +444,7 @@ CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
     obligation_last_error TEXT,
     obligation_settled_at_ms BIGINT,
     CONSTRAINT ck_queued_work_batches_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
-    CONSTRAINT ck_queued_work_batches_work_kind CHECK (work_kind IN ('turn', 'control')),
+    CONSTRAINT ck_queued_work_batches_work_kind CHECK ((jsonb_typeof(payload_json::jsonb) = 'object' AND ((work_kind = 'turn' AND payload_json::jsonb ->> 'type' = 'process_wake') OR (work_kind = 'control' AND payload_json::jsonb ->> 'type' = 'session_command'))) IS TRUE),
     CONSTRAINT ck_queued_work_batches_delivery_policy CHECK (delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')),
     CONSTRAINT ck_queued_work_batches_admission_all_or_none CHECK ((admitted_root IS NULL) = (admitted_by IS NULL)),
     CONSTRAINT ck_queued_work_batches_terminal CHECK ((terminal_cause IS NULL AND terminal_at_ms IS NULL) OR (terminal_cause IN ('delivered', 'applied', 'cancelled', 'stale_config_revision') AND terminal_at_ms IS NOT NULL AND admitted_root IS NULL)),
@@ -470,14 +469,6 @@ CREATE INDEX IF NOT EXISTS idx_lash_queued_work_admission_order
 CREATE INDEX IF NOT EXISTS idx_lash_queued_work_session_command_order
     ON lash_queued_work_batches(session_id, work_kind, enqueued_at_ms, enqueue_seq)
     WHERE terminal_cause IS NULL;
-
-CREATE TABLE IF NOT EXISTS lash_queued_work_items (
-    batch_id TEXT NOT NULL REFERENCES lash_queued_work_batches(batch_id) ON DELETE CASCADE,
-    item_index INTEGER NOT NULL,
-    item_id TEXT NOT NULL,
-    payload_json TEXT NOT NULL,
-    PRIMARY KEY (batch_id, item_index)
-);
 
 CREATE TABLE IF NOT EXISTS lash_wake_redelivery_fences (
     session_id TEXT NOT NULL,

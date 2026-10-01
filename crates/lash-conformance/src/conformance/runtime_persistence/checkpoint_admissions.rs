@@ -1312,7 +1312,7 @@ pub fn queued_process_wake_draft(
     QueuedWorkBatchDraft::new(
         session_id,
         delivery_policy,
-        crate::TurnWorkPayload::process_wake(wake),
+        crate::QueuedWorkPayload::process_wake(wake),
     )
     .with_source_key(crate::process_wake_source_key(
         &crate::ProcessId::fixture(&format!("process:{text}")),
@@ -1363,8 +1363,7 @@ pub(super) fn queued_session_command_draft(
 }
 
 pub(super) fn queued_batch_text(batch: &QueuedWorkBatch) -> Option<&str> {
-    let payload = batch.items.first().map(|item| &item.payload)?;
-    match payload {
+    match &batch.payload {
         QueuedWorkPayload::ProcessWake { wake } => Some(wake.input.as_str()),
         QueuedWorkPayload::SessionCommand { .. } => None,
     }

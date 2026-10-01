@@ -51,7 +51,6 @@ mod process_lifecycle_sql_tests;
 mod rendered_statement_sets_tests;
 mod session_deletion;
 
-use std::collections::BTreeMap;
 use std::path::Path;
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
@@ -61,8 +60,8 @@ use std::sync::{Arc, Mutex};
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use lash_core_execution::runtime::{
     AdmissionBoundary, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
-    QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload,
-    TurnLaneAdmissionPolicy, prepare_process_event_append, prepare_process_registration,
+    QueuedWorkEnqueueOutcome, QueuedWorkKind, QueuedWorkPayload, TurnLaneAdmissionPolicy,
+    prepare_process_event_append, prepare_process_registration,
 };
 use lash_core_execution::store::queued_work::{
     SESSION_COMMAND_BATCHES_PER_RUN, TurnLaneCandidate, admission_scan_limit, derive_batch_id,

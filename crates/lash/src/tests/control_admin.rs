@@ -451,7 +451,7 @@ async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
     let queued = session.durable().queued_work().await?;
     assert_eq!(queued.len(), 1);
     assert!(matches!(
-        &queued[0].items[0].payload,
+        &queued[0].payload,
         lash_core::runtime::QueuedWorkPayload::SessionCommand { .. }
     ));
     Ok(())

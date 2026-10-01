@@ -84,7 +84,6 @@ pub async fn queued_work_source_keys_are_idempotent_and_list_ordered(store: Arc<
         first.batch_id, replay.batch_id,
         "replaying a source key must return the original batch"
     );
-    assert_eq!(first.items[0].item_id, replay.items[0].item_id);
     assert_eq!(queued_batch_text(&replay), Some("first"));
     let listed = store
         .list_queued_work(&SessionId::from("root"))

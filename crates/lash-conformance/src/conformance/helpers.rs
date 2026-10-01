@@ -294,7 +294,7 @@ pub(crate) fn process_wake_work(
     crate::QueuedWorkBatchDraft::new(
         session_id,
         delivery_policy,
-        crate::TurnWorkPayload::process_wake(wake),
+        crate::QueuedWorkPayload::process_wake(wake),
     )
     .with_source_key(crate::process_wake_source_key(&process_id, sequence))
     .with_process_wake_source(process_id, sequence)

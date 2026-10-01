@@ -1108,7 +1108,6 @@ mod tests {
                     enqueued_at_ms: 0,
                     input: lash::TurnInput::empty(),
                     run_spec: None,
-                    terminal_at_ms: None,
                 },
                 root: root.clone(),
                 terminal: lash::persistence::RootTerminal {

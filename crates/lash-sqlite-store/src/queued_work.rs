@@ -27,81 +27,18 @@ pub(crate) fn decode_queued_payload(value: String) -> Result<QueuedWorkPayload, 
     serde_json::from_str(&value).map_err(|err| stored_data_corrupt("QueuedWorkPayload", err))
 }
 
-pub(crate) fn queued_work_batch_from_conn(
-    conn: &Connection,
+pub(crate) fn queued_work_batch_from_row(
     row: QueuedBatchRow,
 ) -> Result<QueuedWorkBatch, StoreError> {
-    let mut stmt = conn
-        .prepare(
-            crate::turn_ingress::turn_ingress_sql()
-                .queued_items
-                .list_by_batch
-                .sql(),
-        )
-        .map_err(sqlite_error)?;
-    let rows = stmt
-        .query_map(params![row.batch_id.as_str()], |item_row| {
-            Ok((item_row.get::<_, String>(0)?, item_row.get::<_, String>(1)?))
-        })
-        .map_err(sqlite_error)?;
-    let mut items = Vec::new();
-    for item in rows {
-        let (item_id, payload_json) = item.map_err(sqlite_error)?;
-        items.push(QueuedWorkItem {
-            item_id,
-            payload: decode_queued_payload(payload_json)?,
-        });
-    }
-    row.into_batch(items)
+    row.into_batch()
 }
 
-pub(crate) fn queued_work_batches_from_conn(
-    conn: &Connection,
+pub(crate) fn queued_work_batches_from_rows(
     rows: &[QueuedBatchRow],
 ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-    if rows.is_empty() {
-        return Ok(Vec::new());
-    }
-    let batch_ids = encode_json(
-        &rows
-            .iter()
-            .map(|row| row.batch_id.as_str())
-            .collect::<Vec<_>>(),
-    )?;
-    let mut stmt = conn
-        .prepare(
-            crate::turn_ingress::turn_ingress_sql()
-                .queued_items_sqlite
-                .list_by_batches
-                .sql(),
-        )
-        .map_err(sqlite_error)?;
-    let item_rows = stmt
-        .query_map(params![batch_ids], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })
-        .map_err(sqlite_error)?;
-    let mut items_by_batch = BTreeMap::<String, Vec<QueuedWorkItem>>::new();
-    for item_row in item_rows {
-        let (batch_id, item_id, payload_json) = item_row.map_err(sqlite_error)?;
-        items_by_batch
-            .entry(batch_id)
-            .or_default()
-            .push(QueuedWorkItem {
-                item_id,
-                payload: decode_queued_payload(payload_json)?,
-            });
-    }
     rows.iter()
         .cloned()
-        .map(|row| {
-            let items = items_by_batch.remove(&row.batch_id).unwrap_or_default();
-            row.into_batch(items)
-        })
+        .map(QueuedBatchRow::into_batch)
         .collect()
 }
 
@@ -113,6 +50,7 @@ pub(crate) struct QueuedBatchRow {
     pub(crate) source_key: Option<String>,
     pub(crate) delivery_policy: String,
     pub(crate) work_kind: String,
+    pub(crate) payload_json: String,
     pub(crate) authority_json: String,
     pub(crate) merge_key: Option<String>,
     pub(crate) enqueued_at_ms: u64,
@@ -124,19 +62,25 @@ pub(crate) struct QueuedBatchRow {
 }
 
 impl QueuedBatchRow {
-    /// The batch this row and its `items`, in item order, describe.
-    fn into_batch(self, items: Vec<QueuedWorkItem>) -> Result<QueuedWorkBatch, StoreError> {
+    /// Decode the batch and its sole payload from one row.
+    fn into_batch(self) -> Result<QueuedWorkBatch, StoreError> {
+        let payload = decode_queued_payload(self.payload_json)?;
+        if decode_work_kind(self.work_kind)? != payload.kind() {
+            return Err(stored_data_corrupt(
+                "QueuedWorkBatch",
+                "work kind contradicts its payload",
+            ));
+        }
         let batch = QueuedWorkBatch {
             batch_id: self.batch_id.into(),
             session_id: self.session_id,
             enqueue_seq: self.enqueue_seq,
             source_key: self.source_key,
             delivery_policy: decode_delivery_policy(self.delivery_policy)?,
-            kind: decode_work_kind(self.work_kind)?,
             authority: decode_authority(self.authority_json)?,
             merge_key: self.merge_key,
             enqueued_at_ms: self.enqueued_at_ms,
-            items,
+            payload,
             submission_digest: self.submission_digest,
             terminal: lash_core_execution::store_backend_support::decode_ingress_terminal(
                 "QueuedWorkBatch",
@@ -144,7 +88,6 @@ impl QueuedBatchRow {
                 self.terminal_at_ms,
             )?,
         };
-        batch.validate_payload_family()?;
         Ok(batch)
     }
 }
@@ -164,6 +107,7 @@ pub(crate) fn queued_batch_row_from_sql(
         source_key: row.get("source_key")?,
         delivery_policy: row.get("delivery_policy")?,
         work_kind: row.get("work_kind")?,
+        payload_json: row.get("payload_json")?,
         authority_json: row.get("authority_json")?,
         merge_key: row.get("merge_key")?,
         enqueued_at_ms: u64_from_sql(
@@ -196,8 +140,7 @@ pub(crate) fn load_queued_batch_by_id_conn(
         )
         .optional()
         .map_err(sqlite_error)?;
-    row.map(|row| queued_work_batch_from_conn(conn, row))
-        .transpose()
+    row.map(queued_work_batch_from_row).transpose()
 }
 
 pub(crate) fn enqueue_queued_work_conn(
@@ -311,18 +254,10 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
             now as i64,
             crate::session_ingress::allocate_sequence(conn, &batch.session_id)?,
             submission_digest.as_str(),
+            encode_json(&batch.payload)?,
         ],
     )
     .map_err(sqlite_error)?;
-    for (index, payload) in batch.payloads.iter().enumerate() {
-        let item_id = format!("{batch_id}:item:{index}");
-        crate::conn::cached_execute(
-            conn,
-            sql.queued_items.insert_new.sql(),
-            params![batch_id, index as i64, item_id, encode_json(payload)?],
-        )
-        .map_err(sqlite_error)?;
-    }
     // The admitted batch owes its session a drive (ADR 0109 §3), armed in
     // the transaction that admits it.
     crate::ingress_obligation::arm_queued_batch_tx(conn, &batch.session_id, &batch_id, now)?;
@@ -361,15 +296,12 @@ pub(crate) fn complete_admitted_batch_conn(
         &row,
         observed.as_ref().map(Option::as_deref),
     )?;
-    // The wake identity a settled batch contributes to its redelivery fence:
-    // the root-keyed head payload, decoded the same way PostgreSQL decodes it.
-    // The wake batch carries exactly one wake item, so the head payload is
-    // the batch's whole wake contribution.
+    // The sole payload contributes the batch's complete redelivery fence.
     let terminal_wake = conn
         .query_row(
             turn_ingress
                 .queued_batches
-                .select_admitted_batch_head_payload
+                .select_admitted_batch_payload
                 .sql(),
             params![session_id.as_str(), batch_id.as_str(), root.as_str()],
             |row| row.get::<_, String>(0),

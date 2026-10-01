@@ -209,8 +209,7 @@ pub(in crate::runtime) fn ingress_admitted_trace_payload(
         "payload_types": queued
             .into_iter()
             .flat_map(|queued| queued.batches.iter())
-            .flat_map(|batch| batch.items.iter())
-            .map(|item| queued_work_payload_type(&item.payload))
+            .map(|batch| queued_work_payload_type(&batch.payload))
             .collect::<Vec<_>>(),
         "causes": causes,
     })

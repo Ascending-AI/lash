@@ -19,9 +19,8 @@ use lash_store_sql::turn_ingress::{
     TurnIngressStatements, cancel_requests::CancelRequestStatements,
     cancellation_bindings::CancellationBindingStatements,
     closure_authorizations::ClosureAuthorizationStatements, pending_inputs::PendingInputStatements,
-    queued_batches::QueuedBatchStatements, queued_items::QueuedItemStatements,
-    retired_scopes::RetiredScopeStatements, run_specs::RunSpecStatements,
-    tool_intent_submissions::ToolIntentSubmissionStatements,
+    queued_batches::QueuedBatchStatements, retired_scopes::RetiredScopeStatements,
+    run_specs::RunSpecStatements, tool_intent_submissions::ToolIntentSubmissionStatements,
     turn_park_events::TurnParkEventStatements, turn_parks::TurnParkStatements,
 };
 use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
@@ -36,7 +35,7 @@ mod turn_parks;
 
 pub(crate) use family::TurnIngressSqliteStatements;
 pub(crate) use pending_inputs::PendingInputSqliteStatements;
-pub(crate) use queued_work::{QueuedBatchSqliteStatements, QueuedItemSqliteStatements};
+pub(crate) use queued_work::QueuedBatchSqliteStatements;
 pub(crate) use turn_cancel::{
     CancelRequestSqliteStatements, CancellationBindingSqliteStatements,
     ClosureAuthorizationSqliteStatements, RetiredScopeSqliteStatements,
@@ -116,10 +115,6 @@ pub(crate) struct TurnIngressSql {
     pub(crate) queued_batches: QueuedBatchStatements,
     /// `queued_work_batches`, SQLite only.
     pub(crate) queued_batches_sqlite: QueuedBatchSqliteStatements,
-    /// `queued_work_items`, shared.
-    pub(crate) queued_items: QueuedItemStatements,
-    /// `queued_work_items`, SQLite only.
-    pub(crate) queued_items_sqlite: QueuedItemSqliteStatements,
     /// `turn_cancel_requests`, shared.
     pub(crate) cancel_requests: CancelRequestStatements,
     /// `turn_cancel_requests`, SQLite only.
@@ -157,8 +152,6 @@ impl TurnIngressSql {
             run_specs: RunSpecStatements::render(dialect),
             queued_batches: QueuedBatchStatements::render(dialect),
             queued_batches_sqlite: QueuedBatchSqliteStatements::render(dialect),
-            queued_items: QueuedItemStatements::render(dialect),
-            queued_items_sqlite: QueuedItemSqliteStatements::render(dialect),
             cancel_requests: CancelRequestStatements::render(dialect),
             cancel_requests_sqlite: CancelRequestSqliteStatements::render(dialect),
             bindings: CancellationBindingStatements::render(dialect),

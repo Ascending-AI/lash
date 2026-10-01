@@ -247,7 +247,7 @@ fn no_queued_work(live: Vec<SessionId>) -> CustomCheck {
                         batches.len(),
                         batches
                             .iter()
-                            .map(|batch| format!("{} {:?}", batch.batch_id, batch.kind))
+                            .map(|batch| format!("{} {:?}", batch.batch_id, batch.kind()))
                             .collect::<Vec<_>>()
                     )),
                     // A session whose create never committed holds nothing.

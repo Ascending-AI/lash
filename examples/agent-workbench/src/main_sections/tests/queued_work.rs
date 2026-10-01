@@ -42,7 +42,7 @@ fn workbench_process_wake_draft(
     lash::persistence::QueuedWorkBatchDraft::new(
         wake.target_session_id.clone(),
         lash::persistence::DeliveryPolicy::EarliestSafeBoundary,
-        lash::persistence::TurnWorkPayload::process_wake(wake),
+        lash::persistence::QueuedWorkPayload::process_wake(wake),
     )
     .with_merge_key(lash::persistence::PROCESS_WAKE_MERGE_KEY)
     .with_source_key(source_key)

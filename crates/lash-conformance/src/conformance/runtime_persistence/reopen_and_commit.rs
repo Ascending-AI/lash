@@ -492,7 +492,7 @@ pub async fn queued_wake_delivery_is_source_key_idempotent_and_admitted_once(
     let malformed = QueuedWorkBatchDraft::new(
         wake.target_session_id.clone(),
         DeliveryPolicy::EarliestSafeBoundary,
-        crate::TurnWorkPayload::process_wake(wake.clone()),
+        crate::QueuedWorkPayload::process_wake(wake.clone()),
     )
     .with_source_key(crate::process_wake_source_key(
         &wake.process_id,
@@ -536,9 +536,8 @@ pub async fn queued_wake_delivery_is_source_key_idempotent_and_admitted_once(
     .await;
     let admitted = admission.queued.as_ref().expect("the root admits the wake");
     assert_eq!(admitted.batches.len(), 1);
-    assert_eq!(admitted.batches[0].items.len(), 1);
     assert!(matches!(
-        admitted.batches[0].items[0].payload,
+        admitted.batches[0].payload,
         QueuedWorkPayload::ProcessWake { .. }
     ));
     end_root(

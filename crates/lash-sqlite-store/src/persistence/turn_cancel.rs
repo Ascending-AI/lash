@@ -52,7 +52,10 @@ pub(super) fn cancel_pending_turn_input_row_conn(
                     input.input_id
                 )));
             }
-            input.state = lash_core_execution::TurnInputState::Cancelled(input.state.ingress());
+            input.state = lash_core_execution::TurnInputState::Cancelled {
+                ingress: input.state.ingress(),
+                at_ms: now.min(i64::MAX as u64),
+            };
             Ok(lash_core_execution::PendingTurnInputCancelOutcome::Cancelled(input))
         }
     }

@@ -14,9 +14,9 @@ lash_store_sql::statements! {
         /// backstop.
         insert_new = "INSERT INTO queued_work_batches (enqueue_seq,
                  batch_id, session_id, source_key, delivery_policy, work_kind,
-                 authority_json, merge_key, enqueued_at_ms, submission_digest
+                 authority_json, merge_key, enqueued_at_ms, submission_digest, payload_json
              )
-             VALUES (?9, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?10)";
+             VALUES (?9, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?10, ?11)";
 
         /// The facts the settlement verdict consults about live batch `?2`
         /// of session `?1`: a tombstone answers nothing, as a missing row
@@ -38,7 +38,7 @@ lash_store_sql::statements! {
         /// Same lock fork as [`settlement_facts`](Self::settlement_facts).
         select_cancelable = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
-                    admitted_root, admitted_by, terminal_cause, terminal_at_ms
+                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json
              FROM queued_work_batches
              WHERE session_id = ?1
                AND batch_id = ?2
@@ -61,7 +61,7 @@ lash_store_sql::statements! {
              )
              SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
-                    admitted_root, admitted_by, terminal_cause, terminal_at_ms
+                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
              WHERE session_id = ?1
@@ -88,7 +88,7 @@ lash_store_sql::statements! {
              )
              SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
-                    admitted_root, admitted_by, terminal_cause, terminal_at_ms
+                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
              WHERE session_id = ?1 AND work_kind = 'turn'
@@ -117,7 +117,7 @@ lash_store_sql::statements! {
              )
              SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
-                    admitted_root, admitted_by, terminal_cause, terminal_at_ms
+                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
              WHERE session_id = ?1 AND work_kind = 'turn'
@@ -126,25 +126,5 @@ lash_store_sql::statements! {
                AND enqueue_seq >= head_enqueue_seq
              ORDER BY enqueue_seq ASC
              LIMIT ?2";
-    }
-}
-
-lash_store_sql::statements! {
-    /// `queued_work_items` statements only SQLite issues.
-    pub(crate) struct QueuedItemSqliteStatements @ "queued_work_item" {
-        /// The payloads of every batch id in the JSON array `?1`, keyed by
-        /// batch and in item order.
-        ///
-        /// One page for a whole admission rather than one query per batch:
-        /// the admission hydrates a run of batches at once, and under
-        /// SQLite's write lock the run cannot change between them anyway.
-        /// PostgreSQL hydrates per batch inside a `REPEATABLE READ` snapshot
-        /// instead, so it has no counterpart. The list bind is a JSON array
-        /// unpacked with `json_each`, which is how this crate binds every
-        /// list.
-        list_by_batches = "SELECT batch_id, item_id, payload_json
-             FROM queued_work_items
-             WHERE batch_id IN (SELECT value FROM json_each(?1))
-             ORDER BY batch_id ASC, item_index ASC";
     }
 }

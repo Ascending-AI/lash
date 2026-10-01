@@ -38,7 +38,7 @@ use std::time::Duration;
 
 use lash_core_execution::runtime::{
     AdmissionBoundary, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
-    QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, TurnLaneAdmissionPolicy,
+    QueuedWorkEnqueueOutcome, QueuedWorkKind, TurnLaneAdmissionPolicy,
 };
 use lash_core_execution::store::queued_work::{
     SESSION_COMMAND_BATCHES_PER_RUN, TurnLaneCandidate, admission_scan_limit, derive_batch_id,

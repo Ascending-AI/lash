@@ -532,8 +532,8 @@ impl SqliteFaultInjector {
         SqliteTransactionPause { state }
     }
 
-    /// Pause the next queued-work batch hydration between its header read and
-    /// its item read, until the returned handle is released.
+    /// Pause the next queued-work read after fetching rows and before decoding
+    /// their payloads, until the returned handle is released.
     pub fn pause_queued_work_hydration(&self) -> SqliteReadPause {
         let state = Arc::new(PauseState::default());
         self.lock_state().read_pause = Some(Arc::clone(&state));

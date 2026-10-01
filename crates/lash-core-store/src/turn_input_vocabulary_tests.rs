@@ -104,15 +104,52 @@ fn from_persisted_accepts_every_legal_pair() {
             next(),
             TurnInputState::DeferredNextTurn,
         ),
-        ("cancelled", active(), TurnInputState::Cancelled(active())),
-        ("cancelled", next(), TurnInputState::Cancelled(next())),
-        ("completed", active(), TurnInputState::Completed(active())),
-        ("completed", next(), TurnInputState::Completed(next())),
+        (
+            "cancelled",
+            active(),
+            TurnInputState::Cancelled {
+                ingress: active(),
+                at_ms: 7,
+            },
+        ),
+        (
+            "cancelled",
+            next(),
+            TurnInputState::Cancelled {
+                ingress: next(),
+                at_ms: 7,
+            },
+        ),
+        (
+            "completed",
+            active(),
+            TurnInputState::Completed {
+                ingress: active(),
+                at_ms: 7,
+            },
+        ),
+        (
+            "completed",
+            next(),
+            TurnInputState::Completed {
+                ingress: next(),
+                at_ms: 7,
+            },
+        ),
     ];
     for (spelling, ingress, expected) in legal {
         assert_eq!(
-            TurnInputState::from_persisted(spelling, ingress.clone()),
-            Some(expected),
+            TurnInputState::from_persisted(
+                spelling,
+                ingress.clone(),
+                matches!(
+                    expected.kind(),
+                    TurnInputStateKind::Cancelled | TurnInputStateKind::Completed
+                )
+                .then_some(7)
+            )
+            .unwrap(),
+            expected,
             "{spelling} under {ingress:?} must decode"
         );
     }
@@ -126,13 +163,15 @@ fn from_persisted_rejects_every_check_illegal_pair() {
         ("accepted", next()),
     ];
     for (spelling, ingress) in illegal {
-        assert_eq!(
-            TurnInputState::from_persisted(spelling, ingress.clone()),
-            None,
+        assert!(
+            matches!(
+                TurnInputState::from_persisted(spelling, ingress.clone(), None),
+                Err(crate::StoreError::StoredDataCorrupt { .. })
+            ),
             "{spelling} under {ingress:?} must be refused"
         );
     }
-    assert_eq!(TurnInputState::from_persisted("bogus", active()), None);
+    assert!(TurnInputState::from_persisted("bogus", active(), None).is_err());
 }
 
 #[test]
@@ -154,12 +193,18 @@ fn state_kind_and_ingress_round_trip() {
             active(),
         ),
         (
-            TurnInputState::Cancelled(active()),
+            TurnInputState::Cancelled {
+                ingress: active(),
+                at_ms: 7,
+            },
             TurnInputStateKind::Cancelled,
             active(),
         ),
         (
-            TurnInputState::Completed(next()),
+            TurnInputState::Completed {
+                ingress: next(),
+                at_ms: 7,
+            },
             TurnInputStateKind::Completed,
             next(),
         ),
@@ -182,7 +227,14 @@ fn accepted_only_rebinds_active_turn_open_states() {
         }))
     );
     assert_eq!(TurnInputState::DeferredNextTurn.accepted(), None);
-    assert_eq!(TurnInputState::Cancelled(next()).accepted(), None);
+    assert_eq!(
+        TurnInputState::Cancelled {
+            ingress: next(),
+            at_ms: 7
+        }
+        .accepted(),
+        None
+    );
 }
 
 #[test]
@@ -200,11 +252,8 @@ fn state_spellings_stay_stable() {
             "completed"
         ]
     );
-    for kind in TurnInputStateKind::ALL {
-        assert_eq!(
-            TurnInputStateKind::from_wire_str(kind.as_str()),
-            Some(*kind)
-        );
+    for &kind in TurnInputStateKind::ALL {
+        assert_eq!(TurnInputStateKind::from_wire_str(kind.as_str()), Some(kind));
     }
 }
 
@@ -286,4 +335,36 @@ fn provisioned_turn_input_id_is_pinned() {
         super::provisioned_turn_input_id(&address),
         "ti:6e69f3397990690f846f9b04b46cb7b3c7bdaf659b1a028ab0bc3fdd41730832"
     );
+}
+
+#[test]
+fn persisted_terminal_time_belongs_only_to_terminal_states() {
+    for &kind in TurnInputStateKind::ALL {
+        let ingress = if kind == TurnInputStateKind::DeferredNextTurn {
+            next()
+        } else {
+            active()
+        };
+        let terminal = matches!(
+            kind,
+            TurnInputStateKind::Cancelled | TurnInputStateKind::Completed
+        );
+        for at in [None, Some(0), Some(7)] {
+            let decoded = TurnInputState::from_persisted(kind.as_str(), ingress.clone(), at);
+            if terminal == at.is_some() {
+                assert!(decoded.is_ok(), "{kind:?} {at:?}");
+            } else {
+                assert!(
+                    matches!(
+                        decoded,
+                        Err(crate::StoreError::StoredDataCorrupt {
+                            record_kind: "PendingTurnInput",
+                            ..
+                        })
+                    ),
+                    "{kind:?} {at:?}"
+                );
+            }
+        }
+    }
 }

@@ -387,7 +387,7 @@ async fn read_step_admission_tx(
         .map_err(store_sqlx_error)?;
     let mut batches = Vec::with_capacity(batch_rows.len());
     for row in batch_rows {
-        batches.push(queued_work_batch_from_row(tx, queued_batch_row(row)?).await?);
+        batches.push(queued_work_batch_from_row(queued_batch_row(row)?)?);
     }
     Ok(CheckpointAdmission {
         inputs: (!inputs.is_empty()).then(|| lash_core_execution::AdmittedTurnInputs {
@@ -603,7 +603,7 @@ async fn scan_queued_work_candidates_tx(
         .map_err(store_sqlx_error)?;
     let mut batches = Vec::with_capacity(rows.len());
     for row in rows {
-        batches.push(queued_work_batch_from_row(tx, queued_batch_row(row)?).await?);
+        batches.push(queued_work_batch_from_row(queued_batch_row(row)?)?);
     }
     let candidates = batches.iter().map(turn_lane_candidate).collect();
     Ok((batches, candidates))

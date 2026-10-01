@@ -147,22 +147,21 @@ pub(super) async fn assert_model_agreement(
     let mut actual_live =
         BTreeMap::<(SessionId, ProcessId), BTreeMap<u64, ExpectedQueuedWake>>::new();
     for batch in queued {
-        for item in batch.items {
-            if let QueuedWorkPayload::ProcessWake { wake } = item.payload {
-                actual_live
-                    .entry((batch.session_id.clone(), wake.process_id.clone()))
-                    .or_default()
-                    .insert(
-                        wake.sequence,
-                        ExpectedQueuedWake {
-                            wake: *wake,
-                            delivery_policy: batch.delivery_policy,
-                            kind: batch.kind,
-                            authority: batch.authority.clone(),
-                            merge_key: batch.merge_key.clone(),
-                        },
-                    );
-            }
+        let kind = batch.kind();
+        if let QueuedWorkPayload::ProcessWake { wake } = batch.payload {
+            actual_live
+                .entry((batch.session_id.clone(), wake.process_id.clone()))
+                .or_default()
+                .insert(
+                    wake.sequence,
+                    ExpectedQueuedWake {
+                        wake: *wake,
+                        delivery_policy: batch.delivery_policy,
+                        kind,
+                        authority: batch.authority.clone(),
+                        merge_key: batch.merge_key.clone(),
+                    },
+                );
         }
     }
     let expected_live = model

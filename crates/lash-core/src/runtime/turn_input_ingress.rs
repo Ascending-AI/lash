@@ -60,8 +60,16 @@ mod tests {
                 | TurnInputStateKind::Completed => active.clone(),
                 TurnInputStateKind::DeferredNextTurn => next.clone(),
             };
-            let state = TurnInputState::from_persisted(kind.as_str(), ingress)
-                .expect("scope-legal pair decodes");
+            let state = TurnInputState::from_persisted(
+                kind.as_str(),
+                ingress,
+                matches!(
+                    kind,
+                    TurnInputStateKind::Cancelled | TurnInputStateKind::Completed
+                )
+                .then_some(7),
+            )
+            .expect("scope-legal pair decodes");
             assert_eq!(state.kind(), kind);
             assert_eq!(state.as_str(), kind.as_str());
         }
@@ -74,15 +82,11 @@ mod tests {
             TurnInputCheckpointBoundary::AfterWork,
         );
         let next = TurnInputIngress::next_turn();
-        assert_eq!(
-            TurnInputState::from_persisted("pending_active", next.clone()),
-            None
+        assert!(TurnInputState::from_persisted("pending_active", next.clone(), None).is_err());
+        assert!(
+            TurnInputState::from_persisted("deferred_next_turn", active.clone(), None).is_err()
         );
-        assert_eq!(
-            TurnInputState::from_persisted("deferred_next_turn", active.clone()),
-            None
-        );
-        assert_eq!(TurnInputState::from_persisted("accepted", next), None);
+        assert!(TurnInputState::from_persisted("accepted", next, None).is_err());
     }
 
     #[test]

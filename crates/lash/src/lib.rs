@@ -566,12 +566,11 @@ pub mod persistence {
         ForkSessionRequest, LiveReplayOutcome, LiveReplaySubscription, PROCESS_WAKE_MERGE_KEY,
         PendingTurnInputBatch, PendingTurnInputDraft, ProcessWakeSource, QueuedCheckpointTurnInput,
         QueuedCheckpointWork, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
-        QueuedWorkBatchPayloads, QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkItem,
-        QueuedWorkKind, QueuedWorkPayload, RuntimeCheckpointComponents, RuntimeSessionState,
-        SessionCommandPayload, SessionCreationHead, SessionCursorError, SessionStoreCreateRequest,
-        TurnInputAdmissionMode, TurnInputCheckpointBoundary, TurnInputCompletion,
-        TurnInputCompletionData, TurnInputIngress, TurnInputState, TurnInputStateKind,
-        TurnLaneAdmissionPolicy, TurnWorkPayload,
+        QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkKind, QueuedWorkPayload,
+        RuntimeCheckpointComponents, RuntimeSessionState, SessionCreationHead, SessionCursorError,
+        SessionStoreCreateRequest, TurnInputAdmissionMode, TurnInputCheckpointBoundary,
+        TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputState,
+        TurnInputStateKind, TurnLaneAdmissionPolicy,
     };
     pub use lash_core::session_graph::RealizedNodeTimestamp;
     /// The artifact-cleanup ledger a [`StoreSet`](crate::StoreSet) hands out

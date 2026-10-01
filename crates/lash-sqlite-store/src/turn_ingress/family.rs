@@ -55,10 +55,7 @@ lash_store_sql::statements! {
                 ?4 > 0 AND EXISTS (
                     SELECT 1
                     FROM queued_work_head_candidate AS head
-                    JOIN queued_work_items AS item
-                      ON item.batch_id = head.head_batch_id
                     WHERE head.head_delivery_policy = 'earliest_safe_boundary'
-                      AND json_extract(item.payload_json, '$.type') <> 'session_command'
                     LIMIT 1
                 )
              )";
@@ -99,10 +96,7 @@ lash_store_sql::statements! {
                 ?4 > 0 AND EXISTS (
                     SELECT 1
                     FROM queued_work_head_candidate AS head
-                    JOIN queued_work_items AS item
-                      ON item.batch_id = head.head_batch_id
                     WHERE head.head_delivery_policy = 'earliest_safe_boundary'
-                      AND json_extract(item.payload_json, '$.type') <> 'session_command'
                     LIMIT 1
                 )
              )";

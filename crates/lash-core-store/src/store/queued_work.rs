@@ -165,19 +165,18 @@ pub struct TurnLaneCandidate {
 impl TurnLaneCandidate {
     pub fn from_batch(batch: &QueuedWorkBatch) -> Self {
         let mut turn_causes = Vec::new();
-        for item in &batch.items {
-            match &item.payload {
-                QueuedWorkPayload::ProcessWake { wake } => {
-                    turn_causes.push(crate::process_wake_turn_cause(wake));
-                }
-                QueuedWorkPayload::SessionCommand { .. } => {}
+        match &batch.payload {
+            QueuedWorkPayload::ProcessWake { wake } => {
+                turn_causes.push(crate::process_wake_turn_cause(wake));
             }
+            QueuedWorkPayload::SessionCommand { .. } => {}
         }
+
         Self {
             batch_id: batch.batch_id.clone(),
             enqueue_seq: batch.enqueue_seq,
             delivery_policy: batch.delivery_policy,
-            kind: batch.kind,
+            kind: batch.kind(),
             authority: batch.authority.clone(),
             merge_key: batch.merge_key.clone(),
             enqueued_at_ms: batch.enqueued_at_ms,

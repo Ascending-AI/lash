@@ -18,8 +18,9 @@ result; they do not own a turn's continuation.
 
 ### 1. The model
 
-`pending_turn_inputs` holds host input. `queued_work_batches` and
-`queued_work_items` hold process wakes and session commands.
+`pending_turn_inputs` holds host input. Each `queued_work_batches` row holds
+one process wake or session command in `payload_json`; its `work_kind` CHECK
+agrees with the payload.
 `session_ingress_sequence` allocates one per-session `enqueue_seq` across both
 admission families. The counter is allocated inside the producer transaction.
 The command lane is selected by kind; input and wakes form the turn lane.
@@ -303,8 +304,8 @@ an admission refusal retains its typed cause through command settlement to the h
 Terminal items stay in place as tombstones. Tombstones preserve kind, source
 key, sequence, submitted delivery, digest, terminal cause, and terminal time,
 with no admission binding. A queued-work tombstone records `terminal_cause`
-and `terminal_at_ms`; an input's terminal state names its cause and it records
-`terminal_at_ms`. Cancelled items cannot reopen on retry. Terminal causes
+and `terminal_at_ms`; an input's terminal state owns its cause and terminal time, decoded together
+from `state`, `ingress_json` and `terminal_at_ms`. Cancelled items cannot reopen on retry. Terminal causes
 distinguish delivered input or wake, applied command, stale config revision,
 and cancellation.
 Open-row selection excludes tombstones. Host vacuum removes queued-work

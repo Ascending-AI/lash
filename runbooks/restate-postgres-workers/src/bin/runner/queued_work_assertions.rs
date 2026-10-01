@@ -27,11 +27,6 @@ struct RetainedWake {
     terminal_at_ms: Option<i64>,
     admitted_root: Option<String>,
     admitted_by: Option<String>,
-    items: Vec<RetainedWakeItem>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct RetainedWakeItem {
     payload_json: String,
 }
 
@@ -55,17 +50,14 @@ impl RetainedWake {
 
 async fn retained_queued_work_snapshot(pool: &sqlx::PgPool) -> Result<Vec<Value>> {
     sqlx::query_scalar(
-        "SELECT to_jsonb(batch) || jsonb_build_object('items', COALESCE((
-             SELECT jsonb_agg(to_jsonb(item) ORDER BY item.item_index)
-             FROM lash_queued_work_items item WHERE item.batch_id = batch.batch_id
-         ), '[]'::jsonb))
+        "SELECT to_jsonb(batch)
          FROM lash_queued_work_batches batch
          WHERE batch.session_id = $1 ORDER BY batch.enqueue_seq",
     )
     .bind(DEFAULT_SESSION_ID)
     .fetch_all(pool)
     .await
-    .context("snapshot retained queued batches and items, including terminal causes")
+    .context("snapshot retained queued batches, including terminal causes")
 }
 
 pub(super) async fn assert_retained_wake_tombstones(storage: &PostgresStorage) -> Result<()> {
@@ -79,10 +71,7 @@ pub(super) async fn assert_retained_wake_tombstones(storage: &PostgresStorage) -
     for snapshot in &before {
         let row: RetainedWake = serde_json::from_value(snapshot.clone())?;
         let terminal = row.terminal()?;
-        let [item] = row.items.as_slice() else {
-            anyhow::bail!("expected exactly one retained wake item: {row:?}");
-        };
-        let QueuedWorkPayload::ProcessWake { wake } = serde_json::from_str(&item.payload_json)?
+        let QueuedWorkPayload::ProcessWake { wake } = serde_json::from_str(&row.payload_json)?
         else {
             anyhow::bail!("expected retained process-wake payload: {row:?}");
         };
@@ -146,7 +135,7 @@ mod tests {
             terminal_at_ms: cause.map(|_| 123),
             admitted_root: None,
             admitted_by: None,
-            items: vec![],
+            payload_json: String::new(),
         }
     }
 

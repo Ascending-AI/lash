@@ -23,7 +23,7 @@
 //! | Usage accounting | `usage_runs`, `usage_facts`, `usage_owner_retirements` | Owner totals and completeness of a settled owner, and a retired owner's retirement |
 //! | Session retention | `node_anchors`, `deleted_sessions` | `fork_points`, deletion probe, and typed `SessionDeleted` refusal to reopen a retired id |
 //! | Attachments | `attachment_referrer_edges`, `attachment_pending_writes`, `attachment_uploads`, SQLite `artifact_refs`, PostgreSQL's artifact table | The committed session's referrer edge plus process-execution-environment reference recovery |
-//! | Receiver queue | `queued_work_batches`, `queued_work_items`, `pending_turn_inputs`, `wake_redelivery_fences` | Queue/input payloads, deterministic ids, and typed wake-rewind refusal |
+//! | Receiver queue | `queued_work_batches`, `pending_turn_inputs`, `wake_redelivery_fences` | Queue/input payloads, deterministic ids, and typed wake-rewind refusal |
 //! | Processes | `processes`, `process_events`, `process_change_clock`, `process_observers`, `process_segment_handovers`, `process_tombstones`, `process_wake_deliveries`, `wake_allocation_floors` | Process state; every event payload; observers; continuation; wake delivery/floor; paginated change feed; typed `ProcessNoLongerRetained` tombstone |
 //! | Triggers | `trigger_subscriptions`, `trigger_occurrences`, `trigger_deliveries`, `trigger_mutation_receipts` | List/filter, delivery reservation, deterministic receipt replay, and `Unchanged` re-registration |
 //!
@@ -1014,10 +1014,9 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
             1
         ))
     );
-    assert_eq!(queued[0].items.len(), 1);
     assert!(
         matches!(
-            &queued[0].items[0].payload,
+            &queued[0].payload,
             QueuedWorkPayload::ProcessWake { wake }
                 if wake.process_id == queue_wake_process()
                     && wake.input == "durable read queued task"

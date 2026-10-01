@@ -113,7 +113,7 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
         sql.queued_batches.select_admitted_by_step.sql(),
         sql.queued_batches.admit.sql(),
         sql.queued_batches.deliver_open_command.sql(),
-        sql.queued_batches.select_admitted_batch_head_payload.sql(),
+        sql.queued_batches.select_admitted_batch_payload.sql(),
         sql.queued_batches.settle_admitted.sql(),
         sql.queued_batches.settle_command.sql(),
         sql.queued_batches.withdraw_open.sql(),
@@ -131,9 +131,6 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
         sql.queued_batches_sqlite
             .admission_candidates_boundary
             .sql(),
-        sql.queued_items.insert_new.sql(),
-        sql.queued_items.list_by_batch.sql(),
-        sql.queued_items_sqlite.list_by_batches.sql(),
         sql.cancel_requests.delete_by_session.sql(),
         sql.cancel_requests.advance_intent_revision.sql(),
         sql.cancel_requests_sqlite.insert_first.sql(),
@@ -308,21 +305,6 @@ fn a_root_release_seeks_the_admission_index() {
         &conn,
         &sql.queued_batches.release_root,
         "idx_queued_work_admission_order",
-    );
-}
-
-#[test]
-fn the_multi_batch_item_read_seeks_its_batch() {
-    // The admission path hydrates a run of batches in one page; if the `json_each`
-    // bind scans `queued_work_items` the page costs the whole table.
-    let conn = catalog();
-    let plan = plan(
-        &conn,
-        turn_ingress_sql().queued_items_sqlite.list_by_batches.sql(),
-    );
-    assert!(
-        plan.contains("USING INDEX") || plan.contains("USING PRIMARY KEY"),
-        "the multi-batch item read no longer seeks:\n{plan}"
     );
 }
 

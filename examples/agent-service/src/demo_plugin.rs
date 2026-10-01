@@ -342,7 +342,7 @@ mod tests {
                 lash::persistence::QueuedWorkBatchDraft::new(
                     session_id.clone(),
                     lash::persistence::DeliveryPolicy::EarliestSafeBoundary,
-                    lash::persistence::TurnWorkPayload::process_wake(wake),
+                    lash::persistence::QueuedWorkPayload::process_wake(wake),
                 )
                 .with_source_key(lash::process::process_wake_source_key(&process_id, 1))
                 .with_process_wake_source(process_id, 1),

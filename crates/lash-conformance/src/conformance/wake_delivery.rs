@@ -709,7 +709,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         .collect::<Vec<_>>();
     assert_eq!(coalesced_receiver_rows.len(), 2);
     assert!(coalesced_receiver_rows.iter().all(|batch| {
-        batch.kind == crate::QueuedWorkKind::Turn
+        batch.kind() == crate::QueuedWorkKind::Turn
             && batch.merge_key.as_deref() == Some(crate::PROCESS_WAKE_MERGE_KEY)
     }));
 
@@ -1817,13 +1817,11 @@ async fn mixed_era_floor_and_ordering(
         .await
         .expect("list mixed-era receiver queue")
         .into_iter()
-        .filter_map(|batch| {
-            batch.items.into_iter().find_map(|item| match item.payload {
-                crate::QueuedWorkPayload::ProcessWake { wake } if wake.process_id == process_id => {
-                    Some(wake.sequence)
-                }
-                _ => None,
-            })
+        .filter_map(|batch| match batch.payload {
+            crate::QueuedWorkPayload::ProcessWake { wake } if wake.process_id == process_id => {
+                Some(wake.sequence)
+            }
+            _ => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(queued_sequences, vec![1, 2, sender_floor_wake.sequence]);

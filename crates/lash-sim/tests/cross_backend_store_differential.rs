@@ -940,8 +940,8 @@ type QueuedWorkBatchRow = (
     Option<String>,
     Option<String>,
     Option<String>,
+    String,
 );
-type QueuedWorkItemRow = (String, i64, String);
 
 enum RawDurableReader {
     /// A SQLite durable core, file or memory: `path` is the file, or the

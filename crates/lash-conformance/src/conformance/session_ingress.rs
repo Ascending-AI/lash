@@ -27,7 +27,6 @@ pub struct SessionIngressHandles {
 pub struct IngressAdmissionSnapshot {
     pub inputs: i64,
     pub batches: i64,
-    pub items: i64,
     pub run_specs: i64,
     pub obligations: i64,
     pub sequence: i64,
@@ -220,7 +219,6 @@ pub async fn ingress_reserved_source_keys_are_refused_before_admission(
         IngressAdmissionSnapshot {
             inputs: 3,
             batches: 2,
-            items: 2,
             run_specs: 1,
             obligations: 5,
             sequence: 5,

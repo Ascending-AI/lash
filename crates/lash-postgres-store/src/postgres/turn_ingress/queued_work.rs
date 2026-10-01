@@ -23,9 +23,9 @@ lash_store_sql::statements! {
         /// constraint is only the backstop.
         insert_new = "INSERT INTO queued_work_batches (
                  enqueue_seq, batch_id, session_id, source_key, delivery_policy, work_kind,
-                 authority_json, merge_key, enqueued_at_ms, submission_digest
+                 authority_json, merge_key, enqueued_at_ms, submission_digest, payload_json
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)";
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)";
 
         /// The facts the settlement verdict consults about live batch `?2`
         /// of session `?1`, locked for the caller's transaction: a tombstone
@@ -44,7 +44,7 @@ lash_store_sql::statements! {
         /// command is being applied, so a withdrawal no longer reaches it.
         select_cancelable = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
-                    admitted_root, admitted_by, terminal_cause, terminal_at_ms
+                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json
              FROM queued_work_batches
              WHERE session_id = ?1
                AND batch_id = ?2
@@ -69,7 +69,7 @@ lash_store_sql::statements! {
              )
              SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
-                    admitted_root, admitted_by, terminal_cause, terminal_at_ms
+                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
              WHERE session_id = ?1
@@ -97,7 +97,7 @@ lash_store_sql::statements! {
              )
              SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
-                    admitted_root, admitted_by, terminal_cause, terminal_at_ms
+                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
              WHERE session_id = ?1 AND work_kind = 'turn'
@@ -127,7 +127,7 @@ lash_store_sql::statements! {
              )
              SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
-                    admitted_root, admitted_by, terminal_cause, terminal_at_ms
+                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
              WHERE session_id = ?1 AND work_kind = 'turn'
@@ -137,18 +137,5 @@ lash_store_sql::statements! {
              ORDER BY enqueue_seq ASC
              LIMIT ?2
              FOR UPDATE OF queued_work_batches SKIP LOCKED";
-    }
-}
-
-lash_store_sql::statements! {
-    /// `queued_work_items` statements only PostgreSQL issues.
-    pub(crate) struct QueuedItemPostgresStatements @ "queued_work_item" {
-        /// SQLite gets this from the foreign key's `ON DELETE CASCADE`; this
-        /// schema's constraint is not declared cascading, so the sweep names
-        /// the rows itself.
-        delete_by_session = "DELETE FROM queued_work_items
-             WHERE batch_id IN (
-                 SELECT batch_id FROM queued_work_batches WHERE session_id = ?1
-             )";
     }
 }

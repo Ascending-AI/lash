@@ -1,10 +1,10 @@
 //! The turn-ingress tables: how work reaches a session and which root holds
 //! it while it is being done.
 //!
-//! One family, ten tables, two lifecycles:
+//! One family, two lifecycles:
 //!
 //! * **ingress** — [`pending_inputs`] holds the turn inputs a caller submitted
-//!   and [`queued_batches`]/[`queued_items`] the work batches enqueued against
+//!   and [`queued_batches`] the work batches enqueued against
 //!   a session. A row a root admitted names it (`admitted_root`), written
 //!   under the session's current drive fence, and only that root's commit or
 //!   terminal write lets go of it again (FIG-3927).
@@ -23,7 +23,6 @@ pub mod cancellation_bindings;
 pub mod closure_authorizations;
 pub mod pending_inputs;
 pub mod queued_batches;
-pub mod queued_items;
 pub mod retired_scopes;
 pub mod run_specs;
 pub mod tool_intent_submissions;

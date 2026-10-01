@@ -54,7 +54,7 @@ pub async fn enqueue_wake_delivery(
                                 "batch_id": enqueued.batch_id,
                                 "source_key": enqueued.source_key,
                                 "delivery_policy": enqueued.delivery_policy,
-                                "work_kind": enqueued.kind,
+                                "work_kind": enqueued.kind(),
                                 "authority": enqueued.authority,
                                 "merge_key": enqueued.merge_key,
                                 "payload_types": ["process_wake"],

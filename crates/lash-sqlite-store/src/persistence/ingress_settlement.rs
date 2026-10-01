@@ -296,7 +296,7 @@ fn admitted_batch_conn(
     )?;
     let row =
         row.ok_or_else(|| StoreError::Backend(format!("admitted batch `{batch_id}` vanished")))?;
-    queued_work_batch_from_conn(tx, row)
+    queued_work_batch_from_row(row)
 }
 
 /// Settle input `input_id`, held by `root`, into the terminal `state` at

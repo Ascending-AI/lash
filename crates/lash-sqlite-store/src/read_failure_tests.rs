@@ -292,6 +292,9 @@ async fn queued_work_hydration_rejects_kind_payload_contradiction() {
         .await
         .expect("enqueue command");
     let raw = rusqlite::Connection::open(&path).expect("open raw connection");
+    // Plant corruption past the SQL CHECK to exercise the row decoder.
+    raw.pragma_update(None, "ignore_check_constraints", true)
+        .expect("allow the planted family contradiction");
     raw.execute(
         "UPDATE queued_work_batches SET work_kind = 'turn' WHERE batch_id = ?1",
         params![batch.batch_id.as_str()],
@@ -305,17 +308,9 @@ async fn queued_work_hydration_rejects_kind_payload_contradiction() {
     );
 }
 
-/// Hydrating a queued-work batch reads two tables: the batch row, then its
-/// item rows. Both reads must come from one snapshot.
-///
-/// FIG-3017: they used to run in autocommit, so each took its own snapshot and
-/// another connection's commit could land between them. A batch consumed in
-/// that window was returned as a header with no payloads, and the reader
-/// reported `StoredDataCorrupt { record_kind: "QueuedWorkBatch", message:
-/// "queued work requires at least one payload" }` — a live write reported as
-/// corruption. The window is one commit wide, so the seam, not load, is what
-/// drives it: `pause_queued_work_hydration` stops the read between the two
-/// statements and the delete commits from a second connection while it waits.
+/// A queued batch and its payload come from one row snapshot. A competing
+/// delete after that read must preserve the fetched payload until the reader
+/// returns; the next read sees the deletion.
 #[derive(Clone, Copy)]
 enum QueuedWorkRead {
     All,
@@ -364,9 +359,7 @@ async fn queued_work_read_survives_a_consume_mid_hydration(session_id: &str, rea
     });
     pause.wait_until_reached().await;
 
-    // A second connection consumes the batch while the read is between its two
-    // statements. The cascade takes the item rows with the batch row, which is
-    // what the reader must not observe as a batch without payloads.
+    // A second connection consumes the batch after the reader fetched its row.
     let raw = rusqlite::Connection::open(&path).expect("open raw connection");
     raw.busy_timeout(std::time::Duration::from_millis(15_000))
         .expect("raw busy timeout");
@@ -387,9 +380,10 @@ async fn queued_work_read_survives_a_consume_mid_hydration(session_id: &str, rea
         .expect("a consumed batch is not corrupt data");
     assert_eq!(batches.len(), 1, "the read holds its own snapshot");
     assert_eq!(batches[0].batch_id.as_str(), batch.batch_id.as_str());
-    assert!(
-        !batches[0].items.is_empty(),
-        "a batch row and its item rows come from one snapshot"
+    assert_eq!(
+        serde_json::to_value(&batches[0].payload).expect("record the read payload"),
+        serde_json::to_value(&batch.payload).expect("record the submitted payload"),
+        "the batch and its payload come from one snapshot"
     );
     // The consume really did commit: the next read no longer sees it.
     assert!(

@@ -53,16 +53,6 @@ impl ResidueDigest {
 /// `?1`/`$1` is the session id.
 const SCOPED_READS: &[(&str, &str, &str, &str)] = &[
     (
-        "queued_work_items",
-        "queued_work_items",
-        "SELECT item.* FROM queued_work_items AS item
-         JOIN queued_work_batches AS batch ON batch.batch_id = item.batch_id
-         WHERE batch.session_id = ?1",
-        "SELECT to_jsonb(item)::text FROM lash_queued_work_items AS item
-         JOIN lash_queued_work_batches AS batch ON batch.batch_id = item.batch_id
-         WHERE batch.session_id = $1",
-    ),
-    (
         "checkpoint_blob_refs",
         "checkpoint_blob_refs",
         "SELECT * FROM checkpoint_blob_refs

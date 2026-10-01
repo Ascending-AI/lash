@@ -1,9 +1,10 @@
 //! Queued-work row model: the durable representation of queued batches and
-//! their items, mirroring the SQLite backend's `queued_work` module.
+//! their single payloads, mirroring the SQLite backend's `queued_work` module.
 //! Originated in `session_factory.rs`; every item keeps its previous path
 //! through the crate-root glob.
 
 use crate::*;
+use lash_core_execution::runtime::QueuedWorkPayload;
 
 #[derive(Clone, Debug)]
 pub(crate) struct QueuedBatchRow {
@@ -12,7 +13,7 @@ pub(crate) struct QueuedBatchRow {
     session_id: SessionId,
     source_key: Option<String>,
     pub(crate) delivery_policy: DeliveryPolicy,
-    pub(crate) kind: QueuedWorkKind,
+    pub(crate) payload: QueuedWorkPayload,
     pub(crate) authority: QueuedWorkAuthority,
     pub(crate) merge_key: Option<String>,
     enqueued_at_ms: u64,
@@ -37,6 +38,16 @@ pub(crate) fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError>
             record_kind: "QueuedWorkBatch",
             message: "unknown queued-work kind".to_string(),
         })?;
+    let payload: QueuedWorkPayload = store_decode_json(
+        row.get::<String, _>("payload_json").as_str(),
+        "queued work payload",
+    )?;
+    if kind != payload.kind() {
+        return Err(StoreError::StoredDataCorrupt {
+            record_kind: "QueuedWorkBatch",
+            message: "work kind contradicts its payload".into(),
+        });
+    }
     let authority_json: String = row.get("authority_json");
     Ok(QueuedBatchRow {
         enqueue_seq: u64_from_sql("QueuedWorkBatch", "enqueue_seq", row.get("enqueue_seq"))?,
@@ -44,7 +55,7 @@ pub(crate) fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError>
         session_id: SessionId::from(row.get::<String, _>("session_id")),
         source_key: row.get("source_key"),
         delivery_policy,
-        kind,
+        payload,
         authority: store_decode_json(&authority_json, "queued work authority")?,
         merge_key: row.get("merge_key"),
         enqueued_at_ms: u64_from_sql(
@@ -81,46 +92,25 @@ pub(crate) async fn load_queued_batch(
         return Ok(None);
     };
     let row = queued_batch_row(row)?;
-    queued_work_batch_from_row(tx, row).await.map(Some)
+    queued_work_batch_from_row(row).map(Some)
 }
 
-pub(crate) async fn queued_work_batch_from_row(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+pub(crate) fn queued_work_batch_from_row(
     row: QueuedBatchRow,
 ) -> Result<QueuedWorkBatch, StoreError> {
-    let item_rows = sqlx::query(
-        crate::turn_ingress::turn_ingress_sql()
-            .queued_items
-            .list_by_batch
-            .sql(),
-    )
-    .bind(row.batch_id.as_str())
-    .fetch_all(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    let mut items = Vec::new();
-    for item in item_rows {
-        let payload_json: String = item.get(1);
-        items.push(QueuedWorkItem {
-            item_id: item.get(0),
-            payload: store_decode_json(&payload_json, "queued work payload")?,
-        });
-    }
     let batch = QueuedWorkBatch {
         batch_id: row.batch_id.into(),
         session_id: row.session_id,
         enqueue_seq: row.enqueue_seq,
         source_key: row.source_key,
         delivery_policy: row.delivery_policy,
-        kind: row.kind,
         authority: row.authority,
         merge_key: row.merge_key,
         enqueued_at_ms: row.enqueued_at_ms,
-        items,
+        payload: row.payload,
         submission_digest: row.submission_digest,
         terminal: row.terminal,
     };
-    batch.validate_payload_family()?;
     Ok(batch)
 }
 
@@ -155,7 +145,7 @@ pub(crate) async fn complete_admitted_batch_tx(
         observed.as_ref().map(Option::as_deref),
     )?;
     // The wake identity a settled batch contributes to its redelivery fence:
-    // the source key (advisory-lock identity) and the head payload, both
+    // the source key (advisory-lock identity) and the sole payload, both
     // root-keyed reads over the locked row.
     let source_key: Option<String> =
         sqlx::query_scalar(sql.family_postgres.select_admitted_batch_source_key.sql())
@@ -167,7 +157,7 @@ pub(crate) async fn complete_admitted_batch_tx(
             .map_err(store_sqlx_error)?
             .flatten();
     let payload_json: Option<String> =
-        sqlx::query_scalar(sql.queued_batches.select_admitted_batch_head_payload.sql())
+        sqlx::query_scalar(sql.queued_batches.select_admitted_batch_payload.sql())
             .bind(session_id.as_str())
             .bind(batch_id.as_str())
             .bind(root.as_str())
@@ -176,12 +166,7 @@ pub(crate) async fn complete_admitted_batch_tx(
             .map_err(store_sqlx_error)?;
     let terminal_wake = payload_json
         .as_deref()
-        .map(|json| {
-            store_decode_json::<lash_core_execution::runtime::QueuedWorkPayload>(
-                json,
-                "queued work payload",
-            )
-        })
+        .map(|json| store_decode_json::<QueuedWorkPayload>(json, "queued work payload"))
         .transpose()?
         .and_then(|payload| {
             lash_core_execution::store::TerminalProcessWake::of_payload(source_key, &payload)

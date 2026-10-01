@@ -10,12 +10,12 @@ pub const TABLE: &str = "queued_work_batches";
 /// row decoders read by column name so the order is the list's to choose.
 pub const COLUMNS: &str = "enqueue_seq, batch_id, session_id, source_key, delivery_policy,
      work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest, admitted_root,
-     admitted_by, terminal_cause, terminal_at_ms";
+     admitted_by, terminal_cause, terminal_at_ms, payload_json";
 
 /// The columns written after allocation under the session lock.
 pub const INSERT_COLUMNS: &str =
     "enqueue_seq, batch_id, session_id, source_key, delivery_policy, work_kind,
-     authority_json, merge_key, enqueued_at_ms, submission_digest";
+     authority_json, merge_key, enqueued_at_ms, submission_digest, payload_json";
 
 /// The facts the settlement verdict
 /// [`require_admitted_to_root`](lash_core::store_backend_support::require_admitted_to_root)
@@ -31,7 +31,7 @@ crate::statements! {
     pub struct QueuedBatchStatements @ "queued_work_batch" {
         select_by_id = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
-                    admitted_root, admitted_by, terminal_cause, terminal_at_ms
+                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json
              FROM queued_work_batches
              WHERE batch_id = ?1";
 
@@ -53,7 +53,7 @@ crate::statements! {
         /// order: tombstones are not queued work.
         list_by_session = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
-                    admitted_root, admitted_by, terminal_cause, terminal_at_ms
+                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json
              FROM queued_work_batches
              WHERE session_id = ?1 AND terminal_cause IS NULL
              ORDER BY enqueue_seq ASC";
@@ -63,7 +63,7 @@ crate::statements! {
         /// so they are open until their tombstone.
         list_open = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
-                    admitted_root, admitted_by, terminal_cause, terminal_at_ms
+                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json
              FROM queued_work_batches
              WHERE session_id = ?1 AND admitted_root IS NULL AND terminal_cause IS NULL
              ORDER BY enqueue_seq ASC";
@@ -74,7 +74,7 @@ crate::statements! {
         select_admitted_by_step = "SELECT enqueue_seq, batch_id, session_id, source_key,
                     delivery_policy, work_kind, authority_json, merge_key,
                     enqueued_at_ms, submission_digest, admitted_root, admitted_by,
-                    terminal_cause, terminal_at_ms
+                    terminal_cause, terminal_at_ms, payload_json
              FROM queued_work_batches
              WHERE session_id = ?1 AND admitted_root = ?2 AND admitted_by = ?3
              ORDER BY enqueue_seq ASC";
@@ -125,27 +125,13 @@ crate::statements! {
                AND admitted_root IS NULL
                AND terminal_cause IS NULL";
 
-        /// The first payload of batch `?2` of session `?1`, if root `?3`
-        /// still holds it: the wake identity a settled batch contributes to
-        /// its redelivery fence.
-        ///
-        /// The wake-source key travels in the plan's covered-item list, so the
-        /// payload is the only fact still on the row. Both backends decode it
-        /// the same way; the wake batch carries exactly one wake item
-        /// (`validate_process_wake_source`), so the head payload is the batch's
-        /// whole wake contribution.
-        select_admitted_batch_head_payload = "SELECT item.payload_json
-             FROM queued_work_batches AS batch
-             JOIN queued_work_items AS item ON item.batch_id = batch.batch_id
-             WHERE batch.session_id = ?1
-               AND batch.batch_id = ?2
-               AND batch.admitted_root = ?3
-             ORDER BY item.item_index ASC
-             LIMIT 1";
+        /// The sole payload of batch `?2` of session `?1`, if root `?3` holds it.
+        select_admitted_batch_payload = "SELECT payload_json FROM queued_work_batches
+             WHERE session_id = ?1 AND batch_id = ?2 AND admitted_root = ?3";
 
         /// Settle batch `?2` of session `?1` under root `?3`, which must hold
         /// it, into its tombstone with cause `?4` at `?5` (ADR 0101 §8): the
-        /// binding goes, the submission stays, and its items stay with it
+        /// binding goes and the submission stays with its payload
         /// until host vacuum.
         settle_admitted = "UPDATE queued_work_batches
              SET admitted_root = NULL,
@@ -214,8 +200,7 @@ crate::statements! {
                AND terminal_cause IS NULL";
 
         /// Remove session `?1`'s tombstones: host vacuum, the only reclaim a
-        /// tombstone has short of session deletion. Their items go with them
-        /// through the foreign key's cascade. A vacuumed wake's redelivery
+        /// tombstone has short of session deletion. A vacuumed wake's redelivery
         /// still meets its receiver floor.
         delete_tombstones = "DELETE FROM queued_work_batches
              WHERE session_id = ?1 AND terminal_cause IS NOT NULL";

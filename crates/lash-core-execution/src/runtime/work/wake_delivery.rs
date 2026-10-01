@@ -419,7 +419,7 @@ impl WakeDeliveryDriver {
                         batch_id = %enqueued.batch_id,
                         source_key = ?enqueued.source_key,
                         delivery_policy = enqueued.delivery_policy.as_str(),
-                        work_kind = enqueued.kind.as_str(),
+                        work_kind = enqueued.kind().as_str(),
                         authority = ?enqueued.authority,
                         merge_key = ?enqueued.merge_key,
                         outcome = "enqueued",

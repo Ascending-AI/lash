@@ -1282,7 +1282,6 @@ pub(crate) async fn delete_session_tx(
     // `close_session` intent stays as its deletion tombstone.
     crate::session_roots::delete_session_roots_conn(tx, session_id).await?;
     for statement in [
-        turn_ingress.queued_items_postgres.delete_by_session.sql(),
         turn_ingress.queued_batches.delete_by_session.sql(),
         crate::process_sql::process_sql()
             .fence

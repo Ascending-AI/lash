@@ -14,7 +14,6 @@ pub(super) fn journaled_drive_inputs(live_generation: u64) -> lash_core::Admitte
             enqueued_at_ms: live_generation,
             input: lash_core::TurnInput::text("deploy staging"),
             run_spec: None,
-            terminal_at_ms: None,
         }],
         applications: Vec::new(),
     }

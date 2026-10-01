@@ -113,13 +113,8 @@ fn oracle_wake_draft(session_id: &SessionId, row_id: &str) -> QueuedWorkBatchDra
 
 /// The row id an admitted literal-oracle batch carries in its one wake.
 fn oracle_row_id(batch: &lash_core::runtime::QueuedWorkBatch) -> String {
-    match batch.items.as_slice() {
-        [
-            lash_core::runtime::QueuedWorkItem {
-                payload: lash_core::runtime::QueuedWorkPayload::ProcessWake { wake },
-                ..
-            },
-        ] => wake.input.clone(),
+    match &batch.payload {
+        lash_core::runtime::QueuedWorkPayload::ProcessWake { wake } => wake.input.clone(),
         other => panic!("literal-oracle batch must carry one process wake, got {other:?}"),
     }
 }

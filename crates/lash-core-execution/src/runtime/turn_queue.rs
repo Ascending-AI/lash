@@ -302,7 +302,7 @@ mod typed_payload_tests {
     }
 
     #[test]
-    fn queued_work_typed_payloads_preserve_command_wire_shape() {
+    fn queued_work_draft_records_one_command_payload() {
         let draft = QueuedWorkBatchDraft::new(
             "s",
             DeliveryPolicy::EarliestSafeBoundary,
@@ -311,9 +311,9 @@ mod typed_payload_tests {
             },
         );
         let expected = serde_json::json!({
-            "session_id": "s", "delivery_policy": "earliest_safe_boundary", "kind": "control",
+            "session_id": "s", "delivery_policy": "earliest_safe_boundary",
             "authority": {},
-            "payloads": [{"type": "session_command", "command": {"kind": "refresh_tool_catalog", "reason": "refresh"}}]
+            "payload": {"type": "session_command", "command": {"kind": "refresh_tool_catalog", "reason": "refresh"}}
         });
         assert_eq!(serde_json::to_value(&draft).unwrap(), expected);
         let restored: QueuedWorkBatchDraft = serde_json::from_value(expected).unwrap();
@@ -330,12 +330,12 @@ mod typed_payload_tests {
             serde_json::json!([turn, command.clone()]),
             serde_json::json!([command.clone(), command]),
         ] {
-            assert!(serde_json::from_value::<QueuedWorkBatchPayloads>(payloads).is_err());
+            assert!(serde_json::from_value::<QueuedWorkPayload>(payloads).is_err());
         }
     }
     #[test]
-    fn queued_work_typed_draft_preserves_json_and_messagepack_bytes() {
-        // Independent pin of the pre-cutover draft envelope and raw item array.
+    fn queued_work_single_payload_draft_round_trips_json_and_messagepack() {
+        // Independent pin of the single-payload draft envelope.
         #[derive(serde::Serialize)]
         struct WireDraft<'a> {
             session_id: &'a SessionId,
@@ -344,46 +344,38 @@ mod typed_payload_tests {
             #[serde(skip_serializing_if = "Option::is_none")]
             process_wake_source: Option<&'a ProcessWakeSource>,
             delivery_policy: DeliveryPolicy,
-            kind: QueuedWorkKind,
             authority: &'a QueuedWorkAuthority,
             #[serde(skip_serializing_if = "Option::is_none")]
             merge_key: Option<&'a str>,
-            payloads: Vec<QueuedWorkPayload>,
+            payload: QueuedWorkPayload,
         }
         let command = SessionCommand::RefreshToolCatalog {
             reason: "wire-pin".into(),
         };
         let turn = QueuedWorkPayload::process_wake(wake(1));
-        let turn_work = || TurnWorkPayload::process_wake(wake(1));
+
         let mut command_draft =
             QueuedWorkBatchDraft::new("s", DeliveryPolicy::EarliestSafeBoundary, command.clone());
         command_draft.source_key = Some("source".into());
         command_draft.merge_key = Some("merge".into());
-        let turn_draft = QueuedWorkBatchDraft::new(
-            "s",
-            DeliveryPolicy::EarliestSafeBoundary,
-            QueuedWorkBatchPayloads::TurnWork {
-                first: turn_work(),
-                rest: vec![turn_work()],
-            },
-        );
-        for (draft, kind, payloads) in [
+        let turn_draft =
+            QueuedWorkBatchDraft::new("s", DeliveryPolicy::EarliestSafeBoundary, turn.clone());
+        for (draft, kind, payload) in [
             (
                 command_draft,
                 QueuedWorkKind::Control,
-                vec![QueuedWorkPayload::session_command(command)],
+                QueuedWorkPayload::session_command(command),
             ),
-            (turn_draft, QueuedWorkKind::Turn, vec![turn.clone(), turn]),
+            (turn_draft, QueuedWorkKind::Turn, turn),
         ] {
             let wire = WireDraft {
                 session_id: &draft.session_id,
                 source_key: draft.source_key.as_deref(),
                 process_wake_source: draft.process_wake_source.as_ref(),
                 delivery_policy: draft.delivery_policy,
-                kind,
                 authority: &draft.authority,
                 merge_key: draft.merge_key.as_deref(),
-                payloads,
+                payload,
             };
             assert_eq!(
                 serde_json::to_vec(&draft).unwrap(),

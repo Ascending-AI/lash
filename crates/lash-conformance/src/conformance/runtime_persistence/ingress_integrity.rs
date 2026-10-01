@@ -85,7 +85,8 @@ async fn resubmitted_terminal(
     assert_eq!(existing.enqueue_seq, original.enqueue_seq);
     assert_eq!(existing.submission_digest, original.submission_digest);
     assert!(
-        existing.items.len() == original.items.len(),
+        serde_json::to_value(&existing.payload).expect("encode payload")
+            == serde_json::to_value(&original.payload).expect("encode original payload"),
         "the tombstone keeps its submission"
     );
     existing.terminal
@@ -530,10 +531,22 @@ pub async fn every_terminal_ingress_item_leaves_a_tombstone(store: Arc<dyn Runti
         .enqueue_pending_turn_input(withdrawn_draft.clone())
         .await
         .expect("enqueue the withdrawn input");
-    store
+    let cancelled = store
         .cancel_pending_turn_input(&session, withdrawn_input.input_id.as_str())
         .await
         .expect("withdraw the input");
+    let crate::PendingTurnInputCancelOutcome::Cancelled(cancelled) = cancelled else {
+        panic!("an open input must be cancelled");
+    };
+    let returned_terminal = cancelled
+        .terminal()
+        .expect("the cancellation receipt is terminal");
+    let persisted = resubmitted_input(&store, withdrawn_draft.clone(), &withdrawn_input).await;
+    assert_eq!(
+        Some(returned_terminal),
+        persisted.terminal(),
+        "the receipt and durable tombstone agree"
+    );
     let delivered_draft = pending_next_turn_input_draft(&session, "delivered input")
         .with_source_key("delivered-input");
     let delivered_input = store
@@ -785,4 +798,39 @@ pub async fn a_host_drain_policy_keeps_principals_apart(store: Arc<dyn RuntimeSt
     )
     .await;
     assert_eq!(second.batch_ids(), vec![batches[2].batch_id.clone()]);
+}
+
+/// A recorded queued-work admission has one payload, so replay cannot hide
+/// an unfenced second wake in the same batch.
+#[expect(clippy::expect_used, reason = "conformance-law fixture")]
+pub async fn a_recorded_queued_batch_refuses_multiple_payloads(store: Arc<dyn RuntimeStore>) {
+    let session = SessionId::from("ingress-one-payload");
+    let batch = store
+        .enqueue_queued_work(wake(&session, "single-process", 1, "wake"))
+        .await
+        .expect("enqueue one wake");
+    let recorded = serde_json::to_value(&batch).expect("record the batch");
+    let restored: QueuedWorkBatch =
+        serde_json::from_value(recorded.clone()).expect("restore one payload");
+    assert_eq!(restored.batch_id, batch.batch_id);
+    let payload = recorded["payload"].clone();
+    let mut multiple = recorded.clone();
+    multiple["payload"] = serde_json::json!([payload.clone(), payload.clone()]);
+    assert!(
+        serde_json::from_value::<QueuedWorkBatch>(multiple).is_err(),
+        "a recorded admission must refuse multiple payloads"
+    );
+    let mut legacy = recorded;
+    legacy
+        .as_object_mut()
+        .expect("batch is an object")
+        .remove("payload");
+    legacy["items"] = serde_json::json!([
+        {"item_id": "first", "payload": payload.clone()},
+        {"item_id": "second", "payload": payload}
+    ]);
+    assert!(
+        serde_json::from_value::<QueuedWorkBatch>(legacy).is_err(),
+        "the retired item array cannot cross the journal boundary"
+    );
 }

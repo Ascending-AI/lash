@@ -170,9 +170,9 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
             &format!(
                 "INSERT INTO lash_queued_work_batches (enqueue_seq,
                      batch_id, session_id, delivery_policy, work_kind, authority_json,
-                     submission_digest, enqueued_at_ms, {fields}
+                     submission_digest, enqueued_at_ms, payload_json, {fields}
                  ) VALUES (1, 'batch', 'session', 'earliest_safe_boundary', 'turn',
-                           '{{}}', 'digest', 0, {values})"
+                           '{{}}', 'digest', 0, jsonb_build_object('type', 'process_wake')::text, {values})"
             ),
             "ck_queued_work_batches_admission_all_or_none",
         )
@@ -195,19 +195,38 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
         &mut connection,
         "INSERT INTO lash_queued_work_batches (enqueue_seq,
              batch_id, session_id, delivery_policy, work_kind, authority_json,
-             submission_digest, enqueued_at_ms
+             submission_digest, enqueued_at_ms, payload_json
          ) VALUES (1,
-             'bad-kind', 'session', 'earliest_safe_boundary', 'cancel', '{}', 'digest', 0
+             'bad-kind', 'session', 'earliest_safe_boundary', 'cancel', '{}', 'digest', 0, jsonb_build_object('type', 'process_wake')::text
          )",
         "ck_queued_work_batches_work_kind",
     )
     .await;
+    for (kind, payload) in [
+        ("turn", "{}"),
+        ("turn", "null"),
+        ("turn", "[]"),
+        ("turn", r#"{"type":"session_command"}"#),
+        ("control", r#"{"type":"process_wake"}"#),
+    ] {
+        assert_check_rejects(
+            &mut connection,
+            &format!(
+                "INSERT INTO lash_queued_work_batches (enqueue_seq, batch_id, session_id,
+                 delivery_policy, work_kind, authority_json, submission_digest,
+                 enqueued_at_ms, payload_json) VALUES (1, 'bad-payload', 'session',
+                 'earliest_safe_boundary', '{kind}', '{{}}', 'digest', 0, '{payload}')"
+            ),
+            "ck_queued_work_batches_work_kind",
+        )
+        .await;
+    }
     assert_check_rejects(
         &mut connection,
         "INSERT INTO lash_queued_work_batches (enqueue_seq,
              batch_id, session_id, delivery_policy, work_kind, authority_json,
-             submission_digest, enqueued_at_ms
-         ) VALUES (1, 'bad-policy', 'session', 'eventually', 'turn', '{}', 'digest', 0)",
+             submission_digest, enqueued_at_ms, payload_json
+         ) VALUES (1, 'bad-policy', 'session', 'eventually', 'turn', '{}', 'digest', 0, jsonb_build_object('type', 'process_wake')::text)",
         "ck_queued_work_batches_delivery_policy",
     )
     .await;

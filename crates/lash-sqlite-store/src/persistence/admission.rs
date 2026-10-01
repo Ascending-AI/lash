@@ -422,7 +422,7 @@ fn read_step_admission_conn(
         .into_iter()
         .map(pending_turn_input_from_row)
         .collect::<Result<Vec<_>, _>>()?;
-    let batches = queued_work_batches_from_conn(tx, &batch_rows)?;
+    let batches = queued_work_batches_from_rows(&batch_rows)?;
     Ok(CheckpointAdmission {
         inputs: (!inputs.is_empty()).then(|| lash_core_execution::AdmittedTurnInputs {
             session_id: session_id.clone(),
@@ -661,7 +661,7 @@ fn scan_queued_work_candidates_sqlite(
             .map_err(sqlite_error)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
     };
-    let batches = queued_work_batches_from_conn(tx, &rows)?;
+    let batches = queued_work_batches_from_rows(&rows)?;
     let candidates = batches.iter().map(turn_lane_candidate).collect();
     Ok((rows, batches, candidates))
 }

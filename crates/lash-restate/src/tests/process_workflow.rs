@@ -1489,9 +1489,7 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
         .await
         .expect("list queued wakes");
     assert_eq!(queued.len(), 1);
-    assert_eq!(queued[0].items.len(), 1);
-    let lash_core::runtime::QueuedWorkPayload::ProcessWake { wake } = &queued[0].items[0].payload
-    else {
+    let lash_core::runtime::QueuedWorkPayload::ProcessWake { wake } = &queued[0].payload else {
         panic!("expected process wake queue payload");
     };
     assert_eq!(wake.input, "wake-after-rebuild");

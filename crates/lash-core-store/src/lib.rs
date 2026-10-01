@@ -234,8 +234,6 @@ pub(crate) use queued_drain_policy::{
     DrainMode, DrainModePolicy, QueuedDrainSelection, default_queued_drain_policy,
 };
 #[allow(unused_imports)]
-pub(crate) use queued_work_vocabulary::TurnWorkPayload;
-#[allow(unused_imports)]
 pub(crate) use session_graph::{
     SESSION_NODE_BODY_SCHEMA_VERSION, SharedJsonValue, build_active_read_projection,
     build_active_read_replacement, frame_node_id,

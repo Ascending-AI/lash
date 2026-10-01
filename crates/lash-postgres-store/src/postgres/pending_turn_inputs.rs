@@ -18,7 +18,6 @@ pub(crate) struct PendingTurnInputRow {
     /// The root whose admission holds the row; `None` while it is open.
     pub(crate) admitted_root: Option<String>,
     run_spec_hash: Option<String>,
-    terminal_at_ms: Option<u64>,
 }
 
 pub(crate) fn pending_turn_input_row(row: PgRow) -> Result<PendingTurnInputRow, StoreError> {
@@ -28,11 +27,10 @@ pub(crate) fn pending_turn_input_row(row: PgRow) -> Result<PendingTurnInputRow, 
     let state = lash_core_execution::TurnInputState::from_persisted(
         row.get::<String, _>("state").as_str(),
         ingress,
-    )
-    .ok_or_else(|| StoreError::StoredDataCorrupt {
-        record_kind: "TurnInputState",
-        message: "unknown or scope-illegal turn-input state".to_string(),
-    })?;
+        row.get::<Option<i64>, _>("terminal_at_ms")
+            .map(|at| u64_from_sql("PendingTurnInput", "terminal_at_ms", at))
+            .transpose()?,
+    )?;
     Ok(PendingTurnInputRow {
         enqueue_seq: u64_from_sql("PendingTurnInput", "enqueue_seq", row.get("enqueue_seq"))?,
         input_id: row.get("input_id"),
@@ -47,10 +45,6 @@ pub(crate) fn pending_turn_input_row(row: PgRow) -> Result<PendingTurnInputRow, 
         )?,
         admitted_root: row.get("admitted_root"),
         run_spec_hash: row.get("run_spec_hash"),
-        terminal_at_ms: row
-            .get::<Option<i64>, _>("terminal_at_ms")
-            .map(|at| u64_from_sql("PendingTurnInput", "terminal_at_ms", at))
-            .transpose()?,
     })
 }
 
@@ -68,7 +62,6 @@ pub(crate) fn pending_turn_input_from_row(
         run_spec: row
             .run_spec_hash
             .map(lash_core_execution::RunSpecHash::from_stored),
-        terminal_at_ms: row.terminal_at_ms,
     })
 }
 
@@ -234,7 +227,10 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
                     input.input_id
                 )));
             }
-            input.state = lash_core_execution::TurnInputState::Cancelled(input.state.ingress());
+            input.state = lash_core_execution::TurnInputState::Cancelled {
+                ingress: input.state.ingress(),
+                at_ms: now.min(i64::MAX as u64),
+            };
             Ok(lash_core_execution::PendingTurnInputCancelOutcome::Cancelled(input))
         }
     }

@@ -66,8 +66,6 @@ DROP TABLE IF EXISTS lash_turn_park_events CASCADE;
 
 DROP TABLE IF EXISTS lash_queued_work_batches CASCADE;
 
-DROP TABLE IF EXISTS lash_queued_work_items CASCADE;
-
 DROP TABLE IF EXISTS lash_wake_redelivery_fences CASCADE;
 
 DROP TABLE IF EXISTS lash_pending_turn_inputs CASCADE;

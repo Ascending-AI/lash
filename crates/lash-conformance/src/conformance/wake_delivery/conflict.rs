@@ -40,10 +40,10 @@ impl crate::store::RuntimeStoreDecorator for WakeEnqueueFaults {
 impl crate::DeploymentStoreDecorator for WakeEnqueueFaults {}
 
 fn wake_input(batch: &crate::QueuedWorkBatch) -> Option<&str> {
-    batch.items.iter().find_map(|item| match &item.payload {
+    match &batch.payload {
         crate::QueuedWorkPayload::ProcessWake { wake } => Some(wake.input.as_str()),
         crate::QueuedWorkPayload::SessionCommand { .. } => None,
-    })
+    }
 }
 
 /// FIG-4487 (ADR 0101 §8, §9): a delivery whose process fact differs from

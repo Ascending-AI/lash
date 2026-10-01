@@ -718,7 +718,6 @@ async fn withheld_wake_case(
     // result and on the durable cancellation; no host input was affected.
     let expected = vec![crate::TurnCancelAffectedWake::deferred(
         batch.batch_id.clone(),
-        batch.items[0].item_id.clone(),
         wake.clone(),
     )];
     assert_eq!(

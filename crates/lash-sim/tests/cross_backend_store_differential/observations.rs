@@ -292,7 +292,7 @@ pub(super) struct QueuedWorkObservation {
     kind: QueuedWorkKind,
     authority: QueuedWorkAuthority,
     merge_key: Option<String>,
-    payloads: Vec<serde_json::Value>,
+    payload: serde_json::Value,
     admitted_root: Option<String>,
     admitted_by: Option<String>,
 }
@@ -303,16 +303,7 @@ pub(super) struct QueuedWorkObservation {
 )]
 pub(super) fn queued_work_observations_from_sql_rows(
     batches: Vec<QueuedWorkBatchRow>,
-    items: Vec<QueuedWorkItemRow>,
 ) -> Vec<QueuedWorkObservation> {
-    let mut payloads_by_batch = BTreeMap::<String, Vec<(i64, serde_json::Value)>>::new();
-    for (batch_id, item_index, payload_json) in items {
-        payloads_by_batch.entry(batch_id).or_default().push((
-            item_index,
-            serde_json::from_str(&payload_json).expect("decode queued-work payload"),
-        ));
-    }
-
     batches
         .into_iter()
         .enumerate()
@@ -321,7 +312,7 @@ pub(super) fn queued_work_observations_from_sql_rows(
                 ordinal,
                 (
                     _enqueue_seq,
-                    batch_id,
+                    _batch_id,
                     source_key,
                     delivery_policy,
                     work_kind,
@@ -329,10 +320,9 @@ pub(super) fn queued_work_observations_from_sql_rows(
                     merge_key,
                     admitted_root,
                     admitted_by,
+                    payload_json,
                 ),
             )| {
-                let mut payloads = payloads_by_batch.remove(&batch_id).unwrap_or_default();
-                payloads.sort_by_key(|(item_index, _)| *item_index);
                 QueuedWorkObservation {
                     ordinal,
                     source_key,
@@ -343,10 +333,8 @@ pub(super) fn queued_work_observations_from_sql_rows(
                     authority: serde_json::from_str(&authority_json)
                         .expect("decode queued-work authority"),
                     merge_key,
-                    payloads: payloads
-                        .into_iter()
-                        .map(|(_item_index, payload)| payload)
-                        .collect(),
+                    payload: serde_json::from_str(&payload_json)
+                        .expect("decode queued-work payload"),
                     admitted_root,
                     admitted_by,
                 }

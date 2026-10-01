@@ -249,9 +249,7 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         .await
         .expect("list queued work");
     assert_eq!(queued.len(), 3);
-    assert!(queued.iter().all(|batch| batch.items.len() == 1));
-    let lash::persistence::QueuedWorkPayload::ProcessWake { wake } = &queued[0].items[0].payload
-    else {
+    let lash::persistence::QueuedWorkPayload::ProcessWake { wake } = &queued[0].payload else {
         panic!("expected process wake queue payload");
     };
     assert!(wake.input.contains("button_pressed"));

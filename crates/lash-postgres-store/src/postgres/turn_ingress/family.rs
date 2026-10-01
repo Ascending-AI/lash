@@ -54,11 +54,8 @@ lash_store_sql::statements! {
              ) OR (
                 ?4 > 0 AND EXISTS (
                     SELECT 1
-                    FROM queued_work_items AS item
-                    JOIN queued_work_head_candidate AS head
-                      ON head.head_batch_id = item.batch_id
+                    FROM queued_work_head_candidate AS head
                     WHERE head.head_delivery_policy = 'earliest_safe_boundary'
-                      AND item.payload_json::jsonb ->> 'type' <> 'session_command'
                     LIMIT 1
                 )
              )";
@@ -97,11 +94,8 @@ lash_store_sql::statements! {
              ) OR (
                 ?4 > 0 AND EXISTS (
                     SELECT 1
-                    FROM queued_work_items AS item
-                    JOIN queued_work_head_candidate AS head
-                      ON head.head_batch_id = item.batch_id
+                    FROM queued_work_head_candidate AS head
                     WHERE head.head_delivery_policy = 'earliest_safe_boundary'
-                      AND item.payload_json::jsonb ->> 'type' <> 'session_command'
                     LIMIT 1
                 )
              )";
@@ -112,7 +106,7 @@ lash_store_sql::statements! {
         /// The settlement observation needs the source key to decide whether a
         /// settled batch consumed a process wake (and so which fence to raise
         /// before the row goes away). The head payload is the shared
-        /// [`QueuedBatchStatements::select_admitted_batch_head_payload`].
+        /// [`QueuedBatchStatements::select_admitted_batch_payload`].
         select_admitted_batch_source_key = "SELECT source_key
              FROM queued_work_batches
              WHERE session_id = ?1

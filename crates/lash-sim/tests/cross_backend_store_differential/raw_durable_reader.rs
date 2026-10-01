@@ -307,7 +307,7 @@ impl RawDurableReader {
                     .collect();
                 let queued_work_batches: Vec<QueuedWorkBatchRow> = sqlx::query_as(
                     "SELECT enqueue_seq, batch_id, source_key, delivery_policy, work_kind,
-                            authority_json, merge_key, admitted_root, admitted_by
+                            authority_json, merge_key, admitted_root, admitted_by, payload_json
                      FROM lash_queued_work_batches
                      WHERE session_id = $1
                      ORDER BY enqueue_seq ASC",
@@ -316,20 +316,7 @@ impl RawDurableReader {
                 .fetch_all(pool)
                 .await
                 .expect("read Postgres queued-work batches");
-                let queued_work_items: Vec<QueuedWorkItemRow> = sqlx::query_as(
-                    "SELECT item.batch_id, item.item_index::BIGINT, item.payload_json
-                     FROM lash_queued_work_items AS item
-                     JOIN lash_queued_work_batches AS batch
-                       ON batch.batch_id = item.batch_id
-                     WHERE batch.session_id = $1
-                     ORDER BY batch.enqueue_seq ASC, item.item_index ASC",
-                )
-                .bind(session_id.as_str())
-                .fetch_all(pool)
-                .await
-                .expect("read Postgres queued-work items");
-                let queued_work =
-                    queued_work_observations_from_sql_rows(queued_work_batches, queued_work_items);
+                let queued_work = queued_work_observations_from_sql_rows(queued_work_batches);
                 let obligation_rows: Vec<ScopeCloseObligationRow> = sqlx::query_as(
                     "SELECT root, terminal_kind, terminal_at_ms, obligation_id,
                             obligation_state, obligation_attempts::BIGINT, obligation_due_at_ms,
@@ -580,7 +567,7 @@ pub(super) async fn read_sqlite_durable_state(
         let mut statement = connection
             .prepare(
                 "SELECT enqueue_seq, batch_id, source_key, delivery_policy, work_kind,
-                        authority_json, merge_key, admitted_root, admitted_by
+                        authority_json, merge_key, admitted_root, admitted_by, payload_json
                  FROM queued_work_batches
                  WHERE session_id = ?1
                  ORDER BY enqueue_seq ASC",
@@ -598,32 +585,14 @@ pub(super) async fn read_sqlite_durable_state(
                     row.get(6)?,
                     row.get(7)?,
                     row.get(8)?,
+                    row.get(9)?,
                 ))
             })
             .expect("read SQLite queued-work batches")
             .collect::<Result<Vec<_>, _>>()
             .expect("decode SQLite queued-work batches")
     };
-    let queued_work_items = {
-        let mut statement = connection
-            .prepare(
-                "SELECT item.batch_id, item.item_index, item.payload_json
-                 FROM queued_work_items AS item
-                 JOIN queued_work_batches AS batch ON batch.batch_id = item.batch_id
-                 WHERE batch.session_id = ?1
-                 ORDER BY batch.enqueue_seq ASC, item.item_index ASC",
-            )
-            .expect("prepare SQLite queued-work item read");
-        statement
-            .query_map([session_id.as_str()], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-            })
-            .expect("read SQLite queued-work items")
-            .collect::<Result<Vec<_>, _>>()
-            .expect("decode SQLite queued-work items")
-    };
-    let queued_work =
-        queued_work_observations_from_sql_rows(queued_work_batches, queued_work_items);
+    let queued_work = queued_work_observations_from_sql_rows(queued_work_batches);
     let obligation_rows: Vec<ScopeCloseObligationRow> = {
         let mut statement = connection
             .prepare(
