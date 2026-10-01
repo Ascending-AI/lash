@@ -46,6 +46,13 @@ share the ceiling check and refuse `UnsafeRetriesAboveCeiling` before
 publishing a configuration. The provider handle applies the admitted retry
 limit without a separate clamp (FIG-4480).
 
+A root's `ResolvedRun` also carries the host's termination policy
+(`TerminationPolicy`) as it stood at the root's first execution. Terminal
+assembly reads the record,
+so a worker with another policy assembles the same terminal for a turn whose
+stream ended without `Done`. The policy stays host configuration: a change
+reaches roots that start after it.
+
 The opener owns only the session binding: the store and the worker wiring
 it runs on. An open, including the engine's own reopen, overrides no recorded
 fact. A session-turn process's worker names the configuration that process's

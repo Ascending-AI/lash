@@ -150,21 +150,6 @@ impl AgentFrameRun {
     }
 }
 
-/// Termination policy knobs.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct TerminationPolicy {
-    #[serde(default)]
-    pub treat_missing_done_as_failure: bool,
-}
-
-impl Default for TerminationPolicy {
-    fn default() -> Self {
-        Self {
-            treat_missing_done_as_failure: true,
-        }
-    }
-}
-
 /// Host application sink for low-level streaming runtime events.
 /// `SessionStreamEvent` is protocol-specific preview/progress data.
 #[async_trait::async_trait]

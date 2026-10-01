@@ -18,7 +18,8 @@ fn a_recorded_turn_config_round_trips_whole() {
         .plugin_config
         .insert("protocol", serde_json::json!({ "dialect": "recorded" }));
     config.config_revision = 3;
-    let resolved = crate::ResolvedRun::snapshot(config);
+    let resolved =
+        crate::ResolvedRun::snapshot(config, crate::runtime::TerminationPolicy::default());
     let recorded = RuntimeEffectOutcome::ResolveTurnConfig {
         resolved: Box::new(resolved.clone()),
     };

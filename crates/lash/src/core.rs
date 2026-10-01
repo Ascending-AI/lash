@@ -945,6 +945,9 @@ impl LashCoreBuilder {
         self
     }
 
+    /// The termination policy each new root records when it first resolves.
+    /// A root assembles its terminal under the policy it recorded, so a
+    /// change here reaches only roots that start after it.
     pub fn termination(mut self, termination: TerminationPolicy) -> Self {
         self.termination = Some(termination);
         self

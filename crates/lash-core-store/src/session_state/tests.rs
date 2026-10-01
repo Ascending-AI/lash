@@ -960,7 +960,11 @@ fn a_redriven_root_runs_under_its_admitted_plugin_config_revision() {
     admitted.plugin_config = capped_plugin_config(12);
     admitted.config_revision = 4;
     let resolved = crate::run_spec::RunSpec::default()
-        .resolve(&admitted, None)
+        .resolve(
+            &admitted,
+            None,
+            crate::run_spec::TerminationPolicy::default(),
+        )
         .expect("resolve the root");
 
     let mut head = admitted.clone();

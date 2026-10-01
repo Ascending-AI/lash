@@ -23,6 +23,21 @@ pub fn test_standard_protocol_factories() -> Vec<Arc<dyn PluginFactory>> {
         decode_code_create_options: false,
         session_override: None,
         code_executor: None,
+        driver: TestDriverKind::Standard,
+    })]
+}
+
+/// The standard fake protocol, except that its driver answers the model's
+/// response with no next step: the machine stalls, so the turn's stream ends
+/// with neither an outcome nor `Done`, and its terminal is the host's
+/// missing-`Done` fallback.
+pub fn test_protocol_factories_ending_without_done() -> Vec<Arc<dyn PluginFactory>> {
+    vec![Arc::new(TestProtocolFactory {
+        id: "test_protocol",
+        decode_code_create_options: false,
+        session_override: None,
+        code_executor: None,
+        driver: TestDriverKind::EndsWithoutDone,
     })]
 }
 
@@ -36,6 +51,7 @@ pub fn test_standard_protocol_factory_with_runtime_state(
         decode_code_create_options: false,
         session_override: Some(session),
         code_executor,
+        driver: TestDriverKind::Standard,
     })
 }
 
@@ -57,7 +73,17 @@ pub fn test_code_protocol_factories() -> Vec<Arc<dyn PluginFactory>> {
         decode_code_create_options: true,
         session_override: None,
         code_executor: None,
+        driver: TestDriverKind::Standard,
     })]
+}
+
+/// Which driver a fake protocol installs.
+#[derive(Clone, Copy)]
+enum TestDriverKind {
+    /// [`TestDriver`].
+    Standard,
+    /// [`EndsWithoutDoneDriver`].
+    EndsWithoutDone,
 }
 
 struct TestProtocolFactory {
@@ -65,6 +91,7 @@ struct TestProtocolFactory {
     decode_code_create_options: bool,
     session_override: Option<Arc<dyn ProtocolSessionPlugin>>,
     code_executor: Option<Arc<dyn crate::plugin::CodeExecutorPlugin>>,
+    driver: TestDriverKind,
 }
 
 impl PluginFactory for TestProtocolFactory {
@@ -86,6 +113,7 @@ impl PluginFactory for TestProtocolFactory {
             id: self.id,
             session_override: self.session_override.clone(),
             code_executor: self.code_executor.clone(),
+            driver: self.driver,
         }))
     }
 }
@@ -94,6 +122,7 @@ struct TestProtocolPlugin {
     id: &'static str,
     session_override: Option<Arc<dyn ProtocolSessionPlugin>>,
     code_executor: Option<Arc<dyn crate::plugin::CodeExecutorPlugin>>,
+    driver: TestDriverKind,
 }
 
 impl SessionPlugin for TestProtocolPlugin {
@@ -111,7 +140,9 @@ impl SessionPlugin for TestProtocolPlugin {
             reg.execution().code_executor(code_executor.clone())?;
         }
         reg.protocol()
-            .protocol_driver(Arc::new(TestProtocolDriver))?;
+            .protocol_driver(Arc::new(TestProtocolDriver {
+                driver: self.driver,
+            }))?;
         Ok(())
     }
 }
@@ -197,14 +228,20 @@ fn default_test_code_termination() -> serde_json::Value {
     })
 }
 
-struct TestProtocolDriver;
+struct TestProtocolDriver {
+    driver: TestDriverKind,
+}
 
 impl ProtocolDriverPlugin for TestProtocolDriver {
     fn build_preamble(&self, input: ProtocolBuildInput) -> TurnDriverPreamble {
         let tool_names = input.tool_catalog.tool_names();
         let tool_names_fingerprint = input.tool_catalog.tool_names_fingerprint();
+        let driver: Arc<dyn ProtocolDriverHandle<crate::HostTurnProtocol>> = match self.driver {
+            TestDriverKind::Standard => Arc::new(TestDriver),
+            TestDriverKind::EndsWithoutDone => Arc::new(EndsWithoutDoneDriver),
+        };
         TurnDriverPreamble {
-            config: TurnDriverConfig::chat(Arc::new(TestDriver), false),
+            config: TurnDriverConfig::chat(driver, false),
             tool_specs: input.tool_catalog.model_tool_specs(),
             tool_names,
             tool_names_fingerprint,
@@ -499,6 +536,52 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
             on_empty: CheckpointResumeAction::PrepareIteration,
         }));
         actions
+    }
+
+    fn handle_exec_result(
+        &self,
+        _ctx: DriverContextView<'_>,
+        _driver_state: crate::ProtocolDriverState,
+        _result: Result<ExecResponse, String>,
+    ) -> Vec<DriverAction> {
+        Vec::new()
+    }
+}
+
+/// A driver that starts one model call and answers its response with only
+/// the response's report: no next step and no finish. The machine then has
+/// nothing to poll, so the turn's stream ends without an outcome or `Done`.
+struct EndsWithoutDoneDriver;
+
+impl ProtocolDriverHandle<crate::HostTurnProtocol> for EndsWithoutDoneDriver {
+    fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
+        vec![DriverAction::Start(PendingWork::Llm {
+            request: ctx.project_llm_request(true),
+            driver_state: None,
+        })]
+    }
+
+    fn handle_llm_success(
+        &self,
+        ctx: DriverContextView<'_>,
+        _request: Arc<lash_sansio::llm::types::LlmRequest>,
+        _driver_state: Option<crate::ProtocolDriverState>,
+        llm_response: LlmResponse,
+        _calls: &crate::sansio::ResponseToolCalls,
+        _text_streamed: bool,
+    ) -> Vec<DriverAction> {
+        vec![DriverAction::Emit(crate::SessionStreamEvent::LlmResponse {
+            protocol_iteration: ctx.protocol_iteration(),
+            content: llm_response.full_text(),
+        })]
+    }
+
+    fn handle_tool_results(
+        &self,
+        _ctx: DriverContextView<'_>,
+        _completed: Vec<CompletedToolCall>,
+    ) -> Vec<DriverAction> {
+        Vec::new()
     }
 
     fn handle_exec_result(

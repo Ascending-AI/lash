@@ -347,10 +347,12 @@ impl RunSpec {
     /// Resolve this spec against `snapshot`, the root's config after the
     /// boundary's command drain. `definition` is what the spec's registered
     /// definition produced over its context (`None` without a definition).
+    /// `termination` is the host's policy the root records.
     pub fn resolve(
         &self,
         snapshot: &PersistedSessionConfig,
         definition: Option<RunOverrides>,
+        termination: TerminationPolicy,
     ) -> Result<ResolvedRun, serde_json::Error> {
         let mut config = snapshot.clone();
         let overrides = (*self.overrides)
@@ -363,6 +365,7 @@ impl RunSpec {
             capabilities: self.capabilities.clone(),
             base: snapshot.clone(),
             render: None,
+            termination,
         })
     }
 }
@@ -419,6 +422,28 @@ impl RecordedRender {
     }
 }
 
+/// How a turn's terminal is assembled when its stream ended with neither a
+/// cancellation, an explicit outcome nor a `Done` event.
+///
+/// A host states it; each root records the host's policy in its
+/// [`ResolvedRun`] on first execution, and terminal assembly reads that
+/// record. A replay, redrive or recovered follow-on on a worker with another
+/// policy assembles the same terminal (ADR 0105 §1, FIG-4389).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TerminationPolicy {
+    /// A turn that ended without `Done` stops as a runtime error with a
+    /// `MissingDone` issue instead of finishing with its assistant output.
+    pub treat_missing_done_as_failure: bool,
+}
+
+impl Default for TerminationPolicy {
+    fn default() -> Self {
+        Self {
+            treat_missing_done_as_failure: true,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ResolvedRun {
     /// The root's snapshot: the session config after the boundary's command
@@ -439,17 +464,23 @@ pub struct ResolvedRun {
     pub capabilities: std::collections::BTreeMap<SlotId, CapabilityRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<RecordedRender>,
+    /// The host's termination policy when the root first resolved: how its
+    /// terminal is assembled when its stream ends without `Done`. Recorded so
+    /// every execution of the root assembles the same terminal (FIG-4389).
+    pub termination: TerminationPolicy,
 }
 
 impl ResolvedRun {
-    /// The default spec's resolution: the snapshot itself.
-    pub fn snapshot(base: PersistedSessionConfig) -> Self {
+    /// The default spec's resolution: the snapshot itself, under
+    /// `termination`.
+    pub fn snapshot(base: PersistedSessionConfig, termination: TerminationPolicy) -> Self {
         Self {
             base,
             spec: None,
             resolved: None,
             capabilities: std::collections::BTreeMap::new(),
             render: None,
+            termination,
         }
     }
 

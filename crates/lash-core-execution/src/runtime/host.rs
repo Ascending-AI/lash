@@ -73,6 +73,8 @@ pub const DEFAULT_ABORT_DRAIN_GRACE: std::time::Duration = std::time::Duration::
 #[derive(Clone)]
 pub struct RuntimeControlConfig {
     pub effect_host: Arc<dyn EffectHost>,
+    /// The termination policy a root records on its first execution. Terminal
+    /// assembly reads the root's record, never this field (FIG-4389).
     pub termination: TerminationPolicy,
     /// How long a protocol-owned stream abort (a protocol boundary that ends
     /// the model's turn under ADR 0036's no-wire-stop rule) keeps draining the

@@ -84,6 +84,108 @@ mod recorded_execution_controls_under_replay {
     }; (a_redrive_runs_under_the_execution_controls_its_root_recorded, "turn-config-recorded-controls-redrive"));
 }
 
+// FIG-4389's recorded termination law on the double's other legs: under
+// always-replay, where every resumption replays the root's journal from its
+// start, and over a SQLite file store set, plain and always-replay. The plain
+// SQLite memory leg runs with `turn_config_tests!` above; the PostgreSQL legs
+// run with the PostgreSQL ingress laws.
+mod recorded_termination {
+    use super::{HarnessServer, LiveConformanceHarness};
+    use std::sync::Arc;
+
+    fn server(always_replay: bool) -> HarnessServer {
+        let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
+            unreachable!("in_process names the server double");
+        };
+        HarnessServer::InProcess {
+            seed,
+            always_replay,
+        }
+    }
+
+    /// The double over its own SQLite memory store set.
+    async fn memory_harness(
+        always_replay: bool,
+    ) -> (
+        LiveConformanceHarness,
+        &'static str,
+        Arc<dyn lash_core::EffectHost>,
+        Arc<dyn lash_core::StoreSet>,
+        Arc<dyn lash_conformance::ConformanceTurnRunner>,
+    ) {
+        let harness =
+            LiveConformanceHarness::start_for_tool_children_on(server(always_replay)).await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let stores = harness.law_stores();
+        let prefix: &'static str = Box::leak(
+            format!(
+                "restate-recorded-termination-memory-{always_replay}-{}",
+                harness.run_nonce()
+            )
+            .into_boxed_str(),
+        );
+        (harness, prefix, effect_host, stores, turn_runner)
+    }
+
+    /// The double with the law's runtime over a SQLite file store set.
+    async fn file_harness(
+        always_replay: bool,
+    ) -> (
+        (LiveConformanceHarness, tempfile::TempDir),
+        &'static str,
+        Arc<dyn lash_core::EffectHost>,
+        Arc<dyn lash_core::StoreSet>,
+        Arc<dyn lash_conformance::ConformanceTurnRunner>,
+    ) {
+        let directory = tempfile::tempdir().expect("SQLite file store directory");
+        let stores: Arc<dyn lash_core::StoreSet> = Arc::new(
+            lash_sqlite_store::SqliteStoreSet::open(directory.path())
+                .await
+                .expect("open the SQLite file store set"),
+        );
+        let harness = LiveConformanceHarness::start_for_tool_children_settling_into(
+            server(always_replay),
+            stores.usage_accounting(),
+        )
+        .await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let prefix: &'static str = Box::leak(
+            format!(
+                "restate-recorded-termination-file-{always_replay}-{}",
+                harness.run_nonce()
+            )
+            .into_boxed_str(),
+        );
+        (
+            (harness, directory),
+            prefix,
+            effect_host,
+            stores,
+            turn_runner,
+        )
+    }
+
+    mod sqlite_memory_always_replay {
+        lash_conformance::turn_config_tests!(@law [] {
+            super::memory_harness(true).await
+        }; (a_redrive_assembles_the_terminal_its_root_recorded_termination_decides, "turn-config-recorded-termination-redrive"));
+    }
+
+    mod sqlite_file {
+        lash_conformance::turn_config_tests!(@law [] {
+            super::file_harness(false).await
+        }; (a_redrive_assembles_the_terminal_its_root_recorded_termination_decides, "turn-config-recorded-termination-redrive"));
+    }
+
+    mod sqlite_file_always_replay {
+        lash_conformance::turn_config_tests!(@law [] {
+            super::file_harness(true).await
+        }; (a_redrive_assembles_the_terminal_its_root_recorded_termination_decides, "turn-config-recorded-termination-redrive"));
+    }
+}
+
 // L-S8: a fresh execution of a started root is SubstrateLost. Every run
 // of the probe runner is a fresh invocation, so its second run of the
 // same admission is the fresh execution.

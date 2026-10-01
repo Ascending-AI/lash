@@ -368,3 +368,78 @@ async fn partial_signal_replay_rejects_changed_request_before_resolution_on_post
     let (registry, _attachments) = postgres_process_registry(&url).await;
     partial_signal_replay_rejects_changed_request_law(registry).await;
 }
+
+// FIG-4389's recorded termination law on the double with the law's runtime
+// over PostgreSQL, plain and always-replay.
+mod recorded_termination {
+    use super::super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
+    use super::*;
+
+    async fn harness(
+        always_replay: bool,
+    ) -> (
+        (DatabaseLock, tempfile::TempDir, LiveConformanceHarness),
+        &'static str,
+        Arc<dyn EffectHost>,
+        Arc<dyn lash_core::StoreSet>,
+        Arc<dyn lash_conformance::ConformanceTurnRunner>,
+    ) {
+        let url = database_url().expect("the recorded termination law requires PostgreSQL");
+        let lock = DatabaseLock::acquire(&url).await;
+        let storage = lash_postgres_store::PostgresStorage::connect(&url)
+            .await
+            .expect("connect PostgreSQL recorded termination law store");
+        reset(storage.pool()).await;
+        let attachments = tempfile::tempdir().expect("attachment directory");
+        let stores: Arc<dyn lash_core::StoreSet> =
+            Arc::new(lash_postgres_store::PostgresStoreSet::new(
+                &storage,
+                Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+                    attachments.path(),
+                )),
+            ));
+        let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
+            unreachable!("in_process names the server double");
+        };
+        let harness = LiveConformanceHarness::start_for_tool_children_settling_into(
+            HarnessServer::InProcess {
+                seed,
+                always_replay,
+            },
+            stores.usage_accounting(),
+        )
+        .await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let prefix: &'static str = Box::leak(
+            format!(
+                "postgres-recorded-termination-{always_replay}-{}",
+                harness.run_nonce()
+            )
+            .into_boxed_str(),
+        );
+        (
+            (lock, attachments, harness),
+            prefix,
+            effect_host,
+            stores,
+            turn_runner,
+        )
+    }
+
+    mod plain {
+        lash_conformance::turn_config_tests!(@law [
+            #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
+        ] {
+            super::harness(false).await
+        }; (a_redrive_assembles_the_terminal_its_root_recorded_termination_decides, "turn-config-recorded-termination-redrive"));
+    }
+
+    mod always_replay {
+        lash_conformance::turn_config_tests!(@law [
+            #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
+        ] {
+            super::harness(true).await
+        }; (a_redrive_assembles_the_terminal_its_root_recorded_termination_decides, "turn-config-recorded-termination-redrive"));
+    }
+}

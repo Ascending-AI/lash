@@ -370,6 +370,7 @@ pub async fn a_steering_spec_must_match_a_pending_follow_ons_shape(store: Arc<dy
         resolved: None,
         capabilities: std::collections::BTreeMap::new(),
         render: None,
+        termination: crate::TerminationPolicy::default(),
     };
     let owed = commit_switch_owing(
         &store,

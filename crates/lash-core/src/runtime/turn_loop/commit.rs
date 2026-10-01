@@ -280,6 +280,24 @@ impl LashRuntime {
         finished
     }
 
+    /// The termination policy the running root recorded in its
+    /// [`ResolvedRun`](crate::ResolvedRun). The logical-turn funnel installs
+    /// that record before the root's first physical turn and every resident
+    /// refresh re-installs it, so every commit of the root reads it.
+    #[expect(
+        clippy::expect_used,
+        reason = "every physical turn commits inside a root whose recorded view the funnel installed"
+    )]
+    fn recorded_termination(&self) -> crate::runtime::TerminationPolicy {
+        self.state
+            .authority
+            .resolved_run
+            .as_deref()
+            .expect("a committing turn runs under its root's recorded view")
+            .termination
+            .clone()
+    }
+
     async fn commit_finished_turn(
         &mut self,
         context: TurnCommitContext<'_, '_>,
@@ -446,12 +464,11 @@ impl LashRuntime {
             .cloned();
         turn_pipeline.state_mut().last_prompt_usage = last_prompt_usage;
         let assembled_state = turn_pipeline.export_state_for_assembly();
-        let assembled = assembly.finish(
-            assembled_state,
-            cancellation.clone(),
-            None,
-            &self.host.core.control.termination,
-        );
+        // The root's recorded termination policy, never this worker's: a
+        // replay or redrive on a worker with another policy assembles the
+        // same terminal for the same recorded work (FIG-4389).
+        let termination = self.recorded_termination();
+        let assembled = assembly.finish(assembled_state, cancellation.clone(), None, &termination);
 
         let Some(session) = self.session.as_ref() else {
             // A store-less session keeps the head's follow-on resident: the

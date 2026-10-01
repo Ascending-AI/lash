@@ -2561,8 +2561,8 @@ impl crate::ProcessService for MockSessionManager {
 // ─────────────────────────────────────────────────────────────────────
 #[cfg(any(test, feature = "testing"))]
 pub use test_protocol_fakes::{
-    test_code_protocol_factories, test_plugin_host, test_standard_protocol_factories,
-    test_standard_protocol_factory_with_runtime_state,
+    test_code_protocol_factories, test_plugin_host, test_protocol_factories_ending_without_done,
+    test_standard_protocol_factories, test_standard_protocol_factory_with_runtime_state,
 };
 
 mod test_protocol_fakes;

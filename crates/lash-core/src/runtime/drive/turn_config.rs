@@ -16,7 +16,10 @@
 //! config. Every physical turn of the root reuses the one record: commands
 //! apply only at turn boundaries. The record is the root's execution view
 //! only; commits keep writing the sticky session config, so a spec's
-//! overrides never become the session's.
+//! overrides never become the session's. The record also carries the host's
+//! termination policy from the root's first execution, which terminal
+//! assembly reads, so a worker with another policy assembles the same
+//! terminal for the same recorded work (FIG-4389).
 //!
 //! The record is data. The route it names is bound to a live provider handle
 //! after the step, on every execution: a handle is this worker's capability,
@@ -96,6 +99,7 @@ impl LashRuntime {
             snapshot: crate::store::persisted_session_config_from_state(&self.state),
             spec,
             inherited,
+            termination: self.host.core.control.termination.clone(),
             protocol_driver: self
                 .session
                 .as_ref()
@@ -167,6 +171,9 @@ struct ResolveTurnConfigRunner {
     /// The shape a recovered follow-on inherits from its parent root
     /// (FIG-3877); present only on the follow-on's own admission.
     inherited: Option<crate::ResolvedRun>,
+    /// This worker's host termination policy, which a root records on its
+    /// first resolution (FIG-4389); a replay decodes the record instead.
+    termination: crate::runtime::TerminationPolicy,
     protocol_driver: Option<std::sync::Arc<dyn crate::plugin::ProtocolDriverPlugin>>,
     /// The session's config owners, which judge every namespace a spec's
     /// overrides changed (FIG-4379).
@@ -183,11 +190,13 @@ struct RootSpec {
 }
 
 impl RootSpec {
-    /// Resolve this spec against `snapshot`. A fault a redeploy or a retry
-    /// repairs is marked so it never becomes the step's recorded outcome.
+    /// Resolve this spec against `snapshot` under `termination`. A fault a
+    /// redeploy or a retry repairs is marked so it never becomes the step's
+    /// recorded outcome.
     async fn resolve(
         self,
         snapshot: &PersistedSessionConfig,
+        termination: crate::runtime::TerminationPolicy,
     ) -> Result<crate::ResolvedRun, RuntimeEffectControllerError> {
         let repairable = |code: RuntimeErrorCode, message: String| {
             RuntimeEffectControllerError::new(code, message).retryable_uncommitted_derivation()
@@ -235,12 +244,13 @@ impl RootSpec {
                 )
             }
         };
-        spec.resolve(snapshot, definition).map_err(|error| {
-            RuntimeEffectControllerError::new(
-                RuntimeErrorCode::RunShapeRefused,
-                format!("run spec `{}` could not be resolved: {error}", self.hash),
-            )
-        })
+        spec.resolve(snapshot, definition, termination)
+            .map_err(|error| {
+                RuntimeEffectControllerError::new(
+                    RuntimeErrorCode::RunShapeRefused,
+                    format!("run spec `{}` could not be resolved: {error}", self.hash),
+                )
+            })
     }
 }
 
@@ -274,8 +284,8 @@ impl RuntimeEffectLocalRunner for ResolveTurnConfigRunner {
             // A recovered follow-on re-records the shape its parent root
             // resolved, verbatim: it does not re-resolve.
             (Some(inherited), _) => inherited,
-            (None, None) => crate::ResolvedRun::snapshot(self.snapshot),
-            (None, Some(spec)) => spec.resolve(&self.snapshot).await?,
+            (None, None) => crate::ResolvedRun::snapshot(self.snapshot, self.termination),
+            (None, Some(spec)) => spec.resolve(&self.snapshot, self.termination).await?,
         };
         // An override is judged by the owner of every namespace it changed,
         // as a config command's candidate is: an overlay cannot set what the
@@ -354,7 +364,10 @@ mod tests {
         view.tool_access = tool_access.clone();
         view.subagent = Some(subagent.clone());
 
-        runtime.apply_turn_config(&crate::ResolvedRun::snapshot(view));
+        runtime.apply_turn_config(&crate::ResolvedRun::snapshot(
+            view,
+            crate::runtime::TerminationPolicy::default(),
+        ));
 
         let plugins = runtime.plugin_session().expect("live plugin session");
         assert_eq!(

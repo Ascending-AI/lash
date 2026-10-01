@@ -28,7 +28,10 @@ struct ConfigParts {
     session_id: SessionId,
     host: crate::RuntimeHostConfig,
     store: Arc<dyn crate::RuntimeStore>,
-    /// Plugins the law adds to the standard protocol.
+    /// The protocol the session runs: the standard fake unless the law
+    /// needs another.
+    protocol: Vec<Arc<dyn crate::plugin::PluginFactory>>,
+    /// Plugins the law adds to the protocol.
     tools: Vec<Arc<dyn crate::plugin::PluginFactory>>,
 }
 
@@ -51,12 +54,7 @@ async fn build_runtime_under(
         crate::LashRuntime::builder(parts.host, crate::testing::runtime_lease_owner())
             .with_session_id(&parts.session_id)
             .with_policy(policy)
-            .with_plugin_factories(
-                crate::testing::test_standard_protocol_factories()
-                    .into_iter()
-                    .chain(parts.tools)
-                    .collect(),
-            )
+            .with_plugin_factories(parts.protocol.into_iter().chain(parts.tools).collect())
             .with_store(crate::conformance::helpers::session_view(
                 &parts.store,
                 parts.session_id.clone(),
@@ -279,6 +277,7 @@ pub async fn a_committed_root_redriven_after_a_model_change_refuses_its_stale_ep
         session_id: session_id.clone(),
         host,
         store: Arc::clone(&store),
+        protocol: crate::testing::test_standard_protocol_factories(),
         tools: Vec::new(),
     };
     let root = TurnId::from(format!("{prefix}-turn-config-replay-root"));
@@ -461,6 +460,7 @@ async fn law_session(
         session_id,
         host,
         store,
+        protocol: crate::testing::test_standard_protocol_factories(),
         tools: Vec::new(),
     }
 }
@@ -1364,4 +1364,149 @@ pub async fn a_redrive_runs_under_the_execution_controls_its_root_recorded(
         RECORDED_TURNS,
         "the redriven root stops at the bound its root recorded, not the redrive's default"
     );
+}
+
+/// A worker's termination policy that says a turn ending without `Done`
+/// fails when `missing_done_fails`, and finishes otherwise.
+fn termination(missing_done_fails: bool) -> crate::TerminationPolicy {
+    crate::TerminationPolicy {
+        treat_missing_done_as_failure: missing_done_fails,
+    }
+}
+
+/// One attempt of `root` on a worker whose host termination policy is
+/// `termination`, under the protocol that ends its turn without `Done`.
+/// With `crash`, the attempt dies after the root's config record and before
+/// its first model call; otherwise it sends how the turn returned on
+/// `turn_tx`.
+fn missing_done_attempt(
+    parts: &ConfigParts,
+    root: &TurnId,
+    termination: crate::TerminationPolicy,
+    crash: bool,
+    turn_tx: TurnResultTx,
+) -> crate::ConformanceTurnAttempt {
+    let mut parts = parts.clone();
+    parts.host.control.termination = termination;
+    let root = root.clone();
+    Arc::new(move |scope| {
+        let parts = parts.clone();
+        let root = root.clone();
+        let turn_tx = turn_tx.clone();
+        Box::pin(async move {
+            let mut runtime = build_runtime(parts).await;
+            if crash {
+                runtime.set_turn_phase_probe(Arc::new(CrashBeforeFirstModelCall));
+            }
+            let turn = runtime
+                .drive_turn(
+                    text_input(&root, "answer without ending the stream"),
+                    crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
+                )
+                .await;
+            assert!(!crash, "the crash fires before the root's first model call");
+            let end = crate::ConformanceTurnEnd::of(&turn);
+            let _ = turn_tx.send(turn);
+            end
+        })
+    })
+}
+
+/// Whether `turn` carries the missing-`Done` fallback's issue.
+fn has_missing_done_issue(turn: &crate::AssembledTurn) -> bool {
+    turn.errors
+        .iter()
+        .any(|issue| issue.code == Some(crate::TurnFailureCode::MissingDone.into()))
+}
+
+/// A redrive assembles the terminal its root's recorded termination policy
+/// decides (FIG-4389, ADR 0105 §1). The turn's protocol ends its stream with
+/// neither an outcome nor `Done`, so its terminal is the missing-`Done`
+/// fallback. The root's first execution, on a worker with one policy,
+/// records its config and dies before its first model call; the redrive runs
+/// on a worker with the opposite policy. Both directions assemble the
+/// terminal the recorded policy decides: a runtime error with a `MissingDone`
+/// issue when it fails a missing `Done`, a finished turn without that issue
+/// when it does not.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_redrive_assembles_the_terminal_its_root_recorded_termination_decides(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    for recorded_fails in [true, false] {
+        let name = if recorded_fails {
+            "missing-done-recorded-fails"
+        } else {
+            "missing-done-recorded-finishes"
+        };
+        let calls = Arc::new(AtomicUsize::new(0));
+        let models = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut parts = law_session(
+            prefix,
+            name,
+            &effect_host,
+            &stores,
+            Arc::new(crate::SingleProviderResolver::new(recording_model(
+                &calls, &models,
+            ))),
+        )
+        .await;
+        parts.protocol = crate::testing::test_protocol_factories_ending_without_done();
+        let root = TurnId::from(format!("{prefix}-turn-config-{name}-root"));
+        let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
+        runner
+            .run_crashed_then_redriven_turn(
+                admit(crate::ExecutionScope::turn(&parts.session_id, &root)),
+                missing_done_attempt(
+                    &parts,
+                    &root,
+                    termination(recorded_fails),
+                    true,
+                    turn_tx.clone(),
+                ),
+                missing_done_attempt(&parts, &root, termination(!recorded_fails), false, turn_tx),
+            )
+            .await;
+        let turn = turn_rx
+            .recv()
+            .await
+            .expect("the tier's runner redrove the root")
+            .unwrap_or_else(|error| panic!("{name}: the redriven root runs: {error:?}"));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "{name}: the redriven root makes its one model call and its stream ends there"
+        );
+        if recorded_fails {
+            assert_eq!(
+                turn.outcome,
+                crate::TurnOutcome::Stopped(crate::TurnStop::RuntimeError),
+                "{name}: the redrive fails the missing Done, as its root recorded"
+            );
+            assert!(
+                has_missing_done_issue(&turn),
+                "{name}: the failure is the missing Done: {:?}",
+                turn.errors
+            );
+        } else {
+            assert!(
+                matches!(
+                    turn.outcome,
+                    crate::TurnOutcome::Finished(crate::TurnFinish::AssistantMessage { .. })
+                ),
+                "{name}: the redrive finishes the turn, as its root recorded: {:?}",
+                turn.outcome
+            );
+            assert!(
+                !has_missing_done_issue(&turn),
+                "{name}: the root recorded no missing-Done failure: {:?}",
+                turn.errors
+            );
+        }
+    }
 }

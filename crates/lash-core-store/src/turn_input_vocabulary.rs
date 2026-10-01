@@ -7,6 +7,7 @@
 pub use crate::run_spec::{
     BindingId, CapabilityRef, ContractRef, DefinitionRef, RecordedRender, ResolvedRun,
     RunDefinition, RunDefinitions, RunOverrides, RunShapeError, RunSpec, RunSpecHash, SlotId,
+    TerminationPolicy,
 };
 use crate::{CheckpointKind, PluginMessage, SessionId, TurnCause, TurnId};
 use std::any::Any;

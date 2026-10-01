@@ -46,9 +46,9 @@ pub use lash_core_execution::testing::{
     queued_work_admission_policy, run_tool, run_tool_granted, runbook_evidence,
     runtime_lease_owner, runtime_services_without_ports, sansio_transcript,
     stage_execution_state_components, standard_test_policy, store_fixtures,
-    test_code_protocol_factories, test_plugin_host, test_standard_protocol_factories,
-    test_standard_protocol_factory_with_runtime_state, test_trigger_router,
-    tool_registry_with_live_provider, trace_capture,
+    test_code_protocol_factories, test_plugin_host, test_protocol_factories_ending_without_done,
+    test_standard_protocol_factories, test_standard_protocol_factory_with_runtime_state,
+    test_trigger_router, tool_registry_with_live_provider, trace_capture,
 };
 
 // Each submodule documents itself in its own file. Adding an outer doc comment

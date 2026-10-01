@@ -29,9 +29,49 @@ fn the_default_spec_is_no_spec_and_resolves_to_the_snapshot() {
         serde_json::to_value(&spec).expect("encode"),
         serde_json::json!({})
     );
-    let resolved = spec.resolve(&snapshot(), None).expect("resolve");
-    assert_eq!(resolved, ResolvedRun::snapshot(snapshot()));
+    let resolved = spec
+        .resolve(&snapshot(), None, TerminationPolicy::default())
+        .expect("resolve");
+    assert_eq!(
+        resolved,
+        ResolvedRun::snapshot(snapshot(), TerminationPolicy::default())
+    );
     assert_eq!(resolved.base.config_revision, 7);
+}
+
+/// FIG-4389: a root records the termination policy it resolved under, the
+/// record round-trips it, and a record without it does not decode: no
+/// worker's live policy fills the gap.
+#[test]
+fn a_resolved_run_records_its_termination_policy() {
+    let finishes = TerminationPolicy {
+        treat_missing_done_as_failure: false,
+    };
+    let resolved = RunSpec::default()
+        .resolve(&snapshot(), None, finishes.clone())
+        .expect("resolve");
+    assert_eq!(resolved.termination, finishes);
+
+    let mut encoded = serde_json::to_value(&resolved).expect("encode run");
+    assert_eq!(
+        encoded["termination"],
+        serde_json::json!({ "treat_missing_done_as_failure": false })
+    );
+    let decoded: ResolvedRun = serde_json::from_value(encoded.clone()).expect("decode run");
+    assert_eq!(decoded.termination, finishes);
+
+    encoded
+        .as_object_mut()
+        .expect("a run encodes as an object")
+        .remove("termination");
+    assert!(
+        serde_json::from_value::<ResolvedRun>(encoded).is_err(),
+        "a run record without its termination policy is refused"
+    );
+    assert!(
+        serde_json::from_value::<TerminationPolicy>(serde_json::json!({})).is_err(),
+        "a termination policy states its fallback explicitly"
+    );
 }
 
 #[test]
@@ -45,7 +85,7 @@ fn recorded_render_survives_run_and_detached_environment_round_trip() {
             "preview": lash_render::RenderParams::preview(),
         }),
     };
-    let mut resolved = ResolvedRun::snapshot(snapshot());
+    let mut resolved = ResolvedRun::snapshot(snapshot(), TerminationPolicy::default());
     resolved.render = Some(record.clone());
     let encoded = serde_json::to_vec(&resolved).expect("encode run");
     let decoded: ResolvedRun = serde_json::from_slice(&encoded).expect("decode run");
@@ -164,7 +204,9 @@ fn capabilities_are_durable_refs_recorded_on_the_resolution() {
         "a capability alone is a non-default spec"
     );
     assert!(spec.hash().expect("hash").is_some());
-    let resolved = spec.resolve(&snapshot(), None).expect("resolve");
+    let resolved = spec
+        .resolve(&snapshot(), None, TerminationPolicy::default())
+        .expect("resolve");
     assert_eq!(resolved.capabilities, spec.capabilities);
     assert_eq!(
         resolved.config(),
@@ -203,7 +245,9 @@ fn a_provider_only_override_keeps_the_snapshot_model_and_variant() {
         provider_id: Some("root-provider".to_string()),
         ..RunOverrides::default()
     });
-    let resolved = spec.resolve(&snapshot(), None).expect("resolve");
+    let resolved = spec
+        .resolve(&snapshot(), None, TerminationPolicy::default())
+        .expect("resolve");
     assert_eq!(resolved.config().provider_id, "root-provider");
     assert_eq!(resolved.config().model, snapshot().model);
     assert_eq!(resolved.spec, spec.hash().expect("hash"));
@@ -239,7 +283,7 @@ fn explicit_overrides_win_over_the_definition_which_wins_over_the_snapshot() {
         ..RunOverrides::default()
     };
     let resolved = spec
-        .resolve(&snapshot(), Some(definition))
+        .resolve(&snapshot(), Some(definition), TerminationPolicy::default())
         .expect("resolve");
     assert_eq!(resolved.config().provider_id, "definition-provider");
     assert_eq!(
@@ -272,7 +316,9 @@ fn a_reset_slot_in_an_override_replaces_the_snapshot_slot() {
         )),
         ..RunOverrides::default()
     });
-    let resolved = spec.resolve(&snapshot(), None).expect("resolve");
+    let resolved = spec
+        .resolve(&snapshot(), None, TerminationPolicy::default())
+        .expect("resolve");
     let prompt = lash_sansio::session_model::prompt::resolve_prompt_layers([resolved
         .config()
         .prompt
