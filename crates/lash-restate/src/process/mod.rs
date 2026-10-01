@@ -139,6 +139,22 @@ fn is_replay_mismatch(error: &PluginError) -> bool {
     }
 }
 
+fn is_terminal_runner_error(error: &PluginError, is_session_turn: bool) -> bool {
+    // A SessionTurn retry replays the child's same sealed fence; only a
+    // fresh root can regain authority after that child is superseded.
+    error.is_terminal()
+        || (is_session_turn
+            && match error {
+                PluginError::Runtime(error) => {
+                    error.code == RuntimeErrorCode::StoreCommitSuperseded
+                }
+                PluginError::RuntimeEffectController(error) => {
+                    error.code == RuntimeErrorCode::StoreCommitSuperseded
+                }
+                _ => false,
+            })
+}
+
 fn terminal_process_output(error: PluginError) -> ProcessAwaitOutput {
     let error = lash_core::RuntimeEffectControllerError::from(error);
     ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::failure(
@@ -148,6 +164,54 @@ fn terminal_process_output(error: PluginError) -> ProcessAwaitOutput {
             error.message,
         ),
     ))
+}
+
+#[cfg(test)]
+mod runner_failure_tests {
+    use super::*;
+
+    #[test]
+    fn session_turn_supersession_keeps_its_cause_across_process_plugin_and_host_boundaries() {
+        let runtime =
+            RuntimeError::new(RuntimeErrorCode::StoreCommitSuperseded, "superseded child");
+        for plugin in [
+            PluginError::Runtime(runtime.clone()),
+            PluginError::RuntimeEffectController(runtime.into()),
+        ] {
+            let plugin = lash_core::ProcessInfraError::new(plugin).into_plugin_error();
+            let plugin: PluginError = serde_json::from_value(serde_json::to_value(plugin).unwrap())
+                .expect("the plugin boundary retains the typed error");
+            assert!(!plugin.is_retryable());
+            assert!(!plugin.is_terminal(), "a fresh runtime root can redrive");
+            assert!(is_terminal_runner_error(&plugin, true));
+            assert!(!is_terminal_runner_error(&plugin, false));
+            let runtime = plugin.clone().into_turn_failure(RuntimeErrorCode::Plugin);
+            assert_eq!(runtime.code, RuntimeErrorCode::StoreCommitSuperseded);
+            assert_eq!(runtime.message, "superseded child");
+            let ProcessAwaitOutput::Settled { output } = terminal_process_output(plugin) else {
+                panic!("the process settles the refusal");
+            };
+            let lash_core::ToolCallOutcome::Failure(failure) = output.outcome else {
+                panic!("the superseded process fails");
+            };
+            assert_eq!(
+                failure.code,
+                RuntimeErrorCode::StoreCommitSuperseded.as_str()
+            );
+            assert_eq!(failure.message, "superseded child");
+            assert_eq!(failure.retry, lash_core::ToolRetryStatus::Never);
+        }
+        for plugin in [
+            PluginError::Runtime(RuntimeError::new(
+                RuntimeErrorCode::StoreCommitFailed,
+                "store I/O",
+            )),
+            PluginError::Session("unavailable infrastructure".into()),
+        ] {
+            assert!(!is_terminal_runner_error(&plugin, true));
+            assert!(!is_terminal_runner_error(&plugin, false));
+        }
+    }
 }
 
 /// A 404 here is a deployment that never bound the process workflow, not a busy engine:

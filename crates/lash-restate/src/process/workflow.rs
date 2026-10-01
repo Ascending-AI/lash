@@ -817,7 +817,7 @@ where
                 .await
                 .map_err(HandlerError::from)?;
         }
-        let requires_cancelled_session_turn = matches!(
+        let is_session_turn = matches!(
             registration.input.as_ref(),
             lash_core::ProcessInput::SessionTurn { .. }
         );
@@ -847,7 +847,7 @@ where
         // process was cancelled.
         let outcome = match outcome {
             Ok(lash_core::ProcessRunOutcome::Terminal { output, prelude })
-                if requires_cancelled_session_turn
+                if is_session_turn
                     && output.terminal_status() != Some(lash_core::ProcessStatus::Cancelled) =>
             {
                 if drive
@@ -898,9 +898,9 @@ where
                 | PluginError::ProcessUnknown { .. }
                 | PluginError::ProcessNotVisible { .. }),
             ) => Err(handler_error_from_plugin(err)),
-            // A failure retrying cannot fix without changing durable state
-            // ends the process Failed, typed by its code.
-            Err(err) if err.is_terminal() => {
+            // A permanent runner refusal ends the process Failed under its
+            // own code, including a SessionTurn's superseded child fence.
+            Err(err) if super::is_terminal_runner_error(&err, is_session_turn) => {
                 Ok(SegmentRunEnd::Terminal(TerminalProposal::Output {
                     output: Box::new(terminal_process_output(err)),
                     prelude: Vec::new(),
