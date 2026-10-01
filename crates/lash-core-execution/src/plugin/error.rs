@@ -370,10 +370,32 @@ impl From<crate::StoreError> for PluginError {
             crate::StoreError::SessionHeadOwned { session_id, owner } => {
                 Self::SessionHeadOwned { session_id, owner }
             }
+            // Bytes the store cannot decode stay undecodable: typed and
+            // terminal, never a session-seam failure a redrive repeats.
+            crate::StoreError::StoredDataCorrupt {
+                record_kind,
+                message,
+            } => Self::StoredDataCorrupt {
+                record_kind: record_kind.to_string(),
+                message,
+            },
             error => match crate::store::StoreRefusal::of_store_error(&error) {
                 Some(refusal) => Self::StoreRefusal(refusal),
                 None => Self::Session(error.to_string()),
             },
+        }
+    }
+}
+
+impl PluginError {
+    /// A store error met while doing `context`, classified as
+    /// [`From<StoreError>`](Self::from) classifies it: a typed refusal and
+    /// corrupt stored data keep their type and are terminal; every other
+    /// failure is the session seam's, named with `context`, and recoverable.
+    pub fn of_store_error(context: impl std::fmt::Display, error: crate::StoreError) -> Self {
+        match Self::from(error) {
+            Self::Session(message) => Self::Session(format!("{context}: {message}")),
+            typed => typed,
         }
     }
 }
@@ -399,15 +421,10 @@ impl PluginError {
             Self::Runtime(error)
                 if error.turn_failure_cause().aborts_invocation()
                     || error.is_session_retirement()
+                    || error.store_refusal().is_some()
                     || matches!(
                         error.code,
-                        crate::RuntimeErrorCode::WriterFenced
-                            | crate::RuntimeErrorCode::StoreIncompatible
-                            | crate::RuntimeErrorCode::StoreSessionMismatch
-                            | crate::RuntimeErrorCode::SessionStateVersionUnsupported
-                            | crate::RuntimeErrorCode::SessionStateVersionNewerThanRuntime
-                            | crate::RuntimeErrorCode::TurnCancelBindingMismatch
-                            | crate::RuntimeErrorCode::UsageOwnerRetired
+                        crate::RuntimeErrorCode::UsageOwnerRetired
                             | crate::RuntimeErrorCode::RecordedTerminationUnavailable
                             | crate::RuntimeErrorCode::MissingRecordedProcessConfig
                     ) =>
@@ -417,15 +434,10 @@ impl PluginError {
             Self::RuntimeEffectController(error)
                 if error.turn_failure_cause().aborts_invocation()
                     || error.is_session_retirement()
+                    || error.store_refusal().is_some()
                     || matches!(
                         error.code,
-                        crate::RuntimeErrorCode::WriterFenced
-                            | crate::RuntimeErrorCode::StoreIncompatible
-                            | crate::RuntimeErrorCode::StoreSessionMismatch
-                            | crate::RuntimeErrorCode::SessionStateVersionUnsupported
-                            | crate::RuntimeErrorCode::SessionStateVersionNewerThanRuntime
-                            | crate::RuntimeErrorCode::TurnCancelBindingMismatch
-                            | crate::RuntimeErrorCode::UsageOwnerRetired
+                        crate::RuntimeErrorCode::UsageOwnerRetired
                             | crate::RuntimeErrorCode::RecordedTerminationUnavailable
                             | crate::RuntimeErrorCode::MissingRecordedProcessConfig
                     ) =>

@@ -110,14 +110,6 @@ pub enum EmbedError {
         /// Session whose catalog row has no head.
         session_id: SessionId,
     },
-    #[error("store is bound to session `{loaded}` but builder requested `{requested}`")]
-    /// A loaded store belongs to a different session than requested.
-    StoreSessionMismatch {
-        /// Session identifier bound to the loaded store.
-        loaded: SessionId,
-        /// Session identifier requested by the builder.
-        requested: SessionId,
-    },
     #[error("invalid work cadence: {0}")]
     WorkCadence(#[from] lash_core::WorkCadenceError),
     /// Cleanup of an unrecorded session stopped at the retained step.
@@ -301,8 +293,9 @@ impl EmbedError {
     /// [`StoreCommitFailed`](lash_core::RuntimeErrorCode::StoreCommitFailed)
     /// stays `false`: the code does not distinguish transient store I/O from
     /// conflicts, so there is no typed signal that a retry is safe.
-    /// Direct and session-wrapped [`StoreError::Contended`](lash_core::StoreError::Contended)
-    /// are retryable for the same reason as the corresponding runtime code.
+    /// A direct or session-wrapped store error is retryable exactly when
+    /// [`StoreError::is_transient`](lash_core::StoreError::is_transient) says
+    /// the storage substrate faulted, as the engine's open retries it.
     ///
     /// Provider failures never surface as `EmbedError` — a failed LLM call
     /// finishes the turn with `TurnOutcome::Stopped(ProviderError)` — so
@@ -314,14 +307,14 @@ impl EmbedError {
             Self::Plugin(err) | Self::Session(SessionError::Plugin(err)) => err.is_retryable(),
             Self::SessionDeleteCleanup { failure, .. } => failure.is_retryable(),
             Self::Reconfigure(_) => false,
-            Self::Store(lash_core::StoreError::Contended)
-            | Self::Session(SessionError::Store {
-                source: lash_core::StoreError::Contended,
-                ..
-            })
+            // A store error is retried here exactly when the engine retries
+            // it: when it is a fault of the storage substrate.
+            Self::Store(source) | Self::Session(SessionError::Store { source, .. }) => {
+                source.is_transient()
+            }
             // The runtime's `model_unavailable`, as a session error: a
             // deployment that serves the recorded key repairs it.
-            | Self::Session(SessionError::ModelUnavailable { .. }) => true,
+            Self::Session(SessionError::ModelUnavailable { .. }) => true,
             Self::MissingProtocolPlugin
             | Self::ConfigSubmit(_)
             | Self::PluginBackendMismatch { .. }
@@ -336,8 +329,6 @@ impl EmbedError {
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
             | Self::SessionDeleteStorage { .. }
-            | Self::Store(_)
-            | Self::StoreSessionMismatch { .. }
             | Self::SessionCreationUnrecorded { .. }
             | Self::WorkCadence(_)
             | Self::SessionStillInUse
@@ -361,8 +352,8 @@ impl EmbedError {
     ///
     /// - builder/wiring variants of this enum (missing protocol plugin,
     ///   default model key or an unknown one, turn budget, commit budget, queued-work composition,
-    ///   handler context, an obligation kind no relay can deliver, and
-    ///   store/session mismatches) — the same call fails
+    ///   handler context, and an obligation kind no relay can deliver) — the
+    ///   same call fails
     ///   identically until the host changes its wiring;
     /// - typed runtime wiring, caller-invariant, unsupported-operation,
     ///   deterministic codec, and corrupt durable-state codes;
@@ -370,18 +361,15 @@ impl EmbedError {
     ///   `CodeExecutionUnavailable`); a recorded model this deployment
     ///   cannot bind (`ModelUnavailable`) is retryable instead, as the
     ///   runtime's `model_unavailable` is;
-    /// - direct or session-wrapped
-    ///   [`StoreError::SessionDeleted`](lash_core::StoreError::SessionDeleted)
-    ///   tombstones and
+    /// - a direct or session-wrapped store error the engine carries under a
+    ///   terminal code: every typed store refusal (compatibility, writer
+    ///   fence, session identity, session-state generation, cancellation
+    ///   authority), a tombstone, corrupt stored data, a commit byte or node
+    ///   budget rejection, a checkpoint codec mismatch and a record-encoding
+    ///   failure, plus a
     ///   [`StoreError::SessionRelationMismatch`](lash_core::StoreError::SessionRelationMismatch)
-    ///   relation conflicts, plus nested controller-owned terminal codes or
-    ///   structured causes;
-    /// - direct or session-wrapped commit byte or node budget rejections, which
-    ///   require the host to raise the configured limit or submit a smaller
-    ///   commit;
-    /// - direct or session-wrapped checkpoint codec mismatches and
-    ///   record-encoding failures, which are deterministic for the same store
-    ///   and build.
+    ///   relation conflict and nested controller-owned terminal codes or
+    ///   structured causes.
     pub fn is_terminal(&self) -> bool {
         match self {
             Self::MissingProtocolPlugin
@@ -394,7 +382,6 @@ impl EmbedError {
             | Self::MissingMaxToolCalls
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
-            | Self::StoreSessionMismatch { .. }
             | Self::SessionCreationUnrecorded { .. }
             | Self::DrainOwnGeneration { .. }
             | Self::UnknownSession { .. }
@@ -431,18 +418,16 @@ impl EmbedError {
     }
 }
 
+/// A store error is terminal at the facade exactly when the engine ends a
+/// drive on it: it is no fault of the storage substrate, and the code the
+/// engine carries it under
+/// ([`RuntimeErrorCode::of_store_error`](lash_core::RuntimeErrorCode::of_store_error))
+/// is terminal. A relation conflict has no code of its own and is refused
+/// the same way on every call.
 fn store_error_is_terminal(error: &lash_core::StoreError) -> bool {
-    matches!(
-        error,
-        lash_core::StoreError::WriterFenced { .. }
-            | lash_core::StoreError::Incompatible { .. }
-            | lash_core::StoreError::SessionDeleted { .. }
-            | lash_core::StoreError::SessionRelationMismatch { .. }
-            | lash_core::StoreError::CommitNodeBudgetExceeded { .. }
-            | lash_core::StoreError::CommitByteBudgetExceeded { .. }
-            | lash_core::StoreError::CheckpointComponentEncodingVersionMismatch { .. }
-            | lash_core::StoreError::RecordEncodingFailed { .. }
-    )
+    !error.is_transient()
+        && (lash_core::RuntimeErrorCode::of_store_error(error).is_terminal()
+            || matches!(error, lash_core::StoreError::SessionRelationMismatch { .. }))
 }
 
 /// Result type returned by Lash facade operations.
@@ -800,6 +785,109 @@ mod tests {
         for error in [direct, wrapped, controller_owned, nested_controller_owned] {
             assert!(error.is_terminal(), "{error}");
             assert!(!error.is_retryable(), "{error}");
+        }
+    }
+
+    /// One of each store refusal that stays typed past the store.
+    fn store_refusals() -> Vec<lash_core::store::StoreRefusal> {
+        use lash_core::store::StoreRefusal;
+        let refusals = vec![
+            StoreRefusal::Incompatible {
+                refusal: lash_core::compat::CompatRefusal::Unstamped {
+                    component: "fleet_format".to_owned(),
+                    writing_release: Some("facade-law".to_owned()),
+                },
+            },
+            StoreRefusal::WriterFenced {
+                recorded: 2,
+                writable: lash_core::compat::VersionRange::exactly(1),
+            },
+            StoreRefusal::StoreSessionMismatch {
+                loaded: SessionId::from("loaded"),
+                requested: SessionId::from("requested"),
+            },
+            StoreRefusal::SessionStateVersionUnsupported {
+                found: 0,
+                current: 3,
+            },
+            StoreRefusal::SessionStateVersionNewerThanRuntime {
+                found: 4,
+                current: 3,
+            },
+            StoreRefusal::TurnCancelBindingMismatch {
+                session_id: SessionId::from("bound"),
+                expected: "admitted".to_owned(),
+                presented: "presented".to_owned(),
+            },
+        ];
+        let codes = refusals
+            .iter()
+            .map(|refusal| refusal.code().as_str().to_owned())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(codes.len(), refusals.len(), "one sample per refusal");
+        refusals
+    }
+
+    /// The direct and session-wrapped shapes a store error reaches a host in.
+    fn store_shapes(error: impl Fn() -> StoreError) -> [EmbedError; 2] {
+        [
+            EmbedError::Store(error()),
+            EmbedError::Session(SessionError::Store {
+                context: "facade law".to_string(),
+                source: error(),
+            }),
+        ]
+    }
+
+    /// The facade answers for a store error what the engine answers for the
+    /// runtime error it turns that store error into (FIG-4628).
+    #[test]
+    fn the_facade_classifies_every_store_refusal_as_the_engine_does() {
+        for refusal in store_refusals() {
+            let engine = RuntimeEffectControllerError::from(refusal.clone().into_store_error())
+                .into_runtime_error();
+            assert_eq!(engine.code, refusal.code());
+            assert!(engine.is_terminal() && !engine.is_retryable(), "{engine}");
+            let shapes = store_shapes(|| refusal.clone().into_store_error())
+                .into_iter()
+                .chain([
+                    EmbedError::Runtime(engine.clone()),
+                    EmbedError::Plugin(PluginError::from(refusal.clone().into_store_error())),
+                ]);
+            for facade in shapes {
+                assert_eq!(facade.is_terminal(), engine.is_terminal(), "{facade:?}");
+                assert_eq!(facade.is_retryable(), engine.is_retryable(), "{facade:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_facade_retries_exactly_the_store_faults_the_engine_retries() {
+        let transient: [fn() -> StoreError; 4] = [
+            || StoreError::Contended,
+            || StoreError::StorageFailure {
+                backend: "facade-law",
+                message: "the store is temporarily unavailable".to_string(),
+            },
+            || StoreError::Backend("the store is temporarily unavailable".to_string()),
+            || StoreError::MigrationOpenElsewhere {
+                database: "durable core".to_string(),
+                location: std::path::PathBuf::from("facade-law"),
+            },
+        ];
+        for error in transient {
+            assert!(error().is_transient(), "{}", error());
+            for facade in store_shapes(error) {
+                assert!(facade.is_retryable() && !facade.is_terminal(), "{facade:?}");
+            }
+        }
+        let corrupt = || StoreError::StoredDataCorrupt {
+            record_kind: "SessionHeadMeta",
+            message: "not the record".to_string(),
+        };
+        assert!(!corrupt().is_transient());
+        for facade in store_shapes(corrupt) {
+            assert!(facade.is_terminal() && !facade.is_retryable(), "{facade:?}");
         }
     }
 }

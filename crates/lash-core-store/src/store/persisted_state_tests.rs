@@ -340,3 +340,41 @@ fn fleet_reader_fails_closed_on_an_admitted_older_version_without_an_upcaster() 
         }
     ));
 }
+
+/// Bytes a versioned record's decoder refuses are refused on every read:
+/// corrupt stored data, never a backend fault a retry repairs (FIG-4628).
+#[test]
+fn an_undecodable_versioned_record_is_corrupt_and_never_transient() {
+    let mistyped = format!(r#"{{"schema_version":{SESSION_HEAD_META_SCHEMA_VERSION},"policy":7}}"#);
+    for json in ["{not-current-json", mistyped.as_str()] {
+        let exact = decode_versioned_json_record::<SessionHeadPayload>(
+            json,
+            "SessionHeadMeta",
+            SESSION_HEAD_META_SCHEMA_VERSION,
+        )
+        .expect_err("the exact-version decoder refuses the bytes");
+        let fleet = decode_versioned_json_record_for_fleet::<SessionHeadPayload>(
+            json,
+            "SessionHeadMeta",
+            SurfaceFormat::of(
+                "SESSION_HEAD_META_SCHEMA_VERSION",
+                SESSION_HEAD_META_SCHEMA_VERSION,
+            ),
+            FleetFormat::current(),
+        )
+        .expect_err("the fleet decoder refuses the bytes");
+        for error in [exact, fleet] {
+            assert!(
+                matches!(
+                    error,
+                    StoreError::StoredDataCorrupt {
+                        record_kind: "SessionHeadMeta",
+                        ..
+                    }
+                ),
+                "{json}: {error:?}"
+            );
+            assert!(!error.is_transient(), "{json}: {error:?}");
+        }
+    }
+}

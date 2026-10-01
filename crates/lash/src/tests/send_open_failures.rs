@@ -14,8 +14,15 @@
 //!   own code and cause;
 //! - a permanent catalog refusal without a typed carrier, or a plugin that
 //!   refuses to build: `PluginSessionManager`, naming the refusal;
-//! - a transient store fault at the catalog or state read: the engine
-//!   retries the open and delivers the input once the store recovers.
+//! - a stored record the store cannot decode: `RuntimeStoreCorrupt`, once;
+//! - a transient store fault at the catalog read, the state read or the
+//!   lookup runtime assembly makes: the engine retries the open and delivers
+//!   the input once the store recovers.
+//!
+//! Every store read of the open is classified one way (FIG-4628), and so is
+//! the reopen of a session-turn process's committed child: a stored
+//! generation outside the worker's window ends the process with the typed
+//! refusal's code, on its first attempt.
 //!
 //! A tool source lost under `ToolSourcePolicy::Require` is the runtime
 //! build's own refusal; `tool_restore_report.rs` holds its law. A deployment
@@ -364,9 +371,14 @@ mod typed_open {
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum Read {
+        /// No read fails: the store only counts.
+        Nothing,
         Catalog,
         Version,
         Window,
+        /// The catalog lookup runtime assembly makes to bind the loaded
+        /// state to its store: the first lookup after a window load.
+        Assembly,
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -386,9 +398,33 @@ mod typed_open {
         remaining: AtomicUsize,
         attempts: AtomicUsize,
         faults: AtomicUsize,
+        /// A window was loaded since the last assembly lookup.
+        window_loaded: AtomicBool,
+        /// Window loads and generation reads since the store was armed.
+        window_reads: AtomicUsize,
+        version_reads: AtomicUsize,
     }
 
     impl OpenStore {
+        fn over(inner: Arc<dyn DeploymentStore>, fault: Fault, read: Read) -> Arc<Self> {
+            Arc::new(Self {
+                inner,
+                fault,
+                read,
+                armed: AtomicBool::new(false),
+                remaining: AtomicUsize::new(2),
+                attempts: AtomicUsize::new(0),
+                faults: AtomicUsize::new(0),
+                window_loaded: AtomicBool::new(false),
+                window_reads: AtomicUsize::new(0),
+                version_reads: AtomicUsize::new(0),
+            })
+        }
+
+        fn armed(&self) -> bool {
+            self.armed.load(Ordering::SeqCst)
+        }
+
         fn fails(&self, read: Read) -> bool {
             if !self.armed.load(Ordering::SeqCst) || self.read != read {
                 return false;
@@ -446,7 +482,10 @@ mod typed_open {
             &self,
             id: &SessionId,
         ) -> std::result::Result<lash_core::store::SessionLookup, StoreError> {
-            if self.fails(Read::Catalog) {
+            let assembly = self.read == Read::Assembly
+                && self.armed()
+                && self.window_loaded.swap(false, Ordering::SeqCst);
+            if self.fails(Read::Catalog) || (assembly && self.fails(Read::Assembly)) {
                 return Err(self.error());
             }
             self.inner.lookup_session(id).await
@@ -456,6 +495,9 @@ mod typed_open {
             &self,
             id: &SessionId,
         ) -> std::result::Result<u32, StoreError> {
+            if self.armed() {
+                self.version_reads.fetch_add(1, Ordering::SeqCst);
+            }
             if self.fails(Read::Version) {
                 return Err(self.error());
             }
@@ -467,6 +509,10 @@ mod typed_open {
             id: &SessionId,
             selector: WindowSelector,
         ) -> std::result::Result<Option<SessionWindowRead>, StoreError> {
+            if self.armed() {
+                self.window_reads.fetch_add(1, Ordering::SeqCst);
+                self.window_loaded.store(true, Ordering::SeqCst);
+            }
             let wrong_session = self.fails(Read::Window);
             let mut read = self.inner.load_session_window(id, selector).await?;
             if wrong_session {
@@ -486,36 +532,58 @@ mod typed_open {
         Postgres,
     }
 
+    /// The double over `storage`, what its stores need to outlive it, and
+    /// the test seams of the session store it runs over.
     async fn double_over(
         storage: Storage,
     ) -> (
         lash_restate_test::RestateTestBackend,
         Box<dyn std::any::Any>,
+        Arc<dyn lash_core::store::StoreTestSupport>,
     ) {
         let config = lash_restate_test::ServerConfig::default();
         match storage {
-            Storage::Memory => (restate_double(SEED).await, Box::new(())),
+            Storage::Memory => {
+                let double = restate_double(SEED).await;
+                let seams = double.stores().session_store_factory();
+                (double, Box::new(()), seams)
+            }
             Storage::File => {
                 let files = tempfile::tempdir().expect("SQLite store directory");
-                let stores: Arc<dyn lash_core::StoreSet> = Arc::new(
-                    lash_sqlite_store::SqliteStoreSet::open(files.path())
-                        .await
-                        .expect("SQLite file stores"),
-                );
+                let stores = lash_sqlite_store::SqliteStoreSet::open(files.path())
+                    .await
+                    .expect("SQLite file stores");
+                let seams = stores.session_store_factory();
+                let stores: Arc<dyn lash_core::StoreSet> = Arc::new(stores);
                 (
                     lash_restate_test::backend_with(SEED, config, move |_| stores)
                         .await
                         .expect("the double over SQLite files"),
                     Box::new(files),
+                    seams,
                 )
             }
             Storage::Postgres => {
-                let (stores, held) = postgres_store_set().await.expect("PostgreSQL gate");
+                let url = lash_postgres_store::testing::required_database_url();
+                let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
+                let storage = lash_postgres_store::PostgresStorage::connect(database.url())
+                    .await
+                    .expect("connect to PostgreSQL");
+                let attachments = tempfile::tempdir().expect("PostgreSQL attachment directory");
+                let stores = lash_postgres_store::PostgresStoreSet::new(
+                    &storage,
+                    Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+                        attachments.path(),
+                    )),
+                );
+                let seams = stores.session_store_factory();
+                let stores: Arc<dyn lash_core::StoreSet> = Arc::new(stores);
                 (
                     lash_restate_test::backend_with(SEED, config, move |_| stores)
                         .await
                         .expect("the double over PostgreSQL"),
-                    held,
+                    Box::new((database, attachments, storage)),
+                    seams,
                 )
             }
         }
@@ -526,16 +594,8 @@ mod typed_open {
         fault: Fault,
         read: Read,
     ) -> (Result<crate::TurnOutput>, Arc<OpenStore>) {
-        let (double, _held) = double_over(storage).await;
-        let store = Arc::new(OpenStore {
-            inner: double.lash_backend().session_store_factory(),
-            fault,
-            read,
-            armed: AtomicBool::new(false),
-            remaining: AtomicUsize::new(2),
-            attempts: AtomicUsize::new(0),
-            faults: AtomicUsize::new(0),
-        });
+        let (double, _held, _seams) = double_over(storage).await;
+        let store = OpenStore::over(double.lash_backend().session_store_factory(), fault, read);
         let backend = DecoratedBackend::over(double.lash_backend()).session_store_factory({
             let store = Arc::clone(&store);
             move |_| store
@@ -581,31 +641,30 @@ mod typed_open {
     }
 
     async fn permanent_refusal(storage: Storage, fault: Fault) {
-        let (read, expected) = match fault {
-            Fault::WrongSession => (
-                Read::Window,
-                serde_json::json!({
-                    "type": "store_session_mismatch",
-                    "loaded": "another-session",
-                    "requested": "typed-open-fault",
-                }),
-            ),
-            Fault::UnsupportedGeneration => (
-                Read::Version,
-                serde_json::json!({
-                    "type": "session_state_version_unsupported",
-                    "found": 0,
-                    "current": lash_core::store::CURRENT_SESSION_STATE_VERSION,
-                }),
-            ),
-            Fault::NewerGeneration => (
-                Read::Version,
-                serde_json::json!({
-                    "type": "session_state_version_newer_than_runtime",
-                    "found": lash_core::store::CURRENT_SESSION_STATE_VERSION + 1,
-                    "current": lash_core::store::CURRENT_SESSION_STATE_VERSION,
-                }),
-            ),
+        let read = match fault {
+            Fault::WrongSession => Read::Window,
+            _ => Read::Version,
+        };
+        permanent_refusal_at(storage, fault, read).await;
+    }
+
+    async fn permanent_refusal_at(storage: Storage, fault: Fault, read: Read) {
+        let expected = match fault {
+            Fault::WrongSession => serde_json::json!({
+                "type": "store_session_mismatch",
+                "loaded": "another-session",
+                "requested": "typed-open-fault",
+            }),
+            Fault::UnsupportedGeneration => serde_json::json!({
+                "type": "session_state_version_unsupported",
+                "found": 0,
+                "current": lash_core::store::CURRENT_SESSION_STATE_VERSION,
+            }),
+            Fault::NewerGeneration => serde_json::json!({
+                "type": "session_state_version_newer_than_runtime",
+                "found": lash_core::store::CURRENT_SESSION_STATE_VERSION + 1,
+                "current": lash_core::store::CURRENT_SESSION_STATE_VERSION,
+            }),
             _ => unreachable!("a permanent refusal"),
         };
         let (answer, store) = send_with_fault(storage, fault, read).await;
@@ -668,6 +727,190 @@ mod typed_open {
         }
     }
 
+    /// A fault only at the lookup runtime assembly makes, after the open's
+    /// catalog and state reads succeeded, is retried like theirs.
+    async fn transient_assembly_fault_recovers(storage: Storage) {
+        for fault in [Fault::StorageFailure, Fault::Backend] {
+            let (answer, store) = send_with_fault(storage, fault, Read::Assembly).await;
+            let output = answer.unwrap_or_else(|error| panic!("{fault:?} at assembly: {error:?}"));
+            assert!(output.is_success(), "{fault:?}: {:?}", output.result);
+            assert_eq!(
+                store.faults.load(Ordering::SeqCst),
+                2,
+                "both faults met the assembly lookup"
+            );
+            assert!(
+                store.attempts.load(Ordering::SeqCst) >= 3,
+                "the store recovered on a retry"
+            );
+        }
+    }
+
+    /// The session's head is bytes its decoder refuses: the open is refused
+    /// once, as corrupt stored data, and the sender is answered.
+    async fn undecodable_head_is_refused_corrupt(storage: Storage) {
+        const ID: &str = "undecodable-head";
+        let (double, _held, seams) = double_over(storage).await;
+        let store = OpenStore::over(
+            double.lash_backend().session_store_factory(),
+            Fault::StorageFailure,
+            Read::Nothing,
+        );
+        let backend = DecoratedBackend::over(double.lash_backend()).session_store_factory({
+            let store = Arc::clone(&store);
+            move |_| store
+        });
+        let core = builder(backend.into())
+            .build(crate::testing::runtime_lease_owner())
+            .expect("the core over the counting store");
+        crate::tests::create_catalog_session(&core, ID)
+            .await
+            .expect("create the session");
+        let durable = core
+            .session(ID)
+            .durable()
+            .await
+            .expect("acquire before the corruption");
+        durable
+            .pending_turn_inputs()
+            .await
+            .expect("resolve before the corruption");
+        let id = SessionId::from(ID);
+        // The input is accepted over a readable head and its drive is held,
+        // so the first read of the corrupt head is the engine's open.
+        let hold = double.hold_session_drive(&id).await;
+        let accepted = durable
+            .send(TurnInput::text("accepted before the head is corrupt"))
+            .await
+            .expect("the input is accepted");
+        let generation = store
+            .inner
+            .read_session_state_version(&id)
+            .await
+            .expect("the session's generation");
+        seams
+            .stamp_session_state_version_and_corrupt_payload_for_testing(&id, generation)
+            .await
+            .expect("corrupt the stored head");
+        store.armed.store(true, Ordering::SeqCst);
+        hold.release();
+        let answer = tokio::time::timeout(ANSWERS_WITHIN, accepted.output())
+            .await
+            .unwrap_or_else(|_| panic!("no answer, {:?}", invocations(&double)));
+        tokio::time::timeout(ANSWERS_WITHIN, double.settle_session_drive(&id))
+            .await
+            .expect("the drive ends without a paused invocation");
+        assert_nothing_paused(&double);
+        let error = drive_refusal(ID, answer.expect_err("the open is refused"));
+        assert_eq!(
+            error.code,
+            lash_core::RuntimeErrorCode::RuntimeStoreCorrupt,
+            "{error:?}"
+        );
+        assert!(
+            error.message.contains("SessionHeadMeta") && error.message.contains("corrupt"),
+            "the refusal names the corrupt record: {error:?}"
+        );
+        assert!(error.is_terminal() && !error.is_retryable(), "{error:?}");
+        assert_eq!(
+            store.window_reads.load(Ordering::SeqCst),
+            1,
+            "corrupt stored data is not read again"
+        );
+    }
+
+    /// A session-turn process whose child is committed under a generation
+    /// outside this worker's window: the reopen's refusal ends the process
+    /// with its own code on the first attempt.
+    async fn committed_child_outside_the_window_ends_its_process(storage: Storage) {
+        const CHILD: &str = "committed-child-outside-the-window";
+        let (double, _held, seams) = double_over(storage).await;
+        let store = OpenStore::over(
+            double.lash_backend().session_store_factory(),
+            Fault::StorageFailure,
+            Read::Nothing,
+        );
+        let backend = DecoratedBackend::over(double.lash_backend()).session_store_factory({
+            let store = Arc::clone(&store);
+            move |_| store
+        });
+        let core = builder(backend.into())
+            .build(crate::testing::runtime_lease_owner())
+            .expect("the core over the counting store");
+        crate::tests::harness::serve_processes_on(&double, &core);
+        crate::tests::create_catalog_session(&core, CHILD)
+            .await
+            .expect("commit the child");
+        let newer = lash_core::store::CURRENT_SESSION_STATE_VERSION + 1;
+        seams
+            .stamp_session_state_version_for_testing(&SessionId::from(CHILD), newer)
+            .await
+            .expect("stamp a generation this worker cannot read");
+        store.armed.store(true, Ordering::SeqCst);
+        let handler: &'static lash_restate_test::OpenHandler = Box::leak(Box::new(
+            double
+                .open_handler(lash_core::AdmittedScope::runtime_operation(
+                    "start-over-a-committed-child",
+                ))
+                .await
+                .expect("open the host operation's handler"),
+        ));
+        let started = core
+            .processes()
+            .start(
+                lash_core::ProcessStartRequest::new(
+                    lash_core::ProcessInput::SessionTurn {
+                        definition_key: "fig4628-session-turn".into(),
+                        create_request: Box::new(
+                            lash_core::SessionCreateRequest::root(
+                                lash_core::SessionStartPoint::Empty,
+                                lash_core::PluginOptions::default(),
+                            )
+                            .with_session_id(CHILD),
+                        ),
+                        turn_input: Box::new(TurnInput::text("run the committed child")),
+                        result: lash_core::SessionTurnOutcome::Turn,
+                    },
+                    lash_core::ProcessOriginator::host(),
+                    lash_core::Lifetime::Detached,
+                )
+                .with_host_start_key("fig4628-committed-child"),
+                handler.scoped(),
+            )
+            .await
+            .expect("the start is admitted");
+        let output = tokio::time::timeout(
+            ANSWERS_WITHIN,
+            core.processes().await_output(&started.process_id),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("the process ends: {:?}", invocations(&double)))
+        .expect("the process's terminal output");
+        let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+            panic!("the process settles the refusal: {output:?}");
+        };
+        let lash_core::ToolCallOutcome::Failure(failure) = output.outcome else {
+            panic!("the process fails: {:?}", output.outcome);
+        };
+        assert_eq!(
+            failure.code,
+            lash_core::RuntimeErrorCode::SessionStateVersionNewerThanRuntime.as_str(),
+            "{failure:?}"
+        );
+        assert_eq!(
+            failure.retry,
+            lash_core::ToolRetryStatus::Never,
+            "{failure:?}"
+        );
+        assert_nothing_paused(&double);
+        assert_eq!(
+            store.version_reads.load(Ordering::SeqCst),
+            1,
+            "a permanent refusal is not retried: {:?}",
+            invocations(&double)
+        );
+    }
+
     macro_rules! laws {
         ($module:ident, $storage:expr $(, $ignore:meta)?) => {
             mod $module {
@@ -691,6 +934,26 @@ mod typed_open {
                 $(#[$ignore])?
                 async fn transient_open_faults_retry_until_the_store_recovers() {
                     transient_fault_recovers($storage).await;
+                }
+                #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+                $(#[$ignore])?
+                async fn a_transient_fault_at_the_assembly_lookup_is_retried() {
+                    transient_assembly_fault_recovers($storage).await;
+                }
+                #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+                $(#[$ignore])?
+                async fn a_typed_refusal_at_the_assembly_lookup_reaches_the_sender() {
+                    permanent_refusal_at($storage, Fault::NewerGeneration, Read::Assembly).await;
+                }
+                #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+                $(#[$ignore])?
+                async fn an_undecodable_head_is_refused_corrupt_and_not_retried() {
+                    undecodable_head_is_refused_corrupt($storage).await;
+                }
+                #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+                $(#[$ignore])?
+                async fn a_committed_child_outside_the_window_ends_its_process_typed() {
+                    committed_child_outside_the_window_ends_its_process($storage).await;
                 }
             }
         };

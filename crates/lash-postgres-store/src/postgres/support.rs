@@ -123,10 +123,9 @@ pub(crate) async fn retained_fork_config_tx(
         &node_json,
         fleet,
     )
-    .map_err(|error| {
-        StoreError::Backend(format!(
-            "failed to decode retained frame node `{frame_node_id}`: {error}"
-        ))
+    .map_err(|error| StoreError::StoredDataCorrupt {
+        record_kind: "SessionNodeRecord",
+        message: format!("failed to decode retained frame node `{frame_node_id}`: {error}"),
     })?
     .frame_config()
     .ok_or_else(|| {
@@ -293,10 +292,12 @@ pub(crate) fn process_decode_error(err: serde_json::Error) -> PluginError {
 
 pub(crate) fn store_decode_json<T: serde::de::DeserializeOwned>(
     json: &str,
-    what: &str,
+    record_kind: &'static str,
 ) -> Result<T, StoreError> {
-    serde_json::from_str(json)
-        .map_err(|err| StoreError::Backend(format!("failed to decode {what}: {err}")))
+    serde_json::from_str(json).map_err(|err| StoreError::StoredDataCorrupt {
+        record_kind,
+        message: format!("failed to decode {record_kind}: {err}"),
+    })
 }
 
 pub(crate) fn encode_json<T: serde::Serialize>(value: &T) -> Result<String, StoreError> {
@@ -668,14 +669,7 @@ fn decode_session_head_meta_row(
                 lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION
             ),
             fleet,
-        )
-        .map_err(|error| match error {
-            StoreError::Backend(message) => StoreError::StoredDataCorrupt {
-                record_kind: "SessionHeadMeta",
-                message,
-            },
-            error => error,
-        })?;
+        )?;
     Ok(Some(
         SessionHeadMeta::assemble(
             session_id,

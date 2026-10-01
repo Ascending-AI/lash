@@ -29,7 +29,10 @@ pub(crate) fn pending_turn_input_row(row: PgRow) -> Result<PendingTurnInputRow, 
         row.get::<String, _>("state").as_str(),
         ingress,
     )
-    .ok_or_else(|| StoreError::Backend("invalid pending turn-input state".to_string()))?;
+    .ok_or_else(|| StoreError::StoredDataCorrupt {
+        record_kind: "TurnInputState",
+        message: "unknown or scope-illegal turn-input state".to_string(),
+    })?;
     Ok(PendingTurnInputRow {
         enqueue_seq: u64_from_sql("PendingTurnInput", "enqueue_seq", row.get("enqueue_seq"))?,
         input_id: row.get("input_id"),

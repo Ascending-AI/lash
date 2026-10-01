@@ -133,42 +133,14 @@ impl CoreSessionDriver {
         // terminal, never a silent create (FIG-4112). Resolution writes no
         // catalog row.
         let store =
-            match crate::session::resolve_existing_session(&self.config.store_factory, session_id)
+            crate::session::resolve_existing_session(&self.config.store_factory, session_id)
                 .await
-            {
-                Ok(store) => store,
-                Err(crate::EmbedError::Store(
-                    error @ (lash_core::StoreError::SessionDeleted { .. }
-                    | lash_core::StoreError::SessionClosing { .. }),
-                )) => {
-                    return Err(OpenFailure::SessionRetired(session_retired_error(
-                        session_id, error,
-                    )));
-                }
-                Err(error) => return Err(OpenFailure::of_store_read(error)),
-            };
-        let state = match crate::session::load_state_from_store(session_id, &policy, &store).await {
-            Ok(state) => state,
-            Err(crate::EmbedError::Store(
-                error @ (lash_core::StoreError::SessionDeleted { .. }
-                | lash_core::StoreError::SessionClosing { .. }),
-            )) => {
-                return Err(OpenFailure::SessionRetired(session_retired_error(
-                    session_id, error,
-                )));
-            }
-            // A row with no head recorded no config: the drive is refused
-            // with the typed code, never run on defaults (FIG-4553).
-            Err(error @ crate::EmbedError::SessionCreationUnrecorded { .. }) => {
-                return Err(OpenFailure::CreationUnrecorded(
-                    lash_core::RuntimeError::new(
-                        lash_core::RuntimeErrorCode::SessionCreationUnrecorded,
-                        error.to_string(),
-                    ),
-                ));
-            }
-            Err(error) => return Err(OpenFailure::of_store_read(error)),
-        };
+                .map_err(|error| OpenFailure::of_open_read(session_id, error))?;
+        // A row with no head recorded no config: the drive is refused with
+        // the typed code, never run on defaults (FIG-4553).
+        let state = crate::session::load_state_from_store(session_id, &policy, &store)
+            .await
+            .map_err(|error| OpenFailure::of_open_read(session_id, error))?;
         let plugin_host = build_plugin_host(
             self.config.protocol_factory.as_ref(),
             self.config.plugin_factories.as_ref(),
@@ -194,11 +166,15 @@ impl CoreSessionDriver {
             self.config.drive_owner.clone(),
         )
         .await
-        .map_err(|error| {
-            OpenFailure::Terminal(match error {
-                lash_core::SessionError::Plugin(error) => error,
-                error => lash_core::PluginError::Session(error.to_string()),
-            })
+        // Assembly binds the loaded state to its store with one more catalog
+        // lookup: its failure is a store read of this open like the two
+        // above (FIG-4628).
+        .map_err(|error| match error {
+            lash_core::SessionError::Plugin(error) => OpenFailure::Terminal(error),
+            lash_core::SessionError::Store { source, .. } => {
+                OpenFailure::of_store_error(session_id, source)
+            }
+            error => OpenFailure::Terminal(lash_core::PluginError::Session(error.to_string())),
         })?;
         // The session runs with the config it recorded at creation, its
         // plugin configuration included, unchanged (FIG-4099, FIG-4112,
@@ -268,39 +244,61 @@ enum OpenFailure {
     /// The session's catalog row has no head, so its creation recorded no
     /// config to open with (FIG-4553).
     CreationUnrecorded(lash_core::RuntimeError),
-    /// The store refused the read with a refusal that stays typed past it
-    /// ([`StoreRefusal`](lash_core::store::StoreRefusal)): the drive is
-    /// refused with its code and cause, which a sender reads (FIG-4597).
+    /// The store answered a read with an error the engine carries under a
+    /// terminal code — a refusal that stays typed past the store
+    /// ([`StoreRefusal`](lash_core::store::StoreRefusal)), or corrupt stored
+    /// data: the drive is refused with that code and cause, which a sender
+    /// reads (FIG-4597, FIG-4628).
     StoreRefused(lash_core::RuntimeError),
     Terminal(lash_core::PluginError),
 }
 
 impl OpenFailure {
-    /// Why a read of the session's catalog row or recorded state failed the
-    /// open, once retirement is answered. Storage faults use the same
-    /// classifier as attachment delivery; permanent refusals stay typed.
-    fn of_store_read(error: crate::EmbedError) -> Self {
+    /// Why a store read of the open failed: the catalog lookup, the recorded
+    /// state's load, or the lookup runtime assembly binds the state with.
+    /// Each is classified here and nowhere else.
+    ///
+    /// - A retired session keeps its recorded retirement.
+    /// - A fault of the storage substrate
+    ///   ([`StoreError::is_transient`](lash_core::StoreError::is_transient))
+    ///   is retried.
+    /// - Every other answer is the store's on each attempt, so the drive is
+    ///   refused: under the terminal code the engine carries the error by,
+    ///   with its typed cause, or naming a refusal that has no such code.
+    fn of_store_error(session_id: &SessionId, error: lash_core::StoreError) -> Self {
         match error {
-            crate::EmbedError::Store(error) if error.is_transient() => Self::Retry(match error {
-                lash_core::StoreError::Contended => lash_core::RuntimeError::new(
-                    lash_core::RuntimeErrorCode::StoreCommitContended,
-                    "the session's runtime is contended; the drive is retried",
-                ),
-                error => lash_core::RuntimeEffectControllerError::from(error).into_runtime_error(),
-            }),
-            crate::EmbedError::Store(error)
-                if lash_core::store::StoreRefusal::of_store_error(&error).is_some() =>
-            {
+            error @ (lash_core::StoreError::SessionDeleted { .. }
+            | lash_core::StoreError::SessionClosing { .. }) => {
+                Self::SessionRetired(session_retired_error(session_id, error))
+            }
+            lash_core::StoreError::Contended => Self::Retry(lash_core::RuntimeError::new(
+                lash_core::RuntimeErrorCode::StoreCommitContended,
+                "the session's runtime is contended; the drive is retried",
+            )),
+            error if error.is_transient() => Self::Retry(
+                lash_core::RuntimeEffectControllerError::from(error).into_runtime_error(),
+            ),
+            error if lash_core::RuntimeErrorCode::of_store_error(&error).is_terminal() => {
                 Self::StoreRefused(
                     lash_core::RuntimeEffectControllerError::from(error).into_runtime_error(),
                 )
             }
-            crate::EmbedError::StoreSessionMismatch { loaded, requested } => Self::StoreRefused(
-                lash_core::RuntimeEffectControllerError::from(
-                    lash_core::StoreError::StoreSessionMismatch { loaded, requested },
-                )
-                .into_runtime_error(),
-            ),
+            error => Self::Terminal(lash_core::PluginError::Session(
+                crate::EmbedError::Store(error).to_string(),
+            )),
+        }
+    }
+
+    /// Why resolving the session or loading its recorded state failed.
+    fn of_open_read(session_id: &SessionId, error: crate::EmbedError) -> Self {
+        match error {
+            crate::EmbedError::Store(error) => Self::of_store_error(session_id, error),
+            error @ crate::EmbedError::SessionCreationUnrecorded { .. } => {
+                Self::CreationUnrecorded(lash_core::RuntimeError::new(
+                    lash_core::RuntimeErrorCode::SessionCreationUnrecorded,
+                    error.to_string(),
+                ))
+            }
             error => Self::Terminal(lash_core::PluginError::Session(error.to_string())),
         }
     }
@@ -311,6 +309,13 @@ impl OpenFailure {
             Self::SessionRetired(error)
             | Self::CreationUnrecorded(error)
             | Self::StoreRefused(error) => lash_core::engine::DriveAbort::Refused(error),
+            // A plugin's own typed store refusal keeps its code and cause;
+            // every other plugin failure is named under the session seam's.
+            Self::Terminal(error @ lash_core::PluginError::StoreRefusal(_)) => {
+                lash_core::engine::DriveAbort::Refused(
+                    lash_core::RuntimeEffectControllerError::from(error).into_runtime_error(),
+                )
+            }
             Self::Terminal(error) => {
                 lash_core::engine::DriveAbort::Refused(lash_core::RuntimeError::new(
                     lash_core::RuntimeErrorCode::PluginSessionManager,

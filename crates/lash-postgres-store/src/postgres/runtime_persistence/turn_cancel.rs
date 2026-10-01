@@ -175,9 +175,10 @@ pub(super) fn turn_cancel_record_from_rows(
                     });
             }
             (other, _) => {
-                return Err(StoreError::Backend(format!(
-                    "malformed turn cancel affected item of kind `{other}`"
-                )));
+                return Err(StoreError::StoredDataCorrupt {
+                    record_kind: "TurnCancelRequest",
+                    message: format!("malformed turn cancel affected item of kind `{other}`"),
+                });
             }
         }
     }
@@ -209,9 +210,10 @@ pub(super) fn turn_cancel_mode_from_wire(
     match mode {
         "immediate" => Ok(lash_core_execution::facade_support::TurnCancelMode::Immediate),
         "after_step" => Ok(lash_core_execution::facade_support::TurnCancelMode::AfterStep),
-        other => Err(StoreError::Backend(format!(
-            "unknown turn cancel mode `{other}`"
-        ))),
+        other => Err(StoreError::StoredDataCorrupt {
+            record_kind: "TurnCancelRequest",
+            message: format!("unknown turn cancel mode `{other}`"),
+        }),
     }
 }
 
@@ -221,9 +223,10 @@ pub(crate) fn turn_cancel_undelivered_from_wire(
     match disposition {
         "defer" => Ok(lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer),
         "drop" => Ok(lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop),
-        other => Err(StoreError::Backend(format!(
-            "unknown turn cancel disposition `{other}`"
-        ))),
+        other => Err(StoreError::StoredDataCorrupt {
+            record_kind: "TurnCancelRequest",
+            message: format!("unknown turn cancel disposition `{other}`"),
+        }),
     }
 }
 

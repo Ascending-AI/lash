@@ -737,6 +737,16 @@ pub fn ensure_supported_record_schema_version_for_fleet(
     Ok(actual)
 }
 
+/// Stored bytes the record's decoder refuses: the same bytes are refused on
+/// every read, so the failure is corruption, never a backend fault a retry
+/// repairs.
+fn undecodable(record_kind: &'static str, err: impl std::fmt::Display) -> StoreError {
+    StoreError::StoredDataCorrupt {
+        record_kind,
+        message: format!("failed to decode {record_kind}: {err}"),
+    }
+}
+
 /// The fleet leg of [`decode_versioned_json_record`]: a persisted record
 /// admits the version `fleet` records for `surface` as well as this build's
 /// newest — the `[N-1, N]` window ADR 0106 §2 gives readers while a finalize
@@ -752,16 +762,15 @@ pub fn decode_versioned_json_record_for_fleet<T>(
 where
     T: serde::de::DeserializeOwned,
 {
-    let mut value: serde_json::Value = serde_json::from_str(json)
-        .map_err(|err| StoreError::Backend(format!("failed to decode {record_kind}: {err}")))?;
+    let mut value: serde_json::Value =
+        serde_json::from_str(json).map_err(|err| undecodable(record_kind, err))?;
     let actual =
         ensure_supported_record_schema_version_for_fleet(record_kind, &value, surface, fleet)?;
     let window = fleet.read_window(surface);
     if actual != window.newest() {
         upcast_json_record(record_kind, surface, actual, window.newest(), &mut value)?;
     }
-    serde_json::from_value(value)
-        .map_err(|err| StoreError::Backend(format!("failed to decode {record_kind}: {err}")))
+    serde_json::from_value(value).map_err(|err| undecodable(record_kind, err))
 }
 
 /// Lifts `value` from `from_version` to `to_version` for `surface` through
@@ -822,11 +831,10 @@ pub fn decode_versioned_json_record<T>(
 where
     T: serde::de::DeserializeOwned,
 {
-    let value: serde_json::Value = serde_json::from_str(json)
-        .map_err(|err| StoreError::Backend(format!("failed to decode {record_kind}: {err}")))?;
+    let value: serde_json::Value =
+        serde_json::from_str(json).map_err(|err| undecodable(record_kind, err))?;
     ensure_supported_record_schema_version(record_kind, &value, expected)?;
-    serde_json::from_value(value)
-        .map_err(|err| StoreError::Backend(format!("failed to decode {record_kind}: {err}")))
+    serde_json::from_value(value).map_err(|err| undecodable(record_kind, err))
 }
 
 /// The MessagePack counterpart of [`decode_versioned_json_record_for_fleet`]
@@ -843,10 +851,7 @@ pub fn decode_versioned_msgpack_record_for_fleet<T>(
 where
     T: serde::de::DeserializeOwned,
 {
-    let corrupt = |err: rmp_serde::decode::Error| StoreError::StoredDataCorrupt {
-        record_kind,
-        message: format!("failed to decode {record_kind}: {err}"),
-    };
+    let corrupt = |err: rmp_serde::decode::Error| undecodable(record_kind, err);
     let mut value: serde_json::Value = rmp_serde::from_slice(bytes).map_err(corrupt)?;
     let actual =
         ensure_supported_record_schema_version_for_fleet(record_kind, &value, surface, fleet)?;
@@ -855,10 +860,7 @@ where
         return rmp_serde::from_slice(bytes).map_err(corrupt);
     }
     upcast_json_record(record_kind, surface, actual, window.newest(), &mut value)?;
-    serde_json::from_value(value).map_err(|err| StoreError::StoredDataCorrupt {
-        record_kind,
-        message: format!("failed to decode {record_kind}: {err}"),
-    })
+    serde_json::from_value(value).map_err(|err| undecodable(record_kind, err))
 }
 
 #[cfg(test)]

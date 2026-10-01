@@ -1292,12 +1292,8 @@ impl RuntimeEffectLocalRunner for AdmitRootRunner {
         let root = self.root.clone();
         self.activate_turn_cancel_binding().await.map_err(|error| {
             let refused = matches!(
-                error.cause,
-                Some(crate::RuntimeErrorCause::StoreRefusal { ref refusal })
-                    if matches!(
-                        **refusal,
-                        crate::store::StoreRefusal::TurnCancelBindingMismatch { .. }
-                    )
+                error.store_refusal(),
+                Some(crate::store::StoreRefusal::TurnCancelBindingMismatch { .. })
             );
             let fault = crate::RuntimeEffectControllerError::from(error);
             if refused {

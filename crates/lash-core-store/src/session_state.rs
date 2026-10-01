@@ -392,20 +392,29 @@ impl RuntimeCheckpointComponents {
         );
     }
 
+    /// An execution-state snapshot whose shape breaks the component set's
+    /// invariants: the same snapshot breaks them on every attempt.
+    fn execution_state_invariant(message: impl Into<String>) -> crate::StoreError {
+        crate::StoreError::StoredDataCorrupt {
+            record_kind: "ExecutionStateSnapshot",
+            message: message.into(),
+        }
+    }
+
     fn set_execution_state_components(
         &mut self,
         snapshot: crate::plugin::ExecutionStateSnapshot,
     ) -> Result<(), crate::StoreError> {
         if snapshot.root.is_none() && !snapshot.components.is_empty() {
-            return Err(crate::StoreError::Backend(
-                "an absent execution-state root cannot retain leaf components".to_string(),
+            return Err(Self::execution_state_invariant(
+                "an absent execution-state root cannot retain leaf components",
             ));
         }
         self.execution_state_body_residency = ExecutionStateBodyResidency::Resident;
         let mut replacement_entries = std::collections::BTreeMap::new();
         for (key, component) in &snapshot.components {
             if !key.starts_with(Self::EXECUTION_STATE_LEAF_PREFIX) {
-                return Err(crate::StoreError::Backend(format!(
+                return Err(Self::execution_state_invariant(format!(
                     "execution-state leaf component `{key}` is outside the `{}` namespace",
                     Self::EXECUTION_STATE_LEAF_PREFIX
                 )));
@@ -422,7 +431,7 @@ impl RuntimeCheckpointComponents {
                 }
                 crate::plugin::ExecutionStateComponentSnapshot::Unchanged => {
                     let Some(existing) = self.entries.get(key) else {
-                        return Err(crate::StoreError::Backend(format!(
+                        return Err(Self::execution_state_invariant(format!(
                             "execution-state leaf component `{key}` was marked unchanged without resident state"
                         )));
                     };
@@ -440,7 +449,7 @@ impl RuntimeCheckpointComponents {
                             ..
                         } => existing.clone(),
                         _ => {
-                            return Err(crate::StoreError::Backend(format!(
+                            return Err(Self::execution_state_invariant(format!(
                                 "execution-state leaf component `{key}` was marked unchanged without a durable ref or pending body"
                             )));
                         }

@@ -4,8 +4,7 @@ use lash_sansio::SessionId;
 pub(crate) fn decode_turn_input_ingress(
     value: String,
 ) -> Result<lash_core_execution::TurnInputIngress, StoreError> {
-    serde_json::from_str(&value)
-        .map_err(|err| StoreError::Backend(format!("failed to decode turn-input ingress: {err}")))
+    serde_json::from_str(&value).map_err(|err| stored_data_corrupt("TurnInputIngress", err))
 }
 
 pub(crate) fn decode_turn_input_state(
@@ -13,17 +12,17 @@ pub(crate) fn decode_turn_input_state(
     ingress: lash_core_execution::TurnInputIngress,
 ) -> Result<lash_core_execution::TurnInputState, StoreError> {
     lash_core_execution::TurnInputState::from_persisted(&value, ingress).ok_or_else(|| {
-        StoreError::Backend(format!(
-            "unknown or scope-illegal turn-input state `{value}`"
-        ))
+        stored_data_corrupt(
+            "TurnInputState",
+            format_args!("unknown or scope-illegal turn-input state `{value}`"),
+        )
     })
 }
 
 pub(crate) fn decode_turn_input(
     value: String,
 ) -> Result<lash_core_execution::TurnInput, StoreError> {
-    serde_json::from_str(&value)
-        .map_err(|err| StoreError::Backend(format!("failed to decode turn input: {err}")))
+    serde_json::from_str(&value).map_err(|err| stored_data_corrupt("TurnInput", err))
 }
 
 #[derive(Clone, Debug)]

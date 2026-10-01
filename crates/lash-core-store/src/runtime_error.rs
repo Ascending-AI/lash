@@ -1411,18 +1411,25 @@ impl RuntimeError {
     /// refused call returned or read back from storage. `None` on any other
     /// error, including an older record that holds only a code and message.
     pub fn session_state_version_refusal(&self) -> Option<SessionStateVersionRefusal> {
-        match self.cause.as_ref()? {
-            RuntimeErrorCause::StoreRefusal { refusal } => match &**refusal {
-                crate::store::StoreRefusal::SessionStateVersionUnsupported { found, current }
-                | crate::store::StoreRefusal::SessionStateVersionNewerThanRuntime {
-                    found,
-                    current,
-                } => Some(SessionStateVersionRefusal {
+        match self.store_refusal()? {
+            crate::store::StoreRefusal::SessionStateVersionUnsupported { found, current }
+            | crate::store::StoreRefusal::SessionStateVersionNewerThanRuntime { found, current } => {
+                Some(SessionStateVersionRefusal {
                     found: *found,
                     current: *current,
-                }),
-                _ => None,
-            },
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// The store refusal this error carries, when a store's typed refusal is
+    /// its cause ([`StoreRefusal::of_store_error`](crate::store::StoreRefusal::of_store_error)).
+    /// Every boundary that keeps a store refusal typed asks this, so a new
+    /// refusal is recognised wherever one is.
+    pub fn store_refusal(&self) -> Option<&crate::store::StoreRefusal> {
+        match self.cause.as_ref()? {
+            RuntimeErrorCause::StoreRefusal { refusal } => Some(refusal),
             _ => None,
         }
     }
@@ -1747,6 +1754,15 @@ impl RuntimeEffectControllerError {
         matches!(self.cause, Some(RuntimeErrorCause::SessionDeleted { .. }))
     }
 
+    /// The store refusal this error carries
+    /// ([`RuntimeError::store_refusal`]).
+    pub fn store_refusal(&self) -> Option<&crate::store::StoreRefusal> {
+        match self.cause.as_ref()? {
+            RuntimeErrorCause::StoreRefusal { refusal } => Some(refusal),
+            _ => None,
+        }
+    }
+
     /// Whether retrying cannot succeed without a host-side change: a terminal
     /// cause, a foreign code its host minted as an outcome, or a terminal
     /// code.
@@ -1832,6 +1848,44 @@ impl From<lash_sansio::EffectIdentityError> for RuntimeEffectControllerError {
     }
 }
 
+impl RuntimeErrorCode {
+    /// The code a store error is carried under past the store: the one
+    /// mapping every boundary that classifies a store error reads, so a store
+    /// error is terminal, or not, the same way on each of them.
+    pub fn of_store_error(err: &crate::StoreError) -> Self {
+        if let Some(refusal) = crate::store::StoreRefusal::of_store_error(err) {
+            return refusal.code();
+        }
+        match err {
+            crate::StoreError::StoredDataCorrupt { .. }
+            | crate::StoreError::MonotonicCounterOverflow { .. } => {
+                crate::RuntimeErrorCode::RuntimeStoreCorrupt
+            }
+            crate::StoreError::SessionDeleted { .. } => crate::RuntimeErrorCode::SessionDeleted,
+            crate::StoreError::HeadRevisionConflict { .. } => {
+                crate::RuntimeErrorCode::StoreCommitSuperseded
+            }
+            crate::StoreError::CommitNodeBudgetExceeded { .. } => {
+                crate::RuntimeErrorCode::StoreCommitNodeBudgetExceeded
+            }
+            crate::StoreError::CommitByteBudgetExceeded { .. } => {
+                crate::RuntimeErrorCode::StoreCommitByteBudgetExceeded
+            }
+            crate::StoreError::CheckpointComponentEncodingVersionMismatch { .. } => {
+                crate::RuntimeErrorCode::CheckpointComponentEncodingVersionMismatch
+            }
+            crate::StoreError::RecordEncodingFailed { .. } => {
+                crate::RuntimeErrorCode::RecordEncodingFailed
+            }
+            crate::StoreError::ArtifactReferrerEnded { .. } => {
+                crate::RuntimeErrorCode::ArtifactReferrerEnded
+            }
+            crate::StoreError::ArtifactMissing { .. } => crate::RuntimeErrorCode::ArtifactMissing,
+            _ => crate::RuntimeErrorCode::RuntimeStore,
+        }
+    }
+}
+
 impl From<crate::StoreError> for RuntimeEffectControllerError {
     fn from(err: crate::StoreError) -> Self {
         let refusal = crate::store::StoreRefusal::of_store_error(&err);
@@ -1854,47 +1908,7 @@ impl From<crate::StoreError> for RuntimeEffectControllerError {
                 refusal: Box::new(refusal.clone()),
             })
             .or(cause);
-        let code = match &err {
-            crate::StoreError::WriterFenced { .. } => RuntimeErrorCode::WriterFenced,
-            crate::StoreError::Incompatible { .. } => RuntimeErrorCode::StoreIncompatible,
-            crate::StoreError::StoreSessionMismatch { .. } => {
-                RuntimeErrorCode::StoreSessionMismatch
-            }
-            crate::StoreError::TurnCancelBindingMismatch { .. } => {
-                RuntimeErrorCode::TurnCancelBindingMismatch
-            }
-            crate::StoreError::StoredDataCorrupt { .. }
-            | crate::StoreError::MonotonicCounterOverflow { .. } => {
-                crate::RuntimeErrorCode::RuntimeStoreCorrupt
-            }
-            crate::StoreError::SessionDeleted { .. } => crate::RuntimeErrorCode::SessionDeleted,
-            crate::StoreError::SessionStateVersionUnsupported { .. } => {
-                crate::RuntimeErrorCode::SessionStateVersionUnsupported
-            }
-            crate::StoreError::SessionStateVersionNewerThanRuntime { .. } => {
-                crate::RuntimeErrorCode::SessionStateVersionNewerThanRuntime
-            }
-            crate::StoreError::HeadRevisionConflict { .. } => {
-                crate::RuntimeErrorCode::StoreCommitSuperseded
-            }
-            crate::StoreError::CommitNodeBudgetExceeded { .. } => {
-                crate::RuntimeErrorCode::StoreCommitNodeBudgetExceeded
-            }
-            crate::StoreError::CommitByteBudgetExceeded { .. } => {
-                crate::RuntimeErrorCode::StoreCommitByteBudgetExceeded
-            }
-            crate::StoreError::CheckpointComponentEncodingVersionMismatch { .. } => {
-                crate::RuntimeErrorCode::CheckpointComponentEncodingVersionMismatch
-            }
-            crate::StoreError::RecordEncodingFailed { .. } => {
-                crate::RuntimeErrorCode::RecordEncodingFailed
-            }
-            crate::StoreError::ArtifactReferrerEnded { .. } => {
-                crate::RuntimeErrorCode::ArtifactReferrerEnded
-            }
-            crate::StoreError::ArtifactMissing { .. } => crate::RuntimeErrorCode::ArtifactMissing,
-            _ => crate::RuntimeErrorCode::RuntimeStore,
-        };
+        let code = RuntimeErrorCode::of_store_error(&err);
         Self {
             journal_disposition: EffectErrorJournalPolicy::Terminal,
             code,

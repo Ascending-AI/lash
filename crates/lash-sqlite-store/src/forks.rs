@@ -53,9 +53,10 @@ fn retained_fork_config_conn(
         fleet,
     )
     .map_err(|error| {
-        lash_core_execution::StoreError::Backend(format!(
-            "failed to decode retained frame node `{frame_node_id}`: {error}"
-        ))
+        crate::stored_data_corrupt(
+            "SessionNodeRecord",
+            format_args!("failed to decode retained frame node `{frame_node_id}`: {error}"),
+        )
     })?
     .frame_config()
     .ok_or_else(|| {

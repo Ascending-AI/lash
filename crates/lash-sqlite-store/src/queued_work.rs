@@ -3,24 +3,28 @@ use lash_sansio::SessionId;
 
 pub(crate) fn decode_delivery_policy(value: String) -> Result<DeliveryPolicy, StoreError> {
     DeliveryPolicy::from_wire_str(&value).ok_or_else(|| {
-        StoreError::Backend(format!("unknown queued-work delivery policy `{value}`"))
+        stored_data_corrupt(
+            "QueuedWorkBatch",
+            format_args!("unknown queued-work delivery policy `{value}`"),
+        )
     })
 }
 
 pub(crate) fn decode_work_kind(value: String) -> Result<QueuedWorkKind, StoreError> {
-    QueuedWorkKind::from_wire_str(&value)
-        .ok_or_else(|| StoreError::Backend(format!("unknown queued-work kind `{value}`")))
-}
-
-pub(crate) fn decode_authority(value: String) -> Result<QueuedWorkAuthority, StoreError> {
-    serde_json::from_str(&value).map_err(|err| {
-        StoreError::Backend(format!("failed to decode queued-work authority: {err}"))
+    QueuedWorkKind::from_wire_str(&value).ok_or_else(|| {
+        stored_data_corrupt(
+            "QueuedWorkBatch",
+            format_args!("unknown queued-work kind `{value}`"),
+        )
     })
 }
 
+pub(crate) fn decode_authority(value: String) -> Result<QueuedWorkAuthority, StoreError> {
+    serde_json::from_str(&value).map_err(|err| stored_data_corrupt("QueuedWorkAuthority", err))
+}
+
 pub(crate) fn decode_queued_payload(value: String) -> Result<QueuedWorkPayload, StoreError> {
-    serde_json::from_str(&value)
-        .map_err(|err| StoreError::Backend(format!("failed to decode queued-work payload: {err}")))
+    serde_json::from_str(&value).map_err(|err| stored_data_corrupt("QueuedWorkPayload", err))
 }
 
 pub(crate) fn queued_work_batch_from_conn(

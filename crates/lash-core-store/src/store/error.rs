@@ -952,6 +952,10 @@ pub enum StoreError {
         /// Backend diagnostic for the failed storage operation.
         message: String,
     },
+    /// A backend failure with no typed cause, classified as a fault of the
+    /// substrate ([`Self::is_transient`]). Stored bytes a decoder refuses are
+    /// never this: they are [`Self::StoredDataCorrupt`], which no retry
+    /// repairs.
     #[error("store backend error: {0}")]
     Backend(String),
 }

@@ -391,10 +391,12 @@ impl SessionBuilder {
         resident: bool,
     ) -> Result<LashSession> {
         if state.session_id != self.session_id {
-            return Err(EmbedError::StoreSessionMismatch {
-                loaded: state.session_id,
-                requested: self.session_id,
-            });
+            return Err(EmbedError::Store(
+                lash_core::StoreError::StoreSessionMismatch {
+                    loaded: state.session_id,
+                    requested: self.session_id,
+                },
+            ));
         }
         let resolved = self.existing_store().await?;
         let policy = self.opening_policy();
@@ -445,10 +447,12 @@ impl SessionBuilder {
         let policy = self.opening_policy();
         let mut state = loaded.state;
         if state.session_id != self.session_id {
-            return Err(EmbedError::StoreSessionMismatch {
-                loaded: state.session_id,
-                requested: self.session_id.clone(),
-            });
+            return Err(EmbedError::Store(
+                lash_core::StoreError::StoreSessionMismatch {
+                    loaded: state.session_id,
+                    requested: self.session_id.clone(),
+                },
+            ));
         }
         bind_to_opener(&mut state, &policy);
         Ok(state)
@@ -618,10 +622,12 @@ pub(crate) async fn load_state_from_store(
     };
     let mut state = loaded.state;
     if state.session_id != session_id {
-        return Err(EmbedError::StoreSessionMismatch {
-            loaded: state.session_id,
-            requested: session_id.clone(),
-        });
+        return Err(EmbedError::Store(
+            lash_core::StoreError::StoreSessionMismatch {
+                loaded: state.session_id,
+                requested: session_id.clone(),
+            },
+        ));
     }
     bind_to_opener(&mut state, policy);
     Ok(state)

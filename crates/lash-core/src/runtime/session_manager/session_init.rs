@@ -681,9 +681,10 @@ async fn durable_session_store(
                     ),
                 ))
             }
-            error => crate::PluginError::Session(format!(
-                "failed to inspect session `{session_id}` before initialisation: {error}"
-            )),
+            error => crate::PluginError::of_store_error(
+                format_args!("failed to inspect session `{session_id}` before initialisation"),
+                error,
+            ),
         })
 }
 
@@ -781,10 +782,14 @@ fn unserved_model_key(error: crate::PluginError) -> crate::PluginError {
 }
 
 /// A session error from assembling a recorded session's runtime, with the
-/// recorded model this worker cannot bind kept typed and retryable.
+/// recorded model this worker cannot bind kept typed and retryable, and a
+/// store error classified as every read of the reopen is.
 fn recorded_session_error(error: crate::SessionError) -> crate::PluginError {
     match error {
         crate::SessionError::Plugin(error) => error,
+        crate::SessionError::Store { context, source } => {
+            crate::PluginError::of_store_error(context, source)
+        }
         error @ crate::SessionError::ModelUnavailable { .. } => crate::PluginError::Runtime(
             crate::RuntimeError::new(crate::RuntimeErrorCode::ModelUnavailable, error.to_string()),
         ),
@@ -821,10 +826,10 @@ async fn recorded_session_state(
     // request, so a recorded relation that disagrees is a conflict, never a
     // silent adopt.
     let meta = store.load_session_meta().await.map_err(|error| {
-        crate::PluginError::Session(format!(
-            "failed to inspect session `{}` before reopen: {error}",
-            session_id
-        ))
+        crate::PluginError::of_store_error(
+            format_args!("failed to inspect session `{session_id}` before reopen"),
+            error,
+        )
     })?;
     if let Some(meta) = &meta
         && meta.relation != *relation
@@ -837,11 +842,14 @@ async fn recorded_session_state(
     crate::store::load_session_window_state(store, crate::store::WindowSelector::Current)
         .await
         .map(|loaded| loaded.map(|loaded| loaded.state))
+        // A refusal to read the recorded child is the store's answer on
+        // every attempt: it stays typed, so the process ends with it instead
+        // of retrying a reopen no attempt can make (FIG-4628).
         .map_err(|error| {
-            crate::PluginError::Session(format!(
-                "failed to load session `{}` for reopen: {error}",
-                session_id
-            ))
+            crate::PluginError::of_store_error(
+                format_args!("failed to load session `{session_id}` for reopen"),
+                error,
+            )
         })
 }
 
