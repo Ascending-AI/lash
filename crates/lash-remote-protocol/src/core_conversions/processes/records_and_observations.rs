@@ -165,6 +165,10 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
             event_types,
             provenance,
             env_ref,
+            // What the engine recorded for its own runs: read only by the
+            // engine, from the registry, and not part of the peer-facing
+            // record (FIG-4527).
+            engine_config: _,
             created_at_ms,
             updated_at_ms,
             external_ref,

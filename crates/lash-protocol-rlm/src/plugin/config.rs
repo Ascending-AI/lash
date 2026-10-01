@@ -4,8 +4,9 @@ use super::{ExecutionBounds, InstructionBound, MemoryBound, RlmAbilities, RlmLan
 ///
 /// The physical slots (the code renderer) are bound live. Every behavioural
 /// choice — the execution bounds, the Lashlang abilities and language
-/// features, the prompt features, discovery, the output limit and the soft
-/// context-budget warning — is this deployment's creation default: a session
+/// features, the prompt features, discovery, the output limit, the soft
+/// context-budget warning and the render — is this deployment's creation
+/// default: a session
 /// records it in its RLM namespace when it is created
 /// ([`RlmRecordedBehaviour`]), and every open, root and process of that
 /// session runs under the recorded value, never under the configuration of
@@ -76,6 +77,10 @@ pub struct RlmRecordedBehaviour {
     /// The host operation the model discovers tools omitted from the prompt
     /// with, or `None` when every tool is inline.
     pub discovery_operation: Option<String>,
+    /// The render the creating deployment configured: the base a root's
+    /// render is resolved over, under the session's own render preferences
+    /// (FIG-4527).
+    pub render: lash_rlm_types::RlmRenderPatch,
 }
 
 /// A builder slot that has not been filled in yet. [`RlmProtocolPluginConfigBuilder::build`]
@@ -194,6 +199,7 @@ impl RlmProtocolPluginConfig {
                 .discovery
                 .as_ref()
                 .map(|discovery| discovery.operation.clone()),
+            render: self.render.clone(),
         }
     }
 
@@ -211,6 +217,7 @@ impl RlmProtocolPluginConfig {
             .discovery_operation
             .clone()
             .map(|operation| lash_core::ToolDiscovery { operation });
+        self.render = behaviour.render.clone();
         self
     }
 

@@ -133,24 +133,26 @@ impl StandardProtocolConfig {
                 .as_ref()
                 .map(|discovery| discovery.operation.clone()),
             batch: self.batch,
+            render: self.render.clone(),
         }
     }
 
-    /// This configuration's renderer and render under a session's recorded
-    /// `behaviour`: what the session's driver runs.
+    /// This configuration's renderer under a session's recorded `behaviour`:
+    /// what the session's driver runs.
     fn under_recorded_behaviour(mut self, behaviour: &StandardRecordedBehaviour) -> Self {
         self.discovery = behaviour
             .discovery_operation
             .clone()
             .map(|operation| lash_core::ToolDiscovery { operation });
         self.batch = behaviour.batch;
+        self.render = behaviour.render.clone();
         self
     }
 }
 
 /// The standard-protocol behaviour a session records at creation
-/// (FIG-4398): the discovery operation and the batch choice its driver runs
-/// under. It is pinned: no config command changes it, a run override cannot
+/// (FIG-4398): the discovery operation, the batch choice and the configured
+/// render its driver runs under. It is pinned: no config command changes it, a run override cannot
 /// restate it, and a session opened, redriven or resumed by a deployment
 /// configured otherwise still runs under it.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -160,11 +162,15 @@ pub struct StandardRecordedBehaviour {
     /// with, or `None` when every tool is inline.
     pub discovery_operation: Option<String>,
     pub batch: BatchSugar,
+    /// The render the creating deployment configured: the base a root's
+    /// render is resolved over, under the session's own render options
+    /// (FIG-4527).
+    pub render: StandardRenderConfig,
 }
 
 /// The standard protocol's recorded session namespace (FIG-4379,
 /// FIG-4398): the render options its tool results render with, over the
-/// host's configured render, and the behaviour the session was created
+/// render its creation recorded, and the behaviour the session was created
 /// with. A stated `null` in a run's render options resets a key, so the
 /// render is read with its nulls dropped.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
@@ -299,17 +305,20 @@ impl ConfigOwner for StandardConfigOwner {
     }
 
     /// Every session records its namespace: the creator's render options,
-    /// or none, under which the host's configured render applies, and this
-    /// host's configured behaviour. A child inherits nothing from its
-    /// parent's namespace.
+    /// or none, under which the recorded render applies, and its
+    /// behaviour. A child inherits its parent's recorded behaviour, whatever
+    /// the host creating it is configured with (FIG-4527); a session with no
+    /// recorded parent behaviour records this host's.
     fn create(
         &self,
         input: Option<StandardTurnOptions>,
-        _facts: CreationFacts<'_, StandardRecordedConfig>,
+        facts: CreationFacts<'_, StandardRecordedConfig>,
     ) -> Result<Option<StandardRecordedConfig>, StandardConfigRefusal> {
         Ok(Some(StandardRecordedConfig {
             render: input.unwrap_or_default().render,
-            behaviour: self.behaviour.clone(),
+            behaviour: facts
+                .parent
+                .map_or_else(|| self.behaviour.clone(), |parent| parent.behaviour.clone()),
         }))
     }
 
@@ -337,7 +346,7 @@ impl ConfigOwner for StandardConfigOwner {
 }
 
 /// Replace the session's render options, whole; `None` clears them, and the
-/// host's configured render applies.
+/// render the session recorded at creation applies.
 #[derive(
     Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema,
 )]

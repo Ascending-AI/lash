@@ -588,6 +588,13 @@ pub struct ProcessRegistration {
     /// start key finds this process again, even once it completed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trigger_delivery_pin: Option<TriggerDeliveryPin>,
+    /// What the process's engine recorded when the row was created
+    /// ([`ProcessEngine::creation_config`](super::ProcessEngine::creation_config)):
+    /// the configuration its runs read back, where the captured environment
+    /// records none (FIG-4527). The start's registration step writes it,
+    /// never the start's author, and a retained row keeps its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine_config: Option<serde_json::Value>,
 }
 
 impl Clone for ProcessRegistration {
@@ -605,6 +612,7 @@ impl Clone for ProcessRegistration {
             wake_session_id: self.wake_session_id.clone(),
             consumer_hold: self.consumer_hold.clone(),
             trigger_delivery_pin: self.trigger_delivery_pin.clone(),
+            engine_config: self.engine_config.clone(),
         }
     }
 }
@@ -698,6 +706,7 @@ impl ProcessRegistration {
             wake_session_id: None,
             consumer_hold: None,
             trigger_delivery_pin: None,
+            engine_config: None,
         }
     }
 
@@ -1429,6 +1438,10 @@ pub struct ProcessRecord {
     pub provenance: ProcessProvenance,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_ref: Option<ProcessExecutionEnvRef>,
+    /// What the process's engine recorded when the row was created: never
+    /// updated after registration (FIG-4527).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine_config: Option<serde_json::Value>,
     #[serde(default)]
     pub created_at_ms: u64,
     #[serde(default)]
@@ -1539,6 +1552,7 @@ impl ProcessRecord {
             event_types: registration.event_types,
             provenance: registration.provenance,
             env_ref: registration.env_ref,
+            engine_config: registration.engine_config,
             created_at_ms: now_ms,
             updated_at_ms: now_ms,
             external_ref: None,

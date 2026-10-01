@@ -847,7 +847,7 @@ impl TriggerRouter {
             })?;
         let process_id = match reservation.process_id.clone() {
             Some(process_id) => process_id,
-            None => match self.register_recovered_delivery(&reservation).await? {
+            None => match Box::pin(self.register_recovered_delivery(&reservation)).await? {
                 RecoveredDeliveryStart::Registered(process_id) => process_id,
                 RecoveredDeliveryStart::AlreadyBound => {
                     return self.recovered_binding(occurrence_id, subscription_id).await;

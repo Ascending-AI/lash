@@ -1179,14 +1179,30 @@ pub struct LashlangRunSettings {
     pub execution_bounds: lashlang::ExecutionBounds,
 }
 
-/// Reads the settings a process recorded from the plugin configuration it
-/// captured with its execution environment (FIG-4398): `Ok(None)` when the
-/// process recorded none, an error when what it recorded is unreadable.
-pub type LashlangRecordedRunSettings = Arc<
-    dyn Fn(&lash_core::AdmittedPluginConfig) -> Result<Option<LashlangRunSettings>, String>
-        + Send
-        + Sync,
->;
+/// The record of what a process runs under (FIG-4398, FIG-4527). A process
+/// reads its settings from what was recorded when it was created, on every
+/// run, redrive and replay: the plugin configuration it captured with its
+/// execution environment, or, where that configuration states none, what
+/// [`Self::create`] recorded with the process's row. No run reads the
+/// settings the running deployment would give a new process.
+pub trait LashlangRecordedRunSettings: Send + Sync {
+    /// What a process created now, having captured `plugin_config`, records
+    /// with its row: this deployment's settings, or `None` when
+    /// `plugin_config` already records them.
+    fn create(
+        &self,
+        plugin_config: &lash_core::AdmittedPluginConfig,
+    ) -> Result<Option<serde_json::Value>, lash_core::PluginError>;
+
+    /// The settings of a process that captured `plugin_config` and whose row
+    /// recorded `created`. A process that recorded them in neither place is
+    /// refused.
+    fn read(
+        &self,
+        plugin_config: &lash_core::AdmittedPluginConfig,
+        created: Option<&serde_json::Value>,
+    ) -> Result<LashlangRunSettings, lash_core::PluginError>;
+}
 
 #[derive(Clone)]
 pub struct LashlangProcessEngine {
@@ -1197,7 +1213,7 @@ pub struct LashlangProcessEngine {
     execution_sink: Option<Arc<dyn lash_trace::TraceSink>>,
     trace_context: lash_trace::TraceContext,
     execution_bounds: lashlang::ExecutionBounds,
-    recorded_run_settings: Option<LashlangRecordedRunSettings>,
+    recorded_run_settings: Option<Arc<dyn LashlangRecordedRunSettings>>,
 }
 
 impl LashlangProcessEngine {
@@ -1243,35 +1259,45 @@ impl LashlangProcessEngine {
         self
     }
 
-    /// Run each process under the settings it recorded, read by `read` from
-    /// the plugin configuration it captured; the engine's own surface and
-    /// bounds serve a process that recorded none.
-    pub fn with_recorded_run_settings(mut self, read: LashlangRecordedRunSettings) -> Self {
-        self.recorded_run_settings = Some(read);
+    /// Run each process under the settings `record` recorded for it at its
+    /// creation. An engine with no record is one a host wired by hand: its
+    /// own surface and bounds are the only settings it has.
+    pub fn with_recorded_run_settings(
+        mut self,
+        record: Arc<dyn LashlangRecordedRunSettings>,
+    ) -> Self {
+        self.recorded_run_settings = Some(record);
         self
     }
 
-    /// The settings a run of a process that captured `plugin_config` executes
-    /// under: the surface and bounds the process recorded with its execution
-    /// environment, never the ones this deployment would give a new process
-    /// (FIG-4398).
+    /// The settings this run executes under: the ones recorded when the
+    /// process was created, in the plugin configuration it captured or with
+    /// its row, never the ones this deployment would give a new process
+    /// (FIG-4398, FIG-4527).
     fn run_settings(
         &self,
-        plugin_config: &lash_core::AdmittedPluginConfig,
-    ) -> Result<LashlangRunSettings, lash_core::ProcessInfraError> {
-        let recorded = match &self.recorded_run_settings {
-            Some(read) => read(plugin_config).map_err(|message| {
-                lash_core::ProcessInfraError::new(lash_core::PluginError::Session(format!(
-                    "lashlang process settings recorded with its environment are unreadable: \
-                     {message}"
-                )))
-            })?,
-            None => None,
-        };
-        Ok(recorded.unwrap_or_else(|| LashlangRunSettings {
-            surface: self.surface.clone(),
-            execution_bounds: self.execution_bounds,
-        }))
+        context: &lash_core::ProcessEngineRunContext<'_>,
+    ) -> impl Future<Output = Result<LashlangRunSettings, lash_core::ProcessInfraError>> + Send + use<>
+    {
+        let plugin_config = context.plugins().admitted_plugin_config();
+        let processes = context.processes();
+        let engine = self.clone();
+        async move {
+            let Some(record) = &engine.recorded_run_settings else {
+                return Ok(LashlangRunSettings {
+                    surface: engine.surface.clone(),
+                    execution_bounds: engine.execution_bounds,
+                });
+            };
+            let created = processes
+                .record()
+                .await
+                .map_err(lash_core::ProcessInfraError::new)?
+                .and_then(|record| record.engine_config);
+            record
+                .read(&plugin_config, created.as_ref())
+                .map_err(lash_core::ProcessInfraError::new)
+        }
     }
 
     pub fn artifact_store(&self) -> LashlangArtifacts {
@@ -1292,6 +1318,16 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
         LashlangProcessInput::from_payload(payload.clone())
             .ok()
             .map(|input| input.executable_generation())
+    }
+
+    fn creation_config(
+        &self,
+        env_spec: &lash_core::ProcessExecutionEnvSpec,
+    ) -> Result<Option<serde_json::Value>, lash_core::PluginError> {
+        match &self.recorded_run_settings {
+            Some(record) => record.create(&env_spec.plugin_config),
+            None => Ok(None),
+        }
     }
 
     async fn run(

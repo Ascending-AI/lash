@@ -395,31 +395,11 @@ impl PluginFactory for RlmProtocolPluginFactory {
         let surface = rlm_lashlang_surface(&config, process_lifecycle)
             .with_plugin_extensions(ctx.extensions())
             .map_err(|err| PluginError::Registration(err.to_string()))?;
-        // A process runs under the behaviour its creator recorded, read from
-        // the plugin configuration it captured; this deployment's surface and
-        // bounds serve only a process whose creator recorded no RLM
-        // namespace (FIG-4398).
-        let deployment_config = self.config.clone();
-        let deployment_extensions = ctx.extensions().clone();
-        let recorded_run_settings: lash_lashlang_runtime::LashlangRecordedRunSettings =
-            Arc::new(move |plugin_config: &lash_core::AdmittedPluginConfig| {
-                let Some(recorded) = plugin_config
-                    .decode::<RlmRecordedConfig>(RLM_PROTOCOL_PLUGIN_ID)
-                    .map_err(|error| format!("invalid recorded RLM session config: {error}"))?
-                else {
-                    return Ok(None);
-                };
-                let config = deployment_config
-                    .clone()
-                    .under_recorded_behaviour(&recorded.behaviour);
-                let surface = rlm_lashlang_surface(&config, process_lifecycle)
-                    .with_plugin_extensions(&deployment_extensions)
-                    .map_err(|error| error.to_string())?;
-                Ok(Some(lash_lashlang_runtime::LashlangRunSettings {
-                    surface,
-                    execution_bounds: config.execution_bounds().into_engine(),
-                }))
-            });
+        let recorded_run_settings = Arc::new(RlmProcessRunSettings {
+            deployment_config: self.config.clone(),
+            deployment_extensions: ctx.extensions().clone(),
+            process_lifecycle,
+        });
         let execution_sink = match (
             self.lashlang_execution_trace_config.sink.clone(),
             ctx.process_observation_sink().cloned(),
@@ -489,6 +469,85 @@ impl PluginFactory for RlmProtocolPluginFactory {
             }));
         }
         Ok(Arc::new(RlmProtocolPlugin { config, dialect }))
+    }
+}
+
+/// The record of the behaviour a Lashlang process runs under. A process
+/// started by an RLM session captured the session's recorded behaviour with
+/// its plugin configuration (FIG-4398). A process whose captured
+/// configuration has no RLM namespace, such as one a host starts under an
+/// environment it published itself, records the creating deployment's
+/// behaviour with its row (FIG-4527). Either way a run reads the record.
+struct RlmProcessRunSettings {
+    deployment_config: RlmProtocolPluginConfig,
+    deployment_extensions: lash_core::PluginExtensions,
+    process_lifecycle: bool,
+}
+
+impl RlmProcessRunSettings {
+    fn captured(
+        plugin_config: &lash_core::AdmittedPluginConfig,
+    ) -> Result<Option<RlmRecordedBehaviour>, PluginError> {
+        plugin_config
+            .decode::<RlmRecordedConfig>(RLM_PROTOCOL_PLUGIN_ID)
+            .map(|recorded| recorded.map(|recorded| recorded.behaviour))
+            .map_err(|error| {
+                PluginError::Session(format!("invalid recorded RLM session config: {error}"))
+            })
+    }
+}
+
+impl lash_lashlang_runtime::LashlangRecordedRunSettings for RlmProcessRunSettings {
+    fn create(
+        &self,
+        plugin_config: &lash_core::AdmittedPluginConfig,
+    ) -> Result<Option<serde_json::Value>, PluginError> {
+        if Self::captured(plugin_config)?.is_some() {
+            return Ok(None);
+        }
+        serde_json::to_value(
+            self.deployment_config
+                .recorded_behaviour(self.process_lifecycle),
+        )
+        .map(Some)
+        .map_err(|error| {
+            PluginError::Session(format!(
+                "failed to record the RLM process behaviour: {error}"
+            ))
+        })
+    }
+
+    fn read(
+        &self,
+        plugin_config: &lash_core::AdmittedPluginConfig,
+        created: Option<&serde_json::Value>,
+    ) -> Result<lash_lashlang_runtime::LashlangRunSettings, PluginError> {
+        let behaviour = match (Self::captured(plugin_config)?, created) {
+            (Some(behaviour), _) => behaviour,
+            (None, Some(created)) => serde_json::from_value::<RlmRecordedBehaviour>(
+                created.clone(),
+            )
+            .map_err(|error| {
+                PluginError::Session(format!("invalid recorded RLM process behaviour: {error}"))
+            })?,
+            (None, None) => {
+                return Err(PluginError::MissingRecordedSessionConfig {
+                    plugin_id: RLM_PROTOCOL_PLUGIN_ID.to_string(),
+                    field: "behaviour".to_string(),
+                });
+            }
+        };
+        let config = self
+            .deployment_config
+            .clone()
+            .under_recorded_behaviour(&behaviour);
+        let surface = rlm_lashlang_surface(&config, self.process_lifecycle)
+            .with_plugin_extensions(&self.deployment_extensions)
+            .map_err(|error| PluginError::Registration(error.to_string()))?;
+        Ok(lash_lashlang_runtime::LashlangRunSettings {
+            surface,
+            execution_bounds: config.execution_bounds().into_engine(),
+        })
     }
 }
 

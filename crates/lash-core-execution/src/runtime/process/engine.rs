@@ -554,6 +554,21 @@ pub trait ProcessEngine: Send + Sync {
         None
     }
 
+    /// What a process created now under `env_spec` records with its row
+    /// (FIG-4527): the configuration this deployment would otherwise supply
+    /// live on every run. It is asked once, by the start's registration step,
+    /// and written to [`ProcessRecord::engine_config`](super::ProcessRecord):
+    /// every run, redrive and replay of the process reads it back from there,
+    /// whatever the running deployment is configured with. `None` for an
+    /// engine with no such configuration, or when `env_spec` already records
+    /// it.
+    fn creation_config(
+        &self,
+        _env_spec: &ProcessExecutionEnvSpec,
+    ) -> Result<Option<serde_json::Value>, crate::PluginError> {
+        Ok(None)
+    }
+
     async fn run(
         &self,
         context: ProcessEngineRunContext<'_>,

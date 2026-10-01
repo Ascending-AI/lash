@@ -244,10 +244,11 @@ async fn assert_budget_command_error(
 
 #[tokio::test]
 async fn public_append_byte_budget_failure_is_typed_terminal_and_actionable() -> Result<()> {
-    // Room for the command's failed settlement, the bare head's commit
-    // (about 1.6 KB: its refusal receipt is not charged, FIG-4471), not for
-    // the append it refuses (about 10.9 KB).
-    const CONFIGURED_BYTE_LIMIT: usize = 2048;
+    // Room for the command's failed settlement, the bare head's commit (a
+    // little over 2 KB now that the head's standard namespace records the
+    // configured render, FIG-4527; its refusal receipt is not charged,
+    // FIG-4471), not for the append it refuses (four times the limit).
+    const CONFIGURED_BYTE_LIMIT: usize = 3072;
     let backend = double_backend().await;
     let factory = backend.session_store_factory();
     let core = core_over_backend_with_commit_budget(

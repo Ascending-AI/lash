@@ -662,6 +662,7 @@ impl RestateProcessIngressRunner {
             // workflow input.
             consumer_hold: None,
             trigger_delivery_pin: None,
+            engine_config: record.engine_config.clone(),
         };
         let execution_context = ProcessExecutionContext::default();
         let invocation_id = self

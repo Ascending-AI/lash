@@ -56,11 +56,14 @@ Each protocol namespace also records the session's behaviour at creation
 (FIG-4398), from the creating deployment's factory configuration:
 `RlmRecordedBehaviour` (execution bounds, Lashlang abilities and language
 features, prompt features, output limit, soft-warning threshold, discovery
-operation) and `StandardRecordedBehaviour` (discovery operation, `batch`
-choice and maximum). No command changes it, and each owner refuses a
-candidate, a run override included, that changes its recorded behaviour. A
-plugin and its hooks run under the recorded behaviour, never under the
-opening deployment's factory configuration.
+operation, configured render) and `StandardRecordedBehaviour` (discovery
+operation, `batch` choice and maximum, configured render). A child session
+records its parent's behaviour, not that of the host creating it (FIG-4527).
+No command changes it, and each owner refuses a candidate, a run override
+included, that changes its recorded behaviour. A plugin and its hooks run
+under the recorded behaviour, never under the opening deployment's factory
+configuration. A root's render is resolved over the recorded render, under
+the session's own render options.
 
 **Transactions.** A `ConfigTransaction` is an ordered list of
 `{owner, command, args}` entries and applies all or none. A host submits it

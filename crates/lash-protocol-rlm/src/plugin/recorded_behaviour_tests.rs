@@ -30,10 +30,10 @@ use crate::{RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmProtocolPluginFactory};
 
 /// The loop the model's cell runs: about 5,000 iterations, far past the
 /// redeployed bound and far inside the recorded one.
-const LOOP_ITERATIONS: usize = 5_000;
+pub(super) const LOOP_ITERATIONS: usize = 5_000;
 
 /// What the model answers when its prompt offers `continue_as`.
-fn looping_cell() -> String {
+pub(super) fn looping_cell() -> String {
     format!(
         "<typescript>\nlet i = 0;\nwhile (i < {LOOP_ITERATIONS}) {{ i = i + 1; }}\nfinish(\"ran \" + String(i));\n</typescript>"
     )
@@ -41,11 +41,12 @@ fn looping_cell() -> String {
 
 /// What the model answers when its prompt does not offer `continue_as`: a
 /// session that lost its recorded prompt features ends here.
-const LOST_FEATURES_ANSWER: &str = "the prompt carried the redeploying factory's features";
+pub(super) const LOST_FEATURES_ANSWER: &str =
+    "the prompt carried the redeploying factory's features";
 
 /// The deployment that creates the session: a generous instruction bound,
 /// decomposition offered, label annotations on.
-fn creating_config() -> RlmProtocolPluginConfig {
+pub(super) fn creating_config() -> RlmProtocolPluginConfig {
     RlmProtocolPluginConfig::builder()
         .channel(RlmChannel::Cell)
         .instruction_limit(InstructionBound::instructions(1_000_000))
@@ -56,7 +57,7 @@ fn creating_config() -> RlmProtocolPluginConfig {
 /// The deployment that redrives it: an instruction bound the loop exhausts,
 /// decomposition withheld, label annotations off, a smaller output limit and
 /// no soft warning.
-fn redeploying_config() -> RlmProtocolPluginConfig {
+pub(super) fn redeploying_config() -> RlmProtocolPluginConfig {
     let mut config = RlmProtocolPluginConfig::builder()
         .channel(RlmChannel::Cell)
         .instruction_limit(InstructionBound::instructions(50))
@@ -69,7 +70,7 @@ fn redeploying_config() -> RlmProtocolPluginConfig {
     config
 }
 
-fn policy() -> SessionPolicy {
+pub(super) fn policy() -> SessionPolicy {
     SessionPolicy {
         model: Some(lash_core::testing::test_model_config(
             "rlm-recorded-behaviour-model",
@@ -82,9 +83,9 @@ fn policy() -> SessionPolicy {
 /// The model: it answers with the looping cell when its prompt offers
 /// `continue_as`, and records every request it served.
 #[derive(Default)]
-struct Model {
-    calls: AtomicUsize,
-    requests: Mutex<Vec<LlmRequest>>,
+pub(super) struct Model {
+    pub(super) calls: AtomicUsize,
+    pub(super) requests: Mutex<Vec<LlmRequest>>,
 }
 
 impl Model {
@@ -119,7 +120,7 @@ impl Model {
     }
 }
 
-fn factory(
+pub(super) fn factory(
     config: RlmProtocolPluginConfig,
     backend: &lash_core::Backend,
 ) -> Arc<dyn PluginFactory> {
@@ -131,7 +132,7 @@ fn factory(
 
 /// Open `store`'s session on a deployment whose RLM factory states `config`,
 /// as a worker that reloads it from its stores does.
-async fn open_runtime(
+pub(super) async fn open_runtime(
     backend: &lash_core::Backend,
     store: lash_core::store::SessionStore,
     config: RlmProtocolPluginConfig,
@@ -326,7 +327,7 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour(
 }
 
 /// A run nonce, so sessions on a shared PostgreSQL database never collide.
-fn nonce() -> u64 {
+pub(super) fn nonce() -> u64 {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("time after epoch")
@@ -334,7 +335,7 @@ fn nonce() -> u64 {
     (nanos & u128::from(u64::MAX)) as u64
 }
 
-async fn on_sqlite_file(
+pub(super) async fn on_sqlite_file(
     config: lash_restate_test::ServerConfig,
     dir: &tempfile::TempDir,
 ) -> lash_restate_test::RestateTestBackend<dyn lash_core::StoreSet> {
@@ -354,7 +355,7 @@ async fn on_sqlite_file(
     .expect("the Restate double over SQLite file stores")
 }
 
-async fn on_sqlite_memory(
+pub(super) async fn on_sqlite_memory(
     config: lash_restate_test::ServerConfig,
 ) -> lash_restate_test::RestateTestBackend<dyn lash_core::StoreSet> {
     lash_restate_test::backend_with_store_set(
@@ -375,7 +376,7 @@ async fn on_sqlite_memory(
 /// The Restate double over PostgreSQL, with what must outlive it; `None`
 /// when no PostgreSQL is configured and none is required.
 #[allow(clippy::disallowed_methods)] // FIG-2971: a test is a host; the gate's database URL is host configuration.
-async fn on_postgres(
+pub(super) async fn on_postgres(
     config: lash_restate_test::ServerConfig,
 ) -> Option<(
     lash_restate_test::RestateTestBackend<dyn lash_core::StoreSet>,
@@ -414,11 +415,11 @@ async fn on_postgres(
     Some((double, attachments))
 }
 
-fn plain() -> lash_restate_test::ServerConfig {
+pub(super) fn plain() -> lash_restate_test::ServerConfig {
     lash_restate_test::ServerConfig::default()
 }
 
-fn always_replay() -> lash_restate_test::ServerConfig {
+pub(super) fn always_replay() -> lash_restate_test::ServerConfig {
     lash_restate_test::ServerConfig::default().always_replay(true)
 }
 

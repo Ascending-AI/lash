@@ -4,9 +4,9 @@
 //! stated facts, the presentation format the prompt is written against
 //! (`Markdown` for a root session, `RawFinalValue` for a child) when the
 //! creator states none, the channel and dialect this host selected
-//! (ADR 0096), and the behaviour this host's configuration states
-//! ([`RlmRecordedBehaviour`], FIG-4398). Every open delivers the namespace
-//! unchanged.
+//! (ADR 0096), and its behaviour ([`RlmRecordedBehaviour`], FIG-4398): its
+//! parent's recorded behaviour for a child, this host's configured behaviour
+//! otherwise (FIG-4527). Every open delivers the namespace unchanged.
 //!
 //! The render preferences are the one setting a session may change, through
 //! [`SetRlmRender`]. The termination and the final-answer format are fixed at
@@ -128,18 +128,25 @@ impl ConfigOwner for RlmConfigOwner {
     }
 
     /// The creator's stated facts, the presentation format a root or child
-    /// session defaults to, and this host's channel, dialect and configured
-    /// behaviour. A child inherits nothing from its parent's namespace.
+    /// session defaults to, this host's channel and dialect, and the
+    /// session's behaviour. A child inherits its parent's recorded behaviour,
+    /// whatever the host creating it is configured with (FIG-4527); a session
+    /// with no recorded parent behaviour records this host's.
     fn create(
         &self,
         input: Option<RlmCreateConfig>,
         facts: CreationFacts<'_, RlmRecordedConfig>,
     ) -> Result<Option<RlmRecordedConfig>, RlmConfigRefusal> {
         let stated = input.unwrap_or_default().0;
-        let process_lifecycle = *self
-            .process_lifecycle
-            .get()
-            .ok_or(RlmConfigRefusal::ProcessLifecycleUndeclared)?;
+        let behaviour = match facts.parent {
+            Some(parent) => parent.behaviour.clone(),
+            None => self.config.recorded_behaviour(
+                *self
+                    .process_lifecycle
+                    .get()
+                    .ok_or(RlmConfigRefusal::ProcessLifecycleUndeclared)?,
+            ),
+        };
         let final_answer_format = stated.final_answer_format.unwrap_or({
             if facts.is_root_session {
                 RlmFinalAnswerFormat::Markdown
@@ -153,7 +160,7 @@ impl ConfigOwner for RlmConfigOwner {
             final_answer_format: Some(final_answer_format),
             channel: Some(self.channel),
             dialect: Some(self.dialect.to_string()),
-            behaviour: self.config.recorded_behaviour(process_lifecycle),
+            behaviour,
         }))
     }
 
@@ -196,7 +203,7 @@ impl ConfigOwner for RlmConfigOwner {
 
 /// Replace the session's render preferences, whole: the print and preview
 /// parameters its prompts render values with. Both empty clears them, and
-/// the protocol's configured render applies.
+/// the render the session recorded at creation applies.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize, JsonSchema)]
 #[schemars(crate = "lash_core::facade_support::schemars")]
 #[serde(deny_unknown_fields)]
@@ -501,5 +508,49 @@ mod tests {
             created_under(None).expect_err("undeclared lifecycle"),
             RlmConfigRefusal::ProcessLifecycleUndeclared
         );
+    }
+
+    /// A child session records its parent's behaviour, whatever the host
+    /// that creates it is configured with, and needs nothing declared by
+    /// that host to do so (FIG-4527).
+    #[test]
+    fn a_child_session_records_its_parents_behaviour() {
+        let parent = created(None, true);
+        let mut otherwise = config();
+        otherwise.instruction_limit = crate::InstructionBound::instructions(7);
+        otherwise.prompt_features.decomposition = false;
+        otherwise.render.print.max_chars = Some(11);
+        for process_lifecycle in [Some(true), None] {
+            let creating_host = RlmConfigOwner {
+                config: otherwise.clone(),
+                ..owner_with(process_lifecycle)
+            };
+            let child = creating_host
+                .create(
+                    None,
+                    CreationFacts {
+                        parent: Some(&parent),
+                        is_root_session: false,
+                    },
+                )
+                .expect("create the child")
+                .expect("the child records its namespace");
+            assert_eq!(child.behaviour, parent.behaviour);
+            assert_ne!(child.behaviour, otherwise.recorded_behaviour(true));
+        }
+    }
+
+    /// The render a deployment configures is recorded behaviour: a session
+    /// opened on a deployment configured otherwise resolves its render over
+    /// the recorded one (FIG-4527).
+    #[test]
+    fn the_configured_render_is_recorded_behaviour() {
+        let mut creating = config();
+        creating.render.print.max_chars = Some(11);
+        let recorded = creating.recorded_behaviour(false);
+        assert_eq!(recorded.render, creating.render);
+        let opened = config().under_recorded_behaviour(&recorded);
+        assert_eq!(opened.render, creating.render);
+        assert_ne!(opened.render, config().render);
     }
 }

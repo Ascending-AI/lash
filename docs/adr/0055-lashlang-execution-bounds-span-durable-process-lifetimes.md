@@ -38,6 +38,16 @@ bounds: a process reads them from the plugin configuration it captured with
 its execution environment. A deployment configured with other bounds that
 opens, redrives or resumes the session does not change them.
 
+A process whose captured plugin configuration has no RLM namespace, such as
+one a host starts under an environment it published itself, records the
+creating deployment's behaviour with its row instead (FIG-4527). The engine
+states it once, in the start's recorded registration step
+(`ProcessEngine::creation_config`, `ProcessRecord::engine_config`), and
+every run reads it back. A start that finds a row retained under its key is
+returned that row with what its own creation recorded. A process that
+recorded its behaviour in neither place is refused; no run reads the bounds
+of the deployment it runs on.
+
 ### Heap accounting
 
 The VM meters logical bytes under its registered heap-size schedule rather

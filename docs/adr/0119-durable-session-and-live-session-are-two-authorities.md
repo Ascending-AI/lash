@@ -38,12 +38,14 @@ it recorded at creation (ADR 0088). Config changes are typed config commands
 
 A factory is live wiring, not behaviour. What a protocol factory states
 about how a session behaves — the RLM execution bounds, Lashlang abilities
-and language features, prompt features, discovery operation, output limit
-and soft-warning threshold; the standard protocol's discovery operation and
-`batch` choice and maximum — is a creation default. The session records it in
-its protocol namespace at creation, and every open, redrive and process of
-that session runs under the recorded value, whatever the opening deployment's
-factory states (FIG-4398). What a factory supplies live is physical: the
+and language features, prompt features, discovery operation, output limit,
+soft-warning threshold and render; the standard protocol's discovery
+operation, `batch` choice and maximum and render — is a creation default. The
+session records it in its protocol namespace at creation, and every open,
+redrive and process of that session runs under the recorded value, whatever
+the opening deployment's factory states (FIG-4398). A child session records
+its parent's, and a process started outside any session records the creating
+deployment's with its row (FIG-4527). What a factory supplies live is physical: the
 dialect and code or output renderer implementations, the worker service, the
 artifact store, deferred-grant resolvers and trace sinks. Each serves the
 identity the session recorded or refuses.

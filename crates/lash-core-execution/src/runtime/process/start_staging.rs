@@ -468,6 +468,7 @@ async fn stage_and_register(
     };
     let definition = stage_definition(stores, &claim, &mut registration, env_spec.as_ref()).await?;
     let engine = stage_engine(stores, &claim, &registration, env.as_ref()).await?;
+    registration.engine_config = creation_config(stores, &registration, env_spec.as_ref())?;
     Box::pin(stage_input(stores, start_key, registration.input.as_ref())).await?;
     let submitted_env_ref = registration.env_ref.clone();
     let submitted_input = Arc::clone(&registration.input);
@@ -684,6 +685,25 @@ async fn stage_env(
     };
     env.staged = acquire_env(env_store.as_ref(), claim, &env).await?;
     Ok(Some(env))
+}
+
+/// What the engine of an engine start records with the row this registration
+/// creates (FIG-4527). It is read here, inside the start's one recorded
+/// registration step and never ahead of the command: a replay of the start
+/// reads the recorded registration, and a start that finds a row retained
+/// under its key is returned that row with what its own creation recorded.
+/// The start's author states none; a value it carried is replaced.
+fn creation_config(
+    stores: &ProcessStartStores<'_>,
+    registration: &ProcessRegistration,
+    env_spec: Option<&ProcessExecutionEnvSpec>,
+) -> Result<Option<serde_json::Value>, RuntimeEffectControllerError> {
+    let (ProcessInput::Engine { kind, .. }, Some(engines), Some(env_spec)) =
+        (registration.input.as_ref(), stores.engines, env_spec)
+    else {
+        return Ok(None);
+    };
+    Ok(engines.require(kind)?.creation_config(env_spec)?)
 }
 
 async fn stage_engine<'a>(

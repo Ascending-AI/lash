@@ -446,3 +446,74 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour_on_postgres_always_re
     )
     .await;
 }
+
+/// A deployment whose configuration differs from [`StandardProtocolConfig`]'s
+/// default in every recorded choice.
+fn configured_otherwise() -> StandardProtocolConfig {
+    let mut config = creating_config();
+    config.render.defaults.max_lines = Some(7);
+    config
+}
+
+/// A child session records its parent's behaviour, whatever the host that
+/// creates it is configured with (FIG-4527).
+#[test]
+fn a_child_session_records_its_parents_behaviour() {
+    let parent = StandardConfigOwner {
+        behaviour: configured_otherwise().recorded_behaviour(),
+    }
+    .create(
+        None,
+        CreationFacts {
+            parent: None,
+            is_root_session: true,
+        },
+    )
+    .expect("create the parent")
+    .expect("the parent records its namespace");
+    let creating_host = StandardConfigOwner {
+        behaviour: StandardProtocolConfig::default().recorded_behaviour(),
+    };
+    let child = creating_host
+        .create(
+            None,
+            CreationFacts {
+                parent: Some(&parent),
+                is_root_session: false,
+            },
+        )
+        .expect("create the child")
+        .expect("the child records its namespace");
+    assert_eq!(child.behaviour, configured_otherwise().recorded_behaviour());
+    assert_ne!(child.behaviour, creating_host.behaviour);
+}
+
+/// The render a deployment configures is recorded behaviour: a session's
+/// driver resolves a root's render over the recorded one, never over the
+/// opening deployment's (FIG-4527).
+#[test]
+fn the_configured_render_is_recorded_behaviour() {
+    let recorded = configured_otherwise().recorded_behaviour();
+    assert_eq!(recorded.render, configured_otherwise().render);
+    let opened = StandardProtocolConfig::default().under_recorded_behaviour(&recorded);
+    assert_eq!(opened.render, configured_otherwise().render);
+    let driver = StandardProtocolDriver { config: opened };
+    let recording = StandardProtocolDriver {
+        config: configured_otherwise(),
+    };
+    let options = lash_core::ProtocolTurnOptions::default();
+    assert_eq!(
+        driver.resolve_render(&options).expect("resolve the render"),
+        recording
+            .resolve_render(&options)
+            .expect("resolve the render"),
+    );
+    assert_ne!(
+        driver.resolve_render(&options).expect("resolve the render"),
+        StandardProtocolDriver {
+            config: StandardProtocolConfig::default(),
+        }
+        .resolve_render(&options)
+        .expect("resolve the render"),
+    );
+}
