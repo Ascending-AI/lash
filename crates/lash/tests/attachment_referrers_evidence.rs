@@ -237,7 +237,14 @@ async fn start_turn_child(
     .with_declared_identity(lash_core::DeclaredProcessIdentity::labelled(
         "law-session-turn",
         None::<String>,
-    ));
+    ))
+    // A session-turn start runs under the environment its declaring attempt
+    // captured (FIG-4396).
+    .with_env_ref(
+        context
+            .process_execution_env_ref()
+            .map_err(|error| error.to_string())?,
+    );
     Ok(lash_core::ToolAttemptOutcome::done(
         lash_core::ToolOutcomeDone::ok(serde_json::json!("started")),
         lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::StartProcess(Box::new(

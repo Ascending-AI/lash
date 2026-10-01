@@ -1374,11 +1374,13 @@ pub(crate) fn classify_process_registration(
                     ),
                 ));
             }
-            if registration.env_ref.is_some() {
+            // A session-turn process runs under the environment its start
+            // captured, exactly as an engine process does (FIG-4396).
+            if registration.env_ref.is_none() {
                 return Err(refuse(
-                    ProcessRegistrationRefusal::ExecutionEnvNotAllowed,
+                    ProcessRegistrationRefusal::ExecutionEnvMissing,
                     format!(
-                        "process `{}` must not capture an execution env for this input kind",
+                        "process `{}` requires a captured execution env",
                         registration_name(registration)
                     ),
                 ));

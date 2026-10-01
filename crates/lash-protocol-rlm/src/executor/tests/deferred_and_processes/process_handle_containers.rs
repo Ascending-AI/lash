@@ -57,7 +57,6 @@ async fn control_round_trip(storage: &str, access: &str, suspension: &str) {
     table.install_worker(
         lash_core::testing::test_code_protocol_factories(),
         runtime_host,
-        session_policy.clone(),
     );
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
         registry: registry.clone(),

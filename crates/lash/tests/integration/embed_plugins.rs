@@ -7,6 +7,7 @@ use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use lash::LashCore;
 use lash::TurnInput;
 use lash::direct::LlmOutputPart;
 use lash::plugins::{
@@ -17,7 +18,6 @@ use lash::tools::{
     ToolAttemptOutcome, ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome,
     ToolProvider,
 };
-use lash::{LashCore, PluginBinding};
 use serde_json::json;
 
 const SEED: u64 = 0x5c_f10b;
@@ -30,66 +30,112 @@ fn assistant_prose(result: &lash::turn::TurnOutput) -> String {
         .to_string()
 }
 
-#[derive(Clone, Debug)]
-struct TestPlugin;
+const TEST_PLUGIN_ID: &str = "test_typed";
 
-#[derive(Clone)]
+/// The plugin's recorded namespace: the label a session is created with.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, lash::plugins::JsonSchema)]
+#[schemars(crate = "lash::plugins::schemars")]
+#[serde(deny_unknown_fields)]
 struct TestPluginConfig {
     label: String,
+}
+
+/// The creator states the label; a session that states none records none.
+struct TestConfigOwner;
+
+impl lash::plugins::ConfigOwner for TestConfigOwner {
+    type Create = TestPluginConfig;
+    type Recorded = TestPluginConfig;
+    type Refusal = String;
+
+    fn implementation(&self) -> &str {
+        "test_typed:1"
+    }
+
+    fn create(
+        &self,
+        input: Option<TestPluginConfig>,
+        _facts: lash::plugins::CreationFacts<'_, TestPluginConfig>,
+    ) -> Result<Option<TestPluginConfig>, String> {
+        Ok(input)
+    }
+
+    fn validate(
+        &self,
+        _value: &TestPluginConfig,
+        _base: Option<&TestPluginConfig>,
+        _facts: &lash::plugins::CandidateFacts<'_>,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+/// Installed on the core: every session runs it, configured by the label its
+/// creation recorded.
+#[derive(Default)]
+struct TestPluginFactory {
     prompt_seen: Arc<Mutex<Vec<String>>>,
     tool_seen: Arc<Mutex<Vec<String>>>,
 }
 
-impl PluginBinding for TestPlugin {
-    const ID: &'static str = "test_typed";
-    type SessionConfig = TestPluginConfig;
-
-    fn factory(config: &Self::SessionConfig) -> Arc<dyn PluginFactory> {
-        Arc::new(TestPluginFactory {
-            config: config.clone(),
-        })
-    }
-}
-
-struct TestPluginFactory {
-    config: TestPluginConfig,
-}
-
 impl PluginFactory for TestPluginFactory {
     fn id(&self) -> &'static str {
-        TestPlugin::ID
+        TEST_PLUGIN_ID
     }
 
-    fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
+    fn register_config(
+        &self,
+        registrar: &mut lash::plugins::ConfigRegistrar,
+    ) -> Result<(), lash::plugins::ConfigRegistrationError> {
+        registrar.owner(TestConfigOwner)
+    }
+
+    fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
+        let label = ctx
+            .plugin_config
+            .config
+            .decode::<TestPluginConfig>(TEST_PLUGIN_ID)
+            .map_err(|error| PluginError::Session(error.to_string()))?
+            .map(|config| config.label);
         Ok(Arc::new(TestSessionPlugin {
-            config: self.config.clone(),
+            label,
+            prompt_seen: Arc::clone(&self.prompt_seen),
+            tool_seen: Arc::clone(&self.tool_seen),
         }))
     }
 }
 
 struct TestSessionPlugin {
-    config: TestPluginConfig,
+    /// The label the session recorded, if it stated one.
+    label: Option<String>,
+    prompt_seen: Arc<Mutex<Vec<String>>>,
+    tool_seen: Arc<Mutex<Vec<String>>>,
 }
 
 impl SessionPlugin for TestSessionPlugin {
     fn id(&self) -> &'static str {
-        TestPlugin::ID
+        TEST_PLUGIN_ID
     }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        let prompt_seen = Arc::clone(&self.config.prompt_seen);
-        let label = self.config.label.clone();
+        // A session that recorded no label runs the plugin with nothing to
+        // contribute: no prompt and no tools.
+        let Some(label) = self.label.clone() else {
+            return Ok(());
+        };
+        let prompt_seen = Arc::clone(&self.prompt_seen);
+        let prompt_label = label.clone();
         reg.prompt().contribute(Arc::new(move |_ctx| {
             let prompt_seen = Arc::clone(&prompt_seen);
-            let label = label.clone();
+            let label = prompt_label.clone();
             Box::pin(async move {
                 prompt_seen.lock_recover().push(label);
                 Ok(Vec::new())
             })
         }));
         reg.tools().provider(Arc::new(TestTools {
-            label: self.config.label.clone(),
-            seen: Arc::clone(&self.config.tool_seen),
+            label,
+            seen: Arc::clone(&self.tool_seen),
         }))
     }
 }
@@ -193,6 +239,7 @@ fn response_tool_call() -> LlmResponse {
 
 async fn core_with_responses(
     responses: Vec<LlmResponse>,
+    plugin: Arc<TestPluginFactory>,
 ) -> (LashCore, lash_restate_test::RestateTestBackend) {
     let responses = Arc::new(Mutex::new(responses.into_iter()));
     let provider = lash_core::testing::TestProvider::builder()
@@ -218,6 +265,7 @@ async fn core_with_responses(
         )
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .plugin(plugin)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "embed-plugins-test-worker",
             "embed-plugins-test-boot",
@@ -226,23 +274,38 @@ async fn core_with_responses(
     (core, double)
 }
 
-#[tokio::test]
-async fn prompt_hook_and_tool_provider_read_typed_session_config() {
-    let prompt_seen = Arc::new(Mutex::new(Vec::new()));
-    let tool_seen = Arc::new(Mutex::new(Vec::new()));
-    let config = TestPluginConfig {
-        label: "page-a".to_string(),
-        prompt_seen: Arc::clone(&prompt_seen),
-        tool_seen: Arc::clone(&tool_seen),
+/// Creates `session_id` recording `label` as the plugin's namespace, or
+/// stating none.
+async fn created_with_label(core: &LashCore, session_id: &str, label: Option<&str>) {
+    let plugin_options = match label {
+        Some(label) => lash::plugins::PluginOptions::typed(
+            TEST_PLUGIN_ID,
+            TestPluginConfig {
+                label: label.to_string(),
+            },
+        )
+        .expect("encode the plugin's creation options"),
+        None => lash::plugins::PluginOptions::default(),
     };
-    let (core, _double) =
-        core_with_responses(vec![response_tool_call(), response_text("done")]).await;
-    let session = crate::created_session(&core, "typed-context")
+    core.session(session_id)
+        .create(lash::SessionCreation {
+            plugin_options,
+            ..Default::default()
+        })
         .await
-        .plugin::<TestPlugin>(config)
-        .open()
-        .await
-        .expect("session");
+        .expect("create the session");
+}
+
+#[tokio::test]
+async fn prompt_hook_and_tool_provider_read_recorded_session_config() {
+    let plugin = Arc::new(TestPluginFactory::default());
+    let (core, _double) = core_with_responses(
+        vec![response_tool_call(), response_text("done")],
+        Arc::clone(&plugin),
+    )
+    .await;
+    created_with_label(&core, "typed-context", Some("page-a")).await;
+    let session = core.session("typed-context").open().await.expect("session");
 
     let result = session
         .send(TurnInput::text("probe"))
@@ -254,15 +317,20 @@ async fn prompt_hook_and_tool_provider_read_typed_session_config() {
     // The prompt is built only by the protocol-start and the second
     // iteration's execution-environment syncs, each journaled so a redrive
     // replays it (FIG-3587); the drive builds none of its own (FIG-3672).
-    assert_eq!(prompt_seen.lock_recover().as_slice(), ["page-a", "page-a"]);
-    assert_eq!(tool_seen.lock_recover().as_slice(), ["page-a"]);
+    assert_eq!(
+        plugin.prompt_seen.lock_recover().as_slice(),
+        ["page-a", "page-a"]
+    );
+    assert_eq!(plugin.tool_seen.lock_recover().as_slice(), ["page-a"]);
 }
 
 #[tokio::test]
-async fn sessions_without_typed_plugin_install_do_not_get_inactive_fallback_tools() {
-    let (core, _double) = core_with_responses(vec![response_text("done")]).await;
-    let session = crate::created_session(&core, "without-typed-plugin")
-        .await
+async fn sessions_that_record_no_plugin_config_do_not_get_inactive_fallback_tools() {
+    let plugin = Arc::new(TestPluginFactory::default());
+    let (core, _double) = core_with_responses(vec![response_text("done")], plugin).await;
+    created_with_label(&core, "without-typed-config", None).await;
+    let session = core
+        .session("without-typed-config")
         .open()
         .await
         .expect("session");

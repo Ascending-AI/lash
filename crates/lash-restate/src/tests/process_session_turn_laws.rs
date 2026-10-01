@@ -47,7 +47,9 @@ async fn parked_worker(
     )
 }
 
-fn registration_for(child: &SessionId) -> ProcessRegistration {
+/// A host session-turn start of `child` under the environment it captured,
+/// published to the store every worker of this file reads.
+async fn registration_for(child: &SessionId) -> ProcessRegistration {
     ProcessRegistration::new(
         ProcessInput::SessionTurn {
             definition_key: "test-session-turn:v1".to_string(),
@@ -65,6 +67,9 @@ fn registration_for(child: &SessionId) -> ProcessRegistration {
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
+    .with_execution_env_ref(Some(
+        persist_session_turn_env_ref(RECOVERY_PROCESS_ENV_STORE.as_ref()).await,
+    ))
 }
 
 async fn worker_for(
@@ -82,6 +87,7 @@ async fn worker_for(
     let plugin_host = lash_core::facade_support::PluginHost::new(plugins);
     let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(engine_backend)
         .map_session_store_factory(|_| session_factory)
+        .map_process_env_store(|_| RECOVERY_PROCESS_ENV_STORE.clone())
         .into_backend();
     let mut runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
         backend,
@@ -101,10 +107,6 @@ async fn worker_for(
         restate_process_work(registry, continuation_store()),
         Arc::new(lash_core::NoSessionWork::new()),
         lash_core::testing::runtime_lease_owner(),
-        lash_core::SessionPolicy {
-            provider_id: "mock".to_string(),
-            ..recovery_session_policy()
-        },
     ))
     .expect("valid SessionTurn worker")
 }
@@ -284,7 +286,7 @@ fn assert_cancelled(outcome: &lash_core::ProcessRunOutcome) {
 async fn redelivery_after_metadata_only_create_finishes_initialisation() {
     let registry = process_registry();
     let child = SessionId::from("metadata-only-worker-child");
-    let registration = registration_for(&child);
+    let registration = registration_for(&child).await;
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -359,7 +361,7 @@ async fn redelivery_after_metadata_only_create_finishes_initialisation() {
 async fn cancelled_mid_turn_subagent_retains_durable_rows() {
     let registry = process_registry();
     let child = SessionId::from("cancelled-worker-child");
-    let registration = registration_for(&child);
+    let registration = registration_for(&child).await;
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -428,7 +430,7 @@ async fn cancelled_mid_turn_subagent_retains_durable_rows() {
 async fn failed_final_child_commit_cancellation_stays_recoverable() {
     let registry = process_registry();
     let child = SessionId::from("failed-final-commit-worker-child");
-    let registration = registration_for(&child);
+    let registration = registration_for(&child).await;
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -498,7 +500,7 @@ async fn failed_final_child_commit_cancellation_stays_recoverable() {
 async fn crash_after_acceptance_redelivery_settles_retained_child_input() {
     let registry = process_registry();
     let child = SessionId::from("crashed-accepted-worker-child");
-    let registration = registration_for(&child);
+    let registration = registration_for(&child).await;
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -563,7 +565,7 @@ async fn crash_after_acceptance_redelivery_settles_retained_child_input() {
 async fn redelivery_after_create_commit_reopens_child_and_runs_turn() {
     let registry = process_registry();
     let child = SessionId::from("committed-create-worker-child");
-    let registration = registration_for(&child);
+    let registration = registration_for(&child).await;
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -630,7 +632,7 @@ async fn redelivery_after_create_commit_reopens_child_and_runs_turn() {
 async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
     let registry = process_registry();
     let child = SessionId::from("panicking-worker-child");
-    let registration = registration_for(&child);
+    let registration = registration_for(&child).await;
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -706,7 +708,7 @@ async fn a_start_in_a_process_owned_session_records_its_owner_above_the_session(
     let parent_id = SessionId::from("test-parent");
     let parent_turn = lash_core::ScopeId::turn(parent_id.clone(), TurnId::from("owner-start-turn"));
     let child = SessionId::from("process-owned-worker-child");
-    let mut registration = registration_for(&child);
+    let mut registration = registration_for(&child).await;
     registration.provenance =
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new(parent_id.as_str()));
     registration.ancestry = lash_core::Ancestry::from_scopes([

@@ -85,7 +85,6 @@ fn processes_area_witnesses() {
         lash::process::ProcessWorkWiring,
         std::sync::Arc<dyn lash::runtime::SessionWorkEngine>,
         lash::persistence::LeaseOwnerIdentity,
-        lash::runtime::SessionPolicy,
     ) -> lash::durability::DurableProcessWorkerConfig =
         lash::durability::DurableProcessWorkerConfig::from_plugin_factories;
     // W0023: lash::durability::DurableProcessWorkerConfig::from_plugin_stack [function]
@@ -103,10 +102,6 @@ fn processes_area_witnesses() {
     // W0032: lash::durability::DurableProcessWorkerConfig::runtime_host [field]
     field_witness(|value: &lash::durability::DurableProcessWorkerConfig| {
         let _ = &value.runtime_host;
-    });
-    // W0033: lash::durability::DurableProcessWorkerConfig::session_policy [field]
-    field_witness(|value: &lash::durability::DurableProcessWorkerConfig| {
-        let _ = &value.session_policy;
     });
     // W0034: lash::durability::DurableProcessWorkerConfig::session_store_factory [function]
     let _ = lash::durability::DurableProcessWorkerConfig::session_store_factory;

@@ -50,9 +50,6 @@ pub struct UnrecordedSessionSources {
     /// The turn's context overlay contributed tool providers.
     #[serde(default)]
     pub context_overlay_tools: bool,
-    /// The session was opened with plugin factories of its own.
-    #[serde(default)]
-    pub open_plugins: bool,
     /// The session's plugins were forked from a parent session.
     #[serde(default)]
     pub fork_plugins: bool,
@@ -74,7 +71,6 @@ impl UnrecordedSessionSources {
     pub fn union(self, other: Self) -> Self {
         Self {
             context_overlay_tools: self.context_overlay_tools || other.context_overlay_tools,
-            open_plugins: self.open_plugins || other.open_plugins,
             fork_plugins: self.fork_plugins || other.fork_plugins,
             open_provider: self.open_provider || other.open_provider,
             open_tool_policy: self.open_tool_policy || other.open_tool_policy,
@@ -90,7 +86,6 @@ impl UnrecordedSessionSources {
                 self.context_overlay_tools,
                 ToolChildRebuildRefusal::ContextOverlayTools,
             ),
-            (self.open_plugins, ToolChildRebuildRefusal::OpenPlugins),
             (self.fork_plugins, ToolChildRebuildRefusal::ForkPlugins),
             (self.open_provider, ToolChildRebuildRefusal::OpenProvider),
             (
@@ -111,7 +106,6 @@ impl UnrecordedSessionSources {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolChildRebuildRefusal {
     ContextOverlayTools,
-    OpenPlugins,
     ForkPlugins,
     OpenProvider,
     OpenToolPolicy,
@@ -132,7 +126,6 @@ impl std::fmt::Display for ToolChildRebuildRefusal {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::ContextOverlayTools => "its turn's context overlay contributed tools",
-            Self::OpenPlugins => "its session was opened with plugin factories of its own",
             Self::ForkPlugins => "its session's plugins were forked from a parent session",
             Self::OpenProvider => "its session was opened with a provider of its own",
             Self::OpenToolPolicy => {

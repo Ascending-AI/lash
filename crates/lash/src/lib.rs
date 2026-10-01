@@ -81,7 +81,6 @@ pub use parked_work_verbs::{
     ControlIntentPage, ControlIntentQuery, ForkedTurn, ParkCancelled, ParkVerbRefused,
     RedriveAccepted, RootRedriveAccepted,
 };
-mod plugin_binding;
 pub mod preflight;
 pub(crate) mod process_admin;
 mod process_lifecycle;
@@ -171,7 +170,6 @@ pub use crate::parked_work::{
     ParkedWorkEventsCursor, ParkedWorkPage, ParkedWorkQuery, ParkedWorkRecord, ParkedWorkRef,
     ParkedWorkReport,
 };
-pub use crate::plugin_binding::PluginBinding;
 pub use crate::prompt_layer::PromptLayerSink;
 pub use crate::send::{
     BatchInput, CancelBuilder, CancelReceipt, CancelTarget, ParkedTurn, RootHandle,
@@ -182,7 +180,7 @@ pub use crate::session::{
     LashSession, ObservableSession, ParkedSession, SessionBuilder, SessionCreation,
     SessionParkRefused,
 };
-pub use crate::tool_catalog::{ToolCatalogMiss, ToolCatalogView};
+pub use crate::tool_catalog::ToolCatalogMiss;
 pub use crate::turn::{
     ReportSource, TurnActivityFanout, TurnOutput, TurnReport, message_role, message_text,
 };
@@ -289,7 +287,7 @@ pub mod prelude {
         AdvancedToolAdmin, ChargeSafetyPolicy, CoreTriggerAdmin, DeploymentDrainStatus,
         DurableSession, EmbedError, InputItem, LashCore, LashCoreBuilder, LashSession, ModelLimits,
         ModelLimitsError, ModelSpec, ModelSpecBuilder, NoProgressBudget, ObservableSession,
-        ParkedSession, PendingTurnInputCancelOutcome, PluginBinding, PluginOperations, PluginStack,
+        ParkedSession, PendingTurnInputCancelOutcome, PluginOperations, PluginStack,
         PromptLayerSink, Result, SendBuilder, SendHandle, SendOutcome, SessionBuilder,
         SessionCommand, SessionCommandAdmin, SessionCommandReceipt, SessionCreateRequest,
         SessionCreation, SessionDeleteReport, SessionDeletion, SessionListFilter,

@@ -228,9 +228,10 @@ attaches a trace sink to `LashCore`, and writes JSONL trace records to stderr
 and `AGENT_SERVICE_TRACE` so provider payloads, RLM response, extracted
 TypeScript, terminal output, and tool calls are visible while you run it.
 
-The app builds a `LashCore` via `LashCore::rlm_builder`, activates `DemoPlugin` per chat session with
-`SessionBuilder::plugin::<DemoPlugin>(...)`, and lets the plugin provide
-its fixed app tools through the normal `ToolProvider` hook.
+The app builds a `LashCore` via `LashCore::rlm_builder` and installs the
+demo board plugin on the core with `LashCoreBuilder::plugin`, so every chat
+session and every process worker runs the same plugin; it provides its fixed
+app tools through the normal `ToolProvider` hook.
 
 Board tools seal their chat id in the prepared call. A session supplies its own
 id; a process supplies its recorded session originator. A host-originated
@@ -239,7 +240,8 @@ sealed chat id, including after replay, without requiring a process session.
 
 The plugin demonstrates:
 
-- Typed session activation through `PluginBinding::SessionConfig`.
+- One core-installed plugin over app-owned state: a session's behaviour is
+  its recorded config, never a per-open plugin installation.
 - App-owned tic-tac-toe board state in the `chat_boards` SQLite table.
 - User message payload board snapshots for browser replay only.
 - `read_board` and `play_move` app tools provided by the plugin's

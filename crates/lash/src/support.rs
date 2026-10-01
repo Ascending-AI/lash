@@ -33,9 +33,8 @@ pub(crate) use lash_core::{TurnActivity, TurnInput};
 pub(crate) use lash_core::{TurnActivityId, TurnEvent};
 
 pub(crate) use crate::admin::{PluginOperations, SessionAdmin};
-pub(crate) use crate::core::{LashCore, build_plugin_host, refuse_foreign_backend_factories};
+pub(crate) use crate::core::{LashCore, build_plugin_host};
 pub(crate) use crate::error::{EmbedError, Result};
-pub(crate) use crate::plugin_binding::PluginBinding;
 pub(crate) use crate::prompt_layer::PromptLayerSink;
 pub(crate) use crate::session::{LashSession, ParkedSession, SessionBuilder};
 #[cfg(test)]

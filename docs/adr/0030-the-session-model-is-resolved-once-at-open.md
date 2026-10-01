@@ -55,8 +55,11 @@ reaches roots that start after it.
 
 The opener owns only the session binding: the store and the worker wiring
 it runs on. An open, including the engine's own reopen, overrides no recorded
-fact. A session-turn process's worker names the configuration that process's
-session is created with; there is no implicit default.
+fact. A session-turn process's child is created from its starter's recorded
+facts: the start captures its starter's recorded configuration, admits the
+child's complete facts against it before the handoff, and the worker creates
+the child from that captured environment. A worker names no configuration of
+its own (ADR 0088).
 
 Input admission does not select a model. Child-session execution and direct
 LLM requests have explicit model selection at their own boundaries. An input

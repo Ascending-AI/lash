@@ -131,9 +131,9 @@ impl RlmSubagentToolsProvider {
     /// body declares that one `ProcessInput::SessionTurn` start and parks on
     /// it; the runtime launches the start, and the child's final value — the
     /// SessionTurn runner's projection under `SessionTurnOutcome::FinalValue` —
-    /// resolves the call. Going through the process worker re-supplies the
-    /// live parent provider, gives the child durability and makes it
-    /// recoverable, the same generic path every other session turn takes.
+    /// resolves the call. Going through the process worker gives the child
+    /// durability and makes it recoverable, under the environment its start
+    /// captured, the same generic path every other session turn takes.
     fn execute_spawn_agent(
         &self,
         context: &lash_core::AttemptContext<'_>,
@@ -182,7 +182,16 @@ impl RlmSubagentToolsProvider {
         .with_declared_identity(lash_core::DeclaredProcessIdentity::labelled(
             "subagent",
             Some("spawn".to_string()),
-        ));
+        ))
+        // The child runs under its parent's recorded facts: the start captures
+        // the attempt's environment — the parent's recorded policy and plugin
+        // config — and the worker builds the child's process runtime from it
+        // (FIG-4396).
+        .with_env_ref(
+            context
+                .process_execution_env_ref()
+                .map_err(|err| format!("spawn_agent could not capture its environment: {err}"))?,
+        );
         let start = lash_core::DeclaredStart::new(
             context,
             lash_core::StartProcessIntent { owner, declaration },

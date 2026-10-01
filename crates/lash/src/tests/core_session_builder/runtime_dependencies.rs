@@ -65,8 +65,9 @@ fn expect_build_error<T>(result: std::result::Result<T, EmbedError>, message: &s
 }
 
 /// FIG-3633: the RLM protocol keeps its Lashlang artifacts in the backend it
-/// was built over, so a core over any other backend refuses it at build, and
-/// a session refuses one supplied as a per-session factory. Otherwise a
+/// was built over, so a core over any other backend refuses it at build. A
+/// core's plugin set is the only one its sessions and workers run
+/// (FIG-4396). Otherwise a
 /// resumed session would look for its modules in a substrate that never held
 /// them, and the core's artifact cleanup would sweep a store nobody wrote.
 #[cfg(feature = "rlm")]
@@ -94,7 +95,7 @@ async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()
     };
 
     // Control: the same factory over the core's own backend builds.
-    let core = build(&core_backend)?;
+    build(&core_backend)?;
 
     let error = expect_build_error(
         build(&artifacts),
@@ -113,30 +114,6 @@ async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()
         other => panic!("expected PluginBackendMismatch, got {other}"),
     }
 
-    // A per-session factory and a worker's extra factory are held to the
-    // same backend.
-    let mut session = core.session("foreign-rlm-plugin");
-    session
-        .plugin_factories
-        .push(Arc::new(rlm_factory(&artifacts)));
-    let session_error = match session.created().await.open().await {
-        Ok(_) => panic!("a per-session RLM factory over another backend must be refused"),
-        Err(error) => error,
-    };
-    assert!(
-        matches!(session_error, EmbedError::PluginBackendMismatch { .. }),
-        "expected PluginBackendMismatch, got {session_error}"
-    );
-    let worker_error = expect_build_error(
-        core.durable_process_worker_config_with_plugins([
-            Arc::new(rlm_factory(&artifacts.clone())) as Arc<dyn PluginFactory>,
-        ]),
-        "a worker's RLM factory over another backend must be refused",
-    );
-    assert!(
-        matches!(worker_error, EmbedError::PluginBackendMismatch { .. }),
-        "expected PluginBackendMismatch, got {worker_error}"
-    );
     Ok(())
 }
 

@@ -8,7 +8,6 @@ use lash::{LashCore, LashSession, ModelSpec, TurnWorkDriver};
 use serde_json::json;
 
 use crate::db::AppDb;
-use crate::demo_plugin::{DemoPlugin, DemoPluginConfig};
 
 pub(crate) type AppResult<T> = Result<T, AppError>;
 
@@ -90,14 +89,7 @@ impl AppStateData {
             Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}
             Err(error) => return Err(error.into()),
         }
-        let session = self
-            .core
-            .session(chat_id)
-            .plugin::<DemoPlugin>(DemoPluginConfig {
-                db: Arc::clone(&self.db),
-            })
-            .open()
-            .await?;
+        let session = self.core.session(chat_id).open().await?;
         if session.policy_snapshot().model != model {
             // Written against the revision this open read, under an id that
             // names the change: a resubmission of the same change is the
@@ -336,6 +328,24 @@ pub(crate) mod test_support {
             provider,
             None,
             lash::tools::ToolSourcePolicy::Tolerate,
+            None,
+        )
+        .await
+    }
+
+    /// A core that installs the board plugin over `db`, as the service's own
+    /// core does: its sessions carry the board prompt and the board tools.
+    pub(crate) async fn test_core_with_board(
+        double: &lash_restate_test::RestateTestBackend,
+        provider: lash::provider::ProviderHandle,
+        db: &Arc<Mutex<AppDb>>,
+    ) -> LashCore {
+        test_core_with_facets(
+            double,
+            provider,
+            None,
+            lash::tools::ToolSourcePolicy::Tolerate,
+            Some(Arc::clone(db)),
         )
         .await
     }
@@ -354,6 +364,7 @@ pub(crate) mod test_support {
             provider,
             None,
             lash::tools::ToolSourcePolicy::Require,
+            None,
         )
         .await
     }
@@ -363,6 +374,7 @@ pub(crate) mod test_support {
         provider: lash::provider::ProviderHandle,
         tools: Option<Arc<dyn lash::tools::ToolProvider>>,
         tool_source_policy: lash::tools::ToolSourcePolicy,
+        board: Option<Arc<Mutex<AppDb>>>,
     ) -> LashCore {
         let backend = double.lash_backend();
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
@@ -379,6 +391,9 @@ pub(crate) mod test_support {
             .provider(provider);
         if let Some(tools) = tools {
             builder = builder.tools(tools);
+        }
+        if let Some(db) = board {
+            builder = builder.plugin(Arc::new(crate::demo_plugin::DemoPluginFactory::new(db)));
         }
         builder
             .model(mock_model_spec())
@@ -406,6 +421,7 @@ pub(crate) mod test_support {
             provider,
             Some(tools),
             lash::tools::ToolSourcePolicy::Tolerate,
+            None,
         )
         .await
     }
@@ -429,7 +445,7 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod session_language_tests {
     use super::test_support::{
-        mock_model_spec, test_core, test_core_requiring_tool_sources, test_core_with_provider,
+        mock_model_spec, test_core, test_core_requiring_tool_sources, test_core_with_board,
         test_core_with_tools, test_state,
     };
     use super::*;
@@ -474,12 +490,17 @@ mod session_language_tests {
             })
             .build()
             .into_handle();
-        let core = test_core_with_provider(&double, provider).await;
-
-        let service = test_state(
-            &double,
-            &core,
+        let db = Arc::new(Mutex::new(
             AppDb::open(&data_dir.join("app-smuggle.db")).expect("app db"),
+        ));
+        let core = test_core_with_board(&double, provider, &db).await;
+
+        let service = AppStateData::new(
+            core.clone(),
+            db,
+            "mock-model".to_string(),
+            None,
+            double.connection(),
         );
         let session = service
             .open_session("smuggled-chat", mock_model_spec())

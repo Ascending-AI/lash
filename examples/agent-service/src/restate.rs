@@ -24,7 +24,7 @@ mod restate_tests {
     use crate::board::BoardState;
     use crate::chat_discard::AgentServiceChatDiscard as _;
     use crate::db::AppDb;
-    use crate::demo_plugin::{DemoPlugin, DemoPluginConfig};
+    use crate::demo_plugin::DemoPluginFactory;
     use crate::effect_groups::{
         AgentServiceEffectGroupExecutors, AgentServiceEffectGroupWorkflow,
         AgentServiceEffectGroupWorkflowImpl, EffectGroupRunReport, EffectGroupRunTerminal,
@@ -37,10 +37,7 @@ mod restate_tests {
     use lash::direct::LlmOutputPart;
     use lash::provider::LlmResponse;
     use lash::runtime::{AwaitEventResolver, ExecutionScope};
-    use lash::{
-        AwaitEventWaitIdentity, CancellationToken, LashCore, PluginBinding, Resolution,
-        ResolveOutcome,
-    };
+    use lash::{AwaitEventWaitIdentity, CancellationToken, LashCore, Resolution, ResolveOutcome};
     use lash_restate::RestateEffectHost;
 
     const STACK_BUDGET_BYTES: usize = 2 * 1024 * 1024;
@@ -489,16 +486,14 @@ finish("done via Restate E2E");
             .plugin(Arc::new(
                 lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter),
             ))
+            .plugin(Arc::new(DemoPluginFactory::new(Arc::clone(&app_db))))
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "agent-service-test",
                 "test",
             ))
             .expect("build test core");
-        let demo_factory = DemoPlugin::factory(&DemoPluginConfig {
-            db: Arc::clone(&app_db),
-        });
         let process_worker = lash::durability::DurableProcessWorker::new(
-            core.durable_process_worker_config_with_plugins([demo_factory])
+            core.durable_process_worker_config()
                 .expect("process worker config"),
         )
         .expect("valid test native substrate config");

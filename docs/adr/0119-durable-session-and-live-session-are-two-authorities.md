@@ -28,10 +28,12 @@ The session builder has three principal terminal verbs; exactly one creates.
   session. A missing id is `EmbedError::UnknownSession`.
 
 The store admission answer decides which racing create succeeds. Hosts that
-want create-or-open state that sequence explicitly. Open-time options govern
-tool-source policy, enqueue-only mode, process-local plugin factories and the
-provider resolver. The resolver must match the recorded provider pin. Config
-changes are typed config commands (ADR 0126).
+want create-or-open state that sequence explicitly. Open-time options are
+physical only: tool-source policy, enqueue-only mode and the provider
+resolver. The resolver must match the recorded provider pin. An open installs
+no plugins: the session runs its core's one plugin set under the plugin config
+it recorded at creation (ADR 0088). Config changes are typed config commands
+(ADR 0126).
 
 A factory is live wiring, not behaviour. What a protocol factory states
 about how a session behaves — the RLM execution bounds, Lashlang abilities

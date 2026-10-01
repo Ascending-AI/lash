@@ -1374,7 +1374,7 @@ pub(super) async fn run_collects_ordered_assistant_prose_activity() -> Result<()
 }
 
 #[tokio::test]
-pub(super) async fn core_catalog_and_actual_turn_resolve_the_identical_contract() -> Result<()> {
+pub(super) async fn session_catalog_and_actual_turn_resolve_the_identical_contract() -> Result<()> {
     let tools = ContractRecordingTools::default();
     let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
@@ -1385,17 +1385,20 @@ pub(super) async fn core_catalog_and_actual_turn_resolve_the_identical_contract(
     .model(mock_model_spec())
     .tools(Arc::new(tools.clone()))
     .build(crate::testing::runtime_lease_owner())?;
-    let core_contract = core
-        .tool_catalog()
-        .resolve_contract("app_lookup")
-        .expect("core catalog contract");
-    let expected = serde_json::to_value(core_contract.as_ref()).expect("serialize core contract");
     let session = core
         .session("catalog-agreement")
         .created()
         .await
         .open()
         .await?;
+    let session_contract = session
+        .admin()
+        .tools()
+        .resolve_contract("app_lookup")
+        .await
+        .expect("session catalog contract");
+    let expected =
+        serde_json::to_value(session_contract.as_ref()).expect("serialize session contract");
     tools.take_resolved();
 
     let output = session

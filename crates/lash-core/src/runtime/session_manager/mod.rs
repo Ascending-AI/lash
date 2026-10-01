@@ -87,9 +87,9 @@ pub(in crate::runtime) enum CurrentOwner {
     Session(Box<CurrentSession>),
     Process {
         process_id: crate::ProcessId,
-        /// The environment an engine or tool-call process captured at its
-        /// start; a session-turn process captured none.
-        environment: Option<Box<crate::ProcessExecutionEnvSpec>>,
+        /// The environment the process captured at its start: its starter's
+        /// recorded policy and plugin config (FIG-4396).
+        environment: Box<crate::ProcessExecutionEnvSpec>,
     },
 }
 
@@ -205,8 +205,7 @@ impl CurrentOwnerCapability {
     }
 
     /// The execution environment a start captures from these services: the
-    /// session's current one, or the process's captured one. A session-turn
-    /// process captured none, and refuses.
+    /// session's current one, or the process's captured one.
     pub(in crate::runtime) fn execution_env_spec(
         &self,
     ) -> Result<crate::ProcessExecutionEnvSpec, crate::PluginError> {
@@ -217,16 +216,7 @@ impl CurrentOwnerCapability {
                     &self.policy,
                 ),
             ),
-            CurrentOwner::Process {
-                environment: Some(environment),
-                ..
-            } => Ok(environment.as_ref().clone()),
-            CurrentOwner::Process {
-                process_id,
-                environment: None,
-            } => Err(crate::PluginError::Session(format!(
-                "process `{process_id}` runs a session turn and captured no execution environment"
-            ))),
+            CurrentOwner::Process { environment, .. } => Ok(environment.as_ref().clone()),
         }
     }
 }
@@ -242,10 +232,9 @@ struct DirectCompletionCapability;
 /// What a process runtime's services are built from.
 pub(in crate::runtime) struct ProcessServicesPorts {
     pub(in crate::runtime) process_id: crate::ProcessId,
-    pub(in crate::runtime) environment: Option<crate::ProcessExecutionEnvSpec>,
-    /// The captured environment's policy, or the deployment's default policy
-    /// for a session-turn process.
-    pub(in crate::runtime) policy: SessionPolicy,
+    /// The environment the process captured at its start; its policy is
+    /// the process runtime's policy.
+    pub(in crate::runtime) environment: crate::ProcessExecutionEnvSpec,
     pub(in crate::runtime) host: RuntimeHost,
     pub(in crate::runtime) plugins: Arc<crate::PluginSession>,
     pub(in crate::runtime) runtime_lease_owner: crate::LeaseOwnerIdentity,
@@ -520,7 +509,6 @@ impl RuntimeSessionServices {
         let ProcessServicesPorts {
             process_id,
             environment,
-            policy,
             host,
             plugins,
             runtime_lease_owner,
@@ -528,10 +516,10 @@ impl RuntimeSessionServices {
         } = ports;
         Self {
             current: CurrentOwnerCapability {
-                policy,
+                policy: environment.policy.clone(),
                 owner: CurrentOwner::Process {
                     process_id,
-                    environment: environment.map(Box::new),
+                    environment: Box::new(environment),
                 },
                 host,
                 plugins,

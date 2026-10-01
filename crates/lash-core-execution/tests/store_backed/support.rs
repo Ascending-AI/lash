@@ -162,7 +162,6 @@ pub fn install_process_worker(double: &lash_restate_test::RestateTestBackend) {
             process_work,
             std::sync::Arc::new(crate::NoSessionWork::new()),
             crate::testing::runtime_lease_owner(),
-            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
     )
     .expect("a valid process worker configuration");

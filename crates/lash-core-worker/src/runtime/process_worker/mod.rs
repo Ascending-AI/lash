@@ -15,19 +15,18 @@ use lash_core_execution::runtime::effect::ProcessRunner;
 
 /// Deployment-local configuration for rebuilding durable process executions.
 ///
-/// Process rows intentionally carry only portable process input and provenance.
-/// Workers provide plugins, providers, stores, secrets, and host capabilities
-/// for the deployment that owns those rows.
+/// Process rows carry portable process input, provenance and the environment
+/// their start captured: the starter's recorded policy and plugin config, which
+/// every process runtime runs under. Workers provide the physical binding —
+/// plugins, providers, stores, secrets and host capabilities — for the
+/// deployment that owns those rows, and no behaviour of their own: a worker
+/// selects no default for a fact its process's start recorded (FIG-4396).
 #[derive(Clone)]
 pub struct DurableProcessWorkerConfig {
     pub plugin_host: Arc<PluginHost>,
     /// The host config and its one backend, which supplies the session
     /// catalog and trigger store this worker reaches (ADR 0102, D2).
     pub runtime_host: RuntimeHostConfig,
-    /// The config a session-turn process's session is created with where
-    /// its recorded create request states none. A host names it: there is
-    /// no implicit default (FIG-4376).
-    pub session_policy: crate::SessionPolicy,
     /// Pacing of the registry waits a process run makes through this
     /// worker's process work.
     pub work_cadence: crate::WorkCadencePolicy,
@@ -45,12 +44,10 @@ impl DurableProcessWorkerConfig {
         process_work: crate::ProcessWorkWiring,
         queued_work: Arc<dyn crate::SessionWorkEngine>,
         lease_owner: crate::LeaseOwnerIdentity,
-        session_policy: crate::SessionPolicy,
     ) -> Self {
         Self {
             plugin_host,
             runtime_host,
-            session_policy,
             work_cadence: crate::WorkCadencePolicy::default(),
             process_work,
             queued_work,
@@ -88,7 +85,6 @@ impl DurableProcessWorkerConfig {
         process_work: crate::ProcessWorkWiring,
         queued_work: Arc<dyn crate::SessionWorkEngine>,
         lease_owner: crate::LeaseOwnerIdentity,
-        session_policy: crate::SessionPolicy,
     ) -> Self {
         Self::new(
             Arc::new(PluginHost::new(plugin_factories.into_iter().collect())),
@@ -96,7 +92,6 @@ impl DurableProcessWorkerConfig {
             process_work,
             queued_work,
             lease_owner,
-            session_policy,
         )
     }
 
@@ -106,7 +101,6 @@ impl DurableProcessWorkerConfig {
         process_work: crate::ProcessWorkWiring,
         queued_work: Arc<dyn crate::SessionWorkEngine>,
         lease_owner: crate::LeaseOwnerIdentity,
-        session_policy: crate::SessionPolicy,
     ) -> Self {
         Self::from_plugin_factories(
             plugin_stack.into_factories(),
@@ -114,7 +108,6 @@ impl DurableProcessWorkerConfig {
             process_work,
             queued_work,
             lease_owner,
-            session_policy,
         )
     }
 }
@@ -351,7 +344,6 @@ impl DurableProcessWorker {
                 turn_phase_probe,
             },
             &admitted,
-            self.config.session_policy.clone(),
         ))
         .await
         .map_err(|err| {

@@ -378,20 +378,6 @@ impl PluginHost {
         })
     }
 
-    pub fn build_core_tool_registry(&self) -> Result<Arc<crate::ToolRegistry>, PluginError> {
-        let ctx = PluginSessionContext {
-            owner: RuntimeOwner::Session(SessionId::from("lash-core-tool-catalog")),
-            tool_access: SessionToolAccess::default(),
-            subagent: None,
-            plugin_config: super::AdmittedPluginConfig::default(),
-            materialization: PluginSessionMaterialization::Creation,
-            extensions: self.extensions.clone(),
-            parent_session_id: None,
-        };
-        let built = self.build_session_contributions(&ctx, None)?;
-        build_tool_registry(&built.contributions, None)
-    }
-
     fn register_session(
         &self,
         owner: &RuntimeOwner,

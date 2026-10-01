@@ -637,13 +637,13 @@ async fn run_once_inner(
 
         let before_turn_usage = runtime.settled_usage_report().await?;
         if let Some(variant) = catalog_variant {
-            let (manifest_count, rendered_bytes) = runtime.tool_catalog_metrics()?;
+            let (manifest_count, rendered_bytes) = runtime.tool_catalog_metrics().await?;
             extra_counters.lock_recover().insert(
-                format!("tool_catalog.{variant}.registry_manifest_count"),
+                format!("tool_catalog.{variant}.session_manifest_count"),
                 manifest_count as u64,
             );
             extra_counters.lock_recover().insert(
-                format!("tool_catalog.{variant}.registry_rendered_bytes"),
+                format!("tool_catalog.{variant}.session_rendered_bytes"),
                 rendered_bytes as u64,
             );
             let composition_probe = Arc::clone(&phase_probe);

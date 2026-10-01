@@ -1284,11 +1284,16 @@ mod zero_move_turn_tests {
             ],
             Arc::clone(&seen),
         );
-        let core = test_core_with_provider(&double, provider).await;
-        let state = test_state(
-            &double,
-            &core,
+        let db = Arc::new(Mutex::new(
             AppDb::open(&data_dir.join("app.db")).expect("app db"),
+        ));
+        let core = crate::state::test_support::test_core_with_board(&double, provider, &db).await;
+        let state = AppStateData::new(
+            core,
+            db,
+            "mock-model".to_string(),
+            None,
+            double.connection(),
         );
         let chat = state
             .with_db(|db| db.create_chat("live", "mock-model", None))

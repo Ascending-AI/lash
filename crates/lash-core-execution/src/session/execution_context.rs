@@ -1131,7 +1131,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         if registration.env_ref.is_some()
             || matches!(
                 registration.input.as_ref(),
-                crate::ProcessInput::External { .. } | crate::ProcessInput::SessionTurn { .. }
+                crate::ProcessInput::External { .. }
             )
         {
             return Ok(registration);

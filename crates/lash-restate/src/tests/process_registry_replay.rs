@@ -1306,7 +1306,9 @@ pub(super) async fn session_turn_cancel_propagates_runner_infrastructure_failure
         lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
         &crate::services::DEFAULT_NAMESPACE,
     ));
-    let registration = session_turn_registration();
+    let registration = session_turn_registration(
+        persist_session_turn_env_ref(RECOVERY_PROCESS_ENV_STORE.as_ref()).await,
+    );
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -1380,7 +1382,9 @@ pub(super) async fn session_turn_runner_failure_after_completion_stays_recoverab
         Arc::clone(&registry),
         continuation_store(),
     ));
-    let registration = session_turn_registration();
+    let registration = session_turn_registration(
+        persist_session_turn_env_ref(RECOVERY_PROCESS_ENV_STORE.as_ref()).await,
+    );
     let process_id = registry
         .register_process(registration.clone())
         .await

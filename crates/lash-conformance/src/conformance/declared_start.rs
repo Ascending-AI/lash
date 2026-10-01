@@ -147,6 +147,151 @@ enum Forge {
 /// The session a [`Forge::ForeignSession`] declaration names.
 const FOREIGN_SESSION: &str = "declared-start-law-foreign-session";
 
+/// The plugin id and config namespace of [`FactsFactory`].
+const FACTS: &str = "conformance-recorded-facts";
+
+/// The default the parent's core installs [`FactsFactory`] with: the value
+/// the parent session records at creation.
+const CORE_FACTS_DEFAULT: &str = "recorded-by-the-parent-core";
+
+/// The default the process worker installs [`FactsFactory`] with. A child
+/// that records or runs under it took the worker's default for a fact its
+/// parent recorded.
+const WORKER_FACTS_DEFAULT: &str = "the-worker-default";
+
+/// [`FactsFactory`]'s recorded namespace.
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    lash_core::facade_support::JsonSchema,
+)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+#[serde(deny_unknown_fields)]
+struct FactsConfig {
+    value: String,
+}
+
+/// The owner of the [`FACTS`] namespace: a creator's value, else the parent's
+/// recorded value for a child, else this deployment's default.
+struct FactsOwner {
+    default: &'static str,
+}
+
+impl crate::ConfigOwner for FactsOwner {
+    type Create = FactsConfig;
+    type Recorded = FactsConfig;
+    type Refusal = String;
+
+    fn implementation(&self) -> &str {
+        "conformance-recorded-facts:1"
+    }
+
+    fn create(
+        &self,
+        input: Option<FactsConfig>,
+        facts: crate::CreationFacts<'_, FactsConfig>,
+    ) -> Result<Option<FactsConfig>, String> {
+        Ok(Some(input.or_else(|| facts.parent.cloned()).unwrap_or(
+            FactsConfig {
+                value: self.default.to_string(),
+            },
+        )))
+    }
+
+    fn validate(
+        &self,
+        _value: &FactsConfig,
+        _base: Option<&FactsConfig>,
+        _facts: &crate::CandidateFacts<'_>,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+/// A plugin that owns one recorded namespace and reports, per owner, the
+/// namespace every plugin session it built for that owner was handed. The
+/// parent's core and the process worker install it under different
+/// defaults.
+struct FactsFactory {
+    default: &'static str,
+    builds: Arc<std::sync::Mutex<Vec<FactsBuild>>>,
+}
+
+/// One plugin session build: its owner, and the namespace it was handed.
+type FactsBuild = (String, Option<serde_json::Value>);
+
+impl FactsFactory {
+    fn new(default: &'static str) -> Self {
+        Self {
+            default,
+            builds: Arc::default(),
+        }
+    }
+
+    /// What every plugin session this factory built for `owner` was handed.
+    fn built_for(&self, owner: &str) -> Vec<Option<serde_json::Value>> {
+        self.builds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .filter(|(built, _)| built == owner)
+            .map(|(_, value)| value.clone())
+            .collect()
+    }
+}
+
+struct FactsPlugin;
+
+impl crate::plugin::SessionPlugin for FactsPlugin {
+    fn id(&self) -> &'static str {
+        FACTS
+    }
+
+    fn register(
+        &self,
+        _reg: &mut crate::plugin::PluginRegistrar,
+    ) -> Result<(), crate::PluginError> {
+        Ok(())
+    }
+}
+
+impl crate::facade_support::PluginFactory for FactsFactory {
+    fn id(&self) -> &'static str {
+        FACTS
+    }
+
+    fn register_config(
+        &self,
+        registrar: &mut crate::ConfigRegistrar,
+    ) -> Result<(), crate::ConfigRegistrationError> {
+        registrar.owner(FactsOwner {
+            default: self.default,
+        })
+    }
+
+    fn build(
+        &self,
+        ctx: &crate::plugin::PluginSessionContext,
+    ) -> Result<Arc<dyn crate::plugin::SessionPlugin>, crate::PluginError> {
+        self.builds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((
+                ctx.owner.to_string(),
+                ctx.plugin_config.config.get(FACTS).cloned(),
+            ));
+        Ok(Arc::new(FactsPlugin))
+    }
+}
+
+fn recorded_facts(value: &str) -> serde_json::Value {
+    serde_json::json!({ "value": value })
+}
+
 fn probe_tool() -> crate::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     crate::ToolDefinition::raw(
@@ -562,6 +707,10 @@ struct World {
     turn_id: TurnId,
     host: crate::RuntimeHostConfig,
     factories: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
+    /// The protocol plugin the parent session records.
+    protocol_plugin_id: &'static str,
+    /// The process worker's [`FactsFactory`], under its own default.
+    worker_facts: Arc<FactsFactory>,
     store: Arc<dyn crate::RuntimeStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
     /// The runtime's own wait on [`Self::registry`]: it wakes on the watch's
@@ -663,18 +812,34 @@ impl World {
                 crate::facade_support::PluginSpec::new().with_tool_provider(provider),
             )) as Arc<dyn crate::facade_support::PluginFactory>
         });
+        let protocol_plugin_id = protocol
+            .first()
+            .map(|factory| factory.id())
+            .expect("the tier's protocol plugin");
+        let facts: Arc<dyn crate::facade_support::PluginFactory> =
+            Arc::new(FactsFactory::new(CORE_FACTS_DEFAULT));
+        let worker_facts = Arc::new(FactsFactory::new(WORKER_FACTS_DEFAULT));
         let factories = protocol
             .into_iter()
             .chain([(tier.subagents)(shape.timeout)])
             .chain(tools)
             .collect::<Vec<_>>();
+        // The worker installs the same plugin set as the parent's core, one
+        // of them under another default: the facts a child runs under are its
+        // parent's recorded ones, never the worker's.
+        let worker_factories = factories
+            .iter()
+            .cloned()
+            .chain([Arc::clone(&worker_facts) as Arc<dyn crate::facade_support::PluginFactory>])
+            .collect::<Vec<_>>();
+        let factories = factories.into_iter().chain([facts]).collect::<Vec<_>>();
         let faults = crate::testing::ProcessRegistryFaults::new(tier.stores.process_registry());
         // One watch, two consumers: the runtime's process port and the worker
         // observe the same registry handle.
         let watched = crate::facade_support::watch_process_registry(Arc::new(faults.clone()));
         let worker = lash_core_worker::DurableProcessWorker::new(
             lash_core_worker::DurableProcessWorkerConfig::new(
-                Arc::new(crate::facade_support::PluginHost::new(factories.clone())),
+                Arc::new(crate::facade_support::PluginHost::new(worker_factories)),
                 host.clone(),
                 crate::ProcessWorkWiring::new(
                     watched.clone(),
@@ -682,7 +847,6 @@ impl World {
                 ),
                 Arc::new(crate::NoSessionWork::new()),
                 crate::testing::runtime_lease_owner(),
-                lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             ),
         )
         .expect("build the declared-start process worker");
@@ -696,6 +860,8 @@ impl World {
             turn_id,
             host,
             factories,
+            protocol_plugin_id,
+            worker_facts,
             registry,
             awaiter,
             faults,
@@ -715,13 +881,25 @@ impl World {
     async fn runtime(&self) -> crate::LashRuntime {
         let mut policy = crate::testing::mock_session_policy();
         policy.session_id = Some(self.session_id.clone());
-        let state = crate::RuntimeSessionState {
+        let mut state = crate::RuntimeSessionState {
             session_id: self.session_id.clone(),
             policy: policy.clone(),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             ))
         };
+        // The law supplies the session's state, so it states what the
+        // session's creation recorded: the namespace every owner its core
+        // installs resolved, under the core's protocol (FIG-4379).
+        state.authority.plugin_config =
+            crate::facade_support::PluginHost::new(self.factories.clone())
+                .resolve_creation_plugin_config(
+                    Some(self.protocol_plugin_id),
+                    &crate::PluginOptions::default(),
+                    None,
+                    true,
+                )
+                .expect("resolve the parent session's recorded plugin config");
         Box::pin(
             crate::LashRuntime::builder(self.host.clone(), crate::testing::runtime_lease_owner())
                 .with_session_id(&self.session_id)
@@ -1199,6 +1377,72 @@ pub async fn spawn_agent_record_carries_child_identity(tier: DeclaredStartTier) 
     assert!(
         saw[0].contains(&child_reply(0)) && !saw[0].contains(child.id.as_str()),
         "the model sees the child's value and not its handle: {saw:?}"
+    );
+}
+
+/// A spawned child and the process that runs it run under the facts their
+/// parent recorded, on a worker whose plugin set has other defaults
+/// (FIG-4396).
+///
+/// The parent session records [`CORE_FACTS_DEFAULT`]; the worker installs
+/// the same owner under [`WORKER_FACTS_DEFAULT`]. The child's `SessionTurn`
+/// process captures the parent's recorded environment at its start, the
+/// worker builds the process's runtime from that environment, and the child
+/// session it creates there records — and runs under — the parent's value.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn declared_start_child_runs_under_recorded_facts_on_a_worker_with_other_defaults(
+    tier: DeclaredStartTier,
+) {
+    let world = World::new(&tier, "recorded-facts", Shape::one_child()).await;
+    let turn = finished(&world, world.run().await);
+    assert_answered_the_child(&world, &turn);
+    let recorded = Some(recorded_facts(CORE_FACTS_DEFAULT));
+
+    let child = world.only_child().await;
+    let env_ref = child
+        .env_ref
+        .clone()
+        .expect("the child's SessionTurn process captured its parent's environment");
+    let environment =
+        crate::load_process_execution_env(tier.stores.process_env_store().as_ref(), &env_ref)
+            .await
+            .expect("load the child's captured environment");
+    assert_eq!(
+        environment.plugin_config.config.get(FACTS),
+        recorded.as_ref(),
+        "the captured environment is the parent's recorded config"
+    );
+    let process_builds = world
+        .worker_facts
+        .built_for(&crate::RuntimeOwner::Process(child.id.clone()).to_string());
+    assert!(
+        !process_builds.is_empty() && process_builds.iter().all(|seen| *seen == recorded),
+        "the worker built the child's process runtime under the recorded facts, \
+         not its own default: {process_builds:?}"
+    );
+
+    let child_session = crate::process_child_session_id(&child.id);
+    let head = crate::SessionCommitStore::load_session_head_meta(
+        tier.stores.session_store_factory().as_ref(),
+        &child_session,
+    )
+    .await
+    .expect("read the child's config head")
+    .expect("the child session recorded a head");
+    assert_eq!(
+        head.config.plugin_config.get(FACTS),
+        recorded.as_ref(),
+        "the child session recorded its parent's value, not the worker's default"
+    );
+    let session_builds = world
+        .worker_facts
+        .built_for(&crate::RuntimeOwner::Session(child_session).to_string());
+    assert!(
+        !session_builds.is_empty() && session_builds.iter().all(|seen| *seen == recorded),
+        "the child session ran under its recorded value on the worker: {session_builds:?}"
     );
 }
 

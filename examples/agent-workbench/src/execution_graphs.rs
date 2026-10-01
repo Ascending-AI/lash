@@ -543,6 +543,17 @@ mod tests {
         (observer, registry, double)
     }
 
+    /// The environment a fixture's session-turn start captured: a session
+    /// turn registers only under the facts its starter recorded.
+    fn session_turn_env_ref() -> lash::process::ProcessExecutionEnvRef {
+        lash::process::ProcessExecutionEnvSpec::new(
+            lash::plugins::AdmittedPluginConfig::default(),
+            lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
+        )
+        .stable_ref()
+        .expect("captured environment digest")
+    }
+
     fn test_graph(
         graph_key: &str,
         session_id: &SessionId,
@@ -602,16 +613,21 @@ mod tests {
         )
         .with_session_id(child_session_id);
         let subagent_process_id = registry
-            .register_process(lash::process::ProcessRegistration::new(
-                RuntimeInput::SessionTurn {
-                    definition_key: "agent-workbench-subagent:v1".to_string(),
-                    create_request: Box::new(create_request),
-                    turn_input: Box::new(lash::TurnInput::text("run child")),
-                    result: lash::process::SessionTurnOutcome::Turn,
-                },
-                lash::process::ProcessProvenance::session(lash::process::SessionScope::new("root")),
-                lash::process::Lifetime::Detached,
-            ))
+            .register_process(
+                lash::process::ProcessRegistration::new(
+                    RuntimeInput::SessionTurn {
+                        definition_key: "agent-workbench-subagent:v1".to_string(),
+                        create_request: Box::new(create_request),
+                        turn_input: Box::new(lash::TurnInput::text("run child")),
+                        result: lash::process::SessionTurnOutcome::Turn,
+                    },
+                    lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
+                        "root",
+                    )),
+                    lash::process::Lifetime::Detached,
+                )
+                .with_execution_env_ref(Some(session_turn_env_ref())),
+            )
             .await
             .expect("register subagent process")
             .id;
@@ -732,18 +748,21 @@ mod tests {
         )
         .with_session_id(child_session_id);
         let subagent_process_id = registry
-            .register_process(lash::process::ProcessRegistration::new(
-                RuntimeInput::SessionTurn {
-                    definition_key: "agent-workbench-subagent:v1".to_string(),
-                    create_request: Box::new(create_request),
-                    turn_input: Box::new(lash::TurnInput::text("run child")),
-                    result: lash::process::SessionTurnOutcome::Turn,
-                },
-                lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
-                    current_session_id,
-                )),
-                lash::process::Lifetime::Detached,
-            ))
+            .register_process(
+                lash::process::ProcessRegistration::new(
+                    RuntimeInput::SessionTurn {
+                        definition_key: "agent-workbench-subagent:v1".to_string(),
+                        create_request: Box::new(create_request),
+                        turn_input: Box::new(lash::TurnInput::text("run child")),
+                        result: lash::process::SessionTurnOutcome::Turn,
+                    },
+                    lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
+                        current_session_id,
+                    )),
+                    lash::process::Lifetime::Detached,
+                )
+                .with_execution_env_ref(Some(session_turn_env_ref())),
+            )
             .await
             .expect("register subagent process")
             .id;
@@ -1121,23 +1140,26 @@ mod tests {
     async fn visibility_keeps_later_child_session_paths() {
         let (observer, registry, _double) = test_process_observer().await;
         let process_id = registry
-            .register_process(lash::process::ProcessRegistration::new(
-                RuntimeInput::SessionTurn {
-                    definition_key: "agent-workbench-subagent:v1".to_string(),
-                    create_request: Box::new(
-                        lash::SessionCreateRequest::child_session(
-                            "root",
-                            lash::SessionStartPoint::Empty,
-                            lash::plugins::PluginOptions::default(),
-                        )
-                        .with_session_id("child"),
-                    ),
-                    turn_input: Box::new(lash::TurnInput::text("run child")),
-                    result: lash::process::SessionTurnOutcome::Turn,
-                },
-                lash::process::ProcessProvenance::host(),
-                lash::process::Lifetime::Detached,
-            ))
+            .register_process(
+                lash::process::ProcessRegistration::new(
+                    RuntimeInput::SessionTurn {
+                        definition_key: "agent-workbench-subagent:v1".to_string(),
+                        create_request: Box::new(
+                            lash::SessionCreateRequest::child_session(
+                                "root",
+                                lash::SessionStartPoint::Empty,
+                                lash::plugins::PluginOptions::default(),
+                            )
+                            .with_session_id("child"),
+                        ),
+                        turn_input: Box::new(lash::TurnInput::text("run child")),
+                        result: lash::process::SessionTurnOutcome::Turn,
+                    },
+                    lash::process::ProcessProvenance::host(),
+                    lash::process::Lifetime::Detached,
+                )
+                .with_execution_env_ref(Some(session_turn_env_ref())),
+            )
             .await
             .expect("register process")
             .id;

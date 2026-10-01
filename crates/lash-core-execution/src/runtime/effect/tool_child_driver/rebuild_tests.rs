@@ -218,13 +218,6 @@ fn every_unrecorded_source_is_a_typed_rebuild_refusal() {
         ),
         (
             UnrecordedSessionSources {
-                open_plugins: true,
-                ..Default::default()
-            },
-            ToolChildRebuildRefusal::OpenPlugins,
-        ),
-        (
-            UnrecordedSessionSources {
                 fork_plugins: true,
                 ..Default::default()
             },

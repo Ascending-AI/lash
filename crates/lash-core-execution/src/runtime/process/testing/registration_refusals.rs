@@ -107,20 +107,21 @@ pub fn refused_process_registrations(rule: ProcessRegistrationRefusal) -> Vec<Pr
             registration.session_capability = Some(crate::SessionId::from("a-different-session"));
             vec![registration]
         }
-        // Engine inputs must carry an env.
+        // Engine and session-turn inputs must carry an env.
         ProcessRegistrationRefusal::ExecutionEnvMissing => {
-            vec![host_registration(ProcessInput::Engine {
-                kind: "fixture-engine".to_string(),
-                payload: serde_json::Value::Null,
-            })]
+            vec![
+                host_registration(ProcessInput::Engine {
+                    kind: "fixture-engine".to_string(),
+                    payload: serde_json::Value::Null,
+                }),
+                host_registration(session_turn_input("fixture-definition")),
+            ]
         }
-        // Both arms that must not: external and session-turn.
+        // The arm that must not: external.
         ProcessRegistrationRefusal::ExecutionEnvNotAllowed => {
             let mut external = accepted_process_registration();
             external.env_ref = env_ref();
-            let mut session_turn = host_registration(session_turn_input("fixture-definition"));
-            session_turn.env_ref = env_ref();
-            vec![external, session_turn]
+            vec![external]
         }
         ProcessRegistrationRefusal::EmptySessionTurnDefinitionKey => {
             vec![host_registration(session_turn_input("  "))]

@@ -6,13 +6,12 @@ use std::task::{Context, Poll};
 use crate::durable_session::DurableSession;
 use crate::session_binding::BoundSession;
 use crate::support::{
-    Arc, EffectHost, EmbedError, LashCore, LashRuntime, PluginBinding, PluginFactory,
-    PluginOperations, PluginOptions, ProcessHandleView, PromptLayer, PromptLayerSink,
-    ProviderHandle, Result, RuntimeErrorCode, RuntimeHandle, RuntimeObservation,
-    RuntimeSessionState, SessionAdmin, SessionCreationHead, SessionCursor, SessionError,
-    SessionObservation, SessionObservationSubscription, SessionPolicy, SessionReadView,
-    SessionResume, SessionScope, SessionSpec, SessionStoreCreateRequest, ToolManifest, ToolState,
-    TurnInput, build_plugin_host, refuse_foreign_backend_factories,
+    Arc, EffectHost, EmbedError, LashCore, LashRuntime, PluginOperations, PluginOptions,
+    ProcessHandleView, PromptLayer, PromptLayerSink, ProviderHandle, Result, RuntimeErrorCode,
+    RuntimeHandle, RuntimeObservation, RuntimeSessionState, SessionAdmin, SessionCreationHead,
+    SessionCursor, SessionError, SessionObservation, SessionObservationSubscription, SessionPolicy,
+    SessionReadView, SessionResume, SessionScope, SessionSpec, SessionStoreCreateRequest,
+    ToolManifest, ToolState, TurnInput, build_plugin_host,
 };
 use futures_util::Stream;
 use lash_core::facade_support::ToolStateFacadeOps;
@@ -29,16 +28,16 @@ use lash_remote_protocol::{
 /// there is no way to hand a session a store from anywhere else.
 ///
 /// The builder carries only what one open supplies — a provider resolver,
-/// process-local plugin factories, the tool-source policy and
-/// [`enqueue_only`](Self::enqueue_only). A session's config is not among
-/// them: it is stated once, in the [`SessionCreation`] passed to
+/// the tool-source policy and [`enqueue_only`](Self::enqueue_only): physical
+/// binding and acquisition, never behaviour. A session's behaviour is
+/// recorded config: the plugins it runs are the core's, configured by the
+/// plugin config it recorded at creation (FIG-4396). It is stated once, in the [`SessionCreation`] passed to
 /// [`create`](Self::create), and changed afterwards only through a config
 /// transaction ([`SessionConfigAdmin::apply`](crate::admin::SessionConfigAdmin::apply)).
 pub struct SessionBuilder {
     pub(crate) core: LashCore,
     pub(crate) session_id: SessionId,
     pub(crate) provider: Option<ProviderHandle>,
-    pub(crate) plugin_factories: Vec<Arc<dyn PluginFactory>>,
     /// Per-open override of the core's tool-source policy (FIG-3367).
     pub(crate) tool_source_policy: Option<lash_core::ToolSourcePolicy>,
     /// Set when the host declares this open will not run a turn (FIG-3353).
@@ -147,11 +146,6 @@ impl SessionBuilder {
         self
     }
 
-    pub fn plugin<P: PluginBinding>(mut self, config: P::SessionConfig) -> Self {
-        self.plugin_factories.push(P::factory(&config));
-        self
-    }
-
     /// Open this session's runtime.
     ///
     /// Open never creates: it resolves an existing session through the
@@ -235,8 +229,8 @@ impl SessionBuilder {
     /// Session Execution Lease, no plugin session, no lifecycle event. Run the
     /// session with [`open`](Self::open), or admit durable input for its first
     /// turn with `create(creation).await?.send(input)`. The builder's open
-    /// knobs — provider resolver, plugin factories, tool-source policy,
-    /// `enqueue_only` — belong to an open and take no part in creation.
+    /// knobs — provider resolver, tool-source policy, `enqueue_only` —
+    /// belong to an open and take no part in creation.
     ///
     /// An id the catalog already holds is refused with
     /// [`EmbedError::SessionAlreadyExists`], always — even when a retry states
@@ -278,11 +272,9 @@ impl SessionBuilder {
         let mut config = lash_core::PersistedSessionConfig::from(&policy);
         // Every plugin the core installs resolves its recorded namespace —
         // the protocol's among them — from what the creator stated (FIG-4379).
-        // A per-open plugin takes no part in creation.
         let plugin_host = build_plugin_host(
             self.core.protocol_factory.as_ref(),
             self.core.plugin_factories.as_ref(),
-            Vec::new(),
         )?;
         config.plugin_config = plugin_host
             .resolve_creation_plugin_config(
@@ -455,7 +447,6 @@ impl SessionBuilder {
         // group tool child of this session cannot be rebuilt without it and
         // waits for its live opener instead (FIG-3712).
         env.core.control.open_sources = lash_core::facade_support::UnrecordedSessionSources {
-            open_plugins: !self.plugin_factories.is_empty(),
             open_provider: self.provider.is_some(),
             open_tool_policy: self.tool_source_policy.is_some()
                 || self.tool_surface_open_mode.is_some(),
@@ -475,11 +466,9 @@ impl SessionBuilder {
                 lash_core::facade_support::SingleProviderResolver::new(provider),
             );
         }
-        refuse_foreign_backend_factories(&self.core.backend, &self.plugin_factories)?;
         let plugin_host = build_plugin_host(
             self.core.protocol_factory.as_ref(),
             self.core.plugin_factories.as_ref(),
-            self.plugin_factories,
         )?;
         env.core = plugin_host.install_process_engine_contributions(
             env.core.clone(),

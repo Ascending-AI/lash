@@ -4,7 +4,6 @@ use async_trait::async_trait;
 use lash::process::ProcessOriginator;
 use lash::sync::MutexExt;
 use lash::{
-    PluginBinding,
     plugins::{PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin},
     prompt::PromptContribution,
     tools::{
@@ -18,32 +17,24 @@ use serde_json::json;
 use crate::board::{BoardState, board_prompt, board_snapshot};
 use crate::db::AppDb;
 
-#[derive(Clone, Debug)]
-pub(crate) struct DemoPlugin;
+const DEMO_PLUGIN_ID: &str = "demo_tic_tac_toe";
 
-#[derive(Clone)]
-pub(crate) struct DemoPluginConfig {
-    pub(crate) db: Arc<Mutex<AppDb>>,
-}
-
-impl PluginBinding for DemoPlugin {
-    const ID: &'static str = "demo_tic_tac_toe";
-    type SessionConfig = DemoPluginConfig;
-
-    fn factory(config: &Self::SessionConfig) -> Arc<dyn PluginFactory> {
-        Arc::new(DemoPluginFactory {
-            db: Arc::clone(&config.db),
-        })
-    }
-}
-
-struct DemoPluginFactory {
+/// The demo's board plugin, installed once on the core: every chat session
+/// and every process worker of the core runs it over the app's one database.
+/// The board a session reads is its own chat's, named by the session id.
+pub(crate) struct DemoPluginFactory {
     db: Arc<Mutex<AppDb>>,
+}
+
+impl DemoPluginFactory {
+    pub(crate) fn new(db: Arc<Mutex<AppDb>>) -> Self {
+        Self { db }
+    }
 }
 
 impl PluginFactory for DemoPluginFactory {
     fn id(&self) -> &'static str {
-        DemoPlugin::ID
+        DEMO_PLUGIN_ID
     }
 
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
@@ -59,7 +50,7 @@ struct DemoSessionPlugin {
 
 impl SessionPlugin for DemoSessionPlugin {
     fn id(&self) -> &'static str {
-        DemoPlugin::ID
+        DEMO_PLUGIN_ID
     }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {

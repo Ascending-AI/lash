@@ -175,7 +175,6 @@ impl CoreSessionDriver {
         let plugin_host = build_plugin_host(
             self.config.protocol_factory.as_ref(),
             self.config.plugin_factories.as_ref(),
-            Vec::new(),
         )
         .map_err(|error| {
             OpenFailure::Terminal(lash_core::PluginError::Session(error.to_string()))

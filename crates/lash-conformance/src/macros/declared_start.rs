@@ -15,6 +15,8 @@ macro_rules! declared_start_tests {
         $crate::declared_start_tests!(@law [$($attr)*] $fixture;
             spawn_agent_record_carries_child_identity);
         $crate::declared_start_tests!(@law [$($attr)*] $fixture;
+            declared_start_child_runs_under_recorded_facts_on_a_worker_with_other_defaults);
+        $crate::declared_start_tests!(@law [$($attr)*] $fixture;
             declared_start_timeout_cancels_the_child);
         $crate::declared_start_tests!(@law [$($attr)*] $fixture;
             declared_start_cancel_at_each_point);

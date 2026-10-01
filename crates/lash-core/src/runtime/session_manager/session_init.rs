@@ -108,30 +108,11 @@ pub(in crate::runtime::session_manager) async fn resolve_session_init(
         session_id: SessionId::from(session_id.to_string()),
         ..RuntimeSessionState::new(current.policy.clone())
     };
-    let policy = resolve_session_policy(current, &request, &session_id)
-        .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+    let ChildFacts {
+        policy,
+        plugin_config: recorded_plugin_config,
+    } = resolve_child_facts(&StarterFacts::of(current), &request, &session_id)?;
     request.policy = Some(policy.clone());
-    // Every installed owner resolves its namespace from the request, the
-    // creating session's recorded namespace standing as the parent's for a
-    // child (FIG-4379). The creation head records the result.
-    let recorded_plugin_config = current
-        .plugins
-        .host()
-        .resolve_creation_plugin_config(
-            Some(current.plugins.protocol_plugin_id()),
-            &request.plugin_options,
-            parent_session_id
-                .is_some()
-                .then(|| current.plugins.admitted_plugin_config())
-                .as_ref()
-                .map(|parent| parent.config.as_ref()),
-            parent_session_id.is_none(),
-        )
-        .map_err(|refusal| {
-            crate::PluginError::Session(format!(
-                "session `{session_id}` config refused at creation: {refusal}"
-            ))
-        })?;
     let initial_runtime_state = build_runtime_state(
         session_id.clone(),
         &request,
@@ -169,33 +150,130 @@ pub(in crate::runtime::session_manager) async fn resolve_session_init(
     })
 }
 
-/// Resolve the new session's policy, honoring the provider pin the parent
-/// session's policy recorded.
+/// The recorded facts a session is created from: its starter's recorded
+/// policy and plugin config, and the plugin set the deployment installs.
+///
+/// On a session's own runtime the starter is that session; on a process
+/// runtime it is the environment the process's start captured. Either way
+/// they are recorded facts, never a worker's defaults (FIG-4396).
+pub(in crate::runtime::session_manager) struct StarterFacts<'a> {
+    pub(in crate::runtime::session_manager) policy: &'a SessionPolicy,
+    pub(in crate::runtime::session_manager) plugin_config: crate::AdmittedPluginConfig,
+    pub(in crate::runtime::session_manager) plugin_host: &'a crate::PluginHost,
+    pub(in crate::runtime::session_manager) protocol_plugin_id: &'a str,
+}
+
+impl<'a> StarterFacts<'a> {
+    /// The facts of the runtime `current` serves.
+    pub(in crate::runtime::session_manager) fn of(current: &'a CurrentOwnerCapability) -> Self {
+        Self {
+            policy: &current.policy,
+            plugin_config: current.plugins.admitted_plugin_config(),
+            plugin_host: current.plugins.host(),
+            protocol_plugin_id: current.plugins.protocol_plugin_id(),
+        }
+    }
+}
+
+/// What a created session records: its complete policy and the plugin
+/// configuration every installed owner resolved for it.
+pub(in crate::runtime::session_manager) struct ChildFacts {
+    pub(in crate::runtime::session_manager) policy: SessionPolicy,
+    pub(in crate::runtime::session_manager) plugin_config: crate::PluginConfig,
+}
+
+/// Resolve the complete facts `request` creates `session_id` with against
+/// its starter's recorded facts: the policy, honoring the recorded provider
+/// pin, and the plugin configuration every installed owner creates — a
+/// child's from its starter's recorded namespaces.
 ///
 /// The recorded provider id is a durable fact (ADR 0066), so a create request
 /// that carries no policy inherits it and a request whose policy names a
 /// *different* provider is refused with
 /// [`SessionError::ProviderMismatch`](crate::SessionError::ProviderMismatch)
-/// rather than silently overwriting the pin the root open established.
-fn resolve_session_policy(
-    current: &CurrentOwnerCapability,
+/// rather than silently overwriting the pin the root open established. A
+/// namespace no installed owner registers, or a value its owner refuses, is
+/// [`RuntimeErrorCode::SessionConfigRefused`](crate::RuntimeErrorCode::SessionConfigRefused):
+/// this deployment's plugin set cannot run the session, on any attempt.
+pub(in crate::runtime::session_manager) fn resolve_child_facts(
+    starter: &StarterFacts<'_>,
     request: &SessionCreateRequest,
     session_id: &SessionId,
-) -> Result<SessionPolicy, crate::SessionError> {
-    let recorded_provider_id = current.policy.recorded_provider_id().to_string();
+) -> Result<ChildFacts, crate::PluginError> {
     let mut policy = request
         .policy
         .clone()
-        .unwrap_or_else(|| current.policy.clone());
+        .unwrap_or_else(|| starter.policy.clone());
     policy.provider_id = SessionPolicy::settle_provider_pin(
         session_id,
-        &recorded_provider_id,
+        starter.policy.recorded_provider_id(),
         policy.recorded_provider_id(),
-    )?;
-    if request.relation.parent_session_id().is_some() {
+    )
+    .map_err(|error| crate::PluginError::Session(crate::SessionError::from(error).to_string()))?;
+    let is_child = request.relation.parent_session_id().is_some();
+    if is_child {
         policy.session_id = Some(SessionId::from(session_id.to_string()));
     }
-    Ok(policy)
+    // Every installed owner resolves its namespace from the request, the
+    // starter's recorded namespace standing as the parent's for a child
+    // (FIG-4379). The creation head records the result.
+    let plugin_config = starter
+        .plugin_host
+        .resolve_creation_plugin_config(
+            Some(starter.protocol_plugin_id),
+            &request.plugin_options,
+            is_child.then_some(starter.plugin_config.config.as_ref()),
+            !is_child,
+        )
+        .map_err(|refusal| {
+            crate::PluginError::Runtime(crate::RuntimeError::new(
+                crate::RuntimeErrorCode::SessionConfigRefused,
+                format!("session `{session_id}` config refused at creation: {refusal}"),
+            ))
+        })?;
+    Ok(ChildFacts {
+        policy,
+        plugin_config,
+    })
+}
+
+/// Admit a session-turn start's child before its worker handoff
+/// (FIG-4396): its complete facts resolve against `environment` — the
+/// starter's recorded policy and plugin config the start captured — on this
+/// deployment's plugin set, the set every worker of its engine binding
+/// installs. A request this plugin set cannot create is refused here, before
+/// the start is registered.
+pub(in crate::runtime::session_manager) fn admit_session_turn_child(
+    current: &CurrentOwnerCapability,
+    create_request: &SessionCreateRequest,
+    environment: &crate::ProcessExecutionEnvSpec,
+    start_name: &str,
+) -> Result<(), crate::PluginError> {
+    let starter = StarterFacts {
+        policy: &environment.policy,
+        plugin_config: environment.plugin_config.clone(),
+        plugin_host: current.plugins.host(),
+        protocol_plugin_id: current.plugins.protocol_plugin_id(),
+    };
+    // A child whose request names no session takes the id the worker
+    // derives from the minted process id (ADR 0107); before registration it
+    // only names a refusal.
+    let session_id = create_request
+        .session_id
+        .clone()
+        .unwrap_or_else(|| SessionId::from(format!("the child of {start_name}")));
+    resolve_child_facts(&starter, create_request, &session_id).map(|_| ())
+}
+
+/// Whether `error` is the creation refusal [`resolve_child_facts`] mints.
+pub(in crate::runtime::session_manager) fn session_config_refused(
+    error: &crate::PluginError,
+) -> bool {
+    matches!(
+        error,
+        crate::PluginError::Runtime(runtime)
+            if runtime.code == crate::RuntimeErrorCode::SessionConfigRefused
+    )
 }
 
 fn build_runtime_state(
@@ -780,10 +858,15 @@ impl RuntimeSessionServices {
                     // never reopen the recorded session on any attempt:
                     // refuse deterministically so the process terminalizes
                     // instead of releasing the claim and re-admitting the
-                    // row forever (FIG-3487). Every other failure stays
+                    // row forever (FIG-3487). A config this deployment's
+                    // plugin set refuses is the same kind of fact: every
+                    // attempt resolves the same recorded request against the
+                    // same owners (FIG-4396). Every other failure stays
                     // `Create` — recoverable, because a transient catalog
                     // miss may resolve on the next admission.
-                    if session_catalog_lookup_unsupported(&source) {
+                    if session_catalog_lookup_unsupported(&source)
+                        || session_config_refused(&source)
+                    {
                         return SessionTurnInitError::Refused {
                             session_id: requested_session_id.clone(),
                             source: Box::new(source),
@@ -1082,8 +1165,8 @@ pub(in crate::runtime::session_manager) enum SessionTurnInitError {
     },
     /// The recorded request can never be initialized by this deployment —
     /// a predecessor payload whose start point `SessionStartPoint` keeps
-    /// only for decode, or a configured catalog that cannot resolve the
-    /// recorded session by id. Deterministic: no attempt can run it, so
+    /// only for decode, a configured catalog that cannot resolve the
+    /// recorded session by id, or a config its plugin set refuses. Deterministic: no attempt can run it, so
     /// the process terminalizes with the refusal rather than staying
     /// recoverable and retrying an unrunnable row forever.
     Refused {

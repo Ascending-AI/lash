@@ -21,53 +21,37 @@ pub(crate) fn catalog_lifecycle_provider() -> lash::provider::ProviderHandle {
         .into_handle()
 }
 
-pub(crate) async fn assert_tool_catalog_contract(
-    core: &lash::LashCore,
-    session: &lash::LashSession,
-) {
-    let core_catalog: lash::ToolCatalogView = core.tool_catalog();
-    let core_manifests = core_catalog.manifests();
-    assert!(
-        core_manifests
-            .iter()
-            .any(|manifest| manifest.name == "inbox__test__send"),
-        "core catalog composes the workbench plugin's inbox tool"
-    );
-    let send_manifest = core_manifests
-        .iter()
-        .find(|manifest| manifest.name == "inbox__test__send")
-        .expect("core catalog includes inbox.test send")
-        .clone();
-    let core_contract = core_catalog
-        .resolve_contract("inbox__test__send")
-        .expect("core catalog resolves inbox.test send");
-    assert_eq!(
-        core_contract.input_schema.canonical()["required"],
-        serde_json::json!(["title"]),
-        "core catalog exposes the runtime input schema"
-    );
-    assert!(
-        matches!(
-            core_contract.output_contract,
-            lash::tools::ToolOutputContract::Static
-        ),
-        "core catalog exposes the runtime output contract"
-    );
-    let miss: lash::ToolCatalogMiss = core_catalog
-        .resolve_contract("inbox__test__missing")
-        .expect_err("unknown core tool has a typed miss");
-    assert_eq!(miss.name, "inbox__test__missing");
-
+pub(crate) async fn assert_tool_catalog_contract(session: &lash::LashSession) {
+    // A catalog is a session's: resolved from the session's recorded facts.
     let session_tools = session.admin().tools();
+    let send_manifest = session_tools
+        .active_manifests()
+        .await
+        .expect("read active session manifests")
+        .into_iter()
+        .find(|manifest| manifest.name == "inbox__test__send")
+        .expect("the session catalog composes the workbench plugin's inbox tool");
     let session_contract = session_tools
         .resolve_contract("inbox__test__send")
         .await
         .expect("session catalog resolves an active tool");
     assert_eq!(
-        serde_json::to_value(session_contract.as_ref()).expect("serialize session contract"),
-        serde_json::to_value(core_contract.as_ref()).expect("serialize core contract"),
-        "core and initial session projections agree"
+        session_contract.input_schema.canonical()["required"],
+        serde_json::json!(["title"]),
+        "the session catalog exposes the runtime input schema"
     );
+    assert!(
+        matches!(
+            session_contract.output_contract,
+            lash::tools::ToolOutputContract::Static
+        ),
+        "the session catalog exposes the runtime output contract"
+    );
+    let miss: lash::ToolCatalogMiss = session_tools
+        .resolve_contract("inbox__test__missing")
+        .await
+        .expect_err("unknown session tool has a typed miss");
+    assert_eq!(miss.name, "inbox__test__missing");
 
     session_tools
         .set_membership(send_manifest.id.clone(), false)
@@ -78,10 +62,6 @@ pub(crate) async fn assert_tool_catalog_contract(
         .await
         .expect_err("non-member tool must resolve as a typed miss in this session");
     assert_eq!(gated.name, "inbox__test__send");
-    assert!(
-        core_catalog.resolve_contract("inbox__test__send").is_ok(),
-        "session catalog curation must not mutate the core projection"
-    );
     session_tools
         .set_membership(send_manifest.id, true)
         .await
@@ -112,11 +92,7 @@ struct LiveProviderFixture {
     pub(super) mail_world: mail::MailWorld,
 }
 
-async fn add_live_provider(
-    core: &lash::LashCore,
-    session: &lash::LashSession,
-) -> LiveProviderFixture {
-    let core_catalog = core.tool_catalog();
+async fn add_live_provider(session: &lash::LashSession) -> LiveProviderFixture {
     let session_tools = session.admin().tools();
 
     let live_mail_world = mail::MailWorld::new();
@@ -151,10 +127,6 @@ async fn add_live_provider(
         .into_iter()
         .find(|manifest| manifest.name == "inbox__live__send")
         .expect("the added provider is immediately visible to the model catalog");
-    assert!(
-        core_catalog.resolve_contract("inbox__live__send").is_err(),
-        "session provider mutation must not change the core catalog projection"
-    );
 
     LiveProviderFixture {
         source: live_source,
@@ -164,11 +136,8 @@ async fn add_live_provider(
     }
 }
 
-pub(crate) async fn assert_live_tool_provider_execution_and_removal(
-    core: &lash::LashCore,
-    session: &lash::LashSession,
-) {
-    let live = add_live_provider(core, session).await;
+pub(crate) async fn assert_live_tool_provider_execution_and_removal(session: &lash::LashSession) {
+    let live = add_live_provider(session).await;
     let output = session
         .send(lash::TurnInput::text("send through the live provider"))
         .id(format!("workbench-test-turn:{}", uuid::Uuid::new_v4()))
@@ -212,12 +181,6 @@ pub(crate) async fn assert_live_tool_provider_execution_and_removal(
         .await
         .expect_err("removed live-provider tool must miss in subsequent resolution");
     assert_eq!(removed.name, "inbox__live__send");
-    assert!(
-        core.tool_catalog()
-            .resolve_contract("inbox__live__send")
-            .is_err(),
-        "the core projection remains unchanged after session source removal"
-    );
     let absent_source = session
         .admin()
         .tools()

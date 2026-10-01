@@ -32,7 +32,6 @@ pub(crate) use work_drivers::{CoreWorkSlot, ResolvedQueuedWork};
 pub struct LashCore {
     pub(crate) drive_owner: lash_core::LeaseOwnerIdentity,
     pub(crate) env: RuntimeEnvironment,
-    pub(crate) tool_registry: Arc<lash_core::ToolRegistry>,
     pub(crate) policy: SessionPolicy,
     pub(crate) protocol_factory: Option<Arc<dyn PluginFactory>>,
     /// The one substrate every port and the effect host come from.
@@ -381,7 +380,6 @@ impl LashCore {
             core: self.clone(),
             session_id: session_id.into(),
             provider: None,
-            plugin_factories: Vec::new(),
             tool_source_policy: None,
             tool_surface_open_mode: None,
         }
@@ -400,9 +398,9 @@ impl LashCore {
     ///
     /// Every factory is visited even after failures. Each failure is warned and
     /// the first is returned after the walk. Implementations own their timeout
-    /// policy and must make repeated shutdown calls idempotent. Extra factories
-    /// supplied only to durable-process-worker configuration or to an
-    /// individual session are host-owned and are not walked by this method.
+    /// policy and must make repeated shutdown calls idempotent. Every worker
+    /// built from [`Self::durable_process_worker_config`] shares these
+    /// factories.
     pub async fn shutdown(&self) -> Result<()> {
         // A stopping deployment hands recovery leadership over now rather
         // than after the lease's TTL (ADR 0109 §1.6).
@@ -478,14 +476,13 @@ impl LashCore {
     /// is the round-trip for the core's own configuration.
     pub async fn resume(&self, parked: ParkedSession) -> Result<LashSession> {
         let ParkedSession { inner, binding } = parked;
-        // Build the per-session env exactly like `SessionBuilder::open_resolved`
-        // (minus builder-scoped plugins): a fresh plugin host with this core's
-        // factories, the shared work drivers, and the core provider resolver
-        // already carried on `self.env`.
+        // Build the per-session env exactly like `SessionBuilder::open_resolved`:
+        // a fresh plugin host with this core's factories, the shared work
+        // drivers, and the core provider resolver already carried on
+        // `self.env`.
         let plugin_host = build_plugin_host(
             self.protocol_factory.as_ref(),
             self.plugin_factories.as_ref(),
-            Vec::new(),
         )?;
         let mut env = binding.apply_owner(self.env.clone());
         env.core = plugin_host.install_process_engine_contributions(
@@ -717,22 +714,16 @@ impl LashCore {
         Arc::clone(&self.process_registry)
     }
 
-    /// Builds the durable process-worker configuration for this core.
+    /// Builds the durable process-worker configuration for this core: the
+    /// core's own plugin set, the one every worker of its engine binding
+    /// installs. A process runs under the environment its start captured, so
+    /// the worker binds the physical plugins and selects no behaviour of its
+    /// own; an incompatible plugin set belongs on a separate engine binding
+    /// (FIG-4396).
     pub fn durable_process_worker_config(&self) -> Result<DurableProcessWorkerConfig> {
-        self.durable_process_worker_config_with_plugins(std::iter::empty::<Arc<dyn PluginFactory>>())
-    }
-
-    /// Builds the durable process-worker configuration with additional plugins.
-    pub fn durable_process_worker_config_with_plugins(
-        &self,
-        extra_plugin_factories: impl IntoIterator<Item = Arc<dyn PluginFactory>>,
-    ) -> Result<DurableProcessWorkerConfig> {
-        let extra_plugin_factories: Vec<_> = extra_plugin_factories.into_iter().collect();
-        refuse_foreign_backend_factories(&self.backend, &extra_plugin_factories)?;
         let plugin_host = build_plugin_host(
             self.protocol_factory.as_ref(),
             self.plugin_factories.as_ref(),
-            extra_plugin_factories,
         )?;
         let runtime_host = plugin_host.install_process_engine_contributions(
             self.env.core.clone(),
@@ -744,7 +735,6 @@ impl LashCore {
             self.substrate_slot.setup.process.clone(),
             Arc::clone(&self.substrate_slot.setup.session_work),
             self.drive_owner.clone(),
-            self.policy.clone(),
         ))
     }
 }
@@ -1093,7 +1083,6 @@ impl LashCoreBuilder {
         let default_plugin_host = Arc::new(build_plugin_host(
             protocol_factory.as_ref(),
             &plugin_factories,
-            Vec::new(),
         )?);
         // Every backend supplies a process registry, so process lifecycle
         // is available on every core. Threaded to every plugin host so core
@@ -1105,8 +1094,6 @@ impl LashCoreBuilder {
         let host_process_engines = default_plugin_host
             .install_process_engine_contributions(core.clone(), process_lifecycle_available)?
             .process_engines;
-        let tool_registry =
-            lash_core::facade_support::build_core_tool_registry(&default_plugin_host)?;
         let process_registry = Arc::clone(process_work.registry());
         process_lifecycle_feed.bind_registry(Arc::clone(&process_registry));
         let env = RuntimeEnvironment::builder(core)
@@ -1190,7 +1177,6 @@ impl LashCoreBuilder {
         Ok(LashCore {
             drive_owner,
             env,
-            tool_registry,
             policy,
             backend,
             store_factory,
@@ -1260,7 +1246,7 @@ impl LashCoreBuilder {
 /// Refuses a plugin factory bound to a backend other than `backend`
 /// ([`PluginFactory::bound_backend`]): its state would live in a substrate
 /// this core neither reopens nor sweeps (ADR 0102, D2).
-pub(crate) fn refuse_foreign_backend_factories<'a>(
+fn refuse_foreign_backend_factories<'a>(
     backend: &Backend,
     factories: impl IntoIterator<Item = &'a Arc<dyn PluginFactory>>,
 ) -> Result<()> {
@@ -1278,19 +1264,17 @@ pub(crate) fn refuse_foreign_backend_factories<'a>(
     Ok(())
 }
 
+/// The core's one plugin set: its protocol and its plugins.
 pub(crate) fn build_plugin_host(
     protocol_factory: Option<&Arc<dyn PluginFactory>>,
-    common_factories: &[Arc<dyn PluginFactory>],
-    extra_factories: Vec<Arc<dyn PluginFactory>>,
+    plugin_factories: &[Arc<dyn PluginFactory>],
 ) -> Result<PluginHost> {
-    let mut factories = Vec::with_capacity(
-        usize::from(protocol_factory.is_some()) + common_factories.len() + extra_factories.len(),
-    );
+    let mut factories =
+        Vec::with_capacity(usize::from(protocol_factory.is_some()) + plugin_factories.len());
     if let Some(protocol_factory) = protocol_factory {
         factories.push(Arc::clone(protocol_factory));
     }
-    factories.extend(common_factories.iter().cloned());
-    factories.extend(extra_factories);
+    factories.extend(plugin_factories.iter().cloned());
     Ok(PluginHost::new(factories))
 }
 

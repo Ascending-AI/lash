@@ -76,6 +76,11 @@ impl SubagentSpawnContext<'_> {
     /// Policy is resolved against the parent snapshot, while tool access is
     /// copied from [`Self::base_tool_access`]. The latter is factory input and
     /// is not derived from the parent's effective tool catalog.
+    ///
+    /// The child runs its parent's recorded protocol (FIG-4396). The RLM
+    /// termination and final-answer format are stated only for a parent whose
+    /// recorded protocol is RLM; a child of any other protocol states no RLM
+    /// namespace, which its parent's plugin set has no owner for.
     pub fn rlm_request(
         &self,
         capability_name: &str,
@@ -90,15 +95,21 @@ impl SubagentSpawnContext<'_> {
             },
             None => RlmTermination::FinishRequired { schema: None },
         };
-        let plugin_options = PluginOptions::typed(
-            lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
-            lash_rlm_types::RlmCreateExtras {
-                termination: Some(termination),
-                final_answer_format: Some(self.final_answer_format.clone()),
-                render: None,
-            },
-        )
-        .map_err(|err| format!("failed to encode rlm plugin options: {err}"))?;
+        let parent_runs_rlm = self.parent_snapshot.plugin_config.protocol_plugin_id()
+            == Some(lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID);
+        let plugin_options = if parent_runs_rlm {
+            PluginOptions::typed(
+                lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
+                lash_rlm_types::RlmCreateExtras {
+                    termination: Some(termination),
+                    final_answer_format: Some(self.final_answer_format.clone()),
+                    render: None,
+                },
+            )
+            .map_err(|err| format!("failed to encode rlm plugin options: {err}"))?
+        } else {
+            PluginOptions::default()
+        };
 
         let initial_nodes = lash_protocol_rlm::rlm_seed_initial_nodes(self.seed.clone());
         let request = SessionCreateRequest::child(

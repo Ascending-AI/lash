@@ -4,7 +4,6 @@ use std::sync::{Arc, Mutex};
 
 use axum::Router;
 use axum::routing::get;
-use lash::PluginBinding;
 use lash::{
     provider::{ProviderHandle, ProviderOptions},
     tracing::{JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceLevel, TraceSink},
@@ -61,7 +60,7 @@ fn default_openrouter_model_capability_for(model: lash::ModelSpec) -> lash::Mode
 
 use crate::chat_discard::{AgentServiceChatDiscard, AgentServiceChatDiscardImpl};
 use crate::db::AppDb;
-use crate::demo_plugin::{DemoPlugin, DemoPluginConfig};
+use crate::demo_plugin::DemoPluginFactory;
 use crate::effect_groups::{
     AgentServiceEffectGroupExecutors, AgentServiceEffectGroupWorkflow,
     AgentServiceEffectGroupWorkflowImpl,
@@ -307,7 +306,10 @@ async fn async_main() -> anyhow_like::Result<()> {
     // exists only where this factory is installed.
     .plugin(Arc::new(
         lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter),
-    ));
+    ))
+    // The board plugin is the core's: every chat session and every process
+    // worker runs it, over the one app database.
+    .plugin(Arc::new(DemoPluginFactory::new(Arc::clone(&shared_db))));
     if let Some(marker) = shutdown_marker::factory_from_env("agent-service")? {
         core_builder = core_builder.plugin(marker);
     }
@@ -316,11 +318,8 @@ async fn async_main() -> anyhow_like::Result<()> {
         .map_err(|err| err.to_string())?;
     let shutdown_core = core.clone();
     let operation = async {
-        let demo_factory = DemoPlugin::factory(&DemoPluginConfig {
-            db: Arc::clone(&shared_db),
-        });
         let process_worker = DurableProcessWorker::new(
-            core.durable_process_worker_config_with_plugins([demo_factory])
+            core.durable_process_worker_config()
                 .map_err(|err| err.to_string())?,
         )
         .map_err(|err| err.to_string())?;

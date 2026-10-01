@@ -243,7 +243,6 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
             session_surface_factory(),
         ],
         runtime_host,
-        session_policy(),
     );
 
     // The occurrence is emitted from a handler, as a deployment's tool

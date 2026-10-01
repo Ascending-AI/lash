@@ -2132,23 +2132,28 @@ async fn process_root(server: HarnessServer, which: ProcessRoot) {
     let factory = stores.session_store_factory();
     let session = SessionId::from(format!("process-child-root-{}", harness.run_nonce()));
     let process_id = registry
-        .register_process(lash_core::ProcessRegistration::new(
-            lash_core::ProcessInput::SessionTurn {
-                definition_key: "process-child-root:v1".to_string(),
-                create_request: Box::new(
-                    lash_core::SessionCreateRequest::child_session(
-                        "process-child-root-parent",
-                        lash_core::SessionStartPoint::Empty,
-                        lash_core::PluginOptions::default(),
-                    )
-                    .with_session_id(&session),
-                ),
-                turn_input: Box::new(lash_core::TurnInput::text("child turn")),
-                result: lash_core::SessionTurnOutcome::Turn,
-            },
-            lash_core::ProcessProvenance::host(),
-            lash_core::Lifetime::Detached,
-        ))
+        .register_process(
+            lash_core::ProcessRegistration::new(
+                lash_core::ProcessInput::SessionTurn {
+                    definition_key: "process-child-root:v1".to_string(),
+                    create_request: Box::new(
+                        lash_core::SessionCreateRequest::child_session(
+                            "process-child-root-parent",
+                            lash_core::SessionStartPoint::Empty,
+                            lash_core::PluginOptions::default(),
+                        )
+                        .with_session_id(&session),
+                    ),
+                    turn_input: Box::new(lash_core::TurnInput::text("child turn")),
+                    result: lash_core::SessionTurnOutcome::Turn,
+                },
+                lash_core::ProcessProvenance::host(),
+                lash_core::Lifetime::Detached,
+            )
+            .with_execution_env_ref(Some(
+                super::persist_session_turn_env_ref(stores.process_env_store().as_ref()).await,
+            )),
+        )
         .await
         .expect("register the SessionTurn process")
         .id;

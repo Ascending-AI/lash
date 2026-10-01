@@ -327,8 +327,8 @@ impl RemoteProcessInput {
     /// ref and declarative ones must not (FIG-2985).
     fn requires_execution_env(&self) -> bool {
         match self {
-            Self::Definition { .. } | Self::Engine { .. } => true,
-            Self::SessionTurn { .. } | Self::External { .. } => false,
+            Self::Definition { .. } | Self::Engine { .. } | Self::SessionTurn { .. } => true,
+            Self::External { .. } => false,
         }
     }
 }

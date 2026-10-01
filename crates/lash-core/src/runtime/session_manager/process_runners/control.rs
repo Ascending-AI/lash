@@ -365,7 +365,7 @@ impl ProcessCapability {
         }
         if matches!(
             registration.input.as_ref(),
-            crate::ProcessInput::External { .. } | crate::ProcessInput::SessionTurn { .. }
+            crate::ProcessInput::External { .. }
         ) {
             return Ok((None, None));
         }
@@ -532,14 +532,38 @@ impl ProcessCapability {
     }
 
     /// Admit immutable recorded inputs and stamp the sole engine identity.
+    ///
+    /// A session-turn start's child is admitted here too, before its
+    /// handoff: its complete facts resolve against the environment the start
+    /// captured on this deployment's plugin set, so a child the plugin set
+    /// cannot run is refused before anything is registered, never on the
+    /// worker (FIG-4396).
     async fn admit_and_stamp_engine_start(
         &self,
         current: &CurrentOwnerCapability,
         registration: crate::ProcessRegistration,
         env_spec: Option<&crate::ProcessExecutionEnvSpec>,
     ) -> Result<crate::ProcessRegistration, crate::PluginError> {
-        let crate::ProcessInput::Engine { kind, payload } = registration.input.as_ref() else {
-            return Ok(registration);
+        let (kind, payload) = match registration.input.as_ref() {
+            crate::ProcessInput::Engine { kind, payload } => (kind, payload),
+            crate::ProcessInput::SessionTurn { create_request, .. } => {
+                let Some(env_spec) = env_spec else {
+                    return Err(crate::PluginError::Session(format!(
+                        "process `{}` requires a captured execution env",
+                        registration.refusal_name()
+                    )));
+                };
+                super::super::session_init::admit_session_turn_child(
+                    current,
+                    create_request,
+                    env_spec,
+                    &registration.refusal_name(),
+                )?;
+                return Ok(registration);
+            }
+            crate::ProcessInput::External { .. } | crate::ProcessInput::Definition { .. } => {
+                return Ok(registration);
+            }
         };
         // Deliberate asymmetry between the two routes, and not a new refusal.
         // A request-shaped start captures the live session env before it reaches

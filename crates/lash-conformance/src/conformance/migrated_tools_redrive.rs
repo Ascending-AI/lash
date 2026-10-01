@@ -248,7 +248,6 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
             ),
             Arc::new(crate::NoSessionWork::new()),
             crate::testing::runtime_lease_owner(),
-            lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         ),
     )
     .expect("build the migrated-tools process worker");

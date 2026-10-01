@@ -79,8 +79,10 @@ impl BenchmarkRuntime {
             .finish()
     }
 
-    pub(crate) fn tool_catalog_metrics(&self) -> anyhow::Result<(usize, usize)> {
-        let manifests = self.core().tool_catalog().manifests();
+    /// The benchmark session's catalog: a catalog is resolved from a
+    /// session's recorded facts, never from the core alone.
+    pub(crate) async fn tool_catalog_metrics(&self) -> anyhow::Result<(usize, usize)> {
+        let manifests = self.session().admin().tools().active_manifests().await?;
         let rendered_bytes = serde_json::to_vec(&manifests)?.len();
         Ok((manifests.len(), rendered_bytes))
     }

@@ -1574,6 +1574,7 @@ mod process_start_store_refusals;
 mod process_terminal_await;
 mod process_terminal_obligation_on_the_double;
 mod process_workflow;
+mod recorded_child_facts_store_axis;
 mod recording_context;
 mod restate_redrive;
 mod session_failure_evidence_on_the_double;

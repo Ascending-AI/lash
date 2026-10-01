@@ -455,3 +455,20 @@ mod recorded_termination {
         }; (a_missing_recorded_termination_is_a_typed_terminal_refusal, "turn-config-missing-recorded-termination"));
     }
 }
+
+/// FIG-4396 on PostgreSQL: a spawned child and the process that runs it run
+/// under the facts their parent recorded, on a worker whose plugin set has
+/// other defaults.
+mod recorded_child_facts {
+    lash_conformance::declared_start_tests!(@law [
+        #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
+    ] {
+        let Some(fixture) =
+            super::super::recorded_child_facts_store_axis::postgres_tier().await
+        else {
+            eprintln!("skipping the PostgreSQL declared-start law: database is not configured");
+            return;
+        };
+        fixture
+    }; declared_start_child_runs_under_recorded_facts_on_a_worker_with_other_defaults);
+}

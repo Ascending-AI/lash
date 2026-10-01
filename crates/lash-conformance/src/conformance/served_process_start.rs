@@ -185,7 +185,6 @@ impl SpawnWorld {
                 ),
                 Arc::new(crate::NoSessionWork::new()),
                 crate::testing::runtime_lease_owner(),
-                lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             ),
         )
         .expect("build the served-process-start process worker");

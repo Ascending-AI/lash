@@ -884,7 +884,6 @@ pub(super) async fn recovery_worker_with_plugins_and_trace(
         process_work,
         Arc::new(lash_core::NoSessionWork::new()),
         lash_core::testing::runtime_lease_owner(),
-        recovery_session_policy(),
     ))
     .expect("valid test process worker")
 }

@@ -147,16 +147,6 @@ pub mod facade_support {
     ) -> lash_trace::TraceContext {
         crate::trace::trace_context_for_effect_invocation(context, invocation)
     }
-    pub fn build_core_tool_registry(
-        host: &crate::plugin::PluginHost,
-    ) -> Result<std::sync::Arc<crate::ToolRegistry>, crate::PluginError> {
-        host.build_core_tool_registry()
-    }
-
-    pub fn tool_registry_manifests(registry: &crate::ToolRegistry) -> Vec<crate::ToolManifest> {
-        crate::ToolProvider::tool_manifests(registry)
-    }
-
     pub fn resolve_tool_registry_contract(
         registry: &crate::ToolRegistry,
         name: &str,

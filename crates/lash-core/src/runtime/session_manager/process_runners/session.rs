@@ -35,10 +35,9 @@ impl RuntimeSessionServices {
             create_request = create_request
                 .with_session_id(crate::runtime::process_child_session_id(&process_id));
         }
-        // `ProcessInput::SessionTurn` is durable input. Its `create_request`
-        // carries only persisted policy, so fill an omitted provider_id from
-        // the parent runtime policy before the child session is built.
-        self.inherit_session_turn_provider_id(&mut create_request);
+        // The child is resolved against the environment this process's start
+        // captured — its starter's recorded policy and plugin config — the
+        // facts the start admitted before its handoff (FIG-4396).
         // The child session's first turn is deliberately scoped by the
         // process identity that started it, so the crossing is spelled out.
         // The process worker admitted this controller under the process id.
@@ -129,15 +128,6 @@ impl RuntimeSessionServices {
                     }
                 }
             }
-        }
-    }
-
-    fn inherit_session_turn_provider_id(&self, create_request: &mut crate::SessionCreateRequest) {
-        let Some(policy) = create_request.policy.as_mut() else {
-            return;
-        };
-        if policy.recorded_provider_id().is_empty() {
-            policy.provider_id = self.current.policy.provider_id.clone();
         }
     }
 }

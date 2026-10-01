@@ -66,7 +66,6 @@ impl DoubleProcesses {
         &self,
         factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
         runtime_host: lash_core::facade_support::RuntimeHostConfig,
-        session_policy: lash_core::SessionPolicy,
     ) {
         let backend = runtime_host.backend().clone();
         let module_store: Arc<dyn lash_core::ModuleArtifactStore> = Arc::new(TestModuleStore {
@@ -84,7 +83,6 @@ impl DoubleProcesses {
                 self.backend.process_work(),
                 Arc::new(lash_core::NoSessionWork::new()),
                 lash_core::testing::runtime_lease_owner(),
-                session_policy,
             ),
         )
         .expect("valid double process worker");

@@ -2177,7 +2177,6 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
     table.install_worker(
         lash_core::testing::test_code_protocol_factories(),
         runtime_host,
-        session_policy.clone(),
     );
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
         registry: registry.clone(),
@@ -2311,7 +2310,6 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
     table.install_worker(
         lash_core::testing::test_code_protocol_factories(),
         runtime_host,
-        session_policy.clone(),
     );
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
         registry: registry.clone(),

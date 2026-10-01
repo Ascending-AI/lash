@@ -533,7 +533,6 @@ finish(await handle);
             process_work,
             Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
-            lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         ))
         .expect("valid test process worker");
     context.install_process_worker(process_worker);

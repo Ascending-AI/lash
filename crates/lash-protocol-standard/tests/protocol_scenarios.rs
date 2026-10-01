@@ -976,7 +976,6 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
             process_wiring.clone(),
             Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
-            policy.clone(),
         ),
     )
     .expect("valid test worker config");

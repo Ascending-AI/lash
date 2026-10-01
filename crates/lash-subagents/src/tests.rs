@@ -150,6 +150,15 @@ impl Capability for CustomRequestCapability {
     }
 }
 
+/// `state`'s snapshot, recording the RLM protocol as its parent's protocol.
+fn rlm_parent_snapshot(state: &RuntimeSessionState) -> lash_core::SessionSnapshot {
+    let mut snapshot = state.to_snapshot();
+    snapshot.plugin_config = lash_core::PluginConfig::for_protocol(Some(
+        lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+    ));
+    snapshot
+}
+
 #[test]
 fn capability_can_build_complete_spawn_request() {
     let registry = CapabilityRegistry::new().with(Arc::new(CustomRequestCapability));
@@ -389,11 +398,18 @@ async fn spawn_uses_live_parent_provider_when_selecting_subagent_model() {
     assert_ne!(child_policy.model.id, stale_choice.id);
     assert_eq!(child_policy.model.id, "live-parent");
     assert!(request.tool_access.restricted_tools().is_none());
+    assert!(
+        !request
+            .plugin_options
+            .plugins
+            .contains_key(lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID),
+        "a child of a parent that records no RLM protocol states no RLM namespace (FIG-4396)"
+    );
 
     let structured_request = build_spawn_create_request(SpawnCreateRequestInput {
         registry: &registry,
         parent_session_id: &SessionId::from("root"),
-        current_snapshot: current_snapshot.to_snapshot(),
+        current_snapshot: rlm_parent_snapshot(&current_snapshot),
         session_spec: &SessionSpec::inherit(),
         tool_access: &tool_access,
         final_answer_format: lash_rlm_types::RlmFinalAnswerFormat::RawFinalValue,
@@ -1106,7 +1122,6 @@ async fn run_seed_probe_inner(
             process_wiring.clone(),
             Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
-            policy.clone(),
         ),
     )
     .expect("valid test worker config");

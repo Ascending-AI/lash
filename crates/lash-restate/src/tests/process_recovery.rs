@@ -1245,7 +1245,6 @@ pub(super) async fn process_deployment_driver_and_workflow_share_registry() {
         process_work,
         Arc::new(lash_core::NoSessionWork::new()),
         lash_core::testing::runtime_lease_owner(),
-        lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     ))
     .expect("valid test process worker");
     let service = deployment

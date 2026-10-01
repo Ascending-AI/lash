@@ -608,13 +608,6 @@ mod tests {
             ),
             (
                 UnrecordedSessionSources {
-                    open_plugins: true,
-                    ..Default::default()
-                },
-                ToolChildRebuildRefusal::OpenPlugins,
-            ),
-            (
-                UnrecordedSessionSources {
                     fork_plugins: true,
                     ..Default::default()
                 },

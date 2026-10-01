@@ -53,7 +53,6 @@ pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomn
     table.install_worker(
         lash_core::testing::test_code_protocol_factories(),
         runtime_host,
-        session_policy.clone(),
     );
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
         registry: registry.clone(),

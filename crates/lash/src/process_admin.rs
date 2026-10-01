@@ -410,6 +410,40 @@ impl Processes {
         }
     }
 
+    /// The environment a host's session-turn start captures when its request
+    /// names none (FIG-4396). No session starts it, so the core is its
+    /// starter: the child is created from the core's creation defaults, the
+    /// facts [`SessionBuilder::create`](crate::SessionBuilder::create)
+    /// resolves a new session against, recorded with the start so every
+    /// worker runs the child under them. The child's plugin config is
+    /// admitted here, on the core's plugin set, before anything is
+    /// registered.
+    fn host_session_turn_environment(
+        &self,
+        create_request: &lash_core::SessionCreateRequest,
+    ) -> Result<lash_core::ProcessExecutionEnvSpec> {
+        let environment = lash_core::ProcessExecutionEnvSpec::new(
+            lash_core::AdmittedPluginConfig::default(),
+            self.core.policy.clone(),
+        );
+        let is_child = create_request.relation.parent_session_id().is_some();
+        crate::support::build_plugin_host(
+            self.core.protocol_factory.as_ref(),
+            self.core.plugin_factories.as_ref(),
+        )?
+        .resolve_creation_plugin_config(
+            self.core
+                .protocol_factory
+                .as_ref()
+                .map(|protocol_factory| protocol_factory.id()),
+            &create_request.plugin_options,
+            is_child.then_some(environment.plugin_config.config.as_ref()),
+            !is_child,
+        )
+        .map_err(lash_core::SessionError::SessionConfigRefused)?;
+        Ok(environment)
+    }
+
     pub async fn start(
         &self,
         request: lash_core::ProcessStartRequest,
@@ -431,11 +465,19 @@ impl Processes {
         // The registrar mints the id; the key only makes the start idempotent.
         // A host mints only host keys: a key of a family lash derives for its
         // own start paths is refused, never adopted (ADR 0107).
-        let registration = request
+        let mut registration = request
             .keyed_in(&scoped_effect_controller)
             .map_err(EmbedError::Plugin)?
             .into_registration();
-        if let Some(env_ref) = registration.env_ref.as_ref() {
+        let host_session_turn_environment = match registration.input.as_ref() {
+            lash_core::ProcessInput::SessionTurn { create_request, .. }
+                if registration.env_ref.is_none() =>
+            {
+                Some(self.host_session_turn_environment(create_request)?)
+            }
+            _ => None,
+        };
+        if registration.env_ref.is_some() || host_session_turn_environment.is_some() {
             let claim = lash_core::ReferrerClaim::guarded(
                 lash_core::ArtifactReferrer::Execution(
                     scoped_effect_controller
@@ -446,14 +488,27 @@ impl Processes {
                 lash_core::ArtifactCleanupPlan::AwaitJournal,
             )
             .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
-            self.core
-                .env
-                .core
-                .durability
-                .process_env_store
-                .acquire_process_execution_env(&claim, env_ref)
-                .await
-                .map_err(lash_core::PluginError::from)?;
+            let process_env_store = &self.core.env.core.durability.process_env_store;
+            match host_session_turn_environment {
+                Some(environment) => {
+                    let env_ref = lash_core::publish_process_execution_env(
+                        process_env_store.as_ref(),
+                        &claim,
+                        &environment,
+                    )
+                    .await
+                    .map_err(EmbedError::Plugin)?;
+                    registration = registration.with_execution_env_ref(Some(env_ref));
+                }
+                None => {
+                    if let Some(env_ref) = registration.env_ref.as_ref() {
+                        process_env_store
+                            .acquire_process_execution_env(&claim, env_ref)
+                            .await
+                            .map_err(lash_core::PluginError::from)?;
+                    }
+                }
+            }
         }
         let start_key = registration.start_key.clone();
         let command = lash_core::ProcessCommand::Start {

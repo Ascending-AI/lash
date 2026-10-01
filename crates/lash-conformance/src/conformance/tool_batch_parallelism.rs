@@ -1331,7 +1331,6 @@ async fn drive_turn(
                 ),
                 Arc::new(crate::NoSessionWork::new()),
                 crate::testing::runtime_lease_owner(),
-                policy.clone(),
             ),
         )
         .expect("build the tool-group parallelism process worker");

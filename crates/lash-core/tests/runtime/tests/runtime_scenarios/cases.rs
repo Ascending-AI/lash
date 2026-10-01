@@ -588,7 +588,6 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
                 backend.process_work(),
                 Arc::new(lash_core::NoSessionWork::new()),
                 lash_core::testing::runtime_lease_owner(),
-                lash_core::testing::standard_test_policy(),
             ),
         )
         .expect("valid test worker config"),

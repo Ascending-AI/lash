@@ -2227,7 +2227,31 @@ pub(super) fn executed_registration() -> ProcessRegistration {
     )))
 }
 
-pub(super) fn session_turn_registration() -> ProcessRegistration {
+/// The environment a test's session-turn start captures, published to
+/// `store`: the starter's recorded policy the child session is created
+/// under, which names the mock provider the test workers serve (FIG-4396).
+pub(super) async fn persist_session_turn_env_ref(
+    store: &dyn ProcessExecutionEnvStore,
+) -> lash_core::ProcessExecutionEnvRef {
+    lash_core::runtime::publish_process_execution_env(
+        store,
+        &lash_core::testing::host_pin_claim_for_testing(),
+        &lash_core::ProcessExecutionEnvSpec::new(
+            lash_core::AdmittedPluginConfig::default(),
+            lash_core::SessionPolicy {
+                provider_id: "mock".to_string(),
+                ..super::process_workflow::recovery_session_policy()
+            },
+        ),
+    )
+    .await
+    .expect("publish the session turn's captured environment")
+}
+
+/// A host session-turn start under `env_ref`, the environment it captured.
+pub(super) fn session_turn_registration(
+    env_ref: lash_core::ProcessExecutionEnvRef,
+) -> ProcessRegistration {
     ProcessRegistration::new(
         ProcessInput::SessionTurn {
             definition_key: "test-session-turn:v1".to_string(),
@@ -2242,6 +2266,7 @@ pub(super) fn session_turn_registration() -> ProcessRegistration {
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,
     )
+    .with_execution_env_ref(Some(env_ref))
 }
 
 pub(super) fn sync_await<T, F>(future: F) -> T

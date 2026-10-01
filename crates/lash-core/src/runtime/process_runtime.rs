@@ -23,21 +23,6 @@ pub struct ProcessRuntimePorts {
     pub turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
 }
 
-/// What a process runs, read from its admitted registration.
-enum ProcessRuntimeBody {
-    /// An engine or tool-call process: the environment loaded from its
-    /// recorded `env_ref`, with its plugin session built for
-    /// `RuntimeOwner::Process(id)`.
-    Captured {
-        environment: crate::ProcessExecutionEnvSpec,
-    },
-    /// A session-turn process: ports only. Its child session is created
-    /// through the host's session work, never admitted by the worker.
-    SessionTurn {
-        default_policy: crate::SessionPolicy,
-    },
-}
-
 /// A process execution's runtime, keyed by its minted id.
 pub struct ProcessRuntimeContext {
     process_id: crate::ProcessId,
@@ -45,34 +30,19 @@ pub struct ProcessRuntimeContext {
 }
 
 impl ProcessRuntimeContext {
-    /// Build the runtime `admitted` runs under. An engine or tool-call
-    /// process loads the environment its start captured; a session-turn
-    /// process runs on `default_policy`, which fills the provider its
-    /// recorded create request omitted.
+    /// Build the runtime `admitted` runs under: the environment its start
+    /// captured — its starter's recorded policy and plugin config — and this
+    /// worker's ports. An engine process and a session-turn process alike run
+    /// under the facts their start recorded; the worker supplies no default
+    /// for either (FIG-4396).
     pub async fn for_admitted(
         ports: ProcessRuntimePorts,
         admitted: &crate::runtime::effect::AdmittedProcess,
-        default_policy: crate::SessionPolicy,
     ) -> Result<Self, crate::PluginError> {
         let process_id = admitted.process_id.clone();
         let registration = &admitted.registration;
-        let body = match registration.input.as_ref() {
-            crate::ProcessInput::Engine { .. } => {
-                let Some(env_ref) = registration.env_ref.as_ref() else {
-                    return Err(crate::PluginError::Session(format!(
-                        "process `{process_id}` is missing a captured execution env"
-                    )));
-                };
-                let environment = crate::runtime::load_process_execution_env(
-                    ports.host.durability.process_env_store.as_ref(),
-                    env_ref,
-                )
-                .await?;
-                ProcessRuntimeBody::Captured { environment }
-            }
-            crate::ProcessInput::SessionTurn { .. } => {
-                ProcessRuntimeBody::SessionTurn { default_policy }
-            }
+        match registration.input.as_ref() {
+            crate::ProcessInput::Engine { .. } | crate::ProcessInput::SessionTurn { .. } => {}
             // Externally-owned rows are rejected before dispatch (ADR 0110):
             // lash never executes them, so they have no runtime.
             crate::ProcessInput::External { .. } => {
@@ -87,25 +57,20 @@ impl ProcessRuntimeContext {
                     "process `{process_id}` names definition `{definition_id}` unresolved"
                 )));
             }
+        }
+        let Some(env_ref) = registration.env_ref.as_ref() else {
+            return Err(crate::PluginError::Session(format!(
+                "process `{process_id}` is missing a captured execution env"
+            )));
         };
-        let (environment, policy, plugin_config) = match body {
-            ProcessRuntimeBody::Captured { environment } => {
-                let policy = environment.policy.clone();
-                let plugin_config = environment.plugin_config.clone();
-                (Some(environment), policy, plugin_config)
-            }
-            // A session-turn process captures no environment: its runtime
-            // only creates or reopens its session, which records and runs
-            // its own configuration (FIG-4379).
-            ProcessRuntimeBody::SessionTurn { default_policy } => {
-                (None, default_policy, crate::AdmittedPluginConfig::default())
-            }
-        };
+        let environment = crate::runtime::load_process_execution_env(
+            ports.host.durability.process_env_store.as_ref(),
+            env_ref,
+        )
+        .await?;
         Self::build(ProcessRuntimeBuild {
             process_id,
             environment,
-            policy,
-            plugin_config,
             host: ports.host,
             work: super::host::RuntimeWork::processes(ports.process_work, ports.queued_work),
             plugin_host: ports.plugin_host,
@@ -124,13 +89,9 @@ impl ProcessRuntimeContext {
         environment: crate::ProcessExecutionEnvSpec,
         lease_owner: crate::LeaseOwnerIdentity,
     ) -> Result<Self, crate::PluginError> {
-        let policy = environment.policy.clone();
-        let plugin_config = environment.plugin_config.clone();
         Self::build(ProcessRuntimeBuild {
             process_id,
-            environment: Some(environment),
-            policy,
-            plugin_config,
+            environment,
             host: runtime_env.core.clone(),
             work: runtime_env.work.clone(),
             plugin_host,
@@ -143,8 +104,6 @@ impl ProcessRuntimeContext {
         let ProcessRuntimeBuild {
             process_id,
             environment,
-            policy,
-            plugin_config,
             host,
             work,
             plugin_host,
@@ -155,7 +114,7 @@ impl ProcessRuntimeContext {
             crate::plugin::PluginSessionRequest::process_creation(
                 process_id.clone(),
                 crate::plugin::SessionAuthorityContext {
-                    plugin_config,
+                    plugin_config: environment.plugin_config.clone(),
                     ..Default::default()
                 },
             ),
@@ -182,7 +141,6 @@ impl ProcessRuntimeContext {
             services: Arc::new(RuntimeSessionServices::for_process(ProcessServicesPorts {
                 process_id: process_id.clone(),
                 environment,
-                policy,
                 host,
                 plugins,
                 runtime_lease_owner: lease_owner,
@@ -206,9 +164,7 @@ impl ProcessRuntimeContext {
 /// Everything one process runtime is built from.
 struct ProcessRuntimeBuild {
     process_id: crate::ProcessId,
-    environment: Option<crate::ProcessExecutionEnvSpec>,
-    policy: crate::SessionPolicy,
-    plugin_config: crate::AdmittedPluginConfig,
+    environment: crate::ProcessExecutionEnvSpec,
     host: crate::RuntimeHostConfig,
     work: super::host::RuntimeWork,
     plugin_host: Arc<crate::PluginHost>,

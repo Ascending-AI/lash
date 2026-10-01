@@ -815,7 +815,7 @@ async fn inbox_authority_resolves_for_any_account_name_inner() {
         tool_names.iter().any(|name| name == "inbox__test__send"),
         "inbox.test send tool should be active: {tool_names:?}"
     );
-    assert_tool_catalog_contract(&core, &session).await;
+    assert_tool_catalog_contract(&session).await;
     tokio::time::timeout(
         Duration::from_secs(5),
         assert_plugin_provider_execution(&session, &mail_world),
@@ -824,7 +824,7 @@ async fn inbox_authority_resolves_for_any_account_name_inner() {
     .expect("plugin-provider turn should complete");
     tokio::time::timeout(
         Duration::from_secs(20),
-        assert_live_tool_provider_execution_and_removal(&core, &session),
+        assert_live_tool_provider_execution_and_removal(&session),
     )
     .await
     .expect("live-provider lifecycle should complete");

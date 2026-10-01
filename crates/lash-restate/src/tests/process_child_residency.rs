@@ -7,12 +7,6 @@ use super::*;
 #[tokio::test]
 pub(super) async fn session_turn_child_runtime_does_not_outlive_the_process_run() {
     let (registry, continuations) = process_stores();
-    let registration = session_turn_registration();
-    let process_id = registry
-        .register_process(registration.clone())
-        .await
-        .expect("register session turn")
-        .id;
 
     // A worker like `recovery_worker`, with a scripted provider so the child
     // turn completes instead of failing on provider resolution.
@@ -45,16 +39,20 @@ pub(super) async fn session_turn_child_runtime_does_not_outlive_the_process_run(
             .into_handle(),
         ));
     let session_store_factory = runtime_host.session_store_factory();
+    let registration = session_turn_registration(
+        persist_session_turn_env_ref(runtime_host.durability.process_env_store.as_ref()).await,
+    );
+    let process_id = registry
+        .register_process(registration.clone())
+        .await
+        .expect("register session turn")
+        .id;
     let worker = DurableProcessWorker::new(lash_core_worker::DurableProcessWorkerConfig::new(
         Arc::new(plugin_host),
         runtime_host,
         process_work,
         Arc::new(lash_core::NoSessionWork::new()),
         lash_core::testing::runtime_lease_owner(),
-        lash_core::SessionPolicy {
-            provider_id: "mock".to_string(),
-            ..recovery_session_policy()
-        },
     ))
     .expect("valid liveness worker");
     let workflow = Arc::new(LashProcessWorkflowImpl::new_for_test(

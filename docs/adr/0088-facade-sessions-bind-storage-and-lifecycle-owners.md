@@ -29,10 +29,36 @@ a second facade session model.
 A parked session retains its owner binding across resume. Applying that binding
 to a receiving core environment restores the owning backend, effect host,
 attachment store, process-environment store, and work ports. The receiving core
-supplies live provider resolution, plugin factories and tracing. The durable
-session config, including session prompt, generation and the execution
-controls of ADR 0030, remains recorded config under ADR 0074; the live core
-prompt is separate.
+supplies only physical binding: live provider resolution, the implementations
+of its one plugin set, and tracing. Behaviour is recorded config. The durable
+session config, including session prompt, generation, the execution controls
+of ADR 0030 and every installed plugin's namespace (ADR 0126), remains
+recorded config under ADR 0074; the live core prompt is separate.
+
+### Behaviour is recorded config; live is physical only
+
+A core installs one plugin set, and every session, open, resume, engine drive
+and process worker of that core runs that set. No open, resume or worker adds
+plugins of its own: a session's behaviour is the plugin config it recorded at
+creation, changed only by its owners' typed config commands. An open still
+states physical facts — the provider that serves the recorded route, the
+tool-source policy that refuses an unavailable source, and enqueue-only mode —
+and none of them selects behaviour.
+
+A process runs under the environment its start captured: its starter's
+recorded policy and plugin config. That holds for a session-turn process as
+for an engine or tool-call process. The start resolves the child's complete
+facts against that environment on its own plugin set before it registers, so
+a child the set cannot create is refused before the handoff. The worker binds
+the same set and builds the process's runtime from the captured environment;
+it supplies no policy or plugin config of its own. A child its worker's set
+cannot create is a terminal typed refusal (`session_config_refused`), never a
+retried infrastructure error.
+
+A deployment that needs an incompatible plugin set — another protocol, or
+owners whose recorded namespaces the first set does not register — runs it on
+a separate engine binding: its own Restate namespace (ADR 0104), with its own
+cores and workers. One engine binding never mixes plugin sets.
 
 Durable turn input crosses mandatory acceptance. Replayable protocol options
 and durable RLM seeds can cross that boundary. Process-local projection
@@ -86,7 +112,8 @@ continuation owner. One captured binding prevents those substitutions.
 ## Consequences
 
 Every facade execution has a real catalog-backed store. Resume retains lifecycle
-ownership while accepting current live wiring. Session relationships use one
+ownership while accepting current physical wiring and never a different
+behaviour. Session relationships use one
 ordinary session model, and deletion retries use durable obligations. The host
 owns external deployment composition.
 
@@ -94,6 +121,8 @@ owns external deployment composition.
 
 - `crates/lash/src/session.rs:152-169,247-275,518-541` separates create and existing-session resolution.
 - `crates/lash/src/session_binding.rs:6-63,150-185` captures owner services and applies them on resume.
+- `crates/lash/src/core.rs` (`build_plugin_host`, `durable_process_worker_config`) builds the core's one plugin set for opens, drives and workers.
+- `crates/lash-core/src/runtime/process_runtime.rs` (`ProcessRuntimeContext::for_admitted`) builds every process runtime from its captured environment; `crates/lash-core/src/runtime/session_manager/session_init.rs` (`resolve_child_facts`, `admit_session_turn_child`) resolves and admits a session-turn child's facts.
 - `crates/lash-core/src/runtime/lifecycle.rs` (`park`, `flush_for_park`) and `crates/lash-core/src/runtime/environment.rs` (`ParkRefused`) make a busy park recoverable.
 - `crates/lash-core/src/runtime/session_administration.rs:104-153` issues the paired deletion context.
 - `crates/lash/src/tests/core_session_builder/session_lifecycle/session_binding.rs` pins lifecycle-owner behavior.

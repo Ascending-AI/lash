@@ -1363,7 +1363,6 @@ async fn execute_trigger_process_with_originator(
     table.install_worker(
         lash_core::testing::test_code_protocol_factories(),
         runtime_host,
-        session_policy.clone(),
     );
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
         registry: registry.clone(),

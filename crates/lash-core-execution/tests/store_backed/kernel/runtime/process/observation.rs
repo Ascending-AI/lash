@@ -514,7 +514,10 @@ mod tests {
         ];
         let mut ids = std::collections::BTreeMap::new();
         for (case, input, kind, label, _child_session_id) in cases {
-            let needs_env = matches!(input, ProcessInput::Engine { .. });
+            let needs_env = matches!(
+                input,
+                ProcessInput::Engine { .. } | ProcessInput::SessionTurn { .. }
+            );
             let mut registration = ProcessRegistration::new(
                 input,
                 ProcessProvenance::host(),
