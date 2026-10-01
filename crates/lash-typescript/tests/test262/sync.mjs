@@ -226,6 +226,7 @@ const typescriptNames = [
   // time, the same shape tsc --strict rejects as TS2554 (FIG-3705).
   "constructor-arity",
   "date-mutation",
+  "date-now-effect",
   "date-string-coercion",
   "debugger",
   // Forms `tsc --strict` rejects, refused rather than implemented (FIG-3651,
