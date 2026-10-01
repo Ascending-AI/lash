@@ -279,10 +279,18 @@ completion, and checks the frame commit's receipt. A later turn failure leaves
 that committed frame in place. The write is a store operation under §9, not
 an extra controller command variant.
 
+The phases a model call issues are recorded with it. Phase 1 journals the raw
+completion together with its response phase plan: whether assistant-response
+hooks derive the served response in a phase 2. Replay follows the recorded
+plan, never the hooks installed at replay, so adding or removing a response
+hook reaches only calls recorded after the change.
+
 Evidence: `crates/lash-sansio/src/sansio/turn_protocol.rs:699`,
 `crates/lash-sansio/src/sansio/turn_protocol.rs:779`,
 `crates/lash-core/src/runtime/turn_loop/context_pressure.rs:1`,
-`crates/lash-core/src/runtime/turn_loop/context_pressure.rs:114`.
+`crates/lash-core/src/runtime/turn_loop/context_pressure.rs:114`,
+`crates/lash-core-execution/src/runtime/effect/llm_outcome.rs:44`,
+`crates/lash/src/tests/response_phase_replay.rs:1`.
 
 ### 7. Continue-as-new and version decisions
 

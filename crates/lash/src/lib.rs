@@ -1102,22 +1102,22 @@ pub mod runtime {
     pub use lash_core::runtime::current_epoch_ms;
     /// Runtime host configuration, control, observation, and effect contracts.
     pub use lash_core::runtime::{
-        AdmittedScope, AssembledTurn, AssistantResponseHookEvents, AssistantStreamHookState,
-        AwaitEventResolver, CheckpointAdmittedSet, CompletionKeyPreparation,
-        DirectCompletionClient, EffectAddress, EffectGroupHandle, EffectGroupMembership,
-        EmbeddedRuntimeHost, EventSink, ExecutionScope, GroupExecutors, GroupSettlement,
-        GroupWakePolicy, LashRuntime, LlmRequestSpec, LlmStreamRecord, LoserPolicy, NoSessionWork,
-        NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
-        ProcessListSelection, RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig,
-        RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-        RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
-        RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
-        RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeHandle,
-        RuntimeInvocation, RuntimeNamedPhase, RuntimeObservation, RuntimePromptConfig,
-        RuntimeProviderConfig, RuntimeTracingConfig, RuntimeTurnPhase, RuntimeTurnPhaseProbe,
-        RuntimeTurnPhaseProbeSlot, ScopedEffectController, SessionWorkEngine, SleepSpec,
-        TurnCancelWait, TurnContext, TurnControlBinding, WorkCadenceError, WorkCadencePolicy,
-        effect_groups_unsupported,
+        AdmittedScope, AssembledTurn, AssistantResponseHookEvents, AssistantResponsePhase,
+        AssistantStreamHookState, AwaitEventResolver, CheckpointAdmittedSet,
+        CompletionKeyPreparation, DirectCompletionClient, EffectAddress, EffectGroupHandle,
+        EffectGroupMembership, EmbeddedRuntimeHost, EventSink, ExecutionScope, GroupExecutors,
+        GroupSettlement, GroupWakePolicy, LashRuntime, LlmRequestSpec, LlmStreamRecord,
+        LoserPolicy, NoSessionWork, NoopEventSink, NoopTurnActivitySink, ProcessCommand,
+        ProcessEffectOutcome, ProcessListSelection, RuntimeAttribution, RuntimeControlConfig,
+        RuntimeDurabilityConfig, RuntimeEffectCommand, RuntimeEffectController,
+        RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
+        RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
+        RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder,
+        RuntimeError, RuntimeErrorCode, RuntimeHandle, RuntimeInvocation, RuntimeNamedPhase,
+        RuntimeObservation, RuntimePromptConfig, RuntimeProviderConfig, RuntimeTracingConfig,
+        RuntimeTurnPhase, RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot, ScopedEffectController,
+        SessionWorkEngine, SleepSpec, TurnCancelWait, TurnContext, TurnControlBinding,
+        WorkCadenceError, WorkCadencePolicy, effect_groups_unsupported,
     };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the

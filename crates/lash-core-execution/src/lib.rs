@@ -763,10 +763,10 @@ pub use runtime::TurnCancelWait;
 pub use runtime::publish_process_execution_env;
 pub use runtime::{
     AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, AdmittedScope, AdmittedTurnInputs,
-    Ancestry, AssistantResponseHookEvents, AssistantStreamHookState, AwaitEventKey,
-    AwaitEventResolver, AwaitEventWaitIdentity, BindingId, BoundaryReason, CapabilityRef,
-    CausalRef, ChargeSafetyRefusalEvidence, CheckpointAdmittedSet, Clock, ClockWallTime,
-    CommandJournalGuard, CommandReplayKey, CompletionKeyPreparation, ContractRef,
+    Ancestry, AssistantResponseHookEvents, AssistantResponsePhase, AssistantStreamHookState,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BindingId, BoundaryReason,
+    CapabilityRef, CausalRef, ChargeSafetyRefusalEvidence, CheckpointAdmittedSet, Clock,
+    ClockWallTime, CommandJournalGuard, CommandReplayKey, CompletionKeyPreparation, ContractRef,
     DeclaredProcessIdentity, DefinitionAcquisition, DefinitionRef, DeliveryPolicy, DeploymentStore,
     DeploymentStoreDecorator, DrainMode, DrainModePolicy, EffectAddress, EffectGroupHandle,
     EffectGroupMembership, EffectHost, EffectJournalRetirement, EffectOpener, EffectOpenerError,

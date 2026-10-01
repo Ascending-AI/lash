@@ -1340,7 +1340,9 @@ fn fig793_llm_outcome() -> RuntimeEffectOutcome {
         })),
         text_streamed: false,
         call_record: None,
-        stream: Box::default(),
+        stream: Box::new(lash_core::LlmStreamRecord::unstreamed(
+            lash_core::AssistantResponsePhase::Raw,
+        )),
     }
 }
 

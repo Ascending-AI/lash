@@ -96,6 +96,7 @@ impl RuntimeTurnDriver<'_> {
                 crate::runtime::LlmStreamRecord {
                     reasoning_published,
                     stream_hook_states,
+                    response_phase,
                 },
         } = match self
             .invoke_turn_llm_effect(machine, id, request, event_tx)
@@ -134,9 +135,12 @@ impl RuntimeTurnDriver<'_> {
         }
         // Phase 2 of the staged boundary runs only once the paid attempt is
         // journaled and on the ledger, so a failing derivation can never take
-        // the record of what we bought down with it.
+        // the record of what we bought down with it. Whether it runs at all is
+        // the plan phase 1 recorded with the completion (ADR 0105 §1), never
+        // the response hooks installed now: a replay after a hook was added or
+        // removed issues the phases its first execution did.
         let result = match result {
-            Ok(raw) if self.session.plugins().has_assistant_response_hooks() => {
+            Ok(raw) if response_phase == crate::runtime::AssistantResponsePhase::DerivedByHooks => {
                 match self
                     .invoke_assistant_response_hooks_effect(
                         machine,

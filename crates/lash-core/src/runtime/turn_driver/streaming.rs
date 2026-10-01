@@ -227,7 +227,9 @@ impl RuntimeTurnDriver<'_> {
                     }),
                     text_streamed: false,
                     call_record: None,
-                    stream: crate::runtime::LlmStreamRecord::default(),
+                    stream: crate::runtime::LlmStreamRecord::unstreamed(
+                        self.assistant_response_phase(),
+                    ),
                 };
             }
         };
@@ -693,7 +695,19 @@ impl RuntimeTurnDriver<'_> {
             stream: crate::runtime::LlmStreamRecord {
                 reasoning_published: reasoning_publication.into_published_blocks(),
                 stream_hook_states,
+                response_phase: self.assistant_response_phase(),
             },
+        }
+    }
+
+    /// The response phase plan phase 1 records with its completion: phase 2
+    /// follows exactly when response hooks are installed as the paid
+    /// completion is recorded. Replays follow the recorded plan, never this.
+    fn assistant_response_phase(&self) -> crate::runtime::AssistantResponsePhase {
+        if self.session.plugins().has_assistant_response_hooks() {
+            crate::runtime::AssistantResponsePhase::DerivedByHooks
+        } else {
+            crate::runtime::AssistantResponsePhase::Raw
         }
     }
 

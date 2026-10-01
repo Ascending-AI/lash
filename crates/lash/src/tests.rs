@@ -1293,6 +1293,7 @@ mod processes_endstate;
 mod recorded_execution_controls;
 #[cfg(feature = "rlm")]
 mod redrive_residue;
+mod response_phase_replay;
 #[cfg(feature = "rlm")]
 mod rlm_restore_idempotence;
 mod send_handle;

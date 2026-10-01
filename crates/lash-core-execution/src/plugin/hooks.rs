@@ -160,13 +160,18 @@ pub type AssistantStreamHook =
 /// this phase's outcome and served from it on replay, so they keep their
 /// placement and are never re-emitted by a redrive that replays the entry.
 ///
-/// Out of contract, stated so it is not discovered: the journal records the
-/// *phase*, not the hook set that produced it. Registering a response hook on a
-/// session whose earlier drives had none makes phase 2 run live against a
-/// replayed completion and append a new entry; removing the last one orphans an
-/// already-journaled entry and silently uses the raw response. Change the hook
-/// set between drives of the same session only when both readings are
-/// acceptable.
+/// Whether phase 2 runs is recorded with the completion (ADR 0105 §1): phase 1
+/// journals the call's
+/// [`AssistantResponsePhase`](crate::runtime::AssistantResponsePhase), decided
+/// from the response hooks installed as it ran, and every replay, retry and
+/// redrive of that call follows the record. Adding or removing a response hook
+/// therefore never changes what an already-recorded call serves: a call
+/// recorded with no response phase serves its raw completion and never runs a
+/// hook installed since, and a call recorded with one serves its journaled
+/// derivation. A phase 2 owed but not yet journaled runs under the hooks
+/// installed when it runs; with none left, it derives the raw completion
+/// unchanged. A hook set change reaches only calls whose phase 1 records
+/// after it.
 pub type AssistantResponseHook = Arc<
     dyn Fn(AssistantResponseHookContext) -> PluginFuture<AssistantResponseTransform> + Send + Sync,
 >;

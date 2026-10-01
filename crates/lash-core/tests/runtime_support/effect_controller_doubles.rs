@@ -577,7 +577,9 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
                         })),
                         text_streamed: false,
                         call_record: None,
-                        stream: Box::default(),
+                        stream: Box::new(lash_core::LlmStreamRecord::unstreamed(
+                            lash_core::AssistantResponsePhase::Raw,
+                        )),
                     })
                 }
             }

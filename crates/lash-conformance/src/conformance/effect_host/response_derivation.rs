@@ -200,7 +200,9 @@ where
             result: Box::new(result),
             text_streamed: true,
             call_record: Some(record),
-            stream: Box::default(),
+            stream: Box::new(lash_core::LlmStreamRecord::unstreamed(
+                lash_core::AssistantResponsePhase::Raw,
+            )),
         };
         let expected = serde_json::to_value(&outcome).expect("result JSON");
         let first = invocation
