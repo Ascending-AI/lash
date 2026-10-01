@@ -710,8 +710,7 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
             session_id: SessionId::from("orphan-fork-child"),
             node_id: parent_leaf.clone(),
             relation: lash_core_execution::SessionRelation::Root,
-            policy: policy.clone(),
-            plugin_config: Default::default(),
+            config: policy.clone().into(),
         })
         .await
         .expect("fork at the parent's live tip");

@@ -176,11 +176,11 @@ async fn a_redelivered_emission_writes_no_reclaimed_row_back(
     );
 
     // The redelivery arrives on a new invocation with nothing journaled.
-    let redelivery = explicit_ephemeral_facets(LashCore::standard_builder(
-        ingress_backend(backend, Some(redelivery_host), None),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
+    let redelivery = explicit_ephemeral_facets(LashCore::standard_builder(ingress_backend(
+        backend,
+        Some(redelivery_host),
+        None,
+    )))
     .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;

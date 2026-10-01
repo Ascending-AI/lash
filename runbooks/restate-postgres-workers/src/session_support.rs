@@ -14,8 +14,8 @@ pub fn turn_handler_error(err: lash::EmbedError) -> restate_sdk::errors::Handler
     }
 }
 
-/// Reach `session_id` from a Restate handler: created with the default
-/// creation unless the catalog already holds it, as the handler's journaled
+/// Reach `session_id` from a Restate handler: created from the harness's
+/// default spec ([`crate::e2e_session_spec`]) unless the catalog already holds it, as the handler's journaled
 /// `lash.host.session` step. A replay reads the step back and touches no
 /// catalog, and the returned Durable Session resolves the session only inside
 /// the handler's journaled acceptance and probes, so a session deleted between
@@ -29,6 +29,6 @@ where
     C: lash::restate::RestateControllerContext<'ctx>,
 {
     core.session(session_id)
-        .create_or_use_restate(ctx, lash::SessionCreation::default())
+        .create_or_use_restate(ctx, lash::SessionCreation::root(crate::e2e_session_spec()))
         .await
 }

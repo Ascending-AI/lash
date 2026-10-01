@@ -14,18 +14,18 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
     };
     let core = build()?;
     core.session("materialize-root")
-        .create(Default::default())
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     core.session("materialize-child")
         .create(crate::SessionCreation {
+            spec: mock_session_spec(),
             parent: Some("materialize-root".into()),
-            ..Default::default()
         })
         .await?;
     core.session("materialize-stated")
         .create(crate::SessionCreation {
             parent: Some("materialize-root".into()),
-            spec: lash_core::facade_support::SessionSpec::new().plugin_options(
+            spec: mock_session_spec().plugin_options(
                 lash_core::PluginOptions::typed(
                     lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
                     lash_rlm_types::RlmCreateExtras {
@@ -99,7 +99,7 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
         .session("materialize-refused")
         .create(crate::SessionCreation {
             parent: Some("materialize-root".into()),
-            spec: lash_core::facade_support::SessionSpec::new().plugin_options(
+            spec: mock_session_spec().plugin_options(
                 lash_core::PluginOptions::typed(
                     lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
                     serde_json::json!({"termination": {"kind": "unknown"}}),
@@ -162,14 +162,10 @@ async fn multi_model_turn_and_remote_report_keep_per_call_evidence() -> Result<(
                 }
             }
         }).build().into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double_backend().await,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(provider, mock_model_spec())
-    .tools(Arc::new(AppTools))
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
+        .serve_test_model(provider, mock_model_spec())
+        .tools(Arc::new(AppTools))
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("per-call-evidence")
         .created()
@@ -290,22 +286,25 @@ async fn resumed_session_observe_wait_cancel_drive_keep_original_owners() -> Res
     let receiving_backend = receiving_double.lash_backend();
     let owner = crate::testing::runtime_lease_owner();
     let build = |backend, answer| {
-        explicit_ephemeral_facets(LashCore::standard_builder(
-            backend,
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        ))
-        .serve_test_model(
-            text_provider("owner-matrix", "owner-model", answer),
-            model_spec("owner-model", None, 200_000),
-        )
-        .build(owner.clone())
+        explicit_ephemeral_facets(LashCore::standard_builder(backend))
+            .serve_test_model(
+                text_provider("owner-matrix", "owner-model", answer),
+                model_spec("owner-model", None, 200_000),
+            )
+            .build(owner.clone())
     };
     let source = build(source_backend.clone(), "source-answer")?;
     let receiving = build(receiving_backend.clone(), "receiving-answer")?;
     let id = "owner-operation-matrix";
-    source.session(id).create(Default::default()).await?;
-    receiving.session(id).create(Default::default()).await?;
+    let spec = session_spec_for(&model_spec("owner-model", None, 200_000));
+    source
+        .session(id)
+        .create(crate::SessionCreation::root(spec.clone()))
+        .await?;
+    receiving
+        .session(id)
+        .create(crate::SessionCreation::root(spec))
+        .await?;
     let session = source.session(id).open().await?;
     let receiving_session = receiving.session(id).open().await?;
     let receiving_output = receiving_session

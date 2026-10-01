@@ -110,11 +110,7 @@ pub(super) async fn double_over(
 /// A core over `double` whose commits fit `nodes` nodes.
 fn core_over(double: &lash_restate_test::RestateTestBackend, nodes: usize) -> Result<LashCore> {
     explicit_ephemeral_facets_with_budget(
-        LashCore::standard_builder(
-            double.lash_backend(),
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        ),
+        LashCore::standard_builder(double.lash_backend()),
         crate::CommitBudget::bounded(1024 * 1024, nodes),
     )
     .serve_test_model(mock_provider(), mock_model_spec())

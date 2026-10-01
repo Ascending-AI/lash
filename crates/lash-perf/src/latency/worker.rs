@@ -45,25 +45,21 @@ pub(crate) async fn run(args: LatencyWorkerArgs) -> Result<()> {
             crate::runtime_perf::providers::BenchmarkEchoTool::new(Arc::clone(&effect_host)),
         )),
     )));
-    let core = lash::LashCore::standard_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .serve_test_model(
-        provider,
-        lash::ModelMetadata::builder("latency-model")
-            .context_window_tokens(200_000)
-            .build()
-            .map_err(|error| anyhow::anyhow!("latency model spec: {error}"))?,
-    )
-    .plugins(plugins)
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "lash-perf-latency-worker",
-        format!("{}", std::process::id()),
-    ))?;
+    let core = lash::LashCore::standard_builder(backend)
+        .serve_test_model(
+            provider,
+            lash::ModelMetadata::builder("latency-model")
+                .context_window_tokens(200_000)
+                .build()
+                .map_err(|error| anyhow::anyhow!("latency model spec: {error}"))?,
+        )
+        .plugins(plugins)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "lash-perf-latency-worker",
+            format!("{}", std::process::id()),
+        ))?;
     let worker = lash::durability::DurableProcessWorker::new(
         core.durable_process_worker_config()
             .context("worker process worker config")?,

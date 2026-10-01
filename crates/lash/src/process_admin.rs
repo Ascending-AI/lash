@@ -371,7 +371,6 @@ impl Processes {
                         &self.core.env.core.durability.process_env_store,
                     ))
                     .with_process_session_catalog(Arc::clone(&self.core.store_factory) as _)
-                    .with_session_turn_default(self.session_turn_default())
                     .with_session_turn_admission(session_turn_admission)
                     .with_process_engines(self.core.host_process_engines.clone()),
             )
@@ -409,46 +408,6 @@ impl Processes {
         Ok(lash_core::ScopeRef::host_session_lookup(session_id.clone()))
     }
 
-    /// The mint of a session-turn start's default binding: the core's
-    /// default selection, resolved by its models when the start's recorded
-    /// admission asks for it.
-    ///
-    /// A session-turn start whose create request names no model runs the
-    /// core's default selection. The first registration under the start's
-    /// key records that binding beside the request, so the worker that later
-    /// creates the child copies it and never falls back to a policy that
-    /// selects no model. The binding is what lash derived, not what the host
-    /// stated: it is minted inside the start's recorded step, the command
-    /// carries the request without it, and the start-key fence compares the
-    /// request without it. While a start is retained under the key nothing
-    /// is minted, so a retry after a catalog edit or a change of default
-    /// presents the request the host stated and is returned the retained
-    /// process with the binding it recorded (FIG-4531).
-    fn session_turn_default(&self) -> lash_core::runtime::SessionTurnDefaultMint {
-        let core = self.core.clone();
-        Arc::new(move || {
-            core.default_selection
-                .mint(
-                    lash_core::facade_support::SessionSpec::new(),
-                    &core.policy,
-                    core.env.core.providers.models.as_ref(),
-                )
-                .map_err(|error| {
-                    lash_core::RuntimeEffectControllerError::new(
-                        lash_core::RuntimeErrorCode::ModelUnknown,
-                        format!("the core's default model selection does not resolve: {error}"),
-                    )
-                })?
-                .model
-                .ok_or_else(|| {
-                    lash_core::RuntimeEffectControllerError::new(
-                        lash_core::RuntimeErrorCode::ModelUnknown,
-                        "the core's default model selection names no model",
-                    )
-                })
-        })
-    }
-
     async fn require_live_session(&self, session_id: &SessionId) -> Result<()> {
         let live =
             lash_core::runtime::session_is_live(self.core.store_factory.as_ref(), session_id)
@@ -462,21 +421,36 @@ impl Processes {
         }
     }
 
-    /// The environment a host's session-turn start captures when its request
-    /// names none (FIG-4396). No session starts it, so the core is its
-    /// starter: the child is created from the core's creation defaults, the
-    /// facts [`SessionBuilder::create`](crate::SessionBuilder::create)
-    /// resolves a new session against, recorded with the start so every
-    /// worker runs the child under them. The child's plugin config is
+    /// The environment a host's session-turn start captures when its start
+    /// names none (FIG-4396). No session starts it, so nothing recorded
+    /// stands beneath it and the core keeps no default (FIG-4594): the
+    /// environment is the policy the request itself states, with no model
+    /// minted, and no plugin configuration. It is a function of what the
+    /// host stated, so the start-key fence that compares it compares only
+    /// that, and a retry on a deployment whose host changed what it passes
+    /// elsewhere presents the same start. The child's plugin config is
     /// admitted here, on the core's plugin set, before anything is
     /// registered.
+    ///
+    /// # Errors
+    ///
+    /// [`EmbedError::SessionTurnStartUnspecified`] when the request leaves
+    /// its policy or its model unstated.
     fn host_session_turn_environment(
         &self,
         create_request: &lash_core::SessionCreateRequest,
     ) -> Result<lash_core::ProcessExecutionEnvSpec> {
+        if let Some(unstated) = create_request.unstated_root_config() {
+            return Err(EmbedError::SessionTurnStartUnspecified { unstated });
+        }
+        let Some(policy) = create_request.policy.clone() else {
+            return Err(EmbedError::SessionTurnStartUnspecified {
+                unstated: lash_core::UnstatedSessionConfig::Policy,
+            });
+        };
         let environment = lash_core::ProcessExecutionEnvSpec::new(
             lash_core::AdmittedPluginConfig::default(),
-            self.core.policy.clone(),
+            policy,
         );
         let is_child = create_request.relation.parent_session_id().is_some();
         crate::support::build_plugin_host(
@@ -513,22 +487,34 @@ impl Processes {
             Box::pin(async move {
                 let env_store = core.env.core.durability.process_env_store.as_ref();
                 if fresh && let Some(key) = request.model.as_ref() {
-                    let policy = match request.policy {
-                        Some(policy) => policy,
-                        None => match environment.as_ref() {
-                            Some(environment) => environment.policy.clone(),
-                            None => match env_ref.as_ref() {
-                                Some(env_ref) => {
-                                    lash_core::runtime::load_process_execution_env(
-                                        env_store, env_ref,
-                                    )
-                                    .await
-                                    .map_err(lash_core::PluginError::from)?
-                                    .policy
-                                }
-                                None => core.policy.clone(),
-                            },
-                        },
+                    // The reasoning the key's binding runs with: the
+                    // request's own, else the one the policy beneath it
+                    // records: the request's, the start's environment, or
+                    // the captured environment the start names. A start
+                    // carries one of them (`Processes::start`).
+                    let reasoning = match request.reasoning {
+                        Some(reasoning) => reasoning,
+                        None => {
+                            let policy = match (request.policy, environment.as_ref()) {
+                                (Some(policy), _) => Some(policy),
+                                (None, Some(environment)) => Some(environment.policy.clone()),
+                                (None, None) => match env_ref.as_ref() {
+                                    Some(env_ref) => Some(
+                                        lash_core::runtime::load_process_execution_env(
+                                            env_store, env_ref,
+                                        )
+                                        .await
+                                        .map_err(lash_core::PluginError::from)?
+                                        .policy,
+                                    ),
+                                    None => None,
+                                },
+                            };
+                            policy
+                                .and_then(|policy| policy.model)
+                                .map(|model| model.reasoning)
+                                .unwrap_or_default()
+                        }
                     };
                     let model =
                         lash_core::ModelConfig {
@@ -540,10 +526,7 @@ impl Processes {
                                     )
                                 },
                             )?,
-                            reasoning: policy
-                                .model
-                                .map(|model| model.reasoning)
-                                .unwrap_or_default(),
+                            reasoning,
                         };
                     model.validate_reasoning().map_err(|refused| {
                         lash_core::RuntimeEffectControllerError::new(
@@ -572,8 +555,18 @@ impl Processes {
     }
 
     /// Start a process, refusing a session-turn child's model key whose
-    /// inherited reasoning is unsupported before any environment or process
-    /// is written. The refusal retains `RuntimeErrorCode::ReasoningRefused`.
+    /// reasoning is unsupported before any environment or process is
+    /// written. The refusal retains `RuntimeErrorCode::ReasoningRefused`.
+    ///
+    /// A session-turn start a host issues with no captured environment is a
+    /// root creation, and takes an explicit spec like every other
+    /// (FIG-4594): build its create request with
+    /// [`SessionCreateRequest::with_spec`](lash_core::SessionCreateRequest::with_spec).
+    /// One that leaves its policy or model unstated is refused with
+    /// [`EmbedError::SessionTurnStartUnspecified`] and nothing is
+    /// registered. The start is registered exactly as stated, so a retry
+    /// under its host key is returned the retained process whatever the
+    /// host passes to other starts by then.
     pub async fn start(
         &self,
         request: lash_core::ProcessStartRequest,
@@ -582,24 +575,12 @@ impl Processes {
         // The registrar mints the id; the key only makes the start idempotent.
         // A host mints only host keys: a key of a family lash derives for its
         // own start paths is refused, never adopted (ADR 0107).
-        let mut request = request
+        // The request is registered as the host stated it: lash lays
+        // nothing of its own under a session-turn start (FIG-4594), so the
+        // start-key fence compares only what the host stated.
+        let request = request
             .keyed_in(&scoped_effect_controller)
             .map_err(EmbedError::Plugin)?;
-        // A default binding is lash's to derive, inside the start's recorded
-        // admission; a host states a model by its key or its policy.
-        if let lash_core::ProcessInput::SessionTurn { create_request, .. } = &mut request.input {
-            create_request.record_default_model(None);
-            // A session-turn start with no parent session is created from
-            // the core's creation defaults, as `SessionBuilder::create`
-            // creates one: the start carries the core's default plugin
-            // options beneath the ones its request states (FIG-4589), so the
-            // worker that later creates the session records them whatever
-            // its own core states.
-            if create_request.relation.parent_session_id().is_none() {
-                create_request.plugin_options = std::mem::take(&mut create_request.plugin_options)
-                    .over(self.core.default_plugin_options.clone());
-            }
-        }
         // A root start's session grant is the host's lookup, whether it came
         // from `session_scope` or from a remote start's `until_session` data
         // (FIG-3607 R3). The start's recorded admission checks the session is

@@ -112,6 +112,7 @@ enum RootRoute {
 /// already include messages and turns posted after the thread root.
 pub async fn open_thread_session(
     core: &LashCore,
+    session_spec: &lash::SessionSpec,
     ledger: &EventLedger,
     record: &EventRecord,
     #[cfg(test)] root_wait: &RootWaitObserver,
@@ -135,7 +136,7 @@ pub async fn open_thread_session(
         let started = tokio::time::Instant::now();
         let mut backoff = ROOT_ADMISSION_INITIAL_BACKOFF;
         let (fork_node, channel) = loop {
-            let channel = match open_channel_session(core, &record.channel_id).await {
+            let channel = match open_channel_session(core, session_spec, &record.channel_id).await {
                 Ok(session) => session,
                 Err(error) if anyhow_session_admission_contended(&error) => {
                     #[cfg(test)]
@@ -154,7 +155,7 @@ pub async fn open_thread_session(
                 }
                 Err(error) => return Err(error),
             };
-            let route = root_route(core, ledger, record, thread_ts).await?;
+            let route = root_route(core, session_spec, ledger, record, thread_ts).await?;
             if let RootRoute::Ready(fork_node) = route {
                 break (fork_node, channel);
             }
@@ -222,7 +223,7 @@ pub async fn open_thread_session(
         }
         channel
     } else {
-        match open_channel_session(core, &record.channel_id).await {
+        match open_channel_session(core, session_spec, &record.channel_id).await {
             Ok(session) => session,
             Err(error) if anyhow_session_admission_contended(&error) => {
                 return Ok(ThreadSessionOpen::AdmissionContended);
@@ -270,6 +271,7 @@ pub(crate) fn anyhow_session_admission_contended(error: &anyhow::Error) -> bool 
 /// Resolve only durable evidence tied to the root itself.
 async fn root_route(
     core: &LashCore,
+    session_spec: &lash::SessionSpec,
     ledger: &EventLedger,
     record: &EventRecord,
     thread_ts: &str,
@@ -290,7 +292,7 @@ async fn root_route(
         // the caller's handle: that handle was opened when this thread reply
         // started waiting, and its graph predates the root turn this repair is
         // about. A snapshot that old can never carry the boundary being derived.
-        let repair_view = match open_channel_session(core, &record.channel_id).await {
+        let repair_view = match open_channel_session(core, session_spec, &record.channel_id).await {
             Ok(session) => session,
             Err(error) if anyhow_session_admission_contended(&error) => {
                 return Ok(RootRoute::Pending);
@@ -500,11 +502,16 @@ fn node_message_id(node: &lash::persistence::SessionNodeRecord) -> Option<&str> 
 /// Open (or resume) the channel's session, creating it on the channel's
 /// first event. The bot owns its channel session ids and means create-or-use:
 /// only `create` creates (FIG-4112), so an existing channel session — the
-/// common case — is the arm where creation config does not apply.
-pub(crate) async fn open_channel_session(core: &LashCore, channel_id: &str) -> Result<LashSession> {
+/// common case — is the arm where `session_spec`, the bot's default, does not
+/// apply: the session keeps what it recorded.
+pub(crate) async fn open_channel_session(
+    core: &LashCore,
+    session_spec: &lash::SessionSpec,
+    channel_id: &str,
+) -> Result<LashSession> {
     match core
         .session(session_id(channel_id))
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(session_spec.clone()))
         .await
     {
         Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}

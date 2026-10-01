@@ -491,7 +491,7 @@ async fn main() -> Result<()> {
     trace_context
         .metadata
         .insert("runbook_trace_offset".to_string(), json!(args.trace_offset));
-    let core = LashCore::rlm_builder(backend, lash::TurnBudget::bounded(12), lash::MaxToolCalls::new(1024), protocol)
+    let core = LashCore::rlm_builder(backend, protocol)
         // The smoke run serves one model, keyed by its wire model.
         .models(Arc::new(
             lash::ModelRegistry::new()
@@ -508,7 +508,6 @@ async fn main() -> Result<()> {
                 )
                 .context("register the smoke model")?,
         ))
-        .model(args.model.as_str())
         .tools(workspace.provider())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -538,16 +537,19 @@ async fn main() -> Result<()> {
     // written out, since only `create` creates (FIG-4112).
     match core
         .session(&args.session_id)
-        .create(lash::SessionCreation {
-            spec: lash::SessionSpec::default()
-                .no_progress_budget(lash::NoProgressBudget::bounded(4))
-                .plugin(
-                    lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
-                    lash::rlm::RlmCreateExtras::default(),
-                )
-                .context("encode RLM session option")?,
-            ..Default::default()
-        })
+        .create(lash::SessionCreation::root(
+            lash::SessionSpec::new(
+                args.model.as_str(),
+                lash::TurnBudget::bounded(12),
+                lash::MaxToolCalls::new(1024),
+            )
+            .no_progress_budget(lash::NoProgressBudget::bounded(4))
+            .plugin(
+                lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
+                lash::rlm::RlmCreateExtras::default(),
+            )
+            .context("encode RLM session option")?,
+        ))
         .await
     {
         Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}

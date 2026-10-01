@@ -94,13 +94,9 @@ async fn core_delete_session_retires_the_deleted_session_effect_journal() -> Res
             })
         },
     );
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.into(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.into()))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
     drop(
         core.session("retire-delete-session")
             .created()

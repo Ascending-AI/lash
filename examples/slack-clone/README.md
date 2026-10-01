@@ -10,7 +10,7 @@ its own users and its own database, and your agent is one more app in it, reache
 only over HTTP.
 
 It is also the repository's **standard-mode reference host**. Turns here are plain
-chat turns driven by the native tool loop (`LashCore::standard_builder(backend, TurnBudget::Unbounded, MaxToolCalls::new(1024))`).
+chat turns driven by the native tool loop (`LashCore::standard_builder(backend)`).
 `agent-workbench` remains the RLM-mode reference; see
 [Modes](#modes-this-is-the-standard-mode-reference) below.
 
@@ -700,7 +700,7 @@ distributed-worker shape.
 
 ## Modes: this is the standard-mode reference
 
-The bot is built with `LashCore::standard_builder(backend, TurnBudget::Unbounded, MaxToolCalls::new(1024))` over the Restate engine and its SQLite store set. Turns are native tool-loop
+The bot is built with `LashCore::standard_builder(backend)` over the Restate engine and its SQLite store set. Turns are native tool-loop
 turns: the model answers in prose, or calls a host tool and then answers.
 
 Two native tools, both backed by real `conversations.*` calls, so the loop leaves

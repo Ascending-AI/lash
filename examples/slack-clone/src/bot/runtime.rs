@@ -1,6 +1,6 @@
 //! Building the bot's `LashCore` — the standard-mode embedding.
 //!
-//! `LashCore::standard_builder(backend, lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(1024))` gives a native tool loop and plain chat turns:
+//! `LashCore::standard_builder(backend)` gives a native tool loop and plain chat turns:
 //! the model answers in prose and calls host tools directly. That is the classic
 //! chat-bot shape and the reason this example, not `agent-workbench`, is the
 //! repo's standard-mode reference. Nothing here touches Lashlang, code cells,
@@ -137,6 +137,10 @@ pub fn http_mcp_server_config(url: &str, token: &str) -> McpServerConfig {
 pub struct BotRuntime {
     /// The standard-mode core every channel session is opened from.
     pub core: LashCore,
+    /// The spec every channel session is created from: the bot's own default.
+    /// A core keeps none, so the bot keeps this value and passes it to each
+    /// creation; a session it already created keeps what it recorded.
+    pub session_spec: SessionSpec,
     /// The MCP plugin factory shared by every session built from `core`.
     pub mcp: Arc<McpPluginFactory>,
     /// The roots this host publishes to connected MCP servers.
@@ -233,27 +237,24 @@ pub async fn build_core(
             lash::RegisteredModel::new(model.clone(), provider.clone()),
         )
         .context("register the bot's model")?;
-    let builder = LashCore::standard_builder(backend, lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(1024))
+    let session_spec = SessionSpec::new(
+        model_key,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .attachment_acceptance(Arc::new(slack_attachment_acceptance()))
+    .plugin(
+        lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
+        StandardTurnOptions {
+            prompt: Some(bot_prompt(
+                config.mcp_servers.contains_key(DEMO_MCP_SERVER_NAME),
+            )),
+            render: None,
+        },
+    )
+    .context("encode the bot's prompt")?;
+    let builder = LashCore::standard_builder(backend)
         .models(Arc::new(models))
-        // `session_spec` replaces the builder's whole spec, so it must precede
-        // `model`, `attachment_acceptance`, which write into that same spec.
-        .session_spec(
-            SessionSpec::new()
-                .turn_budget(lash::TurnBudget::Unbounded)
-                .max_tool_calls(lash::MaxToolCalls::new(1024))
-                .plugin(
-                    lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
-                    StandardTurnOptions {
-                        prompt: Some(bot_prompt(
-                            config.mcp_servers.contains_key(DEMO_MCP_SERVER_NAME),
-                        )),
-                        render: None,
-                    },
-                )
-                .context("encode the bot's prompt")?,
-        )
-        .model(model_key)
-        .attachment_acceptance(Arc::new(slack_attachment_acceptance()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tools(tools::workspace_tools(api))
@@ -263,7 +264,12 @@ pub async fn build_core(
     let core = builder
         .build(drive_owner(&config.incarnation))
         .context("build slack-clone bot Lash core")?;
-    Ok(BotRuntime { core, mcp, roots })
+    Ok(BotRuntime {
+        core,
+        session_spec,
+        mcp,
+        roots,
+    })
 }
 
 fn demo_mcp_server_binary() -> Result<PathBuf> {

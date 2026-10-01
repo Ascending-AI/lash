@@ -44,15 +44,11 @@ async fn fixture_with_batching(batching: crate::QueuedWorkBatchingConfig) -> Res
     let double = restate_double(SEED).await;
     let backend = double.lash_backend();
     let calls = Arc::new(AtomicUsize::new(0));
-    let core = LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    )
-    .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(batching)
-    .serve_test_model(counting_provider(Arc::clone(&calls)), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = LashCore::standard_builder(backend)
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(batching)
+        .serve_test_model(counting_provider(Arc::clone(&calls)), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
     Ok(Fixture {
         core,
         _double: double,
@@ -196,17 +192,13 @@ impl HeldDriveFixture {
         )
         .await;
         let calls = Arc::new(AtomicUsize::new(0));
-        let core = LashCore::standard_builder(
-            backend,
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        )
-        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(
-            crate::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_admission(1),
-        )
-        .serve_test_model(counting_provider(Arc::clone(&calls)), mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+        let core = LashCore::standard_builder(backend)
+            .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(
+                crate::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_admission(1),
+            )
+            .serve_test_model(counting_provider(Arc::clone(&calls)), mock_model_spec())
+            .build(crate::testing::runtime_lease_owner())?;
         let session_id = lash_core::SessionId::from(session);
         drop(core.session(session).created().await.open().await?);
         let store = catalog
@@ -436,15 +428,11 @@ async fn a_booted_core_drives_lost_work_on_its_first_reconcile_tick() -> Result<
         .expect("enqueue the input");
 
     let calls = Arc::new(AtomicUsize::new(0));
-    let _core = LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    )
-    .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-    .serve_test_model(counting_provider(Arc::clone(&calls)), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let _core = LashCore::standard_builder(backend)
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+        .serve_test_model(counting_provider(Arc::clone(&calls)), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
 
     tokio::time::timeout(std::time::Duration::from_secs(60), async {
         loop {

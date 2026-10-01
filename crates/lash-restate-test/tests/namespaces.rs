@@ -241,25 +241,21 @@ fn build_core(backend: lash_core::Backend, label: &str, witness: &Arc<Witness>) 
             .build()
             .into_handle()
     };
-    lash::LashCore::standard_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .serve_test_model(provider, model_spec())
-    .tools(Arc::new(CountingTool {
-        witness: Arc::clone(witness),
-    }) as Arc<dyn lash_core::ToolProvider>)
-    .plugin(Arc::new(EnginePluginFactory {
-        witness: Arc::clone(witness),
-    }))
-    .build(lash_core::LeaseOwnerIdentity::opaque(
-        "lash-restate-test",
-        format!("namespaces-{label}"),
-    ))
-    .expect("build the lash core")
+    lash::LashCore::standard_builder(backend)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_model(provider, model_spec())
+        .tools(Arc::new(CountingTool {
+            witness: Arc::clone(witness),
+        }) as Arc<dyn lash_core::ToolProvider>)
+        .plugin(Arc::new(EnginePluginFactory {
+            witness: Arc::clone(witness),
+        }))
+        .build(lash_core::LeaseOwnerIdentity::opaque(
+            "lash-restate-test",
+            format!("namespaces-{label}"),
+        ))
+        .expect("build the lash core")
 }
 
 fn process_worker(core: &lash::LashCore) -> lash::durability::DurableProcessWorker {
@@ -875,7 +871,11 @@ async fn created_session(
     let session_id = session_id.into();
     match core
         .session(session_id.clone())
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            model_spec().wire_model,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
     {
         Ok(_)

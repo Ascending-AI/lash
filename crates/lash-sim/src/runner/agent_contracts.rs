@@ -456,12 +456,19 @@ await task.fail({ reason: "parent observed child failure" });
         ],
         None,
         true,
-        Some(1),
     )
     .await?;
-    let session = crate::open_created_session(&core, "sim-agent-failed-child-contract")
-        .await
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    let session = crate::open_created_session_from(
+        lash::SessionSpec::new(
+            "lash_runtime agent failed child graph",
+            lash::TurnBudget::bounded(1),
+            lash::MaxToolCalls::new(1024),
+        ),
+        &core,
+        "sim-agent-failed-child-contract",
+    )
+    .await
+    .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let events = Arc::new(RuntimeProofRecordingEvents::default());
     let result = engine
         .run_turn(
@@ -613,21 +620,16 @@ async fn facade_final_value_execution_inner(
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
-    let mut builder = lash::LashCore::rlm_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-        factory,
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .serve_test_model(
-        fixed_texts_provider(provider_kind, provider_responses),
-        lash_core::ModelMetadata::builder(provider_kind)
-            .context_window_tokens(200_000)
-            .build()
-            .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
-    );
+    let mut builder = lash::LashCore::rlm_builder(backend, factory)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_model(
+            fixed_texts_provider(provider_kind, provider_responses),
+            lash_core::ModelMetadata::builder(provider_kind)
+                .context_window_tokens(200_000)
+                .build()
+                .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
+        );
     if let Some(tools) = tools {
         builder = builder.tools(tools);
     }
@@ -642,7 +644,7 @@ async fn facade_final_value_execution_inner(
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     engine.serve_processes(&core)?;
-    let session = crate::open_created_session(&core, session_id)
+    let session = crate::open_created_session(provider_kind, &core, session_id)
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let result = engine
@@ -746,12 +748,19 @@ async fn facade_agent_process_execution_with_options(
         provider_responses,
         tools,
         install_subagents,
-        max_turns,
     )
     .await?;
-    let session = crate::open_created_session(&core, session_id)
-        .await
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    let session = crate::open_created_session_from(
+        lash::SessionSpec::new(
+            provider_kind,
+            max_turns.map_or(lash::TurnBudget::Unbounded, lash::TurnBudget::bounded),
+            lash::MaxToolCalls::new(1024),
+        ),
+        &core,
+        session_id,
+    )
+    .await
+    .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let events = Arc::new(RuntimeProofRecordingEvents::default());
     let result = engine
         .run_turn(
@@ -819,9 +828,13 @@ finish({ recovered: true });
         effect_layer,
     )
     .await?;
-    let session = crate::open_created_session(&core, "sim-agent-durable-input-contract")
-        .await
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    let session = crate::open_created_session(
+        "lash_runtime agent durable input",
+        &core,
+        "sim-agent-durable-input-contract",
+    )
+    .await
+    .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let events = Arc::new(RuntimeProofRecordingEvents::default());
     let turn_engine = engine.clone();
     let turn_session = session.clone();
@@ -918,7 +931,6 @@ async fn agent_process_contract_core_with_effect_layer(
         provider_responses,
         tools,
         false,
-        None,
         effect_layer,
     )
     .await
@@ -929,14 +941,12 @@ async fn agent_process_contract_core_with_options(
     provider_responses: Vec<&'static str>,
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
     install_subagents: bool,
-    max_turns: Option<usize>,
 ) -> Result<ContractCore, FixedScriptRunnerError> {
     agent_process_contract_core_with_options_and_effect_layer(
         provider_kind,
         provider_responses,
         tools,
         install_subagents,
-        max_turns,
         None,
     )
     .await
@@ -952,7 +962,6 @@ async fn agent_process_contract_core_with_options_and_effect_layer(
     provider_responses: Vec<&'static str>,
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
     install_subagents: bool,
-    max_turns: Option<usize>,
     effect_layer: Option<Arc<dyn lash_core::testing::EffectLayer>>,
 ) -> Result<ContractCore, FixedScriptRunnerError> {
     let graph_store = Arc::new(lash::tracing::TraceLashlangGraphStore::default());
@@ -967,8 +976,7 @@ async fn agent_process_contract_core_with_options_and_effect_layer(
         &backend,
     )
     .with_lashlang_execution_sink(Arc::clone(&graph_store) as Arc<dyn lash::tracing::TraceSink>);
-    let turn_budget = max_turns.map_or(lash::TurnBudget::Unbounded, lash::TurnBudget::bounded);
-    let mut builder = lash::LashCore::rlm_builder(backend, turn_budget, lash::MaxToolCalls::new(1024), factory)
+    let mut builder = lash::LashCore::rlm_builder(backend, factory)
         // The process surface is rendered from the tool catalogue, so a host that
         // wants `processes.*` inside a cell installs the plugin that supplies it.
         // Without it every fixed process contract's first cell dies on

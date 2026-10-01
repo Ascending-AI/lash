@@ -18,7 +18,7 @@ async fn create_stating_termination(
 ) -> crate::Result<crate::DurableSession> {
     core.session(session_id)
         .create(crate::SessionCreation {
-            spec: lash_core::facade_support::SessionSpec::new().plugin_options(
+            spec: mock_session_spec().plugin_options(
                 lash_core::PluginOptions::typed(
                     crate::rlm::RLM_PROTOCOL_PLUGIN_ID,
                     crate::rlm::RlmCreateExtras {
@@ -28,7 +28,7 @@ async fn create_stating_termination(
                 )
                 .expect("the typed RLM session options must serialize"),
             ),
-            ..Default::default()
+            parent: None,
         })
         .await
 }
@@ -456,8 +456,8 @@ async fn create_options_naming_a_dialect_fail_during_session_creation() -> Resul
     let error = match core
         .session("rlm-unknown-dialect")
         .create(crate::SessionCreation {
-            spec: lash_core::facade_support::SessionSpec::new().plugin_options(options),
-            ..Default::default()
+            spec: mock_session_spec().plugin_options(options),
+            parent: None,
         })
         .await
     {
@@ -849,7 +849,7 @@ async fn the_prompt_is_recorded_config_its_owners_commands_change() -> Result<()
     };
     core.session("rlm-prompt-config")
         .create(crate::SessionCreation {
-            spec: lash_core::facade_support::SessionSpec::new().plugin_options(
+            spec: mock_session_spec().plugin_options(
                 lash_core::PluginOptions::typed(
                     crate::rlm::RLM_PROTOCOL_PLUGIN_ID,
                     crate::rlm::RlmCreateExtras {
@@ -859,7 +859,7 @@ async fn the_prompt_is_recorded_config_its_owners_commands_change() -> Result<()
                 )
                 .expect("the typed RLM session options must serialize"),
             ),
-            ..Default::default()
+            parent: None,
         })
         .await?;
     let session = core.session("rlm-prompt-config").open().await?;

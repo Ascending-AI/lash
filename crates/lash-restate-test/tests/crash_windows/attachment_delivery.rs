@@ -448,25 +448,21 @@ fn core(harness: &Harness) -> lash::LashCore {
         })
         .build()
         .into_handle();
-    let core = lash::LashCore::standard_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-    .serve_test_model(
-        provider,
-        lash::ModelMetadata::builder("attachment-delivery")
-            .context_window_tokens(100_000)
-            .build()
-            .unwrap(),
-    )
-    .build(lash_core::LeaseOwnerIdentity::opaque(
-        "attachment-delivery",
-        "test",
-    ))
-    .unwrap();
+    let core = lash::LashCore::standard_builder(backend)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .serve_test_model(
+            provider,
+            lash::ModelMetadata::builder("attachment-delivery")
+                .context_window_tokens(100_000)
+                .build()
+                .unwrap(),
+        )
+        .build(lash_core::LeaseOwnerIdentity::opaque(
+            "attachment-delivery",
+            "test",
+        ))
+        .unwrap();
     let worker =
         lash_core_worker::DurableProcessWorker::new(core.durable_process_worker_config().unwrap())
             .unwrap();
@@ -479,7 +475,11 @@ fn core(harness: &Harness) -> lash::LashCore {
 
 async fn put(core: &lash::LashCore, harness: &Harness) -> lash_core::AttachmentRef {
     core.session("attachment-upload")
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "attachment-delivery",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
         .unwrap();
     lash_core::facade_support::RuntimeAttachmentStore::new_with_clock(
@@ -518,7 +518,13 @@ async fn start_law(storage: Storage, live: bool) {
         let mut create_request = lash_core::SessionCreateRequest::root(
             lash_core::SessionStartPoint::Empty,
             Default::default(),
-        );
+        )
+        .with_spec(&lash::SessionSpec::new(
+            "attachment-delivery",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        ))
+        .expect("a root spec");
         create_request.session_id = None;
         let start_key_bytes = run_tag("start-input");
         let start_key = lash_core::StartKey::for_host(&start_key_bytes);

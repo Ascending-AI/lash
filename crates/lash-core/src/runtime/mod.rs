@@ -342,7 +342,7 @@ pub use process::{
 pub use process::{ConsumerHold, PinnedTriggerDelivery, SessionTurnOutcome, TriggerDeliveryPin};
 pub use process::{
     HostStartAdmission, ProcessStartStores, RegisteredProcessStart, SessionTurnAdmission,
-    SessionTurnDefaultMint, register_process_start,
+    register_process_start,
 };
 pub use queued_drain_policy::default_queued_drain_policy;
 pub use queued_drain_policy::{

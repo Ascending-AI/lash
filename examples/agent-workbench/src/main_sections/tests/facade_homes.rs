@@ -138,11 +138,15 @@ fn workbench_plugin_observes_session_config_policy_transition() {
             .plugin(plugin)
             .build(crate::test_core_owner())
             .expect("build config change workbench core");
-        let session = crate::created_session(&core, "workbench-config-change-session")
-            .await
-            .open()
-            .await
-            .expect("open config change session");
+        let session = crate::created_session_from(
+            &core,
+            crate::tests::test_session_defaults().model("workbench-model-before"),
+            "workbench-config-change-session",
+        )
+        .await
+        .open()
+        .await
+        .expect("open config change session");
         let patched_model = lash::ModelMetadata::builder("workbench-model-after")
             .context_window_tokens(8_192)
             .build()
@@ -225,11 +229,15 @@ fn workbench_context_transform_shapes_the_prompt_the_provider_receives() {
             .plugin(plugin)
             .build(crate::test_core_owner())
             .expect("build context transform workbench core");
-        let session = crate::created_session(&core, "workbench-context-transform-session")
-            .await
-            .open()
-            .await
-            .expect("open context transform session");
+        let session = crate::created_session_from(
+            &core,
+            crate::tests::test_session_defaults().model("workbench-context-transform-model"),
+            "workbench-context-transform-session",
+        )
+        .await
+        .open()
+        .await
+        .expect("open context transform session");
         session
             .send(lash::TurnInput::text("shape my context"))
             .require_finish()

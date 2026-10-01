@@ -165,11 +165,12 @@ async fn ambient_traffic_folds_into_the_session_without_a_turn_or_a_reply() {
         .await
         .expect("read unfolded context");
     assert_eq!(unfolded.len(), 2, "both ambient lines wait: {unfolded:?}");
-    let session = crate::tests::created_session(bot.core(), session_id(&channel))
-        .await
-        .open()
-        .await
-        .expect("open channel session");
+    let session =
+        crate::tests::created_session(bot.core(), bot.session_spec(), session_id(&channel))
+            .await
+            .open()
+            .await
+            .expect("open channel session");
     assert!(
         session
             .durable()
@@ -311,11 +312,12 @@ async fn each_channel_gets_its_own_session_and_neither_sees_the_others_context()
         1,
         "the other channel's queued context is untouched"
     );
-    let public_session = crate::tests::created_session(bot.core(), session_id(&public))
-        .await
-        .open()
-        .await
-        .expect("open public session");
+    let public_session =
+        crate::tests::created_session(bot.core(), bot.session_spec(), session_id(&public))
+            .await
+            .open()
+            .await
+            .expect("open public session");
     assert!(
         public_session
             .durable()
@@ -345,11 +347,12 @@ async fn a_thread_forks_on_its_first_reply_and_inherits_uncommitted_root_context
         bot.ingest(envelope, None).await.expect("fold thread root");
     }
 
-    let channel_session = crate::tests::created_session(bot.core(), session_id(&channel))
-        .await
-        .open()
-        .await
-        .expect("open channel session");
+    let channel_session =
+        crate::tests::created_session(bot.core(), bot.session_spec(), session_id(&channel))
+            .await
+            .open()
+            .await
+            .expect("open channel session");
     let channel_head_before = channel_session
         .read_view()
         .session_graph()
@@ -1254,12 +1257,15 @@ async fn an_ambient_thread_reply_creates_the_fork_and_waits_for_a_mention() {
         DeliveryOutcome::Folded { .. }
     ));
     assert_eq!(script.calls(), 0, "ambient thread traffic spends no token");
-    let thread =
-        crate::tests::created_session(bot.core(), thread_session_id(&channel, &root.to_string()))
-            .await
-            .open()
-            .await
-            .expect("open fork created by first reply");
+    let thread = crate::tests::created_session(
+        bot.core(),
+        bot.session_spec(),
+        thread_session_id(&channel, &root.to_string()),
+    )
+    .await
+    .open()
+    .await
+    .expect("open fork created by first reply");
     assert!(
         thread
             .durable()
@@ -1296,11 +1302,12 @@ async fn an_ambient_thread_reply_creates_the_fork_and_waits_for_a_mention() {
 }
 
 async fn channel_session_text(bot: &crate::bot::channel::ChannelBot, channel: &str) -> String {
-    let session = crate::tests::created_session(bot.core(), session_id(channel))
-        .await
-        .open()
-        .await
-        .expect("open channel session");
+    let session =
+        crate::tests::created_session(bot.core(), bot.session_spec(), session_id(channel))
+            .await
+            .open()
+            .await
+            .expect("open channel session");
     session
         .read_view()
         .chronological_projection()

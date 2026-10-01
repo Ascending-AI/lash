@@ -7,27 +7,19 @@ const SEED: u64 = 0xc0e1_ca9e;
 /// what runs a send, where the SQLite engine ran it inline.
 async fn double_standard_core() -> (LashCore, lash_restate_test::RestateTestBackend) {
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())
-    .expect("standard core over the double");
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())
+        .expect("standard core over the double");
     (core, double)
 }
 
 #[tokio::test]
 pub(super) async fn turn_stream_finish_returns_committed_assistant_prose() -> Result<()> {
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(semantic_group_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(semantic_group_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("turn-stream-last-group")
         .created()
@@ -54,13 +46,9 @@ pub(super) async fn turn_stream_finish_returns_committed_assistant_prose() -> Re
 pub(super) async fn turn_run_collects_activities_and_returns_committed_assistant_prose()
 -> Result<()> {
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(semantic_group_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(semantic_group_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("turn-run-last-group")
         .created()
@@ -85,13 +73,9 @@ pub(super) async fn turn_run_collects_activities_and_returns_committed_assistant
 #[tokio::test]
 pub(super) async fn retry_status_streams_as_semantic_turn_event() -> Result<()> {
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(retry_once_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(retry_once_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("retry-status").created().await.open().await?;
     let events = RecordingEvents::default();
 
@@ -146,16 +130,12 @@ pub(super) async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Re
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        checkpoint_gated_provider(entered_tx, release_rx),
-        mock_model_spec(),
-    )
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(
+            checkpoint_gated_provider(entered_tx, release_rx),
+            mock_model_spec(),
+        )
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("queued-input").created().await.open().await?;
     let events = Arc::new(RecordingEvents::default());
     let turn_session = session.clone();
@@ -234,13 +214,9 @@ pub(super) async fn send_cancel_preserves_explicit_origin_hint() -> Result<()> {
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(provider, mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(provider, mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("cancel-with-origin")
         .created()
@@ -289,14 +265,10 @@ pub(super) async fn an_input_cancel_stops_its_inflight_turn() -> Result<()> {
         .build()
         .into_handle();
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(provider, mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())
-    .expect("core");
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(provider, mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())
+        .expect("core");
     let session = core
         .session("cancel-inflight")
         .created()
@@ -409,16 +381,12 @@ pub(super) async fn next_turn_notification_during_a_live_turn_has_bounded_hydrat
         .build()
         .into_handle();
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(provider, mock_model_spec())
-    .plugin(Arc::new(QueuedWorkHydrationProbeFactory {
-        builds: Arc::clone(&builds),
-    }))
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(provider, mock_model_spec())
+        .plugin(Arc::new(QueuedWorkHydrationProbeFactory {
+            builds: Arc::clone(&builds),
+        }))
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("queued-work-live-lease")
         .created()
@@ -480,14 +448,10 @@ pub(super) async fn cancelling_both_sends_stops_the_running_root_and_withdraws_t
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(provider, mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())
-    .expect("core");
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(provider, mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())
+        .expect("core");
     let session = core
         .session("cancel-lock-queue")
         .created()
@@ -537,14 +501,10 @@ pub(super) async fn an_input_cancel_reaches_a_send_through_a_separately_opened_h
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(provider, mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())
-    .expect("core");
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(provider, mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())
+        .expect("core");
     let handle_a = core.session("cancel-scope").created().await.open().await?;
     let handle_b = core.session("cancel-scope").created().await.open().await?;
 
@@ -582,14 +542,10 @@ pub(super) async fn an_input_cancel_commits_the_request_it_was_placed_as() -> Re
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(provider, mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())
-    .expect("core");
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(provider, mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())
+        .expect("core");
     let session = core
         .session("provider-abort-evidence")
         .created()
@@ -633,14 +589,10 @@ pub(super) async fn a_session_cancel_reaches_a_sent_input_its_waiter_drives() ->
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(provider, mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())
-    .expect("core");
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(provider, mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())
+        .expect("core");
     let session = core
         .session("cancel-queued-drain")
         .created()
@@ -691,13 +643,9 @@ pub(super) async fn assert_session_turn_cancel_disposition(
     let double = restate_double(SEED).await;
     let backend = double.lash_backend();
     let store_factory = backend.session_store_factory();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(provider, mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(provider, mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).created().await.open().await?;
     let handle = session
         .send(TurnInput::text("hang until session cancellation"))
@@ -850,13 +798,9 @@ pub(super) async fn active_steer_after_last_call_defers_to_next_turn_first_call(
         .build()
         .into_handle();
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(provider, mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(provider, mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("active-steer-interrupt-cancel")
         .created()
@@ -998,14 +942,10 @@ pub(super) async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<
         .build()
         .into_handle();
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(provider, mock_model_spec())
-    .tools(Arc::new(AppTools))
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(provider, mock_model_spec())
+        .tools(Arc::new(AppTools))
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("accepted-active-steer-interrupt")
         .created()
@@ -1136,14 +1076,10 @@ pub(super) async fn checkpoint_admitted_steer_cancel_reaches_its_root() -> Resul
         .build()
         .into_handle();
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(provider, mock_model_spec())
-    .tools(Arc::new(AppTools))
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(provider, mock_model_spec())
+        .tools(Arc::new(AppTools))
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("checkpoint-admitted-steer-cancel")
         .created()
@@ -1391,14 +1327,10 @@ pub(super) async fn run_collects_ordered_assistant_prose_activity() -> Result<()
 pub(super) async fn session_catalog_and_actual_turn_resolve_the_identical_contract() -> Result<()> {
     let tools = ContractRecordingTools::default();
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(tool_roundtrip_provider(), mock_model_spec())
-    .tools(Arc::new(tools.clone()))
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(tool_roundtrip_provider(), mock_model_spec())
+        .tools(Arc::new(tools.clone()))
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("catalog-agreement")
         .created()
@@ -1500,14 +1432,10 @@ pub(super) async fn private_run_collector_records_ordered_activities() -> Result
 pub(super) async fn turn_event_fanout_streams_to_collector_and_live_sink() -> Result<()> {
     let live = Arc::new(RecordingEvents::default());
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(tool_roundtrip_provider(), mock_model_spec())
-    .tools(Arc::new(AppTools))
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(tool_roundtrip_provider(), mock_model_spec())
+        .tools(Arc::new(AppTools))
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("fanout-tool-events")
         .created()

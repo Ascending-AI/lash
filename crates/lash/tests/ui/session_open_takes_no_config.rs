@@ -6,7 +6,11 @@
 fn open_takes_no_model(core: lash::LashCore, model: lash::ModelKey) {
     let _ = core
         .session("stated-at-open")
-        .session_spec(lash::SessionSpec::new().model(model))
+        .session_spec(lash::SessionSpec::new(
+            model,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        ))
         .open();
 }
 

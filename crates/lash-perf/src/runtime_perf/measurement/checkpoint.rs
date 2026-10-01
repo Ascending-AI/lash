@@ -846,7 +846,10 @@ pub(crate) async fn run_once_embed(
             let (core, store_factory, turn_entry) = build_embed_core(scenario).await?;
             let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
             let session = core
-                .create_and_open_session(session_id.clone(), lash::SessionCreation::default())
+                .create_and_open_session(
+                    session_id.clone(),
+                    lash::SessionCreation::root(core.session_spec()),
+                )
                 .await
                 .with_context(|| format!("open embed session for {}", scenario.name()))?;
             let store = store_factory

@@ -470,8 +470,6 @@ finish("done via Restate E2E");
         );
         let core = LashCore::rlm_builder(
             lash_backend,
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
             factory,
         )
             .serve_test_model(provider, lash::ModelMetadata::builder("mock-model")

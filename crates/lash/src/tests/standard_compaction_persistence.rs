@@ -222,21 +222,26 @@ async fn pressure_compaction_opens_a_summary_frame_the_turn_continues_in() -> Re
         response_with_usage("after response", 1),
     ]);
     let window_probe = Arc::new(WindowProbe::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        provider,
-        model_spec("standard-compaction-model", None, 40_000),
-    )
-    .plugin(Arc::new(
-        lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
-    ))
-    .plugin(window_probe.plugin())
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).created().await.open().await?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(
+            provider,
+            model_spec("standard-compaction-model", None, 40_000),
+        )
+        .plugin(Arc::new(
+            lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
+        ))
+        .plugin(window_probe.plugin())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(session_id)
+        .created_with(session_spec_for(&model_spec(
+            "standard-compaction-model",
+            None,
+            40_000,
+        )))
+        .await
+        .open()
+        .await?;
     session
         .send(TurnInput::text("first request"))
         .id("standard-compaction-pressure-first")
@@ -324,25 +329,30 @@ async fn pressure_compaction_opens_a_summary_frame_the_turn_continues_in() -> Re
 async fn explicit_compaction_opens_a_summary_frame_the_next_turn_continues_in() -> Result<()> {
     let session_id = "standard-compaction-explicit-frame";
     let backend = double_backend().await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        standard_compaction_provider(vec![
-            response_with_usage("first response", 1),
-            response_with_usage("second response", 1),
-            response_with_usage("explicit summary", 1),
-            response_with_usage("after response", 1),
-        ]),
-        model_spec("standard-compaction-model", None, 40_000),
-    )
-    .plugin(Arc::new(
-        lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
-    ))
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).created().await.open().await?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(
+            standard_compaction_provider(vec![
+                response_with_usage("first response", 1),
+                response_with_usage("second response", 1),
+                response_with_usage("explicit summary", 1),
+                response_with_usage("after response", 1),
+            ]),
+            model_spec("standard-compaction-model", None, 40_000),
+        )
+        .plugin(Arc::new(
+            lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
+        ))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(session_id)
+        .created_with(session_spec_for(&model_spec(
+            "standard-compaction-model",
+            None,
+            40_000,
+        )))
+        .await
+        .open()
+        .await?;
     for (turn_id, text) in [
         ("standard-compaction-explicit-one", "first request"),
         ("standard-compaction-explicit-two", "second request"),
@@ -394,20 +404,25 @@ async fn overflow_recovery_opens_a_summary_frame_the_recovered_turn_continues_in
         response_with_usage("recovery summary", 1),
         response_with_usage("verdict response", 1),
     ]);
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        provider,
-        model_spec("standard-compaction-model", None, 200_000),
-    )
-    .plugin(Arc::new(
-        lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
-    ))
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).created().await.open().await?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(
+            provider,
+            model_spec("standard-compaction-model", None, 200_000),
+        )
+        .plugin(Arc::new(
+            lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
+        ))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(session_id)
+        .created_with(session_spec_for(&model_spec(
+            "standard-compaction-model",
+            None,
+            200_000,
+        )))
+        .await
+        .open()
+        .await?;
     let overflow = session
         .send(TurnInput::text("summarize the report"))
         .id("standard-compaction-recovery-overflow")
@@ -552,20 +567,25 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
     }
     responses.push(response_with_usage("answer after the cap", 1));
     let (provider, calls) = standard_compaction_provider_counted(responses);
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        provider,
-        model_spec("standard-compaction-model", None, 200_000),
-    )
-    .plugin(Arc::new(
-        lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
-    ))
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).created().await.open().await?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(
+            provider,
+            model_spec("standard-compaction-model", None, 200_000),
+        )
+        .plugin(Arc::new(
+            lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
+        ))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(session_id)
+        .created_with(session_spec_for(&model_spec(
+            "standard-compaction-model",
+            None,
+            200_000,
+        )))
+        .await
+        .open()
+        .await?;
     let overflow = session
         .send(TurnInput::text("summarize the report"))
         .id("standard-compaction-exhausted-overflow")
@@ -683,20 +703,25 @@ async fn overflow_recovery_starts_a_frame_without_a_reload() -> Result<()> {
         response_with_usage("recovery summary", 1),
         response_with_usage("verdict response", 1),
     ]);
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.into(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        provider,
-        model_spec("standard-compaction-model", None, 200_000),
-    )
-    .plugin(Arc::new(
-        lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
-    ))
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).created().await.open().await?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.into()))
+        .serve_test_model(
+            provider,
+            model_spec("standard-compaction-model", None, 200_000),
+        )
+        .plugin(Arc::new(
+            lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
+        ))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(session_id)
+        .created_with(session_spec_for(&model_spec(
+            "standard-compaction-model",
+            None,
+            200_000,
+        )))
+        .await
+        .open()
+        .await?;
     let overflow = session
         .send(TurnInput::text("summarize the report"))
         .id("standard-compaction-residency-overflow")
@@ -873,20 +898,25 @@ async fn repeated_admin_compactions_distinguish_changed_snapshots() -> Result<()
             .map(|summary| response_with_usage(summary, 1)),
     );
     let backend = double_backend().await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        standard_compaction_provider(responses),
-        model_spec("standard-compaction-model", None, 40_000),
-    )
-    .plugin(Arc::new(
-        lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
-    ))
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).created().await.open().await?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(
+            standard_compaction_provider(responses),
+            model_spec("standard-compaction-model", None, 40_000),
+        )
+        .plugin(Arc::new(
+            lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
+        ))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(session_id)
+        .created_with(session_spec_for(&model_spec(
+            "standard-compaction-model",
+            None,
+            40_000,
+        )))
+        .await
+        .open()
+        .await?;
     for (turn_id, text) in [
         ("standard-compaction-same-parent-one", "first request"),
         ("standard-compaction-same-parent-two", "second request"),
@@ -958,21 +988,26 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         response_with_usage("threshold response", 1),
         response_with_usage("durable summary", 1),
     ]);
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        provider,
-        model_spec("standard-compaction-model", None, 40_000),
-    )
-    .plugin(Arc::new(
-        lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
-    ))
-    .trace_jsonl_path(trace_path.clone())
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).created().await.open().await?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(
+            provider,
+            model_spec("standard-compaction-model", None, 40_000),
+        )
+        .plugin(Arc::new(
+            lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
+        ))
+        .trace_jsonl_path(trace_path.clone())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(session_id)
+        .created_with(session_spec_for(&model_spec(
+            "standard-compaction-model",
+            None,
+            40_000,
+        )))
+        .await
+        .open()
+        .await?;
 
     session
         .send(TurnInput::text("first request"))
@@ -1068,22 +1103,22 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
 
     drop(session);
     drop(core);
-    let reopened_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        standard_compaction_provider(vec![response_with_usage("response after reopen", 1)]),
-        model_spec("standard-compaction-model", None, 40_000),
-    )
-    .plugin(Arc::new(
-        lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
-    ))
-    .build(crate::testing::runtime_lease_owner())?;
+    let reopened_core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(
+            standard_compaction_provider(vec![response_with_usage("response after reopen", 1)]),
+            model_spec("standard-compaction-model", None, 40_000),
+        )
+        .plugin(Arc::new(
+            lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
+        ))
+        .build(crate::testing::runtime_lease_owner())?;
     let reopened_session = reopened_core
         .session(session_id)
-        .created()
+        .created_with(session_spec_for(&model_spec(
+            "standard-compaction-model",
+            None,
+            40_000,
+        )))
         .await
         .open()
         .await?;
@@ -1113,27 +1148,32 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
 async fn repeated_compactions_use_distinct_physical_parents() -> Result<()> {
     let session_id = "standard-compaction-repeated-compactions";
     let backend = double_backend().await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        standard_compaction_provider(vec![
-            response_with_usage("first response", 1),
-            response_with_usage("second response", 1),
-            response_with_usage("first summary", 1),
-            response_with_usage("third response", 1),
-            response_with_usage("fourth response", 1),
-            response_with_usage("second summary", 1),
-        ]),
-        model_spec("standard-compaction-model", None, 40_000),
-    )
-    .plugin(Arc::new(
-        lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
-    ))
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).created().await.open().await?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(
+            standard_compaction_provider(vec![
+                response_with_usage("first response", 1),
+                response_with_usage("second response", 1),
+                response_with_usage("first summary", 1),
+                response_with_usage("third response", 1),
+                response_with_usage("fourth response", 1),
+                response_with_usage("second summary", 1),
+            ]),
+            model_spec("standard-compaction-model", None, 40_000),
+        )
+        .plugin(Arc::new(
+            lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
+        ))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(session_id)
+        .created_with(session_spec_for(&model_spec(
+            "standard-compaction-model",
+            None,
+            40_000,
+        )))
+        .await
+        .open()
+        .await?;
 
     for (turn_id, text) in [
         ("standard-compaction-repeat-one", "first request"),
@@ -1195,24 +1235,29 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
             .expect("the backend runs on its held double")
             .stores(),
     );
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        standard_compaction_provider(vec![
-            response_with_usage("first response", 60_000),
-            response_with_usage("second response", 1),
-        ]),
-        model_spec("attachment-prune-model", None, 100_000),
-    )
-    .plugin(Arc::new(
-        lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
-    ))
-    .trace_jsonl_path(trace_path.clone())
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).created().await.open().await?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(
+            standard_compaction_provider(vec![
+                response_with_usage("first response", 60_000),
+                response_with_usage("second response", 1),
+            ]),
+            model_spec("attachment-prune-model", None, 100_000),
+        )
+        .plugin(Arc::new(
+            lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
+        ))
+        .trace_jsonl_path(trace_path.clone())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(session_id)
+        .created_with(session_spec_for(&model_spec(
+            "attachment-prune-model",
+            None,
+            100_000,
+        )))
+        .await
+        .open()
+        .await?;
 
     session
         .send(TurnInput::text("remember this image").with_attachment(
@@ -1325,21 +1370,26 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
                 .chain([response_with_usage(&format!("response {ordinal}"), 20_000)])
         })
         .collect();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        standard_compaction_provider(responses),
-        model_spec("plugin-message-id-model", None, 40_000),
-    )
-    .plugin(Arc::new(
-        lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
-    ))
-    .plugin(Arc::new(injection_plugin))
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).created().await.open().await?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(
+            standard_compaction_provider(responses),
+            model_spec("plugin-message-id-model", None, 40_000),
+        )
+        .plugin(Arc::new(
+            lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
+        ))
+        .plugin(Arc::new(injection_plugin))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(session_id)
+        .created_with(session_spec_for(&model_spec(
+            "plugin-message-id-model",
+            None,
+            40_000,
+        )))
+        .await
+        .open()
+        .await?;
 
     for ordinal in 0..=THRESHOLD_TURNS {
         session
@@ -1399,7 +1449,16 @@ async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<(
             model_spec("standard-compaction-rlm-model", None, 40_000),
         )
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).created().await.open().await?;
+    let session = core
+        .session(session_id)
+        .created_with(session_spec_for(&model_spec(
+            "standard-compaction-rlm-model",
+            None,
+            40_000,
+        )))
+        .await
+        .open()
+        .await?;
 
     let primed = session
         .send(TurnInput::text("prime durable history"))
@@ -1511,21 +1570,26 @@ async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Re
             })
         })),
     );
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        standard_compaction_provider(vec![
-            response_with_usage("first response", 1),
-            response_with_usage("second response", 1),
-        ]),
-        model_spec("after-turn-model", None, 40_000),
-    )
-    .plugin(Arc::new(plugin))
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).created().await.open().await?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(
+            standard_compaction_provider(vec![
+                response_with_usage("first response", 1),
+                response_with_usage("second response", 1),
+            ]),
+            model_spec("after-turn-model", None, 40_000),
+        )
+        .plugin(Arc::new(plugin))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(session_id)
+        .created_with(session_spec_for(&model_spec(
+            "after-turn-model",
+            None,
+            40_000,
+        )))
+        .await
+        .open()
+        .await?;
     session
         .send(TurnInput::text("first request"))
         .id("enqueue-first")
@@ -1650,21 +1714,26 @@ async fn mid_turn_graph_append_never_replicates_the_read_tail_durably() -> Resul
             })
         })),
     );
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        standard_compaction_provider(vec![
-            response_with_usage("first response", 1),
-            response_with_usage("second response", 1),
-        ]),
-        model_spec("mid-turn-model", None, 40_000),
-    )
-    .plugin(Arc::new(plugin))
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).created().await.open().await?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(
+            standard_compaction_provider(vec![
+                response_with_usage("first response", 1),
+                response_with_usage("second response", 1),
+            ]),
+            model_spec("mid-turn-model", None, 40_000),
+        )
+        .plugin(Arc::new(plugin))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(session_id)
+        .created_with(session_spec_for(&model_spec(
+            "mid-turn-model",
+            None,
+            40_000,
+        )))
+        .await
+        .open()
+        .await?;
     session
         .send(TurnInput::text("first request"))
         .id("append-first")
@@ -1789,21 +1858,26 @@ async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -
             })
         })),
     );
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        standard_compaction_provider(vec![
-            response_with_usage("first response", 1),
-            response_with_usage("second response", 1),
-        ]),
-        model_spec("same-turn-model", None, 40_000),
-    )
-    .plugin(Arc::new(plugin))
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).created().await.open().await?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(
+            standard_compaction_provider(vec![
+                response_with_usage("first response", 1),
+                response_with_usage("second response", 1),
+            ]),
+            model_spec("same-turn-model", None, 40_000),
+        )
+        .plugin(Arc::new(plugin))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(session_id)
+        .created_with(session_spec_for(&model_spec(
+            "same-turn-model",
+            None,
+            40_000,
+        )))
+        .await
+        .open()
+        .await?;
     // Before the fix this turn failed its own final commit:
     // `store head revision conflict: expected 0, actual 1`.
     session
@@ -1918,18 +1992,23 @@ async fn after_turn_enqueue_persists_the_reply_exactly_once() -> Result<()> {
             })
         })),
     );
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        standard_compaction_provider(vec![response_with_usage("first response", 1)]),
-        model_spec("after-turn-model", None, 40_000),
-    )
-    .plugin(Arc::new(plugin))
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).created().await.open().await?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(
+            standard_compaction_provider(vec![response_with_usage("first response", 1)]),
+            model_spec("after-turn-model", None, 40_000),
+        )
+        .plugin(Arc::new(plugin))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(session_id)
+        .created_with(session_spec_for(&model_spec(
+            "after-turn-model",
+            None,
+            40_000,
+        )))
+        .await
+        .open()
+        .await?;
     session
         .send(TurnInput::text("first request"))
         .id("enqueue-once")
@@ -2021,20 +2100,25 @@ async fn admin_compaction_commit_failure_applies_once_on_the_engines_retry() -> 
         // A spare the retry must not ask for: its summary is journaled.
         response_with_usage("failed-then-summarized", 1),
     ]);
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.into(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        provider,
-        model_spec("standard-compaction-model", None, 40_000),
-    )
-    .plugin(Arc::new(
-        lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
-    ))
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session(session_id).created().await.open().await?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.into()))
+        .serve_test_model(
+            provider,
+            model_spec("standard-compaction-model", None, 40_000),
+        )
+        .plugin(Arc::new(
+            lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
+        ))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(session_id)
+        .created_with(session_spec_for(&model_spec(
+            "standard-compaction-model",
+            None,
+            40_000,
+        )))
+        .await
+        .open()
+        .await?;
     session
         .send(TurnInput::text("first request"))
         .id("standard-compaction-commit-failure-one")

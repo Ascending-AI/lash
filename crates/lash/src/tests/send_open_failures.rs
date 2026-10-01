@@ -39,12 +39,8 @@ const SEED: u64 = 0x4597_0101;
 const ANSWERS_WITHIN: std::time::Duration = std::time::Duration::from_secs(60);
 
 fn builder(backend: lash_core::Backend) -> crate::core::LashCoreBuilder {
-    explicit_ephemeral_facets(LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
+    explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .serve_test_model(mock_provider(), mock_model_spec())
 }
 
 /// The error a send to `id` is answered with, within [`ANSWERS_WITHIN`].
@@ -856,6 +852,8 @@ mod typed_open {
                                 lash_core::SessionStartPoint::Empty,
                                 lash_core::PluginOptions::default(),
                             )
+                            .with_spec(&mock_session_spec())
+                            .expect("a root spec")
                             .with_session_id(CHILD),
                         ),
                         turn_input: Box::new(TurnInput::text("run the committed child")),

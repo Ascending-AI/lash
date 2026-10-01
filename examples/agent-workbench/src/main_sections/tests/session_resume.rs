@@ -224,6 +224,7 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        session_defaults: crate::tests::test_session_defaults(),
         core: resumed_core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&resumed_store_factory),

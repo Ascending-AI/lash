@@ -242,12 +242,6 @@ fn held_or_ended(
     }
 }
 
-/// Mints the default model binding of a host session-turn start that names
-/// no model: the registering core's default selection, resolved by its
-/// models now.
-pub type SessionTurnDefaultMint =
-    Arc<dyn Fn() -> Result<crate::ModelConfig, RuntimeEffectControllerError> + Send + Sync>;
-
 /// Admit a host session-turn start before staging writes. `fresh` is false
 /// when its key already retains a process, whose model is never revalidated.
 pub type SessionTurnAdmission =
@@ -262,9 +256,6 @@ pub struct HostStartAdmission {
     /// checked against. `None` refuses every host-granted start: nothing can
     /// prove its session live.
     pub session_catalog: Option<Arc<dyn crate::store::RuntimeStore>>,
-    /// Mints the default binding of a host session-turn start that names no
-    /// model (FIG-4531). `None` records none.
-    pub session_turn_default: Option<SessionTurnDefaultMint>,
     /// Validates the child's inherited reasoning before publishing or
     /// acquiring its environment, inside the recorded start admission.
     pub session_turn_admission: Option<SessionTurnAdmission>,
@@ -274,11 +265,6 @@ impl HostStartAdmission {
     /// The catalog of the admission `host_start` carries, if any.
     pub fn catalog(host_start: Option<&Self>) -> Option<&dyn crate::store::RuntimeStore> {
         host_start.and_then(|host_start| host_start.session_catalog.as_deref())
-    }
-
-    /// The default mint of the admission `host_start` carries, if any.
-    pub fn default_mint(host_start: Option<&Self>) -> Option<&SessionTurnDefaultMint> {
-        host_start.and_then(|host_start| host_start.session_turn_default.as_ref())
     }
 
     /// The host session-turn admission, if this executor carries one.
@@ -302,10 +288,6 @@ pub struct ProcessStartStores<'a> {
     /// checked against, inside the recorded admission this registration
     /// runs in. `None` refuses a host-granted start.
     pub session_catalog: Option<&'a dyn crate::store::RuntimeStore>,
-    /// Mints the default binding of a host session-turn start that names no
-    /// model, inside the recorded admission this registration runs in
-    /// (FIG-4531). `None` records none.
-    pub session_turn_default: Option<&'a SessionTurnDefaultMint>,
     /// A host's child validation and environment publication, executed
     /// before staging and skipped by journal replay.
     pub session_turn_admission: Option<&'a SessionTurnAdmission>,
@@ -418,7 +400,6 @@ pub async fn register_process_start(
             .is_none();
         admit(fresh).await?;
     }
-    let registration = record_session_turn_default(stores, &start_key, registration).await?;
     match stage_and_register(stores, &start_key, registration, observers).await {
         Ok(registered) => {
             if let Some(ports) = stores.ports() {
@@ -439,47 +420,6 @@ pub async fn register_process_start(
             Err(error)
         }
     }
-}
-
-/// Record the default binding of a host session-turn start that names no
-/// model, when no start is retained under its key (FIG-4531).
-///
-/// The binding is derived, not stated, so it is minted here, inside the
-/// start's recorded admission, and never ahead of the command: the command a
-/// journal records carries the request as the host stated it, a replay reads
-/// the recorded registration instead of minting again, and a retry that
-/// finds its start retained mints nothing and is compared as stated
-/// ([`ProcessInput::states_same_start_as`]). Only the first registration
-/// under a key consults the catalog.
-async fn record_session_turn_default(
-    stores: &ProcessStartStores<'_>,
-    start_key: &StartKey,
-    mut registration: ProcessRegistration,
-) -> Result<ProcessRegistration, RuntimeEffectControllerError> {
-    let Some(mint) = stores.session_turn_default else {
-        return Ok(registration);
-    };
-    let ProcessInput::SessionTurn { create_request, .. } = registration.input.as_ref() else {
-        return Ok(registration);
-    };
-    if create_request.names_model() || create_request.default_model().is_some() {
-        return Ok(registration);
-    }
-    if stores
-        .registry
-        .get_process_by_start_key(start_key)
-        .await?
-        .is_some()
-    {
-        return Ok(registration);
-    }
-    let minted = mint()?;
-    let mut input = registration.input.as_ref().clone();
-    if let ProcessInput::SessionTurn { create_request, .. } = &mut input {
-        create_request.record_default_model(Some(minted));
-    }
-    registration.input = Arc::new(input);
-    Ok(registration)
 }
 
 /// Refuse a root start whose host session-lookup grant names a session the

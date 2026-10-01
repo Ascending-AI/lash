@@ -19,19 +19,16 @@ pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, Fi
         runtime_provider_components(OPENAI_COMPATIBLE, &transport)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let engine = crate::backend::SimEngine::new(RUNTIME_PROOF_SEED).await?;
-    let core = lash::LashCore::standard_builder(
-        engine.backend(),
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .serve_test_model(provider_handle, model)
-    .build(crate::sim_process_owner())
-    .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let session = crate::open_created_session(&core, "sim-runtime-session")
-        .await
+    let core = lash::LashCore::standard_builder(engine.backend())
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_model(provider_handle, model.clone())
+        .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    let session =
+        crate::open_created_session(model.wire_model.clone(), &core, "sim-runtime-session")
+            .await
+            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let output = engine
         .run_turn(
             &session,
@@ -133,20 +130,16 @@ pub(super) async fn run_live_turn_facts(
         runtime_provider_components(provider_kind, &transport)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let engine = crate::backend::SimEngine::new(seed).await?;
-    let core = lash::LashCore::standard_builder(
-        engine.backend(),
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .serve_test_model(provider_handle, model)
-    .build(crate::sim_process_owner())
-    .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    let core = lash::LashCore::standard_builder(engine.backend())
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_model(provider_handle, model.clone())
+        .build(crate::sim_process_owner())
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let session_id = SessionId::from(format!(
         "sim-live-failure-{provider_kind}-{offered_prose_deltas}"
     ));
-    let session = crate::open_created_session(&core, session_id.clone())
+    let session = crate::open_created_session(model.wire_model.clone(), &core, session_id.clone())
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
 
@@ -312,30 +305,26 @@ pub(crate) async fn prove_pending_tool_completion_on(
 ) -> Result<PendingToolCompletionProof, FixedScriptRunnerError> {
     let (key_tx, key_rx) = tokio::sync::oneshot::channel();
     let events = Arc::new(RuntimeProofRecordingEvents::default());
-    let core = lash::LashCore::standard_builder(
-        engine.backend(),
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .serve_test_model(
-        pending_tool_roundtrip_provider(),
-        lash_core::ModelMetadata::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
-    )
-    .tools(Arc::new(PendingToolProvider::new(
-        key_tx,
-        crate::invariants::ToolObserver::new(
-            recorder.clone(),
-            Some(engine.restate().server().clone()),
-        ),
-    )) as Arc<dyn lash_core::ToolProvider>)
-    .build(crate::sim_process_owner())
-    .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let session = crate::open_created_session(&core, "sim-pending-tool-session")
+    let core = lash::LashCore::standard_builder(engine.backend())
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_model(
+            pending_tool_roundtrip_provider(),
+            lash_core::ModelMetadata::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
+        )
+        .tools(Arc::new(PendingToolProvider::new(
+            key_tx,
+            crate::invariants::ToolObserver::new(
+                recorder.clone(),
+                Some(engine.restate().server().clone()),
+            ),
+        )) as Arc<dyn lash_core::ToolProvider>)
+        .build(crate::sim_process_owner())
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    let session = crate::open_created_session("mock-model", &core, "sim-pending-tool-session")
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let turn = {
@@ -577,26 +566,22 @@ pub(super) async fn run_final_value_turn(
         Some(workers) => factory.with_worker_service(workers),
         None => factory,
     };
-    let core = lash::LashCore::rlm_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-        factory,
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .serve_test_model(
-        rlm_final_value_provider(),
-        lash_core::ModelMetadata::builder("mock-rlm-final-value")
-            .context_window_tokens(200_000)
-            .build()
-            .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
-    )
-    .build(crate::sim_process_owner())
-    .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let session = crate::open_created_session(&core, "sim-final-value-session")
-        .await
+    let core = lash::LashCore::rlm_builder(backend, factory)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_model(
+            rlm_final_value_provider(),
+            lash_core::ModelMetadata::builder("mock-rlm-final-value")
+                .context_window_tokens(200_000)
+                .build()
+                .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
+        )
+        .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    let session =
+        crate::open_created_session("mock-rlm-final-value", &core, "sim-final-value-session")
+            .await
+            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     engine
         .run_turn(
             &session,

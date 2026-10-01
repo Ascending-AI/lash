@@ -161,8 +161,7 @@ pub async fn ingress_follow_on_fork_and_command_run_matrix(
             node_id: node,
             pending_observer_intents: Vec::new(),
             relation: crate::SessionRelation::Root,
-            policy: request.config.session_policy(),
-            plugin_config: Default::default(),
+            config: request.config.session_policy().into(),
         })
         .await
         .expect("fork switched head");

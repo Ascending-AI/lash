@@ -2,7 +2,7 @@ use lash::ProcessId;
 use lash::SessionId;
 mod batch_journal;
 mod e2e_model;
-pub use e2e_model::{E2E_MODEL_KEY, e2e_model_metadata};
+pub use e2e_model::{E2E_MODEL_KEY, e2e_model_metadata, e2e_session_spec};
 pub mod load;
 pub mod local_restate;
 pub mod overflow_recovery_evidence;
@@ -507,15 +507,12 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
     }
     let mut builder = lash::LashCore::rlm_builder(
         lash::Backend::new(config.backend.clone()),
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
         factory,
     )
         .models(Arc::new(lash::ModelRegistry::new().register(
             E2E_MODEL_KEY,
             lash::RegisteredModel::new(e2e_model_metadata()?, provider),
         )?))
-        .model(E2E_MODEL_KEY)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()))

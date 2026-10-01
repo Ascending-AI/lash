@@ -43,7 +43,7 @@ fn recorded_prompt(config: &lash_core::PersistedSessionConfig) -> crate::standar
 }
 
 fn creation_spec() -> crate::SessionSpec {
-    crate::SessionSpec::new()
+    mock_session_spec()
         .model("created-model")
         .attachment_acceptance(snapshot("created-attachments"))
         .plugin(
@@ -65,7 +65,7 @@ async fn create_with_creation_spec(core: &LashCore, id: &str) -> Result<crate::D
     core.session(id)
         .create(crate::SessionCreation {
             spec: creation_spec(),
-            ..Default::default()
+            parent: None,
         })
         .await
 }
@@ -102,17 +102,12 @@ async fn counting_core(
     })
     .await
     .into();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .models(test_catalog(
-        capturing_provider(captures),
-        SERVED_MODELS.map(|key| model_spec(key, None, 64_000)),
-    ))
-    .model("mock-model")
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .models(test_catalog(
+            capturing_provider(captures),
+            SERVED_MODELS.map(|key| model_spec(key, None, 64_000)),
+        ))
+        .build(crate::testing::runtime_lease_owner())?;
     Ok((core, backend, ledger.expect("the catalog is decorated")))
 }
 

@@ -40,14 +40,10 @@ async fn backend(postgres: bool) -> (lash_core::Backend, Option<Box<dyn std::any
 }
 
 fn core(backend: lash_core::Backend) -> LashCore {
-    explicit_ephemeral_facets(LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())
-    .expect("core")
+    explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())
+        .expect("core")
 }
 
 fn plugin_source<'a>(error: &'a (dyn Error + 'static)) -> Option<&'a PluginError> {
@@ -270,20 +266,16 @@ async fn state_law(postgres: bool) -> Result<()> {
         for rematerialize in [false, true] {
             let id = format!("typed-state-{mode}-{rematerialize}");
             let mode_control = Arc::new(AtomicUsize::new(if rematerialize { 0 } else { mode }));
-            let core = explicit_ephemeral_facets(LashCore::standard_builder(
-                backend.clone(),
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-            ))
-            .serve_test_model(mock_provider(), mock_model_spec())
-            .plugin(Arc::new(StateHook {
-                mode: Arc::clone(&mode_control),
-                handle: Arc::default(),
-            }))
-            .build(crate::testing::runtime_lease_owner())?;
+            let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+                .serve_test_model(mock_provider(), mock_model_spec())
+                .plugin(Arc::new(StateHook {
+                    mode: Arc::clone(&mode_control),
+                    handle: Arc::default(),
+                }))
+                .build(crate::testing::runtime_lease_owner())?;
             let created = core
                 .session(id.as_str())
-                .create(crate::SessionCreation::default())
+                .create(crate::SessionCreation::root(mock_session_spec()))
                 .await;
             let error = if rematerialize {
                 created?;
@@ -382,7 +374,7 @@ async fn cleanup_law(postgres: bool) -> Result<()> {
                 let id = id.as_str();
                 if recorded {
                     core.session(id)
-                        .create(crate::SessionCreation::default())
+                        .create(crate::SessionCreation::root(mock_session_spec()))
                         .await?;
                 }
                 let original = core.session_administration().await;

@@ -29,6 +29,7 @@ impl RetentionFixture {
         let core = test_workbench_core(double.lash_backend());
         install_test_process_worker(&double, &core);
         let state = AppState {
+            session_defaults: crate::tests::test_session_defaults(),
             process_observer: core.processes().observer().expect("process observer"),
             core,
             attachment_store: double.stores().attachment_store(),

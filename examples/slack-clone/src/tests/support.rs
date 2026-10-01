@@ -567,6 +567,7 @@ impl BotHost {
         .expect("build test core");
         let bot = Arc::new(ChannelBot::new(
             built.core,
+            built.session_spec,
             api,
             EventLedger::new(ledger_database),
             identity,

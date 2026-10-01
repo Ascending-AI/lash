@@ -70,30 +70,30 @@ async fn witness(stores: Arc<dyn StoreSet>, label: &str) -> Result<()> {
         .with_transport(Arc::new(FixtureTransport {
             calls: Arc::clone(&calls),
         }));
-    let core = lash::LashCore::standard_builder(
-        lash::Backend::new(engine.clone()),
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .serve_test_model(
-        ProviderHandle::new(provider.into_components()),
-        lash::ModelMetadata::builder("fixture-model")
-            .context_window_tokens(200_000)
-            .max_output_tokens(4096)
-            .build()?,
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        label, &identity,
-    ))?;
+    let core = lash::LashCore::standard_builder(lash::Backend::new(engine.clone()))
+        .serve_test_model(
+            ProviderHandle::new(provider.into_components()),
+            lash::ModelMetadata::builder("fixture-model")
+                .context_window_tokens(200_000)
+                .max_output_tokens(4096)
+                .build()?,
+        )
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            label, &identity,
+        ))?;
     let worker =
         lash::durability::DurableProcessWorker::new(core.durable_process_worker_config()?)?;
     let deployment = restate
         .serve(&engine, engine.endpoint_builder(worker).build())
         .await?;
     core.session(&identity)
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "fixture-model",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await?;
     let session = core.session(&identity).open().await?;
     let failed = session

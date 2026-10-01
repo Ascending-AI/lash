@@ -218,25 +218,21 @@ pub(super) fn core(harness: &Harness, call: Arc<HeldModelCall>) -> lash::LashCor
         })
         .build()
         .into_handle();
-    let core = lash::LashCore::standard_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-    .serve_test_model(
-        provider,
-        lash::ModelMetadata::builder("process-root-recovery")
-            .context_window_tokens(100_000)
-            .build()
-            .unwrap(),
-    )
-    .build(lash_core::LeaseOwnerIdentity::opaque(
-        "process-root-recovery",
-        "test",
-    ))
-    .unwrap();
+    let core = lash::LashCore::standard_builder(backend)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .serve_test_model(
+            provider,
+            lash::ModelMetadata::builder("process-root-recovery")
+                .context_window_tokens(100_000)
+                .build()
+                .unwrap(),
+        )
+        .build(lash_core::LeaseOwnerIdentity::opaque(
+            "process-root-recovery",
+            "test",
+        ))
+        .unwrap();
     harness.install_process_worker(
         lash_core_worker::DurableProcessWorker::new(core.durable_process_worker_config().unwrap())
             .unwrap(),
@@ -256,7 +252,13 @@ pub(super) async fn start_child(
     let mut create_request = lash_core::SessionCreateRequest::root(
         lash_core::SessionStartPoint::Empty,
         Default::default(),
-    );
+    )
+    .with_spec(&lash::SessionSpec::new(
+        "process-root-recovery",
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    ))
+    .expect("a root spec");
     create_request.session_id = session.cloned();
     let request = lash_core::ProcessStartRequest::new(
         lash_core::ProcessInput::SessionTurn {
@@ -451,7 +453,11 @@ async fn ahead_root_law(storage: Storage, live: bool) {
     // The host creates the explicit session; no turn runs in it yet, so no
     // execution has bound its turn cancellation.
     core.session(session.clone())
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "process-root-recovery",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
         .expect("create the explicit session");
 

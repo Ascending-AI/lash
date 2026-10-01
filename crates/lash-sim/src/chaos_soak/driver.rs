@@ -130,22 +130,18 @@ pub(super) fn soak_core(
     Arc::new(move |backend, owner| {
         let model = process::model_spec()?;
         let processes = LashlangProcesses::over(&backend);
-        lash::LashCore::standard_builder(
-            backend,
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-        )
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024).with_drain_mode(drain))
-        .recovery_lease(lash::RecoveryLeaseConfig {
-            generation_rank: rank.load(Ordering::SeqCst),
-            timings: soak_lease_timings(),
-        })
-        .serve_test_model(soak_provider(Arc::clone(&reached)), model)
-        .tools(tool.clone() as Arc<dyn lash_core::ToolProvider>)
-        .plugin(Arc::new(processes))
-        .build(owner)
-        .map_err(|error| format!("build the lash core: {error}"))
+        lash::LashCore::standard_builder(backend)
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024).with_drain_mode(drain))
+            .recovery_lease(lash::RecoveryLeaseConfig {
+                generation_rank: rank.load(Ordering::SeqCst),
+                timings: soak_lease_timings(),
+            })
+            .serve_test_model(soak_provider(Arc::clone(&reached)), model)
+            .tools(tool.clone() as Arc<dyn lash_core::ToolProvider>)
+            .plugin(Arc::new(processes))
+            .build(owner)
+            .map_err(|error| format!("build the lash core: {error}"))
     })
 }
 
@@ -577,8 +573,12 @@ impl Driver {
                             match core
                                 .session(id)
                                 .create(lash::SessionCreation {
+                                    spec: lash::SessionSpec::new(
+                                        process::MODEL,
+                                        lash::TurnBudget::Unbounded,
+                                        lash::MaxToolCalls::new(1024),
+                                    ),
                                     parent,
-                                    ..Default::default()
                                 })
                                 .await
                             {
@@ -798,7 +798,11 @@ impl Driver {
         self.world
             .core()?
             .session(id.clone())
-            .create(Default::default())
+            .create(lash::SessionCreation::root(lash::SessionSpec::new(
+                process::MODEL,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            )))
             .await
             .map_err(|error| error.to_string())?;
         self.send(&id, vec!["tool-witness".to_owned()]).await?;

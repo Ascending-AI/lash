@@ -1,0 +1,57 @@
+error[E0061]: this function takes 1 argument but 2 arguments were supplied
+ --> tests/ui/core_builder_holds_no_session_defaults.rs:8:13
+  |
+8 |     let _ = lash::LashCore::builder(backend, lash::TurnBudget::Unbounded);
+  |             ^^^^^^^^^^^^^^^^^^^^^^^          --------------------------- unexpected argument #2 of type `TurnBudget`
+  |
+note: associated function defined here
+ --> src/core.rs
+  |
+  |     pub fn builder(backend: Backend) -> LashCoreBuilder {
+  |            ^^^^^^^
+help: remove the extra argument
+  |
+8 -     let _ = lash::LashCore::builder(backend, lash::TurnBudget::Unbounded);
+8 +     let _ = lash::LashCore::builder(backend);
+  |
+
+error[E0599]: no method named `model` found for struct `LashCoreBuilder` in the current scope
+  --> tests/ui/core_builder_holds_no_session_defaults.rs:12:55
+   |
+12 |     let _ = lash::LashCore::standard_builder(backend).model(key);
+   |                                                       ^^^^^
+   |
+help: there is a method `models` with a similar name
+   |
+12 |     let _ = lash::LashCore::standard_builder(backend).models(key);
+   |                                                            +
+
+error[E0599]: no method named `reasoning` found for struct `LashCoreBuilder` in the current scope
+  --> tests/ui/core_builder_holds_no_session_defaults.rs:19:55
+   |
+19 |     let _ = lash::LashCore::standard_builder(backend).reasoning(reasoning);
+   |                                                       ^^^^^^^^^ method not found in `LashCoreBuilder`
+
+error[E0599]: no method named `generation` found for struct `LashCoreBuilder` in the current scope
+  --> tests/ui/core_builder_holds_no_session_defaults.rs:26:55
+   |
+26 |     let _ = lash::LashCore::standard_builder(backend).generation(generation);
+   |                                                       ^^^^^^^^^^ method not found in `LashCoreBuilder`
+
+error[E0599]: no method named `attachment_acceptance` found for struct `LashCoreBuilder` in the current scope
+  --> tests/ui/core_builder_holds_no_session_defaults.rs:33:55
+   |
+33 |     let _ = lash::LashCore::standard_builder(backend).attachment_acceptance(acceptance);
+   |                                                       ^^^^^^^^^^^^^^^^^^^^^ method not found in `LashCoreBuilder`
+
+error[E0599]: no method named `session_plugin` found for struct `LashCoreBuilder` in the current scope
+  --> tests/ui/core_builder_holds_no_session_defaults.rs:37:55
+   |
+37 |     let _ = lash::LashCore::standard_builder(backend).session_plugin("plugin", ());
+   |                                                       ^^^^^^^^^^^^^^ method not found in `LashCoreBuilder`
+
+error[E0599]: no method named `session_spec` found for struct `LashCoreBuilder` in the current scope
+  --> tests/ui/core_builder_holds_no_session_defaults.rs:41:55
+   |
+41 |     let _ = lash::LashCore::standard_builder(backend).session_spec(spec);
+   |                                                       ^^^^^^^^^^^^ method not found in `LashCoreBuilder`

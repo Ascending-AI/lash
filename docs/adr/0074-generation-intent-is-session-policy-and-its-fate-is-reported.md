@@ -8,9 +8,10 @@ from what Lash sends and from what a provider reports about execution.
 
 ## Decision
 
-Generation intent belongs to `SessionPolicy.generation`. Creation resolves the
-`SessionCreation.spec` overlay against the core policy and records it with the
-session's initial configuration. Only `create` creates a facade session. Open
+Generation intent belongs to `SessionPolicy.generation`. Creation records what
+`SessionCreation.spec` states with the session's initial configuration; a core
+keeps no default generation (ADR 0030, FIG-4594), and a fork records its fork
+point's. Only `create` creates a facade session. Open
 loads the recorded configuration; it does not reconcile a new generation
 setting, model, or session prompt into it. Later changes use the
 core `SetGeneration` config command (ADR 0126).
@@ -23,9 +24,9 @@ explicitly replaces them.
 
 The durable config includes the generation controls and every plugin's
 namespace. The system prompt is part of the protocol plugin's namespace, not
-of core config: a core's default spec states it as a creation default, a
-session records it at creation and renders the recorded config on every
-worker (ADR 0030, FIG-4589). On open, the recorded model binds back to its
+of core config: a session's spec states it, the session records it at
+creation and renders the recorded config on every worker (ADR 0030,
+FIG-4589). On open, the recorded model binds back to its
 transport by its recorded key and cannot be silently replaced.
 
 Every request taken from session policy pairs its generation options with the

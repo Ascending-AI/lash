@@ -607,8 +607,8 @@ pub async fn session_referrer_waits_for_graph_retirement(h: AttachmentReferrerHa
             node_id: node,
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
-            policy: SessionPolicy::new(TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024)),
-            plugin_config: Default::default(),
+            config: SessionPolicy::new(TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
+                .into(),
         })
         .await
         .unwrap();

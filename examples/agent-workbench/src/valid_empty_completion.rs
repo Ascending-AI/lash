@@ -78,14 +78,15 @@ async fn run_fixture(
         .await
         .map_err(|error| error.to_string())?;
     let engine = restate.engine(Arc::new(stores));
-    let mut builder = lash::LashCore::standard_builder(
-        lash::Backend::new(engine.clone()),
+    let session_spec = lash::SessionSpec::new(
+        model.wire_model.clone(),
         lash::TurnBudget::bounded(1),
         lash::MaxToolCalls::new(1024),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .serve_test_model(provider, model);
+    );
+    let mut builder = lash::LashCore::standard_builder(lash::Backend::new(engine.clone()))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_model(provider, model);
     if let Some(marker) = crate::shutdown_marker::factory_from_env("agent-workbench-valid-empty")? {
         builder = builder.plugin(marker);
     }
@@ -107,7 +108,7 @@ async fn run_fixture(
     let operation = async {
         let session_id = lash::SessionId::from(format!("valid-empty-{}", uuid::Uuid::new_v4()));
         core.session(session_id.clone())
-            .create(lash::SessionCreation::default())
+            .create(lash::SessionCreation::root(session_spec))
             .await
             .map_err(|error| error.to_string())?;
         let session = core

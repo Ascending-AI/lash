@@ -198,24 +198,19 @@ async fn a_refused_cell_reservation_replays_into_a_host_with_capacity(
         &backend,
     );
     let executions = Arc::new(AtomicUsize::new(0));
-    let core = lash::LashCore::rlm_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-        rlm,
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-    .serve_test_model(provider, model_spec())
-    .tools(Arc::new(CountingTool {
-        executions: Arc::clone(&executions),
-        output: json!({"result": "counted"}),
-    }) as Arc<dyn lash_core::ToolProvider>)
-    .build(lash_core::LeaseOwnerIdentity::opaque(
-        "worker-verdict-cell",
-        "test",
-    ))
-    .expect("build the lash core");
+    let core = lash::LashCore::rlm_builder(backend, rlm)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .serve_test_model(provider, model_spec())
+        .tools(Arc::new(CountingTool {
+            executions: Arc::clone(&executions),
+            output: json!({"result": "counted"}),
+        }) as Arc<dyn lash_core::ToolProvider>)
+        .build(lash_core::LeaseOwnerIdentity::opaque(
+            "worker-verdict-cell",
+            "test",
+        ))
+        .expect("build the lash core");
     let session = created_session(&core, run_tag("worker-verdict-cell"))
         .await
         .open()
@@ -331,24 +326,19 @@ pub(super) fn process_host(
         &backend,
     )
     .with_worker_service(workers);
-    lash::LashCore::rlm_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-        factory,
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-    .serve_test_model(provider, model_spec())
-    .tools(Arc::new(CountingTool {
-        executions: Arc::clone(executions),
-        output: json!({"result": "counted"}),
-    }) as Arc<dyn lash_core::ToolProvider>)
-    .build(lash_core::LeaseOwnerIdentity::opaque(
-        "lash-restate-test",
-        "worker-verdict-process",
-    ))
-    .expect("build the lash core")
+    lash::LashCore::rlm_builder(backend, factory)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .serve_test_model(provider, model_spec())
+        .tools(Arc::new(CountingTool {
+            executions: Arc::clone(executions),
+            output: json!({"result": "counted"}),
+        }) as Arc<dyn lash_core::ToolProvider>)
+        .build(lash_core::LeaseOwnerIdentity::opaque(
+            "lash-restate-test",
+            "worker-verdict-process",
+        ))
+        .expect("build the lash core")
 }
 
 /// The dialect's worker service with `cumulative_cpu` per execution scope.

@@ -74,25 +74,21 @@ fn core(backend: &RestateTestBackend, barrier: &Arc<Barrier>) -> lash::LashCore 
         })
         .build()
         .into_handle();
-    lash::LashCore::standard_builder(
-        backend.lash_backend(),
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-    .serve_test_model(
-        provider,
-        lash_core::ModelMetadata::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("model spec"),
-    )
-    .build(lash_core::LeaseOwnerIdentity::opaque(
-        "lash-restate-test",
-        "one-driver",
-    ))
-    .expect("build the lash core")
+    lash::LashCore::standard_builder(backend.lash_backend())
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .serve_test_model(
+            provider,
+            lash_core::ModelMetadata::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("model spec"),
+        )
+        .build(lash_core::LeaseOwnerIdentity::opaque(
+            "lash-restate-test",
+            "one-driver",
+        ))
+        .expect("build the lash core")
 }
 
 #[restate_sdk::workflow]
@@ -264,7 +260,11 @@ async fn created_session(
     let session_id = session_id.into();
     match core
         .session(session_id.clone())
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "mock-model",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
     {
         Ok(_)

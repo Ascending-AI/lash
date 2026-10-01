@@ -159,26 +159,22 @@ async fn captured_rlm_iterations() -> Vec<LlmRequest> {
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
-    let core = lash::LashCore::rlm_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-        factory,
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .serve_test_model(
-        provider,
-        lash_core::ModelMetadata::builder("cache-regression-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("cache regression model"),
-    )
-    .build(crate::sim_process_owner())
-    .expect("RLM cache regression core");
-    let session = crate::open_created_session(&core, "cache-regression-session")
-        .await
-        .expect("RLM cache regression session");
+    let core = lash::LashCore::rlm_builder(backend, factory)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_model(
+            provider,
+            lash_core::ModelMetadata::builder("cache-regression-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("cache regression model"),
+        )
+        .build(crate::sim_process_owner())
+        .expect("RLM cache regression core");
+    let session =
+        crate::open_created_session("cache-regression-model", &core, "cache-regression-session")
+            .await
+            .expect("RLM cache regression session");
     engine
         .run_turn(
             &session,

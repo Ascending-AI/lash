@@ -34,8 +34,8 @@ of its one plugin set, and tracing. Behaviour is recorded config. The durable
 session config, including generation, the recorded model with its request
 defaults, the execution controls of ADR 0030 and every installed plugin's
 namespace (ADR 0126), the protocol's prompt config among them, remains
-recorded config under ADR 0074. The receiving core's own default spec is a
-creation default for the sessions it creates; it never reaches a resumed
+recorded config under ADR 0074. A core holds no session defaults (ADR 0030):
+what its host passes to the sessions it creates never reaches a resumed
 session.
 
 ### Behaviour is recorded config; live is physical only

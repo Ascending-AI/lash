@@ -114,24 +114,19 @@ async fn setup_crash_case(engine: Engine, before_request: usize) {
     )
     .with_worker_service(workers.clone());
     let executions = Arc::new(AtomicUsize::new(0));
-    let core = lash::LashCore::rlm_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-        rlm,
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-    .serve_test_model(provider, model_spec())
-    .tools(Arc::new(CountingTool {
-        executions: Arc::clone(&executions),
-        output: json!({"result": "counted"}),
-    }) as Arc<dyn lash_core::ToolProvider>)
-    .build(lash_core::LeaseOwnerIdentity::opaque(
-        "worker-setup-crash",
-        "test",
-    ))
-    .expect("build the lash core");
+    let core = lash::LashCore::rlm_builder(backend, rlm)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .serve_test_model(provider, model_spec())
+        .tools(Arc::new(CountingTool {
+            executions: Arc::clone(&executions),
+            output: json!({"result": "counted"}),
+        }) as Arc<dyn lash_core::ToolProvider>)
+        .build(lash_core::LeaseOwnerIdentity::opaque(
+            "worker-setup-crash",
+            "test",
+        ))
+        .expect("build the lash core");
     let session = created_session(&core, run_tag("worker-setup-crash"))
         .await
         .open()

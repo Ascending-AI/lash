@@ -142,11 +142,15 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
             .plugin(Arc::new(WorkbenchPluginFactory::new()))
             .build(crate::test_core_owner())
             .expect("build tool control workbench core");
-        let session = crate::created_session(&core, "workbench-tool-control-session")
-            .await
-            .open()
-            .await
-            .expect("open tool control session");
+        let session = crate::created_session_from(
+            &core,
+            crate::tests::test_session_defaults().model("workbench-tool-control-model"),
+            "workbench-tool-control-session",
+        )
+        .await
+        .open()
+        .await
+        .expect("open tool control session");
 
         let cancelled = session
             .send(lash::TurnInput::text("cancel the action"))

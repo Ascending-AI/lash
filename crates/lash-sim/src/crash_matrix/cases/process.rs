@@ -63,7 +63,6 @@ pub(super) async fn stage_start(point: CrashPoint, seed: u64) -> Result<Staged, 
             engines: None,
             engines_required: false,
             session_catalog: None,
-            session_turn_default: None,
             session_turn_admission: None,
             executor: "process start crash matrix",
             starter: &starter,
@@ -119,8 +118,10 @@ const RUN_JOURNAL_CUTS: u64 = 14;
 /// resolved: the window S-14 names.
 const AFTER_TERMINAL_WRITE: &str = "lash.process.parent-end";
 
+pub(crate) use super::MODEL;
+
 pub(crate) fn model_spec() -> Result<lash_core::ModelMetadata, String> {
-    lash_core::ModelMetadata::builder("crash-matrix-model")
+    lash_core::ModelMetadata::builder(MODEL)
         .context_window_tokens(200_000)
         .build()
         .map_err(|error| format!("model spec: {error}"))
@@ -155,18 +156,13 @@ pub(super) fn rlm_core() -> CoreBuild {
             std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &backend,
         );
-        lash::LashCore::rlm_builder(
-            backend,
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-            factory,
-        )
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .recovery_lease(super::recovery_lease())
-        .serve_test_model(provider, model_spec()?)
-        .build(owner)
-        .map_err(|error| format!("build the lash core: {error}"))
+        lash::LashCore::rlm_builder(backend, factory)
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .recovery_lease(super::recovery_lease())
+            .serve_test_model(provider, model_spec()?)
+            .build(owner)
+            .map_err(|error| format!("build the lash core: {error}"))
     })
 }
 

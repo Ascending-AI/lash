@@ -1,17 +1,21 @@
 // FIG-4374: a host serves models through one registry and selects them by
-// key. The builder takes no transport and no model metadata; a session and a
-// send name a key, and nothing names a provider route.
+// key. The builder takes no transport; a session's spec and a send name a
+// key, never model metadata, and nothing names a provider route.
 
 fn core_builder_takes_no_transport(
     backend: lash::Backend,
     provider: lash::provider::ProviderHandle,
 ) {
-    let _ = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(1024))
+    let _ = lash::LashCore::standard_builder(backend)
         .provider(provider);
 }
 
-fn core_builder_selects_a_key_not_metadata(backend: lash::Backend, model: lash::ModelMetadata) {
-    let _ = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(1024)).model(model);
+fn a_spec_selects_a_key_not_metadata(model: lash::ModelMetadata) {
+    let _ = lash::SessionSpec::new(
+        model,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    );
 }
 
 fn a_session_takes_no_transport(core: lash::LashCore, provider: lash::provider::ProviderHandle) {

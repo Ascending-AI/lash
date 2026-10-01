@@ -94,6 +94,7 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        session_defaults: crate::tests::test_session_defaults(),
         unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),

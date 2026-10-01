@@ -3,5 +3,5 @@
 //! build that falls back to an in-memory default (ADR 0102).
 
 fn main() {
-    let _ = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded);
+    let _ = lash::LashCore::standard_builder();
 }

@@ -469,28 +469,27 @@ mod tests {
             Arc::new(lash_protocol_rlm::TypescriptDialect),
             &backend,
         );
-        let core = lash::LashCore::rlm_builder(
-            backend,
-            lash::TurnBudget::bounded(3),
-            lash::MaxToolCalls::new(16),
-            factory,
-        )
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(
-            provider.into_handle(),
-            lash::ModelMetadata::builder("mock-model")
-                .context_window_tokens(200_000)
-                .build()
-                .unwrap(),
-        )
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .build(lash_core::LeaseOwnerIdentity::opaque(
-            "load-admission",
-            "law",
-        ))
-        .unwrap();
+        let core = lash::LashCore::rlm_builder(backend, factory)
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .serve_test_model(
+                provider.into_handle(),
+                lash::ModelMetadata::builder("mock-model")
+                    .context_window_tokens(200_000)
+                    .build()
+                    .unwrap(),
+            )
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .build(lash_core::LeaseOwnerIdentity::opaque(
+                "load-admission",
+                "law",
+            ))
+            .unwrap();
         core.session("load-admission")
-            .create(lash::SessionCreation::default())
+            .create(lash::SessionCreation::root(lash::SessionSpec::new(
+                "mock-model",
+                lash::TurnBudget::bounded(3),
+                lash::MaxToolCalls::new(16),
+            )))
             .await
             .unwrap();
         let session = core.session("load-admission").open().await.unwrap();

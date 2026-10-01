@@ -57,6 +57,10 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/turn_context_has_no_prompt_or_drain_state.rs");
     t.compile_fail("tests/ui/core_builder_requires_a_backend.rs");
     t.compile_fail("tests/ui/core_builder_plugin_host_is_removed.rs");
+    // FIG-4594: a core keeps no session defaults, and a root creation states
+    // its model, turn budget and tool-call limit.
+    t.compile_fail("tests/ui/core_builder_holds_no_session_defaults.rs");
+    t.compile_fail("tests/ui/session_spec_requires_its_required_parts.rs");
     // FIG-4374: models are selected by registry key, and a recorded model is
     // minted by the registry alone.
     t.compile_fail("tests/ui/models_are_selected_by_key.rs");

@@ -119,25 +119,21 @@ impl lash_core::facade_support::PluginFactory for LineageRoots {
 #[tokio::test]
 async fn ordinary_child_is_not_root_under_facade_and_engine_opens() -> Result<()> {
     let owner = Arc::new(LineageRoots::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double_backend().await,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .plugin(owner.clone())
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
+        .plugin(owner.clone())
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
     let id = SessionId::from("ordinary-lineage-child");
     let durable = core
         .session(id.clone())
         .create(crate::SessionCreation {
+            spec: mock_session_spec(),
             parent: Some("ordinary-lineage-parent".into()),
-            ..Default::default()
         })
         .await?;
     assert_eq!(*owner.resolved.lock_recover(), vec![false]);
     let store = crate::session::resolve_existing_session(&core.store_factory, &id).await?;
-    let state = crate::session::load_state_from_store(&id, &core.policy, &store).await?;
+    let state = crate::session::load_state_from_store(&id, &store).await?;
     assert!(state.authority.subagent.is_none());
     assert_eq!(
         state.authority.plugin_config.get(LINEAGE),
@@ -216,13 +212,11 @@ async fn rlm_creation_defaults_from_lineage_and_opens_preserve_recorded_formats(
                 .session(id.clone())
                 .create(crate::SessionCreation {
                     parent: parent.map(Into::into),
-                    spec: lash_core::facade_support::SessionSpec::new()
-                        .plugin_options(plugin_options),
+                    spec: mock_session_spec().plugin_options(plugin_options),
                 })
                 .await?;
             let store = crate::session::resolve_existing_session(&core.store_factory, &id).await?;
-            let policy = core.policy.clone();
-            let state = crate::session::load_state_from_store(&id, &policy, &store).await?;
+            let state = crate::session::load_state_from_store(&id, &store).await?;
             assert!(state.authority.subagent.is_none());
             assert_eq!(
                 lash_protocol_rlm::rlm_session_config(&state.effective_protocol_turn_options())

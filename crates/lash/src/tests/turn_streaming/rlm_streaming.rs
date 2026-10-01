@@ -10,14 +10,10 @@ pub(super) async fn pending_host_tool_completion_parks_turn_and_resolves_through
 -> Result<()> {
     let (key_tx, key_rx) = oneshot::channel();
     let events = Arc::new(RecordingEvents::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double_backend().await,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(tool_roundtrip_provider(), mock_model_spec())
-    .tools(Arc::new(PendingAppTools::new(key_tx)))
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
+        .serve_test_model(tool_roundtrip_provider(), mock_model_spec())
+        .tools(Arc::new(PendingAppTools::new(key_tx)))
+        .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core
         .session("pending-host-tool")
@@ -145,14 +141,10 @@ pub(super) async fn stream_returns_terminal_metadata_without_prose() -> Result<(
 
 #[tokio::test]
 pub(super) async fn stream_emits_chronological_tool_events_without_prose_pollution() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double_backend().await,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(tool_roundtrip_provider(), mock_model_spec())
-    .tools(Arc::new(AppTools))
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
+        .serve_test_model(tool_roundtrip_provider(), mock_model_spec())
+        .tools(Arc::new(AppTools))
+        .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core.session("tool-events").created().await.open().await?;
     let events = RecordingEvents::default();
@@ -245,14 +237,10 @@ pub(super) async fn interleaved_standard_parts_keep_order_through_store_history_
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double_backend().await,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(provider, mock_model_spec())
-    .tools(Arc::new(AppTools))
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
+        .serve_test_model(provider, mock_model_spec())
+        .tools(Arc::new(AppTools))
+        .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core
         .session("interleaved-standard-order")
@@ -568,16 +556,17 @@ pub(super) fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Res
         let backend = double_backend().await;
         let double = latest_double().expect("the backend runs on its held double");
         let core = explicit_ephemeral_facets(rlm_core_builder_over(backend))
-            .generation(lash_core::GenerationOptions {
-                stop_sequences: vec!["caller-owned-stop".to_string()],
-                ..Default::default()
-            })
             .serve_test_model(provider, mock_model_spec())
             .build(crate::testing::runtime_lease_owner())?;
         serve_processes(&core);
         let session = core
             .session("rlm-abort-late-events")
-            .created()
+            .created_with(
+                mock_session_spec().generation(lash_core::GenerationOptions {
+                    stop_sequences: vec!["caller-owned-stop".to_string()],
+                    ..Default::default()
+                }),
+            )
             .await
             .open()
             .await?;

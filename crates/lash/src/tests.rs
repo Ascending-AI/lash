@@ -61,7 +61,7 @@ use tokio::sync::{Mutex as TokioMutex, oneshot};
 /// enqueue-materialisation now makes.
 pub(crate) async fn create_catalog_session(core: &LashCore, session_id: &str) -> Result<()> {
     core.session(session_id)
-        .create(crate::SessionCreation::default())
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     Ok(())
 }
@@ -90,19 +90,22 @@ pub(crate) async fn settled_usage(session: &crate::LashSession) -> Result<lash_c
 }
 
 pub(crate) trait CreatedSession: Sized {
+    /// Created from the test host's default spec ([`mock_session_spec`]).
     async fn created(self) -> Self;
+    /// Created from `spec`.
+    async fn created_with(self, spec: crate::SessionSpec) -> Self;
 }
 
 impl CreatedSession for crate::SessionBuilder {
     async fn created(self) -> Self {
-        let spec = crate::SessionSpec::default();
+        self.created_with(mock_session_spec()).await
+    }
+
+    async fn created_with(self, spec: crate::SessionSpec) -> Self {
         match self
             .core
             .session(self.session_id.clone())
-            .create(crate::SessionCreation {
-                spec,
-                ..Default::default()
-            })
+            .create(crate::SessionCreation::root(spec))
             .await
         {
             Ok(_)
@@ -1121,14 +1124,10 @@ pub(crate) async fn standard_core() -> LashCore {
 
 /// A standard core over `backend`.
 pub(crate) fn standard_core_over(backend: lash_core::Backend) -> LashCore {
-    explicit_ephemeral_facets(LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())
-    .expect("standard core")
+    explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())
+        .expect("standard core")
 }
 
 /// Default RLM protocol factory for tests, over `backend`, the substrate its
@@ -1157,12 +1156,7 @@ async fn rlm_core_builder() -> crate::core::LashCoreBuilder {
 #[cfg(feature = "rlm")]
 fn rlm_core_builder_over(backend: lash_core::Backend) -> crate::core::LashCoreBuilder {
     let factory = rlm_factory(&backend);
-    LashCore::rlm_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-        factory,
-    )
+    LashCore::rlm_builder(backend, factory)
 }
 
 mod scope_support;
@@ -1179,9 +1173,9 @@ pub(crate) use harness::{
     AcceptedSend as _, DecoratedBackend, core_now_ms, double_backend,
     double_backend_explicit_reconcile, double_backend_over, double_backend_over_explicit_reconcile,
     explicit_ephemeral_facets, explicit_ephemeral_facets_with_budget, held_double, invocations,
-    latest_double, mock_model_spec, model_spec, output_into_cancelled_by, postgres_store_set,
-    recorded_model, redeploy, restate_double, retry_when_claim_frees,
-    run_async_test_on_stack_budget, serve_processes, settle_session_drive,
+    latest_double, mock_model_spec, mock_session_spec, model_spec, output_into_cancelled_by,
+    postgres_store_set, recorded_model, redeploy, restate_double, retry_when_claim_frees,
+    run_async_test_on_stack_budget, serve_processes, session_spec_for, settle_session_drive,
     sqlite_memory_store_backend, sqlite_memory_store_set, store_backend_with_clock, test_catalog,
     turn_input_states,
 };

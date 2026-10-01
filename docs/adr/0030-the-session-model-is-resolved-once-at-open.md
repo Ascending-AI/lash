@@ -36,8 +36,18 @@ controls and tool access; each plugin's commands cover its own namespace.
 
 The execution controls are the turn budget, autonomy, the no-progress budget
 and charge safety. They are session configuration like the model. The creator
-states them in `SessionCreation::spec`; unset controls take the core's
-creation defaults. Each root snapshots the configuration, controls included,
+states them in `SessionCreation::spec`. A core keeps no session defaults
+(FIG-4594): `SessionSpec::new(model, turn_budget, max_tool_calls)` takes the
+three parts nothing defaults, the other controls take the neutral values lash
+documents, and a host that wants a default keeps its own `SessionSpec` value
+and passes it.
+Every root creation takes an explicit spec, a host-started session-turn
+process start included; one that states none is refused typed
+(`SessionTurnStartUnspecified`). Everything else lash creates derives from a
+record: a child copies its parent's recorded config, a fork copies its fork
+point's recorded config in full, a process runs under its captured
+environment, and an open or a drive reads only the record. Each root
+snapshots the configuration, controls included,
 in its recorded `ResolveTurnConfig` step (`ResolvedRun`). Its turns, redrives,
 replays and a recovered follow-on run under that snapshot, so a later
 configuration change reaches the next root, never a running or replayed one.
@@ -60,8 +70,8 @@ reaches roots that start after it.
 The system prompt is recorded the same way as the rest of the configuration.
 It is the protocol plugin's: core has no prompt type. A session's protocol
 namespace records its prompt config when the session is created, from the
-plugin creation options of the session's `SessionSpec` laid over the creating
-core's default spec, and the protocol's prompt commands change it for the
+plugin creation options of the session's `SessionSpec` over the plugin's own
+built-in defaults, and the protocol's prompt commands change it for the
 roots after them (ADR 0126). The protocol renders the system prompt from the
 namespace the running root was admitted under, and the render is a recorded
 step: a redrive is served the recorded text and renders nothing. A child

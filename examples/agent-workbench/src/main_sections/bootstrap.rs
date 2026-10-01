@@ -294,42 +294,28 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .transpose()
         .map_err(|error| anyhow!("invalid AGENT_WORKBENCH_OUTPUT_TOKEN_CAP: {error}"))?;
     let shutdown_provider = provider.clone();
-    let builder = LashCore::rlm_builder(
-        lash::Backend::new(backend.clone()),
+    let session_defaults = lash::SessionSpec::new(
+        selection.key(),
         lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS),
         lash::MaxToolCalls::new(1024),
-        factory,
     )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .trace_sink(Arc::clone(&trace_sink))
-    .trace_level(TraceLevel::Extended)
-    .models(Arc::new(WorkbenchModels {
-        provider: provider.clone(),
-    }))
-    .session_spec(
-        lash::SessionSpec::new()
-            .turn_budget(lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS))
-            .max_tool_calls(lash::MaxToolCalls::new(1024))
-            .no_progress_budget(lash::NoProgressBudget::bounded(
-                WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS,
-            ))
-            .generation(lash::direct::GenerationOptions {
-                output_token_cap,
-                ..Default::default()
-            }),
-    )
-    .session_plugin(
-        lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
-        lash::rlm::RlmCreateExtras {
-            prompt: Some(workbench_rlm_prompt(&mail_world)),
-            ..Default::default()
-        },
-    )
-    .context("encode the workbench prompt")?
-    .model(selection.key())
     .reasoning(selection.reasoning())
+    .no_progress_budget(lash::NoProgressBudget::bounded(
+        WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS,
+    ))
+    .generation(lash::direct::GenerationOptions {
+        output_token_cap,
+        ..Default::default()
+    })
     .attachment_acceptance(Arc::new(workbench_attachment_acceptance()));
+    let builder = LashCore::rlm_builder(lash::Backend::new(backend.clone()), factory)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .trace_sink(Arc::clone(&trace_sink))
+        .trace_level(TraceLevel::Extended)
+        .models(Arc::new(WorkbenchModels {
+            provider: provider.clone(),
+        }));
     let builder = if let Some(tool_provider) =
         dev_provider_scenario.and_then(failure_provider::DevProviderScenario::tool_provider)
     {
@@ -442,6 +428,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
 
         let state = AppState {
             core,
+            session_defaults,
             unknown_turn_terminals: UnknownTurnTerminals::default(),
             attachment_store,
             session_store_factory: Arc::clone(&core_store_factory),

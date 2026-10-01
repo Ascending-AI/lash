@@ -437,23 +437,18 @@ fn law_core_over(
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
-    let mut builder = LashCore::rlm_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-        factory,
-    )
-    .serve_test_model(provider, law_model())
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-    .tools(Arc::new(BlobTools {
-        witness: Arc::clone(witness),
-    }))
-    .plugin(Arc::new(
-        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
-            lash_core::lifetime::session_or_starter,
-        ),
-    ));
+    let mut builder = LashCore::rlm_builder(backend, factory)
+        .serve_test_model(provider, law_model())
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tools(Arc::new(BlobTools {
+            witness: Arc::clone(witness),
+        }))
+        .plugin(Arc::new(
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                lash_core::lifetime::session_or_starter,
+            ),
+        ));
     if let Some(expiry) = upload_expiry {
         builder = builder.attachment_upload_expiry(expiry);
     }
@@ -474,7 +469,11 @@ fn law_core_over(
 
 async fn created_session(core: &LashCore, session_id: &str) -> lash::LashSession {
     core.session(session_id)
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            law_model().wire_model,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
         .expect("create the law's session");
     core.session(session_id)

@@ -137,29 +137,25 @@ pub(super) async fn backend_and_process_worker()
             bindings_generation(),
         ),
     ));
-    let core = lash::LashCore::standard_builder(
-        lash_core::Backend::from(Arc::clone(&backend)),
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .serve_test_model(
-        lash_core::testing::TestProvider::builder()
-            .kind("endpoint-builder-stub")
-            .complete(|_| async { Ok(lash_core::LlmResponse::default()) })
-            .build()
-            .into_handle(),
-        lash_core::ModelMetadata::new(
-            "endpoint-builder-model",
-            std::num::NonZeroUsize::new(1024).expect("non-zero context window"),
-        ),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "lash-restate-endpoint-builder",
-        "lash-restate-endpoint-builder-boot",
-    ))
-    .expect("build the core");
+    let core = lash::LashCore::standard_builder(lash_core::Backend::from(Arc::clone(&backend)))
+        .serve_test_model(
+            lash_core::testing::TestProvider::builder()
+                .kind("endpoint-builder-stub")
+                .complete(|_| async { Ok(lash_core::LlmResponse::default()) })
+                .build()
+                .into_handle(),
+            lash_core::ModelMetadata::new(
+                "endpoint-builder-model",
+                std::num::NonZeroUsize::new(1024).expect("non-zero context window"),
+            ),
+        )
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "lash-restate-endpoint-builder",
+            "lash-restate-endpoint-builder-boot",
+        ))
+        .expect("build the core");
     let worker = lash_core_worker::DurableProcessWorker::new(
         core.durable_process_worker_config()
             .expect("the core configures a process worker"),

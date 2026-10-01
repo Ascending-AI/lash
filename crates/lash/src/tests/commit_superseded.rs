@@ -95,14 +95,10 @@ impl Fixture {
                 .build()
                 .into_handle()
         };
-        let core = explicit_ephemeral_facets(LashCore::standard_builder(
-            backend,
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        ))
-        .serve_test_model(provider, mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())
-        .expect("build the core");
+        let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+            .serve_test_model(provider, mock_model_spec())
+            .build(crate::testing::runtime_lease_owner())
+            .expect("build the core");
         Self {
             core,
             double,
@@ -187,23 +183,20 @@ async fn a_second_host_reads_refused_root_usage() -> Result<()> {
     );
     drop(session);
 
-    let second_host = explicit_ephemeral_facets(LashCore::standard_builder(
-        fixture.double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        crate::testing::TestProvider::builder()
-            .kind("commit-superseded")
-            .complete(|_request| async {
-                panic!("the second host reads usage without calling a model")
-            })
-            .build()
-            .into_handle(),
-        mock_model_spec(),
-    )
-    .build(crate::testing::runtime_lease_owner())
-    .expect("build the second host's core");
+    let second_host =
+        explicit_ephemeral_facets(LashCore::standard_builder(fixture.double.lash_backend()))
+            .serve_test_model(
+                crate::testing::TestProvider::builder()
+                    .kind("commit-superseded")
+                    .complete(|_request| async {
+                        panic!("the second host reads usage without calling a model")
+                    })
+                    .build()
+                    .into_handle(),
+                mock_model_spec(),
+            )
+            .build(crate::testing::runtime_lease_owner())
+            .expect("build the second host's core");
     let owner = lash_core::RuntimeOwner::Session(SessionId::from(SESSION));
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     let usage = loop {

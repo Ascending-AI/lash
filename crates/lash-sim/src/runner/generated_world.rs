@@ -382,9 +382,9 @@ impl GeneratedRuntimeWorld {
         let provider_scripts = scripts.clone();
         let (engine, backend, reopen) = self.session_engine(&event.actor_alias).await?;
         let provider_schedule = ScriptedTransportSchedule::new();
-        let (core, transport, provider_kind) =
+        let (core, transport, provider_kind, model) =
             runtime_core_for_scripts(scripts, backend, Some(provider_schedule.clone()))?;
-        let session = crate::open_created_session(&core, event.actor_alias.clone())
+        let session = crate::open_created_session(model, &core, event.actor_alias.clone())
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         if session.session_id() != event.actor_alias {
@@ -1094,24 +1094,21 @@ impl GeneratedRuntimeWorld {
             self.recorder.clone(),
             Some(turn_engine.restate().server().clone()),
         );
-        let core = lash::LashCore::standard_builder(
-            backend,
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-        )
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(provider_handle, model)
-        .tools(Arc::new(SuspendToolProvider::new(
-            tool_name.clone(),
-            Arc::clone(&key_slot),
-            observer,
-        )) as Arc<dyn lash_core::ToolProvider>)
-        .build(crate::sim_process_owner())
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-        let session = crate::open_created_session(&core, session_alias.clone())
-            .await
+        let core = lash::LashCore::standard_builder(backend)
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .serve_test_model(provider_handle, model.clone())
+            .tools(Arc::new(SuspendToolProvider::new(
+                tool_name.clone(),
+                Arc::clone(&key_slot),
+                observer,
+            )) as Arc<dyn lash_core::ToolProvider>)
+            .build(crate::sim_process_owner())
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+        let session =
+            crate::open_created_session(model.wire_model.clone(), &core, session_alias.clone())
+                .await
+                .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         let turn_session = session.clone();
         let turn_events: Arc<dyn lash::TurnActivitySink> = events.clone();
         let prompt = format!("await {suspend_kind_label} completion");

@@ -148,11 +148,11 @@ impl BackendRunner {
                         session_id: self.session_id.clone(),
                         node_id: format!("{}:missing-fork-node", self.session_id).into(),
                         relation: SessionRelation::Root,
-                        policy: lash_core::SessionPolicy::new(
+                        config: lash_core::SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
-                        ),
-                        plugin_config: Default::default(),
+                        )
+                        .into(),
                     })
                     .await
                     .expect_err("existing fork target must be rejected");
@@ -181,11 +181,11 @@ impl BackendRunner {
                             )),
                             source_node_id: format!("{}:foreign-node", self.session_id).into(),
                         },
-                        policy: lash_core::SessionPolicy::new(
+                        config: lash_core::SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
-                        ),
-                        plugin_config: Default::default(),
+                        )
+                        .into(),
                     })
                     .await
                     .expect("foreign lineage must not gate a retained fork point");
@@ -217,11 +217,11 @@ impl BackendRunner {
                             source_session_id: self.session_id.clone(),
                             source_node_id: node_id.clone().into(),
                         },
-                        policy: lash_core::SessionPolicy::new(
+                        config: lash_core::SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
-                        ),
-                        plugin_config: Default::default(),
+                        )
+                        .into(),
                     })
                     .await
                     .expect("rewind must create its first branch");
@@ -253,11 +253,11 @@ impl BackendRunner {
                             source_node_id: format!("{}:rewind-source-node", self.session_id)
                                 .into(),
                         },
-                        policy: lash_core::SessionPolicy::new(
+                        config: lash_core::SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
-                        ),
-                        plugin_config: Default::default(),
+                        )
+                        .into(),
                     })
                     .await
                     .expect("rewind must re-fork after deleting the superseded source");
@@ -423,8 +423,7 @@ pub(super) async fn selected_observer_intents(
                 node_id,
                 relation: request.relation.clone(),
                 pending_observer_intents: request.pending_observer_intents.clone(),
-                policy: request.config.session_policy(),
-                plugin_config: Default::default(),
+                config: request.config.session_policy().into(),
             })
             .await
             .expect("fork deleted-writer history with exact intent");

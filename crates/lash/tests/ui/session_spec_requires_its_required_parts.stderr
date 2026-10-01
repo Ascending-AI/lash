@@ -1,0 +1,91 @@
+error[E0061]: this function takes 3 arguments but 0 arguments were supplied
+ --> tests/ui/session_spec_requires_its_required_parts.rs:7:13
+  |
+7 |     let _ = lash::SessionSpec::new();
+  |             ^^^^^^^^^^^^^^^^^^^^^^-- three arguments are missing
+  |
+note: associated function defined here
+ --> $WORKSPACE/crates/lash-core-execution/src/session_model/mod.rs
+  |
+  |     pub fn new(
+  |            ^^^
+help: provide the arguments
+  |
+7 |     let _ = lash::SessionSpec::new(/* model */, /* TurnBudget */, /* MaxToolCalls */);
+  |                                    +++++++++++++++++++++++++++++++++++++++++++++++++
+
+error[E0061]: this function takes 3 arguments but 1 argument was supplied
+  --> tests/ui/session_spec_requires_its_required_parts.rs:11:13
+   |
+11 |     let _ = lash::SessionSpec::new(model);
+   |             ^^^^^^^^^^^^^^^^^^^^^^------- two arguments of type `TurnBudget` and `MaxToolCalls` are missing
+   |
+note: associated function defined here
+  --> $WORKSPACE/crates/lash-core-execution/src/session_model/mod.rs
+   |
+   |     pub fn new(
+   |            ^^^
+help: provide the arguments
+   |
+11 |     let _ = lash::SessionSpec::new(model, /* TurnBudget */, /* MaxToolCalls */);
+   |                                         ++++++++++++++++++++++++++++++++++++++
+
+error[E0061]: this function takes 3 arguments but 2 arguments were supplied
+  --> tests/ui/session_spec_requires_its_required_parts.rs:15:13
+   |
+15 |     let _ = lash::SessionSpec::new(model, lash::TurnBudget::Unbounded);
+   |             ^^^^^^^^^^^^^^^^^^^^^^------------------------------------ argument #3 of type `MaxToolCalls` is missing
+   |
+note: associated function defined here
+  --> $WORKSPACE/crates/lash-core-execution/src/session_model/mod.rs
+   |
+   |     pub fn new(
+   |            ^^^
+help: provide the argument
+   |
+15 |     let _ = lash::SessionSpec::new(model, lash::TurnBudget::Unbounded, /* MaxToolCalls */);
+   |                                                                      ++++++++++++++++++++
+
+error[E0599]: no associated function or constant named `default` found for struct `SessionSpec` in the current scope
+  --> tests/ui/session_spec_requires_its_required_parts.rs:19:32
+   |
+19 |     let _ = lash::SessionSpec::default();
+   |                                ^^^^^^^ associated function or constant not found in `SessionSpec`
+   |
+note: if you're trying to build a new `SessionSpec` consider using one of the following associated functions:
+      SessionSpec::new
+      SessionSpec::inherit
+  --> $WORKSPACE/crates/lash-core-execution/src/session_model/mod.rs
+   |
+   | /     pub fn new(
+   | |         model: impl Into<ModelKey>,
+   | |         turn_budget: TurnBudget,
+   | |         max_tool_calls: MaxToolCalls,
+   | |     ) -> Self {
+   | |_____________^
+...
+   |       pub fn inherit() -> Self {
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no associated function or constant named `default` found for struct `SessionCreation` in the current scope
+  --> tests/ui/session_spec_requires_its_required_parts.rs:23:36
+   |
+23 |     let _ = lash::SessionCreation::default();
+   |                                    ^^^^^^^ associated function or constant not found in `SessionCreation`
+   |
+note: if you're trying to build a new `SessionCreation` consider using one of the following associated functions:
+      SessionCreation::root
+      SessionCreation::child_of
+  --> src/session.rs
+   |
+   |     pub fn root(spec: SessionSpec) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+   |     pub fn child_of(parent: impl Into<SessionId>, spec: SessionSpec) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0063]: missing field `spec` in initializer of `SessionCreation`
+  --> tests/ui/session_spec_requires_its_required_parts.rs:27:13
+   |
+27 |     let _ = lash::SessionCreation {
+   |             ^^^^^^^^^^^^^^^^^^^^^ missing `spec`

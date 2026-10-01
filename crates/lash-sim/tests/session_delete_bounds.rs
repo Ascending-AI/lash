@@ -45,6 +45,8 @@ struct Deployment {
     clock: Arc<TestClock>,
     backend: Backend,
     core: LashCore,
+    /// The model the core serves: what a law's session is created to run.
+    model: lash::ModelKey,
     /// The next tick's interval, alternating the jitter's extremes.
     ticks: std::cell::Cell<u64>,
 }
@@ -94,24 +96,21 @@ async fn deployment(turns: usize, session: &str, root: &str) -> Deployment {
         &transport,
     )
     .expect("build the provider");
-    let core = LashCore::standard_builder(
-        backend.clone(),
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .serve_test_model(provider, model)
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "session-delete-bounds",
-        "session-delete-bounds-boot",
-    ))
-    .expect("build the core");
+    let core = LashCore::standard_builder(backend.clone())
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_model(provider, model.clone())
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "session-delete-bounds",
+            "session-delete-bounds-boot",
+        ))
+        .expect("build the core");
     Deployment {
         double,
         clock,
         backend,
         core,
+        model: lash::ModelKey::new(model.wire_model),
         ticks: std::cell::Cell::new(0),
     }
 }
@@ -184,7 +183,7 @@ impl Deployment {
         reason = "test fixture: a session that fails to run aborts the law"
     )]
     async fn ended_root(&self, session: &str, root: &str) -> ObligationId {
-        let handle = created_session(&self.core, session)
+        let handle = created_session(&self.core, &self.model, session)
             .await
             .open()
             .await
@@ -474,18 +473,23 @@ async fn a_lapsed_claim_is_retaken_within_its_bound() {
 }
 
 /// This test crate's one path to a session that may not exist yet
-/// (FIG-4112): only `create` creates, so this creates `session_id` with the
-/// core's config unless the catalog already holds it, then hands back the
+/// (FIG-4112): only `create` creates, so this creates `session_id` to run
+/// `model`, unbounded, unless the catalog already holds it, then hands back the
 /// builder for the verb under test. An existing or deleted id is left for
 /// that verb to report.
 async fn created_session(
     core: &lash::LashCore,
+    model: &lash::ModelKey,
     session_id: impl Into<lash::SessionId>,
 ) -> lash::SessionBuilder {
     let session_id = session_id.into();
     match core
         .session(session_id.clone())
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            model.clone(),
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
     {
         Ok(_)

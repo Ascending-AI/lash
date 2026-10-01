@@ -17,26 +17,18 @@ async fn peer_coherence_builder() -> crate::core::LashCoreBuilder {
 }
 
 fn peer_coherence_builder_over(backend: lash_core::Backend) -> crate::core::LashCoreBuilder {
-    LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    )
-    .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-    .serve_test_model(mock_provider(), mock_model_spec())
+    LashCore::standard_builder(backend)
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+        .serve_test_model(mock_provider(), mock_model_spec())
 }
 
 #[tokio::test]
 async fn commit_budget_is_required_for_builder_construction_and_deserialization() {
     let error = expect_build_error(
-        LashCore::standard_builder(
-            double_backend().await,
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        )
-        .serve_test_model(mock_provider(), mock_model_spec())
-        .build(crate::testing::runtime_lease_owner()),
+        LashCore::standard_builder(double_backend().await)
+            .serve_test_model(mock_provider(), mock_model_spec())
+            .build(crate::testing::runtime_lease_owner()),
         "builder must reject a missing commit budget",
     );
     assert!(matches!(error, EmbedError::MissingCommitBudget));
@@ -51,14 +43,10 @@ async fn commit_budget_is_required_for_builder_construction_and_deserialization(
 #[tokio::test]
 async fn queued_work_action_reserve_is_required() {
     let error = expect_build_error(
-        LashCore::standard_builder(
-            double_backend().await,
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        )
-        .serve_test_model(mock_provider(), mock_model_spec())
-        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-        .build(crate::testing::runtime_lease_owner()),
+        LashCore::standard_builder(double_backend().await)
+            .serve_test_model(mock_provider(), mock_model_spec())
+            .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .build(crate::testing::runtime_lease_owner()),
         "builder must reject a missing queued-work action reserve",
     );
     assert!(matches!(error, EmbedError::MissingQueuedWorkBatching));
@@ -91,16 +79,11 @@ async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()
         "two memory store sets must name two substrates"
     );
     let build = |factory_backend: &lash_core::Backend| {
-        LashCore::rlm_builder(
-            core_backend.clone(),
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-            rlm_factory(factory_backend),
-        )
-        .serve_test_model(mock_provider(), mock_model_spec())
-        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .build(crate::testing::runtime_lease_owner())
+        LashCore::rlm_builder(core_backend.clone(), rlm_factory(factory_backend))
+            .serve_test_model(mock_provider(), mock_model_spec())
+            .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+            .build(crate::testing::runtime_lease_owner())
     };
 
     // Control: the same factory over the core's own backend builds.
@@ -132,16 +115,11 @@ async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()
 async fn the_backend_process_registry_stamps_from_the_backend_clock() {
     const NOW_MS: u64 = 4_200_000;
     let clock = Arc::new(lash_core::testing::TestClock::new(NOW_MS));
-    let core = LashCore::standard_builder(
-        store_backend_with_clock(clock).await,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    )
-    .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
-    .model("clock-wiring-model")
-    .build(crate::testing::runtime_lease_owner())
-    .expect("build core over a clocked memory backend");
+    let core = LashCore::standard_builder(store_backend_with_clock(clock).await)
+        .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
+        .build(crate::testing::runtime_lease_owner())
+        .expect("build core over a clocked memory backend");
     let registry = core.process_registry();
     let delivery_expiry_ms = registry.wake_delivery_config().delivery_expiry_ms;
     let builder_clock_process_id = registry
@@ -407,13 +385,9 @@ async fn durable_process_worker_config_uses_the_backend_registry_and_trigger_sto
 async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> Result<()> {
     let backend = double_backend().await;
     let factory = backend.session_store_factory();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
 
     let collected_error = core
         .fork_at(crate::ForkRequest {
@@ -539,13 +513,9 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
     .await;
     let registry = Arc::clone(faults.get().expect("the double decorated its registry"));
     let factory = backend.session_store_factory();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
     let source_model = Some(recorded_model(model_spec(
         "fork-source-model",
         None,
@@ -982,13 +952,9 @@ async fn duplicate_only_fork_intents_are_canonical(
     let branch_session_id = SessionId::from(format!("duplicate-only-branch-{case}"));
     let factory = backend.session_store_factory();
     let registry = backend.process_registry();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
     let policy = lash_core::SessionPolicy {
         session_id: Some(source_session_id.clone()),
         ..lash_core::SessionPolicy::new(
@@ -1136,13 +1102,9 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
         },
     )
     .await?;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
 
     assert!(
         !registry
@@ -1209,13 +1171,9 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
     let backend = double_backend().await;
     let registry = backend.process_registry();
     let factory = backend.session_store_factory();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
 
     for (case, simulate_crash_between_layers) in [("fresh", false), ("crash-resume", true)] {
         let session_id = SessionId::from(format!("nested-observer-intent-{case}"));
@@ -1378,13 +1336,11 @@ async fn durable_process_worker_rejects_incoherent_work_cadence() {
 }
 
 #[tokio::test]
-async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -> Result<()> {
-    // Forking creates a session head at a retained point; it does not create a
-    // second authority over configuration. The branch resolves the host's spec
-    // when it opens, exactly as a reopen of the source would, so the sampling a
-    // benchmark pinned on the core reaches the branch too. Only the recorded
-    // model comes from the record, because it names the model that produced
-    // the history the branch continues.
+async fn a_fork_runs_under_its_branch_points_generation_not_what_the_host_passes() -> Result<()> {
+    // A fork copies its fork point's recorded config in full (FIG-4594): the
+    // sampling the branch point ran with is the branch's, as its model is.
+    // What the host passes to the sessions it creates reaches neither the
+    // fork nor a reopen of it.
     let host_generation = lash_core::GenerationOptions {
         output_token_cap: std::num::NonZeroUsize::new(4_096),
         temperature: Some(lash_core::NonNegativeFiniteF64::new(0.0).expect("finite temperature")),
@@ -1395,14 +1351,14 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
     };
     let backend = double_backend().await;
     let factory = backend.session_store_factory();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .generation(host_generation.clone())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    core.session("generation-fork-host-default")
+        .create(crate::SessionCreation::root(
+            mock_session_spec().generation(host_generation.clone()),
+        ))
+        .await?;
 
     let source_model = Some(recorded_model(model_spec(
         "fork-source-model",
@@ -1410,13 +1366,9 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
         200_000,
     )));
     let source_policy = lash_core::SessionPolicy {
-        // The host and the branch point agree on the provider: a durable
-        // pin is a fact, so a host naming a different one is refused at
-        // open rather than silently discarded (FIG-1558).
         model: source_model,
         session_id: Some(SessionId::from("generation-fork-source")),
-        // The branch point ran with sampling of its own. It is not a second
-        // source of truth for the branch.
+        // The branch point ran with sampling of its own: the branch's.
         generation: lash_core::GenerationOptions {
             seed: Some(9),
             ..Default::default()
@@ -1472,16 +1424,13 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
     })
     .await?;
 
-    let branch = core
-        .session("generation-fork-branch")
-        .created()
-        .await
-        .open()
-        .await?;
+    let branch = core.session("generation-fork-branch").open().await?;
     let branch_state = branch.admin().state().persist_current().await?;
+    assert_ne!(branch_state.policy.generation, host_generation);
     assert_eq!(
-        branch_state.policy.generation, host_generation,
-        "a branch resolves the host's generation intent, like every other reopen"
+        branch_state.policy.generation.seed,
+        Some(9),
+        "a branch runs the generation its fork point recorded"
     );
     assert_eq!(
         branch_state.policy.wire_model(),

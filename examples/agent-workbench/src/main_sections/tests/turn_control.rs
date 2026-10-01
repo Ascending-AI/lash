@@ -140,6 +140,7 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        session_defaults: crate::tests::test_session_defaults(),
         unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),
@@ -433,6 +434,7 @@ async fn turn_cancel_test_state_with_ingress(
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        session_defaults: crate::tests::test_session_defaults(),
         unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),
@@ -740,6 +742,7 @@ finish(await handle);
         .expect("process observer configured");
     let (restate_ingress_url, _restate_requests) = spawn_restate_ingress_capture().await;
     let state = AppState {
+        session_defaults: crate::tests::test_session_defaults(),
         unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),

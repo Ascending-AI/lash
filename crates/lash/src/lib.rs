@@ -128,7 +128,7 @@ pub mod config {
 /// session spec's plugin options under [`STANDARD_PROTOCOL_PLUGIN_ID`]:
 ///
 /// ```ignore
-/// let spec = SessionSpec::new().plugin(
+/// let spec = SessionSpec::new(model_key, turn_budget, max_tool_calls).plugin(
 ///     lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
 ///     lash::standard::StandardTurnOptions {
 ///         prompt: Some(lash::standard::StandardPrompt {
@@ -140,9 +140,9 @@ pub mod config {
 /// )?;
 /// ```
 ///
-/// The same spec is the core's default
-/// ([`LashCoreBuilder::session_spec`](crate::LashCoreBuilder::session_spec))
-/// or one session's ([`SessionCreation::spec`](crate::SessionCreation::spec)).
+/// The spec is one session's ([`SessionCreation::spec`](crate::SessionCreation::spec)):
+/// a core keeps no default, so a host that wants every session to state the
+/// same prompt keeps the spec value and passes it to each creation.
 /// After creation the prompt changes only through [`SetStandardPrompt`] and
 /// [`SetStandardPromptContext`], which reach the next root. A run's options
 /// are [`StandardRunOptions`]: they cannot state the prompt.
@@ -253,7 +253,7 @@ pub use lash_core::{
     SessionId, SessionListFilter, SessionRelationKind, SessionStartPoint, SessionView,
     ToolCallLimitExceeded, ToolCallLimitScope, TurnActivity, TurnActivityId, TurnBudget, TurnCause,
     TurnEvent, TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnId,
-    TurnInput, TurnInputApplication, facade_support::GenerationOverlay,
+    TurnInput, TurnInputApplication, UnstatedSessionConfig, facade_support::GenerationOverlay,
     facade_support::PluginStack, facade_support::SessionCommand,
     facade_support::SessionCommandReceipt, facade_support::SessionSpec,
     facade_support::SpecResolveError, facade_support::TurnActivitySink,
@@ -1378,8 +1378,8 @@ pub mod runtime {
         RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeInvocation,
         RuntimeNamedPhase, RuntimeProviderConfig, RuntimeTracingConfig, RuntimeTurnPhase,
         RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot, ScopedEffectController,
-        SessionTurnDefaultMint, SessionWorkEngine, SleepSpec, TurnCancelWait, TurnContext,
-        TurnControlBinding, WorkCadenceError, WorkCadencePolicy, effect_groups_unsupported,
+        SessionWorkEngine, SleepSpec, TurnCancelWait, TurnContext, TurnControlBinding,
+        WorkCadenceError, WorkCadencePolicy, effect_groups_unsupported,
     };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the

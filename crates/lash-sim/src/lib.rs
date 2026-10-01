@@ -77,17 +77,40 @@ fn sim_process_owner() -> lash_core::LeaseOwnerIdentity {
 ///
 /// A simulated world reaches each session the same way on its first touch
 /// and after every crash or retry, so it means create-or-use. Only `create`
-/// creates, so the arm where the core's creation config does not apply — the
-/// session already exists and keeps what it recorded — is written out here,
-/// once, before the open. A deleted id is left for the open to report.
+/// creates, so the arm where the stated spec does not apply — the session
+/// already exists and keeps what it recorded — is written out here, once,
+/// before the open. A deleted id is left for the open to report.
+///
+/// The session is created from the simulated host's default spec: `model`,
+/// the key its core serves, under an unbounded turn budget. A world that
+/// states more uses [`open_created_session_from`].
 pub(crate) async fn open_created_session(
+    model: impl Into<lash::ModelKey>,
+    core: &lash::LashCore,
+    session_id: impl Into<lash::SessionId>,
+) -> lash::Result<lash::LashSession> {
+    open_created_session_from(
+        lash::SessionSpec::new(
+            model,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        ),
+        core,
+        session_id,
+    )
+    .await
+}
+
+/// [`open_created_session`], created from `spec`.
+pub(crate) async fn open_created_session_from(
+    spec: lash::SessionSpec,
     core: &lash::LashCore,
     session_id: impl Into<lash::SessionId>,
 ) -> lash::Result<lash::LashSession> {
     let session_id = session_id.into();
     match core
         .session(session_id.clone())
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(spec))
         .await
     {
         Ok(_)

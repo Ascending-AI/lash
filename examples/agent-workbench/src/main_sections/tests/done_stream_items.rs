@@ -33,6 +33,7 @@ async fn done_stream_items_are_transient_and_not_snapshotted() {
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        session_defaults: crate::tests::test_session_defaults(),
         unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),
@@ -102,6 +103,7 @@ async fn trigger_dispatch_done_does_not_clear_an_active_turn() {
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        session_defaults: crate::tests::test_session_defaults(),
         unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),

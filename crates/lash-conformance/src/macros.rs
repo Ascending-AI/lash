@@ -2081,11 +2081,10 @@ macro_rules! queue_observation_tests {
             let (_guard, backend) = $fixture;
             $crate::registration_macro_support::absent_or_deleted_durable_operations_emit_no_driver_wake(backend,
                 |backend, id| async move {
-                    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(1024))
+                    let core = lash::LashCore::standard_builder(backend)
                         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
                         .models(lash_core::testing::standard_test_models(lash_core::testing::runtime_helpers::mock_provider(Vec::new()).into_handle()))
-                        .model("mock-model")
                         .build(lash_core::testing::runtime_lease_owner()).expect("build durable facade");
                     let durable = core.session(id).durable().await.expect("noncreating durable handle");
                     (durable.send(lash::TurnInput::text("driver wake probe")).await.is_ok(),

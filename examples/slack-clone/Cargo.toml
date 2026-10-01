@@ -64,7 +64,7 @@ required-features = ["live-e2e"]
 ignored = ["bytes", "restate-sdk"]
 
 # Standard-mode host: no `rlm` feature, no `lash-protocol-rlm`, no Lashlang
-# artifact store. `LashCore::standard_builder(TurnBudget::Unbounded)` pre-seeds the standard protocol
+# artifact store. `LashCore::standard_builder(backend)` pre-seeds the standard protocol
 # plugin, and the bot's turns are native tool-loop turns.
 [dependencies]
 anyhow = { workspace = true }

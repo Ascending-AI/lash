@@ -152,11 +152,7 @@ fn builder_accepts_tools_and_plugins(
 }
 
 fn a_core_is_built_over_one_backend(backend: lash::Backend) -> lash::LashCoreBuilder {
-    lash::LashCore::standard_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
+    lash::LashCore::standard_builder(backend)
 }
 
 fn tool_contract_types_are_nameable(record: ToolCallRecord, contract: ToolOutputContract) {

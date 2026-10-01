@@ -1,12 +1,15 @@
 //! The system prompt is recorded protocol config (FIG-4589). A session
-//! records its protocol's prompt when it is created, from the creating
-//! core's default spec and its own; a prompt command changes it for the
-//! roots after it; and a run's options cannot state it. So:
+//! records its protocol's prompt when it is created, from the spec its
+//! creator states: a core keeps no default (FIG-4594), so a host's default
+//! prompt is a `SessionSpec` value it keeps and passes. A prompt command
+//! changes it for the roots after it; and a run's options cannot state it.
+//! So:
 //!
-//! - a session created under one deployment's defaults is served that prompt
-//!   on every later root, redrives included, whatever defaults the deployment
-//!   reopening it has, and keeps the request defaults its model binding
-//!   recorded beside it (FIG-4374, FIG-4567);
+//! - a session created from one deployment's default spec is served that
+//!   prompt on every later root, redrives included, whatever default spec the
+//!   deployment reopening it passes to the sessions it creates, and keeps the
+//!   request defaults its model binding recorded beside it (FIG-4374,
+//!   FIG-4567);
 //! - a prompt command reaches the next root and never the running one;
 //! - a child created before its parent's prompt changed keeps the prompt it
 //!   recorded;
@@ -14,10 +17,11 @@
 
 use super::*;
 
-/// The first deployment's default prompt: what a session it creates records.
+/// The prompt of the first deployment's default spec: what a session it
+/// creates from that spec records.
 const DEFAULTS_A: &str = "INTRO OF THE CREATING DEPLOYMENT'S DEFAULTS";
-/// The later deployment's default prompt: no session created before it may
-/// be served it.
+/// The prompt of the later deployment's default spec: no session created
+/// before it may be served it.
 const DEFAULTS_B: &str = "INTRO OF THE REDEPLOYED DEFAULTS";
 /// A prompt a config command states.
 const COMMANDED: &str = "INTRO A CONFIG COMMAND STATED";
@@ -115,7 +119,7 @@ fn prompt(intro: &str) -> crate::standard::StandardPrompt {
 
 /// A spec stating the standard prompt [`prompt`] gives `intro`.
 fn spec_stating(intro: &str) -> Result<lash_core::facade_support::SessionSpec> {
-    lash_core::facade_support::SessionSpec::new()
+    mock_session_spec()
         .plugin(
             crate::standard::STANDARD_PROTOCOL_PLUGIN_ID,
             crate::standard::StandardTurnOptions {
@@ -126,33 +130,21 @@ fn spec_stating(intro: &str) -> Result<lash_core::facade_support::SessionSpec> {
         .map_err(EmbedError::ProtocolTurnOptions)
 }
 
-/// A core over `backend` whose default spec states `default_intro` and whose
-/// model is registered with `request_defaults`.
+/// A core over `backend` whose model is registered with `request_defaults`.
+/// The deployment's default spec is its host's: [`spec_stating`] the
+/// deployment's default intro, passed to each creation.
 fn core_with_defaults(
     backend: lash_core::Backend,
     provider: ProviderHandle,
-    default_intro: &str,
     request_defaults: lash_core::provider::ModelRequestDefaults,
 ) -> Result<LashCore> {
-    explicit_ephemeral_facets(LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .session_plugin(
-        crate::standard::STANDARD_PROTOCOL_PLUGIN_ID,
-        crate::standard::StandardTurnOptions {
-            prompt: Some(prompt(default_intro)),
-            render: None,
-        },
-    )
-    .map_err(EmbedError::ProtocolTurnOptions)?
-    .tools(Arc::new(AppTools))
-    .serve_test_model(
-        provider,
-        mock_model_spec().with_request_defaults(request_defaults),
-    )
-    .build(crate::testing::runtime_lease_owner())
+    explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .tools(Arc::new(AppTools))
+        .serve_test_model(
+            provider,
+            mock_model_spec().with_request_defaults(request_defaults),
+        )
+        .build(crate::testing::runtime_lease_owner())
 }
 
 /// Every request `served` made for `id`, in order.
@@ -236,7 +228,7 @@ async fn deployment(
 const ANSWERS_WITHIN: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// A session keeps the prompt and the request defaults it was created under
-/// (acceptance law a). It is created under defaults A, with and without a
+/// (acceptance law a). It is created from the host's default spec A, and with a
 /// prompt of its own, and runs a root, so it restarts with history and the
 /// cancellation binding its first root recorded (FIG-4567). Then the
 /// deployment's process goes away and a new one serves the same stores and
@@ -275,18 +267,17 @@ async fn a_session_created_under_defaults_a_reopens_and_redrives_under_a(
         let creator = core_with_defaults(
             first.lash_backend(),
             scripted_provider(&served, &script),
-            DEFAULTS_A,
             creating_core_defaults(),
         )?;
         creator
             .session(DEFAULTED)
-            .create(crate::SessionCreation::default())
+            .create(crate::SessionCreation::root(spec_stating(DEFAULTS_A)?))
             .await?;
         creator
             .session(STATED)
             .create(crate::SessionCreation {
                 spec: spec_stating(OWN)?,
-                ..Default::default()
+                parent: None,
             })
             .await?;
         for (id, intro) in recorded {
@@ -307,7 +298,6 @@ async fn a_session_created_under_defaults_a_reopens_and_redrives_under_a(
     let redeployed = core_with_defaults(
         second.lash_backend(),
         scripted_provider(&served, &script),
-        DEFAULTS_B,
         redeployed_core_defaults(),
     )?;
     for (id, intro) in recorded {
@@ -363,10 +353,11 @@ async fn a_session_created_under_defaults_a_reopens_and_redrives_under_a(
         );
     }
 
-    // The redeployed defaults are live: they are what a new session records.
+    // The redeployed host's default spec is what a session it creates
+    // records.
     redeployed
         .session(CREATED_LATER)
-        .create(crate::SessionCreation::default())
+        .create(crate::SessionCreation::root(spec_stating(DEFAULTS_B)?))
         .await?;
     redeployed
         .session(CREATED_LATER)
@@ -456,11 +447,10 @@ async fn a_prompt_command_reaches_the_next_root_and_not_the_running_one(
     let core = core_with_defaults(
         double.lash_backend(),
         scripted_provider(&served, &script),
-        DEFAULTS_A,
         creating_core_defaults(),
     )?;
     core.session(ID)
-        .create(crate::SessionCreation::default())
+        .create(crate::SessionCreation::root(spec_stating(DEFAULTS_A)?))
         .await?;
     let session = core.session(ID).open().await?;
 
@@ -545,13 +535,12 @@ async fn a_child_created_before_its_parents_prompt_changed_keeps_its_own(
     let core = core_with_defaults(
         backend.clone(),
         scripted_provider(&served, &script),
-        DEFAULTS_A,
         creating_core_defaults(),
     )?;
     core.session(PARENT)
         .create(crate::SessionCreation {
             spec: spec_stating(OWN)?,
-            ..Default::default()
+            parent: None,
         })
         .await?;
 
@@ -707,11 +696,10 @@ async fn a_run_options_prompt_is_refused(stores: Stores, seed: u64) -> Result<()
     let core = core_with_defaults(
         double.lash_backend(),
         scripted_provider(&served, &script),
-        DEFAULTS_A,
         creating_core_defaults(),
     )?;
     core.session(ID)
-        .create(crate::SessionCreation::default())
+        .create(crate::SessionCreation::root(spec_stating(DEFAULTS_A)?))
         .await?;
     let session = core.session(ID).open().await?;
     let recorded = session.read_view().protocol_turn_options().payload.clone();
@@ -789,7 +777,7 @@ async fn an_rlm_run_options_prompt_is_refused() -> Result<()> {
         )
         .build(crate::testing::runtime_lease_owner())?;
     core.session(ID)
-        .create(crate::SessionCreation::default())
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let session = core.session(ID).open().await?;
     let refused = session

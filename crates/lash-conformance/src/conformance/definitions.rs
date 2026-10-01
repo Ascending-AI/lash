@@ -312,7 +312,6 @@ impl World {
             engines: Some(&self.engines),
             engines_required: true,
             session_catalog: None,
-            session_turn_default: None,
             session_turn_admission: None,
             executor: "definition conformance start",
             starter,

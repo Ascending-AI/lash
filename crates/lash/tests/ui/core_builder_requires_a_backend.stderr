@@ -1,19 +1,15 @@
-error[E0061]: this function takes 3 arguments but 1 argument was supplied
+error[E0061]: this function takes 1 argument but 0 arguments were supplied
  --> tests/ui/core_builder_requires_a_backend.rs:6:13
   |
-6 |     let _ = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded);
-  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^-----------------------------
-  |                                             ||
-  |                                             |argument #1 of type `lash::Backend` is missing
-  |                                             argument #3 of type `MaxToolCalls` is missing
+6 |     let _ = lash::LashCore::standard_builder();
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^-- argument #1 of type `lash::Backend` is missing
   |
 note: associated function defined here
  --> src/core.rs
   |
-  |     pub fn standard_builder(
+  |     pub fn standard_builder(backend: Backend) -> LashCoreBuilder {
   |            ^^^^^^^^^^^^^^^^
-help: provide the arguments
+help: provide the argument
   |
-6 -     let _ = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded);
-6 +     let _ = lash::LashCore::standard_builder(/* lash::Backend */, lash::TurnBudget::Unbounded, /* MaxToolCalls */);
-  |
+6 |     let _ = lash::LashCore::standard_builder(/* lash::Backend */);
+  |                                              +++++++++++++++++++

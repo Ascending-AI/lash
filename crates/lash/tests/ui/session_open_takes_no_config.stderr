@@ -4,19 +4,19 @@ error[E0599]: no method named `session_spec` found for struct `SessionBuilder` i
 7 |       let _ = core
   |  _____________-
 8 | |         .session("stated-at-open")
-9 | |         .session_spec(lash::SessionSpec::new().model(model))
+9 | |         .session_spec(lash::SessionSpec::new(
   | |         -^^^^^^^^^^^^ method not found in `SessionBuilder`
   | |_________|
   |
 
 error[E0599]: no method named `parent` found for struct `SessionBuilder` in the current scope
-  --> tests/ui/session_open_takes_no_config.rs:14:44
+  --> tests/ui/session_open_takes_no_config.rs:18:44
    |
-14 |     let _ = core.session("stated-at-open").parent("parent").open();
+18 |     let _ = core.session("stated-at-open").parent("parent").open();
    |                                            ^^^^^^ method not found in `SessionBuilder`
 
 error[E0599]: no method named `plugin_options` found for struct `SessionBuilder` in the current scope
-  --> tests/ui/session_open_takes_no_config.rs:18:44
+  --> tests/ui/session_open_takes_no_config.rs:22:44
    |
-18 |     let _ = core.session("stated-at-open").plugin_options(options).open();
+22 |     let _ = core.session("stated-at-open").plugin_options(options).open();
    |                                            ^^^^^^^^^^^^^^ method not found in `SessionBuilder`

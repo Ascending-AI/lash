@@ -118,35 +118,30 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
     let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
         .await
         .expect("build the Restate server double");
-    let core = lash::LashCore::standard_builder(
-        double.lash_backend(),
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .models(std::sync::Arc::new(
-        lash::ModelRegistry::new()
-            .register(
-                "gemini-test",
-                lash::RegisteredModel::new(
-                    lash::ModelMetadata::builder("gemini-test")
-                        .context_window_tokens(16_000)
-                        .expose_thinking(true)
-                        .build()
-                        .expect("valid model spec"),
-                    ProviderHandle::new(provider.into_components()),
-                ),
-            )
-            .expect("register the test model"),
-    ))
-    .model("gemini-test")
-    .tools(Arc::new(RuntimeLookupTool))
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "google-reasoning-boundaries-test",
-        "google-reasoning-boundaries-test-boot",
-    ))
-    .expect("core");
+    let core = lash::LashCore::standard_builder(double.lash_backend())
+        .models(std::sync::Arc::new(
+            lash::ModelRegistry::new()
+                .register(
+                    "gemini-test",
+                    lash::RegisteredModel::new(
+                        lash::ModelMetadata::builder("gemini-test")
+                            .context_window_tokens(16_000)
+                            .expose_thinking(true)
+                            .build()
+                            .expect("valid model spec"),
+                        ProviderHandle::new(provider.into_components()),
+                    ),
+                )
+                .expect("register the test model"),
+        ))
+        .tools(Arc::new(RuntimeLookupTool))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "google-reasoning-boundaries-test",
+            "google-reasoning-boundaries-test-boot",
+        ))
+        .expect("core");
     let session = created_session(&core, "google-reasoning-boundaries")
         .await
         .open()
@@ -214,34 +209,29 @@ async fn google_streaming_runtime_does_not_republish_reasoning_after_signature_o
     let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
         .await
         .expect("build the Restate server double");
-    let core = lash::LashCore::standard_builder(
-        double.lash_backend(),
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .models(std::sync::Arc::new(
-        lash::ModelRegistry::new()
-            .register(
-                "gemini-test",
-                lash::RegisteredModel::new(
-                    lash::ModelMetadata::builder("gemini-test")
-                        .context_window_tokens(16_000)
-                        .expose_thinking(true)
-                        .build()
-                        .expect("valid model spec"),
-                    ProviderHandle::new(provider.into_components()),
-                ),
-            )
-            .expect("register the test model"),
-    ))
-    .model("gemini-test")
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "google-signature-only-reasoning-test",
-        "google-signature-only-reasoning-test-boot",
-    ))
-    .expect("core");
+    let core = lash::LashCore::standard_builder(double.lash_backend())
+        .models(std::sync::Arc::new(
+            lash::ModelRegistry::new()
+                .register(
+                    "gemini-test",
+                    lash::RegisteredModel::new(
+                        lash::ModelMetadata::builder("gemini-test")
+                            .context_window_tokens(16_000)
+                            .expose_thinking(true)
+                            .build()
+                            .expect("valid model spec"),
+                        ProviderHandle::new(provider.into_components()),
+                    ),
+                )
+                .expect("register the test model"),
+        ))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "google-signature-only-reasoning-test",
+            "google-signature-only-reasoning-test-boot",
+        ))
+        .expect("core");
     let session = created_session(&core, "google-signature-only-reasoning")
         .await
         .open()
@@ -286,7 +276,11 @@ async fn created_session(
     let session_id = session_id.into();
     match core
         .session(session_id.clone())
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "gemini-test",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
     {
         Ok(_)

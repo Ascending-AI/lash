@@ -194,18 +194,29 @@ mod turn_control_timeout_tests;
 
 #[cfg(test)]
 /// This test crate's one path to a session that may not exist yet
-/// (FIG-4112): only `create` creates, so this creates `session_id` with the
-/// core's config unless the catalog already holds it, then hands back the
-/// builder for the verb under test. An existing or deleted id is left for
-/// that verb to report.
+/// (FIG-4112): only `create` creates, so this creates `session_id` from the
+/// test workbench's default spec unless the catalog already holds it, then
+/// hands back the builder for the verb under test. An existing or deleted id
+/// is left for that verb to report.
 async fn created_session(
     core: &lash::LashCore,
+    session_id: impl Into<lash::SessionId>,
+) -> lash::SessionBuilder {
+    created_session_from(core, crate::tests::test_session_defaults(), session_id).await
+}
+
+#[cfg(test)]
+/// [`created_session`], created from `spec`: a test whose core serves a
+/// model of its own states it.
+async fn created_session_from(
+    core: &lash::LashCore,
+    spec: lash::SessionSpec,
     session_id: impl Into<lash::SessionId>,
 ) -> lash::SessionBuilder {
     let session_id = session_id.into();
     match core
         .session(session_id.clone())
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(spec))
         .await
     {
         Ok(_)

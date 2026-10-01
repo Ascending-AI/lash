@@ -28,14 +28,10 @@ impl ServeWorkbenchTestModel for lash::LashCoreBuilder {
                 lash::RegisteredModel::new(model, provider.clone()),
             )
             .expect("a test model registers under its wire model");
-        // The workbench records the same attachment acceptance production
-        // bootstrap states for every session it creates.
         self.models(Arc::new(WorkbenchTestModels {
             pinned,
             open: WorkbenchModels { provider },
         }))
-        .model(key)
-        .attachment_acceptance(Arc::new(workbench_attachment_acceptance()))
     }
 }
 
@@ -98,6 +94,18 @@ where
     .join()
     .expect("runtime thread")
 }
+/// The default session spec a test workbench keeps: [`test_model`]'s key
+/// under an unbounded turn budget, with the attachment acceptance production
+/// bootstrap states for every session it creates.
+pub(crate) fn test_session_defaults() -> lash::SessionSpec {
+    lash::SessionSpec::new(
+        "test-model",
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+    .attachment_acceptance(Arc::new(workbench_attachment_acceptance()))
+}
+
 fn test_model() -> lash::ModelMetadata {
     lash::ModelMetadata::builder("test-model")
         .context_window_tokens(4096)
@@ -193,8 +201,6 @@ pub(super) fn explicit_durable_test_facets_on(backend: lash::Backend) -> lash::L
     );
     lash::LashCore::rlm_builder(
         backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
         factory,
     )
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -705,6 +711,7 @@ finish("snapshot cursor");
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        session_defaults: crate::tests::test_session_defaults(),
         unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),
@@ -849,6 +856,7 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        session_defaults: crate::tests::test_session_defaults(),
         unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),
@@ -1111,6 +1119,7 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        session_defaults: crate::tests::test_session_defaults(),
         unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),
@@ -1267,11 +1276,10 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
-    let core = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(1024), factory)
+    let core = LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
 
-        .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded).max_tool_calls(lash::MaxToolCalls::new(1024)))
         .serve_workbench_model(provider, model)
         // The `processes` module is catalogue presence, not an ability bit (ADR
         // 0095): the workbench's scripted sources author `processes.*`, so the
@@ -1285,6 +1293,7 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        session_defaults: crate::tests::test_session_defaults(),
         unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),
@@ -1922,8 +1931,6 @@ async fn live_workbench_restate_state_over_stores(
     .with_lashlang_execution_sink(lashlang_execution_sink);
     let core = LashCore::rlm_builder(
         lash::Backend::new(backend.clone()),
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
         factory,
     )
         .serve_workbench_model(provider, model)
@@ -1951,6 +1958,7 @@ async fn live_workbench_restate_state_over_stores(
     let event_tx = SessionEventRegistry::persistent(data_dir.join("product-events.json"), 1024)
         .expect("open durable product events");
     let state = AppState {
+        session_defaults: crate::tests::test_session_defaults(),
         unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),
@@ -2159,11 +2167,10 @@ fn test_workbench_core(backend: lash::Backend) -> LashCore {
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
-    LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(1024), factory)
+    LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
 
-        .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded).max_tool_calls(lash::MaxToolCalls::new(1024)))
         .serve_workbench_model(provider, model)
         // The `processes` module is catalogue presence, not an ability bit (ADR
         // 0095): the workbench's scripted sources author `processes.*`, so the

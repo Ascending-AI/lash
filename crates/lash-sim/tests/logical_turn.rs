@@ -242,27 +242,18 @@ fn standard_core_on(
     trace: Arc<RecordingTraceSink>,
     max_attachment_bytes: Option<u64>,
 ) -> (lash::LashCore, lash_sim::backend::SimEngine) {
-    let core = lash::LashCore::standard_builder(
-        engine.backend(),
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .session_spec(
-        lash::SessionSpec::new()
-            .turn_budget(lash::TurnBudget::Unbounded)
-            .max_tool_calls(lash::MaxToolCalls::new(1024)),
-    )
-    .serve_test_model(provider, model())
-    .tools(tools)
-    .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
-    .max_attachment_bytes(max_attachment_bytes)
-    .trace_sink(trace)
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "logical-turn-test",
-        "logical-turn-test-boot",
-    ))
-    .expect("build logical-turn sim core");
+    let core = lash::LashCore::standard_builder(engine.backend())
+        .serve_test_model(provider, model())
+        .tools(tools)
+        .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
+        .max_attachment_bytes(max_attachment_bytes)
+        .trace_sink(trace)
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "logical-turn-test",
+            "logical-turn-test-boot",
+        ))
+        .expect("build logical-turn sim core");
     (core, engine)
 }
 
@@ -351,21 +342,17 @@ async fn admitted_switch_is_seeded_atomic_ordered_and_exactly_once() {
         .await
         .expect("concurrent sim engine");
     let backend = engine.backend();
-    let core = lash::LashCore::standard_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .serve_test_model(provider, model())
-    .tools(Arc::new(SeedSwitchTool { initial_nodes }))
-    .trace_sink(trace.clone())
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "logical-turn-test",
-        "logical-turn-test-boot",
-    ))
-    .expect("build logical-turn sim core");
+    let core = lash::LashCore::standard_builder(backend)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_model(provider, model())
+        .tools(Arc::new(SeedSwitchTool { initial_nodes }))
+        .trace_sink(trace.clone())
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "logical-turn-test",
+            "logical-turn-test-boot",
+        ))
+        .expect("build logical-turn sim core");
     let session = created_session(&core, "logical-turn-sim")
         .await
         .open()
@@ -813,21 +800,16 @@ finish({ baton: baton });
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
-    let core = lash::LashCore::rlm_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-        factory,
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .serve_test_model(provider, model())
-    .trace_sink(trace.clone())
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "logical-turn-test",
-        "logical-turn-test-boot",
-    ))
-    .expect("build RLM seed sim core");
+    let core = lash::LashCore::rlm_builder(backend, factory)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_model(provider, model())
+        .trace_sink(trace.clone())
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "logical-turn-test",
+            "logical-turn-test-boot",
+        ))
+        .expect("build RLM seed sim core");
     let session = created_session(&core, "logical-turn-rlm-seed")
         .await
         .open()
@@ -933,20 +915,15 @@ await control.continue_as({
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
-    let core = lash::LashCore::rlm_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-        factory,
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .serve_test_model(provider, model())
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "logical-turn-test",
-        "logical-turn-test-boot",
-    ))
-    .expect("build RLM shadowed-control sim core");
+    let core = lash::LashCore::rlm_builder(backend, factory)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_model(provider, model())
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "logical-turn-test",
+            "logical-turn-test-boot",
+        ))
+        .expect("build RLM shadowed-control sim core");
     let session = created_session(&core, "logical-turn-rlm-shadowed-control")
         .await
         .open()
@@ -1059,21 +1036,17 @@ async fn terminal_checkpoint_withheld_admission_is_traced_once() {
         })
         .build()
         .into_handle();
-    let core = lash::LashCore::standard_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-    .serve_test_model(provider, model())
-    .tools(Arc::new(NoTools))
-    .trace_sink(trace.clone())
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "withheld-trace-test",
-        "withheld-trace-test-boot",
-    ))
-    .unwrap();
+    let core = lash::LashCore::standard_builder(backend)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .serve_test_model(provider, model())
+        .tools(Arc::new(NoTools))
+        .trace_sink(trace.clone())
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "withheld-trace-test",
+            "withheld-trace-test-boot",
+        ))
+        .unwrap();
     let session = created_session(&core, session_id.as_str())
         .await
         .open()
@@ -1095,8 +1068,8 @@ async fn terminal_checkpoint_withheld_admission_is_traced_once() {
 }
 
 /// This test crate's one path to a session that may not exist yet
-/// (FIG-4112): only `create` creates, so this creates `session_id` with the
-/// core's config unless the catalog already holds it, then hands back the
+/// (FIG-4112): only `create` creates, so this creates `session_id` to run
+/// [`model`], unbounded, unless the catalog already holds it, then hands back the
 /// builder for the verb under test. An existing or deleted id is left for
 /// that verb to report.
 async fn created_session(
@@ -1106,7 +1079,11 @@ async fn created_session(
     let session_id = session_id.into();
     match core
         .session(session_id.clone())
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            model().wire_model,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
     {
         Ok(_)

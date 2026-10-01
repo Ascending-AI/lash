@@ -1,21 +1,17 @@
 #[tokio::test]
 pub(super) async fn remote_reset_and_transcript_projection_agree() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double_backend().await,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
     .serve_test_model(retrying_visible_stream_provider(), mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     core.session("retry-visible-observation")
         .create(crate::SessionCreation {
-            spec: crate::SessionSpec::default().charge_safety(
+            spec: mock_session_spec().charge_safety(
                 lash_core::ChargeSafetyPolicy::AcceptDuplicateBilling {
                     max_unsafe_retries: 2,
                     max_duplicate_cost_tokens: None,
                 },
             ),
-            ..Default::default()
+            parent: None,
         })
         .await?;
     let session = core.session("retry-visible-observation").open().await?;

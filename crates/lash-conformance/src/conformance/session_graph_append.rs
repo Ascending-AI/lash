@@ -269,8 +269,7 @@ async fn abandoned_branch_scenario(
         session_id: SessionId::from(format!("{prefix}-branch")),
         node_id: fork_point.clone().into(),
         relation: crate::SessionRelation::Root,
-        policy: source_request.config.session_policy(),
-        plugin_config: Default::default(),
+        config: source_request.config.session_policy().into(),
     };
     factory
         .fork_session(&branch_request)
@@ -281,7 +280,7 @@ async fn abandoned_branch_scenario(
         pending_observer_intents: Vec::new(),
         session_id: branch_request.session_id.clone(),
         relation: branch_request.relation.clone(),
-        config: branch_request.policy.clone().into(),
+        config: branch_request.config.clone(),
         head: crate::SessionCreationHead::Config,
     };
     let branch = factory

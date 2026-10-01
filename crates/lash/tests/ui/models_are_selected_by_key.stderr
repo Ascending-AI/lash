@@ -1,7 +1,7 @@
 error[E0599]: no method named `provider` found for struct `LashCoreBuilder` in the current scope
   --> tests/ui/models_are_selected_by_key.rs:10:10
    |
- 9 |       let _ = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(1024))
+ 9 |       let _ = lash::LashCore::standard_builder(backend)
    |  _____________-
 10 | |         .provider(provider);
    | |         -^^^^^^^^ method not found in `LashCoreBuilder`
@@ -9,12 +9,12 @@ error[E0599]: no method named `provider` found for struct `LashCoreBuilder` in t
    |
 
 error[E0277]: the trait bound `ModelKey: From<ModelMetadata>` is not satisfied
-  --> tests/ui/models_are_selected_by_key.rs:14:121
+  --> tests/ui/models_are_selected_by_key.rs:15:9
    |
-14 |     let _ = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(1024)).model(model);
-   |                                                                                                                   ----- ^^^^^ the trait `From<ModelMetadata>` is not implemented for `ModelKey`
-   |                                                                                                                   |
-   |                                                                                                                   required by a bound introduced by this call
+14 |     let _ = lash::SessionSpec::new(
+   |             ---------------------- required by a bound introduced by this call
+15 |         model,
+   |         ^^^^^ the trait `From<ModelMetadata>` is not implemented for `ModelKey`
    |
 help: `ModelKey` implements trait `From<T>`
   --> $WORKSPACE/crates/lash-core-llm/src/model.rs
@@ -25,20 +25,22 @@ help: `ModelKey` implements trait `From<T>`
    | impl From<String> for ModelKey {
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `From<std::string::String>`
    = note: required for `ModelMetadata` to implement `Into<ModelKey>`
-note: required by a bound in `lash::core::session_policy::<impl LashCoreBuilder>::model`
-  --> src/core/session_policy.rs
+note: required by a bound in `SessionSpec::new`
+  --> $WORKSPACE/crates/lash-core-execution/src/session_model/mod.rs
    |
-   |     pub fn model(mut self, key: impl Into<lash_core::ModelKey>) -> Self {
-   |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `lash::core::session_policy::<impl LashCoreBuilder>::model`
+   |     pub fn new(
+   |            --- required by a bound in this associated function
+   |         model: impl Into<ModelKey>,
+   |                     ^^^^^^^^^^^^^^ required by this bound in `SessionSpec::new`
 
 error[E0599]: no method named `provider` found for struct `SessionBuilder` in the current scope
-  --> tests/ui/models_are_selected_by_key.rs:18:35
+  --> tests/ui/models_are_selected_by_key.rs:22:35
    |
-18 |     let _ = core.session("keyed").provider(provider);
+22 |     let _ = core.session("keyed").provider(provider);
    |                                   ^^^^^^^^ method not found in `SessionBuilder`
 
 error[E0599]: no method named `provider_id` found for struct `SendBuilder` in the current scope
-  --> tests/ui/models_are_selected_by_key.rs:22:21
+  --> tests/ui/models_are_selected_by_key.rs:26:21
    |
-22 |     let _ = builder.provider_id("route");
+26 |     let _ = builder.provider_id("route");
    |                     ^^^^^^^^^^^ method not found in `SendBuilder`

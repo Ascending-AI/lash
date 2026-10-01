@@ -374,14 +374,10 @@ fn core_over(
         })
         .build()
         .into_handle();
-    let mut builder = LashCore::standard_builder(
-        engine.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    )
-    .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-    .serve_test_model(provider, mock_model_spec());
+    let mut builder = LashCore::standard_builder(engine.lash_backend())
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+        .serve_test_model(provider, mock_model_spec());
     if with_hook {
         builder = builder.plugin(Arc::new(deriving_plugin(hook_calls)));
     }

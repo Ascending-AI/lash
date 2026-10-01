@@ -26,33 +26,37 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
         .await
         .expect("sim engine");
     let backend = engine.backend();
-    let core = lash::LashCore::standard_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
+    let core = lash::LashCore::standard_builder(backend)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_model(provider, model.clone())
+        .trace_jsonl_path(&trace_path)
+        .trace_level(TraceLevel::Extended)
+        .build(crate::sim_process_owner())
+        .expect("runtime core");
+    let session = crate::open_created_session_from(
+        lash::SessionSpec::new(
+            model.wire_model.clone(),
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )
+        .plugin(
+            lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
+            lash::standard::StandardTurnOptions {
+                prompt: Some(lash::standard::StandardPrompt {
+                    intro: Some("System snapshot instruction.".to_string()),
+                    omit_builtin_guidance: true,
+                    ..Default::default()
+                }),
+                render: None,
+            },
+        )
+        .expect("standard prompt options"),
+        &core,
+        "history-request-snapshot",
     )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .serve_test_model(provider, model)
-    .session_plugin(
-        lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
-        lash::standard::StandardTurnOptions {
-            prompt: Some(lash::standard::StandardPrompt {
-                intro: Some("System snapshot instruction.".to_string()),
-                omit_builtin_guidance: true,
-                ..Default::default()
-            }),
-            render: None,
-        },
-    )
-    .expect("standard prompt options")
-    .trace_jsonl_path(&trace_path)
-    .trace_level(TraceLevel::Extended)
-    .build(crate::sim_process_owner())
-    .expect("runtime core");
-    let session = crate::open_created_session(&core, "history-request-snapshot")
-        .await
-        .expect("session");
+    .await
+    .expect("session");
 
     let first = engine
         .run_text_turn(&session, "history-snapshot-turn-1", "first question")

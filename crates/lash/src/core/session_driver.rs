@@ -1,7 +1,7 @@
 use super::build_plugin_host;
 use crate::support::{
     Arc, DeploymentStore, LashRuntime, LiveReplayStore, PluginFactory, RuntimeEnvironment,
-    RuntimeHandle, SessionPolicy, async_trait,
+    RuntimeHandle, async_trait,
 };
 use lash_sansio::SessionId;
 
@@ -11,7 +11,6 @@ pub(crate) struct CoreSessionDriverConfig {
     pub(super) residents: Arc<super::residents::ResidentSessions>,
     pub(super) drive_owner: lash_core::LeaseOwnerIdentity,
     pub(super) env: RuntimeEnvironment,
-    pub(super) policy: SessionPolicy,
     pub(super) protocol_factory: Option<Arc<dyn PluginFactory>>,
     pub(super) plugin_factories: Arc<Vec<Arc<dyn PluginFactory>>>,
     pub(super) store_factory: Arc<dyn DeploymentStore>,
@@ -127,8 +126,6 @@ impl CoreSessionDriver {
         &self,
         session_id: &SessionId,
     ) -> std::result::Result<RuntimeHandle, OpenFailure> {
-        let mut policy = self.config.policy.clone();
-        policy.session_id = Some(session_id.clone());
         // The engine drives only a session that exists: a missing one is
         // terminal, never a silent create (FIG-4112). Resolution writes no
         // catalog row.
@@ -138,7 +135,7 @@ impl CoreSessionDriver {
                 .map_err(|error| OpenFailure::of_open_read(session_id, error))?;
         // A row with no head recorded no config: the drive is refused with
         // the typed code, never run on defaults (FIG-4553).
-        let state = crate::session::load_state_from_store(session_id, &policy, &store)
+        let state = crate::session::load_state_from_store(session_id, &store)
             .await
             .map_err(|error| OpenFailure::of_open_read(session_id, error))?;
         let plugin_host = build_plugin_host(
@@ -158,6 +155,9 @@ impl CoreSessionDriver {
                 OpenFailure::Terminal(lash_core::PluginError::Session(error.to_string()))
             })?;
         env.plugin_host = Some(Arc::new(plugin_host));
+        // The drive runs the policy the session recorded; this core states
+        // none of its own (FIG-4594).
+        let policy = state.effective_policy().clone();
         let runtime = LashRuntime::from_environment(
             &env,
             policy,

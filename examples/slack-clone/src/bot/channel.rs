@@ -167,6 +167,8 @@ pub struct RecoveryReport {
 #[derive(Clone)]
 pub struct ChannelBot {
     core: LashCore,
+    /// The spec a channel's session is created from on its first event.
+    session_spec: lash::SessionSpec,
     api: Arc<SlackApi>,
     ledger: EventLedger,
     identity: BotIdentity,
@@ -187,6 +189,7 @@ impl ChannelBot {
     /// Assemble a bot over an already-built core.
     pub fn new(
         core: LashCore,
+        session_spec: lash::SessionSpec,
         api: Arc<SlackApi>,
         ledger: EventLedger,
         identity: BotIdentity,
@@ -194,6 +197,7 @@ impl ChannelBot {
     ) -> Self {
         Self {
             core,
+            session_spec,
             api,
             ledger,
             identity,
@@ -220,6 +224,12 @@ impl ChannelBot {
     /// The core, for the shutdown trace flush.
     pub fn core(&self) -> &LashCore {
         &self.core
+    }
+
+    /// The spec the bot creates each channel session from.
+    #[cfg(test)]
+    pub fn session_spec(&self) -> &lash::SessionSpec {
+        &self.session_spec
     }
 
     #[cfg(test)]
@@ -585,6 +595,7 @@ impl ChannelBot {
         let (session, inherited_context) = if record.thread_ts.is_some() {
             match threads::open_thread_session(
                 &self.core,
+                &self.session_spec,
                 &self.ledger,
                 record,
                 #[cfg(test)]
@@ -1075,7 +1086,7 @@ impl ChannelBot {
 
     /// Open (or resume) the channel's session, creating it on first use.
     async fn open_session(&self, channel: &str) -> Result<LashSession> {
-        threads::open_channel_session(&self.core, channel).await
+        threads::open_channel_session(&self.core, &self.session_spec, channel).await
     }
 
     fn classify(&self, event: &Event) -> (&'static str, Intent) {

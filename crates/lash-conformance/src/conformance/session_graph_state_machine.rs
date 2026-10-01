@@ -705,8 +705,7 @@ impl SessionGraphScenario {
                 session_id: SessionId::from(physical_id.clone()),
                 node_id: node_id.clone(),
                 relation,
-                policy: request.config.session_policy(),
-                plugin_config: Default::default(),
+                config: request.config.session_policy().into(),
             })
             .await;
         if !retained {
@@ -800,8 +799,7 @@ impl SessionGraphScenario {
                 session_id: SessionId::from(physical_id.clone()),
                 node_id: node_id.clone(),
                 relation,
-                policy: request.config.session_policy(),
-                plugin_config: Default::default(),
+                config: request.config.session_policy().into(),
             })
             .await
             .map_err(|error| error.to_string())?;
@@ -1412,8 +1410,7 @@ impl SessionGraphScenario {
                 session_id: SessionId::from(probe_id.clone()),
                 node_id: pinned_node_id.to_string().into(),
                 relation: request.relation.clone(),
-                policy: request.config.session_policy(),
-            plugin_config: Default::default(),
+                config: request.config.session_policy().into(),
             })
             .await
             .map_err(|error| {

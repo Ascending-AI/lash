@@ -556,13 +556,16 @@ pub(crate) fn field(name: &str, ty: lashlang::TypeExpr) -> lashlang::TypeField {
 }
 
 impl AppState {
-    /// What the workbench creates a session with: the host's model selection
-    /// and connected accounts at the moment of creation.
+    /// What the workbench creates a session with: its default spec, running
+    /// the host's model selection and stating the connected accounts at the
+    /// moment of creation.
     pub(crate) fn session_creation(&self) -> Result<lash::SessionCreation, serde_json::Error> {
-        Ok(lash::SessionCreation {
-            spec: lash::SessionSpec::new()
-                .model(self.selected_model().key())
-                .reasoning(self.selected_model().reasoning())
+        let selection = self.selected_model();
+        Ok(lash::SessionCreation::root(
+            self.session_defaults
+                .clone()
+                .model(selection.key())
+                .reasoning(selection.reasoning())
                 .plugin(
                     lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
                     lash::rlm::RlmCreateExtras {
@@ -570,12 +573,11 @@ impl AppState {
                         ..Default::default()
                     },
                 )?,
-            ..Default::default()
-        })
+        ))
     }
 }
 
-/// The workbench's RLM prompt, stated in the core's default session spec: the
+/// The workbench's RLM prompt, stated in each session's creation spec: the
 /// standing instructions (ADR 0063: worked examples in the session's own
 /// language, and TypeScript is the sole RLM language, ADR 0096) with the
 /// deferred catalogue's advertisement, and the connected accounts as context.

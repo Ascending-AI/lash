@@ -11,20 +11,16 @@ async fn generation_changes_are_patches_and_a_reopen_writes_nothing() -> Result<
     let double = restate_double(SEED).await;
     let backend = double.lash_backend();
     let factory = backend.session_store_factory();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
     core.session("generation-merge")
         .create(crate::SessionCreation {
-            spec: crate::SessionSpec::new().generation(lash_core::GenerationOptions {
+            spec: mock_session_spec().generation(lash_core::GenerationOptions {
                 seed: Some(73),
                 ..Default::default()
             }),
-            ..Default::default()
+            parent: None,
         })
         .await?;
     let session = core.session("generation-merge").open().await?;

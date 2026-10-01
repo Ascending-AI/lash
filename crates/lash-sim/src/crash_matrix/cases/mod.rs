@@ -87,6 +87,10 @@ fn scripted_provider(held: Arc<AtomicUsize>) -> lash_core::facade_support::Provi
         .into_handle()
 }
 
+/// The model [`standard_core`] and [`held_core`] serve: what a seam's
+/// sessions are created to run.
+pub(crate) const MODEL: &str = "crash-matrix-model";
+
 /// The standard-protocol core every seam's deployment runs.
 pub(crate) fn standard_core() -> CoreBuild {
     held_core(Arc::new(AtomicUsize::new(0)))
@@ -95,21 +99,17 @@ pub(crate) fn standard_core() -> CoreBuild {
 /// [`standard_core`], counting the model calls it holds open in `held`.
 pub(crate) fn held_core(held: Arc<AtomicUsize>) -> CoreBuild {
     Arc::new(move |backend, owner| {
-        let model = lash_core::ModelMetadata::builder("crash-matrix-model")
+        let model = lash_core::ModelMetadata::builder(MODEL)
             .context_window_tokens(200_000)
             .build()
             .map_err(|error| format!("model spec: {error}"))?;
-        lash::LashCore::standard_builder(
-            backend,
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-        )
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .recovery_lease(recovery_lease())
-        .serve_test_model(scripted_provider(Arc::clone(&held)), model)
-        .build(owner)
-        .map_err(|error| format!("build the lash core: {error}"))
+        lash::LashCore::standard_builder(backend)
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .recovery_lease(recovery_lease())
+            .serve_test_model(scripted_provider(Arc::clone(&held)), model)
+            .build(owner)
+            .map_err(|error| format!("build the lash core: {error}"))
     })
 }
 
@@ -171,7 +171,7 @@ async fn send_text(
         let text = text.to_owned();
         let sent = world
             .host_op(async move {
-                let session = crate::open_created_session(&core, session).await?;
+                let session = crate::open_created_session(MODEL, &core, session).await?;
                 session
                     .send(lash::TurnInput::text(text))
                     .id(root.as_str())

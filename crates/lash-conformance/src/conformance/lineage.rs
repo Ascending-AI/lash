@@ -156,11 +156,11 @@ async fn fork(
             session_id: SessionId::from(session_id.to_string()),
             node_id: node_id.to_string().into(),
             relation: SessionRelation::Root,
-            policy: crate::SessionPolicy::new(
+            config: crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
-            ),
-            plugin_config: Default::default(),
+            )
+            .into(),
         })
         .await
         .expect("create lineage conformance fork");

@@ -12,6 +12,12 @@ pub(crate) const RLM_LANGUAGE_ID: &str = "typescript";
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) core: LashCore,
+    /// The workbench's default session spec, stated at boot: turn and
+    /// no-progress budgets, generation, attachment acceptance and the RLM
+    /// prompt. A core keeps no session defaults, so the host keeps this
+    /// value and each creation states it with the model selected at that
+    /// moment ([`AppState::session_creation`]).
+    pub(crate) session_defaults: lash::SessionSpec,
     pub(crate) attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
     /// The deployment's session-store factory, retained beside the core it was
     /// built with because it is also this host's attachment **root authority**

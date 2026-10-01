@@ -241,6 +241,26 @@ mod frame_node_id_tests {
     }
 }
 
+/// The part of its session's config a host session-turn start left
+/// unstated.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnstatedSessionConfig {
+    /// The request carries no policy: no turn budget, generation or charge
+    /// safety is stated.
+    Policy,
+    /// The request names no model: neither a key nor a recorded binding.
+    Model,
+}
+
+impl std::fmt::Display for UnstatedSessionConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Policy => "policy",
+            Self::Model => "model",
+        })
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionCreateRequest {
@@ -257,14 +277,12 @@ pub struct SessionCreateRequest {
     /// keeps the policy's recorded model verbatim; nothing re-resolves it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<crate::ModelKey>,
-    /// The binding the registering core's default selection minted for a
-    /// host session-turn start that names no model (FIG-4531). It is what
-    /// lash derived when the start was first registered, never part of what
-    /// the host stated: the start-key fence leaves it out
-    /// ([`Self::stated`]), and a retried start mints none. The child runs it
-    /// only when neither its policy nor its starter records a model.
+    /// The reasoning the child runs the model its key mints with. `None`
+    /// keeps the reasoning its policy's recorded model carries, or the
+    /// provider's default when the policy records no model. Stated beside
+    /// the key because a policy carries reasoning only with a minted model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) default_model: Option<crate::ModelConfig>,
+    pub reasoning: Option<crate::ReasoningSelection>,
     pub plugin_source: SessionPluginSource,
     #[serde(default)]
     pub initial_nodes: Vec<SessionAppendNode>,
@@ -298,7 +316,7 @@ impl SessionCreateRequest {
             subagent: None,
             plugin_options,
             model: None,
-            default_model: None,
+            reasoning: None,
         }
     }
 
@@ -322,7 +340,7 @@ impl SessionCreateRequest {
             subagent: None,
             plugin_options,
             model: None,
-            default_model: None,
+            reasoning: None,
         }
     }
 
@@ -347,7 +365,7 @@ impl SessionCreateRequest {
             subagent: None,
             plugin_options,
             model: None,
-            default_model: None,
+            reasoning: None,
         }
     }
 
@@ -367,26 +385,40 @@ impl SessionCreateRequest {
                 .is_some_and(|policy| policy.model.is_some())
     }
 
-    /// The default binding the registering core recorded for a request that
-    /// names no model.
-    pub fn default_model(&self) -> Option<&crate::ModelConfig> {
-        self.default_model.as_ref()
+    /// State `spec` as this request's whole config (FIG-4594): the policy
+    /// fields it states, its model key and reasoning, and its plugin
+    /// options. The key is carried unminted, so the request states nothing
+    /// a catalog derives; the runtime that creates the session mints it. A
+    /// host session-turn start states its session this way.
+    ///
+    /// # Errors
+    ///
+    /// A spec that states no model or no turn budget
+    /// ([`SessionSpec::inherit`](crate::SessionSpec::inherit)).
+    pub fn with_spec(
+        mut self,
+        spec: &crate::SessionSpec,
+    ) -> Result<Self, crate::session_model::SpecResolveError> {
+        let Some(model) = spec.model.clone() else {
+            return Err(crate::session_model::SpecResolveError::RootWithoutModel);
+        };
+        self.policy = Some(spec.stated_root_policy()?);
+        self.model = Some(model);
+        self.reasoning = spec.reasoning.clone();
+        self.plugin_options = spec.plugin_options.clone();
+        Ok(self)
     }
 
-    /// Record the registering core's default binding, or none. Only the
-    /// core that registers a start writes it, and only when no start is
-    /// retained under the start's key.
-    pub fn record_default_model(&mut self, default_model: Option<crate::ModelConfig>) {
-        self.default_model = default_model;
-    }
-
-    /// The request as its author stated it: without the default binding
-    /// lash derived at registration.
-    #[must_use]
-    pub fn stated(&self) -> Self {
-        Self {
-            default_model: None,
-            ..self.clone()
+    /// What a host start's request leaves unstated, if anything: a start no
+    /// session captured an environment for has no base, so it states its
+    /// policy and names its model (FIG-4594).
+    pub fn unstated_root_config(&self) -> Option<UnstatedSessionConfig> {
+        if self.policy.is_none() {
+            Some(UnstatedSessionConfig::Policy)
+        } else if !self.names_model() {
+            Some(UnstatedSessionConfig::Model)
+        } else {
+            None
         }
     }
 

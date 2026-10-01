@@ -102,41 +102,35 @@ impl Harness {
         .with_worker_service(lash::rlm::WorkerService::subprocess(
             std::env::var_os("LASH_OPERATOR_VM_WORKER").context("VM worker executable")?,
         ));
-        let core = lash::LashCore::rlm_builder(
-            backend,
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-            protocol,
-        )
-        .models(Arc::new(
-            lash::ModelRegistry::new().register(
-                "session-operator-mock",
-                lash::RegisteredModel::new(
-                    lash::ModelMetadata::builder("session-operator-mock")
-                        .context_window_tokens(200_000)
-                        .build()
-                        .map_err(anyhow::Error::msg)?,
-                    provider,
+        let core = lash::LashCore::rlm_builder(backend, protocol)
+            .models(Arc::new(
+                lash::ModelRegistry::new().register(
+                    "session-operator-mock",
+                    lash::RegisteredModel::new(
+                        lash::ModelMetadata::builder("session-operator-mock")
+                            .context_window_tokens(200_000)
+                            .build()
+                            .map_err(anyhow::Error::msg)?,
+                        provider,
+                    ),
+                )?,
+            ))
+            .commit_budget(lash::CommitBudget::bounded(4 * 1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .trace_jsonl_path(std::path::Path::new(&scratch).join("worker.trace.jsonl"))
+            .plugin(Arc::new(
+                lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                    lash_core::lifetime::starter,
                 ),
-            )?,
-        ))
-        .model("session-operator-mock")
-        .commit_budget(lash::CommitBudget::bounded(4 * 1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .trace_jsonl_path(std::path::Path::new(&scratch).join("worker.trace.jsonl"))
-        .plugin(Arc::new(
-            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
-                lash_core::lifetime::starter,
-            ),
-        ))
-        .plugin(Arc::new(FaultPlugin {
-            repaired: repaired.clone(),
-            pool: pool.clone(),
-        }))
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "session-operator",
-            format!("operator:{}", std::process::id()),
-        ))?;
+            ))
+            .plugin(Arc::new(FaultPlugin {
+                repaired: repaired.clone(),
+                pool: pool.clone(),
+            }))
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                "session-operator",
+                format!("operator:{}", std::process::id()),
+            ))?;
         Ok(Self {
             core,
             engine,
@@ -166,7 +160,11 @@ impl Harness {
     async fn open(&self, tag: &str) -> Result<lash::LashSession> {
         self.core
             .session(format!("operator:{tag}"))
-            .create(lash::SessionCreation::default())
+            .create(lash::SessionCreation::root(lash::SessionSpec::new(
+                "session-operator-mock",
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            )))
             .await?;
         Ok(self.core.session(format!("operator:{tag}")).open().await?)
     }

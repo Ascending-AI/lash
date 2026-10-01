@@ -481,6 +481,7 @@ pub(crate) async fn recoverable_chat_test_state_with_replay_store(
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        session_defaults: crate::tests::test_session_defaults(),
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&store_factory),

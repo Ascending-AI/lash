@@ -500,9 +500,6 @@ where
                         session_catalog: lash_core::runtime::HostStartAdmission::catalog(
                             host_start.as_deref(),
                         ),
-                        session_turn_default: lash_core::runtime::HostStartAdmission::default_mint(
-                            host_start.as_deref(),
-                        ),
                         session_turn_admission:
                             lash_core::runtime::HostStartAdmission::session_turn_admission(
                                 host_start.as_deref(),

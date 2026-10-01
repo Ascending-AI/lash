@@ -65,11 +65,7 @@ impl TestBackend {
         protocol: Option<Arc<dyn lash_core::plugin::ProtocolSessionPlugin>>,
         plugins: Vec<Arc<dyn PluginFactory>>,
     ) -> LashCore {
-        let builder = LashCore::standard_builder(
-            self.backend.clone(),
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        );
+        let builder = LashCore::standard_builder(self.backend.clone());
         let builder = match protocol {
             Some(protocol) => builder.protocol_plugin(
                 lash_core::testing::test_standard_protocol_factory_with_runtime_state(
@@ -303,16 +299,12 @@ async fn a_send_receipt_withdraws_input_before_drive() -> Result<()> {
     let backend = TestBackend::open().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let requests = Arc::new(StdMutex::new(Vec::new()));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        counting_text_provider(Arc::clone(&provider_calls), Arc::clone(&requests)),
-        mock_model_spec(),
-    )
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.backend.clone()))
+        .serve_test_model(
+            counting_text_provider(Arc::clone(&provider_calls), Arc::clone(&requests)),
+            mock_model_spec(),
+        )
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(SESSION).created().await.open().await?;
     // The engine drives a send as soon as it is accepted. Hold the session's
     // drive so nothing claims the input before the withdraw below: the

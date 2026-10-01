@@ -270,11 +270,7 @@ fn core_with_protocol(
     let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(backend)
         .with_session_work(work)
         .into_backend();
-    let builder = LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    );
+    let builder = LashCore::standard_builder(backend);
     let builder = match protocol {
         Some(protocol) => builder.protocol_plugin(
             lash_core::testing::test_standard_protocol_factory_with_runtime_state(protocol, None),

@@ -26,26 +26,22 @@ fn the_workbench_bounds_both_turn_work_and_turn_stalling() {
     assert_eq!(bound.get(), 7);
 
     // The workbench's own policy, resolved the way the runtime resolves it.
-    let spec = lash::SessionSpec::new()
-        .turn_budget(lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS))
-        .max_tool_calls(lash::MaxToolCalls::new(1024))
-        .no_progress_budget(lash::NoProgressBudget::bounded(
-            WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS,
-        ));
+    let spec = lash::SessionSpec::new(
+        "test-model",
+        lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS),
+        lash::MaxToolCalls::new(1024),
+    )
+    .no_progress_budget(lash::NoProgressBudget::bounded(
+        WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS,
+    ));
     let expected_workbench_bound = Some(lash::NoProgressBudget::bounded(
         WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS,
     ));
     assert_eq!(spec.no_progress_budget, expected_workbench_bound);
 
     let policy = spec
-        .resolve_against(
-            &lash::runtime::SessionPolicy::new(
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(1024),
-            ),
-            &lash::EmptyModels,
-        )
-        .expect("a spec naming no model resolves without a catalog");
+        .stated_root_policy()
+        .expect("a root spec states its policy without a catalog");
     assert_eq!(policy.turn_budget.max_turns(), Some(WORKBENCH_MAX_TURNS));
     let resolved_attempts = policy.no_progress_budget.max_attempts();
     assert_eq!(resolved_attempts, Some(WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS));
@@ -56,7 +52,7 @@ fn the_workbench_bounds_both_turn_work_and_turn_stalling() {
 
     // An explicit opt-out survives resolution, so a deployment that wants the
     // old behaviour can still ask for it in as many words.
-    let opted_out = lash::SessionSpec::new()
+    let opted_out = lash::SessionSpec::inherit()
         .no_progress_budget(lash::NoProgressBudget::Unbounded)
         .resolve_against(&policy, &lash::EmptyModels)
         .expect("a spec naming no model resolves without a catalog");

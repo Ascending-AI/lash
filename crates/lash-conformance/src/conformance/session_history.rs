@@ -450,8 +450,8 @@ pub async fn history_fork_respects_ceiling(store: Arc<dyn ConformanceDeployment>
             node_id: middle[0].clone(),
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
-            policy: SessionPolicy::new(TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024)),
-            plugin_config: Default::default(),
+            config: SessionPolicy::new(TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
+                .into(),
         })
         .await
         .expect("fork at retained node");
@@ -483,8 +483,8 @@ pub async fn history_fork_respects_ceiling(store: Arc<dyn ConformanceDeployment>
             node_id: middle[0].clone(),
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
-            policy: SessionPolicy::new(TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024)),
-            plugin_config: Default::default(),
+            config: SessionPolicy::new(TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
+                .into(),
         })
         .await
         .expect("fork an inherited node through the child lineage");
@@ -519,8 +519,8 @@ async fn fork_at(store: &dyn ConformanceDeployment, child: &SessionId, node_id: 
             node_id: node_id.clone(),
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
-            policy: SessionPolicy::new(TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024)),
-            plugin_config: Default::default(),
+            config: SessionPolicy::new(TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
+                .into(),
         })
         .await
         .expect("fork at a retained node");

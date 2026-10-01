@@ -64,8 +64,7 @@ pub(super) async fn session_store_factory_vacuums_organic_retained_tombstone(
             session_id: SessionId::from("retained-tombstone-fork"),
             node_id: leaf_node_id.clone(),
             relation: crate::SessionRelation::Root,
-            policy: request.config.session_policy(),
-            plugin_config: Default::default(),
+            config: request.config.session_policy().into(),
         })
         .await
         .expect_err("a retained tombstone must not be forkable");

@@ -11,7 +11,7 @@ async fn assert_runtime_assembly_refuses_without_writes(
     let catalog = backend.session_store_factory();
     if deleted {
         core.session(session_id.clone())
-            .create(crate::SessionCreation::default())
+            .create(crate::SessionCreation::root(mock_session_spec()))
             .await
             .expect("create the deletion fixture explicitly");
         catalog
@@ -117,16 +117,12 @@ async fn assert_runtime_assembly_refuses_without_writes(
 }
 
 fn peer_core(backend: lash_core::Backend) -> LashCore {
-    LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    )
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-    .build(crate::testing::runtime_lease_owner())
-    .expect("fixture core")
+    LashCore::standard_builder(backend)
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+        .build(crate::testing::runtime_lease_owner())
+        .expect("fixture core")
 }
 
 #[tokio::test]

@@ -57,11 +57,11 @@ async fn ingress_core_over(
         )
         .await?
         .id;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        ingress_backend(backend, effect_host, process_env_store),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(ingress_backend(
+        backend,
+        effect_host,
+        process_env_store,
+    )))
     .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
@@ -129,15 +129,11 @@ fn ingress_backend(
 /// [`KeyJournalController`]: a fresh effect journal, which is exactly what a
 /// redelivered submission gets.
 async fn second_invocation_of(first: &LashCore) -> Result<LashCore> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        ingress_backend(
-            first.backend().clone(),
-            Some(Arc::new(KeyJournalController::default())),
-            None,
-        ),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(ingress_backend(
+        first.backend().clone(),
+        Some(Arc::new(KeyJournalController::default())),
+        None,
+    )))
     .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
@@ -224,11 +220,11 @@ async fn ingress_core_with_trigger_store(
         register_ingress_trigger_subscription(store.as_ref(), backend.process_env_store().as_ref())
             .await?;
     let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        ingress_backend(backend, Some(effect_host), None),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(ingress_backend(
+        backend,
+        Some(effect_host),
+        None,
+    )))
     .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
@@ -518,15 +514,11 @@ async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Resu
         ),
     )
     .await?;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        ingress_backend(
-            backend,
-            Some(Arc::new(KeyJournalController::default())),
-            None,
-        ),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(ingress_backend(
+        backend,
+        Some(Arc::new(KeyJournalController::default())),
+        None,
+    )))
     .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
@@ -2068,14 +2060,10 @@ async fn ingress_engine_core(
     backend: lash_core::Backend,
 ) -> Result<(LashCore, Arc<dyn ProcessRegistry>)> {
     let registry = backend.process_registry();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .plugin(Arc::new(IngressAdmissionEngineFactory))
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .plugin(Arc::new(IngressAdmissionEngineFactory))
+        .build(crate::testing::runtime_lease_owner())?;
     core.host_artifacts()
         .publish_process_env(
             &lash_core::HostArtifactPin::mint(),

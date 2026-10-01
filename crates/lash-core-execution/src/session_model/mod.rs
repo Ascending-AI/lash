@@ -175,14 +175,19 @@ impl std::ops::DerefMut for RuntimeSessionPolicy {
     }
 }
 
-/// Reusable session configuration overlay.
+/// A session's configuration, as its creator states it.
 ///
-/// `SessionSpec` is the public configuration shape for callers that want to
-/// describe either a root session or a child session without constructing the
-/// persisted [`SessionPolicy`] directly. It selects a model by key; resolving
-/// the spec mints that key's binding through the host's models, once, and the
-/// resulting policy records it. A spec that selects no model keeps the base
-/// policy's recorded binding verbatim, never re-resolving its key.
+/// A root creation states a whole spec: [`SessionSpec::new`] takes the model
+/// key and the turn budget, the two parts nothing defaults, and every other
+/// field has a neutral value of its own. Nothing stands beneath it: a
+/// deployment keeps no default spec, so a host that wants one keeps its own
+/// `SessionSpec` value and passes it (FIG-4594). A child states an overlay
+/// ([`SessionSpec::inherit`]) over its parent's recorded policy.
+///
+/// It selects a model by key; resolving the spec mints that key's binding
+/// through the host's models, once, and the resulting policy records it. An
+/// overlay that selects no model keeps its base policy's recorded binding
+/// verbatim, never re-resolving its key.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SessionSpec {
     inherit: bool,
@@ -209,10 +214,8 @@ pub struct SessionSpec {
     /// Plugin-keyed, serializable creation options (FIG-4379), the protocol
     /// plugin's prompt config among them. Each installed plugin creates its
     /// recorded namespace from its key, and only its owner's typed config
-    /// commands change it afterwards. A key stated here is laid over the same
-    /// key of the spec beneath it ([`PluginOptions::over`]); a key no
-    /// installed plugin owns, or a value its owner refuses, fails the
-    /// creation typed as
+    /// commands change it afterwards. A key no installed plugin owns, or a
+    /// value its owner refuses, fails the creation typed as
     /// [`SessionConfigRefused`](crate::SessionError::SessionConfigRefused).
     pub plugin_options: crate::PluginOptions,
     /// Generation intent for every LLM call the session makes. `None` inherits
@@ -227,10 +230,33 @@ pub struct SessionSpec {
 impl Eq for SessionSpec {}
 
 impl SessionSpec {
-    /// Unset fields resolve from the runtime's core defaults.
-    pub fn new() -> Self {
+    /// A root session's spec: the model it runs, by the host's key, its
+    /// turn budget and its tool-call limit, the three parts nothing
+    /// defaults. Every other field starts at the neutral value
+    /// [`SessionPolicy::new`] states; state it with the setters.
+    pub fn new(
+        model: impl Into<ModelKey>,
+        turn_budget: TurnBudget,
+        max_tool_calls: MaxToolCalls,
+    ) -> Self {
         Self {
-            inherit: false,
+            model: Some(model.into()),
+            turn_budget: Some(turn_budget),
+            max_tool_calls: Some(max_tool_calls),
+            ..Self::overlay(false)
+        }
+    }
+
+    /// A child's overlay: unset fields inherit from the parent's recorded
+    /// policy at resolution time. It states no session of its own, so a root
+    /// creation refuses it.
+    pub fn inherit() -> Self {
+        Self::overlay(true)
+    }
+
+    fn overlay(inherit: bool) -> Self {
+        Self {
+            inherit,
             model: None,
             reasoning: None,
             attachment_acceptance: None,
@@ -244,12 +270,40 @@ impl SessionSpec {
         }
     }
 
-    /// Unset fields inherit from the live parent policy at resolution time.
-    pub fn inherit() -> Self {
-        Self {
-            inherit: true,
-            ..Self::new()
+    /// The policy a root records from this spec alone: its stated fields
+    /// over the neutral [`SessionPolicy::new`] of its turn budget and
+    /// tool-call limit, its key minted through `models` now. A spec that
+    /// states no model, no turn budget or no tool-call limit (an
+    /// [`inherit`](Self::inherit) overlay) is refused: a root has no base to
+    /// take them from.
+    pub fn resolve_root(
+        &self,
+        models: &dyn RuntimeModels,
+    ) -> Result<SessionPolicy, SpecResolveError> {
+        if self.model.is_none() {
+            return Err(SpecResolveError::RootWithoutModel);
         }
+        self.resolve_against(&self.root_base()?, models)
+    }
+
+    /// The policy fields of a root this spec states, with no model minted:
+    /// what a host session-turn start carries beside its model key and
+    /// reasoning, so the start states nothing a catalog derives.
+    pub fn stated_root_policy(&self) -> Result<SessionPolicy, SpecResolveError> {
+        let mut unminted = self.clone();
+        unminted.model = None;
+        unminted.reasoning = None;
+        unminted.resolve_against(&self.root_base()?, &crate::EmptyModels)
+    }
+
+    fn root_base(&self) -> Result<SessionPolicy, SpecResolveError> {
+        let turn_budget = self
+            .turn_budget
+            .ok_or(SpecResolveError::RootWithoutTurnBudget)?;
+        let max_tool_calls = self
+            .max_tool_calls
+            .ok_or(SpecResolveError::RootWithoutMaxToolCalls)?;
+        Ok(SessionPolicy::new(turn_budget, max_tool_calls))
     }
 
     /// The model the session runs, by the host's key.
@@ -428,12 +482,18 @@ pub enum SpecResolveError {
     /// refuses.
     #[error(transparent)]
     Reasoning(crate::ReasoningRefused),
-}
-
-impl Default for SessionSpec {
-    fn default() -> Self {
-        Self::new()
-    }
+    /// A root's spec states no model: nothing stands beneath it to supply
+    /// one.
+    #[error("a root session's spec states no model")]
+    RootWithoutModel,
+    /// A root's spec states no turn budget: nothing stands beneath it to
+    /// supply one.
+    #[error("a root session's spec states no turn budget")]
+    RootWithoutTurnBudget,
+    /// A root's spec states no tool-call limit: nothing stands beneath it to
+    /// supply one.
+    #[error("a root session's spec states no max_tool_calls")]
+    RootWithoutMaxToolCalls,
 }
 
 /// The receiving half of [`llm_stream_channel`]: the provider's stream events

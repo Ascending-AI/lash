@@ -4,16 +4,9 @@ use super::*;
 async fn deployment_drain_status_keeps_waiting_process_non_drained() {
     let backend = sqlite_memory_store_backend().await;
     let registry = backend.process_registry();
-    let core = explicit_ephemeral_facets(
-        LashCore::standard_builder(
-            backend,
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        )
-        .model("mock-model"),
-    )
-    .build(crate::testing::runtime_lease_owner())
-    .expect("build core with a process registry");
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .build(crate::testing::runtime_lease_owner())
+        .expect("build core with a process registry");
     let process_id = registry
         .register_process(
             lash_core::ProcessRegistration::new(
@@ -76,16 +69,9 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
     {
         let backend: lash_core::Backend = sqlite_memory_store_backend().await;
         let factory = backend.session_store_factory();
-        let core = explicit_ephemeral_facets(
-            LashCore::standard_builder(
-                backend.clone(),
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-            )
-            .model("mock-model"),
-        )
-        .build(crate::testing::runtime_lease_owner())
-        .expect("build core");
+        let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+            .build(crate::testing::runtime_lease_owner())
+            .expect("build core");
         let idle = core
             .drain_status(false)
             .await
@@ -186,16 +172,9 @@ async fn parked_work_merges_parked_turns_and_processes() {
     let backend: lash_core::Backend = double_backend_explicit_reconcile().await;
     let factory = backend.session_store_factory();
     let registry = backend.process_registry();
-    let core = explicit_ephemeral_facets(
-        LashCore::standard_builder(
-            backend.clone(),
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        )
-        .model("mock-model"),
-    )
-    .build(crate::testing::runtime_lease_owner())
-    .expect("build core");
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .build(crate::testing::runtime_lease_owner())
+        .expect("build core");
 
     let process_id = registry
         .register_process(
@@ -455,16 +434,9 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
     let backend = sqlite_memory_store_backend().await;
     let registry = backend.process_registry();
     let own = backend.build_generation().clone();
-    let core = explicit_ephemeral_facets(
-        LashCore::standard_builder(
-            backend,
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        )
-        .model("mock-model"),
-    )
-    .build(crate::testing::runtime_lease_owner())
-    .expect("build core with a process registry");
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .build(crate::testing::runtime_lease_owner())
+        .expect("build core with a process registry");
     let retired = lash_core::engine::BuildGeneration::for_test("fig-3799-retired");
     assert_ne!(retired, own);
 
@@ -680,16 +652,9 @@ async fn a_closing_session_holds_a_generation_drain_until_its_physical_delete() 
     let backend = sqlite_memory_store_backend().await;
     let factory = backend.session_store_factory();
     let clock = backend.clock();
-    let core = explicit_ephemeral_facets(
-        LashCore::standard_builder(
-            backend,
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        )
-        .model("mock-model"),
-    )
-    .build(crate::testing::runtime_lease_owner())
-    .expect("build the core");
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .build(crate::testing::runtime_lease_owner())
+        .expect("build the core");
     let retired = lash_core::engine::BuildGeneration::for_test("fig-3873-s4-retired");
     assert!(core.drain_generation(&retired).await.expect("mark"));
     let session = lash_core::SessionId::from("fig-3873-s4-closing");

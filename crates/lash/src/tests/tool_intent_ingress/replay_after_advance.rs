@@ -133,15 +133,11 @@ async fn end_prune_and_compact(registry: &Arc<dyn ProcessRegistry>, process_id: 
 /// journal, as [`second_invocation_of`] builds it, without reopening the
 /// law's session: a law may have deleted it.
 fn redelivery_of(first: &LashCore) -> Result<LashCore> {
-    explicit_ephemeral_facets(LashCore::standard_builder(
-        ingress_backend(
-            first.backend().clone(),
-            Some(Arc::new(KeyJournalController::default())),
-            None,
-        ),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
+    explicit_ephemeral_facets(LashCore::standard_builder(ingress_backend(
+        first.backend().clone(),
+        Some(Arc::new(KeyJournalController::default())),
+        None,
+    )))
     .serve_test_model(mock_provider(), mock_model_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())

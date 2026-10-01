@@ -126,15 +126,11 @@ async fn delete_in_handler(
 async fn a_session_close_releases_its_running_roots_execution() -> Result<()> {
     let double = restate_double(SEED).await;
     let calls = Arc::new(HeldCall::default());
-    let core = LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    )
-    .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-    .serve_test_model(hold_provider(Arc::clone(&calls)), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = LashCore::standard_builder(double.lash_backend())
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+        .serve_test_model(hold_provider(Arc::clone(&calls)), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("held-close").created().await.open().await?;
     let session_id = session.session_id().clone();
     session.send(TurnInput::text("hold this root")).await?;

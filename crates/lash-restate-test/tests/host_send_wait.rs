@@ -111,22 +111,18 @@ fn core(backend: lash_core::Backend, barrier: &Arc<Barrier>) -> lash::LashCore {
         })
         .build()
         .into_handle();
-    lash::LashCore::standard_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-    .serve_test_model(
-        provider,
-        lash_core::ModelMetadata::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("model spec"),
-    )
-    .build(owner())
-    .expect("build the lash core")
+    lash::LashCore::standard_builder(backend)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .serve_test_model(
+            provider,
+            lash_core::ModelMetadata::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("model spec"),
+        )
+        .build(owner())
+        .expect("build the lash core")
 }
 
 /// What a host run answers: the outcome's status, its reply and its root.
@@ -262,7 +258,14 @@ impl SessionHost for SessionHostService {
             .expect("the core is built before the host runs");
         let session = core
             .session(ctx.key())
-            .create_or_use_restate(&ctx, lash::SessionCreation::default())
+            .create_or_use_restate(
+                &ctx,
+                lash::SessionCreation::root(lash::SessionSpec::new(
+                    "mock-model",
+                    lash::TurnBudget::Unbounded,
+                    lash::MaxToolCalls::new(1024),
+                )),
+            )
             .await?;
         let handle = session
             .send(lash::TurnInput::text("sent before the session is deleted"))
@@ -1928,35 +1931,30 @@ fn follow_on_core(
             Ok(Vec::new())
         }) as lash_core::plugin::PluginFuture<_>
     });
-    lash::LashCore::standard_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-    .models(Arc::new(
-        lash::ModelRegistry::new()
-            .register(
-                "mock-model",
-                lash::RegisteredModel::new(
-                    lash::ModelMetadata::builder("mock-model")
-                        .context_window_tokens(200_000)
-                        .build()
-                        .expect("model metadata"),
-                    provider,
-                ),
-            )
-            .expect("one key registers"),
-    ))
-    .model("mock-model")
-    .tools(Arc::new(SwitchFrameTool) as Arc<dyn lash_core::ToolProvider>)
-    .plugin(Arc::new(lash_core::plugin::StaticPluginFactory::new(
-        "host-send-wait-follow-on-failure",
-        lash_core::facade_support::PluginSpec::new().with_before_turn(hook),
-    )))
-    .build(owner())
-    .expect("build the lash core")
+    lash::LashCore::standard_builder(backend)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .models(Arc::new(
+            lash::ModelRegistry::new()
+                .register(
+                    "mock-model",
+                    lash::RegisteredModel::new(
+                        lash::ModelMetadata::builder("mock-model")
+                            .context_window_tokens(200_000)
+                            .build()
+                            .expect("model metadata"),
+                        provider,
+                    ),
+                )
+                .expect("one key registers"),
+        ))
+        .tools(Arc::new(SwitchFrameTool) as Arc<dyn lash_core::ToolProvider>)
+        .plugin(Arc::new(lash_core::plugin::StaticPluginFactory::new(
+            "host-send-wait-follow-on-failure",
+            lash_core::facade_support::PluginSpec::new().with_before_turn(hook),
+        )))
+        .build(owner())
+        .expect("build the lash core")
 }
 
 /// FIG-4361 against a live `restate-server`: a follow-on recovery root's run
@@ -2129,7 +2127,11 @@ async fn created_session(
     let session_id = session_id.into();
     match core
         .session(session_id.clone())
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "mock-model",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
     {
         Ok(_)

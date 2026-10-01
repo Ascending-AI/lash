@@ -1,6 +1,5 @@
 use crate::session_identity::SessionRelation;
 pub use crate::session_identity::{SessionCreationHead, SessionStoreCreateRequest};
-use crate::session_policy::SessionPolicy;
 use crate::{NodeId, SessionId};
 
 /// A durable turn boundary whose continuation checkpoint is currently retained.
@@ -27,10 +26,23 @@ pub struct ForkSessionRequest {
     pub node_id: NodeId,
     pub relation: SessionRelation,
     pub pending_observer_intents: Vec<crate::SessionObserverIntent>,
-    pub policy: SessionPolicy,
-    /// The plugin configuration the fork records: the fork point's frame
-    /// capture (FIG-4379).
-    pub plugin_config: crate::PluginConfig,
+    /// The config the fork records: its fork point's recorded config in
+    /// full, model, execution controls, generation, tool access, subagent
+    /// authority and plugin configuration alike (FIG-4594). It is the new
+    /// session's own head, so its `config_revision` starts at `0`.
+    pub config: crate::PersistedSessionConfig,
+}
+
+impl ForkPoint {
+    /// The config a fork of this point records: everything the point's
+    /// frame captured, at the new session's first config revision. Nothing
+    /// of the deployment that forks stands in for any of it (FIG-4594).
+    pub fn fork_config(&self) -> crate::PersistedSessionConfig {
+        crate::PersistedSessionConfig {
+            config_revision: 0,
+            ..self.config.clone()
+        }
+    }
 }
 
 /// Durable identity returned after a zero-node fork.

@@ -473,24 +473,19 @@ fn process_core(engine: &Engine, executions: &Arc<AtomicUsize>) -> lash::LashCor
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
-    lash::LashCore::rlm_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-        factory,
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-    .serve_test_model(provider, model_spec())
-    .tools(Arc::new(CountingTool {
-        executions: Arc::clone(executions),
-        output: json!({"result": "counted"}),
-    }) as Arc<dyn lash_core::ToolProvider>)
-    .build(lash_core::LeaseOwnerIdentity::opaque(
-        "lash-restate-test",
-        "crash-windows-process",
-    ))
-    .expect("build the lash core")
+    lash::LashCore::rlm_builder(backend, factory)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .serve_test_model(provider, model_spec())
+        .tools(Arc::new(CountingTool {
+            executions: Arc::clone(executions),
+            output: json!({"result": "counted"}),
+        }) as Arc<dyn lash_core::ToolProvider>)
+        .build(lash_core::LeaseOwnerIdentity::opaque(
+            "lash-restate-test",
+            "crash-windows-process",
+        ))
+        .expect("build the lash core")
 }
 
 /// ```text
@@ -848,27 +843,23 @@ fn presentation_core(
     };
     let spec = lash_core::plugin::PluginSpec::new()
         .with_presentation_step(retaining_step(Arc::clone(witness)));
-    lash::LashCore::standard_builder(
-        engine.lash_backend(),
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .serve_test_model(provider, model_spec())
-    .tools(Arc::new(CountingTool {
-        executions: Arc::clone(executions),
-        output: json!({ "text": tool_output() }),
-    }) as Arc<dyn lash_core::ToolProvider>)
-    .plugin(Arc::new(lash_core::plugin::StaticPluginFactory::new(
-        "crash-windows-presentation",
-        spec,
-    )))
-    .build(lash_core::LeaseOwnerIdentity::opaque(
-        "lash-restate-test",
-        "crash-windows-presentation",
-    ))
-    .expect("build the lash core")
+    lash::LashCore::standard_builder(engine.lash_backend())
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_model(provider, model_spec())
+        .tools(Arc::new(CountingTool {
+            executions: Arc::clone(executions),
+            output: json!({ "text": tool_output() }),
+        }) as Arc<dyn lash_core::ToolProvider>)
+        .plugin(Arc::new(lash_core::plugin::StaticPluginFactory::new(
+            "crash-windows-presentation",
+            spec,
+        )))
+        .build(lash_core::LeaseOwnerIdentity::opaque(
+            "lash-restate-test",
+            "crash-windows-presentation",
+        ))
+        .expect("build the lash core")
 }
 
 /// The deployment dies after the presentation's `put` landed and before its
@@ -1210,7 +1201,11 @@ async fn created_session(
     let session_id = session_id.into();
     match core
         .session(session_id.clone())
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            model_spec().wire_model,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
     {
         Ok(_)
@@ -1572,18 +1567,13 @@ async fn cell_parity(
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
-    let core = lash::LashCore::rlm_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-        rlm,
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-    .serve_test_model(provider, model_spec())
-    .tools(Arc::new(CellIsolationTool(Arc::clone(&tools))) as Arc<dyn lash_core::ToolProvider>)
-    .build(lash_core::LeaseOwnerIdentity::opaque("cell-parity", "test"))
-    .expect("cell runtime");
+    let core = lash::LashCore::rlm_builder(backend, rlm)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .serve_test_model(provider, model_spec())
+        .tools(Arc::new(CellIsolationTool(Arc::clone(&tools))) as Arc<dyn lash_core::ToolProvider>)
+        .build(lash_core::LeaseOwnerIdentity::opaque("cell-parity", "test"))
+        .expect("cell runtime");
     let session = created_session(&core, "cell-parity-session")
         .await
         .open()

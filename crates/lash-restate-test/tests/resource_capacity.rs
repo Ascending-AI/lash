@@ -19,23 +19,19 @@ fn build_core(backend: &RestateTestBackend) -> lash::LashCore {
         })
         .build()
         .into_handle();
-    lash::LashCore::standard_builder(
-        backend.lash_backend(),
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-    .serve_test_model(
-        provider,
-        lash_core::testing::test_model_metadata("mock-model"),
-    )
-    .plugin(lash_core::testing::process_engine_plugin_fixture())
-    .build(lash_core::LeaseOwnerIdentity::opaque(
-        "lash-restate-test",
-        "resource-capacity",
-    ))
-    .expect("build lifecycle core")
+    lash::LashCore::standard_builder(backend.lash_backend())
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .serve_test_model(
+            provider,
+            lash_core::testing::test_model_metadata("mock-model"),
+        )
+        .plugin(lash_core::testing::process_engine_plugin_fixture())
+        .build(lash_core::LeaseOwnerIdentity::opaque(
+            "lash-restate-test",
+            "resource-capacity",
+        ))
+        .expect("build lifecycle core")
 }
 
 async fn one_lifecycle(seed: u64) -> std::sync::Weak<lash_sqlite_store::SqliteStoreSet> {
@@ -106,7 +102,11 @@ async fn one_lifecycle(seed: u64) -> std::sync::Weak<lash_sqlite_store::SqliteSt
     ));
     let session_id = format!("capacity-{seed}");
     core.session(session_id.clone())
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "mock-model",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
         .expect("create session");
     let session = core.session(session_id).open().await.expect("open session");

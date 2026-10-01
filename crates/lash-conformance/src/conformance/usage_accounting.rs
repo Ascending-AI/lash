@@ -964,11 +964,11 @@ async fn assert_fork_carries_no_usage(tier: &UsageAccountingTier, world: &World,
             node_id: leaf,
             relation: crate::SessionRelation::Root,
             pending_observer_intents: Vec::new(),
-            policy: crate::SessionPolicy::new(
+            config: crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
-            ),
-            plugin_config: Default::default(),
+            )
+            .into(),
         })
         .await
         .unwrap_or_else(|error| panic!("{law}: fork the parent at its leaf: {error}"));

@@ -525,16 +525,11 @@ mod tests {
         let double = crate::tests::test_double_backend(SEED).await;
         let backend = double.lash_backend();
         let registry = backend.process_registry() as Arc<dyn lash::process::ProcessRegistry>;
-        let core = lash::LashCore::standard_builder(
-            backend,
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-        )
-        .model("test-model")
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build(crate::test_core_owner())
-        .expect("build core");
+        let core = lash::LashCore::standard_builder(backend)
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .build(crate::test_core_owner())
+            .expect("build core");
         let observer = core
             .processes()
             .observer()

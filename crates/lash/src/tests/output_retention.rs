@@ -183,19 +183,15 @@ async fn oversized_tool_output_is_retained_before_it_enters_history(
     backend: lash_core::Backend,
 ) -> Result<()> {
     const SESSION: &str = "standard-output-retention";
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .output_retention(POLICY)
-    .serve_test_model(tool_calling_provider(), mock_model_spec())
-    .tools(Arc::new(RetentionTools))
-    .plugin(Arc::new(StaticPluginFactory::new(
-        "output-retention-appendix",
-        lash_core::plugin::PluginSpec::new().with_presentation_step(appendix_step()),
-    )))
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .output_retention(POLICY)
+        .serve_test_model(tool_calling_provider(), mock_model_spec())
+        .tools(Arc::new(RetentionTools))
+        .plugin(Arc::new(StaticPluginFactory::new(
+            "output-retention-appendix",
+            lash_core::plugin::PluginSpec::new().with_presentation_step(appendix_step()),
+        )))
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(SESSION).created().await.open().await?;
     let output = session
         .send(TurnInput::text("call the tools"))

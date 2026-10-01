@@ -6,7 +6,7 @@ use lash_sansio::SessionId;
 #[non_exhaustive]
 pub enum EmbedError {
     #[error(
-        "protocol plugin is required; call .protocol_plugin(...) or use LashCore::standard_builder(backend, lash::TurnBudget::bounded(...), lash::MaxToolCalls::new(1024))/LashCore::rlm_builder(backend, lash::TurnBudget::bounded(...), lash::MaxToolCalls::new(1024), ...)"
+        "protocol plugin is required; call .protocol_plugin(...) or use LashCore::standard_builder(backend)/LashCore::rlm_builder(backend, ...)"
     )]
     /// Returned when no protocol plugin was configured.
     MissingProtocolPlugin,
@@ -30,13 +30,14 @@ pub enum EmbedError {
     /// relay: its store set arms every kind, and a kind nothing delivers
     /// stays owed forever (ADR 0109 §1.4).
     ObligationRelayUnavailable(#[from] lash_core::drive::ObligationRelayUnavailable),
-    #[error("a default model key is required; hosts must select a registered model")]
-    /// Returned when the core names no default model key.
+    #[error("a model key is required; a root session's spec must name a registered model")]
+    /// Returned when a creation's spec states no model: an overlay
+    /// ([`SessionSpec::inherit`](crate::SessionSpec::inherit)) passed where a
+    /// root is created. Nothing is created.
     MissingModel,
     #[error(transparent)]
-    /// Returned when a selected model key has no binding in the host's
-    /// models: at build for the core's default key, at creation for the
-    /// session's key. Nothing is created.
+    /// Returned when a creation's model key has no binding in the host's
+    /// models. Nothing is created.
     ModelUnknown(lash_core::ModelUnavailable),
     #[error(transparent)]
     /// Returned when a creation spec records reasoning its model's recorded
@@ -45,7 +46,9 @@ pub enum EmbedError {
     #[error(
         "turn budget is required; SessionSpec must carry TurnBudget::Bounded(...) or TurnBudget::Unbounded"
     )]
-    /// Returned when the session has no explicit turn budget.
+    /// Returned when a creation's spec states no turn budget: an overlay
+    /// ([`SessionSpec::inherit`](crate::SessionSpec::inherit)) passed where a
+    /// root is created. Nothing is created.
     MissingTurnBudget,
     #[error(
         "max_tool_calls is required; SessionSpec must carry a MaxToolCalls: the total tool calls one cell may make, and the number a process may hold at once"
@@ -53,6 +56,18 @@ pub enum EmbedError {
     /// Returned when the session has no explicit tool-call limit. There is
     /// no default and no built-in ceiling.
     MissingMaxToolCalls,
+    #[error(
+        "a host session-turn start must state its session's {unstated}: build its create request with SessionCreateRequest::with_spec, or start it under a captured environment"
+    )]
+    /// Returned when a host starts a session-turn process whose create
+    /// request does not state its session's whole config and whose start
+    /// names no captured environment (FIG-4594). No session started it, so
+    /// nothing recorded stands beneath it, and the core keeps no default.
+    /// Nothing is registered.
+    SessionTurnStartUnspecified {
+        /// The part of the session's config the request left unstated.
+        unstated: lash_core::UnstatedSessionConfig,
+    },
     #[error(
         "commit budget is required; provide explicit byte and node limits with .commit_budget(...)"
     )]
@@ -94,7 +109,7 @@ pub enum EmbedError {
     /// The session's catalog row has no head, so its creation recorded no
     /// config (FIG-4553). A creating admission writes the creator's config
     /// with the row, and every open reads it back; a row without one is
-    /// refused, never opened with the core's defaults.
+    /// refused, never opened with defaults.
     SessionCreationUnrecorded {
         /// Session whose catalog row has no head.
         session_id: SessionId,
@@ -307,6 +322,7 @@ impl EmbedError {
             | Self::ReasoningRefused(_)
             | Self::MissingTurnBudget
             | Self::MissingMaxToolCalls
+            | Self::SessionTurnStartUnspecified { .. }
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
             | Self::SessionCreationUnrecorded { .. }
@@ -360,6 +376,7 @@ impl EmbedError {
             | Self::ReasoningRefused(_)
             | Self::MissingTurnBudget
             | Self::MissingMaxToolCalls
+            | Self::SessionTurnStartUnspecified { .. }
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
             | Self::SessionCreationUnrecorded { .. }
@@ -601,6 +618,9 @@ mod tests {
             },
             EmbedError::MissingTurnBudget,
             EmbedError::MissingMaxToolCalls,
+            EmbedError::SessionTurnStartUnspecified {
+                unstated: lash_core::UnstatedSessionConfig::Policy,
+            },
             runtime_error(RuntimeErrorCode::MissingExecutionScopeId),
         ] {
             assert!(err.is_terminal(), "{err}");

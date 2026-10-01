@@ -94,8 +94,6 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
             let backend = double.lash_backend();
             LashCore::rlm_builder(
                 backend.clone(),
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
                 lash_protocol_rlm::RlmProtocolPluginFactory::new(
                     lash_protocol_rlm::RlmProtocolPluginConfig::builder()
                         .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -112,12 +110,7 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
                 ),
             )
         } else {
-            LashCore::standard_builder(
-                double.lash_backend(),
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-            )
-            .protocol_plugin(Arc::new(
+            LashCore::standard_builder(double.lash_backend()).protocol_plugin(Arc::new(
                 lash_protocol_standard::StandardProtocolPluginFactory::with_config(
                     lash_protocol_standard::StandardProtocolConfig {
                         discovery: Some(lash_core::ToolDiscovery {

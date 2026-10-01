@@ -373,12 +373,7 @@ fn rlm_core_with_plugins(
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
-    let builder = LashCore::rlm_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-        factory,
-    );
+    let builder = LashCore::rlm_builder(backend, factory);
     let builder = plugins
         .into_iter()
         .fold(builder, |builder, plugin| builder.plugin(plugin));
@@ -1328,7 +1323,11 @@ async fn created_session(
     let session_id = session_id.into();
     match core
         .session(session_id.clone())
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "artifact-referrers",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
     {
         Ok(_)

@@ -139,7 +139,6 @@ async fn recorded_backend() -> (lash_core::Backend, Passes) {
 
 fn configured(builder: crate::core::LashCoreBuilder) -> crate::core::LashCoreBuilder {
     builder
-        .model("mock-model")
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
 }
@@ -169,28 +168,17 @@ async fn every_builder_path_runs_every_obligation_kinds_relay() {
     let mut paths: Vec<(&str, LashCore, Passes)> = Vec::new();
 
     let (backend, passes) = recorded_backend().await;
-    let core = configured(
-        LashCore::builder(
-            backend,
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        )
-        .protocol_plugin(Arc::new(
-            lash_protocol_standard::StandardProtocolPluginFactory::new(),
-        )),
-    )
+    let core = configured(LashCore::builder(backend).protocol_plugin(Arc::new(
+        lash_protocol_standard::StandardProtocolPluginFactory::new(),
+    )))
     .build(owner())
     .expect("build through the builder");
     paths.push(("builder", core, passes));
 
     let (backend, passes) = recorded_backend().await;
-    let core = configured(LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .build(owner())
-    .expect("build through the standard builder");
+    let core = configured(LashCore::standard_builder(backend))
+        .build(owner())
+        .expect("build through the standard builder");
     paths.push(("standard_builder", core, passes));
 
     #[cfg(feature = "rlm")]
@@ -208,14 +196,9 @@ async fn every_builder_path_runs_every_obligation_kinds_relay() {
             std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &backend,
         );
-        let core = configured(LashCore::rlm_builder(
-            backend,
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-            factory,
-        ))
-        .build(owner())
-        .expect("build through the rlm builder");
+        let core = configured(LashCore::rlm_builder(backend, factory))
+            .build(owner())
+            .expect("build through the rlm builder");
         paths.push(("rlm_builder", core, passes));
     }
 

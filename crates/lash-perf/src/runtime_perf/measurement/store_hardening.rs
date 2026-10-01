@@ -525,11 +525,11 @@ async fn measure_store_hardening_history_reads(
                     node_id: fork_point.clone(),
                     relation: lash_core::SessionRelation::Root,
                     pending_observer_intents: Vec::new(),
-                    policy: lash_core::SessionPolicy::new(
+                    config: lash_core::SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),
-                    ),
-                    plugin_config: Default::default(),
+                    )
+                    .into(),
                 })
                 .await?;
             let mut state = load_store_hardening_state(store, &fork_session_id).await?;

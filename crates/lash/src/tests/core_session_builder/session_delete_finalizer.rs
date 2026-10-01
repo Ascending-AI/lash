@@ -51,13 +51,9 @@ async fn closing_fixture_under(
         },
     )
     .await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(SESSION).created().await.open().await?;
     session
         .send(TurnInput::text("a root that ends before the delete"))
@@ -422,17 +418,13 @@ async fn an_immediate_delivery_runs_under_the_configured_attempt_budget() -> Res
         },
     )
     .await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .recovery_pass_budget(lash_core::engine::RecoveryPassBudget {
-        attempt: std::time::Duration::from_millis(BUDGET_MS),
-        tick_wait: std::time::Duration::from_secs(1),
-    })
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .recovery_pass_budget(lash_core::engine::RecoveryPassBudget {
+            attempt: std::time::Duration::from_millis(BUDGET_MS),
+            tick_wait: std::time::Duration::from_secs(1),
+        })
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(SESSION).created().await.open().await?;
     session
         .send(TurnInput::text("a root that ends before the delete"))
@@ -545,17 +537,13 @@ async fn delete_delivery_exhausts_its_budget(
     let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(double.lash_backend())
         .with_session_work(double.explicit_reconcile_session_work())
         .into_backend();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .recovery_pass_budget(lash_core::engine::RecoveryPassBudget {
-        attempt: std::time::Duration::from_millis(BUDGET_MS),
-        tick_wait: std::time::Duration::from_secs(1),
-    })
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .recovery_pass_budget(lash_core::engine::RecoveryPassBudget {
+            attempt: std::time::Duration::from_millis(BUDGET_MS),
+            tick_wait: std::time::Duration::from_secs(1),
+        })
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
     create_catalog_session(&core, SESSION).await?;
     let ledger = double
         .engine_stores()

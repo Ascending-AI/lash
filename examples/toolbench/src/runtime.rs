@@ -99,7 +99,7 @@ async fn run_task_with_shutdown_witness(
         }
         .context("start request recorder")?;
         let substrate = RunSubstrate::open().await?;
-        let core = build_turn_core(
+        let (core, session_spec) = build_turn_core(
             &substrate,
             task,
             model,
@@ -114,15 +114,15 @@ async fn run_task_with_shutdown_witness(
             shutdown_witness,
         )?;
         let substrate = substrate.serve(&core).await?;
-        Ok::<_, anyhow::Error>((core, recorder, substrate))
+        Ok::<_, anyhow::Error>((core, session_spec, recorder, substrate))
     }
     .await;
     let mut cleanup_error = None;
     let result = match prepared {
-        Ok((core, recorder, substrate)) => {
+        Ok((core, session_spec, recorder, substrate)) => {
             let result = tokio::time::timeout(
                 std::time::Duration::from_secs(turn_wall_limit_secs),
-                run_turn(&core, task, run, channel, &telemetry),
+                run_turn(&core, session_spec, task, run, channel, &telemetry),
             )
             .await;
             if let Err(shutdown_error) = core.shutdown().await.context("shut down toolbench core") {
@@ -260,6 +260,7 @@ fn apply_cleanup_failure(
 #[allow(clippy::too_many_arguments)]
 async fn run_turn(
     core: &LashCore,
+    session_spec: lash::SessionSpec,
     task: &Task,
     run: usize,
     channel: crate::ChannelSelection,
@@ -274,12 +275,11 @@ async fn run_turn(
             .context("encode RLM session option")?
     };
     core.session(session_id.clone())
-        .create(lash::SessionCreation {
-            spec: lash::SessionSpec::default()
+        .create(lash::SessionCreation::root(
+            session_spec
                 .no_progress_budget(lash::NoProgressBudget::Unbounded)
                 .plugin_options(plugin_options),
-            ..Default::default()
-        })
+        ))
         .await
         .context("create toolbench session")?;
     let session = core
@@ -444,7 +444,7 @@ fn build_turn_core(
     provider_retries: u32,
     recorder_base_url: &str,
     shutdown_witness: Option<Arc<dyn lash::plugins::PluginFactory>>,
-) -> Result<LashCore> {
+) -> Result<(LashCore, lash::SessionSpec)> {
     let provider = ProviderHandle::new(
         telemetry.capture.wrap(
             OpenAiCompatibleProvider::new(api_key.to_string(), recorder_base_url)
@@ -469,9 +469,7 @@ fn build_turn_core(
     // namespace of its own on the shared restate-server, dropped with the run.
     let backend = substrate.backend.clone();
     let builder = match channel {
-        crate::ChannelSelection::Standard => {
-            LashCore::standard_builder(backend, budget, lash::MaxToolCalls::new(1024))
-        }
+        crate::ChannelSelection::Standard => LashCore::standard_builder(backend),
         crate::ChannelSelection::Cell | crate::ChannelSelection::Native => {
             let mut config = lash::rlm::RlmProtocolPluginConfig::builder()
                 .channel(if channel == crate::ChannelSelection::Cell {
@@ -492,7 +490,7 @@ fn build_turn_core(
                 std::sync::Arc::new(lash::rlm::TypescriptDialect),
                 &backend,
             );
-            LashCore::rlm_builder(backend, budget, lash::MaxToolCalls::new(1024), factory)
+            LashCore::rlm_builder(backend, factory)
         }
     };
     let shutdown_marker =
@@ -514,8 +512,6 @@ fn build_turn_core(
             model,
             lash::RegisteredModel::new(model_metadata(model)?, provider),
         )?))
-        .model(model)
-        .reasoning(reasoning(effort))
         .tools(if channel == crate::ChannelSelection::Standard {
             world.standard_provider()
         } else {
@@ -528,7 +524,11 @@ fn build_turn_core(
             format!("run-{run}-typescript-{}", task.id),
         ))
         .context("build Lash core")?;
-    Ok(core)
+    // The run's session spec: the bench's one model under the task's turn
+    // budget and the run's reasoning effort.
+    let session_spec = lash::SessionSpec::new(model, budget, lash::MaxToolCalls::new(1024))
+        .reasoning(reasoning(effort));
+    Ok((core, session_spec))
 }
 
 /// Native capability probes are sampled model behaviour, so one stochastic

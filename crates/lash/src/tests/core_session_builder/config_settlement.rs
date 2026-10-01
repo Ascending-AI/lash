@@ -5,20 +5,15 @@ const SEED: u64 = 0x5c_f102;
 #[tokio::test]
 async fn settled_config_survives_park_without_pending_graph_nodes() -> Result<()> {
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .models(test_catalog(
-        mock_provider(),
-        [
-            mock_model_spec(),
-            model_spec("settled-model", Some("settled-variant".to_string()), 64_000),
-        ],
-    ))
-    .model("mock-model")
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .models(test_catalog(
+            mock_provider(),
+            [
+                mock_model_spec(),
+                model_spec("settled-model", Some("settled-variant".to_string()), 64_000),
+            ],
+        ))
+        .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("parked-config").created().await.open().await?;
     session
@@ -72,20 +67,15 @@ async fn settled_config_survives_park_without_pending_graph_nodes() -> Result<()
 #[tokio::test]
 async fn commanded_model_survives_an_incidental_default_spec_reopen() -> Result<()> {
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .models(test_catalog(
-        mock_provider(),
-        [
-            mock_model_spec(),
-            model_spec("commanded-model", None, 64_000),
-        ],
-    ))
-    .model("mock-model")
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .models(test_catalog(
+            mock_provider(),
+            [
+                mock_model_spec(),
+                model_spec("commanded-model", None, 64_000),
+            ],
+        ))
+        .build(crate::testing::runtime_lease_owner())?;
 
     let session = core
         .session("incidental-reopen")

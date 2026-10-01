@@ -119,23 +119,18 @@ async fn cancelled_config_command_before_current_ask_is_typed() -> Result<()> {
     })
     .with_session_work(Arc::new(lash_core::NoSessionWork::new()))
     .into_backend();
-    let core = crate::tests::explicit_ephemeral_facets(LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .models(crate::tests::test_catalog(
-        crate::testing::TestProvider::builder()
-            .kind("admin-cancel-test")
-            .build()
-            .into_handle(),
-        [
-            crate::tests::mock_model_spec(),
-            crate::tests::model_spec("cancelled-next-model", None, 64_000),
-        ],
-    ))
-    .model("mock-model")
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = crate::tests::explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .models(crate::tests::test_catalog(
+            crate::testing::TestProvider::builder()
+                .kind("admin-cancel-test")
+                .build()
+                .into_handle(),
+            [
+                crate::tests::mock_model_spec(),
+                crate::tests::model_spec("cancelled-next-model", None, 64_000),
+            ],
+        ))
+        .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("cancelled-config-before-ask");
     let session = core.session(&session_id).created().await.open().await?;
     let store = lash_core::runtime::live_session_view(&core.store_factory, &session_id)

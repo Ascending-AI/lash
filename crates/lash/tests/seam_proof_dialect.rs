@@ -237,29 +237,24 @@ fn core(double: &Double, dialect: Arc<dyn Dialect>, script: &Script) -> LashCore
         dialect,
         &backend,
     );
-    LashCore::rlm_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-        factory,
-    )
-    .serve_test_model(
-        provider,
-        lash::ModelMetadata::builder("seam-proof-dialect")
-            .context_window_tokens(64_000)
-            .build()
-            .expect("model spec"),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-    .tools(Arc::new(Probe {
-        calls: Arc::clone(&script.tool_calls),
-    }))
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "seam-proof-worker",
-        "seam-proof-boot",
-    ))
-    .expect("RLM core")
+    LashCore::rlm_builder(backend, factory)
+        .serve_test_model(
+            provider,
+            lash::ModelMetadata::builder("seam-proof-dialect")
+                .context_window_tokens(64_000)
+                .build()
+                .expect("model spec"),
+        )
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .tools(Arc::new(Probe {
+            calls: Arc::clone(&script.tool_calls),
+        }))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "seam-proof-worker",
+            "seam-proof-boot",
+        ))
+        .expect("RLM core")
 }
 
 fn cell(lines: &str) -> String {
@@ -269,7 +264,11 @@ fn cell(lines: &str) -> String {
 async fn session(core: &LashCore, id: &str) -> lash::LashSession {
     match core
         .session(id)
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "seam-proof-dialect",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
     {
         Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}

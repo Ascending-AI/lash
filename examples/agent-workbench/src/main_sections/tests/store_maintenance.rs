@@ -119,6 +119,7 @@ async fn store_maintenance_fixture(provider: ProviderHandle) -> StoreMaintenance
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        session_defaults: crate::tests::test_session_defaults(),
         core,
         attachment_store: Arc::clone(&attachment_store),
         session_store_factory: Arc::clone(&store_factory),

@@ -78,27 +78,22 @@ fn core(engine: &Engine) -> lash::LashCore {
     let backend = LayeredBackend::over(engine.backend())
         .with_session_work(session_work)
         .into_backend();
-    lash::LashCore::standard_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-    .models(Arc::new(
-        lash::ModelRegistry::new()
-            .register(
-                "mock-model",
-                lash::RegisteredModel::new(mock_model_metadata(), provider),
-            )
-            .unwrap(),
-    ))
-    .model("mock-model")
-    .build(lash_core::LeaseOwnerIdentity::opaque(
-        "uploaded-start",
-        "boot",
-    ))
-    .unwrap()
+    lash::LashCore::standard_builder(backend)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .models(Arc::new(
+            lash::ModelRegistry::new()
+                .register(
+                    "mock-model",
+                    lash::RegisteredModel::new(mock_model_metadata(), provider),
+                )
+                .unwrap(),
+        ))
+        .build(lash_core::LeaseOwnerIdentity::opaque(
+            "uploaded-start",
+            "boot",
+        ))
+        .unwrap()
 }
 
 fn cleanup(backend: &lash_core::Backend) -> ArtifactCleanupRelay {
@@ -214,7 +209,11 @@ async fn law(kind: StorageKind, live: bool, abandon: bool) {
     let first = engine(&storage, kind, live, Arc::clone(&clock), &mut faults).await;
     let core = core(&first);
     core.session("upload-session")
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "mock-model",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
         .unwrap();
     let backend = first.backend();
@@ -616,7 +615,11 @@ async fn unavailable_input_is_refused(kind: StorageKind, live: bool) {
     let engine = engine(&storage, kind, live, clock.clone(), &mut None).await;
     let core = core(&engine);
     core.session("upload-session")
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "mock-model",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
         .unwrap();
     let backend = engine.backend();

@@ -23,6 +23,7 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        session_defaults: crate::tests::test_session_defaults(),
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),

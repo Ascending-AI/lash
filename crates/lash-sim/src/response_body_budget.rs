@@ -83,24 +83,20 @@ async fn witness(
                         streamed,
                         calls: calls.clone(),
                     }));
-                let core = lash::LashCore::standard_builder(
-                    double.lash_backend(),
-                    lash::TurnBudget::Unbounded,
-                    lash::MaxToolCalls::new(1024),
-                )
-                .serve_test_model(
-                    ProviderHandle::new(provider.into_components()),
-                    lash::ModelMetadata::builder("budget-model")
-                        .context_window_tokens(16_000)
-                        .build()
-                        .unwrap(),
-                )
-                .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-                .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-                .build(crate::sim_process_owner())
-                .unwrap();
+                let core = lash::LashCore::standard_builder(double.lash_backend())
+                    .serve_test_model(
+                        ProviderHandle::new(provider.into_components()),
+                        lash::ModelMetadata::builder("budget-model")
+                            .context_window_tokens(16_000)
+                            .build()
+                            .unwrap(),
+                    )
+                    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+                    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+                    .build(crate::sim_process_owner())
+                    .unwrap();
                 let session_id = format!("{lane}-{streamed}-{status}-{excess}");
-                let session = crate::open_created_session(&core, session_id)
+                let session = crate::open_created_session("budget-model", &core, session_id)
                     .await
                     .unwrap();
                 let output = session

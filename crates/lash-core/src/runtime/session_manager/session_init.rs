@@ -271,17 +271,19 @@ pub(in crate::runtime::session_manager) fn resolve_child_facts(
                 .to_string(),
             ))
         })?;
-        let reasoning = policy
-            .model
-            .as_ref()
-            .map(|model| model.reasoning.clone())
-            .unwrap_or_default();
+        let reasoning = request.reasoning.clone().unwrap_or_else(|| {
+            policy
+                .model
+                .as_ref()
+                .map(|model| model.reasoning.clone())
+                .unwrap_or_default()
+        });
         let model = crate::ModelConfig {
             model: recorded,
             reasoning,
         };
-        // The reasoning the child inherits is judged against the capability
-        // of the model its key minted (FIG-4531).
+        // The reasoning the child states or inherits is judged against the
+        // capability of the model its key minted (FIG-4531).
         model.validate_reasoning().map_err(|refused| {
             crate::PluginError::Runtime(crate::RuntimeError::new(
                 crate::RuntimeErrorCode::ReasoningRefused,
@@ -289,11 +291,6 @@ pub(in crate::runtime::session_manager) fn resolve_child_facts(
             ))
         })?;
         policy.model = Some(model);
-    }
-    // A host session-turn start that names no model, on a starter that
-    // records none, runs the default binding its registration recorded.
-    if policy.model.is_none() {
-        policy.model = request.default_model().cloned();
     }
     let is_child = request.relation.parent_session_id().is_some();
     if is_child {
@@ -1724,34 +1721,47 @@ mod tests {
         assert!(refused.is_terminal() && !refused.is_retryable());
     }
 
-    /// FIG-4531: the default binding a host session-turn start recorded at
-    /// registration is the child's model only when neither its request nor
-    /// its starter records one, and it is copied as recorded.
+    /// FIG-4594: a request that states its whole config (a host session-turn
+    /// start's spec) records exactly that: its policy's turn budget, and its
+    /// key minted with the reasoning it states. A starter's recorded policy
+    /// supplies nothing.
     #[test]
-    fn a_recorded_default_binding_is_the_child_model_of_last_resort() {
+    fn a_request_that_states_its_spec_records_it_whatever_its_starter_holds() {
         let models = child_models();
-        let minted = |key: &str| {
-            crate::ModelConfig::new(
-                crate::RuntimeModels::snapshot(models.as_ref(), &crate::ModelKey::new(key))
-                    .expect("the key mints"),
-            )
-        };
-        let bare = SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
-        let mut request = root_request();
-        request.record_default_model(Some(minted(PLAIN)));
-
-        let facts = child_facts(&bare, &request).expect("the default binding resolves");
-        assert_eq!(facts.policy.model, Some(minted(PLAIN)));
-
+        let spec = crate::SessionSpec::new(
+            THINKER,
+            crate::TurnBudget::bounded(4),
+            crate::MaxToolCalls::new(1024),
+        )
+        .reasoning(crate::ReasoningSelection::Effort("high".to_string()));
+        let request = root_request().with_spec(&spec).expect("a root spec");
+        assert_eq!(request.unstated_root_config(), None);
         let starter = SessionPolicy {
-            model: Some(minted(THINKER)),
+            model: Some(crate::ModelConfig::new(
+                crate::RuntimeModels::snapshot(models.as_ref(), &crate::ModelKey::new(PLAIN))
+                    .expect("plain mints"),
+            )),
             ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
         };
-        let facts = child_facts(&starter, &request).expect("the starter's model resolves");
+
+        let facts = child_facts(&starter, &request).expect("the stated spec resolves");
+        assert_eq!(facts.policy.turn_budget, crate::TurnBudget::bounded(4));
+        let model = facts.policy.model.expect("the child records a model");
+        assert_eq!(model.key().as_str(), THINKER);
         assert_eq!(
-            facts.policy.model,
-            Some(minted(THINKER)),
-            "a starter's recorded model wins over the default binding"
+            model.reasoning,
+            crate::ReasoningSelection::Effort("high".to_string())
+        );
+
+        assert_eq!(
+            root_request().unstated_root_config(),
+            Some(crate::UnstatedSessionConfig::Policy)
+        );
+        assert!(
+            root_request()
+                .with_spec(&crate::SessionSpec::inherit())
+                .is_err(),
+            "an overlay states no session of its own"
         );
     }
 

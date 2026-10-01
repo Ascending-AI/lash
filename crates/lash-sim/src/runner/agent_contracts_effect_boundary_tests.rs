@@ -238,9 +238,13 @@ finish(await handle);
     )
     .await
     .expect("build batch envelope contract");
-    let session = crate::open_created_session(&core, "sim-agent-batched-tool-attempt-envelope")
-        .await
-        .expect("open batch envelope contract session");
+    let session = crate::open_created_session(
+        "lash_runtime batched tool attempt envelope",
+        &core,
+        "sim-agent-batched-tool-attempt-envelope",
+    )
+    .await
+    .expect("open batch envelope contract session");
 
     let result = engine
         .run_turn(
@@ -287,9 +291,13 @@ finish(await handle);
     )
     .await
     .expect("build segment envelope contract");
-    let session = crate::open_created_session(&core, "sim-agent-segment-tool-attempt-envelope")
-        .await
-        .expect("open segment envelope contract session");
+    let session = crate::open_created_session(
+        "lash_runtime process segment tool attempt envelope",
+        &core,
+        "sim-agent-segment-tool-attempt-envelope",
+    )
+    .await
+    .expect("open segment envelope contract session");
 
     let result = engine
         .run_turn(
@@ -329,9 +337,13 @@ finish(winner);
     )
     .await
     .expect("build race timer contract");
-    let session = crate::open_created_session(&core, "sim-agent-race-timer-child-layer")
-        .await
-        .expect("open race timer contract session");
+    let session = crate::open_created_session(
+        "lash_runtime race timer child layer",
+        &core,
+        "sim-agent-race-timer-child-layer",
+    )
+    .await
+    .expect("open race timer contract session");
 
     let outcome = engine
         .run_turn(
@@ -378,9 +390,10 @@ finish(winner);
     )
     .await
     .expect("build race turn contract");
-    let session = crate::open_created_session(&core, "sim-agent-race-turn")
-        .await
-        .expect("open race turn contract session");
+    let session =
+        crate::open_created_session("lash_runtime race turn", &core, "sim-agent-race-turn")
+            .await
+            .expect("open race turn contract session");
     let result = engine
         .run_turn(
             &session,

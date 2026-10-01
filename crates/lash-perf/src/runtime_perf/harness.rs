@@ -95,6 +95,20 @@ impl BenchmarkCore {
         }
     }
 
+    /// The spec a benchmark's sessions are created from: the harness's own
+    /// default for the core's protocol. A core keeps none.
+    pub(crate) fn session_spec(&self) -> lash::SessionSpec {
+        let turn_budget = match self {
+            Self::Standard(_) => lash::TurnBudget::Unbounded,
+            Self::Rlm(_) => lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS),
+        };
+        lash::SessionSpec::new(
+            benchmark_model_spec().wire_model,
+            turn_budget,
+            lash::MaxToolCalls::new(1024),
+        )
+    }
+
     /// Create a benchmark's fresh session with `creation`, then open it.
     pub(crate) async fn create_and_open_session(
         &self,
@@ -123,10 +137,7 @@ impl BenchmarkCore {
     ) -> lash::Result<lash::LashSession> {
         self.create_and_open_session(
             session_id,
-            lash::SessionCreation {
-                parent: Some(parent_session_id),
-                ..Default::default()
-            },
+            lash::SessionCreation::child_of(parent_session_id, self.session_spec()),
         )
         .await
     }
@@ -272,6 +283,11 @@ impl BenchmarkRuntime {
 
     pub(crate) fn core(&self) -> LashCore {
         self.core.as_lash_core()
+    }
+
+    /// The spec this runtime's sessions are created from.
+    pub(crate) fn session_spec(&self) -> lash::SessionSpec {
+        self.core.session_spec()
     }
 
     #[expect(
@@ -768,12 +784,7 @@ fn benchmark_standard_builder(
     backend: lash::Backend,
     provider: ProviderHandle,
 ) -> lash::LashCoreBuilder {
-    lash::LashCore::standard_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .serve_test_model(provider, benchmark_model_spec())
+    lash::LashCore::standard_builder(backend).serve_test_model(provider, benchmark_model_spec())
 }
 
 fn benchmark_rlm_builder(
@@ -781,13 +792,7 @@ fn benchmark_rlm_builder(
     provider: ProviderHandle,
     factory: lash_protocol_rlm::RlmProtocolPluginFactory,
 ) -> lash::LashCoreBuilder {
-    lash::LashCore::rlm_builder(
-        backend,
-        lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS),
-        lash::MaxToolCalls::new(1024),
-        factory,
-    )
-    .serve_test_model(provider, benchmark_model_spec())
+    lash::LashCore::rlm_builder(backend, factory).serve_test_model(provider, benchmark_model_spec())
 }
 
 // The benchmark plugin list, in push order. Every conditional reads the
@@ -1031,7 +1036,10 @@ pub(crate) async fn build_runtime(
     let process_phase_probes = install_process_worker(&restate, &core)?;
     let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
     let session = core
-        .create_and_open_session(session_id.clone(), lash::SessionCreation::default())
+        .create_and_open_session(
+            session_id.clone(),
+            lash::SessionCreation::root(core.session_spec()),
+        )
         .await?;
     let store = store_factory
         .session_store(&session_id)
@@ -1228,7 +1236,10 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     let process_phase_probes = install_process_worker(&restate, &core)?;
     let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
     let session = core
-        .create_and_open_session(session_id.clone(), lash::SessionCreation::default())
+        .create_and_open_session(
+            session_id.clone(),
+            lash::SessionCreation::root(core.session_spec()),
+        )
         .await?;
     let persistence = if wiring.session_store_handle {
         match store_factory.lookup_session(&session_id).await? {

@@ -60,6 +60,7 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        session_defaults: crate::tests::test_session_defaults(),
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
@@ -246,6 +247,7 @@ async fn work_api_keeps_orphaned_process_visible_and_routes_cancel_globally_inne
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        session_defaults: crate::tests::test_session_defaults(),
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
@@ -1003,6 +1005,7 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        session_defaults: crate::tests::test_session_defaults(),
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
@@ -1253,6 +1256,7 @@ async fn work_rail_keeps_a_nonterminal_process_past_the_retirement_window_inner(
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        session_defaults: crate::tests::test_session_defaults(),
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),

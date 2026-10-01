@@ -1409,8 +1409,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         session_id: SessionId::from("aaa-fork-delete-first"),
         node_id: source_tip_node_id.clone(),
         relation: crate::SessionRelation::Root,
-        policy: source_request.config.session_policy(),
-        plugin_config: Default::default(),
+        config: source_request.config.session_policy().into(),
     };
     factory
         .fork_session(&delete_first_request)
@@ -1444,8 +1443,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
             session_id: SessionId::from("fork-unretained"),
             node_id: unpinned_past_node_id.clone(),
             relation: crate::SessionRelation::Root,
-            policy: source_request.config.session_policy(),
-            plugin_config: Default::default(),
+            config: source_request.config.session_policy().into(),
         })
         .await
         .expect_err("unpinned past turn must not be forkable");
@@ -1460,8 +1458,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         session_id: SessionId::from("fork-branch"),
         node_id: root_node_id.clone(),
         relation: crate::SessionRelation::Root,
-        policy: source_request.config.session_policy(),
-        plugin_config: Default::default(),
+        config: source_request.config.session_policy().into(),
     };
     let forked = factory
         .fork_session(&fork_request)
@@ -1481,8 +1478,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
                 source_session_id: SessionId::from("no-such-session"),
                 source_node_id: "no-such-node".into(),
             },
-            policy: source_request.config.session_policy(),
-            plugin_config: Default::default(),
+            config: source_request.config.session_policy().into(),
         })
         .await
         .expect("fork relation lineage must not gate a retained fork point");
@@ -1500,7 +1496,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
             pending_observer_intents: Vec::new(),
             session_id: fork_request.session_id.clone(),
             relation: fork_request.relation.clone(),
-            config: fork_request.policy.clone().into(),
+            config: fork_request.config.clone(),
             head: crate::SessionCreationHead::Config,
         })
         .await
@@ -1592,8 +1588,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
             session_id: source_request.session_id.clone(),
             node_id: root_node_id,
             relation: crate::SessionRelation::Root,
-            policy: source_request.config.session_policy(),
-            plugin_config: Default::default(),
+            config: source_request.config.session_policy().into(),
         })
         .await
         .expect_err("forking must reject a previously deleted target session id");

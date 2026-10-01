@@ -345,30 +345,26 @@ async fn restate_deployment(
             lash::formats::build_generation(),
         ),
     ));
-    let core = lash::LashCore::standard_builder(
-        lash_core::Backend::new(backend.clone()),
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .serve_test_model(
-        lash_core::testing::TestProvider::builder()
-            .kind("tool-batch-probe-deployment")
-            .complete(|_| async { Ok(lash_core::LlmResponse::default()) })
-            .build()
-            .into_handle(),
-        lash_core::ModelMetadata::new(
-            "tool-batch-probe-deployment",
-            std::num::NonZeroUsize::new(1024)
-                .ok_or_else(|| anyhow::anyhow!("the probe's context window is zero"))?,
-        ),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "lash-perf-tool-batch",
-        "lash-perf-tool-batch-boot",
-    ))
-    .map_err(|error| anyhow::anyhow!("build the probe deployment's core: {error}"))?;
+    let core = lash::LashCore::standard_builder(lash_core::Backend::new(backend.clone()))
+        .serve_test_model(
+            lash_core::testing::TestProvider::builder()
+                .kind("tool-batch-probe-deployment")
+                .complete(|_| async { Ok(lash_core::LlmResponse::default()) })
+                .build()
+                .into_handle(),
+            lash_core::ModelMetadata::new(
+                "tool-batch-probe-deployment",
+                std::num::NonZeroUsize::new(1024)
+                    .ok_or_else(|| anyhow::anyhow!("the probe's context window is zero"))?,
+            ),
+        )
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "lash-perf-tool-batch",
+            "lash-perf-tool-batch-boot",
+        ))
+        .map_err(|error| anyhow::anyhow!("build the probe deployment's core: {error}"))?;
     let worker = lash::durability::DurableProcessWorker::new(
         core.durable_process_worker_config()
             .map_err(|error| anyhow::anyhow!("configure the probe's process worker: {error}"))?,

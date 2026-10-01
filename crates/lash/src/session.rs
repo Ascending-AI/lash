@@ -50,19 +50,22 @@ pub struct SessionBuilder {
 ///
 /// Creation writes all of it once, with the session's catalog row, in one
 /// store transaction. Nothing here is restated on open.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct SessionCreation {
-    /// The session's config: model key and reasoning, attachment acceptance,
-    /// generation, plugin creation options and the rest of [`SessionSpec`],
-    /// resolved against the core's policy. Unset fields take the core's
-    /// values. The model key is minted into a recorded binding by the core's
-    /// models when the session is created; every open runs that recorded
-    /// binding.
+    /// The session's whole config, stated by its creator (FIG-4594): the
+    /// model key, turn budget and tool-call limit [`SessionSpec::new`] takes, and reasoning,
+    /// attachment acceptance, generation, the other execution controls and
+    /// plugin creation options as its setters state them. Nothing of the
+    /// core stands beneath it; a field left unstated takes the neutral value
+    /// lash documents for it. A host that wants a default keeps its own
+    /// `SessionSpec` value and passes it. The model key is minted into a
+    /// recorded binding by the core's models when the session is created;
+    /// every open runs that recorded binding.
     ///
-    /// Its [`plugin_options`](SessionSpec::plugin_options) are laid over the
-    /// core's default spec's, plugin by plugin (FIG-4589). Every plugin the
-    /// core installs, the protocol among them, creates its own namespace
-    /// from its key, defaults included, and the result is recorded with the
+    /// Every plugin the core installs, the protocol among them, creates its
+    /// own namespace from its key of the spec's
+    /// [`plugin_options`](SessionSpec::plugin_options), the plugin's own
+    /// built-in defaults included, and the result is recorded with the
     /// session's initial config head: every open delivers it unchanged, and
     /// only its owner's typed config commands change it ([`crate::config`]).
     /// The protocol plugin's prompt config is one of these options. A key no
@@ -78,49 +81,26 @@ pub struct SessionCreation {
     pub parent: Option<SessionId>,
 }
 
+impl SessionCreation {
+    /// A root session created from `spec`.
+    pub fn root(spec: SessionSpec) -> Self {
+        Self { spec, parent: None }
+    }
+
+    /// A session created from `spec` and recorded as `parent`'s child
+    /// (ADR 0089). It is an ordinary session: its config is `spec`, not its
+    /// parent's.
+    pub fn child_of(parent: impl Into<SessionId>, spec: SessionSpec) -> Self {
+        Self {
+            spec,
+            parent: Some(parent.into()),
+        }
+    }
+}
+
 struct ResolvedSessionStore {
     store: lash_core::store::SessionStore,
     catalog: Arc<dyn lash_core::DeploymentStore>,
-}
-
-/// The model a session takes when nothing it states or recorded names one:
-/// the core's default key and reasoning. A creation spec without a key mints
-/// it at that moment, so a catalog change reaches only sessions created
-/// afterwards. No open mints it (FIG-4553).
-#[derive(Clone, Debug)]
-pub(crate) struct DefaultSelection {
-    pub(crate) model: lash_core::ModelKey,
-    pub(crate) reasoning: Option<lash_core::ReasoningSelection>,
-}
-
-impl DefaultSelection {
-    /// `spec` resolved against `base`, an unset key and reasoning taking these
-    /// defaults: `models` mints the key into the recorded binding now.
-    pub(crate) fn mint(
-        &self,
-        mut spec: SessionSpec,
-        base: &SessionPolicy,
-        models: &dyn lash_core::RuntimeModels,
-    ) -> Result<SessionPolicy> {
-        if spec.model.is_none() {
-            spec.model = Some(self.model.clone());
-        }
-        if spec.reasoning.is_none() {
-            spec.reasoning = self.reasoning.clone();
-        }
-        spec.resolve_against(base, models)
-            .map_err(|error| match error {
-                lash_core::facade_support::SpecResolveError::Model(error) => {
-                    EmbedError::ModelUnknown(error)
-                }
-                lash_core::facade_support::SpecResolveError::ReasoningWithoutModel => {
-                    EmbedError::MissingModel
-                }
-                lash_core::facade_support::SpecResolveError::Reasoning(error) => {
-                    EmbedError::ReasoningRefused(error)
-                }
-            })
-    }
 }
 
 impl SessionBuilder {
@@ -248,10 +228,14 @@ impl SessionBuilder {
     /// knobs — tool-source policy, `enqueue_only` — belong to an open and
     /// take no part in creation.
     ///
-    /// The session's model key — the creation spec's, else the core's
-    /// default — is minted into a recorded binding here, through the core's
-    /// models; a key they do not register is refused with
-    /// [`EmbedError::ModelUnknown`] and nothing is created.
+    /// The creation spec's model key is minted into a recorded binding here,
+    /// through the core's models; a key they do not register is refused with
+    /// [`EmbedError::ModelUnknown`] and nothing is created. A spec that
+    /// states no model, no turn budget or no tool-call limit (a
+    /// [`SessionSpec::inherit`] overlay) is refused with
+    /// [`EmbedError::MissingModel`], [`EmbedError::MissingTurnBudget`] or
+    /// [`EmbedError::MissingMaxToolCalls`]: a creation has no base to take
+    /// them from.
     ///
     /// An id the catalog already holds is refused with
     /// [`EmbedError::SessionAlreadyExists`], always — even when a retry states
@@ -281,16 +265,12 @@ impl SessionBuilder {
     /// inside [`SessionError::SessionConfigRefused`].
     pub async fn create(self, creation: SessionCreation) -> Result<DurableSession> {
         let SessionCreation { spec, parent } = creation;
-        // The session's stated plugin options, over the core's default
-        // spec's (FIG-4589). A session created here is an ordinary session
-        // even when it names a parent (ADR 0089): it is created from this
-        // core's defaults, unlike a child a running parent creates, which
-        // copies its parent's recorded config.
-        let plugin_options = spec
-            .plugin_options
-            .clone()
-            .over(self.core.default_plugin_options.clone());
-        let policy = self.minted_policy(spec)?;
+        // A session created here is an ordinary session even when it names
+        // a parent (ADR 0089): it records the spec its creator states,
+        // unlike a child a running parent creates, which copies its parent's
+        // recorded config.
+        let policy = self.minted_policy(&spec)?;
+        let plugin_options = spec.plugin_options;
         lash_core::CoreConfigOwner::validate_charge_safety(&policy.charge_safety)
             .map_err(lash_core::CoreConfigOwner::creation_refusal)
             .map_err(lash_core::SessionError::SessionConfigRefused)?;
@@ -399,34 +379,38 @@ impl SessionBuilder {
             ));
         }
         let resolved = self.existing_store().await?;
-        let policy = self.opening_policy();
         self.reconcile_process_observer_intents(Some(&resolved.store))
             .await?;
-        bind_to_opener(&mut state, &policy);
+        bind_to_opener(&mut state, &self.session_id);
         Box::pin(self.open_resolved(state, resolved, resident)).await
     }
 
-    /// `spec` resolved against the core's policy, its unset model key and
-    /// reasoning taking the core's defaults: the model key is minted into a
-    /// recorded binding by the core's models now, and the result is the policy
-    /// a session records.
-    fn minted_policy(&self, spec: SessionSpec) -> Result<SessionPolicy> {
-        let mut policy = self.core.default_selection.mint(
-            spec,
-            &self.core.policy,
-            self.core.env.core.providers.models.as_ref(),
-        )?;
+    /// The policy a root records from `spec` alone (FIG-4594): nothing of
+    /// this core stands beneath it. The model key is minted into a recorded
+    /// binding by the core's models now.
+    fn minted_policy(&self, spec: &SessionSpec) -> Result<SessionPolicy> {
+        let mut policy = spec
+            .resolve_root(self.core.env.core.providers.models.as_ref())
+            .map_err(|error| match error {
+                lash_core::facade_support::SpecResolveError::Model(error) => {
+                    EmbedError::ModelUnknown(error)
+                }
+                lash_core::facade_support::SpecResolveError::ReasoningWithoutModel
+                | lash_core::facade_support::SpecResolveError::RootWithoutModel => {
+                    EmbedError::MissingModel
+                }
+                lash_core::facade_support::SpecResolveError::RootWithoutTurnBudget => {
+                    EmbedError::MissingTurnBudget
+                }
+                lash_core::facade_support::SpecResolveError::RootWithoutMaxToolCalls => {
+                    EmbedError::MissingMaxToolCalls
+                }
+                lash_core::facade_support::SpecResolveError::Reasoning(error) => {
+                    EmbedError::ReasoningRefused(error)
+                }
+            })?;
         policy.session_id = Some(self.session_id.clone());
         Ok(policy)
-    }
-
-    /// What this open brings to the session: its binding. It records nothing
-    /// and overrides nothing the session recorded: [`bind_to_opener`] reads
-    /// only the binding.
-    fn opening_policy(&self) -> SessionPolicy {
-        let mut policy = self.core.policy.clone();
-        policy.session_id = Some(self.session_id.clone());
-        policy
     }
 
     /// The state an existing session opens with: what it recorded, as
@@ -444,7 +428,6 @@ impl SessionBuilder {
                 session_id: self.session_id.clone(),
             });
         };
-        let policy = self.opening_policy();
         let mut state = loaded.state;
         if state.session_id != self.session_id {
             return Err(EmbedError::Store(
@@ -454,7 +437,7 @@ impl SessionBuilder {
                 },
             ));
         }
-        bind_to_opener(&mut state, &policy);
+        bind_to_opener(&mut state, &self.session_id);
         Ok(state)
     }
 
@@ -606,7 +589,6 @@ pub(crate) async fn resolve_existing_session(
 /// session with defaults (FIG-4553).
 pub(crate) async fn load_state_from_store(
     session_id: &SessionId,
-    policy: &SessionPolicy,
     store: &lash_core::store::SessionStore,
 ) -> Result<RuntimeSessionState> {
     let Some(loaded) = lash_core::store::load_session_window_state(
@@ -629,7 +611,7 @@ pub(crate) async fn load_state_from_store(
             },
         ));
     }
-    bind_to_opener(&mut state, policy);
+    bind_to_opener(&mut state, session_id);
     Ok(state)
 }
 
@@ -638,10 +620,10 @@ pub(crate) async fn load_state_from_store(
 /// The recorded config — model binding and reasoning, attachment acceptance,
 /// prompt, generation and the execution controls (turn budget, autonomy,
 /// no-progress budget, charge safety) — is the session's and stays as
-/// recorded; an open never fills or replaces it. The opener owns only the
-/// session binding.
-fn bind_to_opener(state: &mut RuntimeSessionState, opening: &SessionPolicy) {
-    state.policy.session_id = opening.session_id.clone();
+/// recorded; an open never fills or replaces it, and reads nothing but the
+/// record (FIG-4594). The opener owns only the session binding.
+fn bind_to_opener(state: &mut RuntimeSessionState, session_id: &SessionId) {
+    state.policy.session_id = Some(session_id.clone());
 }
 
 /// The session's current frame as runtime state, after the store confirms

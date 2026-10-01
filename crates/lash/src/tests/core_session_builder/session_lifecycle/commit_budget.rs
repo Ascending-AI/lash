@@ -18,11 +18,7 @@ async fn commit_byte_budget_failure_reaches_the_host_as_terminal_and_actionable(
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets_with_budget(
-        LashCore::standard_builder(
-            double_backend().await,
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        ),
+        LashCore::standard_builder(double_backend().await),
         crate::CommitBudget::new(
             crate::CommitBudgetLimit::bounded(CONFIGURED_BYTE_LIMIT),
             crate::CommitBudgetLimit::Unbounded,
@@ -75,11 +71,7 @@ async fn commit_node_budget_failure_reaches_the_host_as_terminal_and_actionable(
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets_with_budget(
-        LashCore::standard_builder(
-            double_backend().await,
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        ),
+        LashCore::standard_builder(double_backend().await),
         crate::CommitBudget::new(
             crate::CommitBudgetLimit::Unbounded,
             crate::CommitBudgetLimit::bounded(CONFIGURED_NODE_LIMIT),
@@ -130,16 +122,9 @@ fn core_over_backend_with_commit_budget(
     backend: lash_core::Backend,
     commit_budget: crate::CommitBudget,
 ) -> Result<LashCore> {
-    explicit_ephemeral_facets_with_budget(
-        LashCore::standard_builder(
-            backend,
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        ),
-        commit_budget,
-    )
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())
+    explicit_ephemeral_facets_with_budget(LashCore::standard_builder(backend), commit_budget)
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())
 }
 
 fn pending_park_state(session_id: impl Into<SessionId>, text: &str) -> RuntimeSessionState {
@@ -376,7 +361,7 @@ async fn create_byte_budget_failure_is_typed_terminal_and_writes_nothing() -> Re
 
     let error = match core
         .session("create-byte-budget-surface")
-        .create(crate::SessionCreation::default())
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
     {
         Ok(_) => panic!("creation must refuse a head no commit fits under the budget"),
@@ -419,7 +404,7 @@ async fn park_byte_budget_failure_is_typed_terminal_and_actionable() -> Result<(
         ),
     )?
     .session("park-byte-budget-surface")
-    .create(crate::SessionCreation::default())
+    .create(crate::SessionCreation::root(mock_session_spec()))
     .await?;
     let core = core_over_backend_with_commit_budget(
         backend,

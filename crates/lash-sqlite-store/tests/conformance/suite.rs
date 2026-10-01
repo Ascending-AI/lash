@@ -455,11 +455,11 @@ async fn fork_session_rejects_a_malformed_target_session_id() {
         node_id: lash_core_execution::NodeId::from("missing-fork-point"),
         relation: lash_core_execution::SessionRelation::Root,
         pending_observer_intents: Vec::new(),
-        policy: lash_core_execution::SessionPolicy::new(
+        config: lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
-            lash_core_execution::MaxToolCalls::new(1024),
-        ),
-        plugin_config: Default::default(),
+            lash::MaxToolCalls::new(1024),
+        )
+        .into(),
     };
     assert!(matches!(
         store.fork_session(&request).await,

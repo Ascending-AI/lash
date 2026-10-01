@@ -1384,8 +1384,7 @@ pub async fn fork_inherits_history_without_execution_queues_waits_or_journals_on
                         source_session_id: world.session_id.clone(),
                         source_node_id: leaf.clone(),
                     },
-                    policy: crate::testing::mock_session_policy(),
-                    plugin_config: Default::default(),
+                    config: crate::testing::mock_session_policy().into(),
                 })
                 .await
                 .expect("fork after source journal settled");

@@ -76,18 +76,14 @@ async fn fixture_over_with_batching(
     let backend = layer(double.lash_backend());
     let release = Arc::new(Notify::new());
     let calls = Arc::new(AtomicUsize::new(0));
-    let core = LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    )
-    .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(batching)
-    .serve_test_model(
-        scripted_provider(Arc::clone(&release), Arc::clone(&calls)),
-        mock_model_spec(),
-    )
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = LashCore::standard_builder(backend)
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(batching)
+        .serve_test_model(
+            scripted_provider(Arc::clone(&release), Arc::clone(&calls)),
+            mock_model_spec(),
+        )
+        .build(crate::testing::runtime_lease_owner())?;
     Ok(Fixture {
         core,
         _double: double,
@@ -854,7 +850,7 @@ async fn a_session_the_engine_opens_first_reopens_under_its_recorded_protocol() 
         .build(crate::testing::runtime_lease_owner())?;
     let durable = core
         .session("engine-first")
-        .create(crate::SessionCreation::default())
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     durable
         .send(TurnInput::text("the engine opens this session first"))
@@ -1173,7 +1169,7 @@ async fn send_batch_refuses_reserved_source_keys_without_admitting_other_members
     fixture
         .core
         .session("reserved-batch")
-        .create(crate::SessionCreation::default())
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let session = fixture.core.session("reserved-batch").open().await?;
     for key in [
@@ -1216,7 +1212,7 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
     fixture
         .core
         .session("send-batch")
-        .create(crate::SessionCreation::default())
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let session = fixture.core.session("send-batch").open().await?;
     let batch = || {
@@ -1308,7 +1304,7 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
     let created = fixture
         .core
         .session("send-entry-matrix")
-        .create(crate::SessionCreation::default())
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let held = created.send(TurnInput::text(HELD)).id("entry-held").await?;
     provider_called(&fixture, calls + 1).await;

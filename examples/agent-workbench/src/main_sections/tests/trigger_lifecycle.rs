@@ -202,6 +202,7 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        session_defaults: crate::tests::test_session_defaults(),
         unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),

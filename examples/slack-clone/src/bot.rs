@@ -171,6 +171,7 @@ pub async fn run(config: BotConfig) -> Result<()> {
 
     let bot = Arc::new(ChannelBot::new(
         built.core,
+        built.session_spec,
         Arc::clone(&api),
         ledger,
         identity,

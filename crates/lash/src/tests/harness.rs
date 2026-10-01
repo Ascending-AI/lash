@@ -20,6 +20,23 @@ pub(crate) fn mock_model_spec() -> lash_core::ModelMetadata {
     model_spec("mock-model", None, 200_000)
 }
 
+/// The spec these laws create a session from when they state nothing of
+/// their own: the test host's own default value, the mock model with an
+/// unbounded turn budget. A core keeps none (FIG-4594).
+pub(crate) fn mock_session_spec() -> crate::SessionSpec {
+    session_spec_for(&mock_model_spec())
+}
+
+/// An unbounded spec running `metadata`, by the key `serve_test_model` and
+/// [`test_catalog`] register it under: its wire model.
+pub(crate) fn session_spec_for(metadata: &lash_core::ModelMetadata) -> crate::SessionSpec {
+    crate::SessionSpec::new(
+        metadata.wire_model.clone(),
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    )
+}
+
 /// A catalog serving every one of `models` through `provider`, each keyed by
 /// its wire model.
 pub(crate) fn test_catalog(

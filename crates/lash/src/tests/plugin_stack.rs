@@ -64,31 +64,27 @@ async fn core_shutdown_visits_protocol_then_common_factories_and_continues_after
 -> Result<()> {
     let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        lash_core::TurnBudget::Unbounded,
-        lash_core::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .protocol_plugin(Arc::new(ShutdownRecordingPluginFactory {
-        id: "protocol",
-        calls: Arc::clone(&calls),
-        failure: None,
-        standard_protocol: true,
-    }))
-    .plugin(Arc::new(ShutdownRecordingPluginFactory {
-        id: "first",
-        calls: Arc::clone(&calls),
-        failure: Some("first failed"),
-        standard_protocol: false,
-    }))
-    .plugin(Arc::new(ShutdownRecordingPluginFactory {
-        id: "second",
-        calls: Arc::clone(&calls),
-        failure: None,
-        standard_protocol: false,
-    }))
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .protocol_plugin(Arc::new(ShutdownRecordingPluginFactory {
+            id: "protocol",
+            calls: Arc::clone(&calls),
+            failure: None,
+            standard_protocol: true,
+        }))
+        .plugin(Arc::new(ShutdownRecordingPluginFactory {
+            id: "first",
+            calls: Arc::clone(&calls),
+            failure: Some("first failed"),
+            standard_protocol: false,
+        }))
+        .plugin(Arc::new(ShutdownRecordingPluginFactory {
+            id: "second",
+            calls: Arc::clone(&calls),
+            failure: None,
+            standard_protocol: false,
+        }))
+        .build(crate::testing::runtime_lease_owner())?;
 
     let error = core
         .shutdown()
@@ -116,14 +112,10 @@ fn persisted_tool_state_at_generation(
 #[tokio::test]
 async fn plugin_surface_streams_as_semantic_turn_event() -> Result<()> {
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .plugin(Arc::new(SurfacePluginFactory))
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .plugin(Arc::new(SurfacePluginFactory))
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("plugin-surface")
         .created()
@@ -178,14 +170,10 @@ async fn embedded_sessions_always_expose_tool_state() -> Result<()> {
 #[tokio::test]
 async fn registered_static_tools_appear_in_tool_state() -> Result<()> {
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .tools(Arc::new(AppTools))
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .tools(Arc::new(AppTools))
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("static-tools").created().await.open().await?;
 
     let state = session.admin().tools().state().await?;
@@ -197,14 +185,10 @@ async fn registered_static_tools_appear_in_tool_state() -> Result<()> {
 #[tokio::test]
 async fn apply_tool_state_and_membership_update_live_catalog() -> Result<()> {
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .tools(Arc::new(AppTools))
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .tools(Arc::new(AppTools))
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("tool-state").created().await.open().await?;
     let app_tool = lash_core::ToolId::from("tool:app_lookup");
 
@@ -251,14 +235,10 @@ async fn apply_tool_state_and_membership_update_live_catalog() -> Result<()> {
 #[tokio::test]
 async fn persisted_session_restores_tool_state() -> Result<()> {
     let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .tools(Arc::new(AppTools))
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .tools(Arc::new(AppTools))
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("persisted-tools")
         .created()
@@ -288,14 +268,10 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
     };
     state.set_tool_state_snapshot(Some(persisted_tool_state));
     let (backend, _) = backend_seeded(state).await;
-    let reopened_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .tools(Arc::new(AppTools))
-    .build(crate::testing::runtime_lease_owner())?;
+    let reopened_core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .tools(Arc::new(AppTools))
+        .build(crate::testing::runtime_lease_owner())?;
 
     let reopened = reopened_core
         .session("persisted-tools")
@@ -366,12 +342,7 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
             .into_handle();
         let double = restate_double(SEED).await;
         let standard_core = explicit_ephemeral_facets(
-            LashCore::builder(
-                double.lash_backend(),
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-            )
-            .protocol_plugin(Arc::new(
+            LashCore::builder(double.lash_backend()).protocol_plugin(Arc::new(
                 crate::plugins::StandardProtocolPluginFactory::with_config(standard_config),
             )),
         )
@@ -507,17 +478,13 @@ async fn builder_configured_tools_and_hooks_are_never_discarded(backend: Backend
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(provider, mock_model_spec())
-    .tools(Arc::new(BuilderSentinelTools {
-        calls: Arc::clone(&calls),
-    }))
-    .plugin(Arc::new(SurfacePluginFactory))
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .serve_test_model(provider, mock_model_spec())
+        .tools(Arc::new(BuilderSentinelTools {
+            calls: Arc::clone(&calls),
+        }))
+        .plugin(Arc::new(SurfacePluginFactory))
+        .build(crate::testing::runtime_lease_owner())?;
     let id = "builder-sentinels";
     let mut session = core.session(id).created().await.open().await?;
     for turn in 0..3 {

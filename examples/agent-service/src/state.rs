@@ -124,23 +124,28 @@ impl AppStateData {
         match self
             .core
             .session(chat_id)
-            .create(lash::SessionCreation {
-                spec: lash::SessionSpec::inherit()
-                    .model(model.key.clone())
-                    .reasoning(model.reasoning.clone())
-                    .plugin(
-                        lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
-                        lash::rlm::RlmCreateExtras {
-                            prompt: Some(lash::rlm::RlmPrompt {
-                                context: vec![crate::board::board_prompt(&board)],
-                                ..Default::default()
-                            }),
+            .create(lash::SessionCreation::root(
+                // The service's default spec, running the chat's model: a
+                // core keeps none, so the host states it at each creation.
+                lash::SessionSpec::new(
+                    model.key.clone(),
+                    lash::TurnBudget::Unbounded,
+                    lash::MaxToolCalls::new(1024),
+                )
+                .reasoning(model.reasoning.clone())
+                .attachment_acceptance(Arc::new(crate::service_attachment_acceptance()))
+                .plugin(
+                    lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
+                    lash::rlm::RlmCreateExtras {
+                        prompt: Some(lash::rlm::RlmPrompt {
+                            context: vec![crate::board::board_prompt(&board)],
                             ..Default::default()
-                        },
-                    )
-                    .map_err(lash::EmbedError::from)?,
-                ..Default::default()
-            })
+                        }),
+                        ..Default::default()
+                    },
+                )
+                .map_err(lash::EmbedError::from)?,
+            ))
             .await
         {
             Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}
@@ -454,14 +459,9 @@ pub(crate) mod test_support {
             std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
             &backend,
         );
-        let mut builder = LashCore::rlm_builder(
-            backend,
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-            factory,
-        )
-        .tool_source_policy(tool_source_policy)
-        .models(Arc::new(crate::OpenRouterModels { provider }));
+        let mut builder = LashCore::rlm_builder(backend, factory)
+            .tool_source_policy(tool_source_policy)
+            .models(Arc::new(crate::OpenRouterModels { provider }));
         if let Some(tools) = tools {
             builder = builder.tools(tools);
         }
@@ -469,7 +469,6 @@ pub(crate) mod test_support {
             builder = builder.plugin(Arc::new(crate::demo_plugin::DemoPluginFactory::new(db)));
         }
         builder
-            .model(mock_model().key)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -691,10 +690,11 @@ mod session_language_tests {
         let seeding_core = test_core_with_tools(&double, Arc::new(SeedTools)).await;
         seeding_core
             .session(chat_id.clone())
-            .create(lash::SessionCreation {
-                spec: lash::SessionSpec::inherit().model(mock_model().key),
-                ..Default::default()
-            })
+            .create(lash::SessionCreation::root(lash::SessionSpec::new(
+                mock_model().key,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            )))
             .await
             .expect("seed create");
         let seeded = seeding_core
@@ -804,10 +804,11 @@ mod session_language_tests {
         let seeding_core = test_core_with_tools(&double, Arc::new(SeedTools)).await;
         seeding_core
             .session(chat_id.clone())
-            .create(lash::SessionCreation {
-                spec: lash::SessionSpec::inherit().model(mock_model().key),
-                ..Default::default()
-            })
+            .create(lash::SessionCreation::root(lash::SessionSpec::new(
+                mock_model().key,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            )))
             .await
             .expect("seed create");
         let seeded = seeding_core

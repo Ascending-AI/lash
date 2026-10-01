@@ -215,14 +215,10 @@ impl lash_core::facade_support::PluginFactory for ProbeFactory {
 }
 
 async fn probe_core(backend: lash_core::Backend, probe: &Arc<ProbeFactory>) -> Result<LashCore> {
-    explicit_ephemeral_facets(LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .plugin(probe.clone())
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())
+    explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .plugin(probe.clone())
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())
 }
 
 fn stating(cap: u64) -> Result<lash_core::PluginOptions> {
@@ -236,7 +232,7 @@ fn stating(cap: u64) -> Result<lash_core::PluginOptions> {
 async fn recorded_state(core: &LashCore, id: &str) -> Result<lash_core::RuntimeSessionState> {
     let id = SessionId::from(id);
     let store = crate::session::resolve_existing_session(&core.store_factory, &id).await?;
-    crate::session::load_state_from_store(&id, &core.policy, &store).await
+    crate::session::load_state_from_store(&id, &store).await
 }
 
 /// The turn budget the session's durable config head records.
@@ -282,8 +278,8 @@ async fn created_config_reaches_every_open() -> Result<()> {
     let durable = core
         .session("probe-session")
         .create(crate::SessionCreation {
-            spec: lash_core::facade_support::SessionSpec::new().plugin_options(stating(12)?),
-            ..Default::default()
+            spec: mock_session_spec().plugin_options(stating(12)?),
+            parent: None,
         })
         .await?;
     probe.builds.lock_recover().clear();
@@ -365,7 +361,7 @@ async fn unstated_namespace_records_owner_default() -> Result<()> {
     let core = probe_core(double_backend().await, &probe).await?;
     drop(
         core.session("probe-default")
-            .create(crate::SessionCreation::default())
+            .create(crate::SessionCreation::root(mock_session_spec()))
             .await?,
     );
     let state = recorded_state(&core, "probe-default").await?;
@@ -383,10 +379,11 @@ async fn unknown_owner_is_refused_at_create_and_submit() -> Result<()> {
     let Err(error) = core
         .session("probe-unknown-create")
         .create(crate::SessionCreation {
-            spec: lash_core::facade_support::SessionSpec::new().plugin_options(
-                lash_core::PluginOptions::typed("no-such-plugin", serde_json::json!({ "k": 1 }))?,
-            ),
-            ..Default::default()
+            spec: mock_session_spec().plugin_options(lash_core::PluginOptions::typed(
+                "no-such-plugin",
+                serde_json::json!({ "k": 1 }),
+            )?),
+            parent: None,
         })
         .await
     else {
@@ -407,7 +404,7 @@ async fn unknown_owner_is_refused_at_create_and_submit() -> Result<()> {
 
     drop(
         core.session("probe-unknown-command")
-            .create(crate::SessionCreation::default())
+            .create(crate::SessionCreation::root(mock_session_spec()))
             .await?,
     );
     let before = recorded_state(&core, "probe-unknown-command").await?;
@@ -452,8 +449,8 @@ async fn a_command_is_owner_reduced_and_revision_checked() -> Result<()> {
     drop(
         core.session("probe-command")
             .create(crate::SessionCreation {
-                spec: lash_core::facade_support::SessionSpec::new().plugin_options(stating(12)?),
-                ..Default::default()
+                spec: mock_session_spec().plugin_options(stating(12)?),
+                parent: None,
             })
             .await?,
     );
@@ -520,8 +517,8 @@ async fn a_transaction_across_owners_is_all_or_none() -> Result<()> {
     drop(
         core.session("probe-atomic")
             .create(crate::SessionCreation {
-                spec: lash_core::facade_support::SessionSpec::new().plugin_options(stating(12)?),
-                ..Default::default()
+                spec: mock_session_spec().plugin_options(stating(12)?),
+                parent: None,
             })
             .await?,
     );
@@ -608,8 +605,8 @@ async fn a_stale_transaction_publishes_nothing() -> Result<()> {
     drop(
         core.session("probe-stale")
             .create(crate::SessionCreation {
-                spec: lash_core::facade_support::SessionSpec::new().plugin_options(stating(12)?),
-                ..Default::default()
+                spec: mock_session_spec().plugin_options(stating(12)?),
+                parent: None,
             })
             .await?,
     );
@@ -645,8 +642,8 @@ async fn redriven_roots_see_their_admitted_revision() -> Result<()> {
     drop(
         core.session("probe-admitted")
             .create(crate::SessionCreation {
-                spec: lash_core::facade_support::SessionSpec::new().plugin_options(stating(12)?),
-                ..Default::default()
+                spec: mock_session_spec().plugin_options(stating(12)?),
+                parent: None,
             })
             .await?,
     );
@@ -700,8 +697,8 @@ async fn a_fork_captures_the_config_of_its_fork_point() -> Result<()> {
     drop(
         core.session("probe-fork-source")
             .create(crate::SessionCreation {
-                spec: lash_core::facade_support::SessionSpec::new().plugin_options(stating(12)?),
-                ..Default::default()
+                spec: mock_session_spec().plugin_options(stating(12)?),
+                parent: None,
             })
             .await?,
     );

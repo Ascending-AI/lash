@@ -322,16 +322,9 @@ async fn async_main() -> anyhow_like::Result<()> {
     );
     let mut core_builder = lash::LashCore::rlm_builder(
         backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
         factory,
     )
     .models(Arc::new(OpenRouterModels { provider }))
-    .model(model.as_str())
-    .reasoning(lash::provider::ReasoningSelection::Effort(
-        model_variant.clone(),
-    ))
-    .attachment_acceptance(Arc::new(service_attachment_acceptance()))
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .trace_sink(Arc::new(TeeTraceSink::new([

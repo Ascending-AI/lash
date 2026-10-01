@@ -15,13 +15,9 @@ use super::scope_support::delete_session_on;
 use super::*;
 
 fn core_over(double: &lash_restate_test::RestateTestBackend) -> Result<LashCore> {
-    explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())
+    explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())
 }
 
 /// Run one turn of live session `id` and require it to finish.
@@ -87,7 +83,7 @@ async fn a_delete_of_a_never_created_id_leaves_the_id_creatable_and_runnable(
     );
 
     core.session(ID)
-        .create(crate::SessionCreation::default())
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     runs_a_turn(&double, &core, ID).await?;
 
@@ -162,20 +158,16 @@ async fn a_delete_racing_a_create_cleans_up_nothing_without_an_accepted_close(
     let backend: lash_core::Backend = DecoratedBackend::over(double.lash_backend())
         .session_store_factory(move |_| gate)
         .into();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from(ID);
 
     let create = async {
         closed.await.expect("the delete's close answers");
         let created = core
             .session(ID)
-            .create(crate::SessionCreation::default())
+            .create(crate::SessionCreation::root(mock_session_spec()))
             .await;
         release.send(()).expect("the delete waits on its close");
         created

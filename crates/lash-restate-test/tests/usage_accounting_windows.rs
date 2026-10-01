@@ -168,23 +168,19 @@ fn core(
         })
         .build()
         .into_handle();
-    lash::LashCore::standard_builder(
-        backend.lash_backend(),
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-    .serve_test_model(
-        provider,
-        lash_core::ModelMetadata::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .unwrap(),
-    )
-    .tools(Arc::new(Probe) as Arc<dyn lash_core::ToolProvider>)
-    .build(lash_core::testing::runtime_lease_owner())
-    .unwrap()
+    lash::LashCore::standard_builder(backend.lash_backend())
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .serve_test_model(
+            provider,
+            lash_core::ModelMetadata::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .unwrap(),
+        )
+        .tools(Arc::new(Probe) as Arc<dyn lash_core::ToolProvider>)
+        .build(lash_core::testing::runtime_lease_owner())
+        .unwrap()
 }
 
 async fn charged(
@@ -263,7 +259,11 @@ async fn cut_before_send(kill: bool) {
     let owner = RuntimeOwner::Session(id.clone());
     let core = core(&backend, Arc::clone(&calls), true, owner.clone());
     core.session(&id)
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "mock-model",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
         .unwrap();
     let session = core.session(&id).open().await.unwrap();
@@ -405,7 +405,11 @@ async fn live_restate_usage_crash_p4_sent_not_projected() {
         RuntimeOwner::Session(id.clone()),
     );
     core.session(&id)
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "mock-model",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
         .unwrap();
     let session = core.session(&id).open().await.unwrap();

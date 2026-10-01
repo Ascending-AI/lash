@@ -371,6 +371,7 @@ fn attachment_usage_gate_state(
         .observer()
         .expect("gate process observer configured");
     AppState {
+        session_defaults: crate::tests::test_session_defaults(),
         core,
         attachment_store,
         session_store_factory: store_factory,

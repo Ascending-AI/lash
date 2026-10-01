@@ -513,6 +513,16 @@ fn model() -> Result<lash::ModelMetadata> {
         .map_err(|error| anyhow!("model metadata: {error}"))
 }
 
+/// The spec every node creates a run's session from: the harness's own
+/// default, since a core keeps none.
+fn session_spec() -> lash::SessionSpec {
+    lash::SessionSpec::new(
+        MODEL_KEY,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+    )
+}
+
 /// The binding every node's registry mints for [`MODEL_KEY`], as a process
 /// environment records it.
 fn model_config() -> Result<lash::ModelConfig> {
@@ -580,32 +590,27 @@ fn core(backend: lash::Backend, observed: &ProviderArgs) -> Result<lash::LashCor
         .build();
     let artifacts = lashlang::LashlangArtifacts::of_backend(&backend);
     let worker_recovery = backend.worker_recovery();
-    lash::LashCore::standard_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .models(Arc::new(
-        lash::ModelRegistry::new()
-            .register(
-                MODEL_KEY,
-                lash::RegisteredModel::new(model()?, provider.into_handle()),
-            )
-            .map_err(|error| anyhow!("register the model: {error}"))?,
-    ))
-    .model(MODEL_KEY)
-    .plugin(Arc::new(process::ProcessEnginePlugin(
-        artifacts,
-        worker_recovery,
-    )))
-    .recovery_lease(recovery_lease())
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "lash-upgrade-node",
-        format!("{build}-{}", std::process::id()),
-    ))
-    .map_err(anyhow::Error::from)
+    lash::LashCore::standard_builder(backend)
+        .models(Arc::new(
+            lash::ModelRegistry::new()
+                .register(
+                    MODEL_KEY,
+                    lash::RegisteredModel::new(model()?, provider.into_handle()),
+                )
+                .map_err(|error| anyhow!("register the model: {error}"))?,
+        ))
+        .plugin(Arc::new(process::ProcessEnginePlugin(
+            artifacts,
+            worker_recovery,
+        )))
+        .recovery_lease(recovery_lease())
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "lash-upgrade-node",
+            format!("{build}-{}", std::process::id()),
+        ))
+        .map_err(anyhow::Error::from)
 }
 
 fn scripted_reply(text: String) -> lash_core::llm::types::LlmResponse {
@@ -794,7 +799,7 @@ async fn turn(args: TurnArgs) -> Result<TurnReport> {
     // the rest use it, written out, since only `create` creates (FIG-4112).
     match core
         .session(session_id.clone())
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(session_spec()))
         .await
     {
         Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}

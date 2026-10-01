@@ -1076,11 +1076,9 @@ pub fn abandoned_consumer_refusal(start_key: Option<&crate::StartKey>, key: &str
 /// supplied, or its keyless start's derived key) fences its start: the
 /// retained process is returned only to a start that presents the same
 /// input, lifetime decision, ancestry, originator, wake target and
-/// environment. The input is compared as the host stated it
-/// ([`ProcessInput::states_same_start_as`](crate::ProcessInput::states_same_start_as)):
-/// the default binding the registering core minted for a session-turn start
-/// that names no model is the retained start's, whatever today's catalog
-/// would mint. A host key is global, so the retained process may be another
+/// environment. Each is what the host stated: a start carries nothing lash
+/// derives from a catalog or a deployment default (FIG-4594), so a retry
+/// after either changed presents the same start. A host key is global, so the retained process may be another
 /// originator's; any other start under it is a
 /// [`PluginError::StartKeyConflict`] that names the key and nothing of the
 /// process it is bound to.
@@ -1103,7 +1101,7 @@ pub fn check_retained_start(
         return Ok(());
     }
     let submitted = prepare_process_registration(registration.clone())?;
-    let same = submitted.input.states_same_start_as(&retained.input)
+    let same = submitted.input == retained.input
         && submitted.lifetime == retained.lifetime
         && submitted.ancestry == retained.ancestry
         && submitted.session_capability == retained.session_capability

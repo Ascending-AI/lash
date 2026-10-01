@@ -5,9 +5,6 @@
 
 use super::*;
 
-/// The budget of the core every law builds: neither session's own, so a
-/// session that ran under it instead of what it recorded is visible.
-const CORE_DEFAULT_TURNS: usize = 3;
 /// The bounded session's recorded budget.
 const BOUNDED_TURNS: usize = 2;
 /// Tool results a turn gathers before the model answers: past every bound
@@ -70,22 +67,18 @@ fn looping_provider(calls: &Arc<AtomicUsize>) -> ProviderHandle {
 }
 
 fn core_over(backend: lash_core::Backend, provider: ProviderHandle) -> Result<LashCore> {
-    explicit_ephemeral_facets(LashCore::standard_builder(
-        backend,
-        crate::TurnBudget::bounded(CORE_DEFAULT_TURNS),
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(provider, mock_model_spec())
-    .tools(Arc::new(AppTools))
-    .build(crate::testing::runtime_lease_owner())
+    explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .serve_test_model(provider, mock_model_spec())
+        .tools(Arc::new(AppTools))
+        .build(crate::testing::runtime_lease_owner())
 }
 
 /// Create `id` with `budget` recorded as its turn budget.
 async fn create_with_budget(core: &LashCore, id: &str, budget: crate::TurnBudget) -> Result<()> {
     core.session(id)
         .create(crate::SessionCreation {
-            spec: crate::SessionSpec::default().turn_budget(budget),
-            ..Default::default()
+            spec: mock_session_spec().turn_budget(budget),
+            parent: None,
         })
         .await?;
     Ok(())
@@ -125,7 +118,7 @@ async fn engine_driven_turn(core: &LashCore, id: &str, text: &str) -> Result<cra
 }
 
 /// One engine runs two sessions created with different budgets; each turn
-/// stops at the budget its session recorded, not the core's.
+/// stops at the budget its session recorded.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn each_session_runs_the_budget_it_was_created_with() -> Result<()> {
     let calls = Arc::new(AtomicUsize::new(0));
@@ -222,7 +215,7 @@ async fn recorded_config(core: &LashCore, id: &str) -> Result<lash_core::Persist
 async fn reopened_config(core: &LashCore, id: &str) -> Result<lash_core::PersistedSessionConfig> {
     let id = SessionId::from(id);
     let store = crate::session::resolve_existing_session(&core.store_factory, &id).await?;
-    let state = crate::session::load_state_from_store(&id, &core.policy, &store).await?;
+    let state = crate::session::load_state_from_store(&id, &store).await?;
     Ok(lash_core::PersistedSessionConfig::from(&state.policy))
 }
 
@@ -260,13 +253,13 @@ async fn creation_refuses_charge_safety_above_the_ceiling_without_recording_a_se
         let error = core
             .session(ID)
             .create(crate::SessionCreation {
-                spec: crate::SessionSpec::default().charge_safety(
+                spec: mock_session_spec().charge_safety(
                     crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
                         max_unsafe_retries: requested,
                         max_duplicate_cost_tokens: Some(0),
                     },
                 ),
-                ..Default::default()
+                parent: None,
             })
             .await
             .err()
@@ -293,7 +286,10 @@ async fn creation_refuses_charge_safety_above_the_ceiling_without_recording_a_se
             .await?
             .is_none()
         );
-        let mut policy = core.policy.clone();
+        let mut policy = lash_core::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        );
         policy.charge_safety = crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
             max_unsafe_retries: requested,
             max_duplicate_cost_tokens: None,
@@ -325,13 +321,13 @@ async fn creation_refuses_charge_safety_above_the_ceiling_without_recording_a_se
     }
     core.session(ID)
         .create(crate::SessionCreation {
-            spec: crate::SessionSpec::default().charge_safety(
+            spec: mock_session_spec().charge_safety(
                 crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
                     max_unsafe_retries: crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES,
                     max_duplicate_cost_tokens: None,
                 },
             ),
-            ..Default::default()
+            parent: None,
         })
         .await?;
     assert_eq!(
@@ -342,42 +338,10 @@ async fn creation_refuses_charge_safety_above_the_ceiling_without_recording_a_se
         }
     );
     assert_eq!(calls.load(Ordering::SeqCst), 0);
-    let inherited = explicit_ephemeral_facets(LashCore::standard_builder(
-        double_backend().await,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .session_spec(
-        crate::SessionSpec::default()
-            .turn_budget(crate::TurnBudget::Unbounded)
-            .max_tool_calls(crate::MaxToolCalls::new(1024))
-            .charge_safety(charge_safety_above_the_ceiling().charge_safety),
-    )
-    .serve_test_model(looping_provider(&calls), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
-    let error = inherited
-        .session(ID)
-        .create(crate::SessionCreation::default())
-        .await
-        .err()
-        .expect("creation must validate inherited defaults too");
-    let crate::EmbedError::Session(lash_core::SessionError::SessionConfigRefused(refusal)) = error
-    else {
-        panic!("expected a typed inherited config refusal, got {error:?}");
-    };
-    assert_eq!(
-        refusal.owner_refusal::<crate::config::CoreConfigRefusal>(),
-        Some(
-            crate::config::CoreConfigRefusal::UnsafeRetriesAboveCeiling {
-                requested: crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES + 1,
-                ceiling: crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES,
-            }
-        )
-    );
     Ok(())
 }
 
-/// A session created with the core's defaults, open on a core over the
+/// A session created unbounded, open on a core over the
 /// server double.
 async fn created_session(id: &str) -> Result<(LashCore, crate::LashSession)> {
     let calls = Arc::new(AtomicUsize::new(0));
@@ -770,14 +734,10 @@ async fn a_recorded_budget_bounds_every_root_after_an_engine_restart(
         );
     }
     let second = restart().await;
-    let unbounded = explicit_ephemeral_facets(LashCore::standard_builder(
-        second,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(endless_provider(&calls), mock_model_spec())
-    .tools(Arc::new(AppTools))
-    .build(crate::testing::runtime_lease_owner())?;
+    let unbounded = explicit_ephemeral_facets(LashCore::standard_builder(second))
+        .serve_test_model(endless_provider(&calls), mock_model_spec())
+        .tools(Arc::new(AppTools))
+        .build(crate::testing::runtime_lease_owner())?;
     for id in [created.as_str(), commanded.as_str()] {
         assert_eq!(
             shape(
@@ -1047,28 +1007,118 @@ async fn set_max_tool_calls_of_zero_is_refused_at_submit() -> Result<()> {
     Ok(())
 }
 
-/// A core whose session spec states no `max_tool_calls` is refused, typed,
-/// before any session can be created under it (FIG-4546): the limit has no
-/// default and no built-in ceiling to fall back to.
+/// A creation whose spec states no `max_tool_calls` is refused, typed, and
+/// nothing is created (FIG-4546, FIG-4594): the limit has no default, no
+/// built-in ceiling and no core setting to fall back to.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_core_without_max_tool_calls_is_refused() -> Result<()> {
-    let calls = Arc::new(AtomicUsize::new(0));
-    let refused = explicit_ephemeral_facets(LashCore::standard_builder(
-        double_backend().await,
-        crate::TurnBudget::bounded(CORE_DEFAULT_TURNS),
-        crate::MaxToolCalls::new(1024),
-    ))
-    .session_spec(crate::SessionSpec::new().turn_budget(crate::TurnBudget::Unbounded))
-    .serve_test_model(looping_provider(&calls), mock_model_spec())
-    .tools(Arc::new(AppTools))
-    .build(crate::testing::runtime_lease_owner());
-    let Err(error) = refused else {
-        panic!("a core without max_tool_calls must not build");
-    };
+async fn a_creation_without_max_tool_calls_is_refused() -> Result<()> {
+    const ID: &str = "creation-without-max-tool-calls";
+    let core = core_over(double_backend().await, mock_provider())?;
+    let mut unstated = mock_session_spec();
+    unstated.max_tool_calls = None;
+    let error = core
+        .session(ID)
+        .create(crate::SessionCreation::root(unstated))
+        .await
+        .err()
+        .expect("a creation without max_tool_calls must be refused");
     assert!(
         matches!(error, crate::EmbedError::MissingMaxToolCalls),
         "{error:?}"
     );
     assert!(error.is_terminal() && !error.is_retryable(), "{error}");
+    assert!(
+        matches!(
+            core.session(ID).open().await,
+            Err(crate::EmbedError::UnknownSession { .. })
+        ),
+        "the refused creation wrote no session"
+    );
+    Ok(())
+}
+
+/// A fork records its fork point's recorded config in full (FIG-4594). The
+/// source is created from one spec and runs a root; the host then changes
+/// what it passes (another session is created from a different spec, on a
+/// second core over the same stores), and the fork made there records
+/// exactly the source's turn budget, generation and charge safety, with the
+/// rest of its config head.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_fork_records_its_fork_points_config_whatever_the_host_passes_now() -> Result<()> {
+    const SOURCE: &str = "fork-config-source";
+    const LATER: &str = "fork-config-created-later";
+    const FORK: &str = "fork-config-branch";
+    let backend = double_backend().await;
+    let stated = mock_session_spec()
+        .turn_budget(crate::TurnBudget::bounded(7))
+        .generation(lash_core::GenerationOptions {
+            seed: Some(321),
+            ..Default::default()
+        })
+        .charge_safety(crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
+            max_unsafe_retries: 1,
+            max_duplicate_cost_tokens: None,
+        });
+    let core = core_over(backend.clone(), mock_provider())?;
+    core.session(SOURCE)
+        .create(crate::SessionCreation::root(stated))
+        .await?;
+    engine_driven_turn(&core, SOURCE, "before the fork").await?;
+    let source = recorded_config(&core, SOURCE).await?;
+    assert_eq!(source.turn_budget, crate::TurnBudget::bounded(7));
+    let point = {
+        let id = SessionId::from(SOURCE);
+        let store = crate::session::resolve_existing_session(&core.store_factory, &id).await?;
+        crate::session::load_state_from_store(&id, &store)
+            .await?
+            .session_graph
+            .leaf_node_id
+            .clone()
+            .expect("the source has a leaf")
+    };
+    core.pin(&point).await?;
+
+    // What the host passes changes: its next session states other controls.
+    let later = core_over(backend, mock_provider())?;
+    let changed = mock_session_spec()
+        .turn_budget(crate::TurnBudget::bounded(11))
+        .generation(lash_core::GenerationOptions {
+            seed: Some(999),
+            ..Default::default()
+        });
+    later
+        .session(LATER)
+        .create(crate::SessionCreation::root(changed))
+        .await?;
+    later
+        .fork_at(crate::ForkRequest {
+            session_id: FORK.into(),
+            node_id: point.clone(),
+            relation: lash_core::SessionRelation::Fork {
+                source_session_id: SOURCE.into(),
+                source_node_id: point,
+            },
+            observed_processes: Vec::new(),
+        })
+        .await?;
+
+    let fork = recorded_config(&later, FORK).await?;
+    assert_eq!(fork.turn_budget, source.turn_budget);
+    assert_eq!(fork.generation, source.generation);
+    assert_eq!(fork.charge_safety, source.charge_safety);
+    assert_eq!(
+        lash_core::PersistedSessionConfig {
+            config_revision: source.config_revision,
+            ..fork.clone()
+        },
+        source,
+        "the fork's config head is its fork point's, at its own first revision"
+    );
+    assert_eq!(fork.config_revision, 0);
+    assert_eq!(
+        reopened_config(&later, FORK).await?.turn_budget,
+        source.turn_budget,
+        "a reopen of the fork runs what it recorded"
+    );
     Ok(())
 }

@@ -216,26 +216,22 @@ fn core(
         ),
         contributed_engines: Arc::clone(contributed_engines),
     };
-    LashCore::builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .protocol_plugin(Arc::new(protocol))
-    .serve_test_model(
-        provider,
-        lash::ModelMetadata::builder("facade-host-wrappers")
-            .context_window_tokens(64_000)
-            .build()
-            .expect("model spec"),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "facade-host-wrappers-worker",
-        "facade-host-wrappers-boot",
-    ))
-    .expect("RLM core behind the host's wrapper")
+    LashCore::builder(backend)
+        .protocol_plugin(Arc::new(protocol))
+        .serve_test_model(
+            provider,
+            lash::ModelMetadata::builder("facade-host-wrappers")
+                .context_window_tokens(64_000)
+                .build()
+                .expect("model spec"),
+        )
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "facade-host-wrappers-worker",
+            "facade-host-wrappers-boot",
+        ))
+        .expect("RLM core behind the host's wrapper")
 }
 
 // ---- the law ----------------------------------------------------------------
@@ -272,7 +268,11 @@ async fn a_facade_host_wraps_the_rlm_factory_and_its_stores(tier: Tier, seed: u6
 
     match core
         .session("facade-host-wrappers")
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "facade-host-wrappers",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
     {
         Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}

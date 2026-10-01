@@ -99,31 +99,23 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
     let backend = double_backend().await;
     let source_host = backend.effect_host();
     let source_catalog = backend.session_store_factory();
-    let source = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        text_provider("resume-provider", "resume-model", "source-provider"),
-        model_spec("resume-model", None, 200_000),
-    )
-    .build(owner.clone())?;
-    let receiving = explicit_ephemeral_facets(LashCore::standard_builder(
-        double_backend().await,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        text_provider("resume-provider", "resume-model", "receiving-provider"),
-        model_spec("resume-model", None, 200_000),
-    )
-    .build(owner)?;
+    let source = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(
+            text_provider("resume-provider", "resume-model", "source-provider"),
+            model_spec("resume-model", None, 200_000),
+        )
+        .build(owner.clone())?;
+    let receiving = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
+        .serve_test_model(
+            text_provider("resume-provider", "resume-model", "receiving-provider"),
+            model_spec("resume-model", None, 200_000),
+        )
+        .build(owner)?;
 
     let parked = Box::pin(
         source
             .session("owner-preserved")
-            .created()
+            .created_with(session_spec_for(&model_spec("resume-model", None, 200_000)))
             .await
             .open()
             .await?
@@ -189,13 +181,9 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
 async fn a_failed_journal_retirement_is_retried_by_the_delete_obligation() -> Result<()> {
     let backend = DecoratedBackend::over(double_backend_explicit_reconcile().await)
         .effect_host(|inner| Arc::new(FailOnceRetirementHost::over(inner)));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.into(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.into()))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
     drop(core.session("delete-retry").created().await.open().await?);
     let first = delete_bound_session_outcome(&core, "delete-retry").await?;
     let crate::SessionDeletion::Closing(closing) = first else {
@@ -259,18 +247,14 @@ async fn a_failed_journal_retirement_is_retried_by_the_delete_obligation() -> Re
 /// `SessionAlreadyExists`, never absorbed into the recorded row.
 #[tokio::test]
 async fn parent_relation_is_read_back_and_a_conflicting_create_is_refused() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double_backend().await,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(mock_provider(), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
+        .serve_test_model(mock_provider(), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
 
     core.session("relation-child")
         .create(crate::SessionCreation {
+            spec: mock_session_spec(),
             parent: Some("relation-parent".into()),
-            ..Default::default()
         })
         .await?;
     let child = core.session("relation-child").open().await?;
@@ -286,8 +270,8 @@ async fn parent_relation_is_read_back_and_a_conflicting_create_is_refused() -> R
     let error = match core
         .session("relation-child")
         .create(crate::SessionCreation {
+            spec: mock_session_spec(),
             parent: Some("other-parent".into()),
-            ..Default::default()
         })
         .await
     {
@@ -334,36 +318,38 @@ async fn resume_addresses_the_parked_owner_registry_not_the_receiving_core() -> 
     let receiving_backend = double_backend().await;
     let receiving_registry = receiving_backend.process_registry();
 
-    let source = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        text_provider(
-            "owner-services-provider",
-            "owner-services-model",
-            "source-provider",
-        ),
-        model_spec("owner-services-model", None, 200_000),
-    )
-    .build(owner.clone())?;
-    let receiving = explicit_ephemeral_facets(LashCore::standard_builder(
-        receiving_backend.clone(),
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-    ))
-    .serve_test_model(
-        text_provider(
-            "owner-services-provider",
-            "owner-services-model",
-            "receiving-provider",
-        ),
-        model_spec("owner-services-model", None, 200_000),
-    )
-    .build(owner)?;
+    let source = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_model(
+            text_provider(
+                "owner-services-provider",
+                "owner-services-model",
+                "source-provider",
+            ),
+            model_spec("owner-services-model", None, 200_000),
+        )
+        .build(owner.clone())?;
+    let receiving =
+        explicit_ephemeral_facets(LashCore::standard_builder(receiving_backend.clone()))
+            .serve_test_model(
+                text_provider(
+                    "owner-services-provider",
+                    "owner-services-model",
+                    "receiving-provider",
+                ),
+                model_spec("owner-services-model", None, 200_000),
+            )
+            .build(owner)?;
 
-    let session = source.session(session_id).created().await.open().await?;
+    let session = source
+        .session(session_id)
+        .created_with(session_spec_for(&model_spec(
+            "owner-services-model",
+            None,
+            200_000,
+        )))
+        .await
+        .open()
+        .await?;
     let process_id = source_registry
         .register_process_with_observers(
             lash_core::ProcessRegistration::new(

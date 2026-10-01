@@ -1094,19 +1094,15 @@ impl BackendRunner {
             &transport,
         )
         .expect("build differential lifecycle provider");
-        lash::LashCore::standard_builder(
-            self.lifecycle_backend.clone(),
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-        )
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(provider, model)
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "cross-backend-differential-test",
-            "cross-backend-differential-test-boot",
-        ))
-        .expect("build differential lifecycle core")
+        lash::LashCore::standard_builder(self.lifecycle_backend.clone())
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .serve_test_model(provider, model)
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                "cross-backend-differential-test",
+                "cross-backend-differential-test-boot",
+            ))
+            .expect("build differential lifecycle core")
     }
     async fn close_reopened_postgres_pool(&mut self) {
         if let Some(pool) = self.reopened_postgres_pool.take() {
@@ -1409,11 +1405,11 @@ impl BackendRunner {
                             source_session_id: self.session_id.clone(),
                             source_node_id: node_id.into(),
                         },
-                        policy: lash_core::SessionPolicy::new(
+                        config: lash_core::SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
-                        ),
-                        plugin_config: Default::default(),
+                        )
+                        .into(),
                     })
                     .await?;
                 Ok(None)

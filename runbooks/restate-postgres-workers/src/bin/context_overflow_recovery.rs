@@ -383,18 +383,9 @@ impl Harness {
                         "the companion host must select LASH_CONTEXT_OVERFLOW_VM_WORKER",
                     )?,
                 ));
-                lash::LashCore::rlm_builder(
-                    backend,
-                    lash::TurnBudget::Unbounded,
-                    lash::MaxToolCalls::new(1024),
-                    rlm,
-                )
+                lash::LashCore::rlm_builder(backend, rlm)
             }
-            Protocol::Standard => lash::LashCore::standard_builder(
-                backend,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(1024),
-            ),
+            Protocol::Standard => lash::LashCore::standard_builder(backend),
         };
         let builder = builder
             .models(Arc::new(
@@ -409,7 +400,6 @@ impl Harness {
                     ),
                 )?,
             ))
-            .model(MODEL_KEY)
             .commit_budget(lash::CommitBudget::bounded(4 * 1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .trace_jsonl_path(
@@ -460,7 +450,11 @@ impl Harness {
         match self
             .core
             .session(session_id)
-            .create(lash::SessionCreation::default())
+            .create(lash::SessionCreation::root(lash::SessionSpec::new(
+                MODEL_KEY,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            )))
             .await
         {
             Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}

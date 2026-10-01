@@ -127,7 +127,7 @@ async fn smoke_stream_timeout_drains_full_channel_before_factory_shutdown() {
     let double = lash_restate_test::backend(0, lash_restate_test::ServerConfig::default())
         .await
         .expect("build the Restate double");
-    let core = core_builders::standard_core_over(
+    let (core, session_spec) = core_builders::standard_core_over(
         double.lash_backend(),
         provider,
         model_spec(DEFAULT_STANDARD_MODEL, 128).expect("model metadata"),
@@ -141,11 +141,12 @@ async fn smoke_stream_timeout_drains_full_channel_before_factory_shutdown() {
         },
     )
     .expect("build core");
-    let session = crate::tests::created_session(&core, "slack-live-e2e-full-channel")
-        .await
-        .open()
-        .await
-        .expect("open session");
+    let session =
+        crate::tests::created_session(&core, &session_spec, "slack-live-e2e-full-channel")
+            .await
+            .open()
+            .await
+            .expect("open session");
     let handle = session
         .send(TurnInput::text("fill activity channel"))
         .await

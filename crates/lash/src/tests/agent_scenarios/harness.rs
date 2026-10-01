@@ -305,13 +305,8 @@ impl AgentScenarioSetup {
         let turn_budget = self
             .max_turns
             .map_or(crate::TurnBudget::Unbounded, crate::TurnBudget::bounded);
-        let mut builder = explicit_ephemeral_facets(LashCore::rlm_builder(
-            backend.into(),
-            turn_budget,
-            crate::MaxToolCalls::new(1024),
-            factory,
-        ))
-        .serve_test_model(provider, mock_model_spec());
+        let mut builder = explicit_ephemeral_facets(LashCore::rlm_builder(backend.into(), factory))
+            .serve_test_model(provider, mock_model_spec());
         if let Some(tools) = self.tool_provider {
             builder = builder.tools(tools);
         }
@@ -333,6 +328,7 @@ impl AgentScenarioSetup {
         let process_registry = core.process_registry();
         Ok(AgentScenarioRuntime {
             core,
+            spec: mock_session_spec().turn_budget(turn_budget),
             store_factory,
             graph_store,
             process_registry,
@@ -345,6 +341,9 @@ impl AgentScenarioSetup {
 
 struct AgentScenarioRuntime {
     core: LashCore,
+    /// The spec the scenario's sessions are created from: the mock model
+    /// under the setup's turn budget.
+    spec: crate::SessionSpec,
     store_factory: Arc<dyn lash_core::DeploymentStore>,
     graph_store: Arc<crate::tracing::TraceLashlangGraphStore>,
     process_registry: Arc<dyn ProcessRegistry>,
@@ -391,7 +390,7 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
     let session = runtime
         .core
         .session(&case.session_id)
-        .created()
+        .created_with(runtime.spec.clone())
         .await
         .open()
         .await?;
@@ -848,7 +847,7 @@ impl AgentSessionTurnProcessScenario {
         let session = runtime
             .core
             .session(&self.session_id)
-            .created()
+            .created_with(runtime.spec.clone())
             .await
             .open()
             .await?;
@@ -1003,7 +1002,7 @@ impl AgentDurableInputSuspensionScenario {
         let session = runtime
             .core
             .session(&self.session_id)
-            .created()
+            .created_with(runtime.spec.clone())
             .await
             .open()
             .await?;
@@ -1218,7 +1217,7 @@ finish(await handle);"#,
     let session = runtime
         .core
         .session("agent-scenario-process-llm-query")
-        .created()
+        .created_with(runtime.spec.clone())
         .await
         .open()
         .await?;
@@ -1264,7 +1263,7 @@ finish(await handle);"#,
     let session = runtime
         .core
         .session("agent-scenario-direct-completion-attempt-retry")
-        .created()
+        .created_with(runtime.spec.clone())
         .await
         .open()
         .await?;

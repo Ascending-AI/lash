@@ -242,21 +242,16 @@ fn services(
         Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
-    let core = lash::LashCore::rlm_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-        factory,
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-    .serve_test_model(provider, mock_model_metadata())
-    .plugin(Arc::new(LoadSurfaceFactory))
-    .build(lash_core::LeaseOwnerIdentity::opaque(
-        "load-behavior-replay",
-        "law",
-    ))
-    .unwrap();
+    let core = lash::LashCore::rlm_builder(backend, factory)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .serve_test_model(provider, mock_model_metadata())
+        .plugin(Arc::new(LoadSurfaceFactory))
+        .build(lash_core::LeaseOwnerIdentity::opaque(
+            "load-behavior-replay",
+            "law",
+        ))
+        .unwrap();
     Services { core, authority }
 }
 
@@ -531,7 +526,11 @@ async fn witness(
     );
     let session = session_of(&run);
     core.session(session.clone())
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            mock_model_metadata().wire_model,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
         .unwrap();
     turn(core, &session, "register", 1).await;
@@ -803,7 +802,11 @@ async fn live_witness(case: Advance) {
     );
     let session = session_of(&run);
     core.session(session.clone())
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            mock_model_metadata().wire_model,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
         .unwrap();
     turn(core, &session, "register", 1).await;

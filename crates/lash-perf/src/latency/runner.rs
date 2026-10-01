@@ -409,17 +409,13 @@ fn build_core(
             crate::runtime_perf::providers::BenchmarkEchoTool::new(Arc::clone(&effect_host)),
         )),
     )));
-    lash::LashCore::standard_builder(
-        backend,
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .serve_test_model(provider, latency_model_spec()?)
-    .plugins(plugins)
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .build(latency_owner())
-    .map_err(anyhow::Error::from)
+    lash::LashCore::standard_builder(backend)
+        .serve_test_model(provider, latency_model_spec()?)
+        .plugins(plugins)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .build(latency_owner())
+        .map_err(anyhow::Error::from)
 }
 
 /// A read-only core over a second store set on `stores_dir`. The per-sample
@@ -518,7 +514,11 @@ async fn run_lane(
     let durable = topology
         .core
         .session(session_id.clone())
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            latency_model_spec()?.wire_model,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
         .map_err(anyhow::Error::from)?;
     let session = match spec.topology {

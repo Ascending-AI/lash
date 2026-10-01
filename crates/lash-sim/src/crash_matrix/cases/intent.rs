@@ -242,7 +242,7 @@ async fn stage_session_end(seam: Seam, point: CrashPoint, seed: u64) -> Result<S
     let world = CrashWorld::new(seed, held_core(Arc::clone(&held)), false).await?;
     world.restart().await?;
     let session = session_name(seam, seed);
-    crate::open_created_session(&world.core()?, session.clone())
+    crate::open_created_session(super::MODEL, &world.core()?, session.clone())
         .await
         .map_err(|error| format!("open `{session}`: {error}"))?;
     let root = "held-0";

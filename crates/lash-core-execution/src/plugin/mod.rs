@@ -103,7 +103,7 @@ pub use session_types::{
     SessionCreateRequest, SessionHandle, SessionLineage, SessionObservedProcessOutcome,
     SessionObservedProcessReceipt, SessionObserverIntent, SessionPluginInit, SessionPluginSource,
     SessionRelation, SessionSnapshot, SessionStartPoint, SessionToolAccess, SessionToolAccessError,
-    SubagentSessionContext,
+    SubagentSessionContext, UnstatedSessionConfig,
 };
 pub use state::{
     KeyRejection, PluginNamespaceState, PluginState, PluginStateEdit, PluginStateError,

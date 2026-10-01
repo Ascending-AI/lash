@@ -324,7 +324,7 @@ pub(super) async fn host(args: RemoteHostArgs) -> Result<()> {
         // (FIG-4112): an existing session keeps what it recorded.
         match core
             .session(session_id.clone())
-            .create(lash::SessionCreation::default())
+            .create(lash::SessionCreation::root(super::session_spec()))
             .await
         {
             Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}

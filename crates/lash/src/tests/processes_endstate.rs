@@ -233,12 +233,7 @@ fn process_test_builder(backend: lash_core::Backend) -> crate::core::LashCoreBui
     );
     LashCore::rlm_builder(
         backend,
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
         factory,
-    )
-    .session_spec(
-        crate::SessionSpec::new().turn_budget(crate::TurnBudget::Unbounded).max_tool_calls(crate::MaxToolCalls::new(1024)),
     )
     .serve_test_model(provider, mock_model_spec())
     .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))

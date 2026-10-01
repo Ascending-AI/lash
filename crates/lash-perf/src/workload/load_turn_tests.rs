@@ -239,35 +239,30 @@ async fn replay_session_through(actor: u64, ordinal: u64) {
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
-    let core = lash::LashCore::rlm_builder(
-        backend,
-        lash::TurnBudget::bounded(TURN_BUDGET),
-        lash::MaxToolCalls::new(1024),
-        factory,
-    )
-    .serve_test_model(
-        served.provider().into_handle(),
-        lash::ModelMetadata::builder("e2e-mock")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("the load model spec"),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .plugin(Arc::new(
-        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
-            lash_core::lifetime::session_or_starter,
-        ),
-    ))
-    .tools(Arc::new(StaticToolProvider::new(
-        ReplayTools::definitions(),
-        tools.clone(),
-    )))
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "fig-4255",
-        "fig-4255-replay",
-    ))
-    .expect("the replay core");
+    let core = lash::LashCore::rlm_builder(backend, factory)
+        .serve_test_model(
+            served.provider().into_handle(),
+            lash::ModelMetadata::builder("e2e-mock")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("the load model spec"),
+        )
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .plugin(Arc::new(
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                lash_core::lifetime::session_or_starter,
+            ),
+        ))
+        .tools(Arc::new(StaticToolProvider::new(
+            ReplayTools::definitions(),
+            tools.clone(),
+        )))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "fig-4255",
+            "fig-4255-replay",
+        ))
+        .expect("the replay core");
     restate.install_process_worker(
         lash::durability::DurableProcessWorker::new(
             core.durable_process_worker_config()
@@ -277,7 +272,11 @@ async fn replay_session_through(actor: u64, ordinal: u64) {
     );
     let session_id = lash::SessionId::from(format!("fig-4255-{actor}-{first}"));
     core.session(session_id.clone())
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "e2e-mock",
+            lash::TurnBudget::bounded(TURN_BUDGET),
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
         .expect("the replayed session is created");
     let session = core

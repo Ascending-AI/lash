@@ -67,7 +67,15 @@ pub(super) async fn a_process_opened_group_child_parks_resumes_and_reparks_idemp
         &double,
         &core,
         "keys-process-group-start",
-        session_turn_start("keys-process-group", "ask the model through the tool"),
+        session_turn_start(
+            "keys-process-group",
+            "ask the model through the tool",
+            &lash::SessionSpec::new(
+                KIMI,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            ),
+        ),
     )
     .await
     .expect("the process starts its child session turn");
@@ -420,7 +428,15 @@ async fn paused_group_dispatch_work_parks_its_opener(
                 &double,
                 &core,
                 "keys-dispatch-start",
-                session_turn_start(session_id, "run the tool"),
+                session_turn_start(
+                    session_id,
+                    "run the tool",
+                    &lash::SessionSpec::new(
+                        KIMI,
+                        lash::TurnBudget::Unbounded,
+                        lash::MaxToolCalls::new(1024),
+                    ),
+                ),
             )
             .await
             .expect("start the process-backed turn");

@@ -137,25 +137,21 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
             .build()
             .into_handle()
     };
-    let core = lash::LashCore::standard_builder(
-        backend.lash_backend(),
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .serve_test_model(
-        provider,
-        lash_core::ModelMetadata::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("model spec"),
-    )
-    .tools(Arc::new(CountingTool {
-        executions: Arc::clone(&tool_executions),
-    }) as Arc<dyn lash_core::ToolProvider>)
-    .build(owner())
-    .expect("build the lash core");
+    let core = lash::LashCore::standard_builder(backend.lash_backend())
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_model(
+            provider,
+            lash_core::ModelMetadata::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("model spec"),
+        )
+        .tools(Arc::new(CountingTool {
+            executions: Arc::clone(&tool_executions),
+        }) as Arc<dyn lash_core::ToolProvider>)
+        .build(owner())
+        .expect("build the lash core");
     let session = created_session(&core, "turn-crash-replay")
         .await
         .open()
@@ -387,7 +383,11 @@ async fn created_session(
     let session_id = session_id.into();
     match core
         .session(session_id.clone())
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "mock-model",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
     {
         Ok(_)

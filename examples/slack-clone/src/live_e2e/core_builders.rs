@@ -151,6 +151,9 @@ pub(super) fn echo_tools() -> Arc<dyn ToolProvider> {
 /// deployment, then its hold on the server.
 pub(super) struct LiveCore {
     core: LashCore,
+    /// The spec a live run's sessions are created from: this host's own
+    /// default, since a core keeps none.
+    session_spec: lash::SessionSpec,
     _deployment: crate::local_restate::LocalDeployment,
     _server: Arc<crate::local_restate::LocalRestateServer>,
 }
@@ -187,7 +190,11 @@ async fn live_engine(label: &str) -> Result<LiveEngine> {
 }
 
 /// Serve `core`'s endpoint in `live`'s namespace and hand back the live core.
-async fn serve_live_core(live: LiveEngine, core: LashCore) -> Result<LiveCore> {
+async fn serve_live_core(
+    live: LiveEngine,
+    core: LashCore,
+    session_spec: lash::SessionSpec,
+) -> Result<LiveCore> {
     let worker = lash::durability::DurableProcessWorker::new(
         core.durable_process_worker_config()
             .context("live-E2E process worker config")?,
@@ -199,6 +206,7 @@ async fn serve_live_core(live: LiveEngine, core: LashCore) -> Result<LiveCore> {
         .await?;
     Ok(LiveCore {
         core,
+        session_spec,
         _deployment: deployment,
         _server: live.server,
     })
@@ -221,33 +229,32 @@ pub(super) async fn standard_core(
     spec: StandardCoreSpec<'_>,
 ) -> Result<LiveCore> {
     let live = live_engine("slack-live-standard").await?;
-    let core = standard_core_over(
+    let (core, session_spec) = standard_core_over(
         lash::Backend::new(live.engine.clone()),
         provider,
         model,
         spec,
     )?;
-    serve_live_core(live, core).await
+    serve_live_core(live, core, session_spec).await
 }
 
-/// [`standard_core`] over `backend`, which a test hands the Restate double's.
+/// [`standard_core`] over `backend`, which a test hands the Restate double's,
+/// with the spec its sessions are created from.
 pub(super) fn standard_core_over(
     backend: lash::Backend,
     provider: ProviderHandle,
     model: ModelMetadata,
     spec: StandardCoreSpec<'_>,
-) -> Result<LashCore> {
+) -> Result<(LashCore, lash::SessionSpec)> {
     let (models, model_key) = one_model(provider, model)?;
-    let mut builder = LashCore::standard_builder(
-        backend,
+    let session_spec = lash::SessionSpec::new(
+        model_key,
         lash::TurnBudget::bounded(spec.turn_budget),
         lash::MaxToolCalls::new(1024),
     )
-    .models(models)
-    .model(model_key)
     .reasoning(live_reasoning())
     .generation(generation(spec.output_cap))
-    .session_plugin(
+    .plugin(
         lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
         lash::standard::StandardTurnOptions {
             prompt: Some(lash::standard::StandardPrompt {
@@ -257,11 +264,13 @@ pub(super) fn standard_core_over(
             render: None,
         },
     )
-    .context("encode the live-E2E standard prompt")?
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .trace_sink(Arc::new(JsonlTraceSink::new(spec.trace_path)))
-    .trace_level(TraceLevel::Extended);
+    .context("encode the live-E2E standard prompt")?;
+    let mut builder = LashCore::standard_builder(backend)
+        .models(models)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .trace_sink(Arc::new(JsonlTraceSink::new(spec.trace_path)))
+        .trace_level(TraceLevel::Extended);
     if let Some(tools) = spec.tools {
         builder = builder.tools(tools);
     }
@@ -273,12 +282,13 @@ pub(super) fn standard_core_over(
     if let Some(witness) = spec.shutdown_witness {
         builder = builder.plugin(witness);
     }
-    builder
+    let core = builder
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "slack-clone-live-standard",
             Uuid::new_v4().to_string(),
         ))
-        .context("build standard live-E2E core")
+        .context("build standard live-E2E core")?;
+    Ok((core, session_spec))
 }
 
 pub(super) async fn rlm_core(
@@ -301,17 +311,14 @@ pub(super) async fn rlm_core(
         &backend,
     );
     let (models, model_key) = one_model(provider, model)?;
-    let mut builder = LashCore::rlm_builder(
-        backend,
+    let session_spec = lash::SessionSpec::new(
+        model_key,
         lash::TurnBudget::bounded(MAX_MODEL_TURNS_PER_SESSION_TURN),
         lash::MaxToolCalls::new(1024),
-        factory,
     )
-    .models(models)
-    .model(model_key)
     .reasoning(live_reasoning())
     .generation(generation(output_cap))
-    .session_plugin(
+    .plugin(
         lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
         lash::rlm::RlmCreateExtras {
             prompt: Some(lash::rlm::RlmPrompt {
@@ -321,12 +328,14 @@ pub(super) async fn rlm_core(
             ..Default::default()
         },
     )
-    .context("encode the live-E2E RLM prompt")?
-    .tools(tools)
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .trace_sink(Arc::new(JsonlTraceSink::new(trace_path)))
-    .trace_level(TraceLevel::Extended);
+    .context("encode the live-E2E RLM prompt")?;
+    let mut builder = LashCore::rlm_builder(backend, factory)
+        .models(models)
+        .tools(tools)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .trace_sink(Arc::new(JsonlTraceSink::new(trace_path)))
+        .trace_level(TraceLevel::Extended);
     if let Some(marker) = super::shutdown_marker::factory_from_env("slack-clone-live-e2e")
         .map_err(anyhow::Error::msg)?
     {
@@ -338,19 +347,20 @@ pub(super) async fn rlm_core(
             Uuid::new_v4().to_string(),
         ))
         .context("build RLM live-E2E core")?;
-    serve_live_core(live, core).await
+    serve_live_core(live, core, session_spec).await
 }
 
-/// Open a live run's session, creating it first unless a rerun over the same
-/// store already did: only `create` creates (FIG-4112).
+/// Open a live run's session, creating it from the live core's spec first
+/// unless a rerun over the same store already did: only `create` creates
+/// (FIG-4112).
 pub(super) async fn create_or_open(
-    core: &lash::LashCore,
+    core: &LiveCore,
     id: impl Into<lash::SessionId>,
 ) -> lash::Result<lash::LashSession> {
     let id = id.into();
     match core
         .session(id.clone())
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(core.session_spec.clone()))
         .await
     {
         Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}

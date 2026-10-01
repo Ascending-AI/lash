@@ -28,11 +28,7 @@ impl Fixture {
     async fn with_plugins(plugins: Vec<Arc<dyn PluginFactory>>) -> Result<Self> {
         let double = restate_double(SEED).await;
         let provider_calls = Arc::new(AtomicUsize::new(0));
-        let builder = LashCore::standard_builder(
-            double.lash_backend(),
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-        );
+        let builder = LashCore::standard_builder(double.lash_backend());
         let builder = plugins
             .into_iter()
             .fold(builder, |builder, plugin| builder.plugin(plugin));

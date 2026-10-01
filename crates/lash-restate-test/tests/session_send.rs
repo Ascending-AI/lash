@@ -57,20 +57,16 @@ fn core_builder(
     backend: &RestateTestBackend,
     provider: lash_core::facade_support::ProviderHandle,
 ) -> lash::LashCoreBuilder {
-    lash::LashCore::standard_builder(
-        backend.lash_backend(),
-        lash::TurnBudget::Unbounded,
-        lash::MaxToolCalls::new(1024),
-    )
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .serve_test_model(
-        provider,
-        lash_core::ModelMetadata::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("model spec"),
-    )
+    lash::LashCore::standard_builder(backend.lash_backend())
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_model(
+            provider,
+            lash_core::ModelMetadata::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("model spec"),
+        )
 }
 
 fn build_core(
@@ -649,10 +645,14 @@ async fn a_dropped_child_turn_leaves_the_child_session_reusable() {
         .expect("open the parent");
     let first = {
         core.session("dropped-child")
-            .create(lash::SessionCreation {
-                parent: Some("dropped-child-parent".into()),
-                ..Default::default()
-            })
+            .create(lash::SessionCreation::child_of(
+                "dropped-child-parent",
+                lash::SessionSpec::new(
+                    "mock-model",
+                    lash::TurnBudget::Unbounded,
+                    lash::MaxToolCalls::new(1024),
+                ),
+            ))
             .await
             .expect("create the child");
         let child = core
@@ -918,7 +918,11 @@ async fn created_session(
     let session_id = session_id.into();
     match core
         .session(session_id.clone())
-        .create(lash::SessionCreation::default())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            "mock-model",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )))
         .await
     {
         Ok(_)
