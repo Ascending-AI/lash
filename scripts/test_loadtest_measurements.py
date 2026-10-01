@@ -674,6 +674,26 @@ class MeasurementsTests(unittest.TestCase):
                 self.assertEqual(result['collection_gaps'][0]['attribution']['status'], 'UNATTRIBUTED')
                 self.assertIn('required collection intervals are missing', result['qualification']['reasons'])
 
+    def test_a_gap_after_the_signal_and_before_its_injection_row_is_the_faults(self):
+        # The controller signals, then records `injected`: the fault is live
+        # in between. Its clock read before the signal opens the window.
+        for instant, status in [(42000, 'FAULT_ATTRIBUTED'), (51999, 'FAULT_ATTRIBUTED'), (41999, 'UNATTRIBUTED')]:
+            with self.subTest(instant=instant):
+                fixture = self.gap_campaign()
+                detail = json.loads(fixture[4][0]['detail_json'])
+                # 990 us on the witness clock is 40 000 ns on the driver's, give or take 2 000 ns.
+                fixture[4][0]['detail_json'] = json.dumps({**detail, 'signal_not_before_us': 990})
+                fixture[-1]['monotonic_ns'] = instant
+                result = self.gap_summary(fixture)
+                gap = result['collection_gaps'][0]
+                self.assertEqual(gap['attribution']['status'], status)
+                if status == 'FAULT_ATTRIBUTED':
+                    self.assertEqual(gap['attribution']['window_ns'], [42000, 108000])
+                    self.assertEqual(result['qualification']['status'], 'PASSED')
+                injected = next(row for row in result['recovery_inputs']['normalized_rows'] if row['phase'] == 'injected')
+                self.assertEqual(injected['signal_not_before_bounds_ns'], [38000, 42000])
+                self.assertEqual(injected['clock_bounds_ns'], [48000, 52000])
+
     def test_wrong_component_gap_fails(self):
         for target in [{'component': 'restate', 'endpoint': 'worker'},
                        {'component': 'postgres', 'endpoint': 'database'},

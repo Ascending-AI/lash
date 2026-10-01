@@ -315,6 +315,15 @@ def normalize_fault_rows(rows, anchors, run):
             else:
                 normalized.append(result)
             continue
+        if row['phase'] == 'injected' and 'signal_not_before_us' in detail:
+            # The controller's clock read before it signalled: the fault went
+            # live between this instant and the row itself.
+            value, interval = convert(detail['signal_not_before_us'])
+            if not value <= instant:
+                errors.append(identity + ': signal_not_before_us follows its injection row')
+                continue
+            result['signal_not_before_ns'] = value
+            result['signal_not_before_bounds_ns'] = interval
         normalized.append(result)
     return normalized, errors
 
@@ -454,6 +463,9 @@ def collection_gaps(run, sample_errors, normalized_faults):
     """Attribute only periodic gaps definitely inside a matching fault.
 
     A failed observation happened at its instant, which must lie in the window.
+    The window opens once the controller's clock read before its signal has
+    certainly happened, when the injection records one, and otherwise once the
+    injection row certainly exists.
     A counter epoch transition happened at an unknown point after the last
     old-epoch observation and no later than the first new-epoch one; that
     interval must meet the window, so a reset first seen after recovery is
@@ -468,7 +480,8 @@ def collection_gaps(run, sample_errors, normalized_faults):
             continue
         injection, recovery = rows['injected'], rows['recovered']
         # Use the inner bounds so clock uncertainty cannot excuse an outside gap.
-        start, end = injection['clock_bounds_ns'][1], recovery['clock_bounds_ns'][0]
+        opened = injection.get('signal_not_before_bounds_ns', injection['clock_bounds_ns'])
+        start, end = opened[1], recovery['clock_bounds_ns'][0]
         component = {'worker-kill': 'worker', 'restate-restart': 'restate',
                      'rolling-deploy': 'worker'}.get(injection['kind'])
         targets = injection['detail'].get('collection_targets', [])

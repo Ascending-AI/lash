@@ -475,8 +475,10 @@ class Campaign:
                          lambda: choose_worker(self.worker_activity(generation)))
         before = self.worker_pod(busy['index'], generation)
         pod = before['metadata']['name']
+        not_before = self.clock_us()
         self.restart_in_place(pod, 'worker', WORKER_PROCESS, 'KILL', fault_id, delay)
         at = self.record(fault_id, kind, 'injected', pod, {
+            'signal_not_before_us': not_before,
             'pod': pod, 'worker_id': busy['worker_id'], 'active': busy['active'], 'signal': 'KILL',
             'collection_targets': [{'component': 'worker',
                                     'endpoint': f"http://{self.name}-worker-{busy['index']}-control:18101"}],
@@ -514,8 +516,10 @@ class Campaign:
 
         chosen = self.poll('no Restate leader was processing work', BUSY_WATCHDOG_S, busy)
         before = self.cluster.json('pod', chosen.pod)
+        not_before = self.clock_us()
         self.restart_in_place(chosen.pod, 'restate', RESTATE_PROCESS, 'TERM', fault_id, delay)
         at = self.record(fault_id, kind, 'injected', chosen.pod, {
+            'signal_not_before_us': not_before,
             'pod': chosen.pod, 'node': chosen.node, 'generation_before': chosen.generation,
             'collection_targets': [
                 {'component': 'restate', 'endpoint': f'http://{self.name}-restate:9070'},
