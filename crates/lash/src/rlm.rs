@@ -1,5 +1,4 @@
 use crate::support::{ProtocolTurnOptions, Result};
-use lash_core::facade_support::ProtocolTurnOptionsFacadeOps;
 
 #[cfg(feature = "rlm")]
 pub use lash_lashlang_runtime::LanguageTraceHost;
@@ -162,7 +161,7 @@ pub use lash_protocol_rlm::{RlmAbilities, RlmLanguageFeatures, RlmPromptFeatures
 /// The RLM protocol's config owner and its commands (FIG-4379, FIG-4588).
 pub use lash_protocol_rlm::{
     RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmRecordedBehaviour, RlmRecordedConfig,
-    SetRlmPrompt, SetRlmPromptContext, SetRlmRender,
+    RlmRenderRefusal, RlmRunOptions, SetRlmPrompt, SetRlmPromptContext, SetRlmRender,
 };
 /// Projection vocabulary: bind projected values to the active session via
 /// [`rlm_session_projection_extension`]. Session extensions are process-local
@@ -197,20 +196,24 @@ pub mod lang {
     pub use lashlang::*;
 }
 
-/// `current` with its RLM termination overridden by `termination`.
+/// `current`, the RLM run options a send already states, with their
+/// termination set to `termination`. Options that are not the RLM owner's
+/// run options are an error here, before anything is sent.
 #[cfg(feature = "rlm")]
 fn rlm_termination_options(
     current: Option<&ProtocolTurnOptions>,
     termination: lash_rlm_types::RlmTermination,
 ) -> Result<ProtocolTurnOptions> {
-    let override_options = ProtocolTurnOptions::typed(lash_rlm_types::RlmTurnOptions {
-        termination: Some(termination),
-        final_answer_format: None,
-        render: None,
-    })?;
-    Ok(current
-        .map(|current| current.merged_with_override(&override_options))
-        .unwrap_or(override_options))
+    let stated = current
+        .map(ProtocolTurnOptions::decode::<lash_rlm_types::RlmTurnOptions>)
+        .transpose()?
+        .unwrap_or_default();
+    Ok(ProtocolTurnOptions::typed(
+        lash_rlm_types::RlmTurnOptions {
+            termination: Some(termination),
+            ..stated
+        },
+    )?)
 }
 
 /// One shared pool for RLM cells, process bodies, and pure language work.

@@ -46,6 +46,7 @@ impl ConfigOwner for CounterOwner {
     type Create = CounterCreate;
     type Recorded = CounterConfig;
     type Refusal = CounterRefusal;
+    type RunOptions = CounterRun;
 
     fn implementation(&self) -> &str {
         self.implementation
@@ -90,6 +91,32 @@ impl ConfigOwner for CounterOwner {
         }
         Ok(())
     }
+
+    /// A run restates the count, within the limit it names.
+    fn apply_run_options(
+        &self,
+        recorded: &CounterConfig,
+        options: CounterRun,
+    ) -> Result<CounterConfig, CounterRefusal> {
+        if options.count > options.limit {
+            return Err(CounterRefusal::PastLimit {
+                limit: options.limit,
+            });
+        }
+        Ok(CounterConfig {
+            count: options.count,
+            ..recorded.clone()
+        })
+    }
+}
+
+/// What a run states for a counter: its count for the run. The label is no
+/// field of it.
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CounterRun {
+    count: u32,
+    limit: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -236,9 +263,11 @@ fn creation_records_defaults_stated_values_and_what_a_child_inherits() {
         )
         .expect_err("an unowned namespace is refused");
     assert_eq!(
-        refused.downcast_ref::<UnknownPluginConfigOwner>(),
-        Some(&UnknownPluginConfigOwner {
-            plugin_ids: vec!["nobody".to_string()],
+        refused,
+        ConfigFault::Refused(ConfigRefusal {
+            owner: "nobody".to_string(),
+            at: RefusalSite::Creation,
+            reason: ConfigRefusalReason::UnknownOwner,
         })
     );
     let refused = registry
@@ -250,11 +279,19 @@ fn creation_records_defaults_stated_values_and_what_a_child_inherits() {
             true,
         )
         .expect_err("creation input the owner does not accept is refused");
-    assert_eq!(
-        refused
-            .downcast_ref::<ConfigRefusal>()
-            .map(|refusal| refusal.owner.as_str()),
-        Some("first")
+    assert!(
+        matches!(
+            &refused,
+            ConfigFault::Refused(ConfigRefusal {
+                owner,
+                at: RefusalSite::Creation,
+                reason: ConfigRefusalReason::Unreadable {
+                    role: ConfigValueRole::CreationInput,
+                    ..
+                },
+            }) if owner == "first"
+        ),
+        "the owner's creation input is unreadable: {refused:?}"
     );
 }
 
@@ -302,7 +339,9 @@ fn a_stale_transaction_runs_no_reducer_and_publishes_nothing() {
     let transaction = registry
         .admit("t", 3, vec![increment("first", 1, 10)])
         .expect("admitted");
-    let resolution = registry.resolve(&base, &transaction, &crate::EmptyModels);
+    let resolution = registry
+        .resolve(&base, &transaction, &crate::EmptyModels)
+        .expect("the recorded config reads");
     assert_eq!(
         resolution.result,
         ConfigResolutionDecision::Stale {
@@ -337,7 +376,9 @@ fn ordered_commands_of_two_owners_publish_together_with_one_revision_step() {
             ],
         )
         .expect("admitted");
-    let resolution = registry.resolve(&base, &transaction, &crate::EmptyModels);
+    let resolution = registry
+        .resolve(&base, &transaction, &crate::EmptyModels)
+        .expect("the recorded config reads");
     let mut published = base.clone();
     assert_eq!(
         resolution.publish(&mut published),
@@ -373,17 +414,29 @@ fn a_refused_member_refuses_the_whole_transaction() {
             vec![increment("first", 2, 10), increment("second", 50, 10)],
         )
         .expect("admitted");
-    let resolution = registry.resolve(&base, &transaction, &crate::EmptyModels);
+    let resolution = registry
+        .resolve(&base, &transaction, &crate::EmptyModels)
+        .expect("the recorded config reads");
     let mut published = base.clone();
     let ConfigTransactionOutcome::Refused { refusal } = resolution.publish(&mut published) else {
         panic!("the transaction is refused");
     };
-    assert_eq!(refusal.index, Some(1));
     assert_eq!(refusal.owner, "second");
-    assert_eq!(refusal.command.as_deref(), Some("increment"));
     assert_eq!(
-        serde_json::from_value::<CounterRefusal>(refusal.refusal).expect("typed refusal"),
-        CounterRefusal::PastLimit { limit: 10 }
+        refusal.at,
+        RefusalSite::Command {
+            index: 1,
+            command: "increment".to_string(),
+        }
+    );
+    assert_eq!(
+        refusal.owner_refusal::<CounterRefusal>(),
+        Some(CounterRefusal::PastLimit { limit: 10 })
+    );
+    assert_eq!(
+        refusal.to_string(),
+        "config command 1 (`second.increment`) refused: past the limit 10",
+        "the display is derived from the site and the reason"
     );
     assert_eq!(
         published, base,
@@ -402,14 +455,294 @@ fn the_final_candidate_is_validated_by_every_touched_owner() {
             vec![increment("first", 60, 1000), increment("first", 60, 1000)],
         )
         .expect("admitted");
-    let resolution = registry.resolve(&base, &transaction, &crate::EmptyModels);
+    let resolution = registry
+        .resolve(&base, &transaction, &crate::EmptyModels)
+        .expect("the recorded config reads");
     let ConfigResolutionDecision::Refused { refusal } = resolution.result else {
         panic!("the final candidate is refused");
     };
-    assert_eq!(refusal.index, None);
+    assert_eq!(refusal.at, RefusalSite::Candidate);
     assert_eq!(
-        serde_json::from_value::<CounterRefusal>(refusal.refusal).expect("typed refusal"),
-        CounterRefusal::OverHundred { count: 120 }
+        refusal.owner_refusal::<CounterRefusal>(),
+        Some(CounterRefusal::OverHundred { count: 120 })
+    );
+}
+
+/// The reason `transaction` is refused for over `base`, with its site.
+fn refused_over(
+    registry: &ConfigRegistry,
+    base: &crate::PersistedSessionConfig,
+    entry: ConfigCommandEntry,
+) -> ConfigRefusal {
+    let transaction = ConfigTransactionRecord {
+        id: "t".to_string(),
+        expected_revision: base.config_revision,
+        entries: vec![entry],
+        implementations: BTreeMap::new(),
+    };
+    let resolution = registry
+        .resolve(base, &transaction, &crate::EmptyModels)
+        .expect("the recorded config reads");
+    let ConfigResolutionDecision::Refused { refusal } = resolution.result else {
+        panic!("the transaction is refused: {resolution:?}");
+    };
+    refusal
+}
+
+/// FIG-4652: what the framework refuses is its own variant, never data in
+/// the owner's slot. A recorded transaction that names an owner or a command
+/// this build does not register, a namespace the session never recorded, or
+/// arguments the command cannot read each refuse with their own reason, at
+/// the command that met them.
+#[test]
+fn framework_refusals_are_their_own_reasons_and_never_the_owners_data() {
+    let (registry, _, _) = counters();
+    let base = head(&registry, 0);
+    let at = |command: &str| RefusalSite::Command {
+        index: 0,
+        command: command.to_string(),
+    };
+
+    let unknown_owner = refused_over(&registry, &base, increment("nobody", 1, 10));
+    assert_eq!(
+        unknown_owner,
+        ConfigRefusal {
+            owner: "nobody".to_string(),
+            at: at("increment"),
+            reason: ConfigRefusalReason::UnknownOwner,
+        }
+    );
+
+    let unknown_command = refused_over(
+        &registry,
+        &base,
+        ConfigCommandEntry {
+            command: "decrement".to_string(),
+            ..increment("first", 1, 10)
+        },
+    );
+    assert_eq!(
+        unknown_command,
+        ConfigRefusal {
+            owner: "first".to_string(),
+            at: at("decrement"),
+            reason: ConfigRefusalReason::UnknownCommand,
+        }
+    );
+
+    let mut unrecorded_base = base.clone();
+    unrecorded_base.plugin_config = PluginConfig::for_protocol(None);
+    let unrecorded = refused_over(&registry, &unrecorded_base, increment("first", 1, 10));
+    assert_eq!(
+        unrecorded,
+        ConfigRefusal {
+            owner: "first".to_string(),
+            at: at("increment"),
+            reason: ConfigRefusalReason::UnrecordedNamespace,
+        }
+    );
+
+    let unreadable = refused_over(
+        &registry,
+        &base,
+        ConfigCommandEntry {
+            args: serde_json::json!({ "by": "one" }),
+            ..increment("first", 1, 10)
+        },
+    );
+    assert_eq!(unreadable.at, at("increment"));
+    assert!(
+        matches!(
+            unreadable.reason,
+            ConfigRefusalReason::Unreadable {
+                role: ConfigValueRole::Arguments,
+                ..
+            }
+        ),
+        "arguments the command cannot read: {unreadable:?}"
+    );
+
+    for refusal in [unknown_owner, unknown_command, unrecorded, unreadable] {
+        assert_eq!(
+            refusal.owner_refusal::<CounterRefusal>(),
+            None,
+            "a framework reason carries no owner refusal: {refusal:?}"
+        );
+        assert_eq!(
+            serde_json::to_value(&refusal).expect("encodes")["reason"].get("refusal"),
+            None,
+            "nothing lash minted sits in the owner's slot: {refusal:?}"
+        );
+    }
+}
+
+/// FIG-4652: a recorded namespace its owner cannot read is corruption of
+/// the session's stored config. It refuses nothing: a transaction resolves
+/// to no decision to record, whether its command changes that namespace or
+/// only the final validation meets it; a run override validates to no
+/// verdict; and a child's creation records nothing from a corrupt parent.
+#[test]
+fn an_unreadable_recorded_namespace_is_corruption_and_refuses_nothing() {
+    let (registry, reductions, _) = counters();
+    let mut base = head(&registry, 0);
+    base.plugin_config
+        .insert("first", serde_json::json!({ "count": "three" }));
+    let corrupt = |error: RecordedNamespaceCorrupt| {
+        assert_eq!(error.owner, "first");
+        assert!(
+            matches!(
+                error.clone().into_store_error(),
+                crate::StoreError::StoredDataCorrupt {
+                    record_kind: "session_config_namespace",
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
+    };
+
+    for (what, entry) in [
+        (
+            "a command on the corrupt namespace",
+            increment("first", 1, 10),
+        ),
+        ("a command on another namespace", increment("second", 1, 10)),
+    ] {
+        let transaction = registry.admit("t", 0, vec![entry]).expect("admitted");
+        corrupt(
+            registry
+                .resolve(&base, &transaction, &crate::EmptyModels)
+                .expect_err(what),
+        );
+    }
+    assert_eq!(
+        reductions.load(Ordering::SeqCst),
+        0,
+        "no reducer ran over the corrupt namespace"
+    );
+
+    let mut derived = base.clone();
+    derived
+        .plugin_config
+        .insert("first", serde_json::json!({ "count": 1, "label": "root" }));
+    match registry.validate_derived(&base, &derived) {
+        Err(ConfigFault::RecordedCorrupt(error)) => corrupt(error),
+        other => panic!("a run override over a corrupt namespace: {other:?}"),
+    }
+    match registry.apply_run_options(
+        &base.plugin_config,
+        "first",
+        &crate::ProtocolTurnOptions::from_payload(serde_json::json!({ "count": 1, "limit": 9 })),
+    ) {
+        Err(ConfigFault::RecordedCorrupt(error)) => corrupt(error),
+        other => panic!("run options over a corrupt namespace: {other:?}"),
+    }
+    match registry.resolve_creation(
+        None,
+        &PluginOptions::default(),
+        Some(&base.plugin_config),
+        false,
+    ) {
+        Err(ConfigFault::RecordedCorrupt(error)) => corrupt(error),
+        other => panic!("a child of a corrupt parent: {other:?}"),
+    }
+
+    // A candidate the owner's own reducer produced is the candidate's
+    // fault, not stored data: here, one over the owner's ceiling.
+    let healthy = head(&registry, 0);
+    let mut over = healthy.clone();
+    over.plugin_config
+        .insert("first", serde_json::json!({ "count": "many" }));
+    assert!(
+        matches!(
+            registry.validate_derived(&healthy, &over),
+            Err(ConfigFault::Refused(ConfigRefusal {
+                at: RefusalSite::Candidate,
+                reason: ConfigRefusalReason::Unreadable {
+                    role: ConfigValueRole::Candidate,
+                    ..
+                },
+                ..
+            }))
+        ),
+        "an unreadable candidate over a readable base is refused"
+    );
+}
+
+/// FIG-4652: a run's options are the owner's typed run options, and only
+/// the owner lays them over its namespace. A field that is not a run option
+/// does not decode, whatever value it states, the recorded one included.
+#[test]
+fn run_options_are_the_owners_typed_options_and_only_the_owner_applies_them() {
+    let (registry, _, _) = counters();
+    let base = head(&registry, 0);
+    let options = |payload: serde_json::Value| crate::ProtocolTurnOptions::from_payload(payload);
+    let apply =
+        |payload| registry.apply_run_options(&base.plugin_config, "first", &options(payload));
+
+    assert_eq!(
+        apply(serde_json::json!({ "count": 7, "limit": 9 })).expect("applied"),
+        serde_json::json!({ "count": 7, "label": "root" }),
+        "the owner applied its run options over the recorded namespace"
+    );
+
+    for restated in [
+        serde_json::json!({ "count": 7, "limit": 9, "label": "root" }),
+        serde_json::json!({ "count": 7, "limit": 9, "label": "other" }),
+    ] {
+        let refused = apply(restated).expect_err("the label is no run option");
+        assert!(
+            matches!(
+                &refused,
+                ConfigFault::Refused(ConfigRefusal {
+                    owner,
+                    at: RefusalSite::Candidate,
+                    reason: ConfigRefusalReason::Unreadable {
+                        role: ConfigValueRole::RunOptions,
+                        ..
+                    },
+                }) if owner == "first"
+            ),
+            "{refused:?}"
+        );
+    }
+
+    let ConfigFault::Refused(refusal) =
+        apply(serde_json::json!({ "count": 12, "limit": 9 })).expect_err("past the limit")
+    else {
+        panic!("the owner refuses");
+    };
+    assert_eq!(refusal.at, RefusalSite::Candidate);
+    assert_eq!(
+        refusal.owner_refusal::<CounterRefusal>(),
+        Some(CounterRefusal::PastLimit { limit: 9 })
+    );
+
+    assert_eq!(
+        registry.apply_run_options(
+            &base.plugin_config,
+            "nobody",
+            &options(serde_json::json!({})),
+        ),
+        Err(ConfigFault::Refused(ConfigRefusal {
+            owner: "nobody".to_string(),
+            at: RefusalSite::Candidate,
+            reason: ConfigRefusalReason::UnknownOwner,
+        }))
+    );
+    assert!(
+        matches!(
+            registry.apply_run_options(
+                &base.plugin_config,
+                CORE_CONFIG_OWNER,
+                &options(serde_json::json!({})),
+            ),
+            Err(ConfigFault::Refused(ConfigRefusal {
+                reason: ConfigRefusalReason::UnrecordedNamespace,
+                ..
+            }))
+        ),
+        "the core share is no namespace a run's options apply to"
     );
 }
 
@@ -503,17 +836,28 @@ fn resolve_core(
 ) -> ConfigResolution {
     let entries = registry.entries(&transaction).expect("entries");
     let transaction = registry.admit("t", 0, entries).expect("admitted");
-    registry.resolve(base, &transaction, models)
+    registry
+        .resolve(base, &transaction, models)
+        .expect("the recorded config reads")
 }
 
+/// The core owner's refusal of `resolution`, and the index of the command
+/// it refused (`None` for the final candidate).
 fn core_refusal(resolution: &ConfigResolution) -> (Option<usize>, core::CoreConfigRefusal) {
     let ConfigResolutionDecision::Refused { refusal } = &resolution.result else {
         panic!("the core owner refuses: {resolution:?}");
     };
     assert_eq!(refusal.owner, CORE_CONFIG_OWNER);
+    let index = match &refusal.at {
+        RefusalSite::Command { index, .. } => Some(*index),
+        RefusalSite::Candidate => None,
+        RefusalSite::Creation => panic!("a transaction is not a creation: {refusal:?}"),
+    };
     (
-        refusal.index,
-        serde_json::from_value(refusal.refusal.clone()).expect("the core owner's typed refusal"),
+        index,
+        refusal
+            .owner_refusal()
+            .expect("the core owner's typed refusal"),
     )
 }
 

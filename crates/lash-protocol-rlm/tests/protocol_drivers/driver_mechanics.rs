@@ -23,7 +23,7 @@ fn malformed_rlm_turn_options_fail_before_llm() {
     assert!(find_llm_call(&effects).is_none());
     assert!(effects_include_runtime_error(
         &effects,
-        "invalid RLM turn options"
+        "invalid recorded RLM session config"
     ));
     assert!(find_done(&effects).is_some());
 }
@@ -41,7 +41,7 @@ fn null_rlm_turn_options_fail_before_llm() {
     assert!(find_llm_call(&effects).is_none());
     assert!(effects_include_runtime_error(
         &effects,
-        "invalid RLM turn options"
+        "invalid recorded RLM session config"
     ));
     assert!(find_done(&effects).is_some());
 }
@@ -1731,17 +1731,12 @@ fn complete_through_checkpoint(machine: &mut TurnMachine, effects: &[Effect]) ->
     drain_effects(machine)
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "test support: the fixed RlmTermination fixture always satisfies the typed-options validation"
-)]
 fn finish_required_options() -> lash_core::ProtocolTurnOptions {
-    lash_core::ProtocolTurnOptions::typed(RlmTurnOptions {
+    recorded_namespace(RlmTurnOptions {
         termination: Some(RlmTermination::FinishRequired { schema: None }),
         final_answer_format: None,
         render: None,
     })
-    .expect("valid rlm turn options")
 }
 
 /// A one-line cell executes.

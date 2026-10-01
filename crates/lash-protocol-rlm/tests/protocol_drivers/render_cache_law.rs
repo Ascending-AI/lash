@@ -212,7 +212,7 @@ async fn drive_with_run_spec(
     store: &lash_core::store::SessionStore,
     session_id: &SessionId,
 ) {
-    let mut options = lash_core::ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
+    let options = lash_core::ProtocolTurnOptions::typed(lash_rlm_types::RlmTurnOptions {
         render: Some(lash_rlm_types::RlmRenderPatch {
             print: lash_render::RenderParamsPatch {
                 max_chars: Some(2),
@@ -223,8 +223,6 @@ async fn drive_with_run_spec(
         ..Default::default()
     })
     .expect("run spec render options");
-    options.payload["channel"] = serde_json::json!("cell");
-    options.payload["dialect"] = serde_json::json!("typescript");
     store
         .enqueue_pending_turn_input(
             lash_core::PendingTurnInputDraft::new(

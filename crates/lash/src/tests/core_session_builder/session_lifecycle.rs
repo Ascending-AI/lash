@@ -501,7 +501,10 @@ async fn a_session_key_selects_its_transport_and_an_unserved_key_is_refused_type
     };
     assert_eq!(refusal.owner, crate::config::CORE_CONFIG_OWNER);
     assert_eq!(
-        refusal.refusal["kind"], "unknown_model",
+        refusal.owner_refusal::<crate::config::CoreConfigRefusal>(),
+        Some(crate::config::CoreConfigRefusal::UnknownModel {
+            key: lash_core::ModelKey::new("updated-model"),
+        }),
         "the refusal is the core owner's typed unknown-model refusal: {refusal:?}"
     );
 
@@ -1049,12 +1052,16 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()>
     else {
         panic!("expected a typed session config refusal, got: {err:?}");
     };
-    let refusal = refusal
-        .downcast_ref::<lash_core::ConfigRefusal>()
-        .expect("the RLM owner's creation refusal");
     assert_eq!(refusal.owner, lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID);
+    assert_eq!(refusal.at, lash_core::RefusalSite::Creation);
     assert!(
-        refusal.message.contains("invalid creation config"),
+        matches!(
+            refusal.reason,
+            lash_core::ConfigRefusalReason::Unreadable {
+                role: lash_core::ConfigValueRole::CreationInput,
+                ..
+            }
+        ),
         "{refusal:?}"
     );
     Ok(())

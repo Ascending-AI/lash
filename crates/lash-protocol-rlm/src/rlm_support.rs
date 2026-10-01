@@ -11,15 +11,19 @@ use lash_rlm_types::{RlmTermination, RlmTurnOptions};
 use lash_sansio::{ExtraKeys, ObjectShape, SchemaShape, ShapeField, ShapeKind};
 use lashlang::Value as FlowValue;
 
+/// What a turn runs under, read from `namespace`, the RLM namespace the
+/// turn's root recorded. A session that recorded none runs under the
+/// defaults.
 pub(crate) fn decode_rlm_options(
-    options: &lash_core::ProtocolTurnOptions,
+    namespace: &lash_core::ProtocolTurnOptions,
 ) -> Result<RlmTurnOptions, String> {
-    if options.is_empty() {
-        return Ok(RlmTurnOptions::default());
-    }
-    options
-        .decode()
-        .map_err(|err| format!("invalid RLM turn options: {err}"))
+    crate::plugin::RlmRecordedConfig::read(namespace)
+        .map(|recorded| {
+            recorded
+                .map(|recorded| recorded.turn_options())
+                .unwrap_or_default()
+        })
+        .map_err(|err| format!("invalid recorded RLM session config: {err}"))
 }
 
 pub(crate) fn decode_rlm_termination_options(

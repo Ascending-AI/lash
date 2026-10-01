@@ -31,6 +31,9 @@ the namespace registered.
   its defaults and, for a child, its parent's recorded value;
 - validates a final candidate, including a run override against the
   namespace it was derived from;
+- declares its typed `RunOptions` and applies them over its recorded
+  namespace (`apply_run_options`): the namespace a run executes under is the
+  owner's output, and nothing else merges a run's options into it;
 - names an implementation identity for its reducers.
 
 A reducer is a pure function from the recorded namespace and the command to
@@ -45,9 +48,11 @@ RLM and standard protocols register one render command each
 (`SetRlmRender`, `SetStandardRender`) and its prompt commands
 (`SetRlmPrompt` and `SetRlmPromptContext`, `SetStandardPrompt` and
 `SetStandardPromptContext`). The system prompt has no core command: it is
-the protocol's recorded config (ADR 0030, FIG-4589). An owner also validates
-the raw options a run states, and refuses a payload that carries the
-session's prompt.
+the protocol's recorded config (ADR 0030, FIG-4589). A run's options are the
+owner's `RunOptions` type (`RlmTurnOptions`, `StandardRunOptions`), which has
+no field for the prompt, the behaviour or a pin: a payload that names one
+does not decode and refuses the run's shape, whatever value it states
+(FIG-4652). An owner whose namespace no run overrides uses `NoRunOptions`.
 
 `SetModel` carries an opaque `ModelKey` (FIG-4374). Its reducer is the one
 core reducer that reads more than the recorded namespace: it asks the host's
@@ -97,8 +102,18 @@ the transaction in one journaled `ResolveConfigTransaction` effect:
    core changed, core validates the reasoning selection against the final
    recorded model.
 4. The result is `Applied`, with the replacement namespaces and the outputs,
-   or `Refused`, with the refusing entry, the owner and the owner's typed
-   refusal.
+   or `Refused`, with a `ConfigRefusal { owner, at, reason }` (FIG-4652). `at`
+   is the refused command (its index and name), the final candidate, or a
+   creation. `reason` is a tagged union: `owner` carries the owner's
+   registered refusal type and nothing else does; `unknown_owner`,
+   `unknown_command`, `unrecorded_namespace` and `unreadable` (with the role
+   of the value that did not read) are the framework's own reasons.
+
+A recorded namespace its owner cannot read is not a refusal. The session
+recorded it from that owner's own typed value, so it is corrupt stored data:
+the resolution records no decision and fails as `StoredDataCorrupt`, and the
+same holds for a run override, a creation from a corrupt parent and a root's
+render.
 
 A redrive replays the recorded resolution and never re-runs a reducer under
 new code.

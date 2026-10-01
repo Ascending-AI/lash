@@ -174,11 +174,10 @@ pub struct StandardRecordedBehaviour {
 /// The standard protocol's recorded session namespace (FIG-4379,
 /// FIG-4398): its prompt, the render options its tool results render with,
 /// and the behaviour the session was created with. Render options apply over
-/// the recorded render. A stated `null` in a run's render options resets a
-/// key, so the render is read with its nulls dropped.
+/// the recorded render. Every reader decodes this type (FIG-4652).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
 #[schemars(crate = "lash_core::facade_support::schemars")]
-#[serde(try_from = "serde_json::Value")]
+#[serde(deny_unknown_fields)]
 pub struct StandardRecordedConfig {
     pub prompt: StandardPrompt,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -188,52 +187,13 @@ pub struct StandardRecordedConfig {
     pub behaviour: StandardRecordedBehaviour,
 }
 
-/// The wire form a [`StandardRecordedConfig`] decodes through.
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StandardRecordedConfigWire {
-    prompt: StandardPrompt,
-    #[serde(default)]
-    render: Option<serde_json::Value>,
-    behaviour: StandardRecordedBehaviour,
-}
-
-impl TryFrom<serde_json::Value> for StandardRecordedConfig {
-    type Error = serde_json::Error;
-
-    fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
-        let wire: StandardRecordedConfigWire = serde_json::from_value(value)?;
-        Ok(Self {
-            prompt: wire.prompt,
-            render: wire
-                .render
-                .map(|render| serde_json::from_value(render::without_nulls(render)))
-                .transpose()?,
-            behaviour: wire.behaviour,
-        })
-    }
-}
-
-/// The recorded key of the session's behaviour, which a run's render options
-/// do not carry.
+/// The recorded key of the session's behaviour, named when a rebuilt
+/// session recorded none.
 const BEHAVIOUR_FIELD: &str = "behaviour";
-
-/// The render options of a root's protocol turn options: its namespace, the
-/// recorded behaviour aside.
-fn standard_turn_options(
-    options: &lash_core::ProtocolTurnOptions,
-) -> Result<StandardTurnOptions, lash_core::ProtocolTurnOptionsError> {
-    let mut options = options.clone();
-    if let Some(object) = options.payload.as_object_mut() {
-        object.remove(BEHAVIOUR_FIELD);
-    }
-    options.decode()
-}
 
 /// Standard protocol creation input (FIG-4379): the prompt and the render
 /// options its tool results render with, over the host's configured
-/// render. A stated `null` in a run's options resets a key, so a value is
-/// read with its nulls dropped.
+/// render. A stated `null` reads as unstated.
 #[derive(
     Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema,
 )]
@@ -272,10 +232,11 @@ impl TryFrom<serde_json::Value> for StandardTurnOptions {
 }
 
 /// The options a run states for the standard protocol (FIG-4589): its render
-/// options, over the session's. A run cannot state the session's prompt,
-/// which is recorded config: a payload that carries one is refused as
-/// [`StandardConfigRefusal::PromptInRunOptions`]. A stated `null` resets a
-/// key, so a value is read with its nulls dropped.
+/// options, which the owner applies field by field over the session's
+/// ([`ConfigOwner::apply_run_options`]). Nothing else is a field: a payload
+/// that names the session's prompt or its behaviour does not decode, so a
+/// run cannot state them, whatever value it gives. A stated `null` reads as
+/// unstated.
 #[derive(
     Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema,
 )]
@@ -326,11 +287,31 @@ pub enum StandardConfigRefusal {
     /// The candidate changes the behaviour the session recorded at
     /// creation.
     BehaviourChanged { recorded: String, candidate: String },
-    /// A run's options state the session's prompt (FIG-4589). The prompt is
-    /// recorded config: creation states it and the owner's prompt commands
-    /// change it, for the next root. A run's options are
-    /// [`StandardRunOptions`], which has no prompt.
-    PromptInRunOptions,
+}
+
+/// Why the standard protocol resolved no render for a root.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum StandardRenderRefusal {
+    /// A resolved head share is not a percentage.
+    HeadShareOutOfRange { head_share_percent: u8 },
+    /// The resolved render parameters did not encode as a record.
+    Unencodable { message: String },
+}
+
+impl std::fmt::Display for StandardRenderRefusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::HeadShareOutOfRange { head_share_percent } => write!(
+                formatter,
+                "head_share_percent must be within 0..=100, got {head_share_percent}"
+            ),
+            Self::Unencodable { message } => {
+                write!(formatter, "the resolved render does not encode: {message}")
+            }
+        }
+    }
 }
 
 impl std::fmt::Display for StandardConfigRefusal {
@@ -344,10 +325,6 @@ impl std::fmt::Display for StandardConfigRefusal {
                 "the session's standard-protocol behaviour is recorded as {recorded} and cannot \
                  become {candidate}"
             ),
-            Self::PromptInRunOptions => formatter.write_str(
-                "a run's standard-protocol options cannot state the session's prompt: set it at \
-                 creation or with the `set_prompt` and `set_prompt_context` config commands",
-            ),
         }
     }
 }
@@ -356,6 +333,7 @@ impl ConfigOwner for StandardConfigOwner {
     type Create = StandardTurnOptions;
     type Recorded = StandardRecordedConfig;
     type Refusal = StandardConfigRefusal;
+    type RunOptions = StandardRunOptions;
 
     fn implementation(&self) -> &str {
         STANDARD_CONFIG_IMPLEMENTATION
@@ -407,16 +385,21 @@ impl ConfigOwner for StandardConfigOwner {
         Ok(())
     }
 
-    /// A run's options are a [`StandardRunOptions`]; a payload that carries
-    /// the session's prompt is refused, whatever value it states.
-    fn validate_run_options(
+    /// A run's render options apply over the session's, field by field
+    /// and tool by tool. The prompt and the behaviour stay as recorded.
+    fn apply_run_options(
         &self,
-        options: &serde_json::Value,
-    ) -> Result<(), StandardConfigRefusal> {
-        if options.get("prompt").is_some() {
-            return Err(StandardConfigRefusal::PromptInRunOptions);
-        }
-        Ok(())
+        recorded: &StandardRecordedConfig,
+        options: StandardRunOptions,
+    ) -> Result<StandardRecordedConfig, StandardConfigRefusal> {
+        let render = match (options.render, recorded.render.as_ref()) {
+            (Some(stated), Some(recorded)) => Some(stated.over(recorded)),
+            (stated, recorded) => stated.or_else(|| recorded.cloned()),
+        };
+        Ok(StandardRecordedConfig {
+            render,
+            ..recorded.clone()
+        })
     }
 }
 
@@ -645,17 +628,37 @@ struct StandardProtocolDriver {
 impl ProtocolDriverPlugin for StandardProtocolDriver {
     fn resolve_render(
         &self,
-        options: &lash_core::ProtocolTurnOptions,
-    ) -> Result<Option<lash_core::RecordedRender>, String> {
-        let patch = standard_turn_options(options).map_err(|error| error.to_string())?;
+        namespace: &lash_core::ProtocolTurnOptions,
+    ) -> Result<Option<lash_core::RecordedRender>, lash_core::RenderFault> {
+        // A session that recorded no standard namespace renders under the
+        // configured render alone.
+        let recorded = if namespace.is_empty() {
+            None
+        } else {
+            Some(
+                namespace
+                    .decode::<StandardRecordedConfig>()
+                    .map_err(|error| lash_core::RecordedNamespaceCorrupt {
+                        owner: STANDARD_PROTOCOL_PLUGIN_ID.to_string(),
+                        message: error.to_string(),
+                    })?,
+            )
+        };
         let resolved = render::resolve(
             &StandardRenderConfig::builtin(),
             &self.config.render,
-            &patch.render.unwrap_or_default(),
-        )?;
+            &recorded
+                .and_then(|recorded| recorded.render)
+                .unwrap_or_default(),
+        )
+        .map_err(|refusal| lash_core::RenderRefusal::new(&refusal))?;
         Ok(Some(lash_core::RecordedRender {
             renderer_id: self.config.renderer.0.id().to_string(),
-            params: serde_json::to_value(resolved).map_err(|error| error.to_string())?,
+            params: serde_json::to_value(resolved).map_err(|error| {
+                lash_core::RenderRefusal::new(&StandardRenderRefusal::Unencodable {
+                    message: error.to_string(),
+                })
+            })?,
         }))
     }
 

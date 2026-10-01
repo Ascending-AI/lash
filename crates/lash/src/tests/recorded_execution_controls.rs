@@ -277,9 +277,9 @@ async fn creation_refuses_charge_safety_above_the_ceiling_without_recording_a_se
             panic!("expected a typed config refusal, got {error:?}");
         };
         assert_eq!(
-            refusal.downcast_ref::<crate::config::CoreConfigRefusal>(),
+            refusal.owner_refusal::<crate::config::CoreConfigRefusal>(),
             Some(
-                &crate::config::CoreConfigRefusal::UnsafeRetriesAboveCeiling {
+                crate::config::CoreConfigRefusal::UnsafeRetriesAboveCeiling {
                     requested,
                     ceiling: crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES,
                 }
@@ -314,9 +314,9 @@ async fn creation_refuses_charge_safety_above_the_ceiling_without_recording_a_se
             panic!("expected a typed core config refusal, got {error:?}");
         };
         assert_eq!(
-            refusal.downcast_ref::<crate::config::CoreConfigRefusal>(),
+            refusal.owner_refusal::<crate::config::CoreConfigRefusal>(),
             Some(
-                &crate::config::CoreConfigRefusal::UnsafeRetriesAboveCeiling {
+                crate::config::CoreConfigRefusal::UnsafeRetriesAboveCeiling {
                     requested,
                     ceiling: crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES,
                 }
@@ -366,9 +366,9 @@ async fn creation_refuses_charge_safety_above_the_ceiling_without_recording_a_se
         panic!("expected a typed inherited config refusal, got {error:?}");
     };
     assert_eq!(
-        refusal.downcast_ref::<crate::config::CoreConfigRefusal>(),
+        refusal.owner_refusal::<crate::config::CoreConfigRefusal>(),
         Some(
-            &crate::config::CoreConfigRefusal::UnsafeRetriesAboveCeiling {
+            crate::config::CoreConfigRefusal::UnsafeRetriesAboveCeiling {
                 requested: crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES + 1,
                 ceiling: crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES,
             }
@@ -526,12 +526,14 @@ async fn refused_publishes_nothing<T: PartialEq + std::fmt::Debug>(
         panic!("the core owner refuses the transaction: {outcome:?}");
     };
     assert_eq!(
+        (&refusal.at, refusal.owner.as_str()),
         (
-            refusal.index,
-            refusal.owner.as_str(),
-            refusal.command.as_deref()
-        ),
-        (Some(index), crate::config::CORE_CONFIG_OWNER, Some(command))
+            &crate::config::RefusalSite::Command {
+                index,
+                command: command.to_string(),
+            },
+            crate::config::CORE_CONFIG_OWNER
+        )
     );
     let head = recorded_config(&core, id).await?;
     assert_eq!(head.config_revision, created.config_revision);
@@ -669,7 +671,9 @@ async fn set_charge_safety_above_the_retry_ceiling_is_refused() -> Result<()> {
     )
     .await?;
     assert_eq!(
-        serde_json::from_value::<crate::config::CoreConfigRefusal>(refusal.refusal)?,
+        refusal
+            .owner_refusal::<crate::config::CoreConfigRefusal>()
+            .expect("the core owner's typed refusal"),
         crate::config::CoreConfigRefusal::UnsafeRetriesAboveCeiling {
             requested: crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES + 1,
             ceiling: crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES,

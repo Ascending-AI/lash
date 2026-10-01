@@ -38,6 +38,7 @@ impl lash_core::ConfigOwner for LineageOwner {
     type Create = LineageConfig;
     type Recorded = LineageConfig;
     type Refusal = LineageRefusal;
+    type RunOptions = lash_core::NoRunOptions;
 
     fn implementation(&self) -> &str {
         "lineage:1"
@@ -61,6 +62,14 @@ impl lash_core::ConfigOwner for LineageOwner {
         _facts: &lash_core::CandidateFacts<'_>,
     ) -> std::result::Result<(), LineageRefusal> {
         Ok(())
+    }
+
+    fn apply_run_options(
+        &self,
+        recorded: &Self::Recorded,
+        _options: Self::RunOptions,
+    ) -> std::result::Result<Self::Recorded, Self::Refusal> {
+        Ok(recorded.clone())
     }
 }
 

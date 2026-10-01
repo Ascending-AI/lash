@@ -30,19 +30,37 @@ pub(crate) fn test_config() -> TurnMachineConfig {
     test_config_with_termination(RlmTermination::default())
 }
 
+pub(crate) fn test_config_with_termination(rlm_termination: RlmTermination) -> TurnMachineConfig {
+    test_config_with_protocol_turn_options(recorded_namespace(RlmTurnOptions {
+        termination: Some(rlm_termination),
+        final_answer_format: None,
+        render: None,
+    }))
+}
+
+/// The recorded RLM namespace of a session that stated `options`: what the
+/// driver reads a turn's options from. The behaviour is an unbounded
+/// cell-channel one without process lifecycle.
 #[expect(
     clippy::expect_used,
-    reason = "test support: the fixed RlmTermination fixture always satisfies the typed-options validation"
+    reason = "test support: a recorded RLM namespace is plain data and always encodes"
 )]
-pub(crate) fn test_config_with_termination(rlm_termination: RlmTermination) -> TurnMachineConfig {
-    test_config_with_protocol_turn_options(
-        lash_core::ProtocolTurnOptions::typed(RlmTurnOptions {
-            termination: Some(rlm_termination),
-            final_answer_format: None,
-            render: None,
-        })
-        .expect("valid rlm turn options"),
-    )
+pub(crate) fn recorded_namespace(options: RlmTurnOptions) -> lash_core::ProtocolTurnOptions {
+    lash_core::ProtocolTurnOptions::typed(lash_protocol_rlm::RlmRecordedConfig {
+        render: options.render,
+        termination: options.termination,
+        final_answer_format: options.final_answer_format,
+        channel: Some(lash_protocol_rlm::RlmChannel::Cell),
+        dialect: None,
+        behaviour: lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+            .channel(lash_protocol_rlm::RlmChannel::Cell)
+            .instruction_limit(lash_protocol_rlm::InstructionBound::unbounded())
+            .memory_limit(lash_protocol_rlm::MemoryBound::unbounded())
+            .build()
+            .recorded_behaviour(false),
+        prompt: Default::default(),
+    })
+    .expect("the recorded namespace encodes")
 }
 
 pub(crate) fn test_config_with_protocol_turn_options(

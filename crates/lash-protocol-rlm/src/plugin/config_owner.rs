@@ -13,9 +13,14 @@
 //! host's share of the system prompt, which a creator states, a child copies
 //! from its parent, and [`SetRlmPrompt`] and [`SetRlmPromptContext`] replace.
 //! The termination and the final-answer format are fixed at creation: no
-//! command changes them, and a turn restates them through its run's protocol
-//! turn options instead. The channel, the dialect and the behaviour are the
-//! session's pins: a candidate that changes any of them is refused.
+//! command changes them, and a turn restates them through its run's options
+//! ([`RlmRunOptions`]), which this owner applies over the recorded namespace.
+//! The channel, the dialect and the behaviour are the session's pins: a
+//! candidate that changes any of them is refused, and a run's options have
+//! no field for them or for the prompt.
+//!
+//! Every reader of the namespace decodes [`RlmRecordedConfig`]: nothing
+//! probes or strips its keys (FIG-4652).
 
 use std::sync::{Arc, OnceLock};
 
@@ -27,6 +32,7 @@ use lash_core::plugin::{
 use lash_render::RenderParamsPatch;
 use lash_rlm_types::{
     RlmCreateExtras, RlmFinalAnswerFormat, RlmPrompt, RlmRenderPatch, RlmTermination,
+    RlmTurnOptions,
 };
 
 use super::RlmProtocolPluginConfig;
@@ -69,11 +75,69 @@ pub struct RlmRecordedConfig {
     pub prompt: RlmPrompt,
 }
 
+impl RlmRecordedConfig {
+    /// The namespace `namespace` holds, read as recorded. `None` for an
+    /// empty one: a session that recorded no RLM namespace.
+    pub fn read(
+        namespace: &lash_core::ProtocolTurnOptions,
+    ) -> Result<Option<Self>, lash_core::ProtocolTurnOptionsError> {
+        if namespace.is_empty() {
+            return Ok(None);
+        }
+        namespace.decode().map(Some)
+    }
+
+    /// What a turn of this session runs under, of what a run may restate.
+    pub fn turn_options(&self) -> RlmTurnOptions {
+        RlmTurnOptions {
+            termination: self.termination.clone(),
+            final_answer_format: self.final_answer_format.clone(),
+            render: self.render.clone(),
+        }
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl RlmRecordedConfig {
+    /// The recorded namespace of a session that stated `options`, for a
+    /// test that drives the protocol without creating a session: an
+    /// unbounded cell-channel behaviour without process lifecycle, and the
+    /// built-in prompt.
+    #[expect(
+        clippy::expect_used,
+        reason = "a recorded RLM namespace is plain data and always encodes"
+    )]
+    pub fn for_testing(options: RlmTurnOptions) -> lash_core::ProtocolTurnOptions {
+        lash_core::ProtocolTurnOptions::typed(Self {
+            render: options.render,
+            termination: options.termination,
+            final_answer_format: options.final_answer_format,
+            channel: Some(RlmChannel::Cell),
+            dialect: None,
+            behaviour: RlmProtocolPluginConfig::builder()
+                .channel(RlmChannel::Cell)
+                .instruction_limit(super::InstructionBound::unbounded())
+                .memory_limit(super::MemoryBound::unbounded())
+                .build()
+                .recorded_behaviour(false),
+            prompt: RlmPrompt::default(),
+        })
+        .expect("the recorded namespace encodes")
+    }
+}
+
 /// What a creator states for the RLM namespace.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, JsonSchema)]
 #[schemars(crate = "lash_core::facade_support::schemars")]
 #[serde(transparent)]
 pub struct RlmCreateConfig(#[schemars(with = "serde_json::Value")] pub RlmCreateExtras);
+
+/// What a run states for the RLM namespace: its termination, its final
+/// answer format and its render preferences.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, JsonSchema)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+#[serde(transparent)]
+pub struct RlmRunOptions(#[schemars(with = "serde_json::Value")] pub RlmTurnOptions);
 
 /// Why the RLM owner refused a candidate.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
@@ -90,12 +154,6 @@ pub enum RlmConfigRefusal {
     /// lifecycle, so the durable-sleep ability a new session records is
     /// unknown: a wiring fault of the deployment, never a default.
     ProcessLifecycleUndeclared,
-    /// A run's options state the session's prompt config (FIG-4589). The
-    /// prompt is recorded config: creation states it and the owner's prompt
-    /// commands change it, for the next root. A run's options are
-    /// [`RlmTurnOptions`](lash_rlm_types::RlmTurnOptions), which has no
-    /// prompt.
-    PromptInRunOptions,
 }
 
 impl std::fmt::Display for RlmConfigRefusal {
@@ -115,10 +173,28 @@ impl std::fmt::Display for RlmConfigRefusal {
                 "the RLM protocol factory has not recorded whether process lifecycle is \
                  available, so a new session's abilities are unknown",
             ),
-            Self::PromptInRunOptions => formatter.write_str(
-                "a run's RLM options cannot state the session's prompt: set it at creation or \
-                 with the `set_prompt` and `set_prompt_context` config commands",
-            ),
+        }
+    }
+}
+
+/// Why the RLM protocol resolved no render for a root.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RlmRenderRefusal {
+    /// The resolved render parameters did not encode as a record.
+    Unencodable { message: String },
+}
+
+impl std::fmt::Display for RlmRenderRefusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unencodable { message } => {
+                write!(
+                    formatter,
+                    "the resolved RLM render does not encode: {message}"
+                )
+            }
         }
     }
 }
@@ -140,6 +216,7 @@ impl ConfigOwner for RlmConfigOwner {
     type Create = RlmCreateConfig;
     type Recorded = RlmRecordedConfig;
     type Refusal = RlmConfigRefusal;
+    type RunOptions = RlmRunOptions;
 
     fn implementation(&self) -> &str {
         RLM_CONFIG_IMPLEMENTATION
@@ -226,13 +303,34 @@ impl ConfigOwner for RlmConfigOwner {
         Ok(())
     }
 
-    /// A run's options are an `RlmTurnOptions`; a payload that carries the
-    /// session's prompt config is refused, whatever value it states.
-    fn validate_run_options(&self, options: &serde_json::Value) -> Result<(), RlmConfigRefusal> {
-        if options.get("prompt").is_some() {
-            return Err(RlmConfigRefusal::PromptInRunOptions);
-        }
-        Ok(())
+    /// A stated termination or final-answer format replaces the recorded
+    /// one for the run, and stated render preferences apply field by field
+    /// over the recorded ones. The pins and the prompt stay as recorded: a
+    /// run's options cannot name them.
+    fn apply_run_options(
+        &self,
+        recorded: &RlmRecordedConfig,
+        options: RlmRunOptions,
+    ) -> Result<RlmRecordedConfig, RlmConfigRefusal> {
+        let RlmTurnOptions {
+            termination,
+            final_answer_format,
+            render,
+        } = options.0;
+        let render = match (render, recorded.render.as_ref()) {
+            (Some(stated), Some(recorded)) => Some(RlmRenderPatch {
+                print: stated.print.over(&recorded.print),
+                preview: stated.preview.over(&recorded.preview),
+            }),
+            (stated, recorded) => stated.or_else(|| recorded.cloned()),
+        };
+        Ok(RlmRecordedConfig {
+            render,
+            termination: termination.or_else(|| recorded.termination.clone()),
+            final_answer_format: final_answer_format
+                .or_else(|| recorded.final_answer_format.clone()),
+            ..recorded.clone()
+        })
     }
 }
 
@@ -405,6 +503,109 @@ mod tests {
         );
     }
 
+    /// FIG-4652: the owner lays a run's options over its recorded namespace.
+    /// Stated render fields apply over the session's field by field, a
+    /// stated termination replaces the session's for the run, and nothing a
+    /// run cannot state moves.
+    #[test]
+    fn run_options_apply_over_the_recorded_namespace_field_by_field() {
+        let print = |max_chars, max_depth| RlmRenderPatch {
+            print: RenderParamsPatch {
+                max_chars,
+                max_depth,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let recorded = created(
+            Some(RlmCreateExtras {
+                render: Some(print(Some(5), None)),
+                termination: Some(RlmTermination::FinishRequired { schema: None }),
+                ..RlmCreateExtras::default()
+            }),
+            true,
+        );
+        let applied = owner()
+            .apply_run_options(
+                &recorded,
+                RlmRunOptions(RlmTurnOptions {
+                    render: Some(print(None, Some(1))),
+                    ..RlmTurnOptions::default()
+                }),
+            )
+            .expect("the run's render options apply");
+        assert_eq!(applied.render, Some(print(Some(5), Some(1))));
+        assert_eq!(
+            applied,
+            RlmRecordedConfig {
+                render: applied.render.clone(),
+                ..recorded.clone()
+            },
+            "nothing the run did not state moved"
+        );
+        let resolved = crate::render::ResolvedRlmRender::resolve(
+            &print(Some(9), Some(4)),
+            &applied.render.clone().expect("render patch"),
+        );
+        assert_eq!(resolved.print.max_chars, 5);
+        assert_eq!(resolved.print.max_depth, 1);
+
+        let restated = owner()
+            .apply_run_options(
+                &recorded,
+                RlmRunOptions(RlmTurnOptions {
+                    termination: Some(RlmTermination::Natural),
+                    final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
+                    render: None,
+                }),
+            )
+            .expect("the run's termination applies");
+        assert_eq!(restated.termination, Some(RlmTermination::Natural));
+        assert_eq!(
+            restated.final_answer_format,
+            Some(RlmFinalAnswerFormat::RawFinalValue)
+        );
+        assert_eq!(restated.render, recorded.render);
+        assert_eq!(
+            owner()
+                .apply_run_options(&recorded, RlmRunOptions::default())
+                .expect("empty options apply"),
+            recorded,
+            "a run that states nothing runs under the recorded namespace"
+        );
+    }
+
+    /// FIG-4652: a run's options have no field for a pin or for the prompt,
+    /// so a payload naming one does not decode, even when it restates the
+    /// recorded value. Every recorded field a run cannot state is covered:
+    /// the list is the recorded namespace's own keys.
+    #[test]
+    fn run_options_have_no_field_for_a_pin_or_the_prompt() {
+        let recorded = serde_json::to_value(created(
+            Some(RlmCreateExtras {
+                render: Some(RlmRenderPatch::default()),
+                termination: Some(RlmTermination::Natural),
+                ..RlmCreateExtras::default()
+            }),
+            true,
+        ))
+        .expect("the recorded namespace encodes");
+        let stated: std::collections::BTreeSet<&str> = recorded
+            .as_object()
+            .expect("the namespace is an object")
+            .iter()
+            .filter(|(key, value)| {
+                serde_json::from_value::<RlmRunOptions>(serde_json::json!({ *key: value })).is_ok()
+            })
+            .map(|(key, _)| key.as_str())
+            .collect();
+        assert_eq!(
+            stated,
+            std::collections::BTreeSet::from(["final_answer_format", "render", "termination"]),
+            "a run restates only its termination, its answer format and its render"
+        );
+    }
+
     /// Stated facts are recorded as stated.
     #[test]
     fn creation_records_the_stated_facts() {
@@ -492,6 +693,7 @@ mod tests {
                 .expect("admitted");
             let outcome = registry
                 .resolve(config, &record, &lash_core::EmptyModels)
+                .expect("the recorded config reads")
                 .publish(config);
             assert!(
                 matches!(outcome, lash_core::ConfigTransactionOutcome::Applied { .. }),
@@ -772,6 +974,7 @@ mod tests {
                 .expect("admitted");
             let outcome = registry
                 .resolve(config, &record, &lash_core::EmptyModels)
+                .expect("the recorded config reads")
                 .publish(config);
             assert!(
                 matches!(outcome, lash_core::ConfigTransactionOutcome::Applied { .. }),

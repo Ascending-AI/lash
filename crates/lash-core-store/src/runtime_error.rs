@@ -15,6 +15,7 @@ mod cause;
 mod classification;
 pub use cause::{GroupChildCapability, RuntimeErrorCause, StoredDataCorruption};
 pub(crate) mod model_unavailable;
+mod run_shape;
 mod tool_call_limit;
 pub(crate) use classification::RuntimeErrorClass;
 pub use classification::TurnFailureCause;
@@ -1507,6 +1508,8 @@ impl RuntimeError {
             | RuntimeErrorCause::MaxToolCallsExceeded { .. }
             | RuntimeErrorCause::StoredDataCorrupt { .. }
             | RuntimeErrorCause::ModuleArtifactRefused { .. }
+            | RuntimeErrorCause::RunShapeRefused { .. }
+            | RuntimeErrorCause::ConfigRefused { .. }
             | RuntimeErrorCause::StoreRefusal { .. } => None,
         }
     }

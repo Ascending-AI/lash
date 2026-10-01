@@ -245,22 +245,19 @@ impl EmbeddedRuntimeBuilder {
         let (mut state, created) = self.resolve_state().await?;
         if created {
             crate::CoreConfigOwner::validate_charge_safety(&state.policy.charge_safety)
-                .map_err(crate::SessionConfigRefusal::new)
+                .map_err(crate::CoreConfigOwner::creation_refusal)
                 .map_err(SessionError::SessionConfigRefused)?;
         }
         let plugins = self.resolve_plugins(&state)?;
         if created {
             // A new session records what every installed owner resolves for
             // it, under the protocol its plugins registered (FIG-4379).
-            state.authority.plugin_config = plugins
-                .host()
-                .resolve_creation_plugin_config(
-                    Some(plugins.protocol_plugin_id()),
-                    &crate::PluginOptions::default(),
-                    None,
-                    state.authority.subagent.is_none(),
-                )
-                .map_err(SessionError::SessionConfigRefused)?;
+            state.authority.plugin_config = plugins.host().resolve_creation_plugin_config(
+                Some(plugins.protocol_plugin_id()),
+                &crate::PluginOptions::default(),
+                None,
+                state.authority.subagent.is_none(),
+            )?;
             plugins.publish_plugin_config(state.admitted_plugin_config());
         }
         let mut persistence = super::lifecycle::RuntimePersistenceBindings::new(self.store);

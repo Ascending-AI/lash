@@ -88,6 +88,21 @@ impl StandardRenderConfig {
     pub fn builtin() -> Self {
         Self::default()
     }
+
+    /// `self` over `under`, field by field and tool by tool: every field
+    /// `self` states wins.
+    #[must_use]
+    pub fn over(&self, under: &Self) -> Self {
+        let mut per_tool = under.per_tool.clone();
+        for (id, patch) in &self.per_tool {
+            let merged = patch.over(per_tool.get(id).unwrap_or(&ToolRenderPatch::default()));
+            per_tool.insert(id.clone(), merged);
+        }
+        Self {
+            defaults: self.defaults.over(&under.defaults),
+            per_tool,
+        }
+    }
 }
 
 pub(crate) fn without_nulls(value: serde_json::Value) -> serde_json::Value {
@@ -122,7 +137,7 @@ pub fn resolve(
     builtin: &StandardRenderConfig,
     host: &StandardRenderConfig,
     options: &StandardRenderConfig,
-) -> Result<ResolvedStandardRenderConfig, String> {
+) -> Result<ResolvedStandardRenderConfig, crate::StandardRenderRefusal> {
     let defaults_patch = options
         .defaults
         .over(&host.defaults.over(&builtin.defaults));
@@ -138,12 +153,12 @@ pub fn resolve(
         .into_iter()
         .map(|(id, patch)| (id, patch.apply(&defaults)))
         .collect::<BTreeMap<_, _>>();
-    if defaults.head_share_percent > 100
-        || per_tool
-            .values()
-            .any(|params| params.head_share_percent > 100)
+    if let Some(head_share_percent) = std::iter::once(&defaults)
+        .chain(per_tool.values())
+        .map(|params| params.head_share_percent)
+        .find(|percent| *percent > 100)
     {
-        return Err("head_share_percent must be within 0..=100".into());
+        return Err(crate::StandardRenderRefusal::HeadShareOutOfRange { head_share_percent });
     }
     Ok(ResolvedStandardRenderConfig { defaults, per_tool })
 }
@@ -428,12 +443,15 @@ async fn render_present(
     if recorded.renderer_id != renderer.0.id() {
         return Err(renderer_unavailable(Some(recorded), renderer.0.id()));
     }
+    // The root recorded these parameters from this protocol's own resolved
+    // type: unreadable, they are corrupt stored data, never a refused shape.
     let resolved: ResolvedStandardRenderConfig = serde_json::from_value(recorded.params.clone())
-        .map_err(|error| {
-            lash_core::RuntimeEffectControllerError::new(
-                RuntimeErrorCode::RunShapeRefused,
-                error.to_string(),
-            )
+        .map_err(|error| lash_core::StoreError::StoredDataCorrupt {
+            record_kind: "recorded_render",
+            message: format!(
+                "renderer `{}` cannot read its recorded parameters: {error}",
+                recorded.renderer_id
+            ),
         })?;
     let params = resolved.for_tool(&ctx.tool_id);
     let mut rendered = renderer.0.tool_output(&ctx.output, &ctx.tool_id, params);
@@ -951,6 +969,31 @@ mod tests {
                 .journal_disposition(lash_core::RuntimeEffectKind::PresentToolResult)
                 .is_retryable_derivation()
         );
+        assert_eq!(artifacts.writes.load(Ordering::SeqCst), 0);
+    }
+
+    /// FIG-4652: recorded render parameters this renderer cannot read are
+    /// corrupt stored data. They are never the root's refused shape: no
+    /// shape was refused, and the presentation renders and retains nothing.
+    #[tokio::test]
+    async fn unreadable_recorded_render_parameters_are_corrupt_stored_data() {
+        let artifacts = Arc::new(Artifacts::default());
+        let mut ctx = context(
+            ToolCallOutput::success("hello"),
+            ToolRenderParams::default(),
+            Arc::clone(&artifacts),
+        );
+        ctx.render.as_mut().expect("record").params =
+            serde_json::json!({ "defaults": "not render parameters" });
+        let error = render_present(baseline(&ctx), &ctx, &ToolOutputRendererSlot::default())
+            .await
+            .expect_err("corrupt");
+        assert_eq!(
+            error.code,
+            RuntimeErrorCode::RuntimeStoreCorrupt,
+            "{error:?}"
+        );
+        assert_ne!(error.code, RuntimeErrorCode::RunShapeRefused);
         assert_eq!(artifacts.writes.load(Ordering::SeqCst), 0);
     }
 }

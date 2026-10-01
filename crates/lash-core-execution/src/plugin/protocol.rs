@@ -372,10 +372,14 @@ pub trait AssistantProseProjectorPlugin: Send + Sync {
 pub trait ProtocolDriverPlugin: Send + Sync {
     fn build_preamble(&self, input: crate::ProtocolBuildInput) -> crate::TurnDriverPreamble;
 
+    /// The render a root's results present with, resolved from `namespace`,
+    /// the protocol namespace the root runs under, which the driver reads
+    /// as its owner's recorded type. A render it refuses is the root's
+    /// refused shape, typed; a namespace it cannot read is corruption.
     fn resolve_render(
         &self,
-        _options: &crate::ProtocolTurnOptions,
-    ) -> Result<Option<crate::RecordedRender>, String> {
+        _namespace: &crate::ProtocolTurnOptions,
+    ) -> Result<Option<crate::RecordedRender>, crate::RenderFault> {
         Ok(None)
     }
 }

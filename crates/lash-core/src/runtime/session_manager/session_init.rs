@@ -251,8 +251,11 @@ pub(in crate::runtime::session_manager) struct ChildFacts {
 /// and inherited reasoning the minted model's capability refuses with
 /// [`RuntimeErrorCode::ReasoningRefused`](crate::RuntimeErrorCode::ReasoningRefused).
 /// A namespace no installed owner registers, or a value its owner refuses, is
-/// [`RuntimeErrorCode::SessionConfigRefused`](crate::RuntimeErrorCode::SessionConfigRefused):
-/// this deployment's plugin set cannot run the session, on any attempt.
+/// [`RuntimeErrorCode::SessionConfigRefused`](crate::RuntimeErrorCode::SessionConfigRefused)
+/// with the refusal typed as its cause
+/// ([`RuntimeErrorCause::ConfigRefused`](crate::RuntimeErrorCause::ConfigRefused)):
+/// this deployment's plugin set cannot run the session, on any attempt. A
+/// starter's recorded namespace its owner cannot read is corruption.
 pub(in crate::runtime::session_manager) fn resolve_child_facts(
     starter: &StarterFacts<'_>,
     request: &SessionCreateRequest,
@@ -312,11 +315,16 @@ pub(in crate::runtime::session_manager) fn resolve_child_facts(
             is_child.then_some(starter.plugin_config.config.as_ref()),
             !is_child,
         )
-        .map_err(|refusal| {
-            crate::PluginError::Runtime(crate::RuntimeError::new(
-                crate::RuntimeErrorCode::SessionConfigRefused,
-                format!("session `{session_id}` config refused at creation: {refusal}"),
-            ))
+        .map_err(|error| match error {
+            crate::CreationConfigError::Refused(refusal) => crate::PluginError::Runtime(
+                crate::RuntimeError::session_config_refused(session_id, refusal),
+            ),
+            crate::CreationConfigError::RecordedCorrupt(corrupt) => {
+                crate::PluginError::from(corrupt.into_store_error())
+            }
+            crate::CreationConfigError::Registration(error) => {
+                crate::PluginError::ConfigRegistration(error)
+            }
         })?;
     Ok(ChildFacts {
         policy,
@@ -1803,5 +1811,45 @@ mod tests {
             .engine_execution_id(),
             Some("invocation:subagent:call")
         );
+    }
+
+    /// FIG-4652: a child whose creation config is refused fails with the
+    /// refusal as its typed cause, not as message text, and the cause
+    /// survives the plugin boundary's encoding.
+    #[test]
+    fn a_refused_child_creation_config_carries_its_typed_cause() {
+        let starter =
+            SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
+        let request = SessionCreateRequest::root(
+            crate::SessionStartPoint::Empty,
+            crate::PluginOptions::typed("no-such-plugin", serde_json::json!({ "k": 1 }))
+                .expect("options"),
+        );
+        let refused = child_facts(&starter, &request)
+            .err()
+            .expect("a namespace no installed plugin owns is refused");
+        assert!(session_config_refused(&refused), "{refused:?}");
+        let expected = crate::ConfigRefusal {
+            owner: "no-such-plugin".to_string(),
+            at: crate::RefusalSite::Creation,
+            reason: crate::ConfigRefusalReason::UnknownOwner,
+        };
+        let decoded: crate::PluginError =
+            serde_json::from_slice(&serde_json::to_vec(&refused).expect("encode the refusal"))
+                .expect("decode the refusal");
+        for error in [refused, decoded] {
+            let crate::PluginError::Runtime(runtime) = error else {
+                panic!("the refusal is a runtime error: {error:?}");
+            };
+            assert_eq!(runtime.code, crate::RuntimeErrorCode::SessionConfigRefused);
+            assert!(runtime.is_terminal());
+            assert_eq!(
+                runtime.cause,
+                Some(crate::RuntimeErrorCause::ConfigRefused {
+                    refusal: Box::new(expected.clone()),
+                })
+            );
+            assert_eq!(runtime.config_refusal(), Some(&expected));
+        }
     }
 }

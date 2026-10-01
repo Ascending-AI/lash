@@ -1124,3 +1124,142 @@ fn stored_corruption_is_a_typed_terminal_admission_refusal() {
         );
     }
 }
+
+/// FIG-4652: a refused run shape and a refused creation config carry their
+/// cause typed, through the journal's encoding and the controller-to-runtime
+/// hop, and every refusal is terminal.
+mod typed_refusal_causes {
+    use crate::config_transaction::{
+        ConfigRefusal, ConfigRefusalReason, ConfigValueRole, RefusalSite,
+    };
+    use crate::run_spec::{DefinitionRef, RenderRefusal, RunDefinitionRefusal, RunShapeRefusal};
+    use crate::runtime_error::{
+        RuntimeEffectControllerError, RuntimeError, RuntimeErrorCause, RuntimeErrorCode,
+    };
+
+    /// A refusal as some raiser's own type.
+    #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    #[serde(tag = "kind", rename_all = "snake_case")]
+    enum Raised {
+        TooWide { width: u32 },
+    }
+
+    impl std::fmt::Display for Raised {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let Self::TooWide { width } = self;
+            write!(formatter, "{width} is too wide")
+        }
+    }
+
+    fn owner_refusal() -> ConfigRefusal {
+        ConfigRefusal {
+            owner: "protocol".to_string(),
+            at: RefusalSite::Candidate,
+            reason: ConfigRefusalReason::Unreadable {
+                role: ConfigValueRole::RunOptions,
+                message: "unknown field `prompt`".to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn every_run_shape_refusal_is_a_typed_terminal_cause() {
+        let reasoning = lash_core_llm::model::ReasoningRefused {
+            key: crate::ModelKey::new("model"),
+            reasoning: crate::ReasoningSelection::Effort("deep".to_string()),
+            category:
+                lash_sansio::llm::capability::ModelEffortValidationCategory::UnsupportedEffort,
+            message: "deep is not declared".to_string(),
+        };
+        for (refusal, code) in [
+            (
+                RunShapeRefusal::Definition {
+                    refusal: RunDefinitionRefusal::new(
+                        DefinitionRef::new("review", 2),
+                        &Raised::TooWide { width: 9 },
+                    ),
+                },
+                RuntimeErrorCode::RunShapeRefused,
+            ),
+            (
+                RunShapeRefusal::Owner {
+                    refusal: owner_refusal(),
+                },
+                RuntimeErrorCode::RunShapeRefused,
+            ),
+            (
+                RunShapeRefusal::Reasoning { refusal: reasoning },
+                RuntimeErrorCode::ReasoningRefused,
+            ),
+            (
+                RunShapeRefusal::ReasoningWithoutModel,
+                RuntimeErrorCode::RunShapeRefused,
+            ),
+            (
+                RunShapeRefusal::ProtocolOptionsWithoutProtocol,
+                RuntimeErrorCode::RunShapeRefused,
+            ),
+            (
+                RunShapeRefusal::Render {
+                    refusal: RenderRefusal::new(&Raised::TooWide { width: 101 }),
+                },
+                RuntimeErrorCode::RunShapeRefused,
+            ),
+        ] {
+            let error = RuntimeEffectControllerError::run_shape_refused(refusal.clone());
+            assert_eq!(error.code, code, "{refusal:?}");
+            assert!(error.is_terminal(), "{refusal:?}");
+            assert_eq!(error.message, refusal.to_string());
+            let journaled: RuntimeEffectControllerError =
+                serde_json::from_value(serde_json::to_value(&error).expect("encodes"))
+                    .expect("decodes");
+            assert_eq!(journaled.run_shape_refusal(), Some(&refusal));
+            let runtime = journaled.into_runtime_error();
+            assert_eq!(runtime.code, code);
+            assert!(runtime.is_terminal() && !runtime.is_retryable());
+            assert_eq!(runtime.run_shape_refusal(), Some(&refusal));
+            assert_eq!(runtime.config_refusal(), None);
+        }
+    }
+
+    #[test]
+    fn a_raised_refusal_reads_back_as_its_raisers_type() {
+        let definition = RunDefinitionRefusal::new(
+            DefinitionRef::new("review", 2),
+            &Raised::TooWide { width: 9 },
+        );
+        assert_eq!(definition.message, "9 is too wide");
+        assert_eq!(
+            serde_json::from_value::<Raised>(definition.refusal).expect("the raiser's type"),
+            Raised::TooWide { width: 9 }
+        );
+        let render = RenderRefusal::new(&Raised::TooWide { width: 101 });
+        assert_eq!(
+            serde_json::from_value::<Raised>(render.refusal).expect("the raiser's type"),
+            Raised::TooWide { width: 101 }
+        );
+    }
+
+    #[test]
+    fn a_refused_creation_config_is_a_typed_terminal_cause() {
+        let refusal = ConfigRefusal {
+            at: RefusalSite::Creation,
+            ..owner_refusal()
+        };
+        let session_id = crate::SessionId::from("child");
+        let error = RuntimeError::session_config_refused(&session_id, refusal.clone());
+        assert_eq!(error.code, RuntimeErrorCode::SessionConfigRefused);
+        assert!(error.is_terminal() && !error.is_retryable());
+        let decoded: RuntimeError =
+            serde_json::from_value(serde_json::to_value(&error).expect("encodes"))
+                .expect("decodes");
+        assert_eq!(
+            decoded.cause,
+            Some(RuntimeErrorCause::ConfigRefused {
+                refusal: Box::new(refusal.clone()),
+            })
+        );
+        assert_eq!(decoded.config_refusal(), Some(&refusal));
+        assert_eq!(decoded.run_shape_refusal(), None);
+    }
+}

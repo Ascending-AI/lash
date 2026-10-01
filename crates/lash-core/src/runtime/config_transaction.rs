@@ -183,7 +183,12 @@ impl LashRuntime {
         next.take_root_view();
         let base = crate::store::persisted_session_config_from_state(&next);
         let registry = self.config_registry()?;
-        let resolution = registry.resolve(&base, &record, self.host.core.providers.models.as_ref());
+        let resolution = registry
+            .resolve(&base, &record, self.host.core.providers.models.as_ref())
+            .map_err(|corrupt| {
+                crate::RuntimeEffectControllerError::from(corrupt.into_store_error())
+                    .into_runtime_error()
+            })?;
         let outcome = publish_config_resolution(&resolution, &mut next);
         if matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. }) {
             self.install_resident_state(next);
@@ -425,9 +430,12 @@ impl RuntimeEffectLocalRunner for ResolveConfigTransactionRunner {
             )
             .retryable_uncommitted_derivation());
         }
+        // A recorded namespace its owner cannot read is corruption of the
+        // session's config, never this transaction's refusal.
         let resolution = self
             .registry
-            .resolve(&self.base, &self.transaction, self.models.as_ref());
+            .resolve(&self.base, &self.transaction, self.models.as_ref())
+            .map_err(crate::RecordedNamespaceCorrupt::into_store_error)?;
         Ok(crate::RuntimeEffectOutcome::ResolveConfigTransaction {
             resolution: Box::new(resolution),
         })

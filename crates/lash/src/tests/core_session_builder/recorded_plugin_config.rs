@@ -65,6 +65,7 @@ impl lash_core::ConfigOwner for ProbeOwner {
     type Create = ProbeConfig;
     type Recorded = ProbeConfig;
     type Refusal = ProbeRefusal;
+    type RunOptions = lash_core::NoRunOptions;
 
     fn implementation(&self) -> &str {
         "probe-config:1"
@@ -96,6 +97,14 @@ impl lash_core::ConfigOwner for ProbeOwner {
             }
             _ => Ok(()),
         }
+    }
+
+    fn apply_run_options(
+        &self,
+        recorded: &Self::Recorded,
+        _options: Self::RunOptions,
+    ) -> std::result::Result<Self::Recorded, Self::Refusal> {
+        Ok(recorded.clone())
     }
 }
 
@@ -242,7 +251,7 @@ async fn recorded_turn_budget(core: &LashCore, id: &str) -> Result<crate::TurnBu
     .turn_budget)
 }
 
-fn creation_refusal(error: &crate::EmbedError) -> &lash_core::SessionConfigRefusal {
+fn creation_refusal(error: &crate::EmbedError) -> &lash_core::ConfigRefusal {
     let crate::EmbedError::Session(lash_core::SessionError::SessionConfigRefused(refusal)) = error
     else {
         panic!("expected a typed session config refusal, got: {error:?}");
@@ -384,10 +393,12 @@ async fn unknown_owner_is_refused_at_create_and_submit() -> Result<()> {
         panic!("an unowned namespace is refused at creation");
     };
     assert_eq!(
-        creation_refusal(&error).downcast_ref::<lash_core::UnknownPluginConfigOwner>(),
-        Some(&lash_core::UnknownPluginConfigOwner {
-            plugin_ids: vec!["no-such-plugin".to_string()],
-        })
+        creation_refusal(&error),
+        &lash_core::ConfigRefusal {
+            owner: "no-such-plugin".to_string(),
+            at: lash_core::RefusalSite::Creation,
+            reason: lash_core::ConfigRefusalReason::UnknownOwner,
+        }
     );
     assert!(
         recorded_state(&core, "probe-unknown-create").await.is_err(),
@@ -466,20 +477,20 @@ async fn a_command_is_owner_reduced_and_revision_checked() -> Result<()> {
     let crate::config::ConfigTransactionOutcome::Refused { refusal } = refused else {
         panic!("the owner refuses lowering its cap: {refused:?}");
     };
+    assert_eq!(refusal.owner, PROBE);
     assert_eq!(
-        (
-            refusal.index,
-            refusal.owner.as_str(),
-            refusal.command.as_deref()
-        ),
-        (Some(0), PROBE, Some("raise_probe_cap"))
+        refusal.at,
+        lash_core::RefusalSite::Command {
+            index: 0,
+            command: "raise_probe_cap".to_string(),
+        }
     );
     assert_eq!(
-        serde_json::from_value::<ProbeRefusal>(refusal.refusal)?,
-        ProbeRefusal::CapLowered {
+        refusal.owner_refusal::<ProbeRefusal>(),
+        Some(ProbeRefusal::CapLowered {
             recorded: 20,
             requested: 5,
-        }
+        })
     );
     let unchanged = recorded_state(&core, "probe-command").await?;
     assert_eq!(unchanged.config_revision, raised.config_revision);
@@ -534,9 +545,14 @@ async fn a_transaction_across_owners_is_all_or_none() -> Result<()> {
     let crate::config::ConfigTransactionOutcome::Refused { refusal } = refused else {
         panic!("the final candidate is refused: {refused:?}");
     };
-    assert_eq!((refusal.index, refusal.owner.as_str()), (None, PROBE));
     assert_eq!(
-        serde_json::from_value::<ProbeRefusal>(refusal.refusal)?,
+        (&refusal.at, refusal.owner.as_str()),
+        (&lash_core::RefusalSite::Candidate, PROBE)
+    );
+    assert_eq!(
+        refusal
+            .owner_refusal::<ProbeRefusal>()
+            .expect("the probe owner's typed refusal"),
         ProbeRefusal::CapAboveBudget {
             cap: 40,
             budget: 30,

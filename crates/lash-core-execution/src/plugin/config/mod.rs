@@ -35,13 +35,13 @@ use serde::de::DeserializeOwned;
 
 pub use self::core::{CORE_CONFIG_IMPLEMENTATION, CoreConfigOwner, CoreConfigRefusal};
 pub use lash_core_store::config_transaction::{
-    CORE_CONFIG_OWNER, ConfigCommandEntry, ConfigRefusal, ConfigResolution,
-    ConfigResolutionDecision, ConfigTransactionOutcome, ConfigTransactionRecord, CoreConfig,
+    CORE_CONFIG_OWNER, ConfigCommandEntry, ConfigFault, ConfigRefusal, ConfigRefusalReason,
+    ConfigResolution, ConfigResolutionDecision, ConfigTransactionOutcome, ConfigTransactionRecord,
+    ConfigValueRole, CoreConfig, RecordedNamespaceCorrupt, RefusalSite,
 };
 pub use lash_core_store::execution_state::{AdmittedPluginConfig, PluginConfig};
 
 use super::{PluginFactory, PluginOptions};
-use crate::SessionConfigRefusal;
 
 pub mod core;
 
@@ -83,6 +83,12 @@ pub trait ConfigOwner: Send + Sync + 'static {
     type Recorded: ConfigWire + Clone;
     /// The owner's typed refusal.
     type Refusal: ConfigWire + std::fmt::Display;
+    /// What a run states for this namespace: its own typed shape, narrower
+    /// than the recorded namespace. What only creation or a config command
+    /// may set (a pin, the prompt config, FIG-4589) is no field of it, so a
+    /// run that states one does not decode, whatever value it states. An
+    /// owner whose namespace no run overrides uses [`NoRunOptions`].
+    type RunOptions: ConfigWire;
 
     /// The identity of this owner's reducers. A config transaction records
     /// the identity each named owner ran at ingress; a drain that runs a
@@ -109,15 +115,24 @@ pub trait ConfigOwner: Send + Sync + 'static {
         facts: &CandidateFacts<'_>,
     ) -> Result<(), Self::Refusal>;
 
-    /// Judge the raw options a run states for this owner's namespace, before
-    /// they are laid over it. A protocol's run options are their own typed
-    /// shape, narrower than its recorded namespace: what only creation or a
-    /// config command may set (its prompt config, FIG-4589) is refused here,
-    /// whatever value the run states for it. The default admits everything.
-    fn validate_run_options(&self, _options: &serde_json::Value) -> Result<(), Self::Refusal> {
-        Ok(())
-    }
+    /// The namespace a run executes under: `recorded` with the run's
+    /// `options` laid over it. The owner alone knows how its options meet
+    /// its namespace; nothing else merges them. The result is then validated
+    /// against `recorded` like any candidate.
+    fn apply_run_options(
+        &self,
+        recorded: &Self::Recorded,
+        options: Self::RunOptions,
+    ) -> Result<Self::Recorded, Self::Refusal>;
 }
+
+/// The run options of an owner whose namespace no run overrides: the empty
+/// object, and nothing else.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct NoRunOptions {}
 
 /// One allowed change to an owner's namespace.
 pub trait ConfigCommand: ConfigWire {
@@ -140,7 +155,8 @@ type RecordedOf<C> = <<C as ConfigCommand>::Owner as ConfigOwner>::Recorded;
 type RefusalOf<C> = <<C as ConfigCommand>::Owner as ConfigOwner>::Refusal;
 
 /// A config registration that cannot stand.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ConfigRegistrationError {
     #[error("plugin `{plugin_id}` registered a second config owner")]
     DuplicateOwner { plugin_id: String },
@@ -313,19 +329,31 @@ trait ErasedOwner: Send + Sync {
         input: Option<&serde_json::Value>,
         parent: Option<&serde_json::Value>,
         is_root_session: bool,
-    ) -> Result<Option<serde_json::Value>, ConfigRefusal>;
+    ) -> Result<Option<serde_json::Value>, ConfigFault>;
     fn validate(
         &self,
         owner_id: &str,
         value: &serde_json::Value,
         base: Option<&serde_json::Value>,
         facts: &CandidateFacts<'_>,
-    ) -> Result<(), ConfigRefusal>;
-    fn validate_run_options(
+    ) -> Result<(), ConfigFault>;
+    fn apply_run_options(
         &self,
         owner_id: &str,
+        recorded: &serde_json::Value,
         options: &serde_json::Value,
-    ) -> Result<(), ConfigRefusal>;
+    ) -> Result<serde_json::Value, ConfigFault>;
+}
+
+/// Where the namespace a command reduces came from, which decides what an
+/// unreadable one means.
+#[derive(Clone, Copy)]
+enum ReducedFrom {
+    /// The session's recorded namespace: unreadable is corruption.
+    Recorded,
+    /// An earlier command's output in the same transaction: unreadable is
+    /// the owner's own candidate.
+    Candidate,
 }
 
 trait ErasedCommand: Send + Sync {
@@ -333,6 +361,7 @@ trait ErasedCommand: Send + Sync {
     fn reduce(
         &self,
         recorded: &serde_json::Value,
+        from: ReducedFrom,
         args: &serde_json::Value,
         models: &dyn crate::RuntimeModels,
     ) -> Result<(serde_json::Value, serde_json::Value), ConfigCommandFailure>;
@@ -340,14 +369,11 @@ trait ErasedCommand: Send + Sync {
     fn output_schema(&self) -> serde_json::Value;
 }
 
-/// Why a command did not reduce: its owner refused, as data, or its
-/// recorded namespace or arguments could not be read.
+/// Why a command did not reduce: a reason to refuse it, or a recorded
+/// namespace that does not read as its owner's type.
 enum ConfigCommandFailure {
-    Refused {
-        refusal: serde_json::Value,
-        message: String,
-    },
-    Unreadable(String),
+    Refused(ConfigRefusalReason),
+    RecordedCorrupt(String),
 }
 
 struct TypedOwner<O>(O);
@@ -356,23 +382,25 @@ fn schema_of<T: schemars::JsonSchema>() -> serde_json::Value {
     serde_json::to_value(schemars::schema_for!(T)).unwrap_or(serde_json::Value::Null)
 }
 
-fn owner_refusal<R: Serialize + std::fmt::Display>(owner_id: &str, refusal: &R) -> ConfigRefusal {
-    ConfigRefusal {
-        index: None,
-        owner: owner_id.to_string(),
-        command: None,
-        refusal: serde_json::to_value(refusal).unwrap_or(serde_json::Value::Null),
-        message: refusal.to_string(),
+fn unreadable(role: ConfigValueRole, error: impl std::fmt::Display) -> ConfigRefusalReason {
+    ConfigRefusalReason::Unreadable {
+        role,
+        message: error.to_string(),
     }
 }
 
-fn unreadable(owner_id: &str, message: String) -> ConfigRefusal {
-    ConfigRefusal {
-        index: None,
+fn refused(owner_id: &str, at: RefusalSite, reason: ConfigRefusalReason) -> ConfigFault {
+    ConfigFault::Refused(ConfigRefusal {
         owner: owner_id.to_string(),
-        command: None,
-        refusal: serde_json::json!({ "unreadable": message }),
-        message,
+        at,
+        reason,
+    })
+}
+
+fn corrupt(owner_id: &str, error: impl std::fmt::Display) -> RecordedNamespaceCorrupt {
+    RecordedNamespaceCorrupt {
+        owner: owner_id.to_string(),
+        message: error.to_string(),
     }
 }
 
@@ -391,20 +419,22 @@ impl<O: ConfigOwner> ErasedOwner for TypedOwner<O> {
         input: Option<&serde_json::Value>,
         parent: Option<&serde_json::Value>,
         is_root_session: bool,
-    ) -> Result<Option<serde_json::Value>, ConfigRefusal> {
+    ) -> Result<Option<serde_json::Value>, ConfigFault> {
+        let at = || RefusalSite::Creation;
         let input = input
             .map(|input| serde_json::from_value::<O::Create>(input.clone()))
             .transpose()
-            .map_err(|error| unreadable(owner_id, format!("invalid creation config: {error}")))?;
+            .map_err(|error| {
+                refused(
+                    owner_id,
+                    at(),
+                    unreadable(ConfigValueRole::CreationInput, error),
+                )
+            })?;
         let parent = parent
             .map(|parent| serde_json::from_value::<O::Recorded>(parent.clone()))
             .transpose()
-            .map_err(|error| {
-                unreadable(
-                    owner_id,
-                    format!("the parent's recorded config is unreadable: {error}"),
-                )
-            })?;
+            .map_err(|error| corrupt(owner_id, error))?;
         let created = self
             .0
             .create(
@@ -414,13 +444,14 @@ impl<O: ConfigOwner> ErasedOwner for TypedOwner<O> {
                     is_root_session,
                 },
             )
-            .map_err(|refusal| owner_refusal(owner_id, &refusal))?;
+            .map_err(|refusal| ConfigRefusal::by_owner(owner_id, at(), &refusal))?;
         created
             .map(|recorded| {
                 serde_json::to_value(recorded).map_err(|error| {
-                    unreadable(
+                    refused(
                         owner_id,
-                        format!("the created config does not encode: {error}"),
+                        at(),
+                        unreadable(ConfigValueRole::Candidate, error),
                     )
                 })
             })
@@ -433,35 +464,55 @@ impl<O: ConfigOwner> ErasedOwner for TypedOwner<O> {
         value: &serde_json::Value,
         base: Option<&serde_json::Value>,
         facts: &CandidateFacts<'_>,
-    ) -> Result<(), ConfigRefusal> {
-        let value = serde_json::from_value::<O::Recorded>(value.clone()).map_err(|error| {
-            unreadable(
-                owner_id,
-                format!("the candidate config is unreadable: {error}"),
-            )
-        })?;
+    ) -> Result<(), ConfigFault> {
+        // The base first: a namespace the candidate left untouched is the
+        // recorded one, and unreadable it is corruption, not a candidate.
         let base = base
             .map(|base| serde_json::from_value::<O::Recorded>(base.clone()))
             .transpose()
-            .map_err(|error| {
-                unreadable(
-                    owner_id,
-                    format!("the recorded config is unreadable: {error}"),
-                )
-            })?;
+            .map_err(|error| corrupt(owner_id, error))?;
+        let value = serde_json::from_value::<O::Recorded>(value.clone()).map_err(|error| {
+            refused(
+                owner_id,
+                RefusalSite::Candidate,
+                unreadable(ConfigValueRole::Candidate, error),
+            )
+        })?;
         self.0
             .validate(&value, base.as_ref(), facts)
-            .map_err(|refusal| owner_refusal(owner_id, &refusal))
+            .map_err(|refusal| {
+                ConfigRefusal::by_owner(owner_id, RefusalSite::Candidate, &refusal).into()
+            })
     }
 
-    fn validate_run_options(
+    fn apply_run_options(
         &self,
         owner_id: &str,
+        recorded: &serde_json::Value,
         options: &serde_json::Value,
-    ) -> Result<(), ConfigRefusal> {
-        self.0
-            .validate_run_options(options)
-            .map_err(|refusal| owner_refusal(owner_id, &refusal))
+    ) -> Result<serde_json::Value, ConfigFault> {
+        let at = || RefusalSite::Candidate;
+        let recorded = serde_json::from_value::<O::Recorded>(recorded.clone())
+            .map_err(|error| corrupt(owner_id, error))?;
+        let options =
+            serde_json::from_value::<O::RunOptions>(options.clone()).map_err(|error| {
+                refused(
+                    owner_id,
+                    at(),
+                    unreadable(ConfigValueRole::RunOptions, error),
+                )
+            })?;
+        let applied = self
+            .0
+            .apply_run_options(&recorded, options)
+            .map_err(|refusal| ConfigRefusal::by_owner(owner_id, at(), &refusal))?;
+        serde_json::to_value(applied).map_err(|error| {
+            refused(
+                owner_id,
+                at(),
+                unreadable(ConfigValueRole::Candidate, error),
+            )
+        })
     }
 }
 
@@ -487,10 +538,11 @@ where
     fn reduce(
         &self,
         recorded: &serde_json::Value,
+        from: ReducedFrom,
         args: &serde_json::Value,
         _models: &dyn crate::RuntimeModels,
     ) -> Result<(serde_json::Value, serde_json::Value), ConfigCommandFailure> {
-        reduce_typed::<C>(recorded, args, |recorded, command| {
+        reduce_typed::<C>(recorded, from, args, |recorded, command| {
             (self.reduce)(recorded, command)
         })
     }
@@ -532,10 +584,11 @@ where
     fn reduce(
         &self,
         recorded: &serde_json::Value,
+        from: ReducedFrom,
         args: &serde_json::Value,
         models: &dyn crate::RuntimeModels,
     ) -> Result<(serde_json::Value, serde_json::Value), ConfigCommandFailure> {
-        reduce_typed::<C>(recorded, args, |recorded, command| {
+        reduce_typed::<C>(recorded, from, args, |recorded, command| {
             (self.reduce)(recorded, command, models)
         })
     }
@@ -553,36 +606,52 @@ where
 /// with `reduce`, and encode the change.
 fn reduce_typed<C: ConfigCommand>(
     recorded: &serde_json::Value,
+    from: ReducedFrom,
     args: &serde_json::Value,
     reduce: impl FnOnce(
         &RecordedOf<C>,
         C,
     ) -> Result<OwnerChange<RecordedOf<C>, C::Output>, RefusalOf<C>>,
 ) -> Result<(serde_json::Value, serde_json::Value), ConfigCommandFailure> {
-    let recorded = serde_json::from_value::<RecordedOf<C>>(recorded.clone())
-        .map_err(|error| ConfigCommandFailure::Unreadable(format!("recorded config: {error}")))?;
+    let refuse =
+        |role, error: serde_json::Error| ConfigCommandFailure::Refused(unreadable(role, error));
+    let recorded =
+        serde_json::from_value::<RecordedOf<C>>(recorded.clone()).map_err(|error| match from {
+            ReducedFrom::Recorded => ConfigCommandFailure::RecordedCorrupt(error.to_string()),
+            ReducedFrom::Candidate => refuse(ConfigValueRole::Candidate, error),
+        })?;
     let command = serde_json::from_value::<C>(args.clone())
-        .map_err(|error| ConfigCommandFailure::Unreadable(format!("arguments: {error}")))?;
-    let change = reduce(&recorded, command).map_err(|refusal| ConfigCommandFailure::Refused {
-        refusal: serde_json::to_value(&refusal).unwrap_or(serde_json::Value::Null),
-        message: refusal.to_string(),
+        .map_err(|error| refuse(ConfigValueRole::Arguments, error))?;
+    let change = reduce(&recorded, command).map_err(|refusal| {
+        ConfigCommandFailure::Refused(ConfigRefusalReason::by_owner(&refusal))
     })?;
-    let next = serde_json::to_value(change.recorded).map_err(|error| {
-        ConfigCommandFailure::Unreadable(format!("next config does not encode: {error}"))
-    })?;
-    let output = serde_json::to_value(change.output).map_err(|error| {
-        ConfigCommandFailure::Unreadable(format!("output does not encode: {error}"))
-    })?;
+    let next = serde_json::to_value(change.recorded)
+        .map_err(|error| refuse(ConfigValueRole::Candidate, error))?;
+    let output = serde_json::to_value(change.output)
+        .map_err(|error| refuse(ConfigValueRole::Output, error))?;
     Ok((next, output))
 }
 
-/// A creation or a transaction named config owners no installed plugin
-/// registers, so recording them would keep facts nobody validates and
-/// nobody reads.
+/// Why a session's creation recorded no plugin config: an owner refused
+/// what the creator stated, the parent's recorded config is corrupt, or
+/// this deployment's config registrations cannot stand.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("no installed plugin owns session config for {}", plugin_ids.join(", "))]
-pub struct UnknownPluginConfigOwner {
-    pub plugin_ids: Vec<String>,
+pub enum CreationConfigError {
+    #[error(transparent)]
+    Refused(#[from] ConfigRefusal),
+    #[error(transparent)]
+    RecordedCorrupt(#[from] RecordedNamespaceCorrupt),
+    #[error("config registration is invalid: {0}")]
+    Registration(#[from] ConfigRegistrationError),
+}
+
+impl From<ConfigFault> for CreationConfigError {
+    fn from(fault: ConfigFault) -> Self {
+        match fault {
+            ConfigFault::Refused(refusal) => Self::Refused(refusal),
+            ConfigFault::RecordedCorrupt(corrupt) => Self::RecordedCorrupt(corrupt),
+        }
+    }
 }
 
 /// Why a config transaction was not admitted at ingress: nothing was
@@ -718,42 +787,36 @@ impl ConfigRegistry {
     /// The recorded plugin configuration of a session being created: every
     /// registered plugin owner creates its namespace — the stated value, its
     /// defaults otherwise — and `protocol_plugin_id` names the protocol
-    /// owner. A stated namespace no owner registers is refused typed.
+    /// owner. A stated namespace no owner registers is refused typed, the
+    /// first in key order. A parent's recorded namespace its owner cannot
+    /// read is corruption.
     pub fn resolve_creation(
         &self,
         protocol_plugin_id: Option<&str>,
         requested: &PluginOptions,
         parent: Option<&PluginConfig>,
         is_root_session: bool,
-    ) -> Result<PluginConfig, SessionConfigRefusal> {
-        let unknown: Vec<String> = requested
-            .plugins
-            .keys()
-            .filter(|plugin_id| {
-                plugin_id.as_str() == CORE_CONFIG_OWNER
-                    || !self.owners.contains_key(plugin_id.as_str())
-            })
-            .cloned()
-            .collect();
-        if !unknown.is_empty() {
-            return Err(SessionConfigRefusal::new(UnknownPluginConfigOwner {
-                plugin_ids: unknown,
-            }));
+    ) -> Result<PluginConfig, ConfigFault> {
+        if let Some(unknown) = requested.plugins.keys().find(|plugin_id| {
+            plugin_id.as_str() == CORE_CONFIG_OWNER || !self.owners.contains_key(plugin_id.as_str())
+        }) {
+            return Err(refused(
+                unknown,
+                RefusalSite::Creation,
+                ConfigRefusalReason::UnknownOwner,
+            ));
         }
         let mut config = PluginConfig::for_protocol(protocol_plugin_id.map(str::to_string));
         for (plugin_id, registered) in &self.owners {
             if plugin_id == CORE_CONFIG_OWNER {
                 continue;
             }
-            let created = registered
-                .owner
-                .create(
-                    plugin_id,
-                    requested.plugins.get(plugin_id),
-                    parent.and_then(|parent| parent.get(plugin_id)),
-                    is_root_session,
-                )
-                .map_err(SessionConfigRefusal::new)?;
+            let created = registered.owner.create(
+                plugin_id,
+                requested.plugins.get(plugin_id),
+                parent.and_then(|parent| parent.get(plugin_id)),
+                is_root_session,
+            )?;
             if let Some(value) = created {
                 config.insert(plugin_id.clone(), value);
             }
@@ -893,104 +956,104 @@ impl ConfigRegistry {
     /// its key's binding through `models` here, once.
     /// Nothing here publishes: the caller records the resolution, then
     /// publishes it.
+    ///
+    /// A recorded namespace its owner cannot read resolves nothing: it is
+    /// corruption of the session's config, never the transaction's refusal.
     pub fn resolve(
         &self,
         base: &crate::PersistedSessionConfig,
         transaction: &ConfigTransactionRecord,
         models: &dyn crate::RuntimeModels,
-    ) -> ConfigResolution {
+    ) -> Result<ConfigResolution, RecordedNamespaceCorrupt> {
         let base_revision = base.config_revision;
         let result = if transaction.expected_revision == base_revision {
-            self.reduce(base, transaction, models)
+            match self.reduce(base, transaction, models) {
+                Ok(applied) => applied,
+                Err(ConfigFault::Refused(refusal)) => ConfigResolutionDecision::Refused { refusal },
+                Err(ConfigFault::RecordedCorrupt(corrupt)) => return Err(corrupt),
+            }
         } else {
             ConfigResolutionDecision::Stale {
                 expected: transaction.expected_revision,
                 actual: base_revision,
             }
         };
-        ConfigResolution {
+        Ok(ConfigResolution {
             base_revision,
             result,
-        }
+        })
     }
 
+    /// The applied decision of `transaction` over `base`, or why it has
+    /// none.
     fn reduce(
         &self,
         base: &crate::PersistedSessionConfig,
         transaction: &ConfigTransactionRecord,
         models: &dyn crate::RuntimeModels,
-    ) -> ConfigResolutionDecision {
+    ) -> Result<ConfigResolutionDecision, ConfigFault> {
         let base_core = CoreConfig::of(base);
         let mut candidate: BTreeMap<String, serde_json::Value> = BTreeMap::new();
         let mut outputs = Vec::with_capacity(transaction.entries.len());
         for (index, entry) in transaction.entries.iter().enumerate() {
-            let refused =
-                |refusal: serde_json::Value, message: String| ConfigResolutionDecision::Refused {
-                    refusal: ConfigRefusal {
-                        index: Some(index),
-                        owner: entry.owner.clone(),
-                        command: Some(entry.command.clone()),
-                        refusal,
-                        message,
+            let refuse = |reason: ConfigRefusalReason| {
+                refused(
+                    &entry.owner,
+                    RefusalSite::Command {
+                        index,
+                        command: entry.command.clone(),
                     },
-                };
-            let command = match self.command(&entry.owner, &entry.command) {
-                Ok(command) => command,
-                Err(error) => {
-                    return refused(
-                        serde_json::json!({ "unknown": error.to_string() }),
-                        error.to_string(),
-                    );
-                }
+                    reason,
+                )
             };
-            let recorded = match candidate.get(&entry.owner) {
-                Some(value) => value.clone(),
-                None if entry.owner == CORE_CONFIG_OWNER => {
-                    match serde_json::to_value(&base_core) {
-                        Ok(value) => value,
-                        Err(error) => {
-                            return refused(
-                                serde_json::json!({ "unreadable": error.to_string() }),
-                                error.to_string(),
-                            );
-                        }
-                    }
-                }
-                None => match base.plugin_config.get(&entry.owner) {
-                    Some(value) => value.clone(),
-                    None => {
-                        let message = format!(
-                            "the session recorded no `{}` config for this command to change",
-                            entry.owner
-                        );
-                        return refused(serde_json::json!({ "unrecorded": entry.owner }), message);
-                    }
-                },
+            let registered = self
+                .owners
+                .get(&entry.owner)
+                .ok_or_else(|| refuse(ConfigRefusalReason::UnknownOwner))?;
+            let command = registered
+                .commands
+                .get(&entry.command)
+                .ok_or_else(|| refuse(ConfigRefusalReason::UnknownCommand))?;
+            let (recorded, from) = match candidate.get(&entry.owner) {
+                Some(value) => (value.clone(), ReducedFrom::Candidate),
+                None if entry.owner == CORE_CONFIG_OWNER => (
+                    // The core share is a view built here, not a stored
+                    // namespace: one that does not encode is this
+                    // candidate's fault.
+                    serde_json::to_value(&base_core)
+                        .map_err(|error| refuse(unreadable(ConfigValueRole::Candidate, error)))?,
+                    ReducedFrom::Candidate,
+                ),
+                None => (
+                    base.plugin_config
+                        .get(&entry.owner)
+                        .cloned()
+                        .ok_or_else(|| refuse(ConfigRefusalReason::UnrecordedNamespace))?,
+                    ReducedFrom::Recorded,
+                ),
             };
-            match command.reduce(&recorded, &entry.args, models) {
+            match command.reduce(&recorded, from, &entry.args, models) {
                 Ok((next, output)) => {
                     candidate.insert(entry.owner.clone(), next);
                     outputs.push(output);
                 }
-                Err(ConfigCommandFailure::Refused { refusal, message }) => {
-                    return refused(refusal, message);
-                }
-                Err(ConfigCommandFailure::Unreadable(message)) => {
-                    return refused(serde_json::json!({ "unreadable": message }), message);
+                Err(ConfigCommandFailure::Refused(reason)) => return Err(refuse(reason)),
+                Err(ConfigCommandFailure::RecordedCorrupt(message)) => {
+                    return Err(corrupt(&entry.owner, message).into());
                 }
             }
         }
-        let core = match candidate.remove(CORE_CONFIG_OWNER) {
-            Some(value) => match serde_json::from_value::<CoreConfig>(value) {
-                Ok(core) => Some(core),
-                Err(error) => {
-                    return ConfigResolutionDecision::Refused {
-                        refusal: unreadable(CORE_CONFIG_OWNER, error.to_string()),
-                    };
-                }
-            },
-            None => None,
-        };
+        let core = candidate
+            .remove(CORE_CONFIG_OWNER)
+            .map(serde_json::from_value::<CoreConfig>)
+            .transpose()
+            .map_err(|error| {
+                refused(
+                    CORE_CONFIG_OWNER,
+                    RefusalSite::Candidate,
+                    unreadable(ConfigValueRole::Candidate, error),
+                )
+            })?;
         let namespaces = candidate;
         let final_core = core.clone().unwrap_or_else(|| base_core.clone());
         let mut final_plugins = base.plugin_config.clone();
@@ -999,12 +1062,10 @@ impl ConfigRegistry {
             core: &final_core,
             plugin_config: &final_plugins,
         };
-        if core.is_some()
-            && let Err(refusal) = core::validate_candidate(&base_core, &final_core)
-        {
-            return ConfigResolutionDecision::Refused {
-                refusal: owner_refusal(CORE_CONFIG_OWNER, &refusal),
-            };
+        if core.is_some() {
+            core::validate_candidate(&base_core, &final_core).map_err(|refusal| {
+                ConfigRefusal::by_owner(CORE_CONFIG_OWNER, RefusalSite::Candidate, &refusal)
+            })?;
         }
         // Every owner judges the final candidate, touched or not: a change
         // to one namespace, the core's included, can break another owner's
@@ -1013,42 +1074,49 @@ impl ConfigRegistry {
             let Some(registered) = self.owners.get(owner.as_str()) else {
                 continue;
             };
-            if let Err(refusal) =
-                registered
-                    .owner
-                    .validate(owner, value, base.plugin_config.get(owner), &facts)
-            {
-                return ConfigResolutionDecision::Refused { refusal };
-            }
+            registered
+                .owner
+                .validate(owner, value, base.plugin_config.get(owner), &facts)?;
         }
-        ConfigResolutionDecision::Applied {
+        Ok(ConfigResolutionDecision::Applied {
             core: core.map(Box::new),
             namespaces,
             outputs,
-        }
+        })
+    }
+
+    /// The protocol namespace a run executes under: the one `config`
+    /// recorded with the run's stated `options` applied by the protocol's
+    /// owner, as its typed run options. Nothing else lays a run's options
+    /// over a namespace.
+    pub fn apply_run_options(
+        &self,
+        config: &PluginConfig,
+        protocol: &str,
+        options: &crate::ProtocolTurnOptions,
+    ) -> Result<serde_json::Value, ConfigFault> {
+        let refuse = |reason| refused(protocol, RefusalSite::Candidate, reason);
+        let registered = self
+            .owners
+            .get(protocol)
+            .ok_or_else(|| refuse(ConfigRefusalReason::UnknownOwner))?;
+        let recorded = config
+            .get(protocol)
+            .ok_or_else(|| refuse(ConfigRefusalReason::UnrecordedNamespace))?;
+        registered
+            .owner
+            .apply_run_options(protocol, recorded, &options.payload)
     }
 
     /// Validate a root's config that a run override derived from the
     /// session's `base`: every namespace the override changed is judged by
     /// its owner against its recorded value, so an overlay cannot set what
-    /// the owner does not admit. `run_options` is the raw protocol options
-    /// the run stated: the protocol's owner judges them first, as stated, so
-    /// an option it refuses is refused even when it restates the recorded
-    /// value.
+    /// the owner does not admit.
     pub fn validate_derived(
         &self,
         base: &crate::PersistedSessionConfig,
         derived: &crate::PersistedSessionConfig,
-        run_options: Option<&crate::ProtocolTurnOptions>,
-    ) -> Result<(), ConfigRefusal> {
-        if let Some(options) = run_options
-            && let Some(protocol) = base.plugin_config.protocol_plugin_id()
-            && let Some(registered) = self.owners.get(protocol)
-        {
-            registered
-                .owner
-                .validate_run_options(protocol, &options.payload)?;
-        }
+    ) -> Result<(), ConfigFault> {
         let core = CoreConfig::of(derived);
         let facts = CandidateFacts {
             core: &core,
@@ -1087,6 +1155,17 @@ impl ConfigRegistry {
             })
             .collect();
         ConfigCommandCatalog { revision, commands }
+    }
+}
+
+impl crate::RunOptionsOwner for ConfigRegistry {
+    fn apply_run_options(
+        &self,
+        config: &PluginConfig,
+        protocol: &str,
+        options: &crate::ProtocolTurnOptions,
+    ) -> Result<serde_json::Value, ConfigFault> {
+        Self::apply_run_options(self, config, protocol, options)
     }
 }
 

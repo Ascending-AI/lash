@@ -66,8 +66,11 @@ final-answer format, the channel and the dialect have no command, so a
 transaction cannot name them: a host that states one is refused
 `UnknownCommand` at submission. The owner's validation refuses a candidate
 that moves the recorded channel or dialect with `RlmConfigRefusal::PinChanged`.
-Refusals travel as data in the transaction's `Refused` outcome; error prose is
-presentation.
+A run cannot name them either: its options are the owner's typed
+`RlmTurnOptions`, which the owner applies over the recorded namespace, and a
+payload that states a pin or the prompt does not decode (FIG-4652).
+Refusals travel as data in the transaction's `Refused` outcome, where only the
+`owner` reason carries the owner's refusal type; error prose is presentation.
 
 Assertion remains host code: read the fact, compare it with the host's
 requirement, and fail if it differs. A host that needs a particular

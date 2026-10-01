@@ -292,7 +292,7 @@ impl SessionBuilder {
             .over(self.core.default_plugin_options.clone());
         let policy = self.minted_policy(spec)?;
         lash_core::CoreConfigOwner::validate_charge_safety(&policy.charge_safety)
-            .map_err(lash_core::SessionConfigRefusal::new)
+            .map_err(lash_core::CoreConfigOwner::creation_refusal)
             .map_err(lash_core::SessionError::SessionConfigRefused)?;
         let mut config = lash_core::PersistedSessionConfig::from(&policy);
         // Every plugin the core installs resolves its recorded namespace —
@@ -311,7 +311,7 @@ impl SessionBuilder {
                 None,
                 parent.is_none(),
             )
-            .map_err(lash_core::SessionError::SessionConfigRefused)?;
+            .map_err(lash_core::SessionError::from)?;
         let request = SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),

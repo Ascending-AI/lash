@@ -356,41 +356,58 @@ async fn a_per_turn_protocol_override_cannot_re_point_the_dialect() -> Result<()
         .output()
         .await?;
 
-    // The attack: a host-supplied per-turn override naming the retired field.
-    let attack = lash_core::ProtocolTurnOptions::from_payload(serde_json::json!({
-        "dialect": "lashlang"
-    }));
-    let attacked = session
-        .send(TurnInput::text("switch me"))
-        .protocol_turn_options(attack)
-        // `require_finish` writes through the same seam and merges shallowly,
-        // so the attack has to survive it — otherwise the turn below would be
-        // carrying no override at all and this test would measure nothing.
-        .require_finish()?;
-    assert_eq!(
-        attacked
-            .run_spec
-            .overrides
-            .protocol_turn_options
-            .as_ref()
-            .expect("the turn carries protocol options")
-            .payload["dialect"],
-        serde_json::json!("lashlang"),
-        "the override must actually reach the turn for this to be an attack"
-    );
-    let refused = attacked
-        .output()
-        .await
-        .expect_err("the RLM owner refuses a run that re-points its dialect");
-    assert!(
-        matches!(
-            &refused,
-            crate::EmbedError::Runtime(error)
-                if error.code == lash_core::RuntimeErrorCode::RunShapeRefused
-                    && error.message.contains(lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID)
-        ),
-        "the refusal is the run shape's, naming the RLM owner: {refused:?}"
-    );
+    // The attack: a host-supplied per-turn override naming a session pin.
+    // A run's options are the RLM owner's typed run options, which have no
+    // field for a pin (FIG-4652): the root's shape is refused whether the
+    // payload re-points the pin or restates the value the session recorded.
+    for pin in [
+        serde_json::json!({ "dialect": "lashlang" }),
+        serde_json::json!({ "dialect": "typescript" }),
+        serde_json::json!({ "channel": "cell" }),
+    ] {
+        let attack = lash_core::ProtocolTurnOptions::from_payload(pin.clone());
+        let attacked = session
+            .send(TurnInput::text("switch me"))
+            .protocol_turn_options(attack.clone());
+        assert_eq!(
+            attacked.run_spec.overrides.protocol_turn_options.as_ref(),
+            Some(&attack),
+            "the override must actually reach the turn for this to be an attack"
+        );
+        let refused = attacked
+            .output()
+            .await
+            .expect_err("a run cannot name a pin of the RLM session");
+        let crate::EmbedError::Runtime(error) = &refused else {
+            panic!("the refusal is the run's: {refused:?}");
+        };
+        assert_eq!(error.code, lash_core::RuntimeErrorCode::RunShapeRefused);
+        let Some(lash_core::RunShapeRefusal::Owner { refusal }) = error.run_shape_refusal() else {
+            panic!("the refusal carries its owner's typed cause: {error:?}");
+        };
+        assert_eq!(refusal.owner, lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID);
+        assert_eq!(refusal.at, lash_core::RefusalSite::Candidate);
+        assert!(
+            matches!(
+                refusal.reason,
+                lash_core::ConfigRefusalReason::Unreadable {
+                    role: lash_core::ConfigValueRole::RunOptions,
+                    ..
+                }
+            ),
+            "{pin} is no run option: {refusal:?}"
+        );
+        // The typed setters decode what the send already states, so they
+        // refuse the same payload before anything is sent.
+        assert!(
+            session
+                .send(TurnInput::text("switch me"))
+                .protocol_turn_options(attack)
+                .require_finish()
+                .is_err(),
+            "{pin} is not an RLM run option"
+        );
+    }
     drop(session);
 
     // The attacked turn reached no provider; the one prompt served the
@@ -449,8 +466,15 @@ async fn create_options_naming_a_dialect_fail_during_session_creation() -> Resul
     };
     let refusal = rlm_creation_refusal(&error);
     assert_eq!(refusal.owner, lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID);
+    assert_eq!(refusal.at, lash_core::RefusalSite::Creation);
     assert!(
-        refusal.message.contains("invalid creation config") && refusal.message.contains("dialect"),
+        matches!(
+            &refusal.reason,
+            lash_core::ConfigRefusalReason::Unreadable {
+                role: lash_core::ConfigValueRole::CreationInput,
+                message,
+            } if message.contains("dialect")
+        ),
         "the refusal names the field the host stated: {refusal:?}"
     );
     Ok(())
@@ -967,6 +991,4 @@ fn rlm_creation_refusal(error: &crate::EmbedError) -> &lash_core::ConfigRefusal 
         panic!("expected a typed session config refusal, got: {error:?}");
     };
     refusal
-        .downcast_ref::<lash_core::ConfigRefusal>()
-        .expect("an owner's creation refusal")
 }

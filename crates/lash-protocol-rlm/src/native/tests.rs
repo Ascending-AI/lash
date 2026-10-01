@@ -54,12 +54,11 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
         turn_id: TurnId::from("parity-turn"),
         emit_llm_trace: false,
         writer_formats: lash_core::build_newest_writer_formats(),
-        termination: lash_core::ProtocolTurnOptions::typed(RlmTurnOptions {
+        termination: crate::plugin::RlmRecordedConfig::for_testing(RlmTurnOptions {
             termination: Some(termination),
             final_answer_format: None,
             render: None,
-        })
-        .unwrap(),
+        }),
     }
 }
 

@@ -606,10 +606,7 @@ mod session_language_tests {
         );
         let attacked = session
             .send(lash::TurnInput::text("switch me"))
-            .protocol_turn_options(attack)
-            // The shallow merge must preserve the dialect attack.
-            .require_finish()
-            .expect("finish requirement");
+            .protocol_turn_options(attack);
         let refused = attacked
             .output()
             .await
@@ -619,6 +616,11 @@ mod session_language_tests {
                 refused,
                 lash::EmbedError::Runtime(ref error)
                     if error.code == lash::runtime::RuntimeErrorCode::RunShapeRefused
+                        && matches!(
+                            error.run_shape_refusal(),
+                            Some(lash::RunShapeRefusal::Owner { refusal })
+                                if refusal.owner == lash::rlm::RLM_PROTOCOL_PLUGIN_ID
+                        )
             ),
             "the dialect attack must be refused as a run shape: {refused:?}"
         );

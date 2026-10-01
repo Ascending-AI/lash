@@ -452,6 +452,13 @@ mod recorded_termination {
             super::harness(false).await
         }; (a_redrive_assembles_the_terminal_its_root_recorded_termination_decides, "turn-config-recorded-termination-redrive"));
 
+        // FIG-4652: a recorded namespace its owner cannot read is corruption.
+        lash_conformance::turn_config_tests!(@law [
+            #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
+        ] {
+            super::harness(false).await
+        }; (a_corrupt_recorded_namespace_is_corruption_and_never_a_recorded_refusal, "turn-config-corrupt-namespace"));
+
         lash_conformance::turn_config_tests!(@law [
             #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
         ] {

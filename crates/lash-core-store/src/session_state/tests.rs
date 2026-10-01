@@ -1122,6 +1122,7 @@ fn a_redriven_root_runs_under_its_admitted_plugin_config_revision() {
             crate::run_spec::TerminationPolicy::default(),
             crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
             &crate::provider::EmptyModels,
+            &crate::run_spec::NoRunOptionsOwner,
         )
         .expect("resolve the root");
 

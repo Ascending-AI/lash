@@ -188,10 +188,13 @@ impl PluginHost {
         requested: &crate::PluginOptions,
         parent: Option<&super::PluginConfig>,
         is_root_session: bool,
-    ) -> Result<super::PluginConfig, crate::SessionConfigRefusal> {
-        self.config_registry()
-            .map_err(crate::SessionConfigRefusal::new)?
-            .resolve_creation(protocol_plugin_id, requested, parent, is_root_session)
+    ) -> Result<super::PluginConfig, super::CreationConfigError> {
+        Ok(self.config_registry()?.resolve_creation(
+            protocol_plugin_id,
+            requested,
+            parent,
+            is_root_session,
+        )?)
     }
 
     /// Ask every factory for its process-engine contributions and register them

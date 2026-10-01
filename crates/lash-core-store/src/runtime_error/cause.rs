@@ -55,6 +55,17 @@ pub enum RuntimeErrorCause {
     MaxToolCallsExceeded {
         exceeded: Box<crate::ToolCallLimitExceeded>,
     },
+    /// Why a root's shape was refused (FIG-4652): the typed half of
+    /// [`RuntimeErrorCode::RunShapeRefused`] and, for a refused reasoning,
+    /// of [`RuntimeErrorCode::ReasoningRefused`].
+    RunShapeRefused {
+        refusal: Box<crate::run_spec::RunShapeRefusal>,
+    },
+    /// Why the config a session's creation stated was refused (FIG-4652):
+    /// the typed half of [`RuntimeErrorCode::SessionConfigRefused`].
+    ConfigRefused {
+        refusal: Box<crate::config_transaction::ConfigRefusal>,
+    },
 }
 
 /// The record kind and diagnostic retained when durable data cannot be decoded.

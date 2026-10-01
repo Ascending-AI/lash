@@ -47,6 +47,7 @@ impl lash::plugins::ConfigOwner for TestConfigOwner {
     type Create = TestPluginConfig;
     type Recorded = TestPluginConfig;
     type Refusal = String;
+    type RunOptions = lash::plugins::NoRunOptions;
 
     fn implementation(&self) -> &str {
         "test_typed:1"
@@ -67,6 +68,14 @@ impl lash::plugins::ConfigOwner for TestConfigOwner {
         _facts: &lash::plugins::CandidateFacts<'_>,
     ) -> Result<(), String> {
         Ok(())
+    }
+
+    fn apply_run_options(
+        &self,
+        recorded: &Self::Recorded,
+        _options: Self::RunOptions,
+    ) -> std::result::Result<Self::Recorded, Self::Refusal> {
+        Ok(recorded.clone())
     }
 }
 

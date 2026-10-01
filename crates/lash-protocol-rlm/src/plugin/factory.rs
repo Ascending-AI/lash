@@ -230,12 +230,7 @@ impl RlmProtocolPluginFactory {
         plugin_config: &lash_core::PluginConfig,
         materialization: lash_core::plugin::PluginSessionMaterialization,
     ) -> Result<RlmRecordedBehaviour, PluginError> {
-        let recorded = plugin_config
-            .decode::<RlmRecordedConfig>(RLM_PROTOCOL_PLUGIN_ID)
-            .map_err(|error| {
-                PluginError::Session(format!("invalid recorded RLM session config: {error}"))
-            })?;
-        match recorded {
+        match recorded_config(plugin_config)? {
             Some(recorded) => Ok(recorded.behaviour),
             None if matches!(
                 materialization,
@@ -433,10 +428,14 @@ impl PluginFactory for RlmProtocolPluginFactory {
     fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         let behaviour = self.session_behaviour(&ctx.plugin_config.config, ctx.materialization)?;
         let config = self.config.clone().under_recorded_behaviour(&behaviour);
-        let recorded = ctx.plugin_config.config.protocol_turn_options();
-        super::channel::validate_channel(&recorded, self.config.channel, ctx.materialization)?;
+        let recorded = recorded_config(&ctx.plugin_config.config)?;
+        super::channel::validate_channel(
+            recorded.as_ref(),
+            self.config.channel,
+            ctx.materialization,
+        )?;
         super::channel::validate_dialect(
-            &recorded,
+            recorded.as_ref(),
             self.dialect.language_id(),
             ctx.materialization,
         )?;
@@ -488,13 +487,19 @@ impl RlmProcessRunSettings {
     fn captured(
         plugin_config: &lash_core::AdmittedPluginConfig,
     ) -> Result<Option<RlmRecordedBehaviour>, PluginError> {
-        plugin_config
-            .decode::<RlmRecordedConfig>(RLM_PROTOCOL_PLUGIN_ID)
-            .map(|recorded| recorded.map(|recorded| recorded.behaviour))
-            .map_err(|error| {
-                PluginError::Session(format!("invalid recorded RLM session config: {error}"))
-            })
+        Ok(recorded_config(&plugin_config.config)?.map(|recorded| recorded.behaviour))
     }
+}
+
+/// The RLM namespace `plugin_config` recorded, as its owner's recorded type.
+fn recorded_config(
+    plugin_config: &lash_core::PluginConfig,
+) -> Result<Option<RlmRecordedConfig>, PluginError> {
+    plugin_config
+        .decode::<RlmRecordedConfig>(RLM_PROTOCOL_PLUGIN_ID)
+        .map_err(|error| {
+            PluginError::Session(format!("invalid recorded RLM session config: {error}"))
+        })
 }
 
 impl lash_lashlang_runtime::LashlangRecordedRunSettings for RlmProcessRunSettings {

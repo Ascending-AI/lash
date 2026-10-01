@@ -41,8 +41,8 @@ pub use config::{
     AdmittedPluginConfig, CORE_CONFIG_IMPLEMENTATION, CandidateFacts, ConfigCommand,
     ConfigCommandCatalog, ConfigCommandDescriptor, ConfigImplementationMismatch, ConfigOwner,
     ConfigRegistrar, ConfigRegistrationError, ConfigRegistry, ConfigSubmitError, ConfigTransaction,
-    ConfigWire, CoreConfigOwner, CoreConfigRefusal, CreationFacts, OwnerChange, PluginConfig,
-    UnknownPluginConfigOwner,
+    ConfigWire, CoreConfigOwner, CoreConfigRefusal, CreationConfigError, CreationFacts,
+    NoRunOptions, OwnerChange, PluginConfig,
 };
 pub use error::{
     PluginError, durable_identity_conflict, is_durable_identity_conflict,

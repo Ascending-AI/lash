@@ -85,6 +85,7 @@ impl lash_core::ConfigOwner for DialectConfigOwner {
     type Create = DialectConfig;
     type Recorded = DialectConfig;
     type Refusal = DialectRefusal;
+    type RunOptions = lash_core::NoRunOptions;
 
     fn implementation(&self) -> &str {
         "dialect-owner:1"
@@ -105,6 +106,14 @@ impl lash_core::ConfigOwner for DialectConfigOwner {
         _facts: &lash_core::CandidateFacts<'_>,
     ) -> Result<(), DialectRefusal> {
         Ok(())
+    }
+
+    fn apply_run_options(
+        &self,
+        recorded: &Self::Recorded,
+        _options: Self::RunOptions,
+    ) -> std::result::Result<Self::Recorded, Self::Refusal> {
+        Ok(recorded.clone())
     }
 }
 

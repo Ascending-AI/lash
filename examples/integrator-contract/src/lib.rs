@@ -120,6 +120,7 @@ impl ConfigOwner for IntegratorConfigOwner {
     type Create = lash::messages::JsonValue;
     type Recorded = lash::messages::JsonValue;
     type Refusal = lash::messages::JsonValue;
+    type RunOptions = lash::plugins::NoRunOptions;
 
     fn implementation(&self) -> &str {
         unreachable!("external signature witness")
@@ -138,6 +139,14 @@ impl ConfigOwner for IntegratorConfigOwner {
         facts: &CandidateFacts<'_>,
     ) -> Result<(), Self::Refusal> {
         unreachable!("external signature witness")
+    }
+
+    fn apply_run_options(
+        &self,
+        recorded: &Self::Recorded,
+        _options: Self::RunOptions,
+    ) -> std::result::Result<Self::Recorded, Self::Refusal> {
+        Ok(recorded.clone())
     }
 }
 
@@ -211,7 +220,7 @@ impl ProtocolDriverPlugin for Integrator {
     fn resolve_render(
         &self,
         _options: &ProtocolTurnOptions,
-    ) -> Result<Option<RecordedRender>, String> {
+    ) -> Result<Option<RecordedRender>, lash::plugins::RenderFault> {
         unreachable!("external signature witness")
     }
 }

@@ -1045,11 +1045,12 @@ pub enum RlmPromptIntro {
 /// There is currently no language choice to restate: TypeScript is the only shipped RLM dialect
 /// and nothing — a turn bag, a session bag, a create contract — names one.
 ///
-/// Unstated fields are omitted from the wire, not written as `null`: the
-/// per-turn bag is merged over the session bag key by key, so a serialized
-/// absence would clobber a recorded session value.
+/// These are the RLM owner's run options: the owner applies each stated
+/// field over the session's recorded value, and an unstated one leaves it
+/// alone. Nothing else is a field, so a payload that names a session pin or
+/// the prompt config does not decode (FIG-4652).
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct RlmTurnOptions {
     /// Termination requirement for this turn. Absence is the `Natural`
     /// default, and leaves whatever the session recorded alone.

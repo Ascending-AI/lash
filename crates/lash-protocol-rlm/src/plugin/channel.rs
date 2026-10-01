@@ -1,5 +1,7 @@
+use lash_core::PluginError;
 use lash_core::plugin::PluginSessionMaterialization;
-use lash_core::{PluginError, ProtocolTurnOptions};
+
+use super::RlmRecordedConfig;
 
 /// Session-pinned transport for RLM programs; both channels use the same engine.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -31,94 +33,64 @@ impl std::str::FromStr for RlmChannel {
     }
 }
 
-/// The recorded key of the session's dialect: the language id of the dialect
-/// the host selected when the session materialized (ADR 0096).
-const DIALECT_FIELD: &str = "dialect";
-
-/// The recorded key of the session's behaviour (FIG-4398).
-const BEHAVIOUR_FIELD: &str = "behaviour";
-
-/// The bag without the session's transport, dialect and behaviour pins: what
-/// remains is the RLM create extras.
-pub(super) fn without_session_pins(options: &ProtocolTurnOptions) -> ProtocolTurnOptions {
-    let mut options = options.clone();
-    if let Some(object) = options.payload.as_object_mut() {
-        object.remove("channel");
-        object.remove(DIALECT_FIELD);
-        object.remove(BEHAVIOUR_FIELD);
-    }
-    options
-}
+/// The session's recorded channel against the host's selection: a different
+/// channel is a typed conflict, and a rematerialized session that recorded
+/// none is refused rather than read as whatever the host selects today.
 #[expect(
     clippy::expect_used,
-    reason = "RlmChannel is a crate-owned enum of strings, both sides decoded from the same recorded payload, so serialization cannot fail"
+    reason = "RlmChannel is a crate-owned enum of strings, so serialization cannot fail"
 )]
 pub(super) fn validate_channel(
-    options: &ProtocolTurnOptions,
+    recorded: Option<&RlmRecordedConfig>,
     requested: RlmChannel,
     materialization: PluginSessionMaterialization,
 ) -> Result<(), PluginError> {
-    match options.payload.get("channel") {
-        Some(value) => {
-            let recorded: RlmChannel = serde_json::from_value(value.clone()).map_err(|error| {
-                PluginError::Session(format!("invalid recorded RLM channel: {error}"))
-            })?;
-            if recorded != requested {
-                return Err(PluginError::RecordedSessionConfigConflict {
-                    plugin_id: super::RLM_PROTOCOL_PLUGIN_ID.to_string(),
-                    field: "channel".to_string(),
-                    recorded: serde_json::to_string(&recorded).expect("channel serializes"),
-                    requested: serde_json::to_string(&requested).expect("channel serializes"),
-                });
-            }
-            Ok(())
-        }
-        None if matches!(
-            materialization,
-            PluginSessionMaterialization::Rematerialization
-        ) =>
-        {
-            Err(PluginError::MissingRecordedSessionConfig {
-                plugin_id: super::RLM_PROTOCOL_PLUGIN_ID.to_string(),
-                field: "channel".to_string(),
-            })
-        }
-        None => Ok(()),
+    match recorded.and_then(|recorded| recorded.channel) {
+        Some(recorded) if recorded == requested => Ok(()),
+        Some(recorded) => Err(PluginError::RecordedSessionConfigConflict {
+            plugin_id: super::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+            field: "channel".to_string(),
+            recorded: serde_json::to_string(&recorded).expect("channel serializes"),
+            requested: serde_json::to_string(&requested).expect("channel serializes"),
+        }),
+        None => missing_pin("channel", materialization),
     }
 }
 
-/// The session's recorded dialect against the host's selection: a different
-/// id is a typed conflict, and a rematerialized session that recorded none is
-/// refused rather than read as whatever the host selects today.
+/// The session's recorded dialect against the host's selection: the language
+/// id of the dialect the host selected when the session materialized
+/// (ADR 0096). A different id is a typed conflict, and a rematerialized
+/// session that recorded none is refused.
 pub(super) fn validate_dialect(
-    options: &ProtocolTurnOptions,
+    recorded: Option<&RlmRecordedConfig>,
     selected: &'static str,
     materialization: PluginSessionMaterialization,
 ) -> Result<(), PluginError> {
-    match options.payload.get(DIALECT_FIELD) {
-        Some(serde_json::Value::String(recorded)) if recorded == selected => Ok(()),
-        Some(serde_json::Value::String(recorded)) => {
-            Err(PluginError::RecordedSessionConfigConflict {
-                plugin_id: super::RLM_PROTOCOL_PLUGIN_ID.to_string(),
-                field: DIALECT_FIELD.to_string(),
-                recorded: recorded.clone(),
-                requested: selected.to_string(),
-            })
-        }
-        Some(other) => Err(PluginError::Session(format!(
-            "invalid recorded RLM dialect: {other}"
-        ))),
-        None if matches!(
-            materialization,
-            PluginSessionMaterialization::Rematerialization
-        ) =>
-        {
+    match recorded.and_then(|recorded| recorded.dialect.as_deref()) {
+        Some(recorded) if recorded == selected => Ok(()),
+        Some(recorded) => Err(PluginError::RecordedSessionConfigConflict {
+            plugin_id: super::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+            field: "dialect".to_string(),
+            recorded: recorded.to_string(),
+            requested: selected.to_string(),
+        }),
+        None => missing_pin("dialect", materialization),
+    }
+}
+
+/// A session being created has recorded no pin yet; a rebuilt one must have.
+fn missing_pin(
+    field: &str,
+    materialization: PluginSessionMaterialization,
+) -> Result<(), PluginError> {
+    match materialization {
+        PluginSessionMaterialization::Rematerialization => {
             Err(PluginError::MissingRecordedSessionConfig {
                 plugin_id: super::RLM_PROTOCOL_PLUGIN_ID.to_string(),
-                field: DIALECT_FIELD.to_string(),
+                field: field.to_string(),
             })
         }
-        None => Ok(()),
+        PluginSessionMaterialization::Creation => Ok(()),
     }
 }
 
@@ -126,27 +98,25 @@ pub(super) fn validate_dialect(
 mod tests {
     use super::*;
 
-    /// The options a session records with only its pins, in the RLM owner's
-    /// recorded form.
-    fn pinned(channel: Option<RlmChannel>, dialect: Option<&str>) -> ProtocolTurnOptions {
-        ProtocolTurnOptions::from_payload(
-            serde_json::to_value(super::super::RlmRecordedConfig {
-                render: None,
-                termination: None,
-                final_answer_format: None,
-                channel,
-                dialect: dialect.map(str::to_string),
-                behaviour: super::super::RlmProtocolPluginConfig::builder()
-                    .channel(RlmChannel::Cell)
-                    .instruction_limit(super::super::InstructionBound::unbounded())
-                    .memory_limit(super::super::MemoryBound::unbounded())
-                    .build()
-                    .recorded_behaviour(false),
-                prompt: Default::default(),
-            })
-            .unwrap(),
-        )
+    /// A recorded namespace with only its pins.
+    fn pinned(channel: Option<RlmChannel>, dialect: Option<&str>) -> RlmRecordedConfig {
+        RlmRecordedConfig {
+            render: None,
+            termination: None,
+            final_answer_format: None,
+            channel,
+            dialect: dialect.map(str::to_string),
+            behaviour: super::super::RlmProtocolPluginConfig::builder()
+                .channel(RlmChannel::Cell)
+                .instruction_limit(super::super::InstructionBound::unbounded())
+                .memory_limit(super::super::MemoryBound::unbounded())
+                .build()
+                .recorded_behaviour(false),
+            prompt: Default::default(),
+        }
     }
+
+    const REBUILT: PluginSessionMaterialization = PluginSessionMaterialization::Rematerialization;
 
     #[test]
     fn from_str_accepts_all_channel_spellings() {
@@ -158,71 +128,39 @@ mod tests {
     #[test]
     fn recorded_channel_refuses_substitution_and_missing_pin() {
         for channel in [RlmChannel::Cell, RlmChannel::NativeTool] {
-            let options = pinned(Some(channel), None);
-            let options: ProtocolTurnOptions =
-                serde_json::from_str(&serde_json::to_string(&options).unwrap()).unwrap();
-            validate_channel(
-                &options,
-                channel,
-                PluginSessionMaterialization::Rematerialization,
-            )
-            .unwrap();
+            let recorded = pinned(Some(channel), None);
+            validate_channel(Some(&recorded), channel, REBUILT).unwrap();
             let other = if channel == RlmChannel::Cell {
                 RlmChannel::NativeTool
             } else {
                 RlmChannel::Cell
             };
-            assert!(
-                matches!(validate_channel(&options, other, PluginSessionMaterialization::Rematerialization), Err(PluginError::RecordedSessionConfigConflict { field, .. }) if field == "channel")
-            );
+            assert!(matches!(
+                validate_channel(Some(&recorded), other, REBUILT),
+                Err(PluginError::RecordedSessionConfigConflict { field, .. }) if field == "channel"
+            ));
         }
-        assert!(
-            matches!(validate_channel(&ProtocolTurnOptions::default(), RlmChannel::Cell, PluginSessionMaterialization::Rematerialization), Err(PluginError::MissingRecordedSessionConfig { field, .. }) if field == "channel")
-        );
+        for unpinned in [None, Some(&pinned(None, None))] {
+            assert!(matches!(
+                validate_channel(unpinned, RlmChannel::Cell, REBUILT),
+                Err(PluginError::MissingRecordedSessionConfig { field, .. }) if field == "channel"
+            ));
+        }
     }
 
     #[test]
     fn recorded_dialect_refuses_substitution_and_missing_pin() {
-        let options = pinned(None, Some("typescript"));
-        let options: ProtocolTurnOptions =
-            serde_json::from_str(&serde_json::to_string(&options).unwrap()).unwrap();
-        validate_dialect(
-            &options,
-            "typescript",
-            PluginSessionMaterialization::Rematerialization,
-        )
-        .unwrap();
+        let recorded = pinned(None, Some("typescript"));
+        validate_dialect(Some(&recorded), "typescript", REBUILT).unwrap();
         assert!(matches!(
-            validate_dialect(
-                &options,
-                "other-dialect",
-                PluginSessionMaterialization::Rematerialization
-            ),
+            validate_dialect(Some(&recorded), "other-dialect", REBUILT),
             Err(PluginError::RecordedSessionConfigConflict { field, recorded, requested, .. })
                 if field == "dialect" && recorded == "typescript" && requested == "other-dialect"
         ));
         assert!(matches!(
-            validate_dialect(
-                &ProtocolTurnOptions::default(),
-                "typescript",
-                PluginSessionMaterialization::Rematerialization
-            ),
+            validate_dialect(None, "typescript", REBUILT),
             Err(PluginError::MissingRecordedSessionConfig { field, .. }) if field == "dialect"
         ));
-        validate_dialect(
-            &ProtocolTurnOptions::default(),
-            "typescript",
-            PluginSessionMaterialization::Creation,
-        )
-        .unwrap();
-        // What remains of a recorded namespace without its pins is its
-        // create extras: here, the prompt alone.
-        assert_eq!(
-            without_session_pins(&pinned(Some(RlmChannel::Cell), Some("typescript")))
-                .payload
-                .as_object()
-                .map(|extras| extras.keys().map(String::as_str).collect::<Vec<_>>()),
-            Some(vec!["prompt"])
-        );
+        validate_dialect(None, "typescript", PluginSessionMaterialization::Creation).unwrap();
     }
 }

@@ -31,8 +31,9 @@ pub use lash_core_store::attachments;
 pub use lash_core_store::chronological;
 pub use lash_core_store::compat;
 pub use lash_core_store::config_transaction::{
-    CORE_CONFIG_OWNER, ConfigCommandEntry, ConfigRefusal, ConfigResolution,
-    ConfigResolutionDecision, ConfigTransactionOutcome, ConfigTransactionRecord, CoreConfig,
+    CORE_CONFIG_OWNER, ConfigCommandEntry, ConfigFault, ConfigRefusal, ConfigRefusalReason,
+    ConfigResolution, ConfigResolutionDecision, ConfigTransactionOutcome, ConfigTransactionRecord,
+    ConfigValueRole, CoreConfig, RecordedNamespaceCorrupt, RefusalSite,
 };
 pub use lash_core_store::impl_current_fleet_format;
 pub use lash_core_store::impl_noop_attachment_referrers;
@@ -356,7 +357,6 @@ pub mod facade_support {
     pub use crate::runtime::release_bound_trigger_delivery_pins;
     pub use crate::runtime::turn_control_binding_id_for_scope;
     pub use crate::runtime::{ProcessChangeHub, ProcessChangeSubscription};
-    pub use lash_core_store::protocol_turn_options::facade_ops::ProtocolTurnOptionsFacadeOps;
     pub use lash_core_store::session_identity::facade_ops::AgentFrameReasonFacadeOps;
     pub const RUNTIME_TUNING_METRICS_ENABLED: bool = cfg!(feature = "otel-trace");
     /// Record one first-party PostgreSQL runtime-connection acquisition wait.
@@ -711,8 +711,8 @@ pub use plugin::{
     AdmittedPluginConfig, CORE_CONFIG_IMPLEMENTATION, CandidateFacts, ConfigCommand,
     ConfigCommandCatalog, ConfigCommandDescriptor, ConfigImplementationMismatch, ConfigOwner,
     ConfigRegistrar, ConfigRegistrationError, ConfigRegistry, ConfigSubmitError, ConfigTransaction,
-    ConfigWire, CoreConfigOwner, CoreConfigRefusal, CreationFacts, OwnerChange, PluginConfig,
-    UnknownPluginConfigOwner,
+    ConfigWire, CoreConfigOwner, CoreConfigRefusal, CreationConfigError, CreationFacts,
+    NoRunOptions, OwnerChange, PluginConfig,
 };
 pub use plugin::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, AppendSessionNodesOutcome,
@@ -775,20 +775,20 @@ pub use runtime::{
     GroupChildCapability, GroupExecutors, GroupReopen, GroupSettlement, GroupWakePolicy, HandleId,
     InputItem, InvalidProcessDefinitionId, InvalidStartKey, JournalReplay, Lifetime,
     LifetimeDecision, LifetimePolicy, LlmRequestSpec, LlmStreamRecord, LocalTurnStop, LoserPolicy,
-    MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork, NoSessionWork, NonTerminalProcessPage,
-    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentEndApplication,
-    ParentEndPlan, PendingTurnInput, PendingTurnInputBatch, PendingTurnInputCancelOutcome,
-    PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputDraft,
-    PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
-    PersistedSegmentHandover, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
-    ProcessChangeCursor, ProcessClockRebind, ProcessCommand, ProcessCompletionAuthority,
-    ProcessCompletionOutcome, ProcessContinuationStore, ProcessDefinition, ProcessDefinitionDraft,
-    ProcessDefinitionDraftError, ProcessDefinitionId, ProcessDefinitionRef,
-    ProcessDefinitionRefusal, ProcessDefinitionResolution, ProcessDefinitionStore,
-    ProcessDefinitionStoredError, ProcessDefinitionTarget, ProcessDefinitionValue,
-    ProcessDriveStep, ProcessEffectOutcome, ProcessEngine, ProcessEngineAdmission,
-    ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry, ProcessEngineRunContext,
-    ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
+    MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork, NoRunOptionsOwner, NoSessionWork,
+    NonTerminalProcessPage, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY,
+    ParentEndApplication, ParentEndPlan, PendingTurnInput, PendingTurnInputBatch,
+    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
+    PendingTurnInputDraft, PendingTurnInputRead, PendingTurnInputReadStatus,
+    PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover, ProcessAwaitOutput,
+    ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessClockRebind, ProcessCommand,
+    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore,
+    ProcessDefinition, ProcessDefinitionDraft, ProcessDefinitionDraftError, ProcessDefinitionId,
+    ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
+    ProcessDefinitionStore, ProcessDefinitionStoredError, ProcessDefinitionTarget,
+    ProcessDefinitionValue, ProcessDriveStep, ProcessEffectOutcome, ProcessEngine,
+    ProcessEngineAdmission, ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry,
+    ProcessEngineRunContext, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
     ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog, ProcessEventPage,
     ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome,
     ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef,
@@ -812,15 +812,16 @@ pub use runtime::{
     QueuedDrainFamily, QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection,
     QueuedWorkAuthority, QueuedWorkBatchingConfig, QueuedWorkKind, RecordedJournal,
     RecordedKeyFence, RecordedKeyRange, RecordedKeys, RecordedRender, RefusedWriteRange,
-    RegistryScopeClose, Resolution, ResolveOutcome, ResolvedProcessDefinition, ResolvedRun,
-    RunDefinition, RunDefinitions, RunOverrides, RunResolveError, RunShapeError, RunSpec,
-    RunSpecHash, RuntimeAttribution, RuntimeCheckpointComponents, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause,
-    RuntimeErrorCode, RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution,
-    RuntimeSessionState, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeBoundController, ScopeGrant, ScopeId,
-    ScopeRef, ScopeStorageError, ScopedEffectController, SegmentHandover, SegmentProgress,
+    RegistryScopeClose, RenderFault, RenderRefusal, Resolution, ResolveOutcome,
+    ResolvedProcessDefinition, ResolvedRun, RunDefinition, RunDefinitionRefusal, RunDefinitions,
+    RunOptionsOwner, RunOverrides, RunResolveError, RunShapeRefusal, RunSpec, RunSpecHash,
+    RuntimeAttribution, RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
+    RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause, RuntimeErrorCode,
+    RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeSessionState,
+    SCOPE_STORAGE_PAYLOAD_VERSION, ScopeBoundController, ScopeGrant, ScopeId, ScopeRef,
+    ScopeStorageError, ScopedEffectController, SegmentHandover, SegmentProgress,
     SegmentStartMarker, ServedOnly, ServedOnlyRange, SessionCreationHead, SessionEntry, SessionId,
     SessionListFilter, SessionRelationKind, SessionScope, SessionStateVersionRefusal,
     SessionStoreCreateRequest, SessionView, SessionWorkEngine, SleepSpec, SlotId, StartCx,
@@ -855,9 +856,9 @@ pub(crate) use runtime::{
 };
 pub use runtime::{ConsumerHold, PinnedTriggerDelivery, SessionTurnOutcome, TriggerDeliveryPin};
 pub use session::{
-    ExecRequest, ExecutionEnvironmentSyncError, RuntimeExecutionContext, SessionConfigRefusal,
-    SessionError, ToolDispatchSurface, ToolSurfaceDrift, ToolSurfaceDriftKind,
-    resolve_trigger_owner_scope, tool_dispatch_surface,
+    ExecRequest, ExecutionEnvironmentSyncError, RuntimeExecutionContext, SessionError,
+    ToolDispatchSurface, ToolSurfaceDrift, ToolSurfaceDriftKind, resolve_trigger_owner_scope,
+    tool_dispatch_surface,
 };
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,

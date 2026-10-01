@@ -48,40 +48,104 @@ impl RemoteConfigTransactionRequest {
     }
 }
 
+impl From<lash_core::RefusalSite> for RemoteRefusalSite {
+    fn from(value: lash_core::RefusalSite) -> Self {
+        match value {
+            lash_core::RefusalSite::Command { index, command } => Self::Command { index, command },
+            lash_core::RefusalSite::Candidate => Self::Candidate,
+            lash_core::RefusalSite::Creation => Self::Creation,
+        }
+    }
+}
+
+impl From<RemoteRefusalSite> for lash_core::RefusalSite {
+    fn from(value: RemoteRefusalSite) -> Self {
+        match value {
+            RemoteRefusalSite::Command { index, command } => Self::Command { index, command },
+            RemoteRefusalSite::Candidate => Self::Candidate,
+            RemoteRefusalSite::Creation => Self::Creation,
+        }
+    }
+}
+
+impl From<lash_core::ConfigValueRole> for RemoteConfigValueRole {
+    fn from(value: lash_core::ConfigValueRole) -> Self {
+        match value {
+            lash_core::ConfigValueRole::CreationInput => Self::CreationInput,
+            lash_core::ConfigValueRole::Arguments => Self::Arguments,
+            lash_core::ConfigValueRole::RunOptions => Self::RunOptions,
+            lash_core::ConfigValueRole::Candidate => Self::Candidate,
+            lash_core::ConfigValueRole::Output => Self::Output,
+            lash_core::ConfigValueRole::Refusal => Self::Refusal,
+        }
+    }
+}
+
+impl From<RemoteConfigValueRole> for lash_core::ConfigValueRole {
+    fn from(value: RemoteConfigValueRole) -> Self {
+        match value {
+            RemoteConfigValueRole::CreationInput => Self::CreationInput,
+            RemoteConfigValueRole::Arguments => Self::Arguments,
+            RemoteConfigValueRole::RunOptions => Self::RunOptions,
+            RemoteConfigValueRole::Candidate => Self::Candidate,
+            RemoteConfigValueRole::Output => Self::Output,
+            RemoteConfigValueRole::Refusal => Self::Refusal,
+        }
+    }
+}
+
+impl From<lash_core::ConfigRefusalReason> for RemoteConfigRefusalReason {
+    fn from(value: lash_core::ConfigRefusalReason) -> Self {
+        match value {
+            lash_core::ConfigRefusalReason::Owner { refusal, message } => {
+                Self::Owner { refusal, message }
+            }
+            lash_core::ConfigRefusalReason::UnknownOwner => Self::UnknownOwner,
+            lash_core::ConfigRefusalReason::UnknownCommand => Self::UnknownCommand,
+            lash_core::ConfigRefusalReason::UnrecordedNamespace => Self::UnrecordedNamespace,
+            lash_core::ConfigRefusalReason::Unreadable { role, message } => Self::Unreadable {
+                role: role.into(),
+                message,
+            },
+        }
+    }
+}
+
+impl From<RemoteConfigRefusalReason> for lash_core::ConfigRefusalReason {
+    fn from(value: RemoteConfigRefusalReason) -> Self {
+        match value {
+            RemoteConfigRefusalReason::Owner { refusal, message } => {
+                Self::Owner { refusal, message }
+            }
+            RemoteConfigRefusalReason::UnknownOwner => Self::UnknownOwner,
+            RemoteConfigRefusalReason::UnknownCommand => Self::UnknownCommand,
+            RemoteConfigRefusalReason::UnrecordedNamespace => Self::UnrecordedNamespace,
+            RemoteConfigRefusalReason::Unreadable { role, message } => Self::Unreadable {
+                role: role.into(),
+                message,
+            },
+        }
+    }
+}
+
 impl From<lash_core::ConfigRefusal> for RemoteConfigRefusal {
     fn from(value: lash_core::ConfigRefusal) -> Self {
-        let lash_core::ConfigRefusal {
-            index,
-            owner,
-            command,
-            refusal,
-            message,
-        } = value;
+        let lash_core::ConfigRefusal { owner, at, reason } = value;
         Self {
-            index,
             owner,
-            command,
-            refusal,
-            message,
+            at: at.into(),
+            reason: reason.into(),
         }
     }
 }
 
 impl From<RemoteConfigRefusal> for lash_core::ConfigRefusal {
     fn from(value: RemoteConfigRefusal) -> Self {
-        let RemoteConfigRefusal {
-            index,
-            owner,
-            command,
-            refusal,
-            message,
-        } = value;
+        let RemoteConfigRefusal { owner, at, reason } = value;
         Self {
-            index,
             owner,
-            command,
-            refusal,
-            message,
+            at: at.into(),
+            reason: reason.into(),
         }
     }
 }
@@ -165,11 +229,15 @@ mod tests {
 
     fn refusal() -> lash_core::ConfigRefusal {
         lash_core::ConfigRefusal {
-            index: Some(1),
             owner: "probe".to_string(),
-            command: Some("raise_cap".to_string()),
-            refusal: serde_json::json!({ "kind": "cap_lowered", "recorded": 8, "requested": 4 }),
-            message: "the cap may only rise".to_string(),
+            at: lash_core::RefusalSite::Command {
+                index: 1,
+                command: "raise_cap".to_string(),
+            },
+            reason: lash_core::ConfigRefusalReason::Owner {
+                refusal: serde_json::json!({ "kind": "cap_lowered", "recorded": 8, "requested": 4 }),
+                message: "the cap may only rise".to_string(),
+            },
         }
     }
 
@@ -196,19 +264,67 @@ mod tests {
         }
     }
 
+    /// Every site and every reason is its own tagged variant on the wire,
+    /// and only the owner's reason carries the owner's data (FIG-4652).
     #[test]
-    fn a_whole_candidate_refusal_carries_no_index_or_command() {
-        let refusal = lash_core::ConfigRefusal {
-            index: None,
-            command: None,
-            ..refusal()
+    fn every_refusal_site_and_reason_is_its_own_tagged_variant() {
+        use lash_core::{ConfigRefusalReason as Reason, ConfigValueRole, RefusalSite};
+        let command = || RefusalSite::Command {
+            index: 0,
+            command: "raise_cap".to_string(),
         };
-        let wire = serde_json::to_value(RemoteConfigRefusal::from(refusal.clone()))
-            .expect("refusal encodes");
-        assert_eq!(wire.get("index"), None);
-        assert_eq!(wire.get("command"), None);
-        let decoded: RemoteConfigRefusal = serde_json::from_value(wire).expect("refusal decodes");
-        assert_eq!(lash_core::ConfigRefusal::from(decoded), refusal);
+        for (at, reason, site_kind, reason_kind) in [
+            (command(), refusal().reason, "command", "owner"),
+            (command(), Reason::UnknownOwner, "command", "unknown_owner"),
+            (
+                command(),
+                Reason::UnknownCommand,
+                "command",
+                "unknown_command",
+            ),
+            (
+                command(),
+                Reason::UnrecordedNamespace,
+                "command",
+                "unrecorded_namespace",
+            ),
+            (
+                RefusalSite::Candidate,
+                Reason::Unreadable {
+                    role: ConfigValueRole::RunOptions,
+                    message: "unknown field `prompt`".to_string(),
+                },
+                "candidate",
+                "unreadable",
+            ),
+            (
+                RefusalSite::Creation,
+                Reason::Unreadable {
+                    role: ConfigValueRole::CreationInput,
+                    message: "missing field".to_string(),
+                },
+                "creation",
+                "unreadable",
+            ),
+        ] {
+            let refusal = lash_core::ConfigRefusal {
+                owner: "probe".to_string(),
+                at,
+                reason,
+            };
+            let wire = serde_json::to_value(RemoteConfigRefusal::from(refusal.clone()))
+                .expect("refusal encodes");
+            assert_eq!(wire["at"]["kind"], site_kind);
+            assert_eq!(wire["reason"]["kind"], reason_kind);
+            assert_eq!(
+                wire["reason"].get("refusal").is_some(),
+                reason_kind == "owner",
+                "only an owner's reason carries a refusal: {wire}"
+            );
+            let decoded: RemoteConfigRefusal =
+                serde_json::from_value(wire).expect("refusal decodes");
+            assert_eq!(lash_core::ConfigRefusal::from(decoded), refusal);
+        }
     }
 
     #[test]

@@ -36,7 +36,8 @@
 //! does not register, or a per-run model key this worker's models do not
 //! serve, ends the attempt unrecorded, so the root retries, parks on its
 //! engine's budget, and recovers once the worker serves it. Only a
-//! deterministic refusal of the spec is recorded.
+//! deterministic refusal of the spec is recorded, with its cause typed
+//! ([`RunShapeRefusal`](crate::RunShapeRefusal), FIG-4652).
 
 use crate::runtime::LashRuntime;
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
@@ -97,6 +98,10 @@ impl LashRuntime {
                 models: std::sync::Arc::clone(&self.host.core.providers.models),
             }),
         };
+        let config_registry = self
+            .session
+            .as_ref()
+            .and_then(|session| session.plugins().host().config_registry().ok());
         let runner = ResolveTurnConfigRunner {
             root: root.clone(),
             snapshot: crate::store::persisted_session_config_from_state(&self.state),
@@ -113,10 +118,7 @@ impl LashRuntime {
                 .session
                 .as_ref()
                 .map(|session| session.plugins().protocol_driver()),
-            config_registry: self
-                .session
-                .as_ref()
-                .and_then(|session| session.plugins().host().config_registry().ok()),
+            config_registry,
         };
         let resolved = controller
             .execute_effect(
@@ -157,7 +159,8 @@ pub(crate) fn model_unconfigured(error: SessionError) -> RuntimeError {
 
 /// Why a root's run spec did not resolve, as its `ResolveTurnConfig` step
 /// answers it. A model key this worker does not serve is the deployment's
-/// fault; a refused reasoning selection or shape is the spec's.
+/// fault; a refused shape is the spec's, with its cause typed; and a recorded
+/// namespace its owner cannot read is corrupt stored data.
 fn run_resolve_fault(
     hash: &impl std::fmt::Display,
     error: crate::RunResolveError,
@@ -170,13 +173,13 @@ fn run_resolve_fault(
                  retries until a deployment serves it: {error}"
             ),
         ),
-        crate::RunResolveError::Reasoning(error) => RuntimeEffectControllerError::new(
-            RuntimeErrorCode::ReasoningRefused,
-            format!("run spec `{hash}` is refused: {error}"),
-        ),
-        error => RuntimeEffectControllerError::new(
-            RuntimeErrorCode::RunShapeRefused,
-            format!("run spec `{hash}` could not be resolved: {error}"),
+        crate::RunResolveError::Refused(refusal) => {
+            RuntimeEffectControllerError::run_shape_refused(refusal)
+        }
+        crate::RunResolveError::RecordedCorrupt(corrupt) => corrupt.into_store_error().into(),
+        crate::RunResolveError::Encode(error) => RuntimeEffectControllerError::new(
+            RuntimeErrorCode::RecordEncodingFailed,
+            format!("run spec `{hash}` could not be encoded: {error}"),
         ),
     }
 }
@@ -215,17 +218,16 @@ struct RootSpec {
 
 impl RootSpec {
     /// Resolve this spec against `snapshot` under `termination` and
-    /// `follow_on_recoveries`. A fault a redeploy or a retry repairs is
-    /// marked so it never becomes the step's recorded outcome.
+    /// `follow_on_recoveries`; `owners` apply the protocol options it states.
+    /// A fault a redeploy or a retry repairs is marked so it never becomes
+    /// the step's recorded outcome.
     async fn resolve(
         self,
         snapshot: &PersistedSessionConfig,
         termination: crate::runtime::TerminationPolicy,
         follow_on_recoveries: u32,
-    ) -> Result<
-        (crate::ResolvedRun, Option<crate::ProtocolTurnOptions>),
-        RuntimeEffectControllerError,
-    > {
+        owners: &dyn crate::RunOptionsOwner,
+    ) -> Result<crate::ResolvedRun, RuntimeEffectControllerError> {
         let repairable = |code: RuntimeErrorCode, message: String| {
             RuntimeEffectControllerError::new(code, message).retryable_uncommitted_derivation()
         };
@@ -264,29 +266,35 @@ impl RootSpec {
                     definition
                         .resolve(snapshot, &spec.context)
                         .map_err(|refusal| {
-                            RuntimeEffectControllerError::new(
-                                RuntimeErrorCode::RunShapeRefused,
-                                refusal.to_string(),
+                            RuntimeEffectControllerError::run_shape_refused(
+                                crate::RunShapeRefusal::Definition { refusal },
                             )
                         })?,
                 )
             }
         };
-        // The protocol options the run states, as stated: the explicit
-        // overrides over the definition's, before either meets the snapshot.
-        let run_options = (*spec.overrides)
-            .clone()
-            .over(definition.clone().unwrap_or_default())
-            .protocol_turn_options;
         spec.resolve(
             snapshot,
             definition,
             termination,
             follow_on_recoveries,
             self.models.as_ref(),
+            owners,
         )
-        .map(|resolved| (resolved, run_options))
         .map_err(|error| run_resolve_fault(&self.hash, error))
+    }
+}
+
+/// A config judgment's fault as the step's error: a refusal is the root's
+/// recorded shape refusal, and a corrupt recorded namespace is corruption.
+fn config_fault(fault: crate::ConfigFault) -> RuntimeEffectControllerError {
+    match fault {
+        crate::ConfigFault::Refused(refusal) => {
+            RuntimeEffectControllerError::run_shape_refused(crate::RunShapeRefusal::Owner {
+                refusal,
+            })
+        }
+        crate::ConfigFault::RecordedCorrupt(corrupt) => corrupt.into_store_error().into(),
     }
 }
 
@@ -316,44 +324,54 @@ impl RuntimeEffectLocalRunner for ResolveTurnConfigRunner {
             ));
         }
         let inherited = self.inherited.is_some();
-        let (mut resolved, run_options) = match (self.inherited, self.spec) {
+        let mut resolved = match (self.inherited, self.spec) {
             // A recovered follow-on re-records the shape its parent root
             // resolved, verbatim: it does not re-resolve.
-            (Some(inherited), _) => (inherited, None),
-            (None, None) => (
-                crate::ResolvedRun::snapshot(
-                    self.snapshot,
-                    self.termination,
-                    self.follow_on_recoveries,
-                ),
-                None,
+            (Some(inherited), _) => inherited,
+            (None, None) => crate::ResolvedRun::snapshot(
+                self.snapshot,
+                self.termination,
+                self.follow_on_recoveries,
             ),
             (None, Some(spec)) => {
-                spec.resolve(&self.snapshot, self.termination, self.follow_on_recoveries)
-                    .await?
+                let owners: &dyn crate::RunOptionsOwner = match self.config_registry.as_deref() {
+                    Some(registry) => registry,
+                    None => &crate::NoRunOptionsOwner,
+                };
+                spec.resolve(
+                    &self.snapshot,
+                    self.termination,
+                    self.follow_on_recoveries,
+                    owners,
+                )
+                .await?
             }
         };
         // An override is judged by the owner of every namespace it changed,
         // as a config command's candidate is: an overlay cannot set what the
         // owner does not admit. The refusal is the root's recorded shape.
         if !inherited
-            && (resolved.resolved.is_some() || run_options.is_some())
+            && resolved.resolved.is_some()
             && let Some(registry) = self.config_registry.as_ref()
         {
             registry
-                .validate_derived(&resolved.base, resolved.config(), run_options.as_ref())
-                .map_err(|refusal| {
-                    RuntimeEffectControllerError::new(
-                        RuntimeErrorCode::RunShapeRefused,
-                        format!("the run's overrides were refused: {refusal}"),
-                    )
-                })?;
+                .validate_derived(&resolved.base, resolved.config())
+                .map_err(config_fault)?;
         }
         if !inherited && let Some(driver) = self.protocol_driver {
-            let options = resolved.config().plugin_config.protocol_turn_options();
-            resolved.render = driver.resolve_render(&options).map_err(|message| {
-                RuntimeEffectControllerError::new(RuntimeErrorCode::RunShapeRefused, message)
-            })?;
+            let namespace = resolved.config().plugin_config.protocol_turn_options();
+            resolved.render = driver
+                .resolve_render(&namespace)
+                .map_err(|fault| match fault {
+                    crate::RenderFault::Refused(refusal) => {
+                        RuntimeEffectControllerError::run_shape_refused(
+                            crate::RunShapeRefusal::Render { refusal },
+                        )
+                    }
+                    crate::RenderFault::RecordedCorrupt(corrupt) => {
+                        corrupt.into_store_error().into()
+                    }
+                })?;
         }
         Ok(RuntimeEffectOutcome::ResolveTurnConfig {
             resolved: Box::new(resolved),

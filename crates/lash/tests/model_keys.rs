@@ -1038,7 +1038,8 @@ async fn an_unknown_key_is_refused_before_anything_changes(tier: Tier, replay: b
         panic!("the model change is refused typed: {changed:?}");
     };
     assert_eq!(
-        serde_json::from_value::<lash::config::CoreConfigRefusal>(refusal.refusal)
+        refusal
+            .owner_refusal::<lash::config::CoreConfigRefusal>()
             .expect("the core owner's typed refusal"),
         lash::config::CoreConfigRefusal::UnknownModel {
             key: ModelKey::new(unregistered),

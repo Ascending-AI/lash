@@ -2,39 +2,182 @@
   "$defs": {
     "RemoteConfigRefusal": {
       "additionalProperties": false,
-      "description": "Why an owner refused a config transaction: which command, by which\nowner, and the owner's typed refusal as data.",
+      "description": "A refused config transaction: the owner it names, where it was refused\nand why.",
       "properties": {
-        "command": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "index": {
-          "description": "The refused command's position; absent when the final candidate as a\nwhole failed an owner's validation.",
-          "format": "uint",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "message": {
-          "type": "string"
+        "at": {
+          "$ref": "#/$defs/RemoteRefusalSite"
         },
         "owner": {
           "type": "string"
         },
-        "refusal": {
-          "description": "The owner's refusal, in the shape of its registered refusal schema."
+        "reason": {
+          "$ref": "#/$defs/RemoteConfigRefusalReason"
         }
       },
       "required": [
         "owner",
-        "refusal",
-        "message"
+        "at",
+        "reason"
       ],
       "type": "object"
+    },
+    "RemoteConfigRefusalReason": {
+      "description": "Why a config transaction was refused. Only `owner` carries data in the\nowner's registered refusal schema; every other reason is the framework's.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The owner refused: `refusal` is in the shape of its registered\nrefusal schema, and `message` is that refusal's display text.",
+          "properties": {
+            "kind": {
+              "const": "owner",
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "refusal": true
+          },
+          "required": [
+            "kind",
+            "refusal",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "No installed plugin registers the named owner.",
+          "properties": {
+            "kind": {
+              "const": "unknown_owner",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The owner registers no command of the name the site carries.",
+          "properties": {
+            "kind": {
+              "const": "unknown_command",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The session recorded no namespace for the owner.",
+          "properties": {
+            "kind": {
+              "const": "unrecorded_namespace",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A value did not read or write as the owner's type.",
+          "properties": {
+            "kind": {
+              "const": "unreadable",
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "role": {
+              "$ref": "#/$defs/RemoteConfigValueRole"
+            }
+          },
+          "required": [
+            "kind",
+            "role",
+            "message"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteConfigValueRole": {
+      "description": "Which value of a config judgment could not be read or written as its\nowner's type.",
+      "enum": [
+        "creation_input",
+        "arguments",
+        "run_options",
+        "candidate",
+        "output",
+        "refusal"
+      ],
+      "type": "string"
+    },
+    "RemoteRefusalSite": {
+      "description": "Where a config refusal was raised.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "One command of the transaction, by its position and registered name.",
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "index": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "command",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "index",
+            "command"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The final candidate as a whole.",
+          "properties": {
+            "kind": {
+              "const": "candidate",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The creation of the session's namespace.",
+          "properties": {
+            "kind": {
+              "const": "creation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
     }
   },
   "$id": "https://lash.dev/schemas/remote-config-transaction-outcome/v100",
@@ -100,7 +243,7 @@
     },
     {
       "additionalProperties": false,
-      "description": "An owner refused: nothing was published.",
+      "description": "The transaction was refused: nothing was published.",
       "properties": {
         "kind": {
           "const": "refused",

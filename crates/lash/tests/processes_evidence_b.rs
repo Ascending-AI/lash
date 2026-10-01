@@ -807,12 +807,6 @@ fn processes_area_witnesses_b() {
     let _ = lash::process::WakeDiscardReason::blocks_ordering_group;
     // W0600: lash_core::facade_support::AgentFrameRun::into_final_turn [function]
     let _ = lash_core::facade_support::AgentFrameRun::into_final_turn;
-    // W0602: lash_core::facade_support::ProtocolTurnOptionsFacadeOps [trait]
-    fn trait_witness_0602<T: lash_core::facade_support::ProtocolTurnOptionsFacadeOps>() {}
-    // W0603: lash_core::facade_support::ProtocolTurnOptionsFacadeOps::merged_with_override [function]
-    fn meth_0603<T: lash_core::facade_support::ProtocolTurnOptionsFacadeOps>(_: &T) {
-        let _ = T::merged_with_override;
-    }
     // W0605: lash_core::facade_support::TurnOptions::with_local_stop [function]
     let _ = lash_core::facade_support::TurnOptions::with_local_stop;
     // W0606: lash_core::facade_support::registry_transitions::RETIRED_PROCESS_STATUS_LABELS [constant]

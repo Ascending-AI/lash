@@ -5,7 +5,7 @@ use lash_core::plugin::{
     ProtocolSessionPlugin, TurnPluginDirective,
 };
 use lash_core::{CheckpointKind, ProtocolTurnOptions, SessionError};
-use lash_rlm_types::{RlmCreateExtras, RlmSessionConfig};
+use lash_rlm_types::RlmSessionConfig;
 
 use super::budget_warning::BUDGET_WARNING_STATUS;
 use super::runtime_state::RlmRuntimeState;
@@ -190,13 +190,14 @@ impl ProtocolSessionPlugin for RlmProtocolSession {
 pub fn rlm_session_config(
     options: &ProtocolTurnOptions,
 ) -> Result<RlmSessionConfig, RlmSessionConfigDecodeError> {
-    if options.is_empty() {
-        return Ok(RlmSessionConfig::default());
-    }
-    let extras = super::channel::without_session_pins(options)
-        .decode::<RlmCreateExtras>()
+    let recorded = RlmRecordedConfig::read(options)
         .map_err(|err| RlmSessionConfigDecodeError::Invalid(err.to_string()))?;
-    Ok(RlmSessionConfig::from(&extras))
+    Ok(recorded
+        .map(|recorded| RlmSessionConfig {
+            final_answer_format: recorded.final_answer_format,
+            termination: recorded.termination,
+        })
+        .unwrap_or_default())
 }
 
 /// A recorded RLM options bag that could not be decoded.

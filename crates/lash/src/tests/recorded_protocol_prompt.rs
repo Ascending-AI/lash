@@ -655,10 +655,49 @@ async fn a_child_created_before_its_parents_prompt_changed_keeps_its_own_on_post
         .await
 }
 
-/// A run-options payload that carries a prompt is refused, typed (acceptance
-/// law e): the root ends `RunShapeRefused` with the standard owner's
-/// refusal, makes no model call, and leaves the recorded prompt as it was,
-/// even when the payload restates the very prompt the session recorded.
+/// The typed cause of a run the standard owner refused for options that are
+/// not its run options (FIG-4652).
+fn assert_not_run_options(refused: &crate::EmbedError, what: &str) {
+    let crate::EmbedError::Runtime(error) = refused else {
+        panic!("{what}: the refusal is the run's: {refused:?}");
+    };
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::RunShapeRefused,
+        "{what}"
+    );
+    let Some(lash_core::RunShapeRefusal::Owner { refusal }) = error.run_shape_refusal() else {
+        panic!("{what}: the refusal carries its owner's typed cause: {error:?}");
+    };
+    assert_eq!(
+        refusal.owner,
+        crate::standard::STANDARD_PROTOCOL_PLUGIN_ID,
+        "{what}"
+    );
+    assert_eq!(refusal.at, lash_core::RefusalSite::Candidate, "{what}");
+    assert!(
+        matches!(
+            refusal.reason,
+            lash_core::ConfigRefusalReason::Unreadable {
+                role: lash_core::ConfigValueRole::RunOptions,
+                ..
+            }
+        ),
+        "{what}: {refusal:?}"
+    );
+    assert_eq!(
+        refusal.owner_refusal::<crate::standard::StandardConfigRefusal>(),
+        None,
+        "{what}: the framework's reason is not the owner's refusal"
+    );
+}
+
+/// A run states only the standard owner's run options (FIG-4589 acceptance
+/// law e, FIG-4652). A payload that carries the session's prompt or its
+/// behaviour is refused, typed: the root ends `RunShapeRefused` with the
+/// owner and the unreadable run options as its cause, makes no model call,
+/// and leaves the recorded namespace as it was. That holds even when the
+/// payload restates the very value the session recorded.
 async fn a_run_options_prompt_is_refused(stores: Stores, seed: u64) -> Result<()> {
     const ID: &str = "recorded-prompt-run-options";
     let served: Served = Arc::default();
@@ -675,37 +714,49 @@ async fn a_run_options_prompt_is_refused(stores: Stores, seed: u64) -> Result<()
         .create(crate::SessionCreation::default())
         .await?;
     let session = core.session(ID).open().await?;
+    let recorded = session.read_view().protocol_turn_options().payload.clone();
+    let recorded_behaviour = recorded
+        .get("behaviour")
+        .cloned()
+        .expect("the session recorded its behaviour");
 
-    for stated in [prompt(COMMANDED), prompt(DEFAULTS_A)] {
+    for (what, stated) in [
+        (
+            "another prompt",
+            serde_json::json!({ "prompt": prompt(COMMANDED) }),
+        ),
+        (
+            "the recorded prompt",
+            serde_json::json!({ "prompt": prompt(DEFAULTS_A) }),
+        ),
+        (
+            "the recorded behaviour",
+            serde_json::json!({ "behaviour": recorded_behaviour }),
+        ),
+    ] {
         let refused = session
-            .send(TurnInput::text("a prompt for this run"))
-            .protocol_turn_options(lash_core::ProtocolTurnOptions::from_payload(
-                serde_json::json!({ "prompt": stated }),
-            ))
+            .send(TurnInput::text("options this run cannot state"))
+            .protocol_turn_options(lash_core::ProtocolTurnOptions::from_payload(stated))
             .output()
             .await
-            .expect_err("a run cannot state the session's prompt");
-        assert!(
-            matches!(
-                &refused,
-                crate::EmbedError::Runtime(error)
-                    if error.code == lash_core::RuntimeErrorCode::RunShapeRefused
-                        && error.message.contains(crate::standard::STANDARD_PROTOCOL_PLUGIN_ID)
-                        && error.message.contains(
-                            &crate::standard::StandardConfigRefusal::PromptInRunOptions
-                                .to_string()
-                        )
-            ),
-            "the refusal is the run shape's, with the standard owner's cause: {refused:?}"
-        );
+            .expect_err(what);
+        assert_not_run_options(&refused, what);
     }
     assert!(
         requests_of(&served, ID).is_empty(),
         "a refused run reaches no model"
     );
+    assert_eq!(
+        session.read_view().protocol_turn_options().payload,
+        recorded,
+        "a refused run leaves the recorded namespace as it was"
+    );
 
     session
-        .send(TurnInput::text("a run that states no prompt"))
+        .send(TurnInput::text("a run that states its render options"))
+        .protocol_turn_options(lash_core::ProtocolTurnOptions::typed(
+            crate::standard::StandardRunOptions::default(),
+        )?)
         .output()
         .await?;
     let requests = requests_of(&served, ID);
@@ -749,17 +800,23 @@ async fn an_rlm_run_options_prompt_is_refused() -> Result<()> {
         .output()
         .await
         .expect_err("a run cannot state the session's prompt");
+    let crate::EmbedError::Runtime(error) = &refused else {
+        panic!("the refusal is the run's: {refused:?}");
+    };
+    assert_eq!(error.code, lash_core::RuntimeErrorCode::RunShapeRefused);
+    let Some(lash_core::RunShapeRefusal::Owner { refusal }) = error.run_shape_refusal() else {
+        panic!("the refusal carries its owner's typed cause: {error:?}");
+    };
+    assert_eq!(refusal.owner, crate::rlm::RLM_PROTOCOL_PLUGIN_ID);
     assert!(
         matches!(
-            &refused,
-            crate::EmbedError::Runtime(error)
-                if error.code == lash_core::RuntimeErrorCode::RunShapeRefused
-                    && error.message.contains(crate::rlm::RLM_PROTOCOL_PLUGIN_ID)
-                    && error.message.contains(
-                        &crate::rlm::RlmConfigRefusal::PromptInRunOptions.to_string()
-                    )
+            refusal.reason,
+            lash_core::ConfigRefusalReason::Unreadable {
+                role: lash_core::ConfigValueRole::RunOptions,
+                ..
+            }
         ),
-        "the refusal is the run shape's, with the RLM owner's cause: {refused:?}"
+        "the prompt is no RLM run option: {refusal:?}"
     );
     assert!(
         seen.lock_recover().is_empty(),

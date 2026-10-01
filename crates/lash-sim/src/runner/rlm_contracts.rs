@@ -714,13 +714,13 @@ pub(super) fn run_rlm_protocol_contract(
 fn rlm_contract_config(
     termination: RlmTermination,
 ) -> Result<lash_core::TurnMachineConfig, FixedScriptRunnerError> {
-    let options = lash_core::ProtocolTurnOptions::typed(RlmTurnOptions {
-        termination: Some(termination),
-        final_answer_format: None,
-        render: None,
-    })
-    .map_err(|err| FixedScriptRunnerError::Assertion(err.to_string()))?;
-    rlm_contract_config_with_turn_options(options)
+    rlm_contract_config_with_turn_options(lash_protocol_rlm::RlmRecordedConfig::for_testing(
+        RlmTurnOptions {
+            termination: Some(termination),
+            final_answer_format: None,
+            render: None,
+        },
+    ))
 }
 
 fn rlm_contract_config_with_turn_options(

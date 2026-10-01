@@ -347,15 +347,13 @@ impl SendBuilder {
         self
     }
 
-    /// Protocol turn options for this input's root, merged over the
-    /// session's key by key; options set twice merge the same way.
+    /// The options this input's root states for the session's protocol:
+    /// the protocol owner's typed run options (`StandardRunOptions`,
+    /// `RlmTurnOptions`), which that owner applies over the session's
+    /// recorded namespace. Options the owner's type does not admit refuse
+    /// the root's shape. Setting them again replaces them.
     pub fn protocol_turn_options(mut self, options: ProtocolTurnOptions) -> Self {
-        let overrides = std::mem::take(&mut *self.run_spec.overrides);
-        *self.run_spec.overrides = lash_core::RunOverrides {
-            protocol_turn_options: Some(options),
-            ..lash_core::RunOverrides::default()
-        }
-        .over(overrides);
+        self.run_spec.overrides.protocol_turn_options = Some(options);
         self
     }
 

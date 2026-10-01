@@ -2069,6 +2069,7 @@ fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
     assert!(matches!(
         registry
             .resolve(&config, &transaction, models.as_ref())
+            .expect("the recorded config reads")
             .publish(&mut config),
         crate::ConfigTransactionOutcome::Applied { .. }
     ));

@@ -50,6 +50,38 @@ impl RuntimeModels for Catalog {
 
 /// `key`'s binding: a 200k window and the `low`/`high` efforts, except the
 /// `plain-model` key, whose capability has no reasoning controls.
+/// A protocol owner whose namespace and run options are both JSON maps: it
+/// lays the stated keys over the recorded ones.
+struct MapOwner;
+
+impl RunOptionsOwner for MapOwner {
+    fn apply_run_options(
+        &self,
+        config: &crate::PluginConfig,
+        protocol: &str,
+        options: &ProtocolTurnOptions,
+    ) -> Result<serde_json::Value, crate::config_transaction::ConfigFault> {
+        let mut namespace = config
+            .get(protocol)
+            .and_then(serde_json::Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        let Some(stated) = options.payload.as_object() else {
+            return Err(crate::config_transaction::ConfigRefusal {
+                owner: protocol.to_string(),
+                at: crate::config_transaction::RefusalSite::Candidate,
+                reason: crate::config_transaction::ConfigRefusalReason::Unreadable {
+                    role: crate::config_transaction::ConfigValueRole::RunOptions,
+                    message: "run options are a map".to_string(),
+                },
+            }
+            .into());
+        };
+        namespace.extend(stated.clone());
+        Ok(serde_json::Value::Object(namespace))
+    }
+}
+
 fn recorded(key: &str) -> RecordedModel {
     let metadata = lash_core_llm::model::ModelMetadata::new(
         format!("{key}-wire"),
@@ -112,6 +144,7 @@ fn the_default_spec_is_no_spec_and_resolves_to_the_snapshot() {
             TerminationPolicy::default(),
             3,
             &catalog(),
+            &MapOwner,
         )
         .expect("resolve");
     assert_eq!(
@@ -130,7 +163,14 @@ fn a_resolved_run_records_its_termination_policy() {
         treat_missing_done_as_failure: false,
     };
     let resolved = RunSpec::default()
-        .resolve(&snapshot(), None, finishes.clone(), 3, &catalog())
+        .resolve(
+            &snapshot(),
+            None,
+            finishes.clone(),
+            3,
+            &catalog(),
+            &MapOwner,
+        )
         .expect("resolve");
     assert_eq!(resolved.termination, finishes);
 
@@ -292,6 +332,7 @@ fn capabilities_are_durable_refs_recorded_on_the_resolution() {
             TerminationPolicy::default(),
             3,
             &catalog(),
+            &MapOwner,
         )
         .expect("resolve");
     assert_eq!(resolved.capabilities, spec.capabilities);
@@ -334,7 +375,14 @@ fn a_model_only_override_mints_the_key_once_and_keeps_the_snapshot_reasoning() {
     });
     let catalog = catalog();
     let resolved = spec
-        .resolve(&snapshot(), None, TerminationPolicy::default(), 3, &catalog)
+        .resolve(
+            &snapshot(),
+            None,
+            TerminationPolicy::default(),
+            3,
+            &catalog,
+            &MapOwner,
+        )
         .expect("resolve");
     assert_eq!(catalog.snapshots(), 1, "the key is minted exactly once");
     let model = resolved.config().model.clone().expect("model");
@@ -356,7 +404,14 @@ fn a_reasoning_only_override_keeps_the_snapshot_model_without_minting() {
     });
     let catalog = catalog();
     let resolved = spec
-        .resolve(&snapshot(), None, TerminationPolicy::default(), 3, &catalog)
+        .resolve(
+            &snapshot(),
+            None,
+            TerminationPolicy::default(),
+            3,
+            &catalog,
+            &MapOwner,
+        )
         .expect("resolve");
     assert_eq!(catalog.snapshots(), 0, "no key, no mint");
     let model = resolved.config().model.clone().expect("model");
@@ -379,6 +434,7 @@ fn an_override_naming_an_unserved_key_fails_typed_and_never_falls_back() {
         TerminationPolicy::default(),
         3,
         &catalog(),
+        &MapOwner,
     ) {
         Err(RunResolveError::Model(unavailable)) => {
             assert_eq!(unavailable.key, ModelKey::new("retired-model"));
@@ -405,8 +461,9 @@ fn an_override_whose_reasoning_the_model_refuses_is_refused_typed() {
         TerminationPolicy::default(),
         3,
         &catalog(),
+        &MapOwner,
     ) {
-        Err(RunResolveError::Reasoning(refused)) => {
+        Err(RunResolveError::Refused(RunShapeRefusal::Reasoning { refusal: refused })) => {
             assert_eq!(refused.key, ModelKey::new("plain-model"));
             assert_eq!(
                 refused.reasoning,
@@ -426,8 +483,9 @@ fn an_override_whose_reasoning_the_model_refuses_is_refused_typed() {
         TerminationPolicy::default(),
         3,
         &catalog(),
+        &MapOwner,
     ) {
-        Err(RunResolveError::Reasoning(refused)) => {
+        Err(RunResolveError::Refused(RunShapeRefusal::Reasoning { refusal: refused })) => {
             assert_eq!(refused.key, ModelKey::new("session-model"));
         }
         other => panic!("an unadvertised effort is refused, got {other:?}"),
@@ -446,6 +504,7 @@ fn an_override_whose_reasoning_the_model_refuses_is_refused_typed() {
             TerminationPolicy::default(),
             3,
             &catalog(),
+            &MapOwner,
         )
         .expect("the provider's default reasoning fits a model with no controls");
 }
@@ -459,8 +518,17 @@ fn a_reasoning_override_for_a_session_without_a_model_is_refused() {
     let bare =
         PersistedSessionConfig::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
     assert!(matches!(
-        spec.resolve(&bare, None, TerminationPolicy::default(), 3, &catalog()),
-        Err(RunResolveError::ReasoningWithoutModel)
+        spec.resolve(
+            &bare,
+            None,
+            TerminationPolicy::default(),
+            3,
+            &catalog(),
+            &MapOwner
+        ),
+        Err(RunResolveError::Refused(
+            RunShapeRefusal::ReasoningWithoutModel
+        ))
     ));
 }
 
@@ -491,6 +559,7 @@ fn explicit_overrides_win_over_the_definition_which_wins_over_the_snapshot() {
             TerminationPolicy::default(),
             3,
             &catalog(),
+            &MapOwner,
         )
         .expect("resolve");
     assert_eq!(

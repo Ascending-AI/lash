@@ -179,6 +179,7 @@ impl ConfigOwner for TestCodeConfigOwner {
     type Create = TestCodeCreateExtras;
     type Recorded = TestCodeCreateExtras;
     type Refusal = TestCodeConfigRefusal;
+    type RunOptions = TestCodeCreateExtras;
 
     fn implementation(&self) -> &str {
         "test-code-protocol:1"
@@ -199,6 +200,15 @@ impl ConfigOwner for TestCodeConfigOwner {
         _facts: &CandidateFacts<'_>,
     ) -> Result<(), TestCodeConfigRefusal> {
         Ok(())
+    }
+
+    /// A run restates the extras whole.
+    fn apply_run_options(
+        &self,
+        _recorded: &TestCodeCreateExtras,
+        options: TestCodeCreateExtras,
+    ) -> Result<TestCodeCreateExtras, TestCodeConfigRefusal> {
+        Ok(options)
     }
 }
 

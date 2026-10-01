@@ -1197,7 +1197,8 @@ pub async fn an_unknown_model_key_is_refused_typed_and_publishes_nothing(
     };
     assert_eq!(refusal.owner, crate::CORE_CONFIG_OWNER);
     assert_eq!(
-        serde_json::from_value::<crate::CoreConfigRefusal>(refusal.refusal)
+        refusal
+            .owner_refusal::<crate::CoreConfigRefusal>()
             .expect("the core owner's typed refusal"),
         crate::CoreConfigRefusal::UnknownModel {
             key: crate::ModelKey::new("turn-config-unknown-model"),
@@ -1215,6 +1216,251 @@ pub async fn an_unknown_model_key_is_refused_typed_and_publishes_nothing(
     );
     assert_eq!(head.config.config_revision, 0, "the revision did not move");
     assert_eq!(calls.load(Ordering::SeqCst), 0, "no model was asked");
+}
+
+/// The plugin id and config namespace of [`ShapedFactory`].
+const SHAPED: &str = "conformance-shaped-config";
+
+/// The namespace the session records under [`SHAPED`].
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    lash_core::facade_support::JsonSchema,
+)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+#[serde(deny_unknown_fields)]
+struct RecordedShape {
+    value: String,
+}
+
+/// A recorded type the bytes of a [`RecordedShape`] do not read as.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    lash_core::facade_support::JsonSchema,
+)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+#[serde(deny_unknown_fields)]
+struct OtherShape {
+    count: u64,
+}
+
+/// The owner of the [`SHAPED`] namespace, reading it as `R`: it records
+/// `R`'s default and admits every candidate.
+struct ShapedOwner<R>(std::marker::PhantomData<fn() -> R>);
+
+impl<R> crate::ConfigOwner for ShapedOwner<R>
+where
+    R: crate::ConfigWire + Clone + Default,
+{
+    type Create = R;
+    type Recorded = R;
+    type Refusal = String;
+    type RunOptions = crate::NoRunOptions;
+
+    fn implementation(&self) -> &str {
+        "conformance-shaped-config:1"
+    }
+
+    fn create(
+        &self,
+        input: Option<R>,
+        _facts: crate::CreationFacts<'_, R>,
+    ) -> Result<Option<R>, String> {
+        Ok(Some(input.unwrap_or_default()))
+    }
+
+    fn validate(
+        &self,
+        _value: &R,
+        _base: Option<&R>,
+        _facts: &crate::CandidateFacts<'_>,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn apply_run_options(&self, recorded: &R, _options: crate::NoRunOptions) -> Result<R, String> {
+        Ok(recorded.clone())
+    }
+}
+
+struct ShapedPlugin;
+
+impl crate::plugin::SessionPlugin for ShapedPlugin {
+    fn id(&self) -> &'static str {
+        SHAPED
+    }
+
+    fn register(
+        &self,
+        _reg: &mut crate::plugin::PluginRegistrar,
+    ) -> Result<(), crate::PluginError> {
+        Ok(())
+    }
+}
+
+/// A plugin whose owner reads the [`SHAPED`] namespace as `R`. Two builds
+/// that install it under different `R` stand for a namespace whose stored
+/// bytes its owner can no longer read.
+struct ShapedFactory<R>(std::marker::PhantomData<fn() -> R>);
+
+impl<R> ShapedFactory<R>
+where
+    R: crate::ConfigWire + Clone + Default,
+{
+    fn installed() -> Vec<Arc<dyn crate::plugin::PluginFactory>> {
+        vec![Arc::new(Self(std::marker::PhantomData))]
+    }
+}
+
+impl<R> crate::plugin::PluginFactory for ShapedFactory<R>
+where
+    R: crate::ConfigWire + Clone + Default,
+{
+    fn id(&self) -> &'static str {
+        SHAPED
+    }
+
+    fn register_config(
+        &self,
+        registrar: &mut crate::ConfigRegistrar,
+    ) -> Result<(), crate::ConfigRegistrationError> {
+        registrar.owner(ShapedOwner::<R>(std::marker::PhantomData))
+    }
+
+    fn build(
+        &self,
+        _ctx: &crate::plugin::PluginSessionContext,
+    ) -> Result<Arc<dyn crate::plugin::SessionPlugin>, crate::PluginError> {
+        Ok(Arc::new(ShapedPlugin))
+    }
+}
+
+/// A recorded namespace its owner cannot read is corruption of the
+/// session's stored config, never a refusal of the transaction that met it
+/// (FIG-4652): the command's resolution fails as corrupt stored data,
+/// nothing settles as `Refused`, and nothing is published.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_corrupt_recorded_namespace_is_corruption_and_never_a_recorded_refusal(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    const REQUEST: &str = "turn-config-corrupt-namespace";
+    let calls = Arc::new(AtomicUsize::new(0));
+    let models = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut parts = law_session(
+        prefix,
+        "corrupt-namespace",
+        &effect_host,
+        &stores,
+        turn_config_models(recording_model(&calls, &models)),
+    )
+    .await;
+    // The session records its namespace as one shape, and a first command
+    // commits the head that carries it.
+    parts.tools = ShapedFactory::<RecordedShape>::installed();
+    command_second_model(&runner, &parts).await;
+    let recorded_head = parts
+        .store
+        .load_session_head_meta(&parts.session_id)
+        .await
+        .expect("read the head")
+        .expect("the first command committed the session's head");
+    assert_eq!(
+        recorded_head.config.plugin_config.get(SHAPED),
+        Some(&serde_json::json!({ "value": "" })),
+        "the session recorded the namespace"
+    );
+
+    // An owner that reads another shape meets bytes it cannot read.
+    let mut reading = parts.clone();
+    reading.tools = ShapedFactory::<OtherShape>::installed();
+    let receipt = submit_transaction(
+        &reading,
+        REQUEST,
+        &crate::ConfigTransaction::of(crate::plugin::config::core::SetModel {
+            model: crate::ModelKey::new(FIRST_MODEL),
+        }),
+    )
+    .await;
+    let (driven_tx, mut driven_rx) = tokio::sync::mpsc::unbounded_channel();
+    let attempt_parts = reading.clone();
+    runner
+        .run_turn(
+            admit(crate::ExecutionScope::session_operation(
+                &parts.session_id,
+                REQUEST,
+            )),
+            Arc::new(move |controller| {
+                let parts = attempt_parts.clone();
+                let driven_tx = driven_tx.clone();
+                let receipt = receipt.clone();
+                Box::pin(async move {
+                    let mut runtime = build_runtime(parts).await;
+                    let driven = runtime
+                        .drive_next_root(
+                            REQUEST,
+                            crate::TurnOptions::new(
+                                tokio_util::sync::CancellationToken::new(),
+                                controller,
+                            ),
+                        )
+                        .await
+                        .map(drop);
+                    let end = crate::ConformanceTurnEnd::of(&driven);
+                    let settled = match &driven {
+                        Ok(()) => Some(runtime.settle_session_command(receipt).await),
+                        Err(_) => None,
+                    };
+                    let _ = driven_tx.send((driven, settled));
+                    end
+                })
+            }),
+        )
+        .await;
+    let (driven, settled) = driven_rx
+        .recv()
+        .await
+        .expect("the tier's runner drove the config transaction");
+    let error = driven.expect_err(&format!(
+        "a namespace its owner cannot read resolves nothing; the command settled {settled:?}"
+    ));
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::RuntimeStoreCorrupt,
+        "an unreadable recorded namespace is corrupt stored data: {error:?}"
+    );
+    assert!(error.is_terminal(), "corruption is never retried");
+    assert!(
+        error.message.contains(SHAPED),
+        "the error names the namespace's owner: {error:?}"
+    );
+    let head = parts
+        .store
+        .load_session_head_meta(&parts.session_id)
+        .await
+        .expect("read the head")
+        .expect("the session's head");
+    assert_eq!(
+        head.config.model_key().map(crate::ModelKey::as_str),
+        Some(SECOND_MODEL),
+        "nothing was published"
+    );
+    assert_eq!(
+        head.config.config_revision, recorded_head.config.config_revision,
+        "the revision did not move"
+    );
 }
 
 /// A model change records the binding the host's models minted where the
@@ -1373,7 +1619,8 @@ pub async fn a_reasoning_change_is_judged_against_the_final_recorded_model(
         panic!("an effort the session's model does not declare is refused: {outcome:?}");
     };
     assert_eq!(refusal.owner, crate::CORE_CONFIG_OWNER);
-    let refusal = serde_json::from_value::<crate::CoreConfigRefusal>(refusal.refusal)
+    let refusal = refusal
+        .owner_refusal::<crate::CoreConfigRefusal>()
         .expect("the core owner's typed refusal");
     assert!(
         matches!(

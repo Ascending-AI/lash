@@ -1137,6 +1137,7 @@ impl lash_core::ConfigOwner for InheritingCapConfigOwner {
     type Create = CapConfig;
     type Recorded = CapConfig;
     type Refusal = CapRefusal;
+    type RunOptions = lash_core::NoRunOptions;
 
     fn implementation(&self) -> &str {
         "inheriting-cap:1"
@@ -1162,6 +1163,14 @@ impl lash_core::ConfigOwner for InheritingCapConfigOwner {
         _facts: &lash_core::CandidateFacts<'_>,
     ) -> Result<(), CapRefusal> {
         Ok(())
+    }
+
+    fn apply_run_options(
+        &self,
+        recorded: &Self::Recorded,
+        _options: Self::RunOptions,
+    ) -> std::result::Result<Self::Recorded, Self::Refusal> {
+        Ok(recorded.clone())
     }
 }
 

@@ -155,9 +155,10 @@ pub struct RunOverrides {
     pub reasoning: Option<ReasoningSelection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<GenerationOptions>,
-    /// Protocol-owned turn options (RLM finish policy and schema included),
-    /// merged key by key over the protocol namespace of the snapshot's plugin
-    /// configuration. A snapshot that records no protocol plugin refuses them.
+    /// The options this run states for the session's protocol (RLM finish
+    /// policy and schema included): the protocol owner's typed run options,
+    /// which that owner alone applies to its recorded namespace. A snapshot
+    /// that records no protocol plugin refuses them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol_turn_options: Option<ProtocolTurnOptions>,
 }
@@ -178,25 +179,12 @@ impl RunOverrides {
             && self.protocol_turn_options.is_none()
     }
 
-    /// `self` over `under`: every field `self` sets wins.
-    #[must_use]
-    pub fn over(self, under: Self) -> Self {
-        Self {
-            model: self.model.or(under.model),
-            reasoning: self.reasoning.or(under.reasoning),
-            generation: self.generation.or(under.generation),
-            protocol_turn_options: match (under.protocol_turn_options, self.protocol_turn_options) {
-                (Some(under), Some(top)) => Some(under.merged_with(&top)),
-                (under, top) => top.or(under),
-            },
-        }
-    }
-
     /// Apply these overrides to `config`, the root's snapshot. An override
     /// key is resolved through `models` here, once; a reasoning override
     /// applies to whichever model the root ends up with. An override of
     /// either has the pair the root would record judged against the recorded
-    /// capability.
+    /// capability. The protocol options are applied apart, by their owner
+    /// ([`apply_protocol_options`]).
     fn apply(
         &self,
         config: &mut PersistedSessionConfig,
@@ -218,7 +206,7 @@ impl RunOverrides {
             let model = config
                 .model
                 .as_mut()
-                .ok_or(RunResolveError::ReasoningWithoutModel)?;
+                .ok_or(RunShapeRefusal::ReasoningWithoutModel)?;
             model.reasoning = reasoning.clone();
         }
         if (self.model.is_some() || self.reasoning.is_some())
@@ -226,19 +214,187 @@ impl RunOverrides {
         {
             model
                 .validate_reasoning()
-                .map_err(RunResolveError::Reasoning)?;
+                .map_err(|refusal| RunShapeRefusal::Reasoning { refusal })?;
         }
         if let Some(generation) = &self.generation {
             config.generation = generation.clone();
         }
-        if let Some(options) = &self.protocol_turn_options {
-            if config.plugin_config.protocol_plugin_id().is_none() {
-                return Err(RunResolveError::ProtocolOptionsWithoutProtocol);
-            }
-            config.plugin_config.override_protocol_turn_options(options);
-        }
         Ok(())
     }
+}
+
+/// Lay one statement of a run's protocol `options` over the protocol
+/// namespace `config` holds, through its `owner`.
+fn apply_protocol_options(
+    config: &mut PersistedSessionConfig,
+    options: &ProtocolTurnOptions,
+    owner: &dyn RunOptionsOwner,
+) -> Result<(), RunResolveError> {
+    let Some(protocol) = config.plugin_config.protocol_plugin_id() else {
+        return Err(RunShapeRefusal::ProtocolOptionsWithoutProtocol.into());
+    };
+    let protocol = protocol.to_string();
+    let applied = owner
+        .apply_run_options(&config.plugin_config, &protocol, options)
+        .map_err(|fault| match fault {
+            crate::config_transaction::ConfigFault::Refused(refusal) => {
+                RunResolveError::Refused(RunShapeRefusal::Owner { refusal })
+            }
+            crate::config_transaction::ConfigFault::RecordedCorrupt(corrupt) => {
+                RunResolveError::RecordedCorrupt(corrupt)
+            }
+        })?;
+    config.plugin_config.insert(protocol, applied);
+    Ok(())
+}
+
+/// The owner of the session's protocol namespace, as a spec's resolution
+/// meets it: the one party that lays a run's stated options over the
+/// recorded namespace. The session's config registry implements it.
+pub trait RunOptionsOwner: Send + Sync {
+    /// `config`'s `protocol` namespace with the run's `options` applied.
+    fn apply_run_options(
+        &self,
+        config: &crate::PluginConfig,
+        protocol: &str,
+        options: &ProtocolTurnOptions,
+    ) -> Result<serde_json::Value, crate::config_transaction::ConfigFault>;
+}
+
+/// The owners of a session whose deployment registers none: protocol options
+/// a run states name an owner nobody registers, and are refused as such.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoRunOptionsOwner;
+
+impl RunOptionsOwner for NoRunOptionsOwner {
+    fn apply_run_options(
+        &self,
+        _config: &crate::PluginConfig,
+        protocol: &str,
+        _options: &ProtocolTurnOptions,
+    ) -> Result<serde_json::Value, crate::config_transaction::ConfigFault> {
+        Err(crate::config_transaction::ConfigRefusal {
+            owner: protocol.to_string(),
+            at: crate::config_transaction::RefusalSite::Candidate,
+            reason: crate::config_transaction::ConfigRefusalReason::UnknownOwner,
+        }
+        .into())
+    }
+}
+
+/// A refusal raised in its raiser's own type and carried as data: the
+/// serialized refusal and its display text.
+fn encoded_refusal<R>(refusal: &R) -> (serde_json::Value, String)
+where
+    R: serde::Serialize + std::fmt::Display,
+{
+    match serde_json::to_value(refusal) {
+        Ok(encoded) => (encoded, refusal.to_string()),
+        // A refusal that does not encode keeps its text, and says so.
+        Err(error) => (
+            serde_json::Value::Null,
+            format!("{refusal} (the refusal did not encode: {error})"),
+        ),
+    }
+}
+
+/// Why a registered definition refused to shape a root: deterministic, so it
+/// is recorded as the root's failure. `refusal` is the definition's own
+/// refusal type, serialized, and `message` its display text.
+#[derive(Clone, Debug, PartialEq, thiserror::Error, serde::Serialize, serde::Deserialize)]
+#[error("run definition `{definition}` refused its context: {message}")]
+#[serde(deny_unknown_fields)]
+pub struct RunDefinitionRefusal {
+    pub definition: DefinitionRef,
+    pub refusal: serde_json::Value,
+    pub message: String,
+}
+
+impl RunDefinitionRefusal {
+    /// `definition`'s own typed `refusal`.
+    pub fn new<R>(definition: DefinitionRef, refusal: &R) -> Self
+    where
+        R: serde::Serialize + std::fmt::Display,
+    {
+        let (refusal, message) = encoded_refusal(refusal);
+        Self {
+            definition,
+            refusal,
+            message,
+        }
+    }
+}
+
+impl Eq for RunDefinitionRefusal {}
+
+/// Why a protocol refused to resolve the render a root's results present
+/// with. `refusal` is the protocol's own refusal type, serialized, and
+/// `message` its display text.
+#[derive(Clone, Debug, PartialEq, thiserror::Error, serde::Serialize, serde::Deserialize)]
+#[error("{message}")]
+#[serde(deny_unknown_fields)]
+pub struct RenderRefusal {
+    pub refusal: serde_json::Value,
+    pub message: String,
+}
+
+impl RenderRefusal {
+    /// The protocol's own typed `refusal`.
+    pub fn new<R>(refusal: &R) -> Self
+    where
+        R: serde::Serialize + std::fmt::Display,
+    {
+        let (refusal, message) = encoded_refusal(refusal);
+        Self { refusal, message }
+    }
+}
+
+impl Eq for RenderRefusal {}
+
+/// Why a protocol resolved no render: it refused the root's options, or the
+/// recorded namespace it reads them from is corrupt.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum RenderFault {
+    #[error(transparent)]
+    Refused(#[from] RenderRefusal),
+    #[error(transparent)]
+    RecordedCorrupt(#[from] crate::config_transaction::RecordedNamespaceCorrupt),
+}
+
+/// Why a root's shape was refused: deterministic, so it is the root's
+/// recorded failure, carried typed as
+/// [`RuntimeErrorCause::RunShapeRefused`](crate::RuntimeErrorCause::RunShapeRefused).
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum RunShapeRefusal {
+    /// The spec's registered definition refused its context.
+    #[error(transparent)]
+    Definition { refusal: RunDefinitionRefusal },
+    /// A config owner refused the config the run's overrides derived, or
+    /// the options the run stated for it.
+    #[error("the run's overrides were refused: {refusal}")]
+    Owner {
+        refusal: crate::config_transaction::ConfigRefusal,
+    },
+    /// The reasoning the root would run is one its model's recorded
+    /// capability refuses.
+    #[error(transparent)]
+    Reasoning {
+        refusal: lash_core_llm::model::ReasoningRefused,
+    },
+    /// The spec sets a reasoning selection for a session with no model.
+    #[error("a reasoning override needs a model, and the session has selected none")]
+    ReasoningWithoutModel,
+    /// The spec states protocol turn options for a session that records no
+    /// protocol plugin.
+    #[error(
+        "run overrides state protocol turn options, but the session records no protocol plugin"
+    )]
+    ProtocolOptionsWithoutProtocol,
+    /// The protocol refused to resolve the root's render.
+    #[error("the run's render was refused: {refusal}")]
+    Render { refusal: RenderRefusal },
 }
 
 /// Why a spec did not resolve to a recorded shape.
@@ -248,19 +404,13 @@ pub enum RunResolveError {
     /// repairs it, so it is never the root's recorded outcome.
     #[error(transparent)]
     Model(crate::provider::ModelUnavailable),
-    /// The spec sets a reasoning selection for a session with no model.
-    #[error("a reasoning override needs a model, and the session has selected none")]
-    ReasoningWithoutModel,
-    /// The reasoning the root would run is one its model's recorded
-    /// capability refuses.
+    /// The spec is refused, on any attempt.
     #[error(transparent)]
-    Reasoning(lash_core_llm::model::ReasoningRefused),
-    /// The spec states protocol turn options for a session that records no
-    /// protocol plugin.
-    #[error(
-        "run overrides state protocol turn options, but the session records no protocol plugin"
-    )]
-    ProtocolOptionsWithoutProtocol,
+    Refused(#[from] RunShapeRefusal),
+    /// The protocol namespace the snapshot recorded does not read as its
+    /// owner's type.
+    #[error(transparent)]
+    RecordedCorrupt(crate::config_transaction::RecordedNamespaceCorrupt),
     #[error("the spec could not be encoded: {0}")]
     Encode(#[from] serde_json::Error),
 }
@@ -361,7 +511,9 @@ impl RunSpec {
     /// definition produced over its context (`None` without a definition).
     /// `termination` and `follow_on_recoveries` are the host's policy and
     /// follow-on recovery bound the root records.
-    /// `models` mints the binding of an override key.
+    /// `models` mints the binding of an override key, and `owner` applies
+    /// the stated protocol options: the definition's first, then the spec's
+    /// own over them.
     pub fn resolve(
         &self,
         snapshot: &PersistedSessionConfig,
@@ -369,12 +521,27 @@ impl RunSpec {
         termination: TerminationPolicy,
         follow_on_recoveries: u32,
         models: &dyn crate::provider::RuntimeModels,
+        owner: &dyn RunOptionsOwner,
     ) -> Result<ResolvedRun, RunResolveError> {
         let mut config = snapshot.clone();
-        let overrides = (*self.overrides)
-            .clone()
-            .over(definition.unwrap_or_default());
-        overrides.apply(&mut config, models)?;
+        let definition = definition.unwrap_or_default();
+        let overrides = &*self.overrides;
+        RunOverrides {
+            model: overrides.model.clone().or(definition.model),
+            reasoning: overrides.reasoning.clone().or(definition.reasoning),
+            generation: overrides.generation.clone().or(definition.generation),
+            protocol_turn_options: None,
+        }
+        .apply(&mut config, models)?;
+        for options in [
+            definition.protocol_turn_options.as_ref(),
+            overrides.protocol_turn_options.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            apply_protocol_options(&mut config, options, owner)?;
+        }
         Ok(ResolvedRun {
             spec: self.hash()?,
             resolved: (config != *snapshot).then(|| Box::new(config)),
@@ -518,15 +685,6 @@ impl ResolvedRun {
     }
 }
 
-/// Why a registered definition refused to shape a root: deterministic, so it
-/// is recorded as the root's failure.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("run definition `{definition}` refused its context: {message}")]
-pub struct RunShapeError {
-    pub definition: DefinitionRef,
-    pub message: String,
-}
-
 /// A registered run definition: a pure, deterministic function from the
 /// root's config snapshot and the spec's context to overrides. It does no
 /// I/O; live resources are bound on the worker by id.
@@ -537,7 +695,7 @@ pub trait RunDefinition: Send + Sync {
         &self,
         snapshot: &PersistedSessionConfig,
         context: &serde_json::Value,
-    ) -> Result<RunOverrides, RunShapeError>;
+    ) -> Result<RunOverrides, RunDefinitionRefusal>;
 }
 
 /// The run definitions a deployment registers, by exact reference.

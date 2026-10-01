@@ -56,21 +56,63 @@ impl RemoteConfigTransactionRequest {
     }
 }
 
-/// Why an owner refused a config transaction: which command, by which
-/// owner, and the owner's typed refusal as data.
+/// Where a config refusal was raised.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RemoteRefusalSite {
+    /// One command of the transaction, by its position and registered name.
+    Command { index: usize, command: String },
+    /// The final candidate as a whole.
+    Candidate,
+    /// The creation of the session's namespace.
+    Creation,
+}
+
+/// Which value of a config judgment could not be read or written as its
+/// owner's type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteConfigValueRole {
+    CreationInput,
+    Arguments,
+    RunOptions,
+    Candidate,
+    Output,
+    Refusal,
+}
+
+/// Why a config transaction was refused. Only `owner` carries data in the
+/// owner's registered refusal schema; every other reason is the framework's.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RemoteConfigRefusalReason {
+    /// The owner refused: `refusal` is in the shape of its registered
+    /// refusal schema, and `message` is that refusal's display text.
+    Owner {
+        refusal: serde_json::Value,
+        message: String,
+    },
+    /// No installed plugin registers the named owner.
+    UnknownOwner,
+    /// The owner registers no command of the name the site carries.
+    UnknownCommand,
+    /// The session recorded no namespace for the owner.
+    UnrecordedNamespace,
+    /// A value did not read or write as the owner's type.
+    Unreadable {
+        role: RemoteConfigValueRole,
+        message: String,
+    },
+}
+
+/// A refused config transaction: the owner it names, where it was refused
+/// and why.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteConfigRefusal {
-    /// The refused command's position; absent when the final candidate as a
-    /// whole failed an owner's validation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub index: Option<usize>,
     pub owner: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub command: Option<String>,
-    /// The owner's refusal, in the shape of its registered refusal schema.
-    pub refusal: serde_json::Value,
-    pub message: String,
+    pub at: RemoteRefusalSite,
+    pub reason: RemoteConfigRefusalReason,
 }
 
 /// What a config transaction settled as.
@@ -86,7 +128,7 @@ pub enum RemoteConfigTransactionOutcome {
     /// The transaction was written against `expected`, but the session's
     /// config was at `actual`: nothing was published.
     Stale { expected: u64, actual: u64 },
-    /// An owner refused: nothing was published.
+    /// The transaction was refused: nothing was published.
     Refused { refusal: RemoteConfigRefusal },
 }
 

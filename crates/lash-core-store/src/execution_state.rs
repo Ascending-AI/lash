@@ -147,8 +147,8 @@ impl PluginConfig {
     }
 
     /// Record `value` as `plugin_id`'s namespace, replacing what it held.
-    /// Only an owner's validated output, or a recorded run's override of the
-    /// protocol namespace, reaches this.
+    /// Only an owner's output reaches this: what it created, or its recorded
+    /// namespace with a run's options applied.
     pub fn insert(&mut self, plugin_id: impl Into<String>, value: serde_json::Value) {
         self.namespaces.insert(plugin_id.into(), value);
     }
@@ -158,17 +158,6 @@ impl PluginConfig {
         for (plugin_id, value) in updates {
             self.namespaces.insert(plugin_id.clone(), value.clone());
         }
-    }
-
-    /// Merge `overrides` over the protocol namespace, key by key (a run's
-    /// one-shot override; it never reaches the sticky config). A
-    /// configuration without a protocol plugin has no namespace to override.
-    pub fn override_protocol_turn_options(&mut self, overrides: &crate::ProtocolTurnOptions) {
-        let Some(protocol) = self.protocol.clone() else {
-            return;
-        };
-        let merged = self.protocol_turn_options().merged_with(overrides);
-        self.namespaces.insert(protocol, merged.payload);
     }
 }
 

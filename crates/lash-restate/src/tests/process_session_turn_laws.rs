@@ -846,6 +846,7 @@ impl lash_core::ConfigOwner for DefaultsOwner {
     type Create = DefaultsConfig;
     type Recorded = DefaultsConfig;
     type Refusal = String;
+    type RunOptions = lash_core::NoRunOptions;
 
     fn implementation(&self) -> &str {
         "partial-create-defaults:1"
@@ -870,6 +871,14 @@ impl lash_core::ConfigOwner for DefaultsOwner {
         _facts: &lash_core::CandidateFacts<'_>,
     ) -> Result<(), String> {
         Ok(())
+    }
+
+    fn apply_run_options(
+        &self,
+        recorded: &Self::Recorded,
+        _options: Self::RunOptions,
+    ) -> std::result::Result<Self::Recorded, Self::Refusal> {
+        Ok(recorded.clone())
     }
 }
 

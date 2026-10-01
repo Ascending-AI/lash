@@ -54,9 +54,9 @@ pub use plugin::{
     RLM_CONFIG_IMPLEMENTATION, RLM_PROTOCOL_PLUGIN_ID, RlmAbilities, RlmChannel, RlmConfigOwner,
     RlmConfigRefusal, RlmCreateConfig, RlmLanguageFeatures, RlmProtocolPluginConfig,
     RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmRecordedBehaviour,
-    RlmRecordedConfig, RlmSessionConfigDecodeError, SetRlmPrompt, SetRlmPromptContext,
-    SetRlmRender, UnsetBound, UnsetChannel, rlm_lashlang_surface, rlm_protocol_config,
-    rlm_session_config,
+    RlmRecordedConfig, RlmRenderRefusal, RlmRunOptions, RlmSessionConfigDecodeError, SetRlmPrompt,
+    SetRlmPromptContext, SetRlmRender, UnsetBound, UnsetChannel, rlm_lashlang_surface,
+    rlm_protocol_config, rlm_session_config,
 };
 pub use projection::{
     RlmHistoryProjection, RlmSeed, decode_rlm_protocol_event, rlm_history_projection,

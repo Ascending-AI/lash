@@ -185,6 +185,7 @@ impl crate::ConfigOwner for FactsOwner {
     type Create = FactsConfig;
     type Recorded = FactsConfig;
     type Refusal = String;
+    type RunOptions = crate::NoRunOptions;
 
     fn implementation(&self) -> &str {
         "conformance-recorded-facts:1"
@@ -209,6 +210,14 @@ impl crate::ConfigOwner for FactsOwner {
         _facts: &crate::CandidateFacts<'_>,
     ) -> Result<(), String> {
         Ok(())
+    }
+
+    fn apply_run_options(
+        &self,
+        recorded: &Self::Recorded,
+        _options: Self::RunOptions,
+    ) -> std::result::Result<Self::Recorded, Self::Refusal> {
+        Ok(recorded.clone())
     }
 }
 

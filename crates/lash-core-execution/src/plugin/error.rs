@@ -163,6 +163,10 @@ pub enum PluginError {
     },
     #[error("plugin registration error: {0}")]
     Registration(String),
+    /// A plugin's config registration cannot stand, so no session can be
+    /// created or changed on this deployment's plugin set.
+    #[error("config registration is invalid: {0}")]
+    ConfigRegistration(super::ConfigRegistrationError),
     #[error("plugin invoke error: {0}")]
     Invoke(String),
     /// A bounded before-tool-call reinspection attempted to replace arguments again.
@@ -497,6 +501,7 @@ impl PluginError {
             | Self::ResidentToolDuplicateName { .. }
             | Self::ResidentToolRouteUnavailable { .. }
             | Self::Registration(_)
+            | Self::ConfigRegistration(_)
             | Self::Invoke(_)
             | Self::BeforeToolCallReplacementConflict { .. }
             | Self::AfterToolCallReplacementConflict { .. }

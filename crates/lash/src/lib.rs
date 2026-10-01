@@ -116,8 +116,8 @@ pub mod config {
     };
     pub use lash_core::{
         CORE_CONFIG_OWNER, ConfigCommandCatalog, ConfigCommandDescriptor, ConfigCommandEntry,
-        ConfigRefusal, ConfigSubmitError, ConfigTransaction, ConfigTransactionOutcome, CoreConfig,
-        CoreConfigRefusal,
+        ConfigRefusal, ConfigRefusalReason, ConfigSubmitError, ConfigTransaction,
+        ConfigTransactionOutcome, ConfigValueRole, CoreConfig, CoreConfigRefusal, RefusalSite,
     };
 }
 /// The standard protocol's host surface: its creation options, its recorded
@@ -150,7 +150,8 @@ pub mod standard {
     pub use lash_protocol_standard::{
         STANDARD_PROTOCOL_PLUGIN_ID, SetStandardPrompt, SetStandardPromptContext,
         SetStandardRender, StandardConfigOwner, StandardConfigRefusal, StandardPrompt,
-        StandardRecordedBehaviour, StandardRecordedConfig, StandardRunOptions, StandardTurnOptions,
+        StandardRecordedBehaviour, StandardRecordedConfig, StandardRenderRefusal,
+        StandardRunOptions, StandardTurnOptions,
     };
 }
 pub mod render {
@@ -279,8 +280,9 @@ pub use lash_core::{Backend, EffectEngine, StoreBindingId, StoreSet};
 /// [`SendBuilder::run`], or through its one-shot setters, and the
 /// [`RunDefinition`]s a [`LashCoreBuilder`] registers for specs to name.
 pub use lash_core::{
-    BindingId, CapabilityRef, ContractRef, DefinitionRef, RunDefinition, RunOverrides,
-    RunResolveError, RunShapeError, RunSpec, SlotId,
+    BindingId, CapabilityRef, ContractRef, DefinitionRef, NoRunOptionsOwner, RenderRefusal,
+    RunDefinition, RunDefinitionRefusal, RunOptionsOwner, RunOverrides, RunResolveError,
+    RunShapeRefusal, RunSpec, SlotId,
 };
 /// Lash's identity for one tool call (ADR 0117): what a tool keys its
 /// idempotency on, through [`tools::AttemptContext::call_id`].
@@ -854,9 +856,9 @@ pub mod plugins {
     /// owner of its namespace and the typed config commands that change it,
     /// and reads the recorded value on every open and in every scoped hook.
     pub use lash_core::{
-        AdmittedPluginConfig, CandidateFacts, ConfigCommand, ConfigOwner, ConfigRegistrar,
-        ConfigRegistrationError, ConfigWire, CreationFacts, OwnerChange, PluginConfig,
-        SessionConfigRefusal, UnknownPluginConfigOwner,
+        AdmittedPluginConfig, CandidateFacts, ConfigCommand, ConfigFault, ConfigOwner,
+        ConfigRegistrar, ConfigRegistrationError, ConfigWire, CreationConfigError, CreationFacts,
+        NoRunOptions, OwnerChange, PluginConfig, RecordedNamespaceCorrupt, RenderFault,
     };
     /// Protocol-driver and process-engine inputs that core owns independently of plugin storage.
     pub use lash_core::{

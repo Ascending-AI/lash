@@ -125,44 +125,206 @@ impl ConfigTransactionRecord {
     }
 }
 
-/// Why a config transaction was refused: which command, by which owner, and
-/// the owner's typed refusal as data. Nothing of a refused transaction is
-/// published.
+/// Where a config refusal was raised.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RefusalSite {
+    /// One command of a transaction, by its position and registered name.
+    Command { index: usize, command: String },
+    /// The candidate as a whole: a transaction's final candidate, or the
+    /// config a run's overrides derived.
+    Candidate,
+    /// The creation of the session's namespace.
+    Creation,
+}
+
+/// Which value of a config judgment could not be read or written as its
+/// owner's type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigValueRole {
+    /// What a creator stated for the namespace.
+    CreationInput,
+    /// A command's arguments.
+    Arguments,
+    /// The options a run stated for the namespace.
+    RunOptions,
+    /// The namespace the owner produced: created, reduced or overridden.
+    Candidate,
+    /// A command's output.
+    Output,
+    /// The owner's own refusal, which did not encode.
+    Refusal,
+}
+
+impl ConfigValueRole {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::CreationInput => "creation input",
+            Self::Arguments => "arguments",
+            Self::RunOptions => "run options",
+            Self::Candidate => "candidate config",
+            Self::Output => "output",
+            Self::Refusal => "refusal",
+        }
+    }
+}
+
+/// Why a config change was refused. Only [`Self::Owner`] carries data in the
+/// owner's registered refusal type; every other reason is the framework's.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ConfigRefusalReason {
+    /// The owner refused: `refusal` is its registered refusal type,
+    /// serialized, and `message` that refusal's display text.
+    Owner {
+        #[schemars(with = "serde_json::Value")]
+        refusal: serde_json::Value,
+        message: String,
+    },
+    /// No installed plugin registers the named owner.
+    UnknownOwner,
+    /// The owner registers no command of the name the site carries.
+    UnknownCommand,
+    /// The session recorded no namespace for the owner, so there is nothing
+    /// for the command to change.
+    UnrecordedNamespace,
+    /// A value did not read or write as the owner's type.
+    Unreadable {
+        role: ConfigValueRole,
+        message: String,
+    },
+}
+
+// `serde_json::Value` never holds NaN or an infinite number, so its
+// `PartialEq` is reflexive.
+impl Eq for ConfigRefusalReason {}
+
+impl std::fmt::Display for ConfigRefusalReason {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Owner { message, .. } => formatter.write_str(message),
+            Self::UnknownOwner => formatter.write_str("no installed plugin registers this owner"),
+            Self::UnknownCommand => formatter.write_str("the owner registers no such command"),
+            Self::UnrecordedNamespace => {
+                formatter.write_str("the session recorded no config for this owner")
+            }
+            Self::Unreadable { role, message } => {
+                write!(formatter, "its {} cannot be read: {message}", role.as_str())
+            }
+        }
+    }
+}
+
+/// A refused config change: the owner it names, where it was refused and
+/// why. Nothing of a refused change is published.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigRefusal {
-    /// The refused command's position in the transaction; `None` when the
-    /// final candidate as a whole failed an owner's validation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub index: Option<usize>,
     pub owner: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub command: Option<String>,
-    /// The owner's refusal, serialized from its declared refusal type.
-    #[schemars(with = "serde_json::Value")]
-    pub refusal: serde_json::Value,
-    /// The refusal's display text.
-    pub message: String,
+    pub at: RefusalSite,
+    pub reason: ConfigRefusalReason,
+}
+
+impl ConfigRefusalReason {
+    /// An owner's own typed `refusal`.
+    pub fn by_owner<R>(refusal: &R) -> Self
+    where
+        R: Serialize + std::fmt::Display,
+    {
+        match serde_json::to_value(refusal) {
+            Ok(encoded) => Self::Owner {
+                refusal: encoded,
+                message: refusal.to_string(),
+            },
+            Err(error) => Self::Unreadable {
+                role: ConfigValueRole::Refusal,
+                message: format!("{refusal}: {error}"),
+            },
+        }
+    }
+}
+
+impl ConfigRefusal {
+    /// `owner`'s own typed `refusal`, raised at `at`.
+    pub fn by_owner<R>(owner: impl Into<String>, at: RefusalSite, refusal: &R) -> Self
+    where
+        R: Serialize + std::fmt::Display,
+    {
+        Self {
+            owner: owner.into(),
+            at,
+            reason: ConfigRefusalReason::by_owner(refusal),
+        }
+    }
+
+    /// The owner's refusal as its registered type `R`: `None` for a
+    /// framework reason, and for a refusal that is not an `R`.
+    pub fn owner_refusal<R: serde::de::DeserializeOwned>(&self) -> Option<R> {
+        match &self.reason {
+            ConfigRefusalReason::Owner { refusal, .. } => {
+                serde_json::from_value(refusal.clone()).ok()
+            }
+            ConfigRefusalReason::UnknownOwner
+            | ConfigRefusalReason::UnknownCommand
+            | ConfigRefusalReason::UnrecordedNamespace
+            | ConfigRefusalReason::Unreadable { .. } => None,
+        }
+    }
 }
 
 impl std::fmt::Display for ConfigRefusal {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match (&self.command, self.index) {
-            (Some(command), Some(index)) => write!(
+        let Self { owner, at, reason } = self;
+        match at {
+            RefusalSite::Command { index, command } => write!(
                 formatter,
-                "config command {index} (`{}.{command}`) refused: {}",
-                self.owner, self.message
+                "config command {index} (`{owner}.{command}`) refused: {reason}"
             ),
-            _ => write!(
+            RefusalSite::Candidate => write!(
                 formatter,
-                "config owner `{}` refused the candidate: {}",
-                self.owner, self.message
+                "config owner `{owner}` refused the candidate: {reason}"
+            ),
+            RefusalSite::Creation => write!(
+                formatter,
+                "config owner `{owner}` refused the session's creation: {reason}"
             ),
         }
     }
 }
 
 impl std::error::Error for ConfigRefusal {}
+
+/// An owner's recorded namespace that does not read as the owner's recorded
+/// type. The session recorded it from that owner's own typed value, so this
+/// is corruption of stored data, never a refusal of the change being judged.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("config owner `{owner}`'s recorded namespace is unreadable: {message}")]
+pub struct RecordedNamespaceCorrupt {
+    pub owner: String,
+    pub message: String,
+}
+
+impl RecordedNamespaceCorrupt {
+    /// This corruption as the store's typed error for unreadable stored
+    /// data.
+    pub fn into_store_error(self) -> crate::StoreError {
+        crate::StoreError::StoredDataCorrupt {
+            record_kind: "session_config_namespace",
+            message: self.to_string(),
+        }
+    }
+}
+
+/// Why a config judgment gave no verdict to publish: the change was
+/// refused, or the recorded config it is judged against is corrupt.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ConfigFault {
+    #[error(transparent)]
+    Refused(#[from] ConfigRefusal),
+    #[error(transparent)]
+    RecordedCorrupt(#[from] RecordedNamespaceCorrupt),
+}
 
 /// What a config transaction settled as, carried by the commit that settles
 /// its command and read back by any submitter holding its receipt.
@@ -327,11 +489,15 @@ mod tests {
             },
             ConfigResolutionDecision::Refused {
                 refusal: ConfigRefusal {
-                    index: Some(0),
                     owner: "counter".to_string(),
-                    command: Some("increment".to_string()),
-                    refusal: serde_json::json!({ "kind": "too_large" }),
-                    message: "too large".to_string(),
+                    at: RefusalSite::Command {
+                        index: 0,
+                        command: "increment".to_string(),
+                    },
+                    reason: ConfigRefusalReason::Owner {
+                        refusal: serde_json::json!({ "kind": "too_large" }),
+                        message: "too large".to_string(),
+                    },
                 },
             },
         ] {

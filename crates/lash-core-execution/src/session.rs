@@ -321,47 +321,35 @@ pub enum SessionError {
         /// The full restore report, including the classes that did not refuse.
         report: Box<crate::ToolRestoreReport>,
     },
-    /// Session config a creation stated that its owner refused, before
-    /// anything was written (FIG-4099, FIG-4379). The refusal is the typed
-    /// error the refusing [`ConfigOwner`](crate::plugin::ConfigOwner) raised
-    /// for its namespace, or
-    /// [`UnknownPluginConfigOwner`](crate::plugin::UnknownPluginConfigOwner)
-    /// when no installed plugin owns a stated key. Match it with
-    /// [`SessionConfigRefusal::downcast_ref`], never on its message. A later
-    /// change is a config transaction, whose refusal is its settled outcome.
+    /// Session config a creation stated that was refused, before anything
+    /// was written (FIG-4099, FIG-4379): which owner, and why, typed
+    /// ([`ConfigRefusal`](crate::ConfigRefusal)). Its
+    /// [`reason`](crate::ConfigRefusal::reason) carries the owner's own
+    /// refusal type as data, or the framework's reason, such as an owner no
+    /// installed plugin registers. A later change is a config transaction,
+    /// whose refusal is its settled outcome.
     #[error("session config refused: {0}")]
-    SessionConfigRefused(SessionConfigRefusal),
+    SessionConfigRefused(crate::ConfigRefusal),
     #[error(transparent)]
     Plugin(#[from] crate::PluginError),
     #[error("protocol error: {0}")]
     Protocol(String),
 }
 
-/// The typed reason a session config change was refused; see
-/// [`SessionError::SessionConfigRefused`].
-#[derive(Debug)]
-pub struct SessionConfigRefusal(Box<dyn std::error::Error + Send + Sync + 'static>);
-
-impl SessionConfigRefusal {
-    pub fn new(refusal: impl std::error::Error + Send + Sync + 'static) -> Self {
-        Self(Box::new(refusal))
-    }
-
-    /// The refusal as the refusing party's own error type, when it is `T`.
-    pub fn downcast_ref<T: std::error::Error + 'static>(&self) -> Option<&T> {
-        self.0.downcast_ref::<T>()
-    }
-}
-
-impl std::fmt::Display for SessionConfigRefusal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl std::error::Error for SessionConfigRefusal {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(self.0.as_ref())
+impl From<crate::plugin::CreationConfigError> for SessionError {
+    fn from(error: crate::plugin::CreationConfigError) -> Self {
+        match error {
+            crate::plugin::CreationConfigError::Refused(refusal) => {
+                Self::SessionConfigRefused(refusal)
+            }
+            crate::plugin::CreationConfigError::RecordedCorrupt(corrupt) => Self::Store {
+                context: "resolving a session's creation config".to_string(),
+                source: corrupt.into_store_error(),
+            },
+            crate::plugin::CreationConfigError::Registration(error) => {
+                Self::Plugin(crate::PluginError::ConfigRegistration(error))
+            }
+        }
     }
 }
 

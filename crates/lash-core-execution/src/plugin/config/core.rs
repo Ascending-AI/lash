@@ -105,10 +105,22 @@ impl CoreConfigOwner {
     }
 }
 
+impl CoreConfigOwner {
+    /// The core owner's `refusal` of a session's creation.
+    pub fn creation_refusal(refusal: CoreConfigRefusal) -> super::ConfigRefusal {
+        super::ConfigRefusal::by_owner(
+            super::CORE_CONFIG_OWNER,
+            super::RefusalSite::Creation,
+            &refusal,
+        )
+    }
+}
+
 impl ConfigOwner for CoreConfigOwner {
     type Create = CoreConfig;
     type Recorded = CoreConfig;
     type Refusal = CoreConfigRefusal;
+    type RunOptions = super::NoRunOptions;
 
     fn implementation(&self) -> &str {
         CORE_CONFIG_IMPLEMENTATION
@@ -133,6 +145,16 @@ impl ConfigOwner for CoreConfigOwner {
         _facts: &CandidateFacts<'_>,
     ) -> Result<(), CoreConfigRefusal> {
         Ok(())
+    }
+
+    /// A run overrides the core share through its spec's typed overrides,
+    /// never through options.
+    fn apply_run_options(
+        &self,
+        recorded: &CoreConfig,
+        _options: super::NoRunOptions,
+    ) -> Result<CoreConfig, CoreConfigRefusal> {
+        Ok(recorded.clone())
     }
 }
 

@@ -492,7 +492,7 @@ impl Processes {
             is_child.then_some(environment.plugin_config.config.as_ref()),
             !is_child,
         )
-        .map_err(lash_core::SessionError::SessionConfigRefused)?;
+        .map_err(lash_core::SessionError::from)?;
         Ok(environment)
     }
 

@@ -96,7 +96,7 @@ impl crate::RunDefinition for CountingDefinition {
         &self,
         _snapshot: &crate::PersistedSessionConfig,
         _context: &serde_json::Value,
-    ) -> Result<crate::RunOverrides, crate::RunShapeError> {
+    ) -> Result<crate::RunOverrides, crate::RunDefinitionRefusal> {
         self.resolved.fetch_add(1, Ordering::SeqCst);
         Ok(crate::RunOverrides {
             model: Some(model(self.model)),
