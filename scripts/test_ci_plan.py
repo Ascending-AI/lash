@@ -1556,6 +1556,38 @@ class RollingUpgradeSelectionTests(unittest.TestCase):
         self.assertEqual("true", plan["rolling_upgrade"])
 
 
+class ReleaseJournalReplaySelectionTests(unittest.TestCase):
+    def test_replay_job_runs_on_main_and_stays_non_required_until_the_cut(self):
+        workflow = yaml.safe_load((ROOT / ".github/workflows/release-journal-replay.yml").read_text())
+        triggers = workflow.get("on", workflow.get(True))
+        self.assertEqual(["main"], triggers["push"]["branches"])
+        self.assertIn("pull_request", triggers)
+        job = workflow["jobs"]["release-journal-replay"]
+        self.assertIn("release_journal_replay", job["if"])
+        self.assertFalse(job.get("continue-on-error", False))
+        self.assertIn("FIG-4097", (ROOT / ".github/workflows/release-journal-replay.yml").read_text())
+        self.assertEqual("fixtures/release-rehearsal/fig-4532-rehearsal-20261001/replay-corpus", job["env"]["LASH_REPLAY_CORPUS_ROOT"])
+        commands = "\n".join(step.get("run", "") for step in job["steps"])
+        self.assertIn("tests::replay_corpus::", commands)
+        self.assertIn("--test_env LASH_REPLAY_CORPUS_ROOT=", commands)
+        aggregator = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]["ci-conclusion"]
+        self.assertNotIn("release-journal-replay", aggregator["needs"])
+
+    def test_every_registered_constant_selects_release_journal_replay(self):
+        for path in ci_plan.versioned_surface_paths():
+            with self.subTest(path=path):
+                plan = ci_plan.classify([("M", path)], event_name="pull_request")
+                self.assertEqual("true", plan.get("release_journal_replay"))
+
+    def test_main_selects_release_journal_replay_even_for_docs(self):
+        plan = ci_plan.classify([("M", "docs/guide.md")], event_name="push")
+        self.assertEqual("true", plan.get("release_journal_replay"))
+
+    def test_unrelated_pull_requests_skip_release_journal_replay(self):
+        plan = ci_plan.classify([("M", "crates/lash-core/src/runtime/assembly.rs")], event_name="pull_request")
+        self.assertEqual("false", plan.get("release_journal_replay"))
+
+
 class ConclusionTests(unittest.TestCase):
     def test_trusted_pr_requires_preflight_and_defers_full_tail_to_queue(self) -> None:
         needs = apply_event_deferrals(successful_needs(), "pull_request")

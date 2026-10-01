@@ -1,6 +1,6 @@
 {
   "scenario": "sleep-envelope",
-  "recorded_at_git_sha": "6a3685df4c5a0ec1be98c6a7a32529112af7ff69",
+  "recorded_at_git_sha": "524ec19fbb08a5f86d506b4173b189285c8eb9ff",
   "format": "lash-restate RecordedRuntimeEffect JSON v1; map keys are Restate effect names",
   "journal_logic_epoch": 1,
   "journal_steps": [

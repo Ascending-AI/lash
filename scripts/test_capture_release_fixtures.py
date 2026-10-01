@@ -22,6 +22,11 @@ SPEC.loader.exec_module(capture)
 
 def plant_tree(root: Path) -> None:
     for leg in capture.LEGS:
+        if leg.name == "replay-corpus":
+            source = root / leg.source / "scenario"
+            source.mkdir(parents=True, exist_ok=True)
+            (source / "journal.json").write_text(json.dumps({"journal_logic_epoch": 7}) + "\n")
+            continue
         source = root / leg.source
         if leg.source.endswith(".db"):
             source.parent.mkdir(parents=True, exist_ok=True)
@@ -71,6 +76,11 @@ class CaptureTests(unittest.TestCase):
             (self.dest / "session-at-rest" / "durable-core.db").read_bytes(),
             (self.repo / "fixtures/durable-read/v1/sqlite/durable-core.db").read_bytes(),
         )
+
+    def test_manifest_records_the_replay_capture_epoch(self):
+        self.assertEqual(self.run_capture("--dry-run"), 0)
+        manifest = json.loads((self.dest / "manifest.json").read_text())
+        self.assertEqual(manifest["journal_logic_epoch"], 7)
 
     def test_dry_run_without_dest_lands_in_a_temp_dir(self):
         self.assertEqual(capture.main(

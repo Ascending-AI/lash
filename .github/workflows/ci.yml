@@ -155,6 +155,7 @@ jobs:
       workers_e2e: ${{ steps.classify.outputs.workers_e2e }}
       restate_suites: ${{ steps.classify.outputs.restate_suites }}
       rolling_upgrade: ${{ steps.classify.outputs.rolling_upgrade }}
+      release_journal_replay: ${{ steps.classify.outputs.release_journal_replay }}
       feature_lanes: ${{ steps.classify.outputs.feature_lanes }}
       workbench: ${{ steps.classify.outputs.workbench }}
       regress: ${{ steps.classify.outputs.regress }}

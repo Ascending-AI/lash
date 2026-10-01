@@ -589,6 +589,7 @@ SHARD_DIR_READERS: Mapping[str, str] = {
 PLAN_OUTPUT_FAMILIES: Mapping[str, frozenset[str]] = {
     **{family: frozenset({family}) for family in FAMILIES},
     "postgres_compatibility": frozenset({"schema"}),
+    "release_journal_replay": frozenset({"rolling_upgrade"}),
     "buck2_trusted": frozenset(),
     "fail_open": frozenset(),
     "docs_only": frozenset(),
@@ -1711,6 +1712,7 @@ def fail_open(reason: str) -> dict[str, str]:
     outputs = {
         "docs_only": "false",
         "fail_open": "true",
+        "release_journal_replay": "true",
         "reason": reason,
         "pr_tail_labels": tail,
         # The pull-request leg runs the whole fast suite plus the deferred
@@ -1797,6 +1799,24 @@ def classify(
     run_everything = global_invalidator or bool(ambiguous) or docs_deletion
 
     outputs = {
+        "release_journal_replay": str(
+            event_name in {"push", "workflow_dispatch"}
+            or run_everything
+            or any(
+                path in surface_paths
+                or path.startswith("crates/lash-restate/testdata/replay-corpus/")
+                or path.startswith(("fixtures/release/", "fixtures/release-rehearsal/"))
+                or path in {
+                    "crates/lash-restate/src/tests/replay_corpus.rs",
+                    "scripts/capture_release_fixtures.py",
+                    "scripts/test_capture_release_fixtures.py",
+                    "scripts/ci_plan.py",
+                    "scripts/test_ci_plan.py",
+                    ".github/workflows/release-journal-replay.yml",
+                }
+                for path in paths
+            )
+        ).lower(),
         "docs_only": str(docs_only).lower(),
         "fail_open": str(bool(ambiguous)).lower(),
         "reason": (

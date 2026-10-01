@@ -205,3 +205,31 @@ body, so an unsupported range never materializes it. Direct callers can choose
 all four allowances with `Call::decode_json_with_limits`; SDK ingress uses the
 default allowances. Remote envelopes and turn inputs use the same preflight
 through their `decode_json_with_limits` methods.
+
+
+## Release journal replay
+
+The replay law reads `LASH_REPLAY_CORPUS_ROOT` as the directory containing
+`<scenario>/journal.json`, the `replay-corpus` leg of
+`lash.release-fixtures-manifest.v1`. An explicit root has no fallback.
+Without the variable it reads `testdata/replay-corpus`.
+
+Each capture records `journal_logic_epoch` and the ordered `journal_steps`.
+The capture manifest records the epoch read from those journals. When the
+current `JOURNAL_LOGIC_EPOCH` matches, replay checks the envelopes and exact
+step sequence. A divergence fails with
+`journal logic changed: bump JOURNAL_LOGIC_EPOCH`. A different epoch returns
+`DifferentGeneration` and prints `different generation, not compared`.
+The added-step self-test proves the unchanged-epoch failure and the distinct
+result after an epoch bump, without changing production constants.
+
+```sh
+kiln test //crates/lash-restate:lash-restate__unit_test \
+  --test_arg=tests::replay_corpus:: --test_arg=--nocapture \
+  --test_env LASH_REPLAY_CORPUS_ROOT=crates/lash-restate/testdata/replay-corpus
+```
+
+The `Release journal replay` workflow runs on main and registered-surface
+pull requests. It stays non-required under FIG-4097 during the version
+freeze. The cut repoints its root to
+`fixtures/release/v1.0.0/replay-corpus` and makes the job required.

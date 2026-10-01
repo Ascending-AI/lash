@@ -253,6 +253,25 @@ def verify_tag(repo: Path, tag: str) -> str:
     return head
 
 
+def replay_corpus_epoch(root: Path) -> int:
+    """Read the epoch of the copied journals, never the capturing binary's epoch."""
+    journals = sorted((root / "replay-corpus").glob("*/journal.json"))
+    if not journals:
+        raise CaptureError("replay-corpus: no scenario journals")
+    epochs = set()
+    for journal in journals:
+        try:
+            epoch = json.loads(journal.read_text(encoding="utf-8"))["journal_logic_epoch"]
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise CaptureError(f"replay-corpus: {journal.name}: missing or invalid capture epoch") from error
+        if type(epoch) is not int or not 0 < epoch <= 0xFFFFFFFF:
+            raise CaptureError("replay-corpus: journal_logic_epoch must be a positive u32")
+        epochs.add(epoch)
+    if len(epochs) != 1:
+        raise CaptureError("replay-corpus: journals have different capture epochs")
+    return epochs.pop()
+
+
 def write_manifest(
     dest: Path, tag: str, commit: str | None, dry_run: bool, legs: list[dict]
 ) -> None:
@@ -261,6 +280,7 @@ def write_manifest(
         "tag": tag,
         "source_commit": commit,
         "dry_run": dry_run,
+        "journal_logic_epoch": replay_corpus_epoch(dest),
         "captured_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "legs": legs,
     }
