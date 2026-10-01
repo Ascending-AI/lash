@@ -19,7 +19,7 @@ reconciled them:
   optimistic user row in its own id namespace (`workbench-user:<turn_id>`) and the runtime
   commits the same text under its own minted id (`m_turn_<turn_id>_input`). Correlating the
   two by id *shape* rather than by `MessageOrigin::TurnInput` left both rendered. See the
-  contract note above `WORKBENCH_USER_MESSAGE_ID` in
+  contract note above `workbench_turn_user_message_id` in
   [`state.rs`](../../examples/agent-workbench/src/main_sections/state.rs).
 - **FIG-984** (fixed, merged) — one trigger-button press rendered the agent reply **twice**.
   Two committed assistant copies of one turn's text reached the browser: the runtime's
@@ -67,9 +67,10 @@ messages exist".
 **The invariant this runbook referees** is documented in
 [the example's README](../../examples/agent-workbench/README.md): *"Either way a completed
 turn leaves exactly one committed assistant copy."* The user side has an analogous rule
-enforced in code — `suppressed_turn_input_message_ids` in
+enforced in code — `ui_owned_turn_input_replacements` in
 [`chat_projection.rs`](../../examples/agent-workbench/src/main_sections/chat_projection.rs)
-suppresses the runtime's duplicate user copy by matching `MessageOrigin::TurnInput`, never an
+replaces the runtime's committed copy of the turn's opening input with the workbench's own
+row, matched by `MessageOrigin::TurnInput`, never an
 id shape (FIG-972). Both regimes now carry unit coverage; this runbook is the judged
 browser-surface layer over it, and it exists because the unit tests assert within one surface
 while both defects were only visible **between** surfaces.

@@ -310,8 +310,8 @@ The judge answers each item from the bundle and cites the file:
 4. **Fresh URIs.** Across the `ready-*.json` of one case, every `uri` is
    distinct, and each `generation` matches its build's.
 5. **No refusal.** No node log holds an error, a panic, or a typed store
-   refusal (`Incompatible`, `WriterFenced`, `SchemaVersionOutOfRange`,
-   `FleetFormatOutsideWritableRange`).
+   refusal (`Incompatible`, `WriterFenced`, `CompatRefusal::TooOld`,
+   `CompatRefusal::ReaderFloorAbove`, `CompatRefusal::FleetOutsideWritable`).
 6. **Finalize.** The E2E log shows, in order: `lashctl finalize` refused
    `deployments_retained`, then refused `held`; `lashctl migrate --phase
    contract` refused `contract_before_finalize`; `lashctl finalize` answering

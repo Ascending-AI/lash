@@ -66,7 +66,7 @@ transcript that lost a row on the way through recovery, or a transcript that gre
 two projection paths both drew the same message.
 
 **Why the web process, not Restate.** Every composer send is submitted to Restate as a
-workflow invocation (`submit_user_turn` in `routes.rs`) and executed through the workbench's
+workflow invocation (`send_turn` → `commit_and_start_user_turn` in `routes.rs`) and executed through the workbench's
 registered endpoint. So killing the web process mid-turn does **not** kill the turn: Restate
 retains the invocation and drives it against the replacement process. The in-flight turn's
 correct outcome is therefore *usually* completion, and the durable stores — not the DOM at

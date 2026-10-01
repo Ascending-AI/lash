@@ -55,8 +55,10 @@ structure rather than exact assistant wording.
   `just agent-workbench-down <port>`.
 - UI: composer, **inject now** (`#injectNow`), **queue next** (`#queueNext`), ingress receipt
   rows, transcript, running pill, and the `#stop` / `#abort` controls. Both ingress buttons are
-  **hidden**, not merely disabled, unless a turn is running (`inject_visible` is `false` while
-  idle), so a driver that gates on the `disabled` property never sees them at all. Gate on
+  **hidden**, not merely disabled, unless a turn is running: they live inside
+  `#runningActions`, which the page keeps `hidden` while idle (it unhides it and hides
+  `#idleActions` together), so a driver that gates on the `disabled` property never sees them
+  at all. Gate on
   presence and visibility, the same way the multi-tab runbook distinguishes `#idleActions`
   from `#runningActions`.
 - HTTP truth: `GET /api/state`, `POST /api/turn`, and `POST /api/turn/input` with
@@ -80,12 +82,26 @@ structure rather than exact assistant wording.
   active input id completes exactly once under the in-flight turn, the queued draft
   dispatches only after settle. ADR 0101 defines current root admission and
   drive-fence settlement; its store-law evidence lives in
-  `crates/lash-conformance/src/conformance/runtime_persistence/root_admissions.rs`. The unfiltered suite
-  is roughly 45 live Restate tests behind a cold workspace build, which is tens of minutes
-  before the one test this row needs even starts; run it as
-  `AGENT_WORKBENCH_E2E_TEST_FILTER=live_restate_turn_input_ingress just agent-workbench-restate-e2e`
-  so the row's own gate is reachable, and run the full suite only when the row is being
-  scored against the whole companion.
+  `crates/lash-conformance/src/conformance/runtime_persistence/root_admissions.rs`. The recipe
+  takes no filter, and the unfiltered suite is roughly 45 live Restate tests behind a cold
+  workspace build — tens of minutes before the one test this row needs even starts. To run
+  this row's law alone, call the suite runner directly with `--only`, beside a disposable
+  pg16 so the registry's per-shard database and run-id variables resolve:
+
+  ```bash
+  export AGENT_WORKBENCH_E2E_RUN_ID="turn-ingress-$(date +%s)-$$"
+  scripts/ci/with-service.sh pg16 -- bash -c '
+    set -euo pipefail
+    export AGENT_WORKBENCH_E2E_POSTGRES_BASE_URL="${LASH_POSTGRES_DATABASE_URL%/*}"
+    exec python3 scripts/ci/restate_suite.py suite agent-workbench \
+      --leg live \
+      --only live_restate_turn_input_ingress_delivers_once_and_queues_after_settle
+  '
+  ```
+
+  Expect `1/1 ok` on one server. Run `just agent-workbench-restate-e2e` for the whole
+  suite — with its fixture cleanup and stale-fence companion law — only when the row is
+  being scored against the whole companion.
 
 ## Phase 0 — Boot and pre-flight
 

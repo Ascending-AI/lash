@@ -18,7 +18,7 @@ bytes after replacing the web process.
 
 **Contract cited.** Lash's host turn contract accepts MIME-tagged attachment sources.
 The workbench deliberately remains PNG-only: it creates an inline `image/png` source,
-runtime [`normalize_input_items`](../../crates/lash-core/src/runtime/io.rs) persists those
+runtime [`normalize_input_items`](../../crates/lash-core/src/runtime/turn_loop/prepare.rs) persists those
 bytes, and the provider adapter materializes the resulting stored source. Generic document
 support is available in Lash but is not enabled by this workbench surface.
 

@@ -7,8 +7,8 @@
 
 > **Workbench process replacement (FIG-1164, FIG-3035).** The non-destructive
 > same-configuration restart is `just agent-workbench-restart <port>`, which keeps the Restate
-> journals and the application data. A step below still marked blocked stays blocked until its
-> own row is re-authored. See the
+> journals and the application data. It is verified: the phases below execute it, and no step
+> of this row is blocked any more. See the
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
 > never substitute the destructive reset.
 
@@ -113,7 +113,7 @@ quality. This runbook is authored for a deliberate token-spending browser run.
   command. The dev helper starts a Postgres 16 container on a port derived from
   `<port>`, passes its URL as `AGENT_WORKBENCH_DATABASE_URL`, records a managed-container
   marker beside the Restate marker. The persistence contract requires both containers to remain
-  unchanged across the currently blocked `agent-workbench-restart` phase;
+  unchanged across the Phase 2 `agent-workbench-restart` replacement;
   `agent-workbench-down` removes both. Record the Postgres
   container name and require the startup trace payload's `store_backend` to be
   `"postgres"` before Phase 1.

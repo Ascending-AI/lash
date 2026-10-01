@@ -42,8 +42,8 @@ kiln gate lash "$LASH_RESIDENT_AUTHORITY_FORK" -- bash -lc '
     test(~duplicate_effective_identity_is_refused_before_contract_resolution) |
     test(~replay_reuses_record_without_calling_resolver) |
     test(~execution_grant_routes_multi_provider_source_by_id_not_name) |
-    test(~pinned_source_preserves_provider_by_id_overrides) |
-    test(~captured_resident_route_does_not_bind_an_unrelated_tool_id) |
+    test(~pinned_source_preserves_provider_execute_result_and_intents) |
+    test(~pinned_source_executes_with_the_provider_manifest_under_alias_drift_and_provider_swap) |
     test(~pinned_source_retains_exactly_known_nonadvertised_resident_id) |
     test(~resident_snapshot_refuses_mismatched_known_id_without_overwriting_advertised_route) |
     test(~process_run_context_captures_catalog_and_execution_route_together) |
@@ -64,11 +64,14 @@ authority-owned alias with the same `ToolId` also retains the original
 registry route. An actual request pin prepares and executes against provider A
 after a later request reassigns the same id to provider B; the attempt-aware
 capability and execution paths remain pinned too.
-Provider-specific by-ID overrides remain authoritative for ordinary, attempt,
-intent, and internal execution, while a captured route never binds an unrelated
-tool ID. A process dispatch captures its catalog and registry together, and a
-known resident that is resolved exactly by ID remains bound even when it is not
-part of the current advertisement.
+An execute through the pinned source returns the provider's result and its
+declared intents verbatim, and a curated snapshot alias that renames the
+model-facing name on a known tool id still hands the provider its own
+advertised manifest — the exact id and provider-facing name, never the alias —
+with a provider swap handing the new provider its own manifest. A process
+dispatch captures its catalog and registry together, and a known resident that
+is resolved exactly by ID remains bound even when it is not part of the current
+advertisement.
 
 The negative witnesses prove that an effective member without a contract, an
 effective duplicate identity, and a definition without a pinned route are
@@ -146,7 +149,7 @@ zero tests, or any malformed record restores as ambient.
 | Duplicate effective identity is refused before contract lookup | duplicate witness passes with zero resolver calls | | `resident-tool-authority.log` |
 | Name curation precedes completeness checks | suppressed malformed nonmember witness passes | | `resident-tool-authority.log` |
 | Resident routes survive same-id provider reassignment | old and fresh requests retain distinct prepare, execute, and attempt routes | | `resident-tool-authority.log` |
-| Provider by-ID behavior remains authoritative | ordinary, attempt/intent, and internal override witnesses pass; unrelated IDs ignore the captured name | | `resident-tool-authority.log` |
+| Provider-facing result, intents and manifest stay verbatim | the execute witness returns the provider's result and declared intents; under alias drift and provider swap each provider sees its own manifest, never the curated alias | | `resident-tool-authority.log` |
 | Direct process dispatch uses one captured tool surface | old and fresh process contexts retain distinct definitions and routes | | `resident-tool-authority.log` |
 | Known nonadvertised residents retain their exact route | restored resident remains curated, nonorphaned, and executable | | `resident-tool-authority.log` |
 | Known resident identity mismatches fail atomically | mismatched exact-ID resolution is refused without state or advertised-route changes | | `resident-tool-authority.log` |

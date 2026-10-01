@@ -151,8 +151,7 @@ wrong. Read the value from the constant:
 | PostgreSQL component | `SCHEMA_VERSION` | `crates/lash-postgres-store/src/lib.rs` |
 | SQLite durable core | `SCHEMA_VERSION` | `crates/lash-sqlite-store/src/schema.rs` |
 | RLM snapshot | `RLM_SNAPSHOT_VERSION` | `crates/lash-protocol-rlm/src/executor/snapshot.rs` |
-| Process wake-delivery format | `PROCESS_WAKE_DELIVERY_FORMAT_VERSION` | `crates/lash-core/src/runtime/process/events.rs` |
-| Process registration family | `PROCESS_REGISTRATION_FAMILY_VERSION` | `crates/lash-core/src/runtime/process/validation.rs` |
+| Process wake-delivery format | `PROCESS_WAKE_DELIVERY_FORMAT_VERSION` | `crates/lash-core-store/src/process_identity.rs` |
 | Append-request identity encoding | `APPEND_REQUEST_IDENTITY_ENCODING_VERSION` | `crates/lash-core-store/src/store/commit_identity.rs` |
 | Session-node body | `SESSION_NODE_BODY_SCHEMA_VERSION` | `crates/lash-core-store/src/session_graph.rs` |
 | Durable-read fixture | `DURABLE_READ_FIXTURE_SCHEMA_VERSION` | `crates/lash-core/tests/support/durable_read_fixture.rs` |

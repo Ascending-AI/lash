@@ -80,7 +80,7 @@ prose and the exact TypeScript it writes are its own; gate on structural outcome
 
 ## Phase 0 — Boot and pre-flight
 
-Check both keys are present (`OPENROUTER_API_KEY`, `TAVILY_API_KEY`) — a missing key is a
+Check `OPENROUTER_API_KEY` is present — a missing key is a
 harness gap → Abort. Boot, gate `/healthz`, open the UI, gate the chat pane rendering.
 Screenshot `00-fresh.png`.
 

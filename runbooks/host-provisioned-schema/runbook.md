@@ -80,7 +80,7 @@ seeds what the host did not.
 
 | Condition | Behavior |
 |---|---|
-| Version stamp outside `[MIN_SUPPORTED_SCHEMA_VERSION, SCHEMA_VERSION]` | Open refuses with `SchemaVersionOutOfRange`, naming found version and the expected range. Fatal under every `SchemaCheck`. A stamp inside the range is admitted and the structural check still runs — for 1.0 the range is the single current version. |
+| Compatibility stamp outside this build's admitted range | Open refuses with `StoreError::Incompatible` carrying a typed `CompatRefusal` — `TooOld` for a stamp below the floor, `ReaderFloorAbove` when a newer build's reader floor exceeds this build's range — each naming the found stamp and the admitted range. Fatal under every `SchemaCheck`. A stamp inside the range is admitted and the structural check still runs — for 1.0 the range is the single current version. |
 | Structural drift (missing/extra/diverged objects) | `SchemaCheck::Enforce` refuses with a per-object diff naming the drifted objects. `WarnOnly` logs and opens — for diagnosis, never production. |
 | Seed row missing (`lash_catalog_identity`) | `verify_schema_for` reports a `SEED ROWS` finding; open refuses naming the table and `schema.sql`. No `SchemaCheck` relaxes it. |
 | Upgrading across a reject-and-recreate bump | Drop the schema lash owns (`DROP SCHEMA ... CASCADE`) or recreate the database, then re-apply this build's `schema.sql`. This build's `teardown.sql` names only this build's tables; an older catalog can hold tables it no longer declares (component 132 retired the effect engine's eight tables), and teardown leaves those behind. |
