@@ -123,6 +123,11 @@ timeout_seconds = 180
 label = "//crates/lash-restate-test:crash_windows__test"
 cwd = "crates/lash-restate-test"
 filters = ["live_restate_"]
+# Quarantined: a non-reproducing 60 s stall in the budget-1, 128 KiB sub-run;
+# the diagnostic that reports the stalled process state on timeout is already
+# in (8fa18345a5). Held out of both legs until the stall is understood
+# (FIG-4612).
+skips = ["recovery::live_restate_segment_budget_and_continuation_preserve_results_across_waits"]
 endpoints = ["CW"]
 shards = 1
 timeout_seconds = 600
