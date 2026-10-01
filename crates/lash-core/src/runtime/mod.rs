@@ -235,7 +235,8 @@ pub(crate) use error::runtime_error_from_store_commit;
 use error::session_commit_error;
 pub use error::{
     ExecutableGeneration, ExecutableGenerationRefusal, GroupChildCapability, RuntimeError,
-    RuntimeErrorCause, RuntimeErrorCode, SessionStateVersionRefusal, TurnFailureCause,
+    RuntimeErrorCause, RuntimeErrorCode, SessionStateVersionRefusal, StoredDataCorruption,
+    TurnFailureCause,
 };
 /// Embedded-host configuration and its public configuration sections.
 pub use host::{

@@ -20,6 +20,11 @@ pub enum RuntimeErrorCause {
     StoreRefusal {
         refusal: Box<crate::store::StoreRefusal>,
     },
+    /// A durable record cannot be decoded. Retrying cannot repair its bytes.
+    StoredDataCorrupt {
+        #[serde(flatten)]
+        corruption: Box<StoredDataCorruption>,
+    },
     SessionDeleted {
         session_id: SessionId,
     },
@@ -44,6 +49,13 @@ pub enum RuntimeErrorCause {
     MaxToolCallsExceeded {
         exceeded: Box<crate::ToolCallLimitExceeded>,
     },
+}
+
+/// The record kind and diagnostic retained when durable data cannot be decoded.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct StoredDataCorruption {
+    pub record_kind: String,
+    pub message: String,
 }
 
 impl RuntimeErrorCause {

@@ -806,6 +806,120 @@ fn session_retirement_never_takes_derivation_retry_authority() {
     );
 }
 
+fn terminal_store_causes() -> Vec<crate::RuntimeErrorCause> {
+    use crate::compat::{CompatRefusal, VersionRange};
+    use crate::store::StoreRefusal;
+    let refusals = [
+        StoreRefusal::WriterFenced {
+            recorded: 2,
+            writable: VersionRange::exactly(1),
+        },
+        StoreRefusal::Incompatible {
+            refusal: CompatRefusal::Unstamped {
+                component: "sqlite-core".into(),
+                writing_release: None,
+            },
+        },
+        StoreRefusal::StoreSessionMismatch {
+            loaded: SessionId::from("other"),
+            requested: SessionId::from("admission"),
+        },
+        StoreRefusal::SessionStateVersionUnsupported {
+            found: 0,
+            current: 1,
+        },
+        StoreRefusal::SessionStateVersionNewerThanRuntime {
+            found: 2,
+            current: 1,
+        },
+        StoreRefusal::TurnCancelBindingMismatch {
+            session_id: SessionId::from("admission"),
+            expected: "admitted".into(),
+            presented: "other".into(),
+        },
+    ];
+    refusals
+        .into_iter()
+        .map(|refusal| crate::RuntimeErrorCause::StoreRefusal {
+            refusal: Box::new(refusal),
+        })
+        .chain([crate::RuntimeErrorCause::SessionDeleted {
+            session_id: SessionId::from("admission"),
+        }])
+        .collect()
+}
+
+fn assert_terminal_derivation(fault: &crate::runtime_error::RuntimeEffectControllerError) {
+    use crate::RuntimeEffectKind as Kind;
+    use crate::runtime_error::EffectErrorJournalPolicy;
+    assert!(fault.is_terminal());
+    for kind in [
+        Kind::BeforeLlmCall,
+        Kind::AssistantResponseHooks,
+        Kind::SyncExecutionEnvironment,
+        Kind::LoadExecutionEnv,
+        Kind::PresentToolResult,
+        Kind::LanguageRuntimeValue,
+        Kind::AdmitDrive,
+        Kind::SealDriveAdmission,
+        Kind::AdmitRoot,
+        Kind::InspectAdmittedHead,
+        Kind::RecoverFollowOn,
+        Kind::ResolveTurnConfig,
+        Kind::ResolveConfigTransaction,
+        Kind::CloseRootScope,
+        Kind::BeginSessionClose,
+        Kind::IngestTriggerOccurrence,
+        Kind::AdmitTriggerDelivery,
+        Kind::Process,
+        Kind::LlmCall,
+        Kind::Direct,
+        Kind::Sleep,
+    ] {
+        assert_eq!(
+            fault.journal_disposition(kind),
+            EffectErrorJournalPolicy::Terminal,
+            "{} records its terminal cause: {fault:?}",
+            kind.as_str()
+        );
+    }
+    assert!(
+        !fault.is_attempt_fault(),
+        "a terminal cause is the recorded answer: {fault:?}"
+    );
+}
+
+#[test]
+fn terminal_causes_never_take_derivation_retry_authority() {
+    for cause in terminal_store_causes() {
+        let mut fault = crate::runtime_error::RuntimeEffectControllerError::new(
+            RuntimeErrorCode::StoreCommitFailed,
+            "a refused derivation",
+        );
+        fault.cause = Some(cause);
+        assert_terminal_derivation(&fault.retryable_uncommitted_derivation());
+    }
+}
+
+#[test]
+fn terminal_causes_override_retry_authority_granted_before_the_cause() {
+    for cause in terminal_store_causes() {
+        for code in [
+            RuntimeErrorCode::StoreCommitFailed,
+            RuntimeErrorCode::TransientCancelWatch,
+            RuntimeErrorCode::ModelUnavailable,
+        ] {
+            let mut fault = crate::runtime_error::RuntimeEffectControllerError::new(
+                code,
+                "a refused derivation",
+            )
+            .retryable_uncommitted_derivation();
+            fault.cause = Some(cause.clone());
+            assert_terminal_derivation(&fault);
+        }
+    }
+}
+
 /// FIG-4404: a recorded model this worker cannot bind is the attempt's fault
 /// on the two effects whose body binds it, and nowhere else; no other
 /// failure of a model call gains the retry authority.
@@ -962,5 +1076,45 @@ fn store_refusals_keep_their_codes_and_fields_across_runtime_boundaries() {
                 })
             );
         }
+    }
+}
+
+#[test]
+fn terminal_codes_never_take_derivation_retry_authority() {
+    for code in RuntimeErrorCode::ALL_FIRST_PARTY
+        .iter()
+        .filter(|code| code.is_terminal())
+    {
+        let fault = crate::runtime_error::RuntimeEffectControllerError::new(
+            code.clone(),
+            "a terminal refusal",
+        )
+        .retryable_uncommitted_derivation();
+        assert_terminal_derivation(&fault);
+    }
+}
+
+#[test]
+fn stored_corruption_is_a_typed_terminal_admission_refusal() {
+    let corrupt = || crate::StoreError::StoredDataCorrupt {
+        record_kind: "TurnCancellationBinding",
+        message: "invalid scope".into(),
+    };
+    let expected = serde_json::json!({
+        "kind": "stored_data_corrupt", "record_kind": "TurnCancellationBinding", "message": "invalid scope",
+    });
+    for runtime in [
+        crate::runtime_error::runtime_error_from_store_commit(corrupt()),
+        crate::runtime_error::runtime_error_from_turn_input_admission(corrupt()),
+        crate::runtime_error::RuntimeEffectControllerError::from(corrupt()).into_runtime_error(),
+    ] {
+        assert_eq!(runtime.code, RuntimeErrorCode::RuntimeStoreCorrupt);
+        assert_eq!(serde_json::to_value(&runtime.cause).unwrap(), expected);
+        let runtime: RuntimeError =
+            serde_json::from_slice(&serde_json::to_vec(&runtime).unwrap()).unwrap();
+        assert_terminal_derivation(
+            &crate::runtime_error::RuntimeEffectControllerError::from(runtime)
+                .retryable_uncommitted_derivation(),
+        );
     }
 }

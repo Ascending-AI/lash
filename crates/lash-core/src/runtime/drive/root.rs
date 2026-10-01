@@ -1284,23 +1284,12 @@ impl RuntimeEffectLocalRunner for AdmitRootRunner {
         // admission and the seal, the step runs again; only an admission or
         // a refusal is recorded.
         //
-        // A binding the session did not admit is such a refusal (FIG-4597):
-        // the deployment runs over these stores under another authority, and
-        // every attempt presents the same one. Recorded, it ends the root
-        // with its typed cause, which the root's sender reads; retried, the
-        // root would pause with its sender waiting on it.
+        // Every permanent store refusal is an admission outcome (FIG-4629).
+        // The retry marker rejects terminal causes, so the journal records
+        // the typed refusal and the root answers its sender.
         let root = self.root.clone();
         self.activate_turn_cancel_binding().await.map_err(|error| {
-            let refused = matches!(
-                error.store_refusal(),
-                Some(crate::store::StoreRefusal::TurnCancelBindingMismatch { .. })
-            );
-            let fault = crate::RuntimeEffectControllerError::from(error);
-            if refused {
-                fault
-            } else {
-                fault.retryable_uncommitted_derivation()
-            }
+            crate::RuntimeEffectControllerError::from(error).retryable_uncommitted_derivation()
         })?;
         let answer = match self.admit().await.map_err(|err| {
             let mut fault = crate::RuntimeEffectControllerError::from(

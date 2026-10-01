@@ -216,7 +216,8 @@ pub use lash_core_llm::turn_vocabulary::{
 pub use lash_core_store::effect_opener::EffectOpenerError;
 pub use lash_core_store::runtime_error::{
     ExecutableGeneration, ExecutableGenerationRefusal, GroupChildCapability, RuntimeError,
-    RuntimeErrorCause, RuntimeErrorCode, SessionStateVersionRefusal, TurnFailureCause,
+    RuntimeErrorCause, RuntimeErrorCode, SessionStateVersionRefusal, StoredDataCorruption,
+    TurnFailureCause,
 };
 
 pub use crate::direct_completion_client::DirectCompletionClient;

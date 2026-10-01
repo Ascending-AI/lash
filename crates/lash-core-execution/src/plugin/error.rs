@@ -414,6 +414,9 @@ impl PluginError {
     /// spelled as `refusal`, recorded or settled once instead of retried.
     pub fn into_turn_failure(self, refusal: crate::RuntimeErrorCode) -> crate::RuntimeError {
         match self {
+            error @ Self::StoredDataCorrupt { .. } => {
+                crate::RuntimeEffectControllerError::from(error).into_runtime_error()
+            }
             Self::StoreRefusal(error) => {
                 crate::RuntimeEffectControllerError::from(error.into_store_error())
                     .into_runtime_error()
@@ -424,7 +427,8 @@ impl PluginError {
                     || error.store_refusal().is_some()
                     || matches!(
                         error.code,
-                        crate::RuntimeErrorCode::UsageOwnerRetired
+                        crate::RuntimeErrorCode::RuntimeStoreCorrupt
+                            | crate::RuntimeErrorCode::UsageOwnerRetired
                             | crate::RuntimeErrorCode::RecordedTerminationUnavailable
                             | crate::RuntimeErrorCode::MissingRecordedProcessConfig
                     ) =>
@@ -437,7 +441,8 @@ impl PluginError {
                     || error.store_refusal().is_some()
                     || matches!(
                         error.code,
-                        crate::RuntimeErrorCode::UsageOwnerRetired
+                        crate::RuntimeErrorCode::RuntimeStoreCorrupt
+                            | crate::RuntimeErrorCode::UsageOwnerRetired
                             | crate::RuntimeErrorCode::RecordedTerminationUnavailable
                             | crate::RuntimeErrorCode::MissingRecordedProcessConfig
                     ) =>
@@ -487,7 +492,6 @@ impl PluginError {
             | Self::RecordedSessionConfigConflict { .. }
             | Self::AppendOperationIdentityConflict { .. }
             | Self::AppendReceiptRequestedNodeCountCorrupt { .. }
-            | Self::StoredDataCorrupt { .. }
             | Self::ClockBeforeUnixEpoch { .. }
             | Self::ProcessNotVisible { .. }
             | Self::NotASessionRuntime { .. }
@@ -705,6 +709,32 @@ mod classification_tests {
             assert!(
                 matches!(PluginError::from(artifact), PluginError::StoreRefusal(found) if found == refusal)
             );
+        }
+    }
+
+    #[test]
+    fn stored_corruption_keeps_its_fields_across_plugin_and_runtime_boundaries() {
+        let expected = serde_json::json!({
+            "kind": "stored_data_corrupt", "record_kind": "TurnCancellationBinding", "message": "invalid scope",
+        });
+        let plugin = PluginError::from(crate::StoreError::StoredDataCorrupt {
+            record_kind: "TurnCancellationBinding",
+            message: "invalid scope".into(),
+        });
+        assert!(plugin.is_terminal());
+        let plugin: PluginError =
+            serde_json::from_slice(&serde_json::to_vec(&plugin).unwrap()).unwrap();
+        let controller = crate::RuntimeEffectControllerError::from(plugin.clone());
+        for plugin in [
+            plugin,
+            PluginError::RuntimeEffectController(controller.clone()),
+            PluginError::Runtime(controller.clone().into_runtime_error()),
+        ] {
+            let runtime = plugin.into_turn_failure(crate::RuntimeErrorCode::Plugin);
+            assert_eq!(runtime.code, crate::RuntimeErrorCode::RuntimeStoreCorrupt);
+            assert_eq!(serde_json::to_value(&runtime.cause).unwrap(), expected);
+            assert!(runtime.is_terminal());
+            assert!(!runtime.is_retryable());
         }
     }
 

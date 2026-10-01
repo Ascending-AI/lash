@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 mod cause;
 mod classification;
-pub use cause::{GroupChildCapability, RuntimeErrorCause};
+pub use cause::{GroupChildCapability, RuntimeErrorCause, StoredDataCorruption};
 pub(crate) mod model_unavailable;
 mod tool_call_limit;
 pub(crate) use classification::RuntimeErrorClass;
@@ -554,6 +554,9 @@ pub enum RuntimeErrorCode {
 /// is a store commit failure.
 pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) -> RuntimeError {
     match err {
+        err @ crate::store::StoreError::StoredDataCorrupt { .. } => {
+            RuntimeEffectControllerError::from(err).into_runtime_error()
+        }
         err if crate::store::StoreRefusal::of_store_error(&err).is_some() => {
             RuntimeEffectControllerError::from(err).into_runtime_error()
         }
@@ -591,6 +594,9 @@ pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) ->
 
 pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> RuntimeError {
     match err {
+        err @ crate::store::StoreError::StoredDataCorrupt { .. } => {
+            RuntimeEffectControllerError::from(err).into_runtime_error()
+        }
         err if crate::store::StoreRefusal::of_store_error(&err).is_some() => {
             RuntimeEffectControllerError::from(err).into_runtime_error()
         }
@@ -1484,6 +1490,7 @@ impl RuntimeError {
             | RuntimeErrorCause::IngressReservedSourceKey { .. }
             | RuntimeErrorCause::ModelUnavailable { .. }
             | RuntimeErrorCause::MaxToolCallsExceeded { .. }
+            | RuntimeErrorCause::StoredDataCorrupt { .. }
             | RuntimeErrorCause::StoreRefusal { .. } => None,
         }
     }
@@ -1623,6 +1630,25 @@ impl RuntimeEffectControllerError {
         }
     }
 
+    /// A durable record cannot be decoded. Keeps its kind and codec diagnostic
+    /// typed through the journal, plugin and runtime boundaries.
+    #[must_use]
+    pub fn stored_data_corrupt(record_kind: impl Into<String>, message: impl Into<String>) -> Self {
+        let record_kind = record_kind.into();
+        let message = message.into();
+        let mut error = Self::new(
+            RuntimeErrorCode::RuntimeStoreCorrupt,
+            format!("stored {record_kind} data is corrupt: {message}"),
+        );
+        error.cause = Some(RuntimeErrorCause::StoredDataCorrupt {
+            corruption: Box::new(StoredDataCorruption {
+                record_kind,
+                message,
+            }),
+        });
+        error
+    }
+
     /// The fenced referrer an `ArtifactReferrerEnded` refusal names. `None`
     /// on any other error.
     #[must_use]
@@ -1648,7 +1674,7 @@ impl RuntimeEffectControllerError {
     /// cell that failed on its host's worker verdict records no cancellation
     /// peek either (FIG-4451).
     pub fn is_attempt_fault(&self) -> bool {
-        self.journal_disposition.is_retryable_derivation()
+        !self.is_terminal() && self.journal_disposition.is_retryable_derivation()
     }
 
     /// Marks this failure of an uncommitted host derivation — an
@@ -1657,16 +1683,16 @@ impl RuntimeEffectControllerError {
     /// safe to execute again. The claim is released unsealed instead of
     /// journaling the failure as the effect's outcome (FIG-3587, FIG-3683).
     ///
-    /// The one fault it never marks is the session's own retirement
-    /// (FIG-3630): a deleted or closing session is a settled fact, not a
-    /// derivation a rerun could answer differently, so the step records it
-    /// and every replay decodes the same refusal instead of running the
-    /// failing body again forever.
+    /// A terminal cause or code never takes this authority (FIG-4629).
+    /// Like session retirement (FIG-3630), it is a settled refusal, so the
+    /// step records it and every replay decodes the same answer.
     #[must_use]
     pub fn retryable_uncommitted_derivation(mut self) -> Self {
-        if !self.is_session_retirement() {
-            self.journal_disposition = EffectErrorJournalPolicy::RetryUncommittedResponseDerivation;
-        }
+        self.journal_disposition = if self.is_terminal() {
+            EffectErrorJournalPolicy::Terminal
+        } else {
+            EffectErrorJournalPolicy::RetryUncommittedResponseDerivation
+        };
         self
     }
 
@@ -1698,6 +1724,11 @@ impl RuntimeEffectControllerError {
     /// one more fault alone: the recorded model this worker could not bind
     /// before the call ([`Self::model_unavailable`], FIG-4404).
     pub fn journal_disposition(&self, kind: RuntimeEffectKind) -> EffectErrorJournalPolicy {
+        // The public cause can be attached after retry authority was granted.
+        // No effect kind may consume that authority for a terminal refusal.
+        if self.is_terminal() {
+            return EffectErrorJournalPolicy::Terminal;
+        }
         if matches!(
             kind,
             RuntimeEffectKind::BeforeLlmCall
@@ -1895,6 +1926,13 @@ impl RuntimeErrorCode {
 
 impl From<crate::StoreError> for RuntimeEffectControllerError {
     fn from(err: crate::StoreError) -> Self {
+        if let crate::StoreError::StoredDataCorrupt {
+            record_kind,
+            message,
+        } = &err
+        {
+            return Self::stored_data_corrupt(*record_kind, message.clone());
+        }
         let refusal = crate::store::StoreRefusal::of_store_error(&err);
         let cause = match &err {
             crate::StoreError::SessionDeleted { session_id } => {

@@ -1336,6 +1336,8 @@ pub mod runtime {
     /// The session-state generations an admission refused, carried in-process
     /// on the error a refused call returns (FIG-3619).
     pub use lash_core::SessionStateVersionRefusal;
+    /// The record kind and diagnostic carried by a stored-data corruption cause.
+    pub use lash_core::StoredDataCorruption;
     /// How a failed turn settles (FIG-3575): an outcome is recorded, a live
     /// fault aborts. A host minting a foreign error code chooses its class.
     pub use lash_core::TurnFailureCause;

@@ -757,7 +757,7 @@ pub use runtime::{
     SessionProcessEventKind, SessionQueueEventKind, SessionRelationKind, SessionRevision,
     SessionScope, SessionStateVersionRefusal, SessionStoreCreateRequest, SessionView,
     SessionWorkEngine, SleepSpec, SlotId, StartCx, StartCxError, StartKey, StoreRealization,
-    ToolAttemptLaunch, TurnActivity, TurnActivityId, TurnCancelAffectedInput,
+    StoredDataCorruption, ToolAttemptLaunch, TurnActivity, TurnActivityId, TurnCancelAffectedInput,
     TurnCancelAffectedWake, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
     TurnCancelClosureOwnerBinding, TurnCancelClosureProposal, TurnCancelClosureSettlement,
     TurnCancelGatePair, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
