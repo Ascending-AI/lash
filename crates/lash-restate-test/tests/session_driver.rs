@@ -18,6 +18,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use std::collections::{BTreeMap, VecDeque};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -33,8 +34,8 @@ use lash_core::{
 use lash_restate::{Call, Reply, RestateSessionDriveRequest, RestateTurnDriveRequest};
 use lash_restate_test::protocol::MessageType;
 use lash_restate_test::{
-    CrashPoint, CrashRule, RestateTestBackend, SESSION_DRIVER_SERVICE, ServerConfig,
-    TURN_DRIVER_SERVICE,
+    CrashPoint, CrashRule, DeploymentHooks, Refusal, RestateTestBackend, SESSION_DRIVER_SERVICE,
+    ServerConfig, TURN_DRIVER_SERVICE,
 };
 
 // ---------------------------------------------------------------------------
@@ -56,6 +57,14 @@ struct Ledger {
 struct AdmissionGate {
     request: String,
     ordinal: u32,
+    reached: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+/// A hold every root run waits at before it consumes its item: the drive
+/// that called the root is then awaiting it.
+#[derive(Default)]
+struct RootHold {
     reached: tokio::sync::Notify,
     release: tokio::sync::Notify,
 }
@@ -86,6 +95,7 @@ enum RootScript {
 struct ScriptedDriver {
     ledgers: Mutex<BTreeMap<SessionId, Ledger>>,
     gate: Mutex<Option<Arc<AdmissionGate>>>,
+    root_hold: Mutex<Option<Arc<RootHold>>>,
     scripts: Mutex<BTreeMap<String, RootScript>>,
 }
 
@@ -137,6 +147,13 @@ impl ScriptedDriver {
         });
         *self.gate.lock().unwrap() = Some(Arc::clone(&gate));
         gate
+    }
+
+    /// From now on every root run waits at the returned hold.
+    fn hold_roots(&self) -> Arc<RootHold> {
+        let hold = Arc::new(RootHold::default());
+        *self.root_hold.lock().unwrap() = Some(Arc::clone(&hold));
+        hold
     }
 
     fn gate_for(&self, request: &DriveRequest, ordinal: u32) -> Option<Arc<AdmissionGate>> {
@@ -242,6 +259,11 @@ impl SessionDriver for ScriptedDriver {
         lash_core::engine::RootRunEnd::owing_nothing(
             async {
                 let root = admitted.root().clone();
+                let hold = self.root_hold.lock().unwrap().clone();
+                if let Some(hold) = hold {
+                    hold.reached.notify_one();
+                    hold.release.notified().await;
+                }
                 let script = self.scripts.lock().unwrap().get(item_of(&root)).copied();
                 {
                     let mut ledgers = self.ledgers.lock().unwrap();
@@ -315,6 +337,12 @@ async fn fixture(
     let backend = lash_restate_test::backend(seed, ServerConfig::default())
         .await
         .expect("build the Restate test backend");
+    let (driver, installed) = install(&backend);
+    (backend, driver, installed)
+}
+
+/// A scripted driver installed as `backend`'s engine driver.
+fn install(backend: &RestateTestBackend) -> (Arc<ScriptedDriver>, Arc<dyn SessionDriver>) {
     let driver = Arc::new(ScriptedDriver::default());
     let installed = backend
         .restate()
@@ -324,7 +352,7 @@ async fn fixture(
         installed.runs_on(driver.as_ref()),
         "the first install is the engine's driver"
     );
-    (backend, driver, installed)
+    (driver, installed)
 }
 
 fn request(id: &str) -> DriveRequestId {
@@ -335,6 +363,21 @@ async fn attach(backend: &RestateTestBackend, session: &SessionId, id: &str) -> 
     tokio::time::timeout(
         Duration::from_secs(20),
         backend.attach_drive(session, request(id)),
+    )
+    .await
+    .expect("the drive ends")
+    .expect("the drive's outcome")
+}
+
+/// How `id`'s drive of `session` ended, read through every invocation it
+/// handed off to.
+async fn whole_drive(backend: &RestateTestBackend, session: &SessionId, id: &str) -> DriveOutcome {
+    tokio::time::timeout(
+        Duration::from_secs(20),
+        backend
+            .restate()
+            .session_work_engine()
+            .await_drive(session, &request(id)),
     )
     .await
     .expect("the drive ends")
@@ -463,7 +506,7 @@ async fn a_busy_session_drive_hands_off_before_its_journal_grows_without_bound()
         .schedule_drive(&session, request("bounded"));
     let first = attach(&backend, &session, "bounded").await;
     assert!(
-        matches!(first.stop, DriveStop::Yielded { .. }),
+        matches!(first.stop, DriveStop::HandedOff { .. }),
         "the first invocation hands off at a boundary: {first:?}"
     );
     assert_eq!(
@@ -474,6 +517,118 @@ async fn a_busy_session_drive_hands_off_before_its_journal_grows_without_bound()
     settle(&backend).await;
     assert_eq!(driver.ledger(&session).consumed.len(), 65);
     no_drive_failed(&backend);
+}
+
+/// A drive's attempt budget is never spent on the sum of its roots'
+/// (FIG-4506). Restate counts failed attempts over an invocation's whole
+/// retry loop, and a busy drive that awaits one root after another never
+/// suspends, so its loop never restarts. Here the deployment dies under the
+/// drive once while it awaits each root of a backlog, and is still down for
+/// the drive's next attempt: more failed attempts in all than the handler's
+/// budget, each followed by a root that ran to its end. The drive runs every
+/// root, in order, and no invocation of it pauses.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_drive_that_goes_on_after_each_failed_attempt_never_pauses_on_their_sum() {
+    let roots = usize::try_from(lash_restate::TURN_HANDLER_MAX_ATTEMPTS).unwrap() + 4;
+    let items: Vec<_> = (0..roots).map(|index| format!("item-{index}")).collect();
+    // The dispatches of the drive the deployment still owes a refusal.
+    let down_for = Arc::new(AtomicUsize::new(0));
+    let hooks = DeploymentHooks {
+        served: None,
+        refuse: Some(Arc::new({
+            let down_for = Arc::clone(&down_for);
+            move |dispatch| {
+                (dispatch.service.ends_with(SESSION_DRIVER_SERVICE)
+                    && down_for
+                        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |owed| {
+                            owed.checked_sub(1)
+                        })
+                        .is_ok())
+                .then_some(Refusal::Retryable)
+            }
+        })),
+    };
+    let backend = lash_restate_test::backend_with_build(0x4506, ServerConfig::default(), "", hooks)
+        .await
+        .expect("build the Restate test backend");
+    let (driver, _installation) = install(&backend);
+    let session = SessionId::from("drive-backlog");
+    let hold = driver.hold_roots();
+    for item in &items {
+        driver.accept(&session, item);
+    }
+    let engine = Arc::clone(backend.restate().session_work_engine());
+    engine.schedule_drive(&session, request("backlog"));
+    let drives = || {
+        backend
+            .server()
+            .invocations()
+            .into_iter()
+            .filter(|view| view.target.starts_with(SESSION_DRIVER_SERVICE))
+            .collect::<Vec<_>>()
+    };
+    for item in &items {
+        let paused = tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                tokio::select! {
+                    () = hold.reached.notified() => return None,
+                    () = tokio::time::sleep(Duration::from_millis(10)) => {
+                        let paused = drives().into_iter().find(|view| view.status == "paused");
+                        if paused.is_some() {
+                            return paused;
+                        }
+                    }
+                }
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("the root of {item} never ran: {:?}", drives()));
+        if let Some(paused) = paused {
+            panic!(
+                "the drive paused before {item} on the failed attempts of the roots it had \
+                 already run: {paused:?}"
+            );
+        }
+        // The drive that called this root awaits it: its attempt is open.
+        let drive = tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                if let Some(drive) = drives().into_iter().find(|view| view.status == "running") {
+                    return drive;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("no drive awaits {item}: {:?}", drives()));
+        down_for.store(1, Ordering::SeqCst);
+        assert!(
+            backend.server().crash(&drive.id),
+            "the drive awaiting {item} had an attempt to crash"
+        );
+        hold.release.notify_one();
+    }
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(20),
+        engine.await_drive(&session, &request("backlog")),
+    )
+    .await
+    .unwrap_or_else(|_| panic!("the drive never ended: {:?}", drives()))
+    .expect("the drive's outcome");
+    assert_eq!(committed_roots(&outcome), items);
+    assert_eq!(outcome.stop, DriveStop::Idle);
+    assert_eq!(driver.ledger(&session).consumed, items);
+    settle(&backend).await;
+    no_drive_failed(&backend);
+    assert_eq!(
+        backend.server().stats().crashes,
+        roots as u64,
+        "the deployment died once under every root"
+    );
+    assert_eq!(
+        down_for.load(Ordering::SeqCst),
+        0,
+        "every death cost the drive a refused attempt"
+    );
 }
 
 /// A row committed while a drive runs, after that drive's last admission
@@ -951,7 +1106,9 @@ fn journal_points(backend: &RestateTestBackend, service: &str) -> Vec<CrashPoint
 
 /// A crash at any journal point of `LashSession` or `LashTurn` recovers to
 /// the reference drive: every item is consumed once, in order, and the drive
-/// answers the same roots.
+/// answers the same roots. A drive whose crashed attempt replayed may answer
+/// them over two invocations (FIG-4506), so the law reads the drive through
+/// its continuations.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_drive_crashed_at_any_journal_point_of_either_handler_consumes_each_item_once() {
     let seed = 17;
@@ -964,7 +1121,7 @@ async fn a_drive_crashed_at_any_journal_point_of_either_handler_consumes_each_it
             .restate()
             .session_work_engine()
             .schedule_drive(&session, request("r1"));
-        let outcome = attach(&backend, &session, "r1").await;
+        let outcome = whole_drive(&backend, &session, "r1").await;
         settle(&backend).await;
         let points = [SESSION_DRIVER_SERVICE, TURN_DRIVER_SERVICE]
             .into_iter()
@@ -989,7 +1146,7 @@ async fn a_drive_crashed_at_any_journal_point_of_either_handler_consumes_each_it
                 .restate()
                 .session_work_engine()
                 .schedule_drive(&session, request("r1"));
-            let outcome = attach(&backend, &session, "r1").await;
+            let outcome = whole_drive(&backend, &session, "r1").await;
             assert_eq!(
                 outcome, reference_outcome,
                 "{service} {point:?}: the redriven drive answers the reference"
@@ -1067,20 +1224,28 @@ fn schedule_continuation_case(
     (initial.request, successor)
 }
 
+/// `first` handed off after `first_roots` roots, and `next`, the rest of the
+/// drive, ran the others.
 fn assert_continuation_case(
     first: &DriveOutcome,
+    first_roots: usize,
     next: &DriveOutcome,
     driver: &ScriptedDriver,
     session: &SessionId,
 ) {
     assert_eq!(
         committed_roots(first),
-        (0..64)
+        (0..first_roots)
             .map(|index| format!("item-{index}"))
             .collect::<Vec<_>>()
     );
-    assert!(matches!(first.stop, DriveStop::Yielded { .. }));
-    assert_eq!(committed_roots(next), ["item-64"]);
+    assert!(matches!(first.stop, DriveStop::HandedOff { .. }));
+    assert_eq!(
+        committed_roots(next),
+        (first_roots..65)
+            .map(|index| format!("item-{index}"))
+            .collect::<Vec<_>>()
+    );
     assert_eq!(next.stop, DriveStop::Idle);
     assert_eq!(
         driver.ledger(session).consumed,
@@ -1115,17 +1280,28 @@ async fn drive_continuation_crash_redrives_one_successor() {
             .expect("predecessor finishes")
             .expect("predecessor outcome");
             assert!(
-                matches!(first.stop, DriveStop::Yielded { .. }),
+                matches!(first.stop, DriveStop::HandedOff { .. }),
                 "the bounded drive yielded before its successor"
             );
+            // Under always-replay every attempt replays, so each invocation
+            // hands off at its second boundary instead of its root bound
+            // (FIG-4506): the drive runs in legs of two roots.
+            let leg_roots = if replay {
+                2
+            } else {
+                lash_core::engine::MAX_ROOTS_PER_DRIVE
+            };
             let next = tokio::time::timeout(
                 Duration::from_secs(60),
-                backend.attach_drive(&session, successor),
+                backend
+                    .lash_backend()
+                    .session_work()
+                    .await_drive(&session, &successor),
             )
             .await
             .expect("successor finishes")
             .expect("successor outcome");
-            assert_continuation_case(&first, &next, &driver, &session);
+            assert_continuation_case(&first, leg_roots, &next, &driver, &session);
             settle(&backend).await;
             assert_eq!(
                 backend.server().stats().crashes,
@@ -1140,8 +1316,8 @@ async fn drive_continuation_crash_redrives_one_successor() {
                     .filter(|invocation| invocation.target
                         == format!("{SESSION_DRIVER_SERVICE}/{session}/drive"))
                     .count(),
-                2,
-                "one predecessor and one successor: {cut:?}, replay={replay}"
+                65_usize.div_ceil(leg_roots),
+                "one invocation per leg, none sent twice: {cut:?}, replay={replay}"
             );
             assert_eq!(turn_invocations(&backend, "run"), 65);
             no_drive_failed(&backend);
@@ -1154,7 +1330,6 @@ async fn drive_continuation_crash_redrives_one_successor() {
 #[ignore = "needs a live restate-server: the session-driver Restate suite runs it"]
 async fn live_restate_drive_continuation_crash_redrives_one_successor() {
     use lash_restate_test::live::{LiveConfig, LiveRestateBackend};
-    use std::sync::atomic::{AtomicUsize, Ordering};
     for cut in ContinuationCut::ALL {
         let tag = format!(
             "continuation-{:?}-{}",
@@ -1208,7 +1383,7 @@ async fn live_restate_drive_continuation_crash_redrives_one_successor() {
         .expect("predecessor finishes")
         .expect("predecessor outcome");
         assert!(
-            matches!(first.stop, DriveStop::Yielded { .. }),
+            matches!(first.stop, DriveStop::HandedOff { .. }),
             "the bounded drive yielded before its successor"
         );
         let next = tokio::time::timeout(
@@ -1218,7 +1393,13 @@ async fn live_restate_drive_continuation_crash_redrives_one_successor() {
         .await
         .expect("successor finishes")
         .expect("successor outcome");
-        assert_continuation_case(&first, &next, &driver, &session);
+        assert_continuation_case(
+            &first,
+            lash_core::engine::MAX_ROOTS_PER_DRIVE,
+            &next,
+            &driver,
+            &session,
+        );
         backend
             .settle(Duration::from_secs(20), Duration::from_millis(100))
             .await;

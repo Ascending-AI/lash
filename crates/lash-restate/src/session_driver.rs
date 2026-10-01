@@ -14,7 +14,11 @@
 //!   (`AdmitDrive`, ordinal 0, 1, ..) on a controller scoped to
 //!   [`drive_admission_scope`], and for every admitted root calls that
 //!   root's `LashTurn` and awaits it. It returns once admission answers
-//!   anything but an admitted root. The object's key serializes the
+//!   anything but an admitted root, or hands the rest of the drive to a
+//!   continuation at a root boundary: at its root bound, and at the first
+//!   boundary an attempt that replayed reaches, so the retry budget Restate
+//!   counts per invocation covers one stretch of roots and never the whole
+//!   backlog (FIG-4506). The object's key serializes the
 //!   engine's drives of the session (O1); an in-process driver beside it is
 //!   serialized by the SQL session execution lease until S8.
 //! - **`LashTurn/{session}:{root}`** is a workflow, one per logical root. Its
@@ -86,6 +90,7 @@
 //! build's drain formats and hands it in through
 //! [`RestateConfig`](crate::RestateConfig) (FIG-3795 A).
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 use lash_core::engine::{
@@ -95,9 +100,11 @@ use lash_core::engine::{
 };
 use lash_core::{SessionDriver, SessionId, SessionWorkEngine};
 use restate_sdk::context::{
-    ContextReadState, ObjectContext, SharedWorkflowContext, WorkflowContext,
+    ContextReadState, ContextSideEffects, ObjectContext, RunFuture, SharedWorkflowContext,
+    WorkflowContext,
 };
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
+use restate_sdk::serde::Json;
 use serde::{Deserialize, Serialize};
 
 use crate::compat::{Call, Reply};
@@ -137,11 +144,18 @@ mod asks;
 /// its generation rides the first recorded step, admission 0 or the root's
 /// start marker. It changed in place again for FIG-4035: `LashTurn`'s `run`
 /// journals a send to its key's `close` handler where it recorded the root's
-/// `CloseRootScope` step, and `close` records that step.
+/// `CloseRootScope` step, and `close` records that step. And again for
+/// FIG-4506: `LashSession`'s `drive` records a `lash.drive.boundary` step
+/// after each root it goes on from, short of its root bound.
 pub const LASH_SESSION_DRIVE_VERSION: u32 = 4;
 
 /// The drive handler's name on `LashSession`.
 const DRIVE_HANDLER: &str = "drive";
+
+/// The journal name of the step `drive` records at a root boundary: whether
+/// the attempt that reached the boundary had replayed an earlier one, and so
+/// hands the rest of the drive to its continuation.
+const ROOT_BOUNDARY_STEP: &str = "lash.drive.boundary";
 
 /// The `LashTurn` handler `run` sends its root's owed scope close to.
 const CLOSE_HANDLER: &str = "close";
@@ -582,16 +596,14 @@ impl RestateSessionWork {
     }
 
     /// The leg a drive continues on after `leg` ended with `outcome`, when
-    /// `leg` spent its root budget and handed off.
+    /// `leg` handed off at a root boundary.
     fn continuation(
         &self,
         session: &SessionId,
         leg: &DriveRequestId,
         outcome: &DriveOutcome,
     ) -> Option<DriveRequestId> {
-        let handed_off = matches!(outcome.stop, DriveStop::Yielded { .. })
-            && outcome.ran.len() == MAX_ROOTS_PER_DRIVE;
-        handed_off.then(|| {
+        matches!(outcome.stop, DriveStop::HandedOff { .. }).then(|| {
             drive_continuation_request(&DriveRequest {
                 session: session.clone(),
                 request: leg.clone(),
@@ -1004,8 +1016,8 @@ impl LashTurn for LashTurnImpl {
 
 /// What `LashSession/{session}/drive` journals: admission `n` on the
 /// drive-admission scope, then, for an admitted root, the call to its
-/// `LashTurn`, then admission `n + 1`, until admission answers anything but
-/// an admitted root.
+/// `LashTurn`, the root boundary, then admission `n + 1`, until admission
+/// answers anything but an admitted root or a boundary hands the drive off.
 async fn drive_session_journal(
     slot: &RestateSessionDriverSlot,
     authority_id: &RestateAuthorityId,
@@ -1062,8 +1074,9 @@ async fn drive_session_journal(
         .await?
 }
 
-/// Admission `n`, then the admitted root's `LashTurn`, until admission
-/// answers anything but an admitted root.
+/// Admission `n`, then the admitted root's `LashTurn` and its boundary,
+/// until admission answers anything but an admitted root or a boundary hands
+/// the drive off.
 async fn drive_admissions(
     driver: &dyn SessionDriver,
     controller: &RestateRuntimeEffectController<'_, ObjectContext<'_>>,
@@ -1078,6 +1091,9 @@ async fn drive_admissions(
     // replay rebuilds the same state.
     let mut rules = DriveLoop::new();
     let mut ordinal = 0_u32;
+    // The root boundaries this attempt recorded itself. One it was served
+    // from the journal instead was recorded by an attempt before it.
+    let live_boundaries = Arc::new(AtomicUsize::new(0));
     loop {
         let scoped = controller
             .scoped_effect_controller(admission_scope.clone())
@@ -1153,7 +1169,28 @@ async fn drive_admissions(
                 if let Some(stop) = stop {
                     return Ok(DriveOutcome { ran, stop });
                 }
-                if ran.len() == MAX_ROOTS_PER_DRIVE {
+                // Restate counts a handler's attempts over the invocation's
+                // whole retry loop, which only a suspension or a new
+                // invocation restarts: a drive that kept going would add up
+                // the failed attempts of every root it runs, and pause on a
+                // budget meant for one root's work (FIG-4506). So an attempt
+                // that replayed a boundary, one that follows a failed attempt
+                // or a suspension, hands the rest of the drive to a fresh
+                // invocation at the first boundary it reaches live. What it
+                // decided is recorded, so its own replay decides the same.
+                let handed_off = ran.len() == MAX_ROOTS_PER_DRIVE || {
+                    let boundary = ran.len() - 1;
+                    let live = Arc::clone(&live_boundaries);
+                    let Json(replayed) = RunFuture::name(
+                        ContextSideEffects::run(controller.context(), move || async move {
+                            Ok(Json(live.fetch_add(1, Ordering::SeqCst) < boundary))
+                        }),
+                        ROOT_BOUNDARY_STEP,
+                    )
+                    .await?;
+                    replayed
+                };
+                if handed_off {
                     // The send is a journaled Restate command. Its request is
                     // distinct from this invocation and queues behind this
                     // object's exclusive handler before we return. The
@@ -1184,7 +1221,7 @@ async fn drive_admissions(
                     .await?;
                     return Ok(DriveOutcome {
                         ran,
-                        stop: DriveStop::Yielded { root: yielded_root },
+                        stop: DriveStop::HandedOff { root: yielded_root },
                     });
                 }
                 ordinal = ordinal.checked_add(1).ok_or_else(|| {

@@ -297,7 +297,19 @@ Evidence: `crates/lash-sansio/src/sansio/turn_protocol.rs:699`,
 A session drive runs at most `MAX_ROOTS_PER_DRIVE`, 64 roots, per invocation.
 At a root boundary the session driver sends a continuation with an idempotency
 identity derived from the drive request. It transfers no live turn machine or
-group cursor. Process execution uses bounded segments and durable handovers.
+group cursor.
+
+Restate counts a handler's failed attempts over the invocation's whole retry
+loop, which only a suspension or a new invocation restarts. A drive that
+awaits one root after another never suspends, so its eight-attempt budget
+would be spent on the sum of every root's failures. The drive therefore
+records a `lash.drive.boundary` step after each root it goes on from: whether
+the attempt that reached the boundary was served an earlier boundary from the
+journal, which makes it a retry or a resume. Such an attempt hands off there,
+before its root bound, and its stop is `DriveStop::HandedOff`. One retry loop
+then covers the roots up to the first boundary a replaying attempt reaches
+live, never the backlog. Under always-replay every attempt replays, and a
+drive runs in legs of two roots. Process execution uses bounded segments and durable handovers.
 
 `DriveRequest.build_generation` names the build generation. Recorded routes
 and generation sentinels bind journal replay under ADR 0106 §1. A process's

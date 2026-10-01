@@ -219,6 +219,13 @@ pub enum DriveStop {
     /// it waited for. Unlike [`Idle`](Self::Idle), admission did not answer
     /// that nothing is pending; the session's next ask to drive re-checks.
     Yielded { root: TurnId },
+    /// The engine's drive invocation ended at a root boundary and sent the
+    /// rest of the drive to its continuation request
+    /// ([`drive_continuation_request`]), after `root`: it reached its root
+    /// bound, or it reached the boundary on an attempt that replayed. A
+    /// waiter follows the continuation; this is one leg's stop, never a
+    /// whole drive's.
+    HandedOff { root: TurnId },
 }
 
 /// The stop rules every drive loop keeps, in process or split across an
