@@ -35,6 +35,7 @@ first_party_codes! {
         Self::ArtifactMissing,
         Self::DefinitionMissing,
         Self::DefinitionRefused,
+        Self::WorkerCheckoutTimedOut,
         Self::EffectPanicked,
         Self::MissingExecutionScopeId,
         Self::ExecutionScopeTurnIdMismatch,

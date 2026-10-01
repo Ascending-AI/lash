@@ -64,6 +64,9 @@ pub enum ArtifactStoreError {
     },
     #[error(transparent)]
     StoreRefusal(crate::store::StoreRefusal),
+    /// Artifact verification could not obtain a worker on this host.
+    #[error("worker checkout exceeded its bounded wait")]
+    WorkerCheckoutTimedOut,
     #[error("artifact store backend error: {0}")]
     Backend(String),
 }
@@ -99,6 +102,15 @@ impl From<crate::StoreError> for ArtifactStoreError {
 impl From<ArtifactStoreError> for crate::PluginError {
     fn from(error: ArtifactStoreError) -> Self {
         match error {
+            ArtifactStoreError::WorkerCheckoutTimedOut => {
+                crate::PluginError::RuntimeEffectController(
+                    crate::RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::WorkerCheckoutTimedOut,
+                        error.to_string(),
+                    )
+                    .retryable_uncommitted_derivation(),
+                )
+            }
             ArtifactStoreError::ReferrerEnded { referrer } => {
                 crate::PluginError::Runtime(crate::RuntimeError::artifact_referrer_ended(referrer))
             }

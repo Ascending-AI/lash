@@ -290,6 +290,9 @@ pub enum ProcessDefinitionRefusal {
         engine_kind: ProcessEngineKind,
         message: String,
     },
+    /// The host could not obtain a worker to inspect the artifact. No
+    /// definition was judged; a later attempt with capacity may resolve it.
+    WorkerCheckoutTimedOut { engine_kind: ProcessEngineKind },
     /// The signature travelling on the reference disagrees with the artifact.
     SignatureMismatch {
         engine_kind: ProcessEngineKind,
@@ -330,6 +333,10 @@ impl std::fmt::Display for ProcessDefinitionRefusal {
                 formatter,
                 "process engine `{engine_kind}` cannot resolve the definition: {message}"
             ),
+            Self::WorkerCheckoutTimedOut { engine_kind } => write!(
+                formatter,
+                "process engine `{engine_kind}` could not inspect the definition: worker checkout exceeded its bounded wait"
+            ),
             Self::SignatureMismatch {
                 engine_kind,
                 claimed,
@@ -361,7 +368,18 @@ impl std::error::Error for ProcessDefinitionRefusal {}
 
 impl From<ProcessDefinitionRefusal> for crate::PluginError {
     fn from(refusal: ProcessDefinitionRefusal) -> Self {
-        crate::PluginError::Session(refusal.to_string())
+        match refusal {
+            ProcessDefinitionRefusal::WorkerCheckoutTimedOut { .. } => {
+                crate::PluginError::RuntimeEffectController(
+                    crate::RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::WorkerCheckoutTimedOut,
+                        refusal.to_string(),
+                    )
+                    .retryable_uncommitted_derivation(),
+                )
+            }
+            refusal => crate::PluginError::Session(refusal.to_string()),
+        }
     }
 }
 

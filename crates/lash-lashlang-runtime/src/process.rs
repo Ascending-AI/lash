@@ -524,12 +524,7 @@ async fn run_lashlang_process_scoped(
                 return Ok(retired_generation(input.module_ref.to_string(), resume_owner).into());
             }
             Err(err) => {
-                return Err(lash_core::ProcessInfraError::new(
-                    lash_core::PluginError::Session(format!(
-                        "failed to load lashlang module artifact `{}`: {err}",
-                        input.module_ref
-                    )),
-                ));
+                return Err(lash_core::ProcessInfraError::new(err.into()));
             }
         }
     };

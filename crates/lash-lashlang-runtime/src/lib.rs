@@ -1393,7 +1393,14 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
             .workers
             .inspect_artifact(&self.artifact_store, &identity.module_ref)
             .await
-            .map_err(|error| unresolvable(error.to_string()))?
+            .map_err(|error| match error {
+                lash_core::ArtifactStoreError::WorkerCheckoutTimedOut => {
+                    lash_core::ProcessDefinitionRefusal::WorkerCheckoutTimedOut {
+                        engine_kind: engine_kind.clone(),
+                    }
+                }
+                error => unresolvable(error.to_string()),
+            })?
             .ok_or_else(|| {
                 unresolvable(format!(
                     "module artifact `{}` is not published",

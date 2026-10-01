@@ -286,7 +286,10 @@ fn definition_refused(message: String) -> crate::PluginError {
 }
 
 fn refusal_error(refusal: ProcessDefinitionRefusal) -> crate::PluginError {
-    definition_refused(refusal.to_string())
+    match refusal {
+        refusal @ ProcessDefinitionRefusal::WorkerCheckoutTimedOut { .. } => refusal.into(),
+        refusal => definition_refused(refusal.to_string()),
+    }
 }
 
 fn definition_corrupt(

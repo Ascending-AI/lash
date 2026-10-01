@@ -499,7 +499,10 @@ pub mod runtime_ops {
 
         async fn request_accounted(&self, request: Request) -> Result<Response, PoolError> {
             self.mark_running().await?;
-            let response = self.request(request);
+            let service = self.clone();
+            let response = tokio::task::spawn_blocking(move || service.request(request))
+                .await
+                .map_err(PoolError::protocol)?;
             self.checkpoint().await?;
             response
         }
@@ -523,8 +526,11 @@ pub mod runtime_ops {
                     bytes,
                 })
                 .await
-                .map_err(|error| {
-                    lash_core_execution::ArtifactStoreError::Backend(error.to_string())
+                .map_err(|error| match error {
+                    PoolError::CheckoutTimedOut => {
+                        lash_core_execution::ArtifactStoreError::WorkerCheckoutTimedOut
+                    }
+                    error => lash_core_execution::ArtifactStoreError::Backend(error.to_string()),
                 })? {
                 Response::Artifact(artifact) => Ok(Some(artifact)),
                 Response::ArtifactRefused { message } => {

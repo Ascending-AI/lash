@@ -37,6 +37,9 @@ pub enum RuntimeErrorCode {
     /// of its kind, a value it cannot resolve, a forged signature claim, or a
     /// manifest that disagrees with the engine's resolution.
     DefinitionRefused,
+    /// This host could not obtain a worker before the checkout deadline.
+    /// No guest or definition verdict was produced; the attempt can retry.
+    WorkerCheckoutTimedOut,
     EffectPanicked,
     MissingExecutionScopeId,
     ExecutionScopeTurnIdMismatch,
@@ -667,6 +670,7 @@ impl RuntimeErrorCode {
             Self::ArtifactMissing => "artifact_missing",
             Self::DefinitionMissing => "definition_missing",
             Self::DefinitionRefused => "definition_refused",
+            Self::WorkerCheckoutTimedOut => "worker_checkout_timed_out",
             Self::EffectPanicked => "effect_panicked",
             Self::MissingExecutionScopeId => "missing_execution_scope_id",
             Self::ExecutionScopeTurnIdMismatch => "execution_scope_turn_id_mismatch",
@@ -945,6 +949,7 @@ impl RuntimeErrorCode {
             "artifact_missing" => Self::ArtifactMissing,
             "definition_missing" => Self::DefinitionMissing,
             "definition_refused" => Self::DefinitionRefused,
+            "worker_checkout_timed_out" => Self::WorkerCheckoutTimedOut,
             "effect_panicked" => Self::EffectPanicked,
             "missing_execution_scope_id" => Self::MissingExecutionScopeId,
             "execution_scope_turn_id_mismatch" => Self::ExecutionScopeTurnIdMismatch,

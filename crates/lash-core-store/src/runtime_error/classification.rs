@@ -80,6 +80,8 @@ impl RuntimeErrorCode {
             Self::DefinitionMissing => Terminal,
             // the engine judges the immutable descriptor, so it refuses it again.
             Self::DefinitionRefused => Terminal,
+            // a worker becomes available without changing the operation.
+            Self::WorkerCheckoutTimedOut => Retryable,
             // a contained panic of the effect body; the same body panics the same way.
             Self::EffectPanicked => Terminal,
             // the effect names no execution scope; wiring, not the attempt.
