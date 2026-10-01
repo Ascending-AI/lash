@@ -96,22 +96,14 @@ use serde::{Deserialize, Serialize};
 ///
 /// version_guard(
 ///     shapes(cover(RecordedRuntimeEffect, GaveUpEntry, Stamped, FrontierMark)),
-///     items(JournaledEffectRecord, EFFECT_JOURNAL_VERSION_FIELD, stamped),
-///     impls("Serialize for JournaledEffectRecord", "Deserialize for JournaledEffectRecord"),
+///     roots(JournaledEffectRecord),
+///     items(EFFECT_JOURNAL_VERSION_FIELD, stamped),
 ///     shapes(
 ///         path = "crates/lash-core-execution/src/runtime/effect/envelope.rs",
 ///         cover(
 ///             RuntimeEffectInvocation, RuntimeEffectEnvelope, RuntimeEffectCommand,
 ///             RuntimeEffectOutcome,
 ///         ),
-///     ),
-///     items(
-///         path = "crates/lash-core-execution/src/runtime/effect/validation.rs",
-///         CanonicalRuntimeEffectEnvelope,
-///     ),
-///     items(
-///         path = "crates/lash-core-store/src/runtime_error.rs", RuntimeEffectControllerError,
-///         RuntimeEffectReplayMismatchReport,
 ///     ),
 /// )
 pub const EFFECT_JOURNAL_VERSION: u32 = 15;

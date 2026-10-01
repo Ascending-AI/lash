@@ -27,16 +27,18 @@ use crate::{ProcessId, SessionId};
 /// The referrer labels and their canonical id encodings at the 1.0 cut.
 ///
 /// version_guard(
-///     items(
-///         ArtifactReferrerKind, ALL, as_str, parse, ArtifactReferrer, canonical_id, decode,
-///         StoredReferrer, FrameEnvironmentId, SubscriptionRevisionId, HostArtifactPin,
-///         UploadReferrerId, AttachmentUploadId, HOST_PIN_PREFIX, HOST_PIN_HEX_LEN, UPLOAD_PREFIX,
-///         UPLOAD_HEX_LEN, try_from, decode_journal_identity, json_text, json_parse,
+///     roots(
+///         ArtifactReferrerKind, ArtifactReferrer, StoredReferrer, FrameEnvironmentId,
+///         SubscriptionRevisionId, HostArtifactPin, UploadReferrerId, AttachmentUploadId,
 ///     ),
-///     impls("Serialize for ArtifactReferrer", "Deserialize for ArtifactReferrer"),
-///     items(path = "crates/lash-core-store/src/process_identity.rs", StartKey, parse_rendered),
-///     items(path = "crates/lash-core-store/src/session_identity.rs", FrameNodeId),
-///     items(path = "crates/lash-sansio/src/effect_identity.rs", EffectJournalIdentity),
+///     roots(path = "crates/lash-core-store/src/process_identity.rs", StartKey),
+///     roots(path = "crates/lash-core-store/src/session_identity.rs", FrameNodeId),
+///     roots(path = "crates/lash-sansio/src/effect_identity.rs", EffectJournalIdentity),
+///     items(
+///         ALL, as_str, parse, canonical_id, decode, HOST_PIN_PREFIX, HOST_PIN_HEX_LEN,
+///         UPLOAD_PREFIX, UPLOAD_HEX_LEN, try_from, decode_journal_identity, json_text, json_parse,
+///     ),
+///     items(path = "crates/lash-core-store/src/process_identity.rs", parse_rendered),
 ///     file(
 ///         path = "crates/lash-sansio/src/identity.rs",
 ///         cover("string_identity!", SessionId, ProcessId),

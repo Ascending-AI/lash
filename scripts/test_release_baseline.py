@@ -59,6 +59,21 @@ class ReleaseBaselineTests(unittest.TestCase):
         result = self.command("check", "--baseline", "scripts/release-baseline.toml")
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    @unittest.skipUnless(os.environ.get("LASH_RELEASE_CUT") == "1", "FIG-4485: release baseline activates at the 1.0 cut")
+    def test_sqlite_stamps_equal_their_catalog_numbers(self):
+        self.assertEqual(baseline.sqlite_stamp_mismatches(ROOT), [])
+
+    def test_pre_cut_sqlite_stamps_are_named_against_their_catalog_numbers(self):
+        errors = baseline.sqlite_stamp_mismatches(ROOT)
+        if not baseline.mismatches(baseline.inventory(ROOT), baseline.load_baseline(ROOT / baseline.BASELINE)):
+            self.assertEqual(errors, [])
+            return
+        for stamp, component in [("SCHEMA_VERSION", "SQLITE_CORE"),
+                                 ("PROCESS_SCHEMA_VERSION", "SQLITE_REGISTRY"),
+                                 ("TRIGGER_SCHEMA_VERSION", "SQLITE_TRIGGERS")]:
+            self.assertTrue(any(f":{stamp}: default stamp" in error and component in error
+                                for error in errors), errors)
+
     def test_resolver_rejects_ambiguous_missing_and_unsupported_constants(self):
         for text, name in [("const V: u32 = 1;\nconst V: u32 = 2;", "V"),
                            ("const V: u32 = 1;", "MISSING"),
@@ -100,6 +115,8 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
                           "crates/lash-core-store/src/store/state_version.rs",
                           "crates/lash-core-store/src/store/synthetic_next.rs",
                           "crates/lash-postgres-store/src/postgres/migrate.rs",
+                          "crates/lash-sqlite-store/src/migration.rs",
+                          "crates/lash-core-store/src/compat.rs",
                           "crates/lash-typescript/tests/workflow_graph_schema.rs",
                           "examples/workflow-graph-roundtrip/frontend/scripts/generate-contract-types.mjs",
                           "examples/workflow-graph-roundtrip/CONTRACT.md"])
@@ -122,6 +139,34 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
                                                        "REMOTE_PROTOCOL_VERSION: u32 = 100;"))
             errors = baseline.mismatches(baseline.inventory(repo), declared)
             self.assertTrue(any("REMOTE_PROTOCOL_VERSION" in error for error in errors))
+
+            # After the reset every SQLite stamp is its catalog's number, in
+            # both tiers; a stamp that keeps an old value, and a catalog step
+            # numbered past its stamp, are red.
+            self.assertEqual(baseline.sqlite_stamp_mismatches(repo), [])
+            check = subprocess.run(
+                [sys.executable, str(ROOT / "scripts/release_baseline.py"), "--repo", str(repo), "check"],
+                capture_output=True, text=True, cwd=ROOT,
+            )
+            self.assertIn("REMOTE_PROTOCOL_VERSION", check.stderr)
+            self.assertNotIn("stamp", check.stderr)
+            schema = repo / "crates/lash-sqlite-store/src/schema.rs"
+            reset_schema = schema.read_text()
+            self.assertIn("const BASE_PROCESS_SCHEMA_VERSION: i32 = 1;", reset_schema)
+            schema.write_text(reset_schema.replace("const BASE_PROCESS_SCHEMA_VERSION: i32 = 1;",
+                                                   "const BASE_PROCESS_SCHEMA_VERSION: i32 = 44;"))
+            errors = baseline.sqlite_stamp_mismatches(repo)
+            self.assertTrue(errors and all("PROCESS_SCHEMA_VERSION" in error for error in errors), errors)
+            self.assertTrue(any("default stamp 44" in error and "SQLITE_REGISTRY" in error for error in errors))
+            schema.write_text(reset_schema)
+            catalog = repo / "crates/lash-sqlite-store/src/migration.rs"
+            reset_catalog = catalog.read_text()
+            self.assertIn("from: 1,\n        to: 2,", reset_catalog)
+            catalog.write_text(reset_catalog.replace("from: 1,\n        to: 2,", "from: 2,\n        to: 3,", 1))
+            errors = baseline.sqlite_stamp_mismatches(repo)
+            self.assertTrue(any("DurableCore step 2 to 3 is outside" in error for error in errors), errors)
+            self.assertTrue(any("DurableCore has no step chain from the default stamp 1" in error
+                                for error in errors), errors)
 
 
 if __name__ == "__main__":

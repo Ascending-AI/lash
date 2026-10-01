@@ -669,15 +669,7 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 ///             RuntimeEffectOutcome,
 ///         ),
 ///     ),
-///     items(path = "crates/lash-core-store/src/store/root.rs", RootAdmission, AdmittedHead),
-///     items(path = "crates/lash-core-store/src/store/pending_follow_on.rs", PendingFollowOn),
-///     items(path = "crates/lash-sansio/src/effect_identity.rs", ExecutionScope),
-///     items(path = "crates/lash-core-store/src/runtime_error.rs", RuntimeErrorCode),
-///     items(
-///         path = "crates/lash-sansio/src/session_model/mod.rs", TurnOutcome, TurnFinish, TurnStop,
-///         TurnCancellationEvidence, TurnCancelMode, TurnCancelUndeliveredInputPolicy,
-///         SessionAppendNode, ErrorEnvelope,
-///     ),
+///     roots(path = "crates/lash-sansio/src/session_model/mod.rs", TurnOutcome, ErrorEnvelope),
 ///     catalog(path = "crates/lash-postgres-store/src/postgres/migrate.rs", EXPAND_MIGRATIONS),
 /// )
 const SCHEMA_VERSION: i32 = 141;

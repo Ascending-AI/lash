@@ -1138,23 +1138,18 @@ CREATE TABLE IF NOT EXISTS lash_compat (
 /// recreate it.
 const BASE_SCHEMA_VERSION: i32 = 99;
 /// version_guard(
+///     roots(
+///         path = "crates/lash-sqlite-store/src/lib.rs", StoredBlobEnvelope,
+///         BlobArtifactDescriptor, BlobStorageHint, BlobCompression,
+///     ),
+///     roots(path = "crates/lash-core-store/src/store/root.rs", RootAdmission),
+///     roots(path = "crates/lash-core-store/src/store/pending_follow_on.rs", PendingFollowOn),
+///     roots(path = "crates/lash-core-store/src/runtime_error.rs", RuntimeErrorCode),
+///     roots(path = "crates/lash-sansio/src/session_model/mod.rs", TurnOutcome, ErrorEnvelope),
 ///     items(SCHEMA, elide = "sql_idempotent_index"),
 ///     items(
 ///         path = "crates/lash-sqlite-store/src/schema_fragments.rs", SESSION_INGRESS_TABLE,
 ///         SESSION_ROOTS_TABLES, elide = "sql_idempotent_index",
-///     ),
-///     items(
-///         path = "crates/lash-sqlite-store/src/lib.rs", StoredBlobEnvelope, BlobArtifactDescriptor,
-///         BlobStorageHint, BlobCompression,
-///     ),
-///     items(path = "crates/lash-core-store/src/store/root.rs", RootAdmission, AdmittedHead),
-///     items(path = "crates/lash-core-store/src/store/pending_follow_on.rs", PendingFollowOn),
-///     items(path = "crates/lash-sansio/src/effect_identity.rs", ExecutionScope),
-///     items(path = "crates/lash-core-store/src/runtime_error.rs", RuntimeErrorCode),
-///     items(
-///         path = "crates/lash-sansio/src/session_model/mod.rs", TurnOutcome, TurnFinish, TurnStop,
-///         TurnCancellationEvidence, TurnCancelMode, TurnCancelUndeliveredInputPolicy,
-///         SessionAppendNode, ErrorEnvelope,
 ///     ),
 ///     catalog(
 ///         path = "crates/lash-sqlite-store/src/migration.rs", CATALOG,

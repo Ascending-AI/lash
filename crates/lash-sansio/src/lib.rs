@@ -79,16 +79,14 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// not carry.
 ///
 /// version_guard(
+///     roots(path = "crates/lashlang/src/builtins.rs", Builtin, Arity),
 ///     items(path = "crates/lashlang/src/ast_number.rs", canonical_bits),
 ///     items(
-///         path = "crates/lashlang/src/artifact.rs", hash_host_requirements, process_component_hash,
-///         write_exports, write_host_requirements, write_program, write_declaration, write_function,
-///         write_process, write_type, write_expr,
+///         path = "crates/lashlang/src/artifact.rs", hash_host_requirements,
+///         process_component_hash, write_exports, write_host_requirements, write_program,
+///         write_declaration, write_function, write_process, write_type, write_expr,
 ///     ),
-///     items(
-///         path = "crates/lashlang/src/builtins.rs", SOURCE_BUILTINS, TYPESCRIPT_BUILTINS, Builtin,
-///         Arity,
-///     ),
+///     items(path = "crates/lashlang/src/builtins.rs", SOURCE_BUILTINS, TYPESCRIPT_BUILTINS),
 ///     file(
 ///         path = "crates/lash-typescript/src/lower/**", path = "crates/lashlang/src/ast_roles.rs",
 ///         cover("impl Lowerer", CollectionTransformParts),

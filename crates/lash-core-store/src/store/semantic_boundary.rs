@@ -16,10 +16,8 @@ use crate::SessionId;
 /// the cancellation-dependent commit fields admitted after that cutover.
 ///
 /// version_guard(
-///     items(
-///         SemanticBoundaryRequestIntent, semantic_boundary_request_intent_encoding,
-///         semantic_boundary_request_identity,
-///     ),
+///     roots(SemanticBoundaryRequestIntent),
+///     items(semantic_boundary_request_intent_encoding, semantic_boundary_request_identity),
 /// )
 pub const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
 /// Encoding version of the create-session semantic-boundary request identity;
@@ -27,10 +25,8 @@ pub const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
 /// reasons.
 ///
 /// version_guard(
-///     items(
-///         SemanticBoundaryRequestIntent, semantic_boundary_request_intent_encoding,
-///         semantic_boundary_request_identity,
-///     ),
+///     roots(SemanticBoundaryRequestIntent),
+///     items(semantic_boundary_request_intent_encoding, semantic_boundary_request_identity),
 /// )
 pub const CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
 /// Refuse settlement or evidence content on a semantic-boundary commit.

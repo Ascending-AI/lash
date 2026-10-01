@@ -222,20 +222,10 @@ fn default_root_session_id() -> SessionId {
 /// encoding is refused rather than reinterpreted field-by-field.
 ///
 /// version_guard(
-///     items(SessionHeadPayload),
-///     items(path = "crates/lash-core-store/src/session_graph.rs", PersistedSessionConfig),
-///     items(path = "crates/lash-core-store/src/execution_state.rs", PluginConfig),
-///     items(path = "crates/lash-sansio/src/llm/capability.rs", ModelCapability, InstructionRole),
-///     items(
-///         path = "crates/lash-core-store/src/session_identity.rs", SessionToolAccess,
-///         SessionResidentToolAccess, SessionToolAccessWire,
-///     ),
-///     items(
-///         path = "crates/lash-sansio/src/tool_contract.rs",
-///         path = "crates/lash-sansio/src/schema_contract.rs", ToolDefinition, ToolManifest,
-///         ToolContract, ToolId, CompactToolContract, ToolRetryPolicy, ToolOutputContract,
-///         ToolArgumentProjectionPolicy, SchemaContract, SchemaProjectionPolicy,
-///         SchemaProjectionOverride, ProjectionMode,
+///     roots(SessionHeadPayload),
+///     roots(
+///         path = "crates/lash-core-store/src/session_identity.rs", SessionResidentToolAccess,
+///         SessionToolAccessWire,
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]

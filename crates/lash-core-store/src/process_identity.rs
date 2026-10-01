@@ -116,9 +116,10 @@ const START_KEY_PREFIX: &str = "process-start-key";
 /// burned.
 ///
 /// version_guard(
+///     roots(StartKeyNamespace),
 ///     items(
-///         START_KEY_DOMAIN, START_KEY_PREFIX, StartKeyNamespace, derive, for_tool_intent,
-///         for_trigger_delivery, for_host, for_keyless_host, write_scope,
+///         START_KEY_DOMAIN, START_KEY_PREFIX, derive, for_tool_intent, for_trigger_delivery,
+///         for_host, for_keyless_host, write_scope,
 ///     ),
 /// )
 pub const START_KEY_FAMILY_VERSION: u8 = 1;
@@ -566,7 +567,7 @@ impl WakeDeliveryState {
 /// process incarnation: a minted process id names one process (ADR 0107).
 ///
 /// version_guard(
-///     items(ProcessWakeDelivery),
+///     roots(ProcessWakeDelivery),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 4;

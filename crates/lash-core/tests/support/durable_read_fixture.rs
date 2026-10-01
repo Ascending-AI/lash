@@ -101,7 +101,7 @@ pub const SESSION_ID: &str = "durable-read-fixture";
 /// format it was written in. Move it when [`ExpectedFixture`]'s shape changes.
 ///
 /// version_guard(
-///     items(ExpectedFixture),
+///     roots(ExpectedFixture),
 /// )
 pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 131;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;

@@ -126,6 +126,13 @@ use crate::{PluginMessage, ProcessId};
 /// its own facts (ADR 0125).
 ///
 /// version_guard(
+///     roots(ToolSettlement),
+///     roots(
+///         path = "crates/lash-core-execution/src/tool_dispatch/context.rs", ToolDispatchOutcome,
+///         PendingToolDispatchOutcome,
+///     ),
+///     roots(path = "crates/lash-sansio/src/llm/types.rs", LlmCallId),
+///     roots(path = "crates/lash-sansio/src/session_model/message.rs", FlatPart, FlatPartRef),
 ///     items(
 ///         path = "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs",
 ///         path = "crates/lash-core-execution/src/tool_dispatch/context.rs",
@@ -139,17 +146,7 @@ use crate::{PluginMessage, ProcessId};
 ///         path = "crates/lash-sansio/src/effect_identity.rs",
 ///         path = "crates/lash-sansio/src/causal.rs",
 ///         path = "crates/lash-core-execution/src/runtime/effect/recorded_stream.rs",
-///         ToolSettlement, RecordedChildStream, RecordedChildEvent, RecordedChildChannel,
-///         ChildStreamTruncation, ToolDispatchOutcome, PendingToolDispatchOutcome,
-///         ToolTriggerEffectOutcome, TriggerDeliveryEmitReceipt, TriggerDeliveryEmitOutcome,
-///         PluginMessage, MessageRole, MessageOrigin, TurnOutputSource, Part, FlatPart, FlatPartRef,
-///         PartAttachment, PartKind, TokenUsage, LlmCallId, AttachmentSource, ProviderFileScope,
-///         ProviderReplayMeta, ProviderReasoningReplay, ProviderRouteIdentity, ResponsePhase,
-///         ResponseTextMeta, AttachmentRef, AttachmentId, AttachmentTypeMetadata, MediaType,
-///         ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentRefusalReason,
-///         ModelToolReturn, ModelToolReturnPart, AttachmentMaterializationNotice,
-///         AttachmentMaterializationSource, AttachmentMaterializationReason, ExecutionScope,
-///         EffectAddress, CausalRef,
+///         ToolIntentKind,
 ///     ),
 ///     file(
 ///         path = "crates/lash-sansio/src/identity.rs",
@@ -175,22 +172,10 @@ pub const TOOL_SETTLEMENT_VERSION: u16 = 8;
 /// a capture carries no usage (ADR 0125).
 ///
 /// version_guard(
-///     items(
-///         path = "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs",
-///         path = "crates/lash-sansio/src/plugin.rs",
-///         path = "crates/lash-sansio/src/session_model/message.rs",
-///         path = "crates/lash-sansio/src/session_model/mod.rs",
-///         path = "crates/lash-sansio/src/llm/types.rs",
-///         path = "crates/lash-sansio/src/attachment.rs",
-///         path = "crates/lash-sansio/src/tool_output.rs",
-///         path = "crates/lash-sansio/src/effect_identity.rs",
-///         path = "crates/lash-sansio/src/causal.rs", ToolAttemptCapture, LlmCallId, TokenUsage,
-///         PluginMessage, MessageRole, MessageOrigin, TurnOutputSource, Part, FlatPart, FlatPartRef,
-///         PartAttachment, PartKind, ModelToolReturnPart, AttachmentSource, ProviderFileScope,
-///         ProviderReplayMeta, ProviderReasoningReplay, ProviderRouteIdentity, ResponsePhase,
-///         ResponseTextMeta, AttachmentRef, AttachmentId, AttachmentTypeMetadata, MediaType,
-///         ExecutionScope, EffectAddress, CausalRef,
-///     ),
+///     roots(ToolAttemptCapture),
+///     roots(path = "crates/lash-sansio/src/llm/types.rs", LlmCallId),
+///     roots(path = "crates/lash-sansio/src/session_model/message.rs", FlatPart, FlatPartRef),
+///     roots(path = "crates/lash-sansio/src/session_model/mod.rs", TokenUsage),
 ///     file(
 ///         path = "crates/lash-sansio/src/identity.rs",
 ///         cover("string_identity!", SessionId, ProcessId, TurnId, InputId),

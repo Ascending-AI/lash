@@ -516,7 +516,8 @@ impl PendingTurnInputBatch {
 /// identical retry as a conflict.
 ///
 /// version_guard(
-///     items(turn_input_submission_preimage, TurnInput, InputItem),
+///     roots(TurnInput),
+///     items(turn_input_submission_preimage),
 /// )
 pub const TURN_INPUT_SUBMISSION_FAMILY_VERSION: u8 = 1;
 

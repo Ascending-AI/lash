@@ -15,7 +15,10 @@
 # they version.
 #
 # What each constant guards is not listed here either. The constant declares
-# it in code, with a `/// version_guard(..)` marker in its doc comment, and scripts/check_version_bumps.py reads the markers from the
+# its root types in code, with a `/// version_guard(..)` marker in its doc
+# comment; the guard set is every shape reachable from those roots, derived
+# by scripts/check_version_bumps.py (scripts/version_guard_closure.py prints
+# it). The gate reads the markers from the
 # tree: given `--base <sha> --head <sha>` it fails when a guarded shape changed
 # without its constant bumping, when a decoder-law surface bumped without its
 # RECORD_UPCASTERS lift, when a DDL stamp bumped without the step of the

@@ -309,32 +309,17 @@ pub struct SessionNodeRecord {
 ///
 /// version_guard(
 ///     shapes(cover(StoredSessionNodeBody, SessionNodePayload, SessionNodeRecord)),
-///     items(
-///         path = "crates/lash-sansio/src/session_model/mod.rs", SessionHistoryRecord,
-///         ConversationRecord, ProtocolEvent, TurnBudget, NoProgressBudget,
+///     roots(
+///         path = "crates/lash-sansio/src/session_model/message.rs", Message, FlatPart,
+///         FlatPartRef,
 ///     ),
-///     items(
-///         path = "crates/lash-sansio/src/session_model/message.rs", Message, MessageRole,
-///         MessageOrigin, Part, FlatPart, FlatPartRef, PartKind, PartAttachment,
-///     ),
-///     items(path = "crates/lash-sansio/src/tool_output.rs", ModelToolReturnPart),
-///     items(
-///         path = "crates/lash-core-store/src/session_identity.rs", AgentFrameReason,
-///         AgentFrameAssignment,
-///     ),
+///     roots(path = "crates/lash-core-store/src/execution_state.rs", PluginOptions),
 ///     file(
 ///         path = "crates/lash-core-store/src/session_policy_serde.rs",
 ///         cover(
 ///             "impl serde::Serialize for SessionPolicy",
 ///             "impl<'de> serde::Deserialize<'de> for SessionPolicy",
 ///         ),
-///     ),
-///     items(
-///         path = "crates/lash-core-store/src/execution_state.rs", PluginOptions, PluginConfig,
-///     ),
-///     items(
-///         path = "crates/lash-core-llm/src/model.rs", ModelConfig, RecordedModel, ModelKey,
-///         ModelMetadata, ModelLimits,
 ///     ),
 ///     shapes(
 ///         path = "crates/lash-sansio/src/llm/capability.rs",
@@ -358,7 +343,6 @@ pub struct SessionNodeRecord {
 ///             ProviderRouteIdentity, ProviderFileScope, GenerationOptions, NonNegativeFiniteF64,
 ///         ),
 ///     ),
-///     items(path = "crates/lash-sansio/src/attachment.rs", MediaType, AttachmentRef),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 22;

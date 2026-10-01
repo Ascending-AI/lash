@@ -175,12 +175,6 @@ pub use lashlang_graph::{
 ///             TraceLashlangEventIdentity, TraceBranchMembership, TraceAttemptUsageOutcome,
 ///         ),
 ///     ),
-///     items(
-///         path = "crates/lash-sansio/src/tool_output.rs", ToolFailureClass, ToolFailureSource,
-///         ToolRetryStatus,
-///     ),
-///     items(path = "crates/lash-sansio/src/workflow.rs", WorkflowExecutionSite),
-///     items(path = "crates/lash-sansio/src/execution_node_kind.rs", ExecutionNodeKind),
 ///     items(path = "crates/lash-trace/src/lashlang_graph.rs", fold_lashlang_graph),
 ///     shapes(
 ///         path = "crates/lash-trace/src/lashlang_graph/model.rs",

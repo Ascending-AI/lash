@@ -8,8 +8,9 @@ constant itself, by a marker in its doc comment::
     /// The demo record's stored format.
     ///
     /// version_guard(
-    ///     items(Request, encode_request),
-    ///     items(path = "crates/demo/src/wire.rs", Envelope),
+    ///     roots(Request),
+    ///     roots(path = "crates/demo/src/wire.rs", Envelope),
+    ///     items(encode_request),
     ///     shapes(path = "crates/demo/src/dto/*.rs", cover(Reply)),
     ///     impls("Serialize for Request"),
     ///     file(path = "crates/demo/schema.sql", cover("CREATE TABLE demo")),
@@ -23,12 +24,19 @@ versions, no build, lint or feature-gate check reads it, and this script and
 own block of doc comments and attributes, with no blank line between that
 block and the ``const``.
 
+- ``roots`` names the types the format starts from, its envelope or its
+  persisted record, and guards every shape reachable from them: the gate
+  walks their Serde-visible fields, container arguments and aliases to a
+  closure (see "Reachability" below), so a marker never lists leaf types;
 - ``items`` guards the named declarations (``const``, ``static``, ``fn``,
-  ``struct``, ``enum``, ``type``), comments and formatting ignored;
-- ``shapes`` guards every Serde-derived struct and enum in the matched files,
-  and ``cover(..)`` names shapes that must be among them;
+  ``struct``, ``enum``, ``type``), comments and formatting ignored. It is for
+  what no type reaches: encoders, tags, tables, and types under a
+  hand-written impl. It is not followed;
+- ``shapes`` guards every Serde-derived struct and enum in the matched files
+  and, like ``roots``, everything they reach; ``cover(..)`` names shapes that
+  must be among them;
 - ``impls`` guards hand-written ``Serialize for T`` / ``Deserialize for T``
-  impls;
+  impls. The impls of a reachable type are guarded without being named;
 - ``file`` guards whole files, and ``cover(..)`` names text they must contain;
 - ``catalog`` guards nothing: it names the migration catalog a DDL stamp's bump
   must extend (below), and ``rows = ".."`` keeps only the rows that contain that
@@ -59,6 +67,9 @@ does not excuse the step.
 
 There is no report-only mode. A changed shape without its bump, a bump
 without its evidence, and a guard that cannot be evaluated all exit nonzero.
+A reachable type the tree cannot resolve is such a guard.
+``version_guard_closure.py`` prints each surface's closure, its cycles and
+what the walk leaves opaque.
 
 Guard hashing ignores only allowlisted non-wire derives inside top-level
 ``derive`` attributes and ``derive`` entries of ``cfg_attr``. Wire-producing
@@ -77,6 +88,7 @@ from dataclasses import dataclass
 import fnmatch
 from functools import lru_cache
 import hashlib
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -88,7 +100,7 @@ from typing import Iterable
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = "scripts/versioned-surfaces.toml"
 MARKER = "version_guard"
-GUARD_KINDS = ("items", "shapes", "impls", "file")
+GUARD_KINDS = ("items", "shapes", "impls", "file", "roots")
 # The one table a record lift is registered in (ADR 0106 §2). Its default-build
 # arm is the upgrade evidence a bumped decoder-law surface owes.
 UPCASTER_REGISTRY = "crates/lash-core-store/src/store/fleet_format.rs"
@@ -185,6 +197,11 @@ class TreeView:
 
     def __init__(self) -> None:
         self._projected: dict[str, str | None] = {}
+        self._reachability: Reachability | None = None
+        self._closures: dict[Guard, tuple[Closure, list[str]]] = {}
+
+    def preload(self, paths: Iterable[str]) -> None:
+        """Read `paths` ahead of use, where one read is cheaper than many."""
 
     def matching_paths(self, patterns: Iterable[str]) -> tuple[str, ...]:
         raise NotImplementedError
@@ -229,6 +246,33 @@ class RevisionView(TreeView):
             self._contents[path] = result.stdout if result.returncode == 0 else None
         return self._contents[path]
 
+    def preload(self, paths: Iterable[str]) -> None:
+        wanted = [path for path in paths if path not in self._contents]
+        if not wanted:
+            return
+        request = "".join(f"{self.revision}:{path}\n" for path in wanted).encode()
+        completed = subprocess.run(
+            ["git", "cat-file", "--batch"], cwd=self.repo, input=request, capture_output=True
+        )
+        if completed.returncode != 0:
+            detail = completed.stderr.decode(errors="replace").strip()
+            raise CheckError(f"git cat-file --batch failed: {detail}")
+        output = completed.stdout
+        cursor = 0
+        for path in wanted:
+            line_end = output.index(b"\n", cursor)
+            header = output[cursor:line_end].split()
+            cursor = line_end + 1
+            if header[-1] == b"missing":
+                self._contents[path] = None
+                continue
+            size = int(header[2])
+            blob = output[cursor : cursor + size]
+            cursor += size + 1
+            self._contents[path] = (
+                blob.decode("utf-8", errors="surrogateescape") if header[1] == b"blob" else None
+            )
+
 
 class WorktreeView(TreeView):
     """The files on disk, so the registry check reads what a commit would."""
@@ -239,6 +283,24 @@ class WorktreeView(TreeView):
         super().__init__()
         self.repo = repo
         self._contents: dict[str, str | None] = {}
+        self._listings: dict[str, tuple[str, ...]] = {}
+
+    def _listing(self, prefix: str) -> tuple[str, ...]:
+        """Every file under `prefix`, build output and vendored trees left out."""
+        if prefix not in self._listings:
+            found: list[str] = []
+            base = self.repo / prefix
+            for directory, names, files in os.walk(base):
+                names[:] = [
+                    name
+                    for name in names
+                    if name not in {"target", "node_modules"} and not name.startswith(".")
+                ]
+                relative = os.path.relpath(directory, self.repo).replace(os.sep, "/")
+                stem = "" if relative == "." else relative + "/"
+                found.extend(stem + name for name in files)
+            self._listings[prefix] = tuple(found)
+        return self._listings[prefix]
 
     def matching_paths(self, patterns: Iterable[str]) -> tuple[str, ...]:
         matches: set[str] = set()
@@ -249,17 +311,13 @@ class WorktreeView(TreeView):
                     matches.add(pattern)
                 continue
             prefix = pattern[: wildcard.start()].rpartition("/")[0]
-            base = self.repo / prefix
-            if not base.is_dir():
+            if not (self.repo / prefix).is_dir():
                 continue
-            for path in base.rglob("*"):
-                relative = path.relative_to(self.repo).as_posix()
-                if (
-                    path.is_file()
-                    and "/target/" not in f"/{relative}"
-                    and fnmatch.fnmatchcase(relative, pattern)
-                ):
-                    matches.add(relative)
+            matches.update(
+                relative
+                for relative in self._listing(prefix)
+                if fnmatch.fnmatchcase(relative, pattern)
+            )
         return tuple(sorted(matches))
 
     def content(self, path: str) -> str | None:
@@ -1350,15 +1408,17 @@ class _MarkerParser:
         self.list_items(argument)
         if not all(paths) or len(paths) != len(set(paths)):
             raise CheckError(f"{MARKER} {kind}(..) paths must be distinct and non-empty")
-        if kind in {"items", "impls"} and not symbols:
+        if kind in {"items", "impls", "roots"} and not symbols:
             raise CheckError(f"{MARKER} {kind}(..) names nothing to guard")
         if kind in {"shapes", "file"} and symbols:
             raise CheckError(
                 f"{MARKER} {kind}(..) takes path, cover and elide, not "
                 + ", ".join(symbols)
             )
-        if kind in {"items", "impls"} and cover:
+        if kind in {"items", "impls", "roots"} and cover:
             raise CheckError(f"{MARKER} {kind}(..) does not take cover")
+        if kind == "roots" and elide:
+            raise CheckError(f"{MARKER} roots(..) does not take elide")
         for values, what in ((symbols, "names"), (cover, "cover")):
             if len(values) != len(set(values)):
                 raise CheckError(f"{MARKER} {kind}(..) {what} contain duplicates")
@@ -1446,6 +1506,1349 @@ def declaration_in(text: str, surface: Surface) -> Declaration | None:
     )
 
 
+# --- Reachability ------------------------------------------------------------
+#
+# A `roots(..)` guard names the types a format starts from: its envelope or its
+# persisted record. Everything those types serialize is guarded with them. The
+# walk below computes that closure from the tree: from each root it follows the
+# Serde-visible fields of structs and enums, the generic arguments of the
+# containers they sit in, and type aliases, resolving each name the way the
+# file that writes it does (its own definitions, its `use` imports, then the
+# crate).
+#
+# - a `#[serde(skip)]` field is not followed;
+# - `from`, `try_from` and `into` name the type the shape serializes as, and it
+#   is followed;
+# - a `with`, `serialize_with` or `deserialize_with` adapter of this repository
+#   is guarded as text, and the field's type is still followed;
+# - a type whose Serde impls are hand-written is guarded with those impls and
+#   is not followed further: its fields do not say what it writes;
+# - a type declared by a `macro_rules!` invocation is guarded as the invocation
+#   and the macro;
+# - a type of another package, an external adapter and an associated type are
+#   opaque: reported, and not followed;
+# - a name that resolves to nothing, or to several definitions, is an error.
+#   The guard cannot be evaluated until the code or the marker says which type
+#   is meant.
+
+RUST_TYPE_DEFINITION = re.compile(
+    r"(?m)^([ \t]*)(?:pub(?:\([^)]*\))?[ \t]+)?(struct|enum|union|type)[ \t]+"
+    r"([A-Za-z_][A-Za-z0-9_]*)\b"
+)
+RUST_USE = re.compile(r"(?m)^[ \t]*(pub(?:\([^)]*\))?[ \t]+)?use[ \t]+([^;]+);")
+RUST_MODULE_OPENING = re.compile(
+    r"(?m)^([ \t]*)(?:pub(?:\([^)]*\))?[ \t]+)?mod[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{"
+)
+RUST_MODULE_FILE = re.compile(
+    r"(?m)^(?:[ \t]*#\[path[ \t]*=[ \t]*\"([^\"]+)\"\][ \t]*\n)?"
+    r"[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?mod[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*;"
+)
+RUST_MACRO_DEFINITION = re.compile(r"(?m)^[ \t]*macro_rules![ \t]+([A-Za-z_][A-Za-z0-9_]*)\b")
+RUST_MACRO_CALL = re.compile(r"(?m)^([ \t]*)([A-Za-z_][A-Za-z0-9_]*)![ \t]*[({\[]")
+RUST_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+RUST_NUMBER = re.compile(r"[0-9][0-9A-Za-z_]*(?:\.[0-9][0-9A-Za-z_]*)?")
+
+# Names every Rust file has without importing them.
+RUST_PRELUDE_TYPES = frozenset(
+    "bool char str u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize f32 f64 "
+    "String Vec Option Box Result".split()
+)
+RUST_STANDARD_CRATES = frozenset({"std", "core", "alloc"})
+RUST_TYPE_KEYWORDS = frozenset({"mut", "const", "unsafe", "extern", "fn", "for", "Self", "as"})
+RUST_SOURCE_PATTERNS = ("crates/*.rs", "examples/*.rs")
+CARGO_MANIFEST_PATTERNS = ("Cargo.toml", "crates/*Cargo.toml", "examples/*Cargo.toml")
+MAX_REPORTED_PROBLEMS = 12
+
+Token = tuple[str, str]
+
+
+@lru_cache(maxsize=None)
+def rust_tokens(text: str) -> tuple[Token, ...]:
+    """Split Rust source into identifiers, lifetimes, literals and punctuation."""
+    tokens: list[Token] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char.isspace():
+            index += 1
+        elif text.startswith("//", index) or text.startswith("/*", index):
+            skipped = _rust_trivia_end(text, index)
+            if skipped is None:
+                raise CheckError("unterminated Rust comment while reading a guarded shape")
+            index = skipped
+        elif raw := _raw_string_start(text, index):
+            content_start, closer = raw
+            closing = text.find(closer, content_start)
+            if closing < 0:
+                raise CheckError("unterminated Rust raw string while reading a guarded shape")
+            tokens.append(("literal", text[content_start:closing]))
+            index = closing + len(closer)
+        elif char == '"' or text.startswith('b"', index):
+            start = index = index + (2 if char == "b" else 1)
+            while index < len(text) and text[index] != '"':
+                index += 2 if text[index] == "\\" else 1
+            tokens.append(("literal", text[start:index]))
+            index += 1
+        elif char_end := _char_literal_end(text, index):
+            tokens.append(("char", text[index:char_end]))
+            index = char_end
+        elif char == "'" and (name := RUST_IDENTIFIER.match(text, index + 1)):
+            tokens.append(("lifetime", name.group(0)))
+            index = name.end()
+        elif name := RUST_IDENTIFIER.match(text, index):
+            tokens.append(("ident", name.group(0)))
+            index = name.end()
+        elif number := RUST_NUMBER.match(text, index):
+            tokens.append(("number", number.group(0)))
+            index = number.end()
+        elif text.startswith(("::", "->", "=>"), index):
+            tokens.append(("punct", text[index : index + 2]))
+            index += 2
+        else:
+            tokens.append(("punct", char))
+            index += 1
+    return tuple(tokens)
+
+
+@dataclass(frozen=True)
+class TypeRef:
+    """One type name as a field writes it."""
+
+    segments: tuple[str, ...]
+    absolute: bool = False
+    associated: bool = False
+
+    @property
+    def label(self) -> str:
+        return ("::" if self.absolute else "") + "::".join(self.segments)
+
+
+def type_refs(
+    tokens: Iterable[Token], generics: frozenset[str] = frozenset()
+) -> tuple[TypeRef, ...]:
+    """Every type a type expression names: the type itself and the generic
+    arguments of its containers. Trait objects, lifetimes, array lengths and
+    the item's own generic parameters name no shape."""
+    tokens = tuple(tokens)
+    refs: list[TypeRef] = []
+    index = 0
+    while index < len(tokens):
+        kind, value = tokens[index]
+        if (kind, value) == ("punct", ";"):
+            # `[T; N]`: the length is an expression.
+            depth = 0
+            while index < len(tokens):
+                if tokens[index] == ("punct", "["):
+                    depth += 1
+                elif tokens[index] == ("punct", "]"):
+                    if depth == 0:
+                        break
+                    depth -= 1
+                index += 1
+            continue
+        if kind != "ident":
+            index += 1
+            continue
+        segments = [value]
+        end = index + 1
+        while (
+            end + 1 < len(tokens)
+            and tokens[end] == ("punct", "::")
+            and tokens[end + 1][0] == "ident"
+        ):
+            segments.append(tokens[end + 1][1])
+            end += 2
+        before = tokens[index - 1] if index else ("", "")
+        before2 = tokens[index - 2] if index > 1 else ("", "")
+        after = tokens[end] if end < len(tokens) else ("", "")
+        trait = before in {("ident", "dyn"), ("ident", "impl"), ("punct", "+")}
+        index = end
+        if value in {"dyn", "impl"} or (len(segments) == 1 and value in RUST_TYPE_KEYWORDS):
+            continue
+        if trait or (after == ("punct", "=") and len(segments) == 1):
+            # A trait bound, or the name of an associated-type binding.
+            continue
+        if before == ("punct", "::"):
+            if before2 == ("punct", ">"):
+                refs.append(TypeRef(tuple(segments), associated=True))
+            else:
+                refs.append(TypeRef(tuple(segments), absolute=True))
+            continue
+        if value in generics:
+            if len(segments) > 1:
+                refs.append(TypeRef(tuple(segments), associated=True))
+            continue
+        refs.append(TypeRef(tuple(segments)))
+    return tuple(refs)
+
+
+class _ItemParser:
+    """Reads one struct, enum, union or type alias from its tokens."""
+
+    OPENING = {"(": ")", "[": "]", "{": "}", "<": ">"}
+
+    def __init__(self, tokens: tuple[Token, ...]) -> None:
+        self.tokens = tokens
+        self.index = 0
+
+    def peek(self, ahead: int = 0) -> Token:
+        at = self.index + ahead
+        return self.tokens[at] if at < len(self.tokens) else ("end", "")
+
+    def at(self, value: str, ahead: int = 0) -> bool:
+        return self.peek(ahead) == ("punct", value)
+
+    def attributes(self) -> list[tuple[Token, ...]]:
+        found: list[tuple[Token, ...]] = []
+        while self.at("#") and self.at("[", 1):
+            self.index += 2
+            start = self.index
+            depth = 1
+            while depth and self.index < len(self.tokens):
+                if self.at("["):
+                    depth += 1
+                elif self.at("]"):
+                    depth -= 1
+                self.index += 1
+            found.append(self.tokens[start : self.index - 1])
+        return found
+
+    def visibility(self) -> None:
+        if self.peek() != ("ident", "pub"):
+            return
+        self.index += 1
+        if self.at("(") and self.peek(1)[1] in {"crate", "self", "super", "in"}:
+            self.group()
+
+    def group(self) -> tuple[Token, ...]:
+        """The tokens inside the delimiters that open here."""
+        closer = self.OPENING[self.peek()[1]]
+        opener = self.peek()[1]
+        self.index += 1
+        start = self.index
+        depth = 1
+        while self.index < len(self.tokens):
+            if self.at(opener):
+                depth += 1
+            elif self.at(closer):
+                depth -= 1
+                if depth == 0:
+                    break
+            self.index += 1
+        inner = self.tokens[start : self.index]
+        self.index += 1
+        return inner
+
+    def until_comma(self, *, angles: bool = True) -> tuple[Token, ...]:
+        """The tokens up to the next comma of this nesting level."""
+        start = self.index
+        stack: list[str] = []
+        while self.index < len(self.tokens):
+            kind, value = self.peek()
+            if kind == "punct":
+                if value == "," and not stack:
+                    break
+                if value in self.OPENING and (angles or value != "<"):
+                    stack.append(self.OPENING[value])
+                elif stack and value == stack[-1]:
+                    stack.pop()
+            self.index += 1
+        found = self.tokens[start : self.index]
+        self.index += 1
+        return found
+
+
+def serde_arguments(attributes: Iterable[tuple[Token, ...]]) -> list[tuple[str, str | None]]:
+    """`key` and `key = "value"` of every `serde(..)` attribute, `cfg_attr`
+    ones included."""
+    found: list[tuple[str, str | None]] = []
+    for attribute in attributes:
+        for index, token in enumerate(attribute):
+            if token != ("ident", "serde") or attribute[index + 1 : index + 2] != (("punct", "("),):
+                continue
+            parser = _ItemParser(attribute[index + 1 :])
+            inner = _ItemParser(parser.group())
+            while inner.index < len(inner.tokens):
+                argument = inner.until_comma(angles=False)
+                if not argument or argument[0][0] != "ident":
+                    continue
+                value = None
+                if argument[1:2] == (("punct", "="),) and argument[2:3]:
+                    value = argument[2][1] if argument[2][0] == "literal" else None
+                found.append((argument[0][1], value))
+    return found
+
+
+def _attribute_text(attribute: tuple[Token, ...]) -> str:
+    body = "".join(f'"{value}"' if kind == "literal" else value for kind, value in attribute)
+    return f"#[{body}]"
+
+
+def _outside_default_build(attributes: Iterable[tuple[Token, ...]]) -> bool:
+    """Whether a field or variant is the upgrade harness's or a test's."""
+    for attribute in attributes:
+        text = _attribute_text(attribute)
+        if text == SYNTHETIC_NEXT_CFG or _test_only_cfg(text):
+            return True
+    return False
+
+
+@dataclass(frozen=True)
+class ParsedShape:
+    start: int
+    end: int
+    derives_serde: bool
+    synthetic_next: bool
+    refs: tuple[TypeRef, ...]
+    # (`with` | `serialize_with` | `deserialize_with`, the path as written)
+    adapters: tuple[tuple[str, str], ...]
+
+
+@lru_cache(maxsize=None)
+def parse_shape(text: str, offset: int) -> ParsedShape:
+    """The types one struct, enum, union or alias serializes."""
+    start = rust_item_start_with_attributes(text, offset, rust_outer_attribute_ranges(text))
+    end = rust_item_end(text, offset)
+    parser = _ItemParser(rust_tokens(text[start:end]))
+    attributes = parser.attributes()
+    derives_serde = any(
+        attribute[:1] in ((("ident", "derive"),), (("ident", "cfg_attr"),))
+        and any(
+            kind == "ident" and value.startswith(("Serialize", "Deserialize"))
+            for kind, value in attribute
+        )
+        for attribute in attributes
+    )
+    synthetic_next = any(_attribute_text(a) == SYNTHETIC_NEXT_CFG for a in attributes)
+    refs: list[TypeRef] = []
+    adapters: list[tuple[str, str]] = []
+
+    parser.visibility()
+    kind = parser.peek()[1]
+    parser.index += 2
+    generics: set[str] = set()
+    if parser.at("<"):
+        parameters = _ItemParser(parser.group())
+        while parameters.index < len(parameters.tokens):
+            parameter = [token for token in parameters.until_comma() if token != ("ident", "const")]
+            if parameter and parameter[0][0] == "ident":
+                generics.add(parameter[0][1])
+    scope = frozenset(generics)
+
+    def member(inner: _ItemParser, *, named: bool) -> None:
+        field_attributes = inner.attributes()
+        inner.visibility()
+        if named:
+            inner.index += 2
+        tokens = inner.until_comma()
+        arguments = serde_arguments(field_attributes)
+        keys = {key for key, _ in arguments}
+        if _outside_default_build(field_attributes):
+            return
+        if "skip" in keys or {"skip_serializing", "skip_deserializing"} <= keys:
+            return
+        refs.extend(type_refs(tokens, scope))
+        adapters.extend(
+            (key, value)
+            for key, value in arguments
+            if key in {"with", "serialize_with", "deserialize_with"} and value
+        )
+
+    def members(tokens: tuple[Token, ...], *, named: bool) -> None:
+        inner = _ItemParser(tokens)
+        while inner.index < len(inner.tokens):
+            member(inner, named=named)
+
+    for key, value in serde_arguments(attributes):
+        if key in {"from", "try_from", "into"} and value:
+            refs.extend(type_refs(rust_tokens(value), scope))
+
+    if kind == "type":
+        while parser.index < len(parser.tokens) and not parser.at("="):
+            parser.index += 1
+        parser.index += 1
+        refs.extend(type_refs(parser.tokens[parser.index :], scope))
+    elif kind == "enum":
+        while parser.index < len(parser.tokens) and not parser.at("{"):
+            parser.index += 1
+        variants = _ItemParser(parser.group()) if parser.at("{") else _ItemParser(())
+        while variants.index < len(variants.tokens):
+            variant_attributes = variants.attributes()
+            variants.index += 1
+            body: tuple[Token, ...] = ()
+            named = False
+            if variants.at("(") or variants.at("{"):
+                named = variants.at("{")
+                body = variants.group()
+            variants.until_comma(angles=False)
+            keys = {key for key, _ in serde_arguments(variant_attributes)}
+            if _outside_default_build(variant_attributes):
+                continue
+            if "skip" in keys or {"skip_serializing", "skip_deserializing"} <= keys:
+                continue
+            members(body, named=named)
+    else:
+        while parser.index < len(parser.tokens) and not (
+            parser.at("{") or parser.at("(") or parser.at(";")
+        ):
+            parser.index += 1
+        if parser.at("{") or parser.at("("):
+            named = parser.at("{")
+            members(parser.group(), named=named)
+    return ParsedShape(
+        start, end, derives_serde, synthetic_next, tuple(dict.fromkeys(refs)),
+        tuple(dict.fromkeys(adapters)),
+    )
+
+
+def _expand_use(tree: str, prefix: tuple[str, ...] = ()) -> list[tuple[str, tuple[str, ...]]]:
+    """`(bound name, path)` for every leaf of a `use` tree; a glob binds `*`."""
+    tree = tree.strip()
+    opening = tree.find("{")
+    if opening >= 0:
+        base = prefix + tuple(part.strip() for part in tree[:opening].split("::") if part.strip())
+        inner = tree[opening + 1 : tree.rindex("}")]
+        leaves: list[tuple[str, tuple[str, ...]]] = []
+        depth = 0
+        start = 0
+        for index, char in enumerate(inner + ","):
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+            elif char == "," and depth == 0:
+                if inner[start:index].strip():
+                    leaves.extend(_expand_use(inner[start:index], base))
+                start = index + 1
+        return leaves
+    path, _, alias = re.sub(r"\s+", " ", tree).partition(" as ")
+    segments = prefix + tuple(part.strip() for part in path.split("::") if part.strip())
+    if not segments:
+        return []
+    if segments[-1] == "*":
+        return [("*", segments[:-1])]
+    if segments[-1] == "self":
+        segments = segments[:-1]
+    if not segments:
+        return []
+    return [(alias.strip() or segments[-1], segments)]
+
+
+@dataclass(frozen=True)
+class FileIndex:
+    """What one Rust file declares, read without parsing its bodies."""
+
+    # (name, kind, offset, enclosing inline modules)
+    types: tuple[tuple[str, str, int, tuple[str, ...]], ...]
+    # (bound name or `*`, path, is `pub use`)
+    uses: tuple[tuple[str, tuple[str, ...], bool], ...]
+    # (name, opening offset, end offset, enclosing inline modules)
+    modules: tuple[tuple[str, int, int, tuple[str, ...]], ...]
+    # `mod name;` -> the file its `#[path]` names, or "" for the usual place
+    child_modules: tuple[tuple[str, str], ...]
+    serde_impls: frozenset[str]
+    macro_definitions: tuple[tuple[str, int], ...]
+    macro_calls: tuple[tuple[str, int], ...]
+
+
+def _indented_block_end(text: str, opening: re.Match[str]) -> int:
+    """The end of a rustfmt-formatted block: its closing brace sits at the
+    opening line's indentation."""
+    if text.startswith("}", opening.end()):
+        return opening.end() + 1
+    closing = text.find(f"\n{opening.group(1)}}}", opening.end())
+    return len(text) if closing < 0 else closing + len(opening.group(1)) + 2
+
+
+def _gated_on_test(text: str, start: int) -> bool:
+    """Whether the attribute lines directly above `start` gate on `test`."""
+    while start > 0:
+        line_start = text.rfind("\n", 0, start - 1) + 1
+        line = text[line_start:start].strip()
+        if not line.startswith(("#[", "//")):
+            return False
+        if _test_only_cfg(line):
+            return True
+        start = line_start
+    return False
+
+
+@lru_cache(maxsize=None)
+def index_file(text: str) -> FileIndex:
+    ranges: list[tuple[str, int, int]] = []
+    excluded: list[tuple[int, int]] = []
+    for opening in RUST_MODULE_OPENING.finditer(text):
+        end = _indented_block_end(text, opening)
+        if _gated_on_test(text, opening.start()):
+            excluded.append((opening.start(), end))
+        else:
+            ranges.append((opening.group(2), opening.start(), end))
+
+    def production(offset: int) -> bool:
+        return not any(start <= offset < end for start, end in excluded)
+
+    def enclosing(offset: int) -> tuple[str, ...]:
+        return tuple(name for name, start, end in ranges if start < offset < end)
+
+    types = []
+    for match in RUST_TYPE_DEFINITION.finditer(text):
+        chain = enclosing(match.start())
+        # An item indented past its module is inside a function, impl or trait.
+        if production(match.start()) and len(match.group(1)) == 4 * len(chain):
+            types.append((match.group(3), match.group(2), match.start(), chain))
+    uses = [
+        (name, segments, match.group(1) is not None)
+        for match in RUST_USE.finditer(text)
+        if production(match.start())
+        for name, segments in _expand_use(match.group(2))
+    ]
+    return FileIndex(
+        tuple(types),
+        tuple(uses),
+        tuple((name, start, end, enclosing(start)) for name, start, end in ranges),
+        tuple((m.group(2), m.group(1) or "") for m in RUST_MODULE_FILE.finditer(text)),
+        frozenset(match.group(2) for match in RUST_SERDE_IMPL.finditer(text)),
+        tuple((m.group(1), m.start()) for m in RUST_MACRO_DEFINITION.finditer(text)),
+        tuple(
+            (m.group(2), m.start())
+            for m in RUST_MACRO_CALL.finditer(text)
+            if production(m.start()) and len(m.group(1)) == 4 * len(enclosing(m.start()))
+        ),
+    )
+
+
+@dataclass(frozen=True)
+class Shape:
+    """One member of a closure: a type definition, or the macro call that
+    declares one."""
+
+    path: str
+    name: str
+    offset: int
+    kind: str
+    modules: tuple[str, ...] = ()
+
+    @property
+    def label(self) -> str:
+        return f"{self.name} ({self.path})"
+
+
+@dataclass(frozen=True)
+class Closure:
+    """Everything a set of roots serializes."""
+
+    entries: tuple[Entry, ...]
+    depths: tuple[tuple[Shape, int], ...]
+    # Each cycle as the shape names on it.
+    cycles: tuple[tuple[str, ...], ...]
+    # (what, why it is not followed)
+    opaque: tuple[tuple[str, str], ...]
+    problems: tuple[str, ...]
+
+    @property
+    def paths(self) -> frozenset[str]:
+        return frozenset(path for path, _, _ in self.entries)
+
+
+class _Unresolved(Exception):
+    pass
+
+
+# What resolving a standard-library or prelude name returns: nothing to
+# follow, and, unlike an empty result, an answer.
+_STANDARD: list[Shape] = []
+
+
+def _is_test_source(path: str) -> bool:
+    parts = path.split("/")
+    return (
+        "tests" in parts[:-1]
+        or "benches" in parts[:-1]
+        or parts[-1] in {"tests.rs", "test.rs"}
+        or parts[-1].endswith("_tests.rs")
+    )
+
+
+class Reachability:
+    """The closure walk over one tree."""
+
+    def __init__(self, view: TreeView) -> None:
+        self.view = view
+        self._sources: dict[str, list[str]] | None = None
+        self._crate_roots: tuple[str, ...] = ()
+        # The name code writes for a crate -> its directory.
+        self._crate_names: dict[str, str] = {}
+        self._external: dict[str, set[str]] = {}
+        self._indexed: dict[str, dict[str, FileIndex]] = {}
+        self._types: dict[str, dict[str, list[Shape]]] = {}
+        self._lookups: dict[
+            tuple[str, tuple[str, ...]], tuple[list[Shape] | None, tuple[tuple[str, str], ...], str]
+        ] = {}
+        self._module_files: dict[str, dict[tuple[str, ...], str]] = {}
+        self._macros: dict[str, list[tuple[str, str, int, bool, str]]] = {}
+        self._crates: dict[str, str] = {}
+        # crate -> bound name (or `*`) -> the `pub use` paths that bind it
+        self._exports: dict[str, dict[str, list[tuple[str, tuple[str, ...]]]]] = {}
+        self._macro_names: dict[str, tuple[dict[str, list[Shape]], dict[str, list[Shape]]]] = {}
+        self._adapters: dict[
+            tuple[str, str, str], tuple[list[Entry], list[tuple[str, str]], str]
+        ] = {}
+        self._edges: dict[
+            Shape,
+            tuple[
+                tuple[Shape, ...], tuple[Entry, ...], tuple[tuple[str, str], ...], tuple[str, ...]
+            ],
+        ] = {}
+
+    # -- the workspace -------------------------------------------------------
+
+    def _load_workspace(self) -> None:
+        if self._sources is not None:
+            return
+        manifests = self.view.matching_paths(CARGO_MANIFEST_PATTERNS)
+        self.view.preload(manifests)
+        roots: list[str] = []
+        workspace_external: set[str] = set()
+        pending: list[tuple[str, dict]] = []
+        for manifest in manifests:
+            text = self.view.content(manifest)
+            try:
+                document = tomllib.loads(text or "")
+            except tomllib.TOMLDecodeError as error:
+                raise CheckError(f"{self.view.label}: cannot read {manifest}: {error}") from error
+            directory = manifest.rpartition("/")[0]
+            if "package" in document:
+                roots.append(directory)
+                package = str(document["package"].get("name", ""))
+                library = document.get("lib", {}).get("name") or package.replace("-", "_")
+                self._crate_names.setdefault(library, directory)
+            tables = [document.get("dependencies", {}), document.get("build-dependencies", {})]
+            tables.append(document.get("workspace", {}).get("dependencies", {}))
+            tables.extend(
+                target.get("dependencies", {}) for target in document.get("target", {}).values()
+            )
+            for table in tables:
+                pending.append((directory, table))
+        for directory, table in pending:
+            external = self._external.setdefault(directory, set())
+            for name, spec in table.items():
+                written = name.replace("-", "_")
+                if isinstance(spec, dict) and "path" in spec:
+                    target = "/".join(part for part in (directory, spec["path"]) if part)
+                    parts: list[str] = []
+                    for part in target.split("/"):
+                        if part == "..":
+                            parts.pop()
+                        elif part != ".":
+                            parts.append(part)
+                    self._crate_names[written] = "/".join(parts)
+                elif not (isinstance(spec, dict) and spec.get("workspace")):
+                    external.add(written)
+                    if directory == "":
+                        workspace_external.add(written)
+        for external in self._external.values():
+            external.update(workspace_external)
+        self._crate_roots = tuple(sorted(roots, key=len, reverse=True))
+        sources: dict[str, list[str]] = {}
+        for path in self.view.matching_paths(RUST_SOURCE_PATTERNS):
+            sources.setdefault(self.crate_of(path), []).append(path)
+        self._sources = sources
+
+    def crate_of(self, path: str) -> str:
+        """The directory of the crate `path` belongs to."""
+        if path not in self._crates:
+            head, separator, _ = path.partition("/src/")
+            self._crates[path] = next(
+                (root for root in self._crate_roots if path.startswith(root + "/")),
+                head if separator else path.rpartition("/")[0],
+            )
+        return self._crates[path]
+
+    def _index(self, crate: str) -> dict[str, FileIndex]:
+        """Every production source file of `crate`."""
+        self._load_workspace()
+        if crate not in self._indexed:
+            assert self._sources is not None
+            paths = [
+                path
+                for path in self._sources.get(crate, ())
+                if path.startswith(crate + "/src/") and not _is_test_source(path)
+            ]
+            self.view.preload(paths)
+            indexed: dict[str, FileIndex] = {}
+            types: dict[str, list[Shape]] = {}
+            for path in paths:
+                content = self.view.projected(path)
+                if content is None:
+                    continue
+                indexed[path] = index_file(content)
+                for name, kind, offset, modules in indexed[path].types:
+                    types.setdefault(name, []).append(Shape(path, name, offset, kind, modules))
+            self._indexed[crate] = indexed
+            self._types[crate] = types
+        return self._indexed[crate]
+
+    def _file(self, path: str) -> FileIndex:
+        indexed = self._index(self.crate_of(path))
+        if path not in indexed:
+            # A root may live outside `src/` (a test-support fixture format).
+            content = self.view.projected(path)
+            if content is None:
+                raise _Unresolved(f"{path} cannot be read")
+            indexed[path] = index_file(content)
+        return indexed[path]
+
+    def _module_path(self, shape: Shape) -> tuple[str, ...]:
+        crate = self.crate_of(shape.path)
+        relative = shape.path[len(crate) + 1 :].removesuffix(".rs").split("/")
+        if relative[:1] == ["src"]:
+            relative = relative[1:]
+        if relative[-1:] in (["mod"], ["lib"], ["main"]):
+            relative = relative[:-1]
+        return (*relative, *shape.modules)
+
+    def _default_build(self, shapes: Iterable[Shape]) -> list[Shape]:
+        kept = []
+        for shape in shapes:
+            content = self.view.projected(shape.path)
+            if content is not None and not parse_shape(content, shape.offset).synthetic_next:
+                kept.append(shape)
+        return kept
+
+    # -- resolution ----------------------------------------------------------
+
+    def roots(self, path: str, name: str) -> list[Shape]:
+        """The definitions of `name` in `path`."""
+        try:
+            index = self._file(path)
+        except _Unresolved:
+            return []
+        return self._default_build(
+            Shape(path, name, offset, kind, modules)
+            for found, kind, offset, modules in index.types
+            if found == name
+        )
+
+    def resolve(self, ref: TypeRef, origin: Shape, opaque: list[tuple[str, str]]) -> list[Shape]:
+        """The definitions `ref` names where `origin` writes it. Nothing for a
+        standard or opaque type; `_Unresolved` when the tree does not say."""
+        if ref.associated:
+            opaque.append((f"<..>::{ref.label}", f"an associated type, in {origin.label}"))
+            return []
+        if ref.absolute:
+            return self._in_crate_named(ref.segments, origin, opaque, ())
+        return self._resolve_path(ref.segments, origin.path, origin.modules, opaque, ())
+
+    def _resolve_path(
+        self,
+        segments: tuple[str, ...],
+        path: str,
+        modules: tuple[str, ...],
+        opaque: list[tuple[str, str]],
+        trail: tuple[tuple[str, tuple[str, ...]], ...],
+        *,
+        strict: bool = False,
+    ) -> list[Shape]:
+        """`segments` as `path` sees them. `strict` keeps to what the file
+        itself declares and imports, without the crate-wide search."""
+        if (path, segments) in trail or len(trail) > 16:
+            raise _Unresolved(f"{'::'.join(segments)} is imported in a circle")
+        trail = (*trail, (path, segments))
+        index = self._file(path)
+        crate = self.crate_of(path)
+        first = segments[0]
+        if first in {"crate", "self", "super"}:
+            base: tuple[str, ...] = ()
+            if first != "crate":
+                base = (*self._module_path(Shape(path, "", 0, "")), *modules)
+            rest = segments[1:] if first in {"crate", "self"} else segments
+            while rest[:1] == ("super",):
+                base, rest = base[:-1], rest[1:]
+            return self._in_module(crate, base, rest, opaque, trail, "::".join(segments))
+
+        imported = [use for name, use, _ in index.uses if name == first and use != (first,)]
+        if imported:
+            found: dict[Shape, None] = {}
+            failures: list[str] = []
+            standard = False
+            for use in dict.fromkeys(imported):
+                try:
+                    shapes = self._resolve_path(
+                        (*use, *segments[1:]), path, modules, opaque, trail
+                    )
+                except _Unresolved as error:
+                    failures.append(str(error))
+                else:
+                    standard = standard or shapes is _STANDARD
+                    found.update(dict.fromkeys(shapes))
+            if failures and not found and not standard:
+                raise _Unresolved(failures[0])
+            return list(found) if found or not standard else _STANDARD
+
+        if len(segments) == 1:
+            local = [
+                Shape(path, name, offset, kind, chain)
+                for name, kind, offset, chain in index.types
+                if name == first
+            ]
+            local = self._default_build(local)
+            if local:
+                for wanted in (
+                    lambda shape: shape.modules == modules,
+                    lambda shape: shape.modules == modules[: len(shape.modules)],
+                    lambda shape: True,
+                ):
+                    nearest = [shape for shape in local if wanted(shape)]
+                    if nearest:
+                        return nearest
+            if first in RUST_PRELUDE_TYPES:
+                return _STANDARD
+            globbed: dict[Shape, None] = {}
+            beyond: list[tuple[str, str]] = []
+            for name, use, _ in index.uses:
+                if name != "*":
+                    continue
+                try:
+                    hidden: list[tuple[str, str]] = []
+                    shapes = self._resolve_path((*use, first), path, modules, hidden, trail)
+                except _Unresolved:
+                    continue
+                if shapes is _STANDARD:
+                    return _STANDARD
+                globbed.update(dict.fromkeys(shapes))
+                beyond.extend(hidden)
+            if globbed:
+                return list(globbed)
+            if beyond:
+                opaque.extend(beyond)
+                return []
+            if strict:
+                raise _Unresolved(f"{first} is not declared or imported in {path}")
+            try:
+                return self._in_crate(crate, segments, opaque, trail, first)
+            except _Unresolved:
+                declared = self._macro_declared(crate, first)
+                if declared:
+                    return declared
+                raise
+
+        if first in RUST_STANDARD_CRATES:
+            return _STANDARD
+        if first in self._crate_names or first in self._external.get(crate, ()):
+            return self._in_crate_named(segments, Shape(path, "", 0, "", modules), opaque, trail)
+        # A module of this crate, written relative to the file.
+        base = (*self._module_path(Shape(path, "", 0, "")), *modules)
+        return self._in_module(crate, base, segments, opaque, trail, "::".join(segments))
+
+    def _in_crate_named(
+        self,
+        segments: tuple[str, ...],
+        origin: Shape,
+        opaque: list[tuple[str, str]],
+        trail: tuple[tuple[str, tuple[str, ...]], ...],
+    ) -> list[Shape]:
+        self._load_workspace()
+        first = segments[0]
+        if first in RUST_STANDARD_CRATES:
+            return _STANDARD
+        if first not in self._crate_names:
+            opaque.append(("::".join(segments), f"a type of package `{first}`"))
+            return []
+        if len(segments) == 1:
+            return []
+        return self._in_module(
+            self._crate_names[first], (), segments[1:], opaque, trail, "::".join(segments)
+        )
+
+    def _module_file(self, crate: str, module: tuple[str, ...]) -> str | None:
+        indexed = self._index(crate)
+        if crate not in self._module_files:
+            self._module_files[crate] = {
+                self._module_path(Shape(path, "", 0, "")): path
+                for path in sorted(indexed, reverse=True)
+            }
+        return self._module_files[crate].get(module)
+
+    def _in_module(
+        self,
+        crate: str,
+        base: tuple[str, ...],
+        rest: tuple[str, ...],
+        opaque: list[tuple[str, str]],
+        trail: tuple[tuple[str, tuple[str, ...]], ...],
+        written: str,
+    ) -> list[Shape]:
+        """`rest` as module `base` of `crate` sees it: what the crate declares
+        or re-exports there, then what that module itself imports (a child's
+        `use super::*` brings its parent's imports with it)."""
+        if not rest:
+            return []
+        named = self._module_file(crate, (*base, *rest[:-1]))
+        if named is not None:
+            try:
+                return self._resolve_path(rest[-1:], named, (), opaque, trail, strict=True)
+            except _Unresolved:
+                pass
+        try:
+            return self._in_crate(crate, (*base, *rest), opaque, trail, written)
+        except _Unresolved as error:
+            failure = error
+        for depth in range(len(rest) - 1, -1, -1):
+            module = (*base, *rest[:depth])
+            source = self._module_file(crate, module)
+            while source is None and depth == 0 and module:
+                module = module[:-1]
+                source = self._module_file(crate, module)
+            if source is not None:
+                try:
+                    return self._resolve_path(rest[depth:], source, (), opaque, trail)
+                except _Unresolved:
+                    break
+        declared = self._macro_declared(crate, rest[-1])
+        if declared:
+            return declared
+        raise failure
+
+    def _in_crate(
+        self,
+        crate: str,
+        segments: tuple[str, ...],
+        opaque: list[tuple[str, str]],
+        trail: tuple[tuple[str, tuple[str, ...]], ...],
+        written: str,
+    ) -> list[Shape]:
+        """`segments` looked up in `crate`: its own definitions, then what it
+        re-exports."""
+        if not segments:
+            return []
+        key = (crate, segments)
+        if key not in self._lookups:
+            # A re-export that leads back here names nothing new.
+            self._lookups[key] = (None, (), f"{written} is re-exported in a circle")
+            hidden: list[tuple[str, str]] = []
+            try:
+                shapes = self._search_crate(crate, segments, hidden, trail, written)
+            except _Unresolved as error:
+                self._lookups[key] = (None, (), str(error))
+            else:
+                self._lookups[key] = (shapes, tuple(hidden), "")
+        shapes, hidden, failure = self._lookups[key]
+        if shapes is None:
+            raise _Unresolved(failure)
+        opaque.extend(hidden)
+        return shapes if shapes is _STANDARD else list(shapes)
+
+    def _search_crate(
+        self,
+        crate: str,
+        segments: tuple[str, ...],
+        opaque: list[tuple[str, str]],
+        trail: tuple[tuple[str, tuple[str, ...]], ...],
+        written: str,
+    ) -> list[Shape]:
+        indexed = self._index(crate)
+        name, hints = segments[-1], segments[:-1]
+        candidates = self._default_build(self._types[crate].get(name, ()))
+        if candidates:
+            if hints:
+                hinted = [
+                    shape
+                    for shape in candidates
+                    if self._module_path(shape)[-len(hints) :] == hints
+                ]
+                exact = [shape for shape in hinted if self._module_path(shape) == hints]
+                candidates = exact or hinted or candidates
+            groups = {(shape.path, shape.modules) for shape in candidates}
+            if len(groups) > 1:
+                raise _Unresolved(
+                    f"{written} is ambiguous: "
+                    + ", ".join(sorted(f"{path}" for path, _ in groups))
+                )
+            return candidates
+
+        # Not declared in the crate: a re-export, or a macro's declaration.
+        found: dict[Shape, None] = {}
+        hidden: list[tuple[str, str]] = []
+        if crate not in self._exports:
+            exports: dict[str, list[tuple[str, tuple[str, ...]]]] = {}
+            for path, index in indexed.items():
+                for bound, use, public in index.uses:
+                    if public:
+                        exports.setdefault(bound, []).append((path, use))
+            self._exports[crate] = exports
+        exports = self._exports[crate]
+        for bound in (name, "*"):
+            for path, use in exports.get(bound, ()):
+                target = (*use, name) if bound == "*" else use
+                if target[0] not in {"crate", "self", "super"} and (
+                    target[0] not in self._crate_names
+                    and target[0] not in self._external.get(crate, ())
+                    and target[0] not in RUST_STANDARD_CRATES
+                ):
+                    # `pub use module::Name` beside `mod module;`.
+                    target = ("self", *target)
+                try:
+                    shapes = self._resolve_path(target, path, (), hidden, trail)
+                except _Unresolved:
+                    continue
+                if shapes is _STANDARD:
+                    return _STANDARD
+                found.update(dict.fromkeys(shapes))
+        if found:
+            return list(found)
+        exported = [entry for entry in hidden if entry[0].rpartition("::")[2] == name]
+        if exported:
+            opaque.append(exported[0])
+            return []
+        raise _Unresolved(f"{written} names no type of {crate}")
+
+    def _macro_texts(self, crate: str) -> list[tuple[str, str, int, bool, str]]:
+        """`(path, macro, offset, is the definition, text)` for the crate's
+        `macro_rules!` definitions and its calls of them."""
+        if crate not in self._macros:
+            indexed = self._index(crate)
+            macros = {macro for index in indexed.values() for macro, _ in index.macro_definitions}
+            texts = []
+            for path, index in indexed.items():
+                content = self.view.projected(path) or ""
+                for defines, entries in (
+                    (True, index.macro_definitions),
+                    (False, index.macro_calls),
+                ):
+                    for macro, offset in entries:
+                        if macro in macros:
+                            body = _item_text(content, offset)
+                            texts.append((path, macro, offset, defines, body))
+            self._macros[crate] = texts
+        return self._macros[crate]
+
+    def _macro_declared(self, crate: str, name: str) -> list[Shape]:
+        """The crate's `macro_rules!` definitions that declare `name`, and
+        otherwise its calls of its own macros that mention it."""
+        if crate not in self._macro_names:
+            declared: dict[str, list[Shape]] = {}
+            mentioned: dict[str, list[Shape]] = {}
+            for path, macro, offset, defines, body in self._macro_texts(crate):
+                if defines:
+                    names = set(re.findall(r"\b(?:struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)", body))
+                    table = declared
+                else:
+                    names = {value for kind, value in rust_tokens(body) if kind == "ident"}
+                    table = mentioned
+                for found in names:
+                    table.setdefault(found, []).append(Shape(path, found, offset, f"macro {macro}"))
+            self._macro_names[crate] = (declared, mentioned)
+        declared, mentioned = self._macro_names[crate]
+        return declared.get(name) or mentioned.get(name) or []
+
+    # -- adapters ------------------------------------------------------------
+
+    def _adapter(
+        self, kind: str, written: str, origin: Shape, opaque: list[tuple[str, str]]
+    ) -> list[Entry]:
+        """The text of a `with` module or a `*_with` function."""
+        segments = tuple(part.strip() for part in written.split("::") if part.strip())
+        if not segments:
+            raise _Unresolved(f"{kind} = {written!r} names nothing")
+        function = None if kind == "with" else segments[-1]
+        module = segments if kind == "with" else segments[:-1]
+        if function is not None and not module:
+            content = self.view.projected(origin.path) or ""
+            local = named_rust_items(content, [function])
+            if local:
+                return [(origin.path, name, value) for name, value in local.items()]
+            imported = [use for name, use, _ in self._file(origin.path).uses if name == function]
+            if not imported:
+                raise _Unresolved(f"{kind} = {written!r} names no function of {origin.path}")
+            module, function = imported[0][:-1], imported[0][-1]
+        hidden: list[tuple[str, str]] = []
+        texts = self._module_texts(module, origin.path, hidden, 0)
+        if hidden:
+            opaque.append((written, f"a {kind} adapter of {hidden[0][1]}"))
+            return []
+        found: list[Entry] = []
+        for path, label, text in texts:
+            if function is None:
+                found.append((path, label, strip_rust_trivia(text)))
+            else:
+                found.extend(
+                    (path, name, value)
+                    for name, value in named_rust_items(text, [function]).items()
+                )
+        if not found and kind == "with":
+            # A `with` path may also name a type that carries a `remote` derive.
+            try:
+                found = [
+                    self.entry(shape)
+                    for shape in self._resolve_path(segments, origin.path, origin.modules, [], ())
+                ]
+            except _Unresolved:
+                found = []
+        if not found:
+            raise _Unresolved(f"{kind} = {written!r} names no adapter this tree declares")
+        return found
+
+    def _module_texts(
+        self, module: tuple[str, ...], path: str, hidden: list[tuple[str, str]], depth: int
+    ) -> list[tuple[str, str, str]]:
+        """`(path, label, text)` of the module `module` names where `path`
+        writes it: an inline `mod`, or a module's file."""
+        if depth > 8 or not module:
+            return []
+        crate = self.crate_of(path)
+        index = self._file(path)
+        first = module[0]
+        if first in RUST_STANDARD_CRATES:
+            hidden.append((first, "the standard library"))
+            return []
+        if first in {"crate", "self", "super"}:
+            module = tuple(part for part in module if part not in {"crate", "self", "super"})
+            return self._module_in_crate(crate, module, path, hidden, depth)
+        imported = [use for name, use, _ in index.uses if name == first and use != (first,)]
+        if imported:
+            return self._module_texts((*imported[0], *module[1:]), path, hidden, depth + 1)
+        found = self._module_in_crate(crate, module, path, hidden, depth)
+        if found or hidden:
+            return found
+        if first in self._crate_names and module[1:]:
+            target = self._crate_names[first]
+            return self._module_in_crate(target, module[1:], "", hidden, depth)
+        if first in self._external.get(crate, ()):
+            hidden.append((first, f"package `{first}`"))
+        return []
+
+    def _module_in_crate(
+        self,
+        crate: str,
+        module: tuple[str, ...],
+        origin: str,
+        hidden: list[tuple[str, str]],
+        depth: int,
+    ) -> list[tuple[str, str, str]]:
+        indexed = self._index(crate)
+        if origin and origin not in indexed and self.crate_of(origin) == crate:
+            indexed = {origin: self._file(origin), **indexed}
+        found: list[tuple[str, str, str]] = []
+        label = f"mod {module[-1]}"
+        for path in sorted(indexed, key=lambda candidate: candidate != origin):
+            index = indexed[path]
+            content = self.view.projected(path)
+            if content is None:
+                continue
+            file_modules = self._module_path(Shape(path, "", 0, ""))
+            for name, start, end, chain in index.modules:
+                full = (*file_modules, *chain, name)
+                if name == module[-1] and (
+                    full[-len(module) :] == module or (path == origin and len(module) == 1)
+                ):
+                    found.append((path, label, content[start:end]))
+            for name, relocated in index.child_modules:
+                if name == module[-1] and relocated and (path == origin or len(module) == 1):
+                    target = "/".join((*path.split("/")[:-1], relocated))
+                    text = self.view.projected(target)
+                    if text is not None:
+                        found.append((target, label, text))
+            if file_modules and file_modules[-len(module) :] == module:
+                found.append((path, label, content))
+            if found and path == origin:
+                return found
+        if found:
+            return found
+        # A module the crate root re-exports from elsewhere.
+        root = self._module_file(crate, ())
+        if root is not None and root != origin:
+            for name, use, _ in indexed[root].uses:
+                if name == module[0] and use != (module[0],):
+                    return self._module_texts((*use, *module[1:]), root, hidden, depth + 1)
+        return []
+
+    # -- the walk ------------------------------------------------------------
+
+    def entry(self, shape: Shape) -> Entry:
+        content = self.view.projected(shape.path) or ""
+        if shape.kind.startswith("macro "):
+            return (shape.path, shape.name, strip_rust_trivia(_item_text(content, shape.offset)))
+        parsed = parse_shape(content, shape.offset)
+        return (
+            shape.path,
+            shape.name,
+            strip_rust_trivia(normalize_rust_derive_lists(content[parsed.start : parsed.end])),
+        )
+
+    def _expand(self, shape: Shape):
+        """What `shape` leads to: the shapes it serializes, the text guarded
+        beside it, what is opaque under it, and what could not be resolved."""
+        key = shape
+        if key in self._edges:
+            return self._edges[key]
+        targets: dict[Shape, None] = {}
+        extra: list[Entry] = []
+        opaque: list[tuple[str, str]] = []
+        problems: list[str] = []
+        crate = self.crate_of(shape.path)
+        indexed = self._index(crate)
+        content = self.view.projected(shape.path) or ""
+        if shape.kind.startswith("macro "):
+            macro = shape.kind.partition(" ")[2]
+            extra.extend(
+                (path, f"{macro}!", strip_rust_trivia(body))
+                for path, name, _, _, body in self._macro_texts(crate)
+                if name == macro
+            )
+            opaque.append(
+                (shape.label, f"declared by `{macro}!`; the macro and its calls are guarded")
+            )
+            result = ((), tuple(extra), tuple(opaque), ())
+            self._edges[key] = result
+            return result
+
+        parsed = parse_shape(content, shape.offset)
+        hand_written = False
+        for path, index in indexed.items():
+            if shape.name not in index.serde_impls:
+                continue
+            text = self.view.projected(path) or ""
+            impls = named_rust_serde_impls(
+                text, (f"Serialize for {shape.name}", f"Deserialize for {shape.name}")
+            )
+            extra.extend((path, name, value) for name, value in impls.items())
+            hand_written = hand_written or bool(impls)
+        if hand_written and not parsed.derives_serde:
+            opaque.append(
+                (shape.label, "its Serde impls are hand-written; the impls are guarded")
+            )
+        elif not parsed.derives_serde and shape.kind != "type":
+            opaque.append((shape.label, "not a Serde type; its fields are not followed"))
+        else:
+            for ref in parsed.refs:
+                try:
+                    for target in self.resolve(ref, shape, opaque):
+                        targets[target] = None
+                except _Unresolved as error:
+                    problems.append(f"{shape.label} names {ref.label}: {error}")
+            for kind, written in parsed.adapters:
+                key = (kind, written, shape.path)
+                if key not in self._adapters:
+                    hidden: list[tuple[str, str]] = []
+                    try:
+                        found = self._adapter(kind, written, shape, hidden)
+                        self._adapters[key] = (found, hidden, "")
+                    except _Unresolved as error:
+                        self._adapters[key] = ([], [], str(error))
+                entries, hidden, failure = self._adapters[key]
+                extra.extend(entries)
+                opaque.extend(hidden)
+                if failure:
+                    problems.append(f"{shape.label}: {failure}")
+        result = (tuple(targets), tuple(extra), tuple(dict.fromkeys(opaque)), tuple(problems))
+        self._edges[key] = result
+        return result
+
+    def closure(self, roots: Iterable[Shape]) -> Closure:
+        depths: dict[Shape, int] = {}
+        queue: list[Shape] = []
+        for root in roots:
+            if root not in depths:
+                depths[root] = 0
+                queue.append(root)
+        entries: dict[Entry, None] = {}
+        opaque: dict[tuple[str, str], None] = {}
+        problems: dict[str, None] = {}
+        graph: dict[Shape, tuple[Shape, ...]] = {}
+        cursor = 0
+        while cursor < len(queue):
+            shape = queue[cursor]
+            cursor += 1
+            targets, extra, hidden, failed = self._expand(shape)
+            graph[shape] = targets
+            entries[self.entry(shape)] = None
+            entries.update(dict.fromkeys(extra))
+            opaque.update(dict.fromkeys(hidden))
+            problems.update(dict.fromkeys(failed))
+            for target in targets:
+                if target not in depths:
+                    depths[target] = depths[shape] + 1
+                    queue.append(target)
+        return Closure(
+            tuple(sorted(entries)),
+            tuple(depths.items()),
+            _cycles(graph),
+            tuple(sorted(opaque)),
+            tuple(problems),
+        )
+
+
+@lru_cache(maxsize=None)
+def _item_text(text: str, offset: int) -> str:
+    return text[offset : rust_item_end(text, offset)]
+
+
+def _cycles(graph: dict[Shape, tuple[Shape, ...]]) -> tuple[tuple[str, ...], ...]:
+    """The strongly connected components of the closure that hold a cycle."""
+    order: dict[Shape, int] = {}
+    low: dict[Shape, int] = {}
+    stack: list[Shape] = []
+    on_stack: set[Shape] = set()
+    found: list[tuple[str, ...]] = []
+    for start in graph:
+        if start in order:
+            continue
+        work: list[tuple[Shape, int]] = [(start, 0)]
+        while work:
+            node, edge = work.pop()
+            if edge == 0:
+                order[node] = low[node] = len(order)
+                stack.append(node)
+                on_stack.add(node)
+            targets = graph.get(node, ())
+            if edge < len(targets):
+                work.append((node, edge + 1))
+                target = targets[edge]
+                if target not in order:
+                    work.append((target, 0))
+                elif target in on_stack:
+                    low[node] = min(low[node], order[target])
+                continue
+            for target in targets:
+                if target in on_stack:
+                    low[node] = min(low[node], low[target])
+            if low[node] == order[node]:
+                component: list[Shape] = []
+                while True:
+                    member = stack.pop()
+                    on_stack.discard(member)
+                    component.append(member)
+                    if member == node:
+                        break
+                if len(component) > 1 or node in graph.get(node, ()):
+                    found.append(tuple(sorted(shape.name for shape in component)))
+    return tuple(sorted(found))
+
+
+def reachability(view: TreeView) -> Reachability:
+    if view._reachability is None:
+        view._reachability = Reachability(view)
+    return view._reachability
+
+
+def roots_closure(view: TreeView, guard: Guard) -> tuple[Closure, list[str]]:
+    """The closure of a `roots(..)` guard's roots, or of every shape a
+    `shapes(..)` guard sweeps, and the roots the tree does not have."""
+    reach = reachability(view)
+    shapes: list[Shape] = []
+    found: set[str] = set()
+    for path in view.matching_paths(guard.paths):
+        names: Iterable[str] = guard.symbols
+        if guard.kind == "shapes":
+            names = [name.partition("#")[0] for name in serde_shapes(view.projected(path) or "")]
+        for name in dict.fromkeys(names):
+            roots = reach.roots(path, name)
+            if roots:
+                found.add(name)
+            shapes.extend(roots)
+    return reach.closure(shapes), sorted(set(guard.symbols) - found)
+
+
 def guard_signature(
     view: TreeView,
     guard: Guard,
@@ -1453,6 +2856,8 @@ def guard_signature(
     enforce_presence: bool,
     base_signature: tuple[Entry, ...] | None = None,
 ) -> tuple[Entry, ...]:
+    if guard.kind == "roots":
+        return roots_signature(view, guard, enforce_presence=enforce_presence)
     paths = view.matching_paths(guard.paths)
     elide_fn = ELISIONS.get(guard.elide) if guard.elide else None
 
@@ -1489,6 +2894,9 @@ def guard_signature(
             for name, value in items.items()
         )
 
+    if guard.kind == "shapes":
+        # A sweep's shapes are roots too: what they serialize is guarded.
+        signature.extend(roots_signature(view, guard, enforce_presence=enforce_presence))
     if enforce_presence:
         where = f"{view.label}: {guard.label}"
         if not paths:
@@ -1503,7 +2911,34 @@ def guard_signature(
             missing = sorted(set(guard.must_cover) - covered)
             if missing:
                 raise CheckError(f"{where} does not cover " + ", ".join(missing))
-    return tuple(sorted(signature))
+    return tuple(sorted(set(signature)))
+
+
+def closure_of(view: TreeView, guard: Guard) -> tuple[Closure, list[str]]:
+    if guard not in view._closures:
+        view._closures[guard] = roots_closure(view, guard)
+    return view._closures[guard]
+
+
+def roots_signature(
+    view: TreeView, guard: Guard, *, enforce_presence: bool
+) -> tuple[Entry, ...]:
+    """Every shape reachable from the guard's roots. At the head a root the
+    tree does not have, and a reachable type it cannot resolve, are errors."""
+    closure, missing = closure_of(view, guard)
+    if enforce_presence:
+        where = f"{view.label}: {guard.label}"
+        if missing:
+            raise CheckError(f"{where} does not find " + ", ".join(sorted(missing)))
+        if closure.problems:
+            shown = closure.problems[:MAX_REPORTED_PROBLEMS]
+            more = len(closure.problems) - len(shown)
+            raise CheckError(
+                f"{where} reaches {len(closure.problems)} type(s) it cannot resolve: "
+                + "; ".join(shown)
+                + (f"; and {more} more" if more else "")
+            )
+    return closure.entries
 
 
 def comparable(signature: Iterable[Entry]) -> frozenset[tuple[str, str]]:
@@ -2078,6 +3513,8 @@ def guarded_path_patterns(repo: Path) -> frozenset[str]:
         if declaration is not None:
             for guard in declaration.guards:
                 patterns.update(guard.paths)
+                if guard.kind in {"roots", "shapes"}:
+                    patterns.update(closure_of(view, guard)[0].paths)
             patterns.update(catalog.path for catalog in declaration.catalogs)
     return frozenset(patterns)
 

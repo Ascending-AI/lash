@@ -6,13 +6,13 @@ use lash_sansio::SessionId;
 /// The stored SQLite blob envelope's format under the 1.0 freeze.
 ///
 /// version_guard(
+///     roots(
+///         path = "crates/lash-sqlite-store/src/lib.rs", StoredBlobEnvelope, BlobCompression,
+///         BlobStorageHint, BlobArtifactDescriptor,
+///     ),
 ///     items(
 ///         blob_envelope_admits, should_compress_blob, compress_blob, decompress_blob,
 ///         encode_artifact_blob, decode_artifact_blob, encode_msgpack,
-///     ),
-///     items(
-///         path = "crates/lash-sqlite-store/src/lib.rs", StoredBlobEnvelope, BlobCompression,
-///         BlobStorageHint, BlobArtifactDescriptor,
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]

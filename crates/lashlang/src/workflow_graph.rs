@@ -60,20 +60,10 @@ pub use projection::{
 ///
 /// version_guard(
 ///     shapes(cover(WorkflowGraph)),
-///     items(
-///         path = "crates/lashlang/src/ast.rs", Declaration, ProcessDecl, ProcessParam,
-///         ProcessSignalDecl, FunctionDecl, FunctionParam, LabelMetadata, AssignTarget,
-///         AssignPathStep, Expr, FunctionExpr, MethodKey, ProcessLiteralExpr, TryExpr, CatchClause,
-///         TypeExpr, UnionMembers, ProcessSignature, ProcessType, ProcessTypeKind, ProcessTypeWire,
-///         ProcessParamWire, TypeField, ResourceRefExpr, JavaScriptUnaryOp, JavaScriptBinaryOp,
-///         JavaScriptLogicalOp,
+///     roots(
+///         path = "crates/lashlang/src/ast.rs", Declaration, ProcessSignature, ProcessTypeKind,
+///         ProcessTypeWire,
 ///     ),
-///     impls(
-///         path = "crates/lashlang/src/ast.rs", "Serialize for UnionMembers",
-///         "Deserialize for UnionMembers", "Serialize for ProcessType",
-///         "Deserialize for ProcessType",
-///     ),
-///     items(path = "crates/lashlang/src/ast_string.rs", AstString),
 ///     items(
 ///         path = "crates/lashlang/src/workflow_graph/projection.rs",
 ///         path = "crates/lashlang/src/artifact.rs",
@@ -91,10 +81,9 @@ pub use projection::{
 ///         into_ownership_map, workflow_projection, statement_list, push_statement_list,
 ///         is_statement_list, collect_body, collect_statement, statement_value, map_node_subtree,
 ///         check_shape, process_wrapper_run_path, execution_sites, collect_execution_sites,
-///         push_execution_site_descriptor, collect_child_execution_sites, workflow_owner, node_site,
-///         branch_site, branch_edge_id,
+///         push_execution_site_descriptor, collect_child_execution_sites, workflow_owner,
+///         node_site, branch_site, branch_edge_id,
 ///     ),
-///     items(path = "crates/lash-sansio/src/workflow.rs", WorkflowExecutionSite),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 21;

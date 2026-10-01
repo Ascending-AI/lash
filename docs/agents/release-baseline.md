@@ -42,3 +42,11 @@ The Python release law is cut-gated under FIG-4485. Rehearse it with
 ReleaseBaselineTests.test_release_values_match_declared_baseline` through
 `kiln gate`. At the cut, remove that law's skip gate and update the preparation
 gate's selection. The tooling laws run against both the pre-cut and reset trees.
+
+`test_sqlite_stamps_equal_their_catalog_numbers` is cut-gated the same way.
+After the reset each SQLite schema stamp must equal the version its
+database's compat descriptor writes, in the default and synthetic-next
+builds, and every catalog step must lie inside that stamp's range: the
+version-bump gate reads a stamp's catalog steps in the stamp's own numbers.
+`release_baseline.py check` and `release_reset.py --apply` enforce it, and the
+scratch reset law proves it on the reset tree with two red mutants.

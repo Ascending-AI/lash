@@ -101,6 +101,13 @@ jobs:
           python3 scripts/ci_plan.py versioned-surface \
             --paths-file "${RUNNER_TEMP}/changed-paths" >> "${GITHUB_OUTPUT}"
 
+      # What each constant guards is derived from its root types. The gate
+      # below fails on a reachable type it cannot resolve; this prints the
+      # closures it compares, with their cycles and opaque types.
+      - name: Report the derived guard sets
+        if: steps.select.outputs.versioned_surface == 'true'
+        run: python3 scripts/version_guard_closure.py >> "${GITHUB_STEP_SUMMARY}"
+
       - name: Check version bumps
         if: steps.select.outputs.versioned_surface == 'true'
         env:

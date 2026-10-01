@@ -26,7 +26,7 @@ mod arc_serde_bytes {
 /// snapshot fields are refused rather than remapped.
 ///
 /// version_guard(
-///     items(SessionCheckpoint),
+///     roots(SessionCheckpoint),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 4;
@@ -39,7 +39,7 @@ pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 5;
 /// Encoding implemented for checkpoint-component logical bytes in this build.
 ///
 /// version_guard(
-///     items(CheckpointComponentDescriptor, HydratedCheckpointComponent),
+///     roots(HydratedCheckpointComponent),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const CHECKPOINT_COMPONENT_ENCODING_VERSION: u32 = 2;

@@ -396,6 +396,33 @@ class FormatRegistryTests(unittest.TestCase):
         self.assertIn("has a guard that cannot be evaluated", problems[0])
         self.assertIn("does not find Gone", problems[0])
 
+    def test_a_reachable_type_the_tree_cannot_resolve_fails(self) -> None:
+        derived = SOURCE.replace("items(WireRecord)", "roots(WireRecord)").replace(
+            "pub struct WireRecord {\n    pub id: String,",
+            "#[derive(Serialize)]\npub struct WireRecord {\n    pub id: Missing,",
+        )
+        self.write("crates/demo/src/lib.rs", derived)
+        # The file's sweep reaches the same shape, so both surfaces fail.
+        problems = [problem for problem in self.problems() if ":WIRE_VERSION " in problem]
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("WIRE_VERSION has a guard that cannot be evaluated", problems[0])
+        self.assertIn("roots(crates/demo/src/lib.rs) reaches 1 type(s) it cannot resolve", problems[0])
+        self.assertIn("WireRecord (crates/demo/src/lib.rs) names Missing", problems[0])
+
+        self.write(
+            "crates/demo/src/lib.rs",
+            derived + "\n#[derive(Serialize)]\npub struct Missing(u8);\n",
+        )
+        self.assertEqual(self.problems(), [])
+
+    def test_a_swept_shape_whose_field_cannot_be_resolved_fails(self) -> None:
+        self.write(
+            "crates/demo/src/lib.rs", SOURCE.replace("pub name: String,", "pub name: Missing,")
+        )
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("Hello (crates/demo/src/lib.rs) names Missing", problems[0])
+
     def test_a_ddl_guard_without_its_catalog_fails(self) -> None:
         self.write("crates/demo/schema.sql", "CREATE TABLE demo (id TEXT);\n")
         ddl = 'items(WireRecord), file(path = "crates/demo/schema.sql")'

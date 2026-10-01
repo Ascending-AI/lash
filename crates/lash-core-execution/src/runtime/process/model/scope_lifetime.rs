@@ -445,8 +445,7 @@ pub mod lifetime {
 /// [`ScopeId`], so it is refused as malformed.
 ///
 /// version_guard(
-///     items(ScopeId, ScopeStoragePayload),
-///     items(path = "crates/lash-core-store/src/effect_opener.rs", EffectOpener),
+///     roots(ScopeStoragePayload),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const SCOPE_STORAGE_PAYLOAD_VERSION: u16 = 2;

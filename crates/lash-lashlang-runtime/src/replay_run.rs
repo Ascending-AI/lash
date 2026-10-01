@@ -45,9 +45,9 @@ use lash_sansio::sync::MutexExt;
 /// marker, the ordinal width, a sub-key, the seal — is a grammar change.
 ///
 /// version_guard(
-///     items(LashlangReplayNamespace, CommandShape, DispatchedOrdinalsDigest),
-///     items(path = "crates/lash-lashlang-runtime/src/host_identity.rs", LashlangHostIdentities),
-///     items(path = "crates/lash-core-execution/src/runtime/causal.rs", CommandReplayKey),
+///     roots(LashlangReplayNamespace, CommandShape, DispatchedOrdinalsDigest),
+///     roots(path = "crates/lash-lashlang-runtime/src/host_identity.rs", LashlangHostIdentities),
+///     roots(path = "crates/lash-core-execution/src/runtime/causal.rs", CommandReplayKey),
 /// )
 pub const LASHLANG_REPLAY_KEY_GRAMMAR_VERSION: u32 = 2;
 
@@ -71,14 +71,12 @@ pub const LASHLANG_REPLAY_KEY_GRAMMAR_VERSION: u32 = 2;
 /// it runs. Process bodies journal no binding set and stay on the key grammar.
 ///
 /// version_guard(
+///     roots(path = "crates/lash-core-execution/src/session.rs", ToolDispatchSurface),
 ///     items(
 ///         path = "crates/lash-lashlang-runtime/src/cell_bindings.rs", CELL_TOOL_BINDINGS_SUFFIX,
 ///         CELL_TOOL_BINDINGS_OPERATION, resolve_ambient_bindings, compare,
 ///     ),
-///     items(
-///         path = "crates/lash-core-execution/src/session.rs", ToolDispatchSurface,
-///         tool_dispatch_surface,
-///     ),
+///     items(path = "crates/lash-core-execution/src/session.rs", tool_dispatch_surface),
 /// )
 pub const LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION: u32 = 6;
 

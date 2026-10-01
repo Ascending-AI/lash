@@ -18,11 +18,26 @@ pub use lash_sansio::VersionRange;
 ///
 /// version_guard(
 ///     shapes(cover(Call, Reply, ObjectCompat)),
+///     roots(path = "crates/lash-restate/src/wire.rs", RestateCompatError, CallDecodeError),
+///     roots(
+///         path = "crates/lash-restate/src/effect_group/payload.rs", EffectGroupPayloadPutRequest,
+///     ),
+///     roots(
+///         path = "crates/lash-restate/src/process/mod.rs", RestateProcessWorkflowInput,
+///         RestateProcessWorkflowPayload, RestateProcessWorkflowOutput,
+///         RestateProcessCancelRequest, RestateProcessCompleteRequest, RestateProcessAwaitRequest,
+///         RestateProcessHandOverRequest, RestateProcessCancelSignal,
+///     ),
+///     roots(path = "crates/lash-restate/src/process_attach.rs", RestateProcessAttachRequest),
+///     roots(
+///         path = "crates/lash-restate/src/session_driver.rs", RestateSessionDriveRequest,
+///         RestateTurnDriveRequest, RestateRootCloseRequest,
+///     ),
+///     roots(path = "crates/lash-restate/src/object_state.rs", ObjectUpgradeResponse),
 ///     items(COMPAT_KEY),
-///     items(path = "crates/lash-sansio/src/compat.rs", VersionRange, RawVersionRange),
 ///     items(
-///         path = "crates/lash-restate/src/wire.rs", RestateCompatError, CallDecodeError,
-///         wire_unsupported, incompatible, restate_compat_error_in,
+///         path = "crates/lash-restate/src/wire.rs", wire_unsupported, incompatible,
+///         restate_compat_error_in,
 ///     ),
 ///     shapes(
 ///         path = "crates/lash-restate/src/effect_group/messages.rs",
@@ -35,10 +50,6 @@ pub use lash_sansio::VersionRange;
 ///             EffectGroupDispatchRequest, EffectGroupChildRequest,
 ///         ),
 ///     ),
-///     items(
-///         path = "crates/lash-restate/src/effect_group/payload.rs", EffectGroupPayloadPutRequest,
-///         EffectGroupPayloadGetResponse,
-///     ),
 ///     shapes(
 ///         path = "crates/lash-restate/src/durable_wait/messages.rs",
 ///         cover(
@@ -46,29 +57,10 @@ pub use lash_sansio::VersionRange;
 ///             RestateDurableWaitIndexRequest, RestateDurableWaitRegistration, RestateTurnGatePeek,
 ///         ),
 ///     ),
-///     items(
-///         path = "crates/lash-restate/src/process/mod.rs",
-///         path = "crates/lash-restate/src/process_attach.rs", RestateProcessWorkflowInput,
-///         RestateProcessWorkflowPayload, RestateProcessWorkflowOutput,
-///         RestateProcessCancelRequest, RestateProcessCompleteRequest, RestateProcessAwaitRequest,
-///         RestateProcessHandOverRequest, RestateProcessCancelSignal, RestateProcessAttachRequest,
-///     ),
-///     items(
-///         path = "crates/lash-restate/src/session_driver.rs", RestateSessionDriveRequest,
-///         RestateTurnDriveRequest, RestateRootCloseRequest,
-///     ),
 ///     shapes(
 ///         path = "crates/lash-restate/src/usage_accounting.rs",
 ///         cover(UsageAccountingSettle, UsageExecutionRetirement, UsageOwnerDrain),
 ///     ),
-///     items(path = "crates/lash-restate/src/object_state.rs", ObjectUpgradeResponse),
-///     items(path = "crates/lash-core-store/src/build_generation.rs", BuildGeneration),
-///     items(path = "crates/lash-core-store/src/await_event_identity.rs", AwaitEventKey),
-///     items(
-///         path = "crates/lash-core-execution/src/runtime/process/events.rs", ProcessAwaitOutput,
-///     ),
-///     items(path = "crates/lash-sansio/src/tool_output.rs", CancelRequest),
-///     items(path = "crates/lash-core-effect/src/retirement.rs", ResolveOutcome),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const RESTATE_WIRE_VERSION: u32 = 1;

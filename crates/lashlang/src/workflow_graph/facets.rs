@@ -12,16 +12,10 @@ use crate::linker::{LinkError, WorkflowLinkAnalysis};
 ///
 /// version_guard(
 ///     shapes(cover(WorkflowNodeTypeFacets)),
-///     items(
-///         path = "crates/lashlang/src/ast.rs", TypeExpr, UnionMembers, ProcessSignature,
-///         ProcessType, ProcessTypeKind, ProcessTypeWire, ProcessParamWire, ProcessParam, TypeField,
+///     roots(
+///         path = "crates/lashlang/src/ast.rs", ProcessSignature, ProcessTypeKind, ProcessTypeWire,
+///         ProcessParam,
 ///     ),
-///     impls(
-///         path = "crates/lashlang/src/ast.rs", "Serialize for UnionMembers",
-///         "Deserialize for UnionMembers", "Serialize for ProcessType",
-///         "Deserialize for ProcessType",
-///     ),
-///     items(path = "crates/lashlang/src/ast_string.rs", AstString),
 /// )
 pub const WORKFLOW_TYPE_FACET_SCHEMA_VERSION: u32 = 4;
 

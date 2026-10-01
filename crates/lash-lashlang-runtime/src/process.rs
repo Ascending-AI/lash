@@ -116,7 +116,7 @@ pub(crate) fn record_segment_boundary_decline(
 /// wiring a store.
 ///
 /// version_guard(
-///     items(LashlangSegmentState),
+///     roots(LashlangSegmentState),
 ///     items(path = "crates/lashlang/src/workflow_graph.rs", workflow_node_id),
 ///     items(
 ///         path = "crates/lashlang/src/workflow_graph/execution_sites.rs",
@@ -126,8 +126,8 @@ pub(crate) fn record_segment_boundary_decline(
 ///         into_ownership_map, workflow_projection, statement_list, push_statement_list,
 ///         is_statement_list, collect_body, collect_statement, statement_value, map_node_subtree,
 ///         check_shape, process_wrapper_run_path, execution_sites, collect_execution_sites,
-///         push_execution_site_descriptor, collect_child_execution_sites, workflow_owner, node_site,
-///         branch_site, branch_edge_id,
+///         push_execution_site_descriptor, collect_child_execution_sites, workflow_owner,
+///         node_site, branch_site, branch_edge_id,
 ///     ),
 ///     shapes(
 ///         path = "crates/lash-core-execution/src/runtime/process/engine.rs",

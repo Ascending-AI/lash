@@ -41,22 +41,14 @@ pub const LASHLANG_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The JSON module envelope written by the 1.0 binary.
 ///
 /// version_guard(
+///     roots(ModuleArtifactEnvelope, StoredModuleArtifactEnvelope),
 ///     items(
-///         ModuleArtifact, StoredModuleArtifact, ModuleArtifactEnvelope,
-///         StoredModuleArtifactEnvelope, ModuleRef, ProcessRef, ContentHash, HostRequirementsRef,
-///         HostRequirements, ModuleExports, written_envelope_encoding, envelope_encoding_admitted,
-///         to_store_bytes, from_store_bytes, reject_future_shape, contains_obsolete_process_type,
+///         written_envelope_encoding, envelope_encoding_admitted, to_store_bytes, from_store_bytes,
+///         reject_future_shape, contains_obsolete_process_type,
 ///     ),
 ///     shapes(path = "crates/lashlang/src/ast.rs", cover(Program, Declaration, Expr, TypeExpr)),
-///     impls(
-///         path = "crates/lashlang/src/ast.rs", "Serialize for UnionMembers",
-///         "Deserialize for UnionMembers", "Serialize for ProcessType",
-///         "Deserialize for ProcessType",
-///     ),
 ///     shapes(path = "crates/lashlang/src/ast_number.rs", cover(IrNumber)),
 ///     shapes(path = "crates/lashlang/src/ast_roles.rs", cover(StructuralRole, ProcessOrigin)),
-///     items(path = "crates/lashlang/src/ast_string.rs", AstString),
-///     items(path = "crates/lashlang/src/span.rs", Span),
 ///     shapes(
 ///         path = "crates/lashlang/src/linker/host.rs",
 ///         path = "crates/lashlang/src/linker/catalog.rs",
@@ -103,12 +95,7 @@ const fn envelope_encoding_admitted(encoding: u64) -> bool {
 /// v13 would run a program this VM compiled under the old capture meaning.
 ///
 /// version_guard(
-///     items(
-///         path = "crates/lashlang/src/runtime/host.rs", AbilityOp, AbilityOutcome,
-///         AggregateConsumer, ResourceOperation, ResourceOperationOutcome, ResourceOperationBatch,
-///         ResourceOperationBatchLeaf, ResourceOperationBatchOutcome, ProcessEvent,
-///         ProcessEventKind, Sleep, SleepKind,
-///     ),
+///     roots(path = "crates/lashlang/src/runtime/host.rs", AbilityOp, AbilityOutcome),
 /// )
 pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v14";
 

@@ -153,6 +153,87 @@ def mismatches(rows: list[dict], baseline: dict):
     return errors
 
 
+SQLITE_STAMPS = Path("crates/lash-sqlite-store/src/schema.rs")
+SQLITE_CATALOG = Path("crates/lash-sqlite-store/src/migration.rs")
+COMPAT_DESCRIPTORS = Path("crates/lash-core-store/src/compat.rs")
+CFG = r'(?P<attrs>(?:#\[cfg\([^\]]*\)\]\s*)*)'
+STAMP_DATABASE = re.compile(
+    r"version_guard\((?:(?!version_guard\().)*?rows\s*=\s*\"SqliteDatabase::(?P<database>\w+)\""
+    r"(?:(?!version_guard\().)*?const\s+(?P<stamp>[A-Z][A-Z0-9_]*)\s*:", re.DOTALL,
+)
+DATABASE_COMPONENT = re.compile(r"Self::(\w+)\s*=>\s*ComponentId::(\w+)")
+DESCRIPTOR = re.compile(
+    CFG + r"CompatDescriptor\s*\{\s*component:\s*ComponentId::(?P<component>\w+),"
+    r"\s*reads:[^,]*(?:\([^)]*\))?,\s*writes:\s*VersionRange::(?P<range>exactly|between)"
+    r"\((?P<bounds>[^)]*)\)"
+)
+CATALOG_ROW = re.compile(
+    CFG + r"SqliteMigration\s*\{\s*database:\s*SqliteDatabase::(?P<database>\w+),"
+    r"\s*from:\s*(?P<from>\d+),\s*to:\s*(?P<to>\d+),"
+)
+
+
+def sqlite_stamp_mismatches(repo: Path):
+    """Where a SQLite schema stamp and its migration catalog count differently.
+
+    The catalog's steps, and the `lash_compat` row a store carries, are in the
+    compatibility descriptor's numbers. A stamp's bump owes a catalog step
+    from its old value to its new one (check_version_bumps.py), so that chain
+    can only be read when the stamp is the descriptor's version. After the
+    reset each stamp must therefore equal the version its database's
+    descriptor writes, in the default and the synthetic-next build, and every
+    catalog step must lie inside the stamp's own range.
+    """
+    schema = (repo / SQLITE_STAMPS).read_text()
+    stamps = {m["stamp"]: m["database"] for m in STAMP_DATABASE.finditer(schema)}
+    components = dict(DATABASE_COMPONENT.findall(without_comments(schema)))
+    descriptors = without_comments((repo / COMPAT_DESCRIPTORS).read_text())
+    catalog = without_comments((repo / SQLITE_CATALOG).read_text())
+    if not stamps or set(stamps.values()) - components.keys():
+        raise BaselineError("cannot read the SQLite stamps and their databases")
+    errors = []
+    for stamp, database in sorted(stamps.items()):
+        values = {}
+        for synthetic in (False, True):
+            tier = "synthetic-next" if synthetic else "default"
+            written = [
+                int(m["bounds"].split(",")[-1])
+                for m in DESCRIPTOR.finditer(descriptors)
+                if m["component"] == components[database] and enabled(m["attrs"], synthetic)
+            ]
+            if len(written) != 1:
+                raise BaselineError(f"{database}: expected one {tier} compat descriptor, found {len(written)}")
+            values[synthetic] = value = resolve(schema, stamp, synthetic)
+            if value != written[0]:
+                errors.append(
+                    f"{SQLITE_STAMPS}:{stamp}: {tier} stamp {value}, but the "
+                    f"{components[database]} descriptor and its catalog write {written[0]}"
+                )
+            for row in CATALOG_ROW.finditer(catalog):
+                if row["database"] != database or not enabled(row["attrs"], synthetic):
+                    continue
+                start, end = int(row["from"]), int(row["to"])
+                if not 1 <= start < end <= value:
+                    errors.append(
+                        f"{SQLITE_CATALOG}: {database} step {start} to {end} is outside "
+                        f"the {tier} stamp {stamp} = {value}"
+                    )
+        steps = {
+            (int(row["from"]), int(row["to"]))
+            for row in CATALOG_ROW.finditer(catalog)
+            if row["database"] == database and enabled(row["attrs"], True)
+        }
+        at = values[False]
+        while at < values[True] and any(start == at for start, _ in steps):
+            at = max(end for start, end in steps if start == at)
+        if at != values[True]:
+            errors.append(
+                f"{SQLITE_CATALOG}: {database} has no step chain from the default stamp "
+                f"{values[False]} to the synthetic-next stamp {values[True]} ({stamp})"
+            )
+    return errors
+
+
 def verify_build(rows: list[dict], report: Path, synthetic: bool):
     text = report.read_text()
     marker = "release-inventory-build="
@@ -191,11 +272,14 @@ def main():
             print(json.dumps(rows, indent=2))
             return 0
         path = args.baseline if args.baseline.is_absolute() else args.repo / args.baseline
-        errors = mismatches(rows, load_baseline(path))
+        errors = mismatches(rows, load_baseline(path)) + sqlite_stamp_mismatches(args.repo)
         if errors:
             print("\n".join(errors), file=sys.stderr)
             return 1
-        print(f"release baseline: {len(rows)} surfaces, zero omissions, zero mismatches")
+        print(
+            f"release baseline: {len(rows)} surfaces, zero omissions, zero mismatches; "
+            "SQLite stamps equal their catalog numbers"
+        )
         return 0
     except (BaselineError, OSError, KeyError, tomllib.TOMLDecodeError, json.JSONDecodeError) as error:
         print(f"release baseline error: {error}", file=sys.stderr)

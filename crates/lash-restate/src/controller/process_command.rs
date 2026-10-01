@@ -6,8 +6,8 @@ use restate_sdk::serde::Json;
 /// a replay refuses any other version.
 ///
 /// version_guard(
-///     items(JournaledCancelCommandIdentity, JournaledCancelAdmission),
-///     items(
+///     roots(JournaledCancelAdmission),
+///     roots(
 ///         path = "crates/lash-core-execution/src/runtime/process/start_staging.rs",
 ///         RegisteredProcessStart,
 ///     ),

@@ -61,10 +61,8 @@ pub use canonical_messagepack::{
 ///     ),
 ///     shapes(
 ///         path = "crates/lashlang/src/runtime/heap.rs",
-///         path = "crates/lashlang/src/runtime/heap/*.rs",
-///         cover(ErrorKind, HeapId),
+///         path = "crates/lashlang/src/runtime/heap/*.rs", cover(ErrorKind, HeapId),
 ///     ),
-///     items(path = "crates/lashlang/src/runtime/value.rs", ImageValue, ResourceHandle),
 /// )
 // v11 writes a closure's ECMA `name`/`length` own-property slots. A v10 wire's
 // closures would decode under the old shape, but restoring them would silently

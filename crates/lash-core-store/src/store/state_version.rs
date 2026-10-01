@@ -19,9 +19,7 @@ pub const OLDEST_SUPPORTED_SESSION_STATE_VERSION: u32 = 3;
 /// a later migration or drain can identify them.
 ///
 /// version_guard(
-///     items(
-///         path = "crates/lash-core-store/src/plugin_state.rs", PluginState, PluginNamespaceState,
-///     ),
+///     roots(path = "crates/lash-core-store/src/plugin_state.rs", PluginState),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const CURRENT_SESSION_STATE_VERSION: u32 = 3;

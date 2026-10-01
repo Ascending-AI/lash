@@ -139,9 +139,9 @@ pub(crate) const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
 /// relative timeout after a worker replacement.
 ///
 /// version_guard(
-///     items(
+///     roots(
 ///         path = "crates/lash-restate/src/durable_wait/messages.rs",
-///         RestateDurableWaitAwaitRequest, RestateDurableWaitDeadline,
+///         RestateDurableWaitAwaitRequest,
 ///     ),
 /// )
 pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 2;
@@ -154,18 +154,18 @@ pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 2;
 /// `lash_core::store::RECORD_UPCASTERS`.
 ///
 /// version_guard(
+///     roots(RestateDurableWaitIndexMetadata),
+///     roots(
+///         path = "crates/lash-restate/src/durable_wait/messages.rs",
+///         RestateDurableWaitClassification,
+///     ),
 ///     items(
-///         RestateDurableWaitIndexMetadata, DURABLE_WAIT_REGISTRY_FORMATS,
-///         DURABLE_WAIT_INDEX_METADATA_KEY, DURABLE_WAIT_INDEX_WAIT_PREFIX,
-///         DURABLE_WAIT_INDEX_RESOLUTION_PREFIX, DURABLE_WAIT_INDEX_EFFECT_PREFIX,
-///         DURABLE_WAIT_INDEX_GROUP_PREFIX, DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX,
-///         DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX,
+///         DURABLE_WAIT_REGISTRY_FORMATS, DURABLE_WAIT_INDEX_METADATA_KEY,
+///         DURABLE_WAIT_INDEX_WAIT_PREFIX, DURABLE_WAIT_INDEX_RESOLUTION_PREFIX,
+///         DURABLE_WAIT_INDEX_EFFECT_PREFIX, DURABLE_WAIT_INDEX_GROUP_PREFIX,
+///         DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX, DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX,
 ///     ),
 ///     shapes(path = "crates/lash-restate/src/object_state.rs", cover(StampedValue)),
-///     items(
-///         path = "crates/lash-restate/src/durable_wait/messages.rs",
-///         RestateDurableWaitAwakeableRequest, RestateDurableWaitClassification,
-///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const DURABLE_WAIT_REGISTRY_FORMAT_VERSION: u16 = 1;

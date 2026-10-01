@@ -197,11 +197,11 @@ pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
 /// executable and is refused.
 ///
 /// version_guard(
-///     items(
+///     roots(
 ///         path = "crates/lashlang/src/runtime/instruction.rs", Instruction, IntrinsicOp,
 ///         JavaScriptUriCodec,
 ///     ),
-///     items(path = "crates/lashlang/src/ast.rs", JavaScriptBinaryOp, JavaScriptUnaryOp),
+///     roots(path = "crates/lashlang/src/ast.rs", JavaScriptBinaryOp, JavaScriptUnaryOp),
 ///     shapes(path = "crates/lashlang/src/runtime/vm/continuation.rs", cover(VmContinuation)),
 ///     items(path = "crates/lashlang/src/runtime/entry_points.rs", compile, compile_main),
 /// )

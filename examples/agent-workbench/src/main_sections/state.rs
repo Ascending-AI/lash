@@ -590,7 +590,7 @@ impl ProductEventHistory {
 }
 
 /// version_guard(
-///     items(ProductEvent, ProductEventHistory, PersistedProductEventLog),
+///     roots(PersistedProductEventLog),
 /// )
 pub(crate) const PRODUCT_EVENT_LOG_FORMAT_VERSION: u32 = 2;
 

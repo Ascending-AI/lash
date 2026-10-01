@@ -29,7 +29,7 @@ use crate::compat::{CompatRefusal, VersionRange};
 /// recording any other value is refused at open.
 ///
 /// version_guard(
-///     items(FleetFormat, FleetFormatState),
+///     roots(FleetFormat, FleetFormatState),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const FLEET_FORMAT_VERSION: u32 = 1;

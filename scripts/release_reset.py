@@ -238,6 +238,7 @@ def main():
         if not args.source_only:
             regenerate(repo)
         errors = baseline.mismatches(baseline.inventory(repo), baseline.load_baseline(declaration))
+        errors += baseline.sqlite_stamp_mismatches(repo)
         if errors:
             raise baseline.BaselineError("\n".join(errors))
         return 0

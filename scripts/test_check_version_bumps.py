@@ -149,6 +149,110 @@ STEP_FROM_7 = """    Migration {
 """
 
 
+ROOTED_PEER = """
+/// version_guard(roots(path = "crates/demo/src/dto/hello.rs", Hello))
+pub const PEER_PROTOCOL_VERSION: u32 = 1;
+"""
+
+# A root and what it serializes: two levels of derived shapes in another
+# module, an alias, container arguments, another package's type, a skipped
+# field, an adapter, a hand-written impl, a macro's declaration and a cycle.
+ROOTED_DTO = """
+use crate::model::{Body, Tag};
+use std::collections::BTreeMap;
+
+#[derive(Serialize, Deserialize)]
+pub struct Hello {
+    pub name: String,
+    pub body: Body,
+    pub tags: BTreeMap<String, Vec<Tag>>,
+    #[serde(skip)]
+    pub scratch: Scratch,
+    #[serde(with = "stamp")]
+    pub at: u64,
+    pub extra: Option<Box<other::Extra>>,
+    pub raw: serde_json::Value,
+    pub code: Code,
+    pub id: HelloId,
+    pub tree: Tree,
+}
+
+pub struct Scratch {
+    pub hits: u32,
+}
+
+mod stamp {
+    pub fn serialize<S: Serializer>(at: &u64, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u64(*at)
+    }
+}
+
+pub struct Code {
+    pub digits: Digits,
+}
+
+impl Serialize for Code {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str("code")
+    }
+}
+
+pub struct Digits(pub u32);
+
+#[derive(Serialize, Deserialize)]
+pub struct Tree {
+    pub children: Vec<Tree>,
+}
+
+identity!(HelloId);
+"""
+
+MODEL = """
+#[derive(Serialize, Deserialize)]
+pub struct Body {
+    pub leaf: Leaf,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Leaf {
+    pub n: u32,
+}
+
+pub type Tag = TagV1;
+
+#[derive(Serialize, Deserialize)]
+pub enum TagV1 {
+    Plain,
+    Weighted { weight: u8 },
+}
+"""
+
+IDS = """
+macro_rules! identity {
+    ($name:ident) => {
+        #[derive(Serialize, Deserialize)]
+        pub struct $name(String);
+    };
+}
+"""
+
+OTHER = """
+#[derive(Serialize, Deserialize)]
+pub struct Extra {
+    pub n: u8,
+}
+"""
+
+DEMO_MANIFEST = """
+[package]
+name = "demo"
+
+[dependencies]
+other = { path = "../other" }
+serde_json = "1"
+"""
+
+
 class Fixture(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -264,14 +368,14 @@ class BumpAndEvidence(Fixture):
         self.assertIn("must be an inline array", output)
 
     def test_a_wire_surface_bump_is_its_own_evidence(self) -> None:
-        self.write("crates/demo/src/dto/hello.rs", DTO.replace("name: String", "name: Name"))
+        self.write("crates/demo/src/dto/hello.rs", DTO.replace("name: String", "name: u64"))
         self.write("crates/demo/src/peer.rs", PEER.replace("u32 = 1;", "u32 = 2;"))
         code, output = self.verdict(self.commit("wire bump"))
         self.assertEqual(code, 0, output)
         self.assertIn("PEER_PROTOCOL_VERSION 1 to 2 (coexist surface", output)
 
     def test_a_changed_wire_shape_without_the_bump_fails(self) -> None:
-        self.write("crates/demo/src/dto/hello.rs", DTO.replace("name: String", "name: Name"))
+        self.write("crates/demo/src/dto/hello.rs", DTO.replace("name: String", "name: u64"))
         code, output = self.verdict(self.commit("wire change"))
         self.assertEqual(code, 1, output)
         self.assertIn("PEER_PROTOCOL_VERSION is 1 on both sides", output)
@@ -581,6 +685,181 @@ class GuardSet(Fixture):
         self.assertIn("unknown entry 'serde'", output)
 
 
+class Reachable(Fixture):
+    """A `roots(..)` guard covers everything its roots serialize."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.write("crates/demo/Cargo.toml", DEMO_MANIFEST)
+        self.write("crates/other/Cargo.toml", '[package]\nname = "other"\n')
+        self.write("crates/other/src/lib.rs", OTHER)
+        self.write("crates/demo/src/peer.rs", ROOTED_PEER)
+        self.write("crates/demo/src/dto/hello.rs", ROOTED_DTO)
+        self.write("crates/demo/src/model.rs", MODEL)
+        self.write("crates/demo/src/ids.rs", IDS)
+        self.base = self.commit("a rooted surface")
+
+    def changed(self, relative: str, old: str, new: str) -> tuple[int, str]:
+        path = self.repo / relative
+        text = path.read_text(encoding="utf-8")
+        self.assertIn(old, text)
+        path.write_text(text.replace(old, new), encoding="utf-8")
+        return self.verdict(self.commit(f"{relative}: {new}"))
+
+    def closure(self) -> gate.Closure:
+        view = gate.RevisionView(self.repo, self.git("rev-parse", "HEAD"))
+        guard = gate.Guard("roots", ("crates/demo/src/dto/hello.rs",), ("Hello",))
+        return gate.closure_of(view, guard)[0]
+
+    def test_the_base_evaluates(self) -> None:
+        code, output = self.verdict(self.base)
+        self.assertEqual(code, 0, output)
+
+    def test_a_leaf_two_levels_below_the_root_owes_the_bump(self) -> None:
+        depths = {shape.name: depth for shape, depth in self.closure().depths}
+        self.assertEqual(2, depths["Leaf"])
+        result_code, output = self.changed("crates/demo/src/model.rs", "pub n: u32,", "pub n: u64,")
+        self.assertEqual(result_code, 1, output)
+        self.assertIn("PEER_PROTOCOL_VERSION is 1 on both sides", output)
+        self.assertIn("guarded shape changed (Leaf;", output)
+
+    def test_the_leaf_change_with_its_bump_passes(self) -> None:
+        self.write("crates/demo/src/peer.rs", ROOTED_PEER.replace("u32 = 1;", "u32 = 2;"))
+        code, output = self.changed("crates/demo/src/model.rs", "pub n: u32,", "pub n: u64,")
+        self.assertEqual(code, 0, output)
+        self.assertIn("PEER_PROTOCOL_VERSION 1 to 2", output)
+
+    def test_an_alias_and_a_container_argument_are_followed(self) -> None:
+        code, output = self.changed("crates/demo/src/model.rs", "weight: u8", "weight: u16")
+        self.assertEqual(code, 1, output)
+        self.assertIn("guarded shape changed (TagV1;", output)
+
+    def test_repointing_an_alias_owes_the_bump(self) -> None:
+        code, output = self.changed("crates/demo/src/model.rs", "type Tag = TagV1;", "type Tag = u8;")
+        self.assertEqual(code, 1, output)
+        self.assertIn("Tag, TagV1", output)
+
+    def test_a_type_of_another_crate_is_followed(self) -> None:
+        code, output = self.changed("crates/other/src/lib.rs", "pub n: u8,", "pub n: u16,")
+        self.assertEqual(code, 1, output)
+        self.assertIn("guarded shape changed (Extra;", output)
+
+    def test_a_skipped_field_is_not_followed(self) -> None:
+        self.assertNotIn("Scratch", {shape.name for shape, _ in self.closure().depths})
+        code, output = self.changed("crates/demo/src/dto/hello.rs", "pub hits: u32,", "pub hits: u64,")
+        self.assertEqual(code, 0, output)
+
+    def test_an_adapter_is_guarded(self) -> None:
+        code, output = self.changed(
+            "crates/demo/src/dto/hello.rs", "serialize_u64(*at)", "serialize_u64(*at + 1)"
+        )
+        self.assertEqual(code, 1, output)
+        self.assertIn("mod stamp", output)
+
+    def test_an_adapter_the_tree_does_not_declare_cannot_be_evaluated(self) -> None:
+        code, output = self.changed("crates/demo/src/dto/hello.rs", 'with = "stamp"', 'with = "gone"')
+        self.assertEqual(code, 2, output)
+        self.assertIn("with = 'gone' names no adapter this tree declares", output)
+
+    def test_a_hand_written_impl_is_guarded_and_its_fields_are_not_followed(self) -> None:
+        self.assertNotIn("Digits", {shape.name for shape, _ in self.closure().depths})
+        code, output = self.changed("crates/demo/src/dto/hello.rs", "Digits(pub u32)", "Digits(pub u64)")
+        self.assertEqual(code, 0, output)
+        code, output = self.changed("crates/demo/src/dto/hello.rs", '"code"', '"kode"')
+        self.assertEqual(code, 1, output)
+        self.assertIn("Serialize for Code", output)
+
+    def test_a_macro_declared_type_is_guarded_as_its_macro(self) -> None:
+        code, output = self.changed("crates/demo/src/ids.rs", "$name(String)", "$name(u64)")
+        self.assertEqual(code, 1, output)
+        self.assertIn("identity!", output)
+
+    def test_cycles_and_opaque_types_are_reported(self) -> None:
+        closure = self.closure()
+        self.assertEqual((("Tree",),), closure.cycles)
+        self.assertEqual((), closure.problems)
+        opaque = dict(closure.opaque)
+        self.assertEqual("a type of package `serde_json`", opaque["serde_json::Value"])
+        self.assertIn("hand-written", opaque["Code (crates/demo/src/dto/hello.rs)"])
+        self.assertIn("declared by `identity!`", opaque["HelloId (crates/demo/src/dto/hello.rs)"])
+
+    def test_a_reachable_type_the_tree_cannot_resolve_cannot_be_evaluated(self) -> None:
+        code, output = self.changed("crates/demo/src/model.rs", "pub leaf: Leaf,", "pub leaf: Leaves,")
+        self.assertEqual(code, 2, output)
+        self.assertIn("reaches 1 type(s) it cannot resolve", output)
+        self.assertIn("Body (crates/demo/src/model.rs) names Leaves", output)
+
+    def test_an_ambiguous_name_cannot_be_evaluated(self) -> None:
+        self.write("crates/demo/src/extra.rs", "pub struct Leaf {\n    pub m: u8,\n}\n")
+        code, output = self.changed(
+            "crates/demo/src/dto/hello.rs", "pub body: Body,", "pub body: Body,\n    pub leaf: Leaf,"
+        )
+        self.assertEqual(code, 2, output)
+        self.assertIn("Leaf is ambiguous", output)
+
+    def test_a_missing_root_cannot_be_evaluated(self) -> None:
+        self.write("crates/demo/src/peer.rs", ROOTED_PEER.replace("Hello)", "Goodbye)"))
+        code, output = self.verdict(self.commit("stale root"))
+        self.assertEqual(code, 2, output)
+        self.assertIn("does not find Goodbye", output)
+
+    def test_roots_take_names_only(self) -> None:
+        for argument, reason in (
+            ("cover(Hello)", "does not take cover"),
+            ('elide = "sql_idempotent_index"', "does not take elide"),
+        ):
+            with self.subTest(argument=argument):
+                self.write(
+                    "crates/demo/src/peer.rs", ROOTED_PEER.replace("Hello)", f"Hello, {argument})")
+                )
+                code, output = self.verdict(self.commit(argument))
+                self.assertEqual(code, 2, output)
+                self.assertIn(reason, output)
+
+    def test_a_conversion_type_is_followed(self) -> None:
+        self.write(
+            "crates/demo/src/dto/hello.rs",
+            ROOTED_DTO.replace(
+                "pub struct Tree {", '#[serde(try_from = "TreeWire")]\npub struct Tree {'
+            )
+            + "\n#[derive(Deserialize)]\npub struct TreeWire {\n    pub depth: u8,\n}\n",
+        )
+        base = self.commit("a wire twin")
+        self.write(
+            "crates/demo/src/dto/hello.rs",
+            (self.repo / "crates/demo/src/dto/hello.rs").read_text().replace("depth: u8", "depth: u16"),
+        )
+        code, output = self.verdict(self.commit("twin changes"), base)
+        self.assertEqual(code, 1, output)
+        self.assertIn("TreeWire", output)
+
+    def test_a_sweep_follows_what_its_shapes_serialize(self) -> None:
+        self.write(
+            "crates/demo/src/peer.rs",
+            ROOTED_PEER.replace(
+                'roots(path = "crates/demo/src/dto/hello.rs", Hello)',
+                'shapes(path = "crates/demo/src/dto/*.rs", cover(Hello))',
+            ),
+        )
+        base = self.commit("a sweep")
+        self.write("crates/demo/src/model.rs", MODEL.replace("pub n: u32,", "pub n: u64,"))
+        code, output = self.verdict(self.commit("leaf outside the swept file"), base)
+        self.assertEqual(code, 1, output)
+        self.assertIn("guarded shape changed (Leaf;", output)
+
+    def test_dropping_a_root_does_not_excuse_changing_its_leaf(self) -> None:
+        self.write(
+            "crates/demo/src/peer.rs",
+            ROOTED_PEER.replace(
+                'roots(path = "crates/demo/src/dto/hello.rs", Hello)',
+                'items(path = "crates/demo/src/dto/hello.rs", Scratch)',
+            ),
+        )
+        code, output = self.changed("crates/demo/src/model.rs", "pub n: u32,", "pub n: u64,")
+        self.assertEqual(code, 1, output)
+        self.assertIn("Leaf", output)
+
+
 class RegistryMoves(Fixture):
     def test_a_new_surface_is_reported_as_registered(self) -> None:
         self.write(
@@ -607,7 +886,7 @@ class RegistryMoves(Fixture):
         )
         (self.repo / "crates/demo/src/peer.rs").unlink()
         self.write("crates/demo/src/wire.rs", PEER)
-        self.write("crates/demo/src/dto/hello.rs", DTO.replace("name: String", "name: Name"))
+        self.write("crates/demo/src/dto/hello.rs", DTO.replace("name: String", "name: u64"))
         code, output = self.verdict(self.commit("relocate and change"))
         self.assertEqual(code, 1, output)
         self.assertIn("PEER_PROTOCOL_VERSION is 1 on both sides", output)
@@ -617,7 +896,7 @@ class RegistryMoves(Fixture):
         (self.repo / "crates/demo/src/peer.rs").unlink()
         removed = self.commit("retire the surface, keep the shape")
         self.assertEqual(self.verdict(removed)[0], 0)
-        self.write("crates/demo/src/dto/hello.rs", DTO.replace("name: String", "name: Name"))
+        self.write("crates/demo/src/dto/hello.rs", DTO.replace("name: String", "name: u64"))
         code, output = self.verdict(self.git("rev-parse", "HEAD") and self.commit("and change it"))
         self.assertEqual(code, 1, output)
         self.assertIn("PEER_PROTOCOL_VERSION left the registry", output)
@@ -684,6 +963,24 @@ def planted_change(view: gate.TreeView, guard: gate.Guard) -> PlantedView | None
             if gate.comparable(after) != gate.comparable(signature):
                 return changed
     return None
+
+
+def planted_shape(view: gate.TreeView, shape: gate.Shape) -> PlantedView:
+    """`view` with every definition of `shape`'s name in its file changed."""
+    text = view.content(shape.path)
+    assert text is not None
+    for match in reversed(list(gate.RUST_TYPE_DEFINITION.finditer(text))):
+        if match.group(3) == shape.name:
+            text = text[: match.start()] + "#[planted_change]\n" + text[match.start() :]
+    return PlantedView(view, {shape.path: text})
+
+
+# The crates whose payload types the Restate wire carries (FIG-4566 found
+# about 200 of them guarded by no constant).
+WIRE_KEY = "crates/lash-restate/src/compat.rs:RESTATE_WIRE_VERSION"
+WIRE_PAYLOAD_CRATES = (
+    "crates/lash-core-execution/", "crates/lash-core-store/", "crates/lash-sansio/",
+)
 
 
 # What the guard-completeness audit (FIG-4566) found unguarded, by the surface
@@ -820,6 +1117,107 @@ class RealRepository(unittest.TestCase):
                     self.assertIn("its guarded shape changed", result.failures[0].detail)
                     planted += 1
         self.assertGreaterEqual(planted, len(self.surfaces))
+
+    def leaves(self, key: str) -> dict[gate.Shape, int]:
+        """The derived shapes two or more levels below `key`'s roots."""
+        deep: dict[gate.Shape, int] = {}
+        for guard in self.declaration(key).guards:
+            if guard.kind not in {"roots", "shapes"}:
+                continue
+            for shape, depth in gate.closure_of(self.view, guard)[0].depths:
+                if depth >= 2 and shape.kind in {"struct", "enum"}:
+                    deep[shape] = max(depth, deep.get(shape, 0))
+        return deep
+
+    def assert_planted_leaf_fails(self, key: str, shape: gate.Shape) -> None:
+        result = gate.check_views(
+            self.view, planted_shape(self.view, shape), only=frozenset({key})
+        )
+        self.assertEqual((), result.errors)
+        self.assertEqual([key], [finding.surface.key for finding in result.failures])
+        self.assertIn("its guarded shape changed", result.failures[0].detail)
+        self.assertIn(shape.name, result.failures[0].detail)
+
+    def test_every_reachable_type_resolves(self) -> None:
+        followed = 0
+        cycles: set[tuple[str, ...]] = set()
+        opaque: set[tuple[str, str]] = set()
+        for key in self.surfaces:
+            for guard in self.declaration(key).guards:
+                if guard.kind not in {"roots", "shapes"}:
+                    continue
+                with self.subTest(surface=key, guard=guard.label):
+                    closure, missing = gate.closure_of(self.view, guard)
+                    self.assertEqual(([], ()), (missing, closure.problems))
+                    followed += len(closure.depths)
+                    cycles.update(closure.cycles)
+                    opaque.update(closure.opaque)
+        # The walk says what it does not follow instead of passing it silently.
+        self.assertGreater(followed, 1000)
+        self.assertIn(("ValueWire",), cycles)
+        self.assertIn(("serde_json::Value", "a type of package `serde_json`"), opaque)
+
+    def test_markers_name_types_as_roots(self) -> None:
+        """A type listed under `items` would be guarded without what it
+        serializes. Types go under `roots`; `items` is for what no type
+        reaches."""
+        reach = gate.reachability(self.view)
+        for key in self.surfaces:
+            guards = self.declaration(key).guards
+            derived = {
+                (shape.path, shape.name)
+                for guard in guards
+                if guard.kind in {"roots", "shapes"}
+                for shape, _ in gate.closure_of(self.view, guard)[0].depths
+            }
+            for guard in guards:
+                if guard.kind != "items":
+                    continue
+                listed = sorted(
+                    name
+                    for path in self.view.matching_paths(guard.paths)
+                    for name in guard.symbols
+                    if reach.roots(path, name) and (path, name) not in derived
+                )
+                with self.subTest(surface=key, guard=guard.label):
+                    self.assertEqual([], listed)
+
+    def test_the_wire_reaches_its_payload_leaves(self) -> None:
+        payload = [
+            shape for shape in self.leaves(WIRE_KEY) if shape.path.startswith(WIRE_PAYLOAD_CRATES)
+        ]
+        self.assertGreaterEqual(len(payload), 200)
+        self.assertEqual(set(WIRE_PAYLOAD_CRATES), {
+            crate for shape in payload for crate in WIRE_PAYLOAD_CRATES
+            if shape.path.startswith(crate)
+        })
+
+    def test_a_planted_unbumped_change_to_a_leaf_below_a_root_fails_its_surface(self) -> None:
+        """Every surface that reaches two or more levels down: change its
+        deepest leaf, leave the constant alone, and the gate fails that
+        surface."""
+        planted = 0
+        for key in self.surfaces:
+            deep = self.leaves(key)
+            if not deep:
+                continue
+            shape = max(deep, key=lambda leaf: (deep[leaf], leaf.path, leaf.name))
+            with self.subTest(surface=key, leaf=shape.label, depth=deep[shape]):
+                self.assert_planted_leaf_fails(key, shape)
+                planted += 1
+        self.assertGreaterEqual(planted, 30)
+
+    def test_a_planted_unbumped_change_to_a_wire_payload_leaf_fails_the_wire(self) -> None:
+        """One payload leaf of every file the Restate wire reaches two or
+        more levels below its handler bodies."""
+        by_file: dict[str, gate.Shape] = {}
+        for shape in sorted(self.leaves(WIRE_KEY), key=lambda leaf: (leaf.path, leaf.name)):
+            if shape.path.startswith(WIRE_PAYLOAD_CRATES):
+                by_file.setdefault(shape.path, shape)
+        self.assertGreaterEqual(len(by_file), 40)
+        for shape in by_file.values():
+            with self.subTest(leaf=shape.label):
+                self.assert_planted_leaf_fails(WIRE_KEY, shape)
 
     def test_the_audited_shapes_are_guarded(self) -> None:
         for key, names in AUDITED_GUARDS.items():

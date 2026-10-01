@@ -18,14 +18,16 @@ use super::control_intent::ControlIntentId;
 /// The obligation state, kind, key, and stall labels written at the 1.0 cut.
 ///
 /// version_guard(
-///     items(
-///         ObligationKind, ALL, from_label, label, key_column_types, KeyColumnType, ObligationKey,
-///         decode_label, columns, decode, ObligationState, as_str, StallReason,
-///     ),
-///     items(path = "crates/lash-core-store/src/store/control_intent.rs", ControlIntentId),
-///     items(
+///     roots(ObligationKind, KeyColumnType, ObligationKey, ObligationState, StallReason),
+///     roots(path = "crates/lash-core-store/src/store/control_intent.rs", ControlIntentId),
+///     roots(
 ///         path = "crates/lash-core-store/src/artifact_referrer.rs", ArtifactReferrerKind,
-///         ArtifactReferrer, canonical_id, decode, as_str, parse,
+///         ArtifactReferrer,
+///     ),
+///     items(ALL, from_label, label, key_column_types, decode_label, columns, decode, as_str),
+///     items(
+///         path = "crates/lash-core-store/src/artifact_referrer.rs", canonical_id, decode, as_str,
+///         parse,
 ///     ),
 ///     file(
 ///         path = "crates/lash-sansio/src/identity.rs",

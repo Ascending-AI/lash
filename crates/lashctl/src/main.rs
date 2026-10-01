@@ -25,21 +25,15 @@ use serde_json::{Value, json};
 
 /// version_guard(
 ///     shapes(cover(StepDto)),
+///     roots(Exit, CliError),
+///     roots(path = "crates/lash-core-store/src/store/fleet_finalize.rs", FinalizeRefusal),
+///     roots(path = "crates/lash-postgres-store/src/postgres/migrate.rs", MigrationRefusal),
+///     roots(path = "crates/lash-restate/src/object_upgrade.rs", ObjectUpgradeError),
 ///     items(
-///         Exit, CliError, name, from, run, output, error_json, objects_preflight_result,
-///         objects_sweep_result, finalize_result, hold_result, migration_result, stalled_row,
-///         stalled_result, drain_status_result, version_result,
+///         name, from, run, output, error_json, objects_preflight_result, objects_sweep_result,
+///         finalize_result, hold_result, migration_result, stalled_row, stalled_result,
+///         drain_status_result, version_result,
 ///     ),
-///     items(path = "crates/lash-core-store/src/compat.rs", CompatRefusal, CompatStamp),
-///     items(
-///         path = "crates/lash-core-store/src/store/fleet_finalize.rs", FinalizeRefusal,
-///         RetainedDeployment, FinalizeHold,
-///     ),
-///     items(
-///         path = "crates/lash-core-store/src/store/generation_drain.rs", GenerationDrainStatus,
-///     ),
-///     items(path = "crates/lash-postgres-store/src/postgres/migrate.rs", MigrationRefusal),
-///     items(path = "crates/lash-restate/src/object_upgrade.rs", ObjectUpgradeError),
 ///     shapes(
 ///         path = "crates/lash-postgres-store/src/connection_budget.rs",
 ///         cover(PostgresConnectionBudgetReport, PostgresConnectionBudgetRefusal),

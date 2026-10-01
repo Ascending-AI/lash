@@ -471,22 +471,13 @@ pub struct RuntimeCommitReceipt {
 /// receipt is refused, not converted.
 ///
 /// version_guard(
-///     items(RuntimeCommitReceipt, decode_runtime_commit_receipt, ensure_supported_receipt_version),
-///     items(
+///     roots(RuntimeCommitReceipt),
+///     roots(
 ///         path = "crates/lash-core-store/src/store/runtime_commit_plan.rs",
 ///         RuntimeCommitReceiptRecord,
 ///     ),
-///     items(path = "crates/lash-core-store/src/store/pending_follow_on.rs", PendingFollowOn),
-///     items(path = "crates/lash-core-store/src/session_graph.rs", RealizedNodeTimestamp),
-///     items(
-///         path = "crates/lash-core-store/src/turn_failure_evidence.rs", TurnFailureEvidence,
-///         TurnFailurePartialOutput, ChargeSafetyRefusalEvidence,
-///     ),
-///     items(path = "crates/lash-core-store/src/queued_work_vocabulary.rs", QueuedWorkBatch),
-///     items(path = "crates/lash-core-store/src/turn_input_vocabulary.rs", TurnInputApplication),
-///     items(
-///         path = "crates/lash-core-store/src/turn_control_vocabulary.rs", TurnCancelInputOutcome,
-///     ),
+///     roots(path = "crates/lash-core-store/src/queued_work_vocabulary.rs", QueuedWorkBatch),
+///     items(decode_runtime_commit_receipt, ensure_supported_receipt_version),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 pub const RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION: u32 = 2;

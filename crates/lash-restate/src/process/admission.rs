@@ -75,16 +75,14 @@ use std::sync::Arc;
 /// of this version, behind the generation sentinel (FIG-3795).
 ///
 /// version_guard(
-///     items(
-///         ADMIT_STEP, START_STEP, AdmissionVerdict, StartOutcome, stamped_journal_version,
-///         decode_stamped_request,
-///     ),
-///     items(
-///         path = "crates/lash-restate/src/process/mod.rs",
-///         path = "crates/lash-restate/src/process_attach.rs", RestateProcessWorkflowInput,
+///     roots(AdmissionVerdict, StartOutcome),
+///     roots(
+///         path = "crates/lash-restate/src/process/mod.rs", RestateProcessWorkflowInput,
 ///         RestateProcessWorkflowPayload, RestateProcessCancelRequest,
-///         RestateProcessCompleteRequest, RestateProcessAwaitRequest, RestateProcessAttachRequest,
+///         RestateProcessCompleteRequest, RestateProcessAwaitRequest,
 ///     ),
+///     roots(path = "crates/lash-restate/src/process_attach.rs", RestateProcessAttachRequest),
+///     items(ADMIT_STEP, START_STEP, stamped_journal_version, decode_stamped_request),
 ///     file(path = "crates/lash-restate/src/process/stamped_requests.rs"),
 /// )
 pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 4;
@@ -100,7 +98,8 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 4;
 /// The bump guard pins the handler prefix steps below.
 ///
 /// version_guard(
-///     items(ADMIT_STEP, START_STEP, AdmissionVerdict, StartOutcome),
+///     roots(AdmissionVerdict, StartOutcome),
+///     items(ADMIT_STEP, START_STEP),
 ///     items(
 ///         path = "crates/lash-restate/src/process/workflow.rs", COMPLETE_STEP, BOUNDARY_STEP,
 ///         HANDOVER_STEP, CANCEL_FORWARD_STEP, CANCEL_RECORD_STEP, CANCEL_ROUTE_STEP,

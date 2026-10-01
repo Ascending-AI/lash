@@ -23,11 +23,8 @@ use crate::{ProcessId, VersionRange};
 /// The newest process cursor format this build reads and writes.
 ///
 /// version_guard(
-///     items(
-///         ProcessCursor, ProcessCursorReference, parse, fmt, PROCESS_CURSOR_UNROUTED_EPOCH,
-///         RETIRED_PROCESS_CURSOR_VERSIONS,
-///     ),
-///     impls("Serialize for ProcessCursor", "Deserialize for ProcessCursor"),
+///     roots(ProcessCursor, ProcessCursorReference),
+///     items(parse, fmt, PROCESS_CURSOR_UNROUTED_EPOCH, RETIRED_PROCESS_CURSOR_VERSIONS),
 ///     file(path = "crates/lash-sansio/src/identity.rs", cover("string_identity!", ProcessId)),
 /// )
 #[cfg(not(feature = "synthetic-next"))]

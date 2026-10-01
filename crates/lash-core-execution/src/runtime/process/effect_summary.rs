@@ -18,15 +18,13 @@ use super::events::ProcessEventAppendRequest;
 ///         cover(
 ///             PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
 ///             PROCESS_EFFECT_OCCURRENCE_CAP, "struct ProcessEffectOccurrence",
-///             "struct ProcessEffectOmissions", "fn append_request",
-///             "fn decode", "fn tool_failure_code", "fn effect_outcome_payload_schema",
+///             "struct ProcessEffectOmissions", "fn append_request", "fn decode",
+///             "fn tool_failure_code", "fn effect_outcome_payload_schema",
 ///             "fn effect_omissions_payload_schema",
 ///         ),
 ///     ),
-///     items(
-///         path = "crates/lash-core-execution/src/runtime/process/events.rs", ProcessEventKind,
-///         from_event_type,
-///     ),
+///     roots(path = "crates/lash-core-execution/src/runtime/process/events.rs", ProcessEventKind),
+///     items(path = "crates/lash-core-execution/src/runtime/process/events.rs", from_event_type),
 ///     items(
 ///         path = "crates/lash-core-execution/src/runtime/process/validation.rs",
 ///         validate_generic_process_event_append,

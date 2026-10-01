@@ -41,14 +41,7 @@ use super::*;
 ///         path = "crates/lash-sansio/src/sansio/turn_protocol.rs",
 ///         cover(TurnCheckpoint, MachineState, Effect),
 ///     ),
-///     items(path = "crates/lash-sansio/src/session_model/mod.rs", SessionStreamEvent),
-///     items(path = "crates/lash-sansio/src/llm/types.rs", StreamBlockIdentity, StreamBlockKind),
-///     items(
-///         path = "crates/lash-sansio/src/session_model/message.rs",
-///         path = "crates/lash-sansio/src/plugin.rs",
-///         path = "crates/lash-sansio/src/tool_output.rs", Part, FlatPart, FlatPartRef,
-///         PluginMessage, ModelToolReturnPart,
-///     ),
+///     roots(path = "crates/lash-sansio/src/session_model/message.rs", FlatPart, FlatPartRef),
 /// )
 pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 11;
 
