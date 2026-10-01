@@ -11,6 +11,11 @@
 //!
 //! The registry holds each held session weakly: the last hold's drop
 //! releases its runtime, so nothing opened for one attempt serves the next.
+//! A root still running on the runtime keeps the hold up past the attempt
+//! that called it, and the next attempt joins it. A root also keeps the
+//! runtime's writer for as long as it runs, so an admission that finds the
+//! writer taken runs on a runtime opened for it alone: a replayed admission
+//! never waits for the root its drive already called (FIG-4729).
 //! A session a host holds open is driven on the host's runtime
 //! ([`residents`](super::residents)) instead.
 

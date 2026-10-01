@@ -528,6 +528,20 @@ impl CrashWorld {
         self.killing.store(false, Ordering::SeqCst);
     }
 
+    /// Drop `id`'s running attempt as a broken connection to the deployment
+    /// does, and let the engine replay it at once: the deployment stays up
+    /// and every other attempt runs on, the roots the dropped one called
+    /// included. Answers whether an attempt was running.
+    pub fn drop_attempt(&self, id: &str) -> Result<bool, String> {
+        let server = self.double()?.server();
+        // The crash listener takes the deployment down unless a kill is
+        // under way: this attempt dies alone.
+        self.killing.store(true, Ordering::SeqCst);
+        let dropped = server.crash(id);
+        self.killing.store(false, Ordering::SeqCst);
+        Ok(dropped)
+    }
+
     /// Kill the deployment, let a seeded outage of up to five seconds pass on
     /// the virtual clock, and bring up a fresh one.
     pub async fn crash_and_restart(&self) -> Result<(), String> {

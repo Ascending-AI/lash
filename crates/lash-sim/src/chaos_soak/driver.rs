@@ -309,6 +309,8 @@ pub(super) struct Driver {
     starts: usize,
     /// Start requests already published, by sleep.
     published: std::collections::BTreeMap<u64, lash_core::ProcessStartRequest>,
+    /// Where a multi-part step stands, for the report of one that hung.
+    phase: String,
 }
 
 impl Driver {
@@ -369,6 +371,7 @@ impl Driver {
             deployment,
             starts: 0,
             published: std::collections::BTreeMap::new(),
+            phase: String::new(),
         })
     }
 
@@ -473,16 +476,26 @@ impl Driver {
         match tokio::time::timeout(STEP_WALL_LIMIT, Box::pin(self.run_step(seed, step))).await {
             Ok(outcome) => outcome,
             Err(_) => Err(format!(
-                "the step ran past {STEP_WALL_LIMIT:?} of wall time: the host or the engine hung; crashes {}/{} handled; timers {:?}; {:?}",
+                "the step ran past {STEP_WALL_LIMIT:?} of wall time: the host or the engine hung at `{}`; crashes {}/{} handled; timers {:?}; {:?}; working: {:?}; every open invocation: {:?}",
+                self.phase,
                 self.handled,
                 self.world.trip().fires(),
                 self.world.double()?.server().timers(),
-                crate::crash_matrix::invariants::diagnose(&self.world).await
+                crate::crash_matrix::invariants::diagnose(&self.world).await,
+                self.world
+                    .double()?
+                    .server()
+                    .working()
+                    .into_iter()
+                    .map(|view| view.target)
+                    .collect::<Vec<_>>(),
+                open_invocations(&self.world)
             )),
         }
     }
 
     async fn run_step(&mut self, seed: u64, step: &Step) -> Result<String, String> {
+        self.phase.clear();
         self.settle_crash().await?;
         match step {
             Step::Open {
@@ -1058,7 +1071,9 @@ impl Driver {
         let crashes_before = self.counts.crashes;
         let mut tick = 0;
         loop {
+            self.phase = format!("drain tick {tick}: settling work");
             self.settle_work().await?;
+            self.phase = format!("drain tick {tick}: reading the drain status");
             let status = self
                 .world
                 .core()?
@@ -1101,6 +1116,7 @@ impl Driver {
                     open_invocations(&self.world)
                 ));
             }
+            self.phase = format!("drain tick {tick}: ticking");
             self.tick().await?;
             tick += 1;
         }
@@ -1399,6 +1415,85 @@ mod tests {
                 "`{root}` ran to its terminal before the build was removed"
             );
         }
+    }
+
+    /// A drive attempt that replays while the root it called is still
+    /// running waits for that root on the engine, as its first attempt did
+    /// (FIG-4729). The drive's attempt is dropped under a held root, whose
+    /// run goes on in the same process on the runtime the drive held. The
+    /// replay re-serves its recorded admission and waits on its recorded
+    /// call; it does not wait in the process for the runtime the root runs
+    /// on, which a root that never answers never gives back. So a rolling
+    /// deploy's drain, which ticks once the engine's work has settled, ends
+    /// the deleted session's root and retires the old build.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_drive_replayed_under_its_running_root_waits_on_the_engine() {
+        let seed = 0x4729;
+        let mut driver = Driver::new(seed).await.expect("world");
+        driver
+            .step(
+                seed,
+                &Step::Open {
+                    session: 0,
+                    lane: Lane::Held,
+                    parent: None,
+                },
+            )
+            .await
+            .expect("open the session");
+        let id = driver.ledger.sessions[0].id.clone();
+        driver
+            .send_held(&id, "held-0", false)
+            .await
+            .expect("send the held root");
+        assert!(driver.reached("held-0"), "the root is in its model call");
+        let target = format!("LashSession/{id}/drive");
+        let drive = |driver: &Driver| {
+            driver
+                .world
+                .double()
+                .expect("double")
+                .server()
+                .invocations()
+                .into_iter()
+                .find(|view| view.target == target)
+                .expect("the session's drive")
+        };
+        let first = drive(&driver);
+        assert_eq!((first.status, first.attempts), ("running", 1), "{first:?}");
+        assert!(
+            driver.world.drop_attempt(&first.id).expect("double"),
+            "the drive's first attempt was running"
+        );
+
+        let settled = tokio::time::Instant::now() + Duration::from_secs(10);
+        while driver.works().expect("double") && tokio::time::Instant::now() < settled {
+            driver.world.quiesce().await;
+        }
+        let replayed = drive(&driver);
+        assert_eq!(
+            (
+                replayed.status,
+                replayed.attempts,
+                replayed.blocked_on_server
+            ),
+            ("running", 2, Some(true)),
+            "the replayed drive waits on the engine for the root it called: {replayed:?}"
+        );
+        assert!(driver.reached("held-0"), "the root runs on");
+
+        let old = driver.deployment.clone();
+        let deleted = driver.delete(0).await.expect("delete the session");
+        let rolled = driver
+            .step(seed, &Step::Roll)
+            .await
+            .expect("the old generation drains");
+        assert!(
+            pinned_open(&driver.world, &old).is_empty(),
+            "{deleted}; {rolled}"
+        );
+        assert_eq!(driver.ledger.retired.len(), 1, "{deleted}; {rolled}");
+        driver.world.finish().await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

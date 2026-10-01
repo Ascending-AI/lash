@@ -151,7 +151,9 @@ pub trait SessionDriver: Send + Sync {
     /// in this process share one runtime, opened by the first of them. An
     /// attempt ends where the engine stops polling it, so nothing held
     /// crosses into the next attempt: that one opens the session afresh, as
-    /// a redrive in a fresh process does. The default holds nothing.
+    /// a redrive in a fresh process does. A replayed admission never waits
+    /// for a root still running on the held runtime (FIG-4729). The default
+    /// holds nothing.
     fn hold_drive(&self, _session: &SessionId) -> crate::engine::DriveHold {
         crate::engine::DriveHold::empty()
     }

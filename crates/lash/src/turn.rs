@@ -38,6 +38,24 @@ pub(crate) async fn admit_drive_observed(
     verdict
 }
 
+/// [`admit_drive_observed`] when nothing holds `runtime`'s writer; `None`
+/// when something does, with nothing recorded. A root keeps the writer for
+/// as long as it runs.
+pub(crate) async fn admit_drive_observed_unless_busy(
+    runtime: &RuntimeHandle,
+    controller: &ScopedEffectController<'_>,
+    request: &lash_core::engine::DriveRequest,
+    ordinal: u32,
+    draining: Option<&lash_core::engine::BuildGeneration>,
+) -> Option<std::result::Result<lash_core::engine::AdmitVerdict, lash_core::engine::DriveAbort>> {
+    let writer_handle = runtime.writer();
+    let mut writer = writer_handle.try_lock().ok()?;
+    let verdict =
+        lash_core::drive::admit_drive(&mut writer, controller, request, ordinal, draining).await;
+    runtime.publish_from(&writer);
+    Some(verdict)
+}
+
 /// Run one admitted root on `runtime`'s session (FIG-3600), recording every
 /// turn activity on the session's observation.
 ///

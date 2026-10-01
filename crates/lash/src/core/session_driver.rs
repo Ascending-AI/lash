@@ -407,6 +407,34 @@ impl lash_core::SessionDriver for CoreSessionDriver {
         draining: Option<&lash_core::engine::BuildGeneration>,
     ) -> std::result::Result<lash_core::engine::AdmitVerdict, lash_core::engine::DriveAbort> {
         let runtime = match self.drive_runtime(&request.session).await {
+            // The drive's held runtime may be running a root this drive
+            // called, which keeps the writer until it ends: the root's
+            // attempt outlived the drive attempt that called it, or it
+            // replayed beside this one and reached the runtime first. The
+            // admission ahead of that root is recorded, and an attempt that
+            // waited here for the writer would not reach the recorded call
+            // it waits for the root on, for as long as the root runs
+            // (FIG-4729). So the admission runs on a runtime opened for it
+            // alone, as it does in a process that holds none.
+            Ok(DriveRuntime::Held { handle, .. }) => {
+                if let Some(verdict) = crate::turn::admit_drive_observed_unless_busy(
+                    &handle,
+                    &controller,
+                    request,
+                    ordinal,
+                    draining,
+                )
+                .await
+                {
+                    return verdict;
+                }
+                self.open_runtime(&request.session)
+                    .await
+                    .map(DriveRuntime::Opened)
+            }
+            runtime => runtime,
+        };
+        let runtime = match runtime {
             Ok(runtime) => runtime,
             // A session that is already deleted — or closed past admission —
             // still owes the journal the recorded step at this position: an
