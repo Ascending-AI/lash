@@ -468,40 +468,15 @@ fn committed_root(case: &str, outcome: &DriveOutcome) -> TurnId {
 /// root)`, writes positive terminal evidence for that root, and closes that
 /// root's scope exactly once. A parked root keeps its scope open until a
 /// cancel ends it.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one law walks every kind of driver-run logical turn"
+)]
 pub async fn every_driver_turn_is_owned_by_its_root(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
-) {
-    owned_by_its_root(prefix, effect_host, stores, runner, true).await;
-}
-
-/// [`every_driver_turn_is_owned_by_its_root`] without its
-/// terminal-checkpoint follow-on case, for a tier where every await suspends
-/// and every resumption replays the handler's journal: there a drive whose
-/// root takes a terminal-checkpoint follow-on never ends, after both of its
-/// turns ran owned by the root. That stall is the tier's, not ownership's;
-/// every other case holds there.
-pub async fn every_driver_turn_but_a_checkpoint_follow_on_is_owned_by_its_root(
-    prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-) {
-    owned_by_its_root(prefix, effect_host, stores, runner, false).await;
-}
-
-#[expect(
-    clippy::too_many_lines,
-    reason = "one law walks every kind of driver-run logical turn"
-)]
-async fn owned_by_its_root(
-    prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-    checkpoint_follow_on: bool,
 ) {
     let registry = stores.process_registry();
     let no_crash = crate::ConformanceCrash::new;
@@ -606,36 +581,34 @@ async fn owned_by_its_root(
     // A terminal-checkpoint follow-on: an input addressed to the running
     // turn is admitted at its terminal checkpoint and withheld from it, and
     // the root drives it in a follow-on physical turn.
-    if checkpoint_follow_on {
-        let case = "checkpoint follow-on";
-        let mut parts = DriveParts::new(prefix, "owned-checkpoint", &effect_host, &stores, 1).await;
-        let closes = CountedClose::over(&mut parts, &stores);
-        script_model(
-            &mut parts,
-            vec![Step::Probe, Step::Answer, Step::Probe, Step::Answer],
-            no_crash(),
-        );
-        let tools = OwnershipTools::new(Arc::clone(&registry), parts.session_id.clone());
-        let root = TurnId::from("owned-checkpoint-root");
-        *tools.steer.lock().expect("steer") = Some((Arc::clone(&parts.store), root.clone()));
-        parts
-            .enqueue("answer, then take the steer", Some(root.as_str()))
-            .await;
-        let outcome = drive_with(&runner, &parts, &tools, "owned-checkpoint").await;
-        assert_eq!(committed_root(case, &outcome), root);
-        assert_owned(
-            case,
-            &parts,
-            &stores,
-            &tools,
-            &closes,
-            &root,
-            2,
-            RootTerminalKind::Answered,
-        )
+    let case = "checkpoint follow-on";
+    let mut parts = DriveParts::new(prefix, "owned-checkpoint", &effect_host, &stores, 1).await;
+    let closes = CountedClose::over(&mut parts, &stores);
+    script_model(
+        &mut parts,
+        vec![Step::Probe, Step::Answer, Step::Probe, Step::Answer],
+        no_crash(),
+    );
+    let tools = OwnershipTools::new(Arc::clone(&registry), parts.session_id.clone());
+    let root = TurnId::from("owned-checkpoint-root");
+    *tools.steer.lock().expect("steer") = Some((Arc::clone(&parts.store), root.clone()));
+    parts
+        .enqueue("answer, then take the steer", Some(root.as_str()))
         .await;
-        runner.scenario_finished().await;
-    }
+    let outcome = drive_with(&runner, &parts, &tools, "owned-checkpoint").await;
+    assert_eq!(committed_root(case, &outcome), root);
+    assert_owned(
+        case,
+        &parts,
+        &stores,
+        &tools,
+        &closes,
+        &root,
+        2,
+        RootTerminalKind::Answered,
+    )
+    .await;
+    runner.scenario_finished().await;
 
     // A recovered follow-on: the drive that switched frames dies inside the
     // follow-on's model call, and a later drive recovers the follow-on the

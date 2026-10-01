@@ -47,13 +47,13 @@ lash_conformance::driver_turn_ownership_tests!({
 });
 
 // The ownership law where every await suspends and every resumption replays
-// the handler's journal from its start. Its terminal-checkpoint follow-on
-// case is not registered here: in this mode that drive never ends, after both
-// of its turns ran owned by the root.
+// the handler's journal from its start (FIG-4514): a root replayed after its
+// terminal-checkpoint follow-on committed names that follow-on's effects as
+// its first execution did, so the drive ends.
 mod driver_turn_ownership_under_replay {
     use super::{HarnessServer, LiveConformanceHarness};
 
-    lash_conformance::driver_turn_ownership_tests!(@without_checkpoint_follow_on {
+    lash_conformance::driver_turn_ownership_tests!({
         let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
             unreachable!("in_process names the server double");
         };

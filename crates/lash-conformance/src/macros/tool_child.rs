@@ -245,19 +245,6 @@ macro_rules! driver_turn_ownership_tests {
             .await;
         }
     };
-    // A tier that replays its handler's journal at every await registers the
-    // law without its terminal-checkpoint follow-on case, whose drive never
-    // ends there.
-    (@without_checkpoint_follow_on $fixture:block) => {
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn every_driver_turn_but_a_checkpoint_follow_on_is_owned_by_its_root() {
-            let (_guard, prefix, host, stores, runner) = $fixture;
-            $crate::registration_macro_support::every_driver_turn_but_a_checkpoint_follow_on_is_owned_by_its_root(
-                prefix, host, stores, runner,
-            )
-            .await;
-        }
-    };
 }
 
 /// Register the session-close laws L-D1..L-D6 (FIG-3600 S7, FIG-3607 item

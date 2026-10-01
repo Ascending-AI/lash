@@ -187,6 +187,38 @@ lash_conformance::driver_turn_ownership_tests!({
     )
 });
 
+// The ownership law where every await suspends and every resumption replays
+// the handler's journal from its start (FIG-4514): a root replayed after its
+// terminal-checkpoint follow-on committed names that follow-on's effects as
+// its first execution did, so the drive ends.
+mod driver_turn_ownership_under_replay {
+    use super::*;
+
+    lash_conformance::driver_turn_ownership_tests!({
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let backend = TestBackend::open(SUBSTRATE).await;
+        let stores = backend.as_stores();
+        let double_stores = Arc::clone(&stores);
+        let double = lash_restate_test::backend_with(
+            4514 + NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+            lash_restate_test::ServerConfig::default().always_replay(true),
+            move |_| Arc::clone(&double_stores),
+        )
+        .await
+        .expect("boot the ownership law's always-replay handler");
+        let effect_host = double.restate().restate_effect_host();
+        let runner = Arc::new(ScopeLawTurnRunner(double.clone()))
+            as Arc<dyn lash_conformance::ConformanceTurnRunner>;
+        (
+            (backend, double),
+            "sqlite-driver-ownership-replay",
+            effect_host,
+            stores,
+            runner,
+        )
+    });
+}
+
 // FIG-4457: two queued inputs, the second sent while the first one's drive
 // is down, get their own roots under the default drain, and a cancel of one
 // leaves the other untouched. Each drive runs inside a handler of the Restate

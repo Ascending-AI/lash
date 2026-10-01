@@ -745,30 +745,8 @@ impl LashRuntime {
             if let Some(owed) = self.state.pending_follow_on.as_deref().cloned() {
                 turn_trace_turn_id = owed.follow_on_turn_id.clone();
                 physical_ordinal = owed.physical_index();
-                // A late crash may replay this root after its follow-on has
-                // committed. In that case the first frame's recorded commit
-                // fixes the follow-on index; loading the newer head would
-                // rename its earlier recorded effects. An uncommitted
-                // follow-on still refreshes the head, including graph writes
-                // made after the first frame's commit.
-                if let (Some(previous), Some(store)) = (
-                    turns.last(),
-                    self.session
-                        .as_ref()
-                        .and_then(|session| session.history_store()),
-                ) && store
-                    .committed_turn_exists(&owed.follow_on_turn_id)
-                    .await
-                    .map_err(super::runtime_error_from_store_commit)?
-                {
-                    self.admitted_turn_index =
-                        Some(previous.state.turn_index.checked_add(1).ok_or_else(|| {
-                            RuntimeError::new(
-                                RuntimeErrorCode::StoreCommitFailed,
-                                "follow-on turn index exceeds platform range",
-                            )
-                        })?);
-                }
+                self.pin_committed_follow_on_index(turns.last(), &owed.follow_on_turn_id)
+                    .await?;
                 start =
                     LogicalTurnStart::Input(follow_on_input(&owed, follow_turn_context.clone()));
                 // Work an earlier turn withheld at its terminal checkpoint
@@ -795,6 +773,8 @@ impl LashRuntime {
             turn_trace_turn_id = next_physical_turn_id(&logical_root, physical_ordinal)
                 .map_err(super::runtime_error_from_store_commit)?;
             physical_ordinal += 1;
+            self.pin_committed_follow_on_index(turns.last(), &turn_trace_turn_id)
+                .await?;
             let mut input = TurnInput::items(Vec::new());
             input.turn_context = follow_turn_context.clone();
             follow_on_rows = Some(withheld.clone());
@@ -803,6 +783,44 @@ impl LashRuntime {
             announce_queued_work = false;
             start = LogicalTurnStart::Input(input);
         }
+    }
+}
+
+impl LashRuntime {
+    /// Pin the turn index of `follow_on`, the physical turn that runs after
+    /// `previous` in the same root, when it has already committed.
+    ///
+    /// A late crash, or a tier that replays the root's journal at every
+    /// await, may replay this root after its follow-on has committed. In
+    /// that case the previous turn's recorded commit fixes the follow-on
+    /// index; loading the newer head would rename its earlier recorded
+    /// effects. An uncommitted follow-on still refreshes the head, including
+    /// graph writes made after the previous turn's commit. The one rule for
+    /// a frame follow-on and a terminal-checkpoint follow-on.
+    async fn pin_committed_follow_on_index(
+        &mut self,
+        previous: Option<&AssembledTurn>,
+        follow_on: &TurnId,
+    ) -> Result<(), RuntimeError> {
+        if let (Some(previous), Some(store)) = (
+            previous,
+            self.session
+                .as_ref()
+                .and_then(|session| session.history_store()),
+        ) && store
+            .committed_turn_exists(follow_on)
+            .await
+            .map_err(super::runtime_error_from_store_commit)?
+        {
+            self.admitted_turn_index =
+                Some(previous.state.turn_index.checked_add(1).ok_or_else(|| {
+                    RuntimeError::new(
+                        RuntimeErrorCode::StoreCommitFailed,
+                        "follow-on turn index exceeds platform range",
+                    )
+                })?);
+        }
+        Ok(())
     }
 }
 

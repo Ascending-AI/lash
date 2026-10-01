@@ -427,15 +427,24 @@ async fn double_law_backend(
     Arc<dyn lash_core_execution::EffectHost>,
     Arc<dyn lash_conformance::ConformanceTurnRunner>,
 ) {
+    double_law_backend_on(storage, lash_restate_test::ServerConfig::default()).await
+}
+
+/// [`double_law_backend`] on a double configured by `config`.
+async fn double_law_backend_on(
+    storage: &PostgresStorage,
+    config: lash_restate_test::ServerConfig,
+) -> (
+    (tempfile::TempDir, lash_restate_test::RestateTestBackend),
+    Arc<dyn lash_core_execution::StoreSet>,
+    Arc<dyn lash_core_execution::EffectHost>,
+    Arc<dyn lash_conformance::ConformanceTurnRunner>,
+) {
     let (attachments, stores) = pg_law_stores(storage);
     let engine_stores = Arc::clone(&stores);
-    let backend = lash_restate_test::backend_with(
-        restate_seed(),
-        lash_restate_test::ServerConfig::default(),
-        move |_| engine_stores,
-    )
-    .await
-    .expect("boot the law's Restate double over PostgreSQL stores");
+    let backend = lash_restate_test::backend_with(restate_seed(), config, move |_| engine_stores)
+        .await
+        .expect("boot the law's Restate double over PostgreSQL stores");
     let host: Arc<dyn lash_core_execution::EffectHost> = backend.restate().restate_effect_host();
     let runner = DoubleTurnRunner::shared(backend.clone());
     ((attachments, backend), stores, host, runner)
@@ -1872,6 +1881,32 @@ mod driver_turn_ownership {
         (
             (lock, storage, attachments, double),
             "pg-driver-ownership",
+            host,
+            stores,
+            runner,
+        )
+    });
+}
+
+// The ownership law where every await suspends and every resumption replays
+// the handler's journal from its start (FIG-4514): a root replayed after its
+// terminal-checkpoint follow-on committed names that follow-on's effects as
+// its first execution did, so the drive ends.
+mod driver_turn_ownership_under_replay {
+    use super::*;
+    lash_conformance::driver_turn_ownership_tests!({
+        let Some((lock, storage)) = storage().await else {
+            return;
+        };
+        reset(storage.pool()).await;
+        let ((attachments, double), stores, host, runner) = double_law_backend_on(
+            &storage,
+            lash_restate_test::ServerConfig::default().always_replay(true),
+        )
+        .await;
+        (
+            (lock, storage, attachments, double),
+            "pg-driver-ownership-replay",
             host,
             stores,
             runner,
