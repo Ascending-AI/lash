@@ -1225,6 +1225,58 @@ def check_no_first_party_build_dependency() -> None:
     assert not first_party, f"first-party build-dependency edges: {first_party}"
 
 
+def check_facade_completeness() -> None:
+    """The facade test documents exactly the facade's first-party closure."""
+
+    policy = tomllib.loads((HERE / "package-policy.toml").read_text())
+    inventory = load_json("target-inventory.json")
+    libraries = {
+        target["label"]: package["package"]
+        for package in inventory["packages"]
+        for target in package["targets"]
+        if target["kind"] == "lib"
+    }
+    facade = next(
+        label for label, name in libraries.items() if name == policy["facade"]["package"]
+    )
+    package_deps = bzl_value((HERE / "deps.bzl").read_text(encoding="utf-8"), "PACKAGE_DEPS")
+    closure: set[str] = set()
+    pending = [facade]
+    while pending:
+        for label in package_deps[libraries[pending.pop()]]["normal"].values():
+            if label in libraries and label not in closure:
+                closure.add(label)
+                pending.append(label)
+    package_dir, name = facade.removeprefix("//").split(":")
+    rules = (ROOT / package_dir / "BUCK").read_text(encoding="utf-8")
+    calls = [
+        {keyword.arg: ast.literal_eval(keyword.value) for keyword in statement.value.keywords}
+        for statement in ast.parse(rules).body
+        if isinstance(statement, ast.Expr)
+        and isinstance(statement.value, ast.Call)
+        and getattr(statement.value.func, "id", "") == "facade_completeness_test"
+    ]
+    assert len(calls) == 1, f"expected one facade_completeness_test in {package_dir}/BUCK"
+    (call,) = calls
+    assert call["name"] == "facade_completeness" and call["facade"] == f":{name}"
+    assert "manual" in call["tags"]
+    assert set(call["libraries"]) == closure, (
+        "facade_completeness libraries differ from the facade's first-party closure: "
+        f"missing {sorted(closure - set(call['libraries']))}, "
+        f"extra {sorted(set(call['libraries']) - closure)}"
+    )
+    root = (ROOT / "BUCK").read_text(encoding="utf-8")
+    assert 'name = "scripts/facade_completeness.py"' in root
+    rule = (HERE / "facade_completeness.bzl").read_text(encoding="utf-8")
+    assert 'sub_targets["doc-json"]' in rule
+    assert "run `kiln sync`" in rule
+    assert "supports_test_execution_caching = True" in rule
+    overlay = (HERE / "prelude_overlay.py").read_text(encoding="utf-8")
+    for flag in ("--output-format=json", "--document-hidden-items", "RUSTC_BOOTSTRAP"):
+        assert flag in overlay.split("RUSTDOC_JSON_FLAGS = ", 1)[1].split("\n'''", 1)[0]
+    assert 'targets["doc-json"] = rustdoc_json' in overlay
+
+
 def main() -> int:
     checks = [
         check_inventory,
@@ -1248,6 +1300,7 @@ def main() -> int:
         check_feature_lane_dependency_edges,
         check_feature_lane_test_policy,
         check_no_first_party_build_dependency,
+        check_facade_completeness,
     ]
     for check in checks:
         check()

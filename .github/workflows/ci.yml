@@ -20,10 +20,11 @@ name: CI
 # Buck2 targets the diff actually affects: the same label selection
 # `scripts/dev-test.py` makes locally (`scripts/ci_plan.py`
 # `pr_affected_targets`: the touched packages' dev-suite members, their
-# dev-deferred labels, the API seal `//crates/lash:ui_fixtures` on a facade
-# diff, inventory build labels for packages with no selected test, and the
-# schema checks). A trusted pull request whose diff can move a Rust build
-# also compiles and lints the feature lanes: a lane break is caused by an API
+# dev-deferred labels, the API seal `//crates/lash:ui_fixtures` and
+# `//crates/lash:facade_completeness` on a facade diff, inventory build labels
+# for packages with no selected test, and the schema checks). A trusted pull
+# request whose diff can move a Rust build also compiles and lints the feature
+# lanes: a lane break is caused by an API
 # change anywhere upstream, which the diff's own path set cannot see — #2285
 # changed a public engine API and broke the slack-clone live-E2E variant
 # while touching no feature-gated file. The lane TESTS still join a pull
@@ -888,9 +889,17 @@ jobs:
           # is, on most diffs, a cache lookup, and it runs on every trusted
           # event because a dependency's change moves the pinned diagnostics
           # as surely as a facade change does.
+          #
+          # `//crates/lash:facade_completeness` rides beside it for the same
+          # reason (FIG-4373): it documents the facade and its first-party
+          # dependency closure as rustdoc JSON and fails when a facade-exported
+          # signature names a first-party type no `lash::` path reaches. A
+          # change to any crate in that closure can open a gap, so it runs on
+          # every trusted event, where an unchanged closure is a cache hit.
           scripts/ci/buck2-test.sh workspace-core \
             //:workspace_core_tests \
-            //crates/lash:ui_fixtures ${{ needs.plan.outputs.pr_tail_labels }}
+            //crates/lash:ui_fixtures //crates/lash:facade_completeness \
+            ${{ needs.plan.outputs.pr_tail_labels }}
 
       - name: Upload failing test logs
         if: failure()

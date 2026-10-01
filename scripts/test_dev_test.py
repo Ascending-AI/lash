@@ -249,7 +249,8 @@ class DevTestTests(unittest.TestCase):
         (self.root / "Cargo.toml").write_text("[workspace]\n")
         self.assertEqual(json.loads(self.invoke("--dry-run").stdout)["commands"], [
             ["kiln", "build", "//:schema_checks"],
-            ["kiln", "test", "//:dev_tests", "//crates/lash:ui_fixtures"],
+            ["kiln", "test", "//:dev_tests", "//crates/lash:ui_fixtures",
+             "//crates/lash:facade_completeness"],
         ])
 
     def test_untracked_content_changes_identity(self):

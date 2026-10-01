@@ -102,7 +102,7 @@ jobs:
 
       - name: Warm deterministic test actions
         shell: bash
-        run: scripts/ci/buck2-test.sh cache-warm //:workspace_tests //crates/lash:ui_fixtures
+        run: scripts/ci/buck2-test.sh cache-warm //:workspace_tests //crates/lash:ui_fixtures //crates/lash:facade_completeness
 
       - name: Remove client credentials
         if: always()

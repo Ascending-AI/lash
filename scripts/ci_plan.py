@@ -1645,6 +1645,7 @@ def affected_buck2_labels(
     labels = ["//:dev_tests", *tail] if scope.broad else batch_labels(members, batches)
     if scope.facade:
         labels.append("//crates/lash:ui_fixtures")
+        labels.append("//crates/lash:facade_completeness")
     uncovered = [
         package
         for package in scope.packages
@@ -1712,7 +1713,8 @@ def fail_open(reason: str) -> dict[str, str]:
         # tail: what the tail job would run on a trusted event. The facade
         # seal target is a cheap no-op when it is not an input.
         "pr_test_labels": (
-            f"//:dev_tests {tail} //crates/lash:ui_fixtures"
+            f"//:dev_tests {tail} //crates/lash:ui_fixtures "
+            "//crates/lash:facade_completeness"
         ),
         "pr_build_targets": "//:schema_checks",
     }

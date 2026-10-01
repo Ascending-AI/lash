@@ -1117,6 +1117,44 @@ export_file(
     visibility = ["PUBLIC"],
 )
 
+load("//tools/buck2:facade_completeness.bzl", "facade_completeness_test")
+
+facade_completeness_test(
+    name = "facade_completeness",
+    facade = ":lash",
+    libraries = [
+        "//crates/lash-core-effect:lash-core-effect",
+        "//crates/lash-core-execution:lash-core-execution",
+        "//crates/lash-core-ids:lash-core-ids",
+        "//crates/lash-core-llm:lash-core-llm",
+        "//crates/lash-core-store:lash-core-store",
+        "//crates/lash-core-worker:lash-core-worker",
+        "//crates/lash-core:lash-core",
+        "//crates/lash-http-transport:lash-http-transport",
+        "//crates/lash-lashlang-runtime:lash-lashlang-runtime",
+        "//crates/lash-plugin-process-controls:lash-plugin-process-controls",
+        "//crates/lash-protocol-rlm:lash-protocol-rlm",
+        "//crates/lash-protocol-standard:lash-protocol-standard",
+        "//crates/lash-regress:lash-regress",
+        "//crates/lash-remote-protocol:lash-remote-protocol",
+        "//crates/lash-render:lash-render",
+        "//crates/lash-restate:lash-restate",
+        "//crates/lash-rlm-types:lash-rlm-types",
+        "//crates/lash-sansio:lash-sansio",
+        "//crates/lash-sqlite-store:lash-sqlite-store",
+        "//crates/lash-store-sql:lash-store-sql",
+        "//crates/lash-tool-support:lash-tool-support",
+        "//crates/lash-trace:lash-trace",
+        "//crates/lash-typescript:lash-typescript",
+        "//crates/lash-vm-broker:lash-vm-broker",
+        "//crates/lash-vm-client:lash-vm-client",
+        "//crates/lash-vm-protocol:lash-vm-protocol",
+        "//crates/lash-vm-worker:lash-vm-worker",
+        "//crates/lashlang:lashlang",
+    ],
+    tags = ["manual"],
+)
+
 # Feature-lane variants. One target per distinct `(package, resolved features,
 # Cargo target kind)` unit of scripts/feature-coverage.toml; see
 # tools/buck2/feature_variants.py.

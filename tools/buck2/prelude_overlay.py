@@ -41,7 +41,7 @@ INPUT_SHA256 = {
 # invocation a full verification, rather than trusting an on-disk receipt.
 OUTPUT_SHA256 = {
     "decls/rust_rules.bzl": "89ee8309c0f24763adb0bc0276243c022640f489c17223f0597152e188c07885",
-    "rust/build.bzl": "d9f1e5fbe12a381f812ab55694905bc84e1971af6000eed50a9984c4b41c3125",
+    "rust/build.bzl": "1d3247772f5cc9bda40326086dedd78692307066f369d984a120d0ba0055a74d",
     "rust/cargo_buildscript.bzl": "ff69fa677037ce6414d80b326f0565168ced5e0a916d0e7f456df4cfc07420a8",
     "rust/clippy_configuration.bzl": "9f7db7c7c8e0f34d65e0a71f1eebfb36ffd8749e6061123cab71a46d548d16a2",
     "rust/failure_filter.bzl": "6ec035fcd09446d60560711c37532f8d749401c50e50767ac8eebcddcb2a9e03",
@@ -49,7 +49,7 @@ OUTPUT_SHA256 = {
     "rust/named_deps.bzl": "894b0f405b7dfbe9380b3c671999efb70ac2209747ab87b8b2322d621c8f35d9",
     "rust/profile.bzl": "c76bcbf08bf1e2f9cf295c619504ff2d398f790dfc68abbe96bcfb35ed4c1e14",
     "rust/rust_binary.bzl": "15c839433910cd64edd2cf0e90666ec062e784aa3591c101a2090b123dc246f9",
-    "rust/rust_library.bzl": "16e64e3a0326a8f9e373a037b5a51d99e1851e05a7dd3e1194c67877f103c6a0",
+    "rust/rust_library.bzl": "8370e69403329e492a0c19074a8e7fa88fff767c2cefceb43618323b516968d3",
     "rust/sources.bzl": "5505f55458faba390a75f50118877d16f57f08a41a5924e7c901de51f74c1b69",
     "rust/tools/tool_rules.bzl": "447a2c751cbd20a29663d0c14d641f7055195ca874c9ddcff0dbfaac6f9ff590",
     "rust/tools/BUCK": "1e1f72a05eaab95e347fd69a4c396134017161a59e833ff215b1cbd3e48eb086",
@@ -69,6 +69,10 @@ PREVIOUS_OUTPUT_SHA256 = {
         "ac1bbf9c1a7084a9756af83edf8dfbbedb47269010d54149187cf1b1b6f56b34",
         "51f2f65902b39bb78ebe818d4484f959b6e6a95ce6a8f65ba1e844ebe34d28e6",
         "ae4377e979bd1e6089016a87f2ee31bf7dc56c31ec6cad8c06220cfdfd9a4712",
+        "d9f1e5fbe12a381f812ab55694905bc84e1971af6000eed50a9984c4b41c3125",
+    },
+    "rust/rust_library.bzl": {
+        "16e64e3a0326a8f9e373a037b5a51d99e1851e05a7dd3e1194c67877f103c6a0",
     },
     "rust/cargo_buildscript.bzl": {
         "49e261487744c64fda39e73f15a0c440fa4af8ae9a4cb6f4ec12bcb4257ff607",
@@ -502,6 +506,97 @@ def preserve_relative_binary_env(text: str) -> str:
     return text.replace(RELATIVE_BINARY_ANCHOR, RELATIVE_BINARY_ENV, 1)
 
 
+def replace_once(text: str, old: str, new: str, what: str) -> str:
+    if new in text:
+        return text
+    if text.count(old) != 1:
+        raise ValueError(f"{what} changed")
+    return text.replace(old, new, 1)
+
+
+# The facade-completeness test (tools/buck2/facade_completeness.bzl) reads
+# rustdoc's JSON for each first-party library. `doc-json` is the stock `doc`
+# action with the JSON backend: the same compile context, dependency metadata
+# and toolchain, so it is remote and cacheable like `doc`. A `#[doc(hidden)]`
+# module is still a path, so hidden items are documented; the check reads the
+# document, not rustdoc's lints. The format is unstable, hence an explicit
+# RUSTC_BOOTSTRAP on the pinned stable toolchain.
+RUSTDOC_JSON_FLAGS = '''    if json:
+        plain_env["RUSTC_BOOTSTRAP"] = cmd_args("1")
+        rustdoc_cmd.add("-Zunstable-options", "--output-format=json", "--document-hidden-items", "--cap-lints=allow")
+'''
+
+
+def add_rustdoc_json_action(text: str) -> str:
+    text = replace_once(
+        text,
+        "    document_private_items: bool,\n) -> Artifact:\n",
+        "    document_private_items: bool,\n    json: bool = False,\n) -> Artifact:\n",
+        "rustdoc signature",
+    )
+    text = replace_once(
+        text,
+        '    subdir = common_args.subdir + "-rustdoc"\n',
+        '    subdir = common_args.subdir + ("-rustdoc-json" if json else "-rustdoc")\n',
+        "rustdoc output",
+    )
+    text = replace_once(
+        text,
+        '''    if document_private_items:
+        rustdoc_cmd.add("--document-private-items")
+''',
+        '''    if document_private_items:
+        rustdoc_cmd.add("--document-private-items")
+''' + RUSTDOC_JSON_FLAGS,
+        "rustdoc private items",
+    )
+    return replace_once(
+        text,
+        'ctx.actions.run(rustdoc_cmd, category = "rustdoc", env = kiln_action_env(ctx, rust_identity = True))',
+        'ctx.actions.run(rustdoc_cmd, category = "rustdoc_json" if json else "rustdoc", env = kiln_action_env(ctx, rust_identity = True))',
+        "rustdoc action",
+    )
+
+
+def add_rustdoc_json_subtarget(text: str) -> str:
+    text = replace_once(
+        text,
+        '''        document_private_items = False,
+    )
+''',
+        '''        document_private_items = False,
+    )
+    rustdoc_json = generate_rustdoc(
+        ctx = ctx,
+        compile_ctx = compile_ctx,
+        params = static_library_params,
+        default_roots = _DEFAULT_ROOTS,
+        document_private_items = False,
+        json = True,
+    )
+''',
+        "library rustdoc",
+    )
+    text = replace_once(
+        text,
+        "        rustdoc = rustdoc,\n",
+        "        rustdoc = rustdoc,\n        rustdoc_json = rustdoc_json,\n",
+        "library rustdoc provider argument",
+    )
+    text = replace_once(
+        text,
+        "    rustdoc: Artifact,\n",
+        "    rustdoc: Artifact,\n    rustdoc_json: Artifact,\n",
+        "library rustdoc provider parameter",
+    )
+    return replace_once(
+        text,
+        '    targets["doc"] = rustdoc\n',
+        '    targets["doc"] = rustdoc\n    targets["doc-json"] = rustdoc_json\n',
+        "library doc subtarget",
+    )
+
+
 def transform(relative: str, text: str) -> str:
     if relative == "rust/sources.bzl":
         return add_checkout_source_projection(text)
@@ -513,6 +608,8 @@ def transform(relative: str, text: str) -> str:
         text, count = re.subn(pattern, r"\g<1>False", text, flags=re.S)
         if count != 1:
             raise ValueError(f"expected one Clippy action in {relative}, found {count}")
+        if relative == "rust/rust_library.bzl":
+            text = add_rustdoc_json_subtarget(text)
         return text
     if relative == "rust/tools/BUCK":
         old_cfg = '''get_rustc_cfg(
@@ -604,6 +701,7 @@ def transform(relative: str, text: str) -> str:
         if old_cache not in text:
             raise ValueError("Clippy cache policy changed")
         text = text.replace(old_cache, new_cache, 1)
+        text = add_rustdoc_json_action(text)
     if relative == "rust/cargo_buildscript.bzl":
         text = add_attrs(text, '        "buildscript": attrs.exec_dep(providers = [RunInfo]),\n')
         text = text.replace(
@@ -650,7 +748,9 @@ def upgrade_previous(relative: str, text: str) -> str:
     if relative == "decls/rust_rules.bzl":
         return add_repo_rooted_srcs_attr(text)
     if relative == "rust/build.bzl":
-        return remap_repo_rooted_sources(narrow_transitive_source_inputs(preserve_relative_binary_env(preserve_relative_manifest_dir(text))))
+        return add_rustdoc_json_action(remap_repo_rooted_sources(narrow_transitive_source_inputs(preserve_relative_binary_env(preserve_relative_manifest_dir(text)))))
+    if relative == "rust/rust_library.bzl":
+        return add_rustdoc_json_subtarget(text)
     if relative != "rust/cargo_buildscript.bzl":
         raise ValueError("no previous-overlay upgrade for {}".format(relative))
     encoded = '''        rust_toolchain_info.rustc_flags,

@@ -502,6 +502,16 @@ store_seam = [
   "attachment_store_head_has_no_default",
 ]
 
+# --- facade completeness ------------------------------------------------------
+
+# FIG-4373/FIG-4375: `//crates/lash:facade_completeness` fails when a signature
+# the facade exports names a first-party type no `lash::` path reaches. It
+# reads the `doc-json` subtarget of `package`'s library and of every
+# first-party library in its normal-dependency closure, which the generator
+# takes from Cargo's resolve (tools/buck2/facade_completeness.bzl).
+[facade]
+package = "lash-runtime"
+
 [[rule]]
 packages = ["transcript-contract"]
 compile_data = ["//crates/lash-core-execution:rust_sources"]

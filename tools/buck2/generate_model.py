@@ -655,6 +655,9 @@ def validate_package_policy(metadata: dict) -> None:
         for name in PACKAGE_POLICY.get(section, {}):
             if name not in members:
                 raise ValueError(f"package-policy.toml [{section}] names unknown package {name}")
+    facade = PACKAGE_POLICY.get("facade", {}).get("package")
+    if facade is not None and not any("lib" in target["kind"] for target in members.get(facade, {}).get("targets", [])):
+        raise ValueError(f"package-policy.toml [facade] names {facade!r}, not a workspace library")
 
 
 def cargo_test_policy(
@@ -1244,6 +1247,59 @@ def render_package(package: dict, features: list[str], worker_tests: bool = Fals
     }
 
 
+def facade_completeness(metadata: dict, package_name: str) -> tuple[pathlib.Path, str]:
+    """The facade-completeness test over `package_name` and its first-party closure.
+
+    The closure follows normal dependencies through first-party libraries in
+    Cargo's resolve. A proc-macro exports no type a signature could name, and
+    its own dependencies are not part of the facade's graph. Third-party crates
+    are their own business. The rule checks this list against the facade's
+    Rust link graph at analysis time.
+    """
+    members = set(metadata["workspace_members"])
+    packages = {package["id"]: package for package in metadata["packages"]}
+    nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
+
+    def library(package_id: str) -> dict | None:
+        return next(
+            (target for target in packages[package_id]["targets"] if "lib" in target["kind"]),
+            None,
+        )
+
+    def label(package_id: str) -> str:
+        directory = pathlib.PurePosixPath(relative(packages[package_id]["manifest_path"])).parent
+        return f"//{directory.as_posix()}:{directory.name}"
+
+    facade = next(
+        package["id"] for package in metadata["packages"]
+        if package["name"] == package_name and package["id"] in members
+    )
+    closure: set[str] = set()
+    pending = [facade]
+    while pending:
+        for dependency in nodes[pending.pop()]["deps"]:
+            package_id = dependency["pkg"]
+            if package_id not in members or package_id in closure:
+                continue
+            if not any(kind["kind"] is None for kind in dependency["dep_kinds"]):
+                continue
+            target = library(package_id)
+            if target is None or "proc-macro" in target["kind"]:
+                continue
+            closure.add(package_id)
+            pending.append(package_id)
+    directory = pathlib.Path(packages[facade]["manifest_path"]).resolve().parent
+    return directory / "BUCK", (
+        '\nload("//tools/buck2:facade_completeness.bzl", "facade_completeness_test")\n\n'
+        "facade_completeness_test(\n"
+        '    name = "facade_completeness",\n'
+        f"    facade = {quote(':' + directory.name)},\n"
+        f"    libraries = {string_list(sorted(label(package_id) for package_id in closure))},\n"
+        '    tags = ["manual"],\n'
+        ")\n"
+    )
+
+
 def generated(
     metadata: dict,
     third_party_labels: dict[tuple[str, str], str],
@@ -1281,6 +1337,10 @@ def generated(
         )
         outputs[manifest.parent / "BUCK"] = content
         inventory.append(item)
+    if facade := PACKAGE_POLICY.get("facade", {}).get("package"):
+        # See `[facade]` in tools/buck2/package-policy.toml.
+        path, target = facade_completeness(metadata, facade)
+        outputs[path] += target
     inventory.sort(key=lambda item: item["manifest"])
     inventory_payload = {
         "cargo_package_count": len(inventory),

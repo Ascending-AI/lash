@@ -2684,6 +2684,7 @@ class FacadeAndToolingGatingTests(unittest.TestCase):
         )
         self.assertIn("//:workspace_core_tests", core["run"])
         self.assertIn("//crates/lash:ui_fixtures", core["run"])
+        self.assertIn("//crates/lash:facade_completeness", core["run"])
         self.assertEqual(
             "needs.plan.outputs.buck2_trusted != 'true'"
             " && needs.plan.outputs.facade == 'true'",

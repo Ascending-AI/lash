@@ -3422,6 +3422,13 @@ export_file(
     visibility = ["PUBLIC"],
 )
 
+export_file(
+    name = "scripts/facade_completeness.py",
+    src = "scripts/facade_completeness.py",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
 schema_documents(
     name = "host_schema_documents",
     generators = [
