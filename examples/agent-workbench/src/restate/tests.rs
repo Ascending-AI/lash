@@ -623,7 +623,7 @@ async fn cron_occurrence_redrive_reemits_the_reserved_process_start() {
                 },
                 lash::process::ProcessIdentity::new("fig806-cron-engine"),
             )
-            .with_payload_schema(lash::triggers::LashSchema::any()),
+            .with_payload_schema(lash::triggers::JsonSchema::any()),
         },
     )
     .await

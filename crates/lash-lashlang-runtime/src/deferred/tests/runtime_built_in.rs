@@ -124,6 +124,7 @@ async fn retained_negative_masks_duplicate_catalog_claimants_before_live_validat
             lash_core::ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "boolean" }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["web"], "fetch")),
         lash_core::ToolDefinition::raw(
             "tool:second_fetch",
@@ -132,6 +133,7 @@ async fn retained_negative_masks_duplicate_catalog_claimants_before_live_validat
             lash_core::ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "boolean" }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["web"], "fetch")),
     ]);
 

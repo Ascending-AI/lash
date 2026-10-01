@@ -16,7 +16,9 @@ use rmcp::service::QuitReason;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, timeout};
 
-use super::{McpEntry, McpServerHealth, McpToolListRefresh, PublishedService, import_tools};
+use super::{
+    McpEntry, McpServerFault, McpServerHealth, McpToolListRefresh, PublishedService, import_tools,
+};
 use crate::config::McpShutdownPolicy;
 use crate::error::McpError;
 use crate::service_lifecycle::{ConnectingService, StdioChildGuard, connect_service};
@@ -456,7 +458,7 @@ impl LifecycleActor {
             Ok(connecting) => connecting,
             Err(error) => {
                 self.active_pid.store(0, Ordering::SeqCst);
-                self.record_error(error.to_string());
+                self.record_mcp_error(&error);
                 send_result(initial_reply, Err(error));
                 return ConnectionExit::Failed;
             }
@@ -502,7 +504,7 @@ impl LifecycleActor {
         let running = match connected {
             Ok(Ok(running)) => running,
             Ok(Err(error)) => {
-                self.record_error(error.to_string());
+                self.record_mcp_error(&error);
                 self.reap_child(&server_name, stdio_child.take()).await;
                 send_result(initial_reply, Err(error));
                 return ConnectionExit::Failed;
@@ -513,7 +515,7 @@ impl LifecycleActor {
                     server: server_name.clone(),
                     timeout_ms: startup_timeout.as_millis() as u64,
                 };
-                self.record_error(error.to_string());
+                self.record_mcp_error(&error);
                 self.reap_child(&server_name, stdio_child.take()).await;
                 send_result(initial_reply, Err(error));
                 return ConnectionExit::Failed;
@@ -545,7 +547,7 @@ impl LifecycleActor {
                         Ok(Ok(tools)) => tools,
                         Ok(Err(error)) => {
                             let error = McpError::Protocol(format!("list_tools failed: {error}"));
-                            self.record_error(error.to_string());
+                            self.record_mcp_error(&error);
                             let shutdown = connection.cancel_and_reap(self, &server_name).await;
                             if shutdown {
                                 send_shutdown(initial_reply);
@@ -559,7 +561,7 @@ impl LifecycleActor {
                                 server: server_name.clone(),
                                 timeout_ms: startup_timeout.as_millis() as u64,
                             };
-                            self.record_error(error.to_string());
+                            self.record_mcp_error(&error);
                             let shutdown = connection.cancel_and_reap(self, &server_name).await;
                             if shutdown {
                                 send_shutdown(initial_reply);
@@ -602,7 +604,7 @@ impl LifecycleActor {
         let imported = match import_tools(&server_name, tools, instructions.clone()) {
             Ok(imported) => imported,
             Err(error) => {
-                self.record_error(error.to_string());
+                self.record_mcp_error(&error);
                 let shutdown = connection.cancel_and_reap(self, &server_name).await;
                 if shutdown {
                     send_shutdown(initial_reply);
@@ -618,7 +620,7 @@ impl LifecycleActor {
         };
         if let Err(error) = entry.replace_imported_tools(imported) {
             drop(entry);
-            self.record_error(error.to_string());
+            self.record_mcp_error(&error);
             let shutdown = connection.cancel_and_reap(self, &server_name).await;
             if shutdown {
                 send_shutdown(initial_reply);
@@ -668,7 +670,7 @@ impl LifecycleActor {
                         Ok(()) => {}
                         Err(error) => {
                             tracing::warn!(server = %server_name, error = %error, "MCP tools/list refresh refused");
-                            self.record_error(error.to_string());
+                            self.record_mcp_error(&error);
                         }
                     }
                 }
@@ -983,10 +985,10 @@ impl LifecycleActor {
         }
     }
 
-    fn health_error(&self) -> Option<String> {
+    fn health_error(&self) -> Option<McpServerFault> {
         self.entry
             .upgrade()
-            .and_then(|entry| entry.health.read_recover().error().map(str::to_owned))
+            .and_then(|entry| entry.health.read_recover().fault().cloned())
     }
 
     fn begin_shutdown(&self) {
@@ -995,7 +997,27 @@ impl LifecycleActor {
         });
     }
 
+    fn record_mcp_error(&self, error: &McpError) {
+        let fault = match error {
+            McpError::UnusableSchema(source) => {
+                McpServerFault::UnusableSchema(Box::new(source.clone()))
+            }
+            McpError::PoolShutDown
+            | McpError::Config(_)
+            | McpError::Io(_)
+            | McpError::Json(_)
+            | McpError::Protocol(_)
+            | McpError::StartupTimeout { .. }
+            | McpError::Reconfigure(_) => McpServerFault::Connection(error.to_string()),
+        };
+        self.record_fault(fault);
+    }
+
     fn record_error(&self, error: String) {
+        self.record_fault(McpServerFault::Connection(error));
+    }
+
+    fn record_fault(&self, error: McpServerFault) {
         let Some(entry) = self.entry.upgrade() else {
             return;
         };
@@ -1119,7 +1141,7 @@ impl Drop for LifecycleActor {
             )
         };
         self.set_health(McpServerHealth::ShuttingDown {
-            reason: Some(reason),
+            reason: Some(McpServerFault::Connection(reason)),
         });
     }
 }
@@ -1154,7 +1176,7 @@ async fn reap_child(
         );
         if let Some(entry) = entry.upgrade() {
             *entry.health.write_recover() = McpServerHealth::ShuttingDown {
-                reason: Some(reason.clone()),
+                reason: Some(McpServerFault::Connection(reason.clone())),
             };
         }
         tracing::error!(server = %server_name, pid, reason = %reason, "MCP lifecycle actor abandoned a stdio child");

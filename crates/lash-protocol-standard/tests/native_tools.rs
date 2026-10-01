@@ -135,6 +135,7 @@ fn a_catalogue_tool_named_batch_is_refused_while_the_sugar_is_offered() {
 
 struct NamedBatch;
 
+#[expect(clippy::expect_used, reason = "this fixture declares valid schemas")]
 fn named_batch() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:catalogue_batch",
@@ -143,6 +144,7 @@ fn named_batch() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "object" }),
         serde_json::json!({ "type": "object" }),
     )
+    .expect("valid declared tool schemas")
 }
 
 #[async_trait::async_trait]

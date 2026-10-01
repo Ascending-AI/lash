@@ -9,7 +9,7 @@ fn main() {
         "granted",
         serde_json::json!({ "type": "object" }),
         serde_json::json!({ "type": "object" }),
-    ));
+    ).expect("valid declared tool schemas"));
     let _ = lash::tools::AttemptContext::__for_granted_source;
     let _ = grant;
 }

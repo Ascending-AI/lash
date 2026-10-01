@@ -512,7 +512,7 @@ fn the_preamble_offers_batch_only_when_enabled() {
         .collect::<Vec<_>>();
     assert_eq!(names, vec!["batch"]);
     assert_eq!(
-        enabled.tool_specs[0].input_schema.canonical["properties"]["tool_calls"]["maxItems"],
+        enabled.tool_specs[0].input_schema.canonical.as_value()["properties"]["tool_calls"]["maxItems"],
         serde_json::json!(8)
     );
     assert!(

@@ -118,6 +118,7 @@ mod catalogue_tests {
             }),
             serde_json::json!({ "type": "string" }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new([module], operation))
     }
 
@@ -197,7 +198,10 @@ mod catalogue_tests {
     #[test]
     fn finish_required_schema_finalization_prompt_requires_value() {
         let prompt = rlm_finalization_prompt(&RlmTermination::FinishRequired {
-            schema: Some(serde_json::json!({ "type": "object" })),
+            schema: Some(
+                lash_sansio::JsonSchema::admit(serde_json::json!({ "type": "object" }))
+                    .expect("valid finish schema"),
+            ),
         });
 
         assert!(prompt.contains("finish(value)"));
@@ -325,7 +329,7 @@ fn required_output_block(dialect: &SessionDialect, termination: &RlmTermination)
     match termination {
         RlmTermination::FinishRequired {
             schema: Some(schema),
-        } => Some(dialect.required_output_contract(schema)),
+        } => Some(dialect.required_output_contract(schema.as_value())),
         _ => None,
     }
 }

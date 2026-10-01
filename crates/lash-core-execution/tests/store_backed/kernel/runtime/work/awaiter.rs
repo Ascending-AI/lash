@@ -40,7 +40,7 @@ mod tests {
     fn plain_event_type(name: &str) -> crate::ProcessEventType {
         crate::ProcessEventType {
             name: name.to_string(),
-            payload_schema: crate::LashSchema::any(),
+            payload_schema: crate::JsonSchema::any(),
             semantics: crate::ProcessEventSemanticsSpec::default(),
         }
     }

@@ -636,6 +636,13 @@ mod tests {
         // is rendered from the tool's schema and the declaration from the
         // host catalog, and the model resolves the reference only when the
         // two spellings agree.
+        let tick_schema = serde_json::json!({
+            "$id": "cron.Tick",
+            "type": "object",
+            "properties": { "fired_at": { "type": "string" } },
+            "required": ["fired_at"],
+            "additionalProperties": false
+        });
         let tool = lash_core::ToolDefinition::raw(
             "tool:probe/read_tick",
             "read_tick",
@@ -644,10 +651,12 @@ mod tests {
                 "type": "object",
                 "properties": { "tick": { "$ref": "cron.Tick" } },
                 "required": ["tick"],
-                "additionalProperties": false
+                "additionalProperties": false,
+                "definitions": { "Tick": tick_schema.clone() }
             }),
-            serde_json::json!({ "$ref": "cron.Tick" }),
+            serde_json::json!({ "$ref": "cron.Tick", "definitions": { "Tick": tick_schema } }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["probe"], "read"));
         let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
         let section = dialect
@@ -720,6 +729,7 @@ mod tests {
             }),
             serde_json::json!({ "type": "string" }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["web"], "fetch"));
         let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
         let section = dialect
@@ -803,6 +813,7 @@ mod tests {
                 "additionalProperties": false
             }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["processes"], "start"));
         let with = render(&lash_core::ToolCatalog::from_tool_definitions(vec![start]));
         assert!(with.contains("### Processes"), "{with}");
@@ -1124,6 +1135,7 @@ mod tests {
                 }),
                 serde_json::json!({ "type": "string" }),
             )
+            .expect("valid declared tool schemas")
             .with_tool_binding(ToolBinding::new(modules.clone(), operation.as_str()));
             let registration = crate::tool_catalog::rlm_tool_catalog(
                 ToolCatalogContext {

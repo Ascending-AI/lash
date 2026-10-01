@@ -353,7 +353,7 @@ pub async fn bound_trigger_duplicate_after_child_prune_returns_original_process(
     let rig = LawRig::set_up(
         prefix,
         "bound-trigger",
-        crate::TriggerSourceCapture::resident(["ui", "button"], crate::LashSchema::any()),
+        crate::TriggerSourceCapture::resident(["ui", "button"], crate::JsonSchema::any()),
         effect_host,
         stores,
         runner.as_ref(),
@@ -501,7 +501,7 @@ pub async fn trigger_emission_held_across_a_bind_and_prune_returns_the_bound_pro
         "raced-trigger",
         crate::TriggerSourceCapture::provider(
             ["ui", "button"],
-            crate::LashSchema::any(),
+            crate::JsonSchema::any(),
             "raced-trigger-provider",
             serde_json::json!({ "route": "button" }),
         ),
@@ -798,6 +798,10 @@ async fn bound_process(
         .collect()
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn increment_subscription(
     source_key: &str,
     env_ref: crate::ProcessExecutionEnvRef,
@@ -814,12 +818,13 @@ fn increment_subscription(
         source_type: "ui.button.pressed".to_string(),
         source_key: source_key.to_string(),
         source: serde_json::json!({ "button": "Blue" }),
-        payload_schema: crate::LashSchema::new(serde_json::json!({
+        payload_schema: crate::JsonSchema::admit(serde_json::json!({
             "type": "object",
             "properties": { "button": { "type": "string" } },
             "required": ["button"],
             "additionalProperties": false
-        })),
+        }))
+        .expect("valid declared payload schema"),
         target: crate::ProcessInput::Engine {
             kind: INCREMENT_KIND.to_string(),
             payload: serde_json::json!({ "process": "increment" }),

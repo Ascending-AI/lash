@@ -481,6 +481,7 @@ mod session_tool_access_tests {
             crate::ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "string" }),
         )
+        .expect("valid declared tool schemas")
     }
 
     #[test]

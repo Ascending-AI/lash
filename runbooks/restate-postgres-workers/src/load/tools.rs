@@ -241,6 +241,10 @@ pub fn execute<'a>(tools: Option<&'a LoadTools>, call: ToolCall<'a>) -> ToolFutu
 }
 
 /// The load tools' catalog entries, bound under `tools`.
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 pub fn definitions() -> Vec<ToolDefinition> {
     [
         (
@@ -284,6 +288,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
             input_schema,
             output_schema,
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["tools"], name))
     })
     .collect()

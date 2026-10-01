@@ -205,6 +205,7 @@ fn awaited_settled_value_survives_a_finally_origin_wire_roundtrip() {
 fn structured_tool_failure_survives_a_finally_origin_wire_roundtrip() {
     let source = crate::ExecutionHostError::from_tool_failure(
         &lash_sansio::ToolFailure {
+            cause: None,
             class: lash_sansio::ToolFailureClass::PermissionDenied,
             code: "approval_denied".to_string(),
             message: "approval was denied".to_string(),

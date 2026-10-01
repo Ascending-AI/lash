@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::sync::MutexExt;
-use crate::{SchemaContract, SchemaProjectionOverride};
+use crate::{
+    JsonSchema, SchemaContract, SchemaProjectionOverride, SchemaPurpose, ToolCatalogBuildError,
+};
 
 /// Automatic retry policy for a tool's execution.
 ///
@@ -110,14 +112,14 @@ pub enum ToolOutputContract {
     FromInputSchema {
         input_field: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        default_schema: Option<serde_json::Value>,
+        default_schema: Option<JsonSchema>,
     },
 }
 
 impl ToolOutputContract {
     pub fn from_input_schema(
         input_field: impl Into<String>,
-        default_schema: Option<serde_json::Value>,
+        default_schema: Option<JsonSchema>,
     ) -> Self {
         Self::FromInputSchema {
             input_field: input_field.into(),
@@ -142,7 +144,7 @@ impl ToolOutputContract {
             Self::FromInputSchema { default_schema, .. } => {
                 let default = default_schema
                     .as_ref()
-                    .map(|schema| compact_type(&SchemaShape::from_json_schema(schema)))
+                    .map(|schema| compact_type(&SchemaShape::from_json_schema(schema.as_value())))
                     .unwrap_or_else(|| "any".to_string());
                 Some(format!("<T = {default}>"))
             }
@@ -435,7 +437,7 @@ impl Default for ToolContract {
             compact_cache: CompactContractCache::default(),
             shapes: ShapeCache::default(),
             input_schema: Self::default_input_schema_contract(),
-            output_schema: serde_json::Value::Null.into(),
+            output_schema: JsonSchema::any().into(),
             output_contract: ToolOutputContract::Static,
             examples: Vec::new(),
         }
@@ -443,8 +445,12 @@ impl Default for ToolContract {
 }
 
 impl ToolContract {
+    #[expect(
+        clippy::expect_used,
+        reason = "the default input schema is a fixed object schema"
+    )]
     fn default_input_schema_contract() -> SchemaContract {
-        Self::default_input_schema().into()
+        SchemaContract::admit(Self::default_input_schema()).expect("valid default input schema")
     }
 
     pub fn default_input_schema() -> serde_json::Value {
@@ -761,6 +767,34 @@ impl ToolDefinition {
         description: impl Into<String>,
         input_schema: serde_json::Value,
         output_schema: serde_json::Value,
+    ) -> Result<Self, ToolCatalogBuildError> {
+        let id = id.into();
+        let name = name.into();
+        let admit = |schema, purpose| {
+            SchemaContract::admit(schema).map_err(|source| ToolCatalogBuildError::UnusableSchema {
+                tool_id: id.clone(),
+                name: name.clone(),
+                purpose,
+                source,
+            })
+        };
+        let input_schema = admit(input_schema, SchemaPurpose::ToolInput)?;
+        let output_schema = admit(output_schema, SchemaPurpose::ToolOutput)?;
+        Ok(Self::new(
+            id,
+            name,
+            description,
+            input_schema,
+            output_schema,
+        ))
+    }
+
+    pub fn new(
+        id: impl Into<ToolId>,
+        name: impl Into<String>,
+        description: impl Into<String>,
+        input_schema: SchemaContract,
+        output_schema: SchemaContract,
     ) -> Self {
         let id = id.into();
         let name = name.into();
@@ -778,8 +812,8 @@ impl ToolDefinition {
             },
             contract: ToolContract {
                 identity: Some(ToolContractIdentity { id, name }),
-                input_schema: input_schema.into(),
-                output_schema: output_schema.into(),
+                input_schema,
+                output_schema,
                 ..ToolContract::default()
             },
         }
@@ -789,7 +823,7 @@ impl ToolDefinition {
         id: impl Into<ToolId>,
         name: impl Into<String>,
         description: impl Into<String>,
-    ) -> Self
+    ) -> Result<Self, ToolCatalogBuildError>
     where
         Args: schemars::JsonSchema,
         Output: schemars::JsonSchema,
@@ -829,7 +863,7 @@ impl ToolDefinition {
     pub fn with_input_schema_projection(
         mut self,
         profile: impl Into<String>,
-        schema: serde_json::Value,
+        schema: JsonSchema,
     ) -> Self {
         let profile = profile.into();
         self.contract
@@ -842,7 +876,7 @@ impl ToolDefinition {
     pub fn with_output_schema_projection(
         mut self,
         profile: impl Into<String>,
-        schema: serde_json::Value,
+        schema: JsonSchema,
     ) -> Self {
         let profile = profile.into();
         self.contract
@@ -855,7 +889,7 @@ impl ToolDefinition {
     pub fn with_output_from_input_schema(
         self,
         input_field: impl Into<String>,
-        default_schema: Option<serde_json::Value>,
+        default_schema: Option<JsonSchema>,
     ) -> Self {
         self.with_output_contract(ToolOutputContract::from_input_schema(
             input_field,
@@ -1037,57 +1071,6 @@ pub use schema_shape::{
     is_named_type_reference,
 };
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct LashSchema {
-    pub schema: serde_json::Value,
-}
-
-impl LashSchema {
-    pub fn new(schema: serde_json::Value) -> Self {
-        Self { schema }
-    }
-
-    pub fn any() -> Self {
-        Self::new(serde_json::json!({}))
-    }
-
-    pub fn object(
-        properties: serde_json::Map<String, serde_json::Value>,
-        required: Vec<String>,
-    ) -> Self {
-        let mut schema = serde_json::Map::new();
-        schema.insert(
-            "type".to_string(),
-            serde_json::Value::String("object".to_string()),
-        );
-        schema.insert(
-            "properties".to_string(),
-            serde_json::Value::Object(properties),
-        );
-        if !required.is_empty() {
-            schema.insert(
-                "required".to_string(),
-                serde_json::Value::Array(
-                    required
-                        .into_iter()
-                        .map(serde_json::Value::String)
-                        .collect(),
-                ),
-            );
-        }
-        schema.insert(
-            "additionalProperties".to_string(),
-            serde_json::Value::Bool(true),
-        );
-        Self::new(serde_json::Value::Object(schema))
-    }
-
-    #[cfg(feature = "schema-validation")]
-    pub fn validate(&self, value: &serde_json::Value) -> Result<(), String> {
-        schema_validation::validate_schema(&self.schema, value)
-    }
-}
-
 #[cfg(feature = "schema-validation")]
 mod schema_validation;
 #[cfg(feature = "schema-validation")]
@@ -1107,7 +1090,8 @@ mod inline_tests {
             "test",
             serde_json::json!({}),
             serde_json::json!({}),
-        );
+        )
+        .expect("valid declared tool schemas");
         let mut value = serde_json::to_value(tool.manifest()).unwrap();
         assert!(value.get("inline").is_none());
         assert!(

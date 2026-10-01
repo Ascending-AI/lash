@@ -10,6 +10,7 @@ fn lost_tool_definition() -> lash::tools::ToolDefinition {
         lash::tools::ToolDefinition::default_input_schema(),
         json!({ "type": "object", "additionalProperties": true }),
     )
+    .expect("valid declared tool schemas")
 }
 
 struct SeedTools;

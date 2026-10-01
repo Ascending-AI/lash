@@ -423,6 +423,10 @@ impl ToolProvider for DeferredExecutionProvider {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn search_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "workbench:search_tools",
@@ -458,7 +462,7 @@ fn search_tool_definition() -> ToolDefinition {
             "required": ["results"],
             "additionalProperties": false
         }),
-    )
+    ).expect("valid declared tool schemas")
     .with_examples(vec![
         "await tools.search({ query: \"text checksum\", limit: 3 });".to_string(),
     ])
@@ -570,6 +574,7 @@ fn workbench_deferred_definitions() -> Vec<ToolDefinition> {
     ]
 }
 
+#[expect(clippy::expect_used, reason = "this fixture declares valid schemas")]
 fn utility_definition(
     name: &str,
     module: [&str; 1],
@@ -585,6 +590,7 @@ fn utility_definition(
         input_schema,
         output_schema,
     )
+    .expect("valid declared tool schemas")
     .with_examples(vec![format!(
         "await {}.{}({{ /* matching arguments */ }})?",
         module[0], operation

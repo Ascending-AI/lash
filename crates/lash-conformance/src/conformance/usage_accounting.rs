@@ -686,6 +686,10 @@ struct Probe {
     world: World,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn probe_definition() -> crate::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     crate::ToolDefinition::raw(
@@ -695,6 +699,7 @@ fn probe_definition() -> crate::ToolDefinition {
         object.clone(),
         object,
     )
+    .expect("valid declared tool schemas")
 }
 
 #[async_trait::async_trait]

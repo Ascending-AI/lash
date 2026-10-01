@@ -110,11 +110,14 @@ async fn smoke_stream_timeout_drains_full_channel_before_factory_shutdown() {
     let executed = Arc::new(AtomicUsize::new(0));
     let all_executed = Arc::new(tokio::sync::Notify::new());
     let tools = Arc::new(StaticToolProvider::new(
-        vec![ToolDefinition::typed::<EchoArgs, EchoOutput>(
-            "tool:slack_clone.structural_echo",
-            "structural_echo",
-            "Return the supplied value unchanged.",
-        )],
+        vec![
+            ToolDefinition::typed::<EchoArgs, EchoOutput>(
+                "tool:slack_clone.structural_echo",
+                "structural_echo",
+                "Return the supplied value unchanged.",
+            )
+            .expect("valid declared tool schemas"),
+        ],
         CountingEchoTool {
             executed: Arc::clone(&executed),
             all_executed: Arc::clone(&all_executed),

@@ -1470,7 +1470,7 @@ pub(super) async fn restate_deployment_sink_funnel_feeds_appended_events() {
         .register_process(external_registration().with_extra_event_types([
             lash_core::ProcessEventType {
                 name: "producer.tick".to_string(),
-                payload_schema: lash_core::LashSchema::any(),
+                payload_schema: lash_core::JsonSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec::default(),
             },
         ]))

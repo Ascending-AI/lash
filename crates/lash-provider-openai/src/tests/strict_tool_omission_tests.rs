@@ -173,6 +173,7 @@ fn tool_definition() -> ToolDefinition {
             "additionalProperties": false
         }),
     )
+    .expect("valid declared tool schemas")
 }
 
 fn provider(
@@ -181,7 +182,7 @@ fn provider(
     transport: Arc<CapturingScriptedTransport>,
 ) -> ProviderHandle {
     let compat = OpenAiCompat {
-        strict_tools: Some(strict_tools),
+        schema_capabilities: Some(ProviderSchemaCapabilities::openai(strict_tools)),
         ..OpenAiCompat::default()
     };
     match endpoint {
@@ -584,8 +585,10 @@ fn replay_request_with_canonical_call() -> LlmRequest {
     req.tools = Arc::new(vec![LlmToolSpec {
         name: TOOL_NAME.to_string(),
         description: "Capture strict omission behavior.".to_string(),
-        input_schema: tool_input_schema().into(),
-        output_schema: json!({ "type": "object" }).into(),
+        input_schema: lash_sansio::SchemaContract::admit(tool_input_schema())
+            .expect("valid declared schema"),
+        output_schema: lash_sansio::SchemaContract::admit(json!({ "type": "object" }))
+            .expect("valid declared schema"),
     }]);
     req
 }
@@ -595,7 +598,7 @@ fn assert_journaled_call_replay_ignores_strict_toggle(endpoint: Endpoint) {
     let chat_body = |strict_tools| {
         OpenAiCompatibleProvider::new("key", "https://openai.test/v1")
             .with_compat(OpenAiCompat {
-                strict_tools: Some(strict_tools),
+                schema_capabilities: Some(ProviderSchemaCapabilities::openai(strict_tools)),
                 ..OpenAiCompat::default()
             })
             .build_chat_request_body(&req, false)
@@ -603,7 +606,8 @@ fn assert_journaled_call_replay_ignores_strict_toggle(endpoint: Endpoint) {
     };
     let responses_body = |strict_tools| {
         let mut provider = OpenAiProvider::new("key");
-        provider.inner.compat.strict_tools = Some(strict_tools);
+        provider.inner.compat.schema_capabilities =
+            Some(ProviderSchemaCapabilities::openai(strict_tools));
         provider.build_responses_request_body(&req, false).unwrap()
     };
 
@@ -802,24 +806,23 @@ fn strict_decoder_leaves_override_and_ref_backed_ambiguous_union_nulls_untouched
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "override_probe".to_string(),
         description: "override".to_string(),
-        input_schema: lash_sansio::SchemaContract::new(json!({
+        input_schema: lash_sansio::SchemaContract::admit(json!({
             "type": "object",
             "properties": { "value": { "type": "integer" } }
         }))
+        .expect("valid declared schema")
         .with_override(
             lash_sansio::SchemaDialect::OPENAI_STRICT_TOOL_PARAMETERS,
-            override_schema,
+            lash_sansio::JsonSchema::admit(override_schema)
+                .expect("valid declared projection schema"),
         ),
-        output_schema: json!({}).into(),
+        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+            .expect("valid declared schema"),
     }]);
     let capabilities = lash_sansio::ProviderSchemaCapabilities::openai(true);
-    let override_decoder = crate::responses_shared::ToolArgumentDecoder::for_request(
-        "test",
-        &req,
-        true,
-        &capabilities,
-    )
-    .unwrap();
+    let override_decoder =
+        crate::responses_shared::ToolArgumentDecoder::for_request("test", &req, &capabilities)
+            .unwrap();
     assert_eq!(
         override_decoder.decode("override_probe", r#"{"value":null}"#.to_string()),
         r#"{"value":null}"#
@@ -828,7 +831,7 @@ fn strict_decoder_leaves_override_and_ref_backed_ambiguous_union_nulls_untouched
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "union_probe".to_string(),
         description: "union".to_string(),
-        input_schema: json!({
+        input_schema: lash_sansio::SchemaContract::admit(json!({
             "type": "object",
             "properties": {
                 "choice": {
@@ -859,17 +862,14 @@ fn strict_decoder_leaves_override_and_ref_backed_ambiguous_union_nulls_untouched
                     "additionalProperties": false
                 }
             }
-        })
-        .into(),
-        output_schema: json!({}).into(),
+        }))
+        .expect("valid declared schema"),
+        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+            .expect("valid declared schema"),
     }]);
-    let union_decoder = crate::responses_shared::ToolArgumentDecoder::for_request(
-        "test",
-        &req,
-        true,
-        &capabilities,
-    )
-    .unwrap();
+    let union_decoder =
+        crate::responses_shared::ToolArgumentDecoder::for_request("test", &req, &capabilities)
+            .unwrap();
     let arguments = r#"{"choice":{"kind":"left","value":null}}"#;
     assert_eq!(
         union_decoder.decode("union_probe", arguments.to_string()),
@@ -883,7 +883,7 @@ fn strict_decoder_preserves_nested_ref_union_omission_null() {
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "nested_union_probe".to_string(),
         description: "nested union".to_string(),
-        input_schema: json!({
+        input_schema: lash_sansio::SchemaContract::admit(json!({
             "type": "object",
             "properties": {
                 "choice": {
@@ -917,14 +917,14 @@ fn strict_decoder_preserves_nested_ref_union_omission_null() {
                     "additionalProperties": false
                 }
             }
-        })
-        .into(),
-        output_schema: json!({}).into(),
+        }))
+        .expect("valid declared schema"),
+        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+            .expect("valid declared schema"),
     }]);
     let decoder = crate::responses_shared::ToolArgumentDecoder::for_request(
         "test",
         &req,
-        true,
         &lash_sansio::ProviderSchemaCapabilities::openai(true),
     )
     .unwrap();
@@ -942,7 +942,7 @@ fn strict_decoder_strips_single_branch_all_of_omission_null() {
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "all_of_probe".to_string(),
         description: "single-branch allOf".to_string(),
-        input_schema: json!({
+        input_schema: lash_sansio::SchemaContract::admit(json!({
             "type": "object",
             "properties": {
                 "limit": {
@@ -950,14 +950,14 @@ fn strict_decoder_strips_single_branch_all_of_omission_null() {
                     "default": 37
                 }
             }
-        })
-        .into(),
-        output_schema: json!({}).into(),
+        }))
+        .expect("valid declared schema"),
+        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+            .expect("valid declared schema"),
     }]);
     let decoder = crate::responses_shared::ToolArgumentDecoder::for_request(
         "test",
         &req,
-        true,
         &lash_sansio::ProviderSchemaCapabilities::openai(true),
     )
     .unwrap();
@@ -966,4 +966,32 @@ fn strict_decoder_strips_single_branch_all_of_omission_null() {
         decoder.decode("all_of_probe", r#"{"limit":null}"#.to_string()),
         "{}"
     );
+}
+
+#[test]
+fn resolved_tool_dialect_owns_wire_strictness_and_omission_decoder() {
+    let req = replay_request_with_canonical_call();
+    let capabilities = ProviderSchemaCapabilities::openai(true);
+    let compat = OpenAiCompat {
+        schema_capabilities: Some(capabilities.clone()),
+        ..OpenAiCompat::default()
+    };
+    let chat = OpenAiCompatibleProvider::new("key", "https://openai.test/v1")
+        .with_compat(compat.clone())
+        .build_chat_request_body(&req, false)
+        .unwrap();
+    let mut provider = OpenAiProvider::new("key");
+    provider.inner.compat = compat;
+    let responses = provider.build_responses_request_body(&req, false).unwrap();
+    assert_eq!(chat["tools"][0]["function"]["strict"], true);
+    assert_eq!(responses["tools"][0]["strict"], true);
+    let decoder =
+        crate::responses_shared::ToolArgumentDecoder::for_request("openai", &req, &capabilities)
+            .unwrap();
+    let decoded: Value = serde_json::from_str(&decoder.decode(
+        TOOL_NAME,
+        json!({"limit": null, "nullable_note": null}).to_string(),
+    ))
+    .unwrap();
+    assert_eq!(decoded, json!({"nullable_note": null}));
 }

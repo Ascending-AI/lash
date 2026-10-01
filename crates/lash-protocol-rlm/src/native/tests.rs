@@ -567,7 +567,10 @@ fn termination_and_trajectory_parity() {
         RlmTermination::Natural,
         RlmTermination::FinishRequired { schema: None },
         RlmTermination::FinishRequired {
-            schema: Some(serde_json::json!({"type":"string"})),
+            schema: Some(
+                lash_sansio::JsonSchema::admit(serde_json::json!({"type":"string"}))
+                    .expect("valid finish schema"),
+            ),
         },
     ] {
         for prose in ["answer", ""] {
@@ -1381,7 +1384,11 @@ fn markdown_fenced_finish_requests_an_explicit_no_execution_repair() {
             let mut config = config(
                 false,
                 RlmTermination::FinishRequired {
-                    schema: schema.clone(),
+                    schema: schema
+                        .clone()
+                        .map(lash_sansio::JsonSchema::admit)
+                        .transpose()
+                        .expect("valid finish schema"),
                 },
             );
             config.protocol_driver = Arc::new(crate::protocol::RlmDriver::with_dialect(

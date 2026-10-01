@@ -147,6 +147,8 @@ pub struct RemoteProcessToolFailure {
     pub source: RemoteProcessToolFailureSource,
     pub retry: RemoteProcessToolRetryStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause: Option<Box<lash_sansio::ToolFailureCause>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<serde_json::Value>,
 }
 

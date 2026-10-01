@@ -58,6 +58,7 @@ fn workbench_control_tools() -> Arc<dyn lash::tools::ToolProvider> {
             empty_input.clone(),
             json!({ "type": "object" }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(lash::tools::ToolBinding::new(
             ["workbench_control"],
             "cancel",
@@ -69,6 +70,7 @@ fn workbench_control_tools() -> Arc<dyn lash::tools::ToolProvider> {
             empty_input.clone(),
             json!({ "type": "object" }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(lash::tools::ToolBinding::new(
             ["workbench_control"],
             "finish",
@@ -80,6 +82,7 @@ fn workbench_control_tools() -> Arc<dyn lash::tools::ToolProvider> {
             empty_input,
             json!({ "type": "object" }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(lash::tools::ToolBinding::new(["workbench_control"], "fail")),
     ];
     Arc::new(lash::tools::StaticToolProvider::new(

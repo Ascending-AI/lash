@@ -63,7 +63,7 @@ async fn waiting_request_with_sleep(
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
     .with_extra_event_types([lash_core::ProcessEventType {
         name: "signal.go".to_owned(),
-        payload_schema: lash_core::LashSchema::any(),
+        payload_schema: lash_core::JsonSchema::any(),
         semantics: lash_core::ProcessEventSemanticsSpec::default(),
     }])
 }

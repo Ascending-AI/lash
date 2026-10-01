@@ -107,6 +107,8 @@ async fn publish_process(restate: &RestateTestBackend) -> lash_core::ProcessStar
         .ir()
         .process(PROCESS)
         .map(lash_lashlang_runtime::lashlang_process_signal_event_types)
+        .transpose()
+        .expect("valid signal payload schemas")
         .unwrap_or_default();
     let input = lash_lashlang_runtime::LashlangProcessInput {
         module_ref: linked.artifact.module_ref().clone(),

@@ -37,6 +37,10 @@ pub enum DurabilityTier {
 pub enum ArtifactStoreError {
     #[error("referrer kind `{kind}` cannot hold artifact bytes")]
     ReferrerKindRefused { kind: crate::ArtifactReferrerKind },
+    #[error("unusable payload schema: {source}")]
+    UnusableSchema {
+        source: Box<crate::SchemaAdmissionError>,
+    },
     #[error("failed to encode artifact: {0}")]
     Encode(String),
     #[error("unsupported module artifact generation: {refusal}")]
@@ -124,6 +128,9 @@ impl From<ArtifactStoreError> for crate::PluginError {
                     kind,
                     store: crate::ReferrerStore::Artifact,
                 })
+            }
+            ArtifactStoreError::UnusableSchema { source } => {
+                crate::PluginError::UnusableSchema { source }
             }
             ArtifactStoreError::WorkerCheckoutTimedOut => {
                 crate::PluginError::RuntimeEffectController(

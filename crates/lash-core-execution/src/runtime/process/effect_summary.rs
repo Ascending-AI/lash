@@ -429,8 +429,12 @@ fn vocabulary_version_schema() -> serde_json::Value {
     }
 }
 
-pub(super) fn effect_outcome_payload_schema() -> crate::LashSchema {
-    crate::LashSchema::new(serde_json::json!({
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
+pub(super) fn effect_outcome_payload_schema() -> crate::JsonSchema {
+    crate::JsonSchema::admit(serde_json::json!({
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -454,11 +458,16 @@ pub(super) fn effect_outcome_payload_schema() -> crate::LashSchema {
             "replay_key": { "type": "string", "minLength": 1 }
         }
     }))
+    .expect("valid declared payload schema")
 }
 
-pub(super) fn effect_omissions_payload_schema() -> crate::LashSchema {
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
+pub(super) fn effect_omissions_payload_schema() -> crate::JsonSchema {
     let count = serde_json::json!({ "type": "integer", "minimum": 0 });
-    crate::LashSchema::new(serde_json::json!({
+    crate::JsonSchema::admit(serde_json::json!({
         "type": "object",
         "additionalProperties": false,
         "required": ["vocabulary_version", "occurrence_cap", "nodes"],
@@ -481,6 +490,7 @@ pub(super) fn effect_omissions_payload_schema() -> crate::LashSchema {
             }
         }
     }))
+    .expect("valid declared payload schema")
 }
 
 #[cfg(test)]

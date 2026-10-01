@@ -301,6 +301,10 @@ fn recorded_facts(value: &str) -> serde_json::Value {
     serde_json::json!({ "value": value })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn probe_tool() -> crate::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     crate::ToolDefinition::raw(
@@ -310,6 +314,7 @@ fn probe_tool() -> crate::ToolDefinition {
         object.clone(),
         object,
     )
+    .expect("valid declared tool schemas")
     .with_retry_policy(crate::ToolRetryPolicy::safe(2, 1, 1))
 }
 

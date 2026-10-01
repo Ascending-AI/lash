@@ -102,6 +102,10 @@ pub struct CellFailure {
     /// through the protocol driver and the trajectory it records.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exec_failure: Option<ExecCodeFailureReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_admission: Option<Box<crate::SchemaAdmissionError>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_mismatch: Option<Box<crate::ValueMismatch>>,
 }
 
 impl CellFailure {
@@ -112,7 +116,19 @@ impl CellFailure {
             worker_limit: None,
             tool_call_limit: None,
             exec_failure: None,
+            schema_admission: None,
+            value_mismatch: None,
         }
+    }
+
+    pub fn with_value_mismatch(mut self, source: crate::ValueMismatch) -> Self {
+        self.value_mismatch = Some(Box::new(source));
+        self
+    }
+
+    pub fn with_schema_admission(mut self, source: crate::SchemaAdmissionError) -> Self {
+        self.schema_admission = Some(Box::new(source));
+        self
     }
 
     pub fn with_worker_limit(mut self, limit: crate::worker_limit::WorkerLimit) -> Self {

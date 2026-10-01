@@ -44,12 +44,12 @@ async fn ingress_core_over(
             .with_extra_event_types(vec![
                 lash_core::ProcessEventType {
                     name: EVENT.to_string(),
-                    payload_schema: lash_core::LashSchema::any(),
+                    payload_schema: lash_core::JsonSchema::any(),
                     semantics: lash_core::ProcessEventSemanticsSpec::default(),
                 },
                 lash_core::ProcessEventType {
                     name: format!("signal.{SIGNAL}"),
-                    payload_schema: lash_core::LashSchema::any(),
+                    payload_schema: lash_core::JsonSchema::any(),
                     semantics: lash_core::ProcessEventSemanticsSpec::default(),
                 },
             ]),
@@ -191,7 +191,7 @@ async fn register_ingress_trigger_subscription(
         },
         lash_core::ProcessIdentity::labelled("testing-fixture", Some("intent-ingress-delivery")),
     )
-    .with_payload_schema(lash_core::LashSchema::any());
+    .with_payload_schema(lash_core::JsonSchema::any());
     let outcome = store
         .execute_command(
             "intent-ingress-subscription",
@@ -298,7 +298,7 @@ async fn host_register_trigger_realizes_and_fires(backend: lash_core::Backend) -
                     Some("host-ingress-registration"),
                 ),
             )
-            .with_payload_schema(lash_core::LashSchema::any()),
+            .with_payload_schema(lash_core::JsonSchema::any()),
         }));
     let outcome = ingress
         .submit(
@@ -555,7 +555,7 @@ async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Resu
                 Some("intent-ingress-registration"),
             ),
         )
-        .with_payload_schema(lash_core::LashSchema::any())
+        .with_payload_schema(lash_core::JsonSchema::any())
     };
     let session_id = SessionId::from(SESSION);
     let register = |owner_scope, actor| {

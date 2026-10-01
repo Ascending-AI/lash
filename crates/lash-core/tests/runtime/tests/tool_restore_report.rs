@@ -37,6 +37,7 @@ impl FixedTools {
             lash_core::ToolDefinition::default_input_schema(),
             json!({ "type": "object", "additionalProperties": true }),
         )
+        .expect("valid declared tool schemas")
     }
 }
 

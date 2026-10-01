@@ -1338,6 +1338,7 @@ pub(super) fn rotating_tool_definition(name: &str) -> lash_core::ToolDefinition 
         lash_core::ToolDefinition::default_input_schema(),
         json!({ "type": "object", "additionalProperties": true }),
     )
+    .expect("valid declared tool schemas")
 }
 
 #[async_trait::async_trait]
@@ -1881,7 +1882,7 @@ pub(super) async fn append_process_wake_to_queue(
 pub(super) fn process_wake_event_type() -> lash_core::ProcessEventType {
     lash_core::ProcessEventType {
         name: "process.wake".to_string(),
-        payload_schema: lash_core::LashSchema::any(),
+        payload_schema: lash_core::JsonSchema::any(),
         semantics: lash_core::ProcessEventSemanticsSpec {
             wake: Some(lash_core::ProcessWakeSpec {
                 when: None,

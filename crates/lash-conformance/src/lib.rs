@@ -1,5 +1,6 @@
 //! Backend certification laws shared by store implementations.
 
+use lash_core::JsonSchema;
 use lash_core::*;
 mod conformance;
 pub use conformance::*;

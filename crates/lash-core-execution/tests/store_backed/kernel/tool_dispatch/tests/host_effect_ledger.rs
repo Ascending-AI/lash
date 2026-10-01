@@ -292,6 +292,7 @@ fn ledger_tool(name: &str, retry_policy: ToolRetryPolicy) -> crate::ToolDefiniti
         }),
         json!({ "type": "string" }),
     )
+    .expect("valid declared tool schemas")
     .with_retry_policy(retry_policy)
 }
 

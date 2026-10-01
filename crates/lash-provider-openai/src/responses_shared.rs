@@ -193,39 +193,31 @@ pub fn build_tools(
     provider: &str,
     req: &lash_core::llm::types::LlmRequest,
 ) -> Result<Vec<Value>, LlmTransportError> {
-    build_tools_with_strict(provider, req, false)
-}
-
-pub fn build_tools_with_strict(
-    provider: &str,
-    req: &lash_core::llm::types::LlmRequest,
-    strict_tools: bool,
-) -> Result<Vec<Value>, LlmTransportError> {
-    let capabilities = ProviderSchemaCapabilities::openai(strict_tools);
-    build_tools_with_capabilities(provider, req, strict_tools, &capabilities)
+    build_tools_with_capabilities(provider, req, &ProviderSchemaCapabilities::openai(false))
 }
 
 pub fn build_tools_with_capabilities(
     provider: &str,
     req: &lash_core::llm::types::LlmRequest,
-    strict_tools: bool,
     capabilities: &ProviderSchemaCapabilities,
 ) -> Result<Vec<Value>, LlmTransportError> {
     req.tools
         .iter()
         .map(|tool| {
-            let parameters = projected_schema(
-                provider,
+            let resolved = resolve_schema(
                 &tool.input_schema,
-                capabilities,
-                SchemaPurpose::ToolInput,
-            )?;
+                SchemaResolutionRequest {
+                    provider,
+                    purpose: SchemaPurpose::ToolInput,
+                    dialects: capabilities.dialects_for(SchemaPurpose::ToolInput),
+                },
+            ).map_err(|error| projection_error(provider, error))?;
             Ok(json!({
                 "type": "function",
                 "name": tool.name,
                 "description": tool.description,
-                "parameters": parameters,
-                "strict": strict_tools,
+                "parameters": resolved.schema,
+                "strict": resolved.dialect == lash_sansio::SchemaDialect::openai_strict_tool_parameters(),
             }))
         })
         .collect()

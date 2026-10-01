@@ -896,7 +896,7 @@ async fn trigger_emit_does_not_append_session_node_or_queue_work() -> Result<()>
         "Button",
         "ui.button",
         "pressed",
-        lash_core::LashSchema::any(),
+        lash_core::JsonSchema::any(),
     );
     let backend = double_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
@@ -1103,7 +1103,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
                 )
                 .with_extra_event_types([lash_core::ProcessEventType {
                     name: "signal.ready".to_string(),
-                    payload_schema: lash_core::LashSchema::any(),
+                    payload_schema: lash_core::JsonSchema::any(),
                     semantics: lash_core::ProcessEventSemanticsSpec::default(),
                 }])
                 .with_observers(["host-filter-bypass".to_string()]),

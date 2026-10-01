@@ -17,6 +17,7 @@ mod tests {
             serde_json::json!({ "type": "object" }),
             serde_json::json!({ "type": "string" }),
         )
+        .expect("valid declared tool schemas")
     }
 
     struct GrantedLeafTool;
@@ -527,6 +528,7 @@ mod tests {
             crate::ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "string" }),
         )
+        .expect("valid declared tool schemas")
     }
 
     #[async_trait::async_trait]

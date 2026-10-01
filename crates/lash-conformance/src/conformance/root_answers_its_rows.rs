@@ -47,6 +47,10 @@ const DRIVE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
 /// `AfterWork` checkpoint before its next model call.
 struct RootRowsTools;
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn tool(name: &str, description: &str) -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         format!("tool:{name}"),
@@ -55,6 +59,7 @@ fn tool(name: &str, description: &str) -> crate::ToolDefinition {
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({"type": "object", "additionalProperties": true}),
     )
+    .expect("valid declared tool schemas")
 }
 
 fn switch_frame_tool() -> crate::ToolDefinition {

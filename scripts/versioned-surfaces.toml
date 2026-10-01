@@ -93,6 +93,10 @@ reason = "lower read bound for WORKER_PROTOCOL_VERSION, not a separately written
 # appends the names it supersedes here.
 
 [[retired_hash_domain]]
+name = "lash-tool-schema-cache/v2"
+reason = "FIG-4663: admitted schemas own compiled validators, replacing the schema hash cache"
+
+[[retired_hash_domain]]
 name = "lash-process-env/v4"
 reason = "superseded process-environment identity"
 

@@ -74,6 +74,7 @@ fn tool_definition() -> lash_core::ToolDefinition {
         json!({"type": "object", "properties": {}, "additionalProperties": false}),
         json!({"type": "object"}),
     )
+    .expect("valid declared tool schemas")
 }
 
 struct SwitchFrameTool;

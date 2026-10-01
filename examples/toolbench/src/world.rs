@@ -133,9 +133,13 @@ impl SharedWorld {
             .clone()
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "this module declares the tool or payload schema and admission checks its invariant"
+    )]
     pub(crate) fn standard_provider(&self) -> Arc<dyn ToolProvider> {
         let mut tools = definitions(self.snapshot().catalog);
-        tools.push(ToolDefinition::raw("tool:toolbench_submit", "submit", "Submit exactly the value the task asks for and end the task. Call exactly once, on its own, after all other work has succeeded.", json!({"type":"object", "properties":{"value":{"type":["number","string","boolean","null","array","object"]}}, "required":["value"], "additionalProperties":false}), json!({})));
+        tools.push(ToolDefinition::raw("tool:toolbench_submit", "submit", "Submit exactly the value the task asks for and end the task. Call exactly once, on its own, after all other work has succeeded.", json!({"type":"object", "properties":{"value":{"type":["number","string","boolean","null","array","object"]}}, "required":["value"], "additionalProperties":false}), json!({})).expect("valid declared tool schemas"));
         Arc::new(StaticToolProvider::new(tools, self.clone()))
     }
 
@@ -391,6 +395,7 @@ fn easy_definitions() -> Vec<ToolDefinition> {
     ]
 }
 
+#[expect(clippy::expect_used, reason = "this fixture declares valid schemas")]
 fn definition<const N: usize>(
     name: &'static str,
     module: [&'static str; N],
@@ -406,6 +411,7 @@ fn definition<const N: usize>(
         input_schema,
         output_schema,
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(ToolBinding::new(module, operation))
 }
 

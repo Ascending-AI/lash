@@ -315,6 +315,7 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
             }),
             serde_json::json!({ "type": "object", "additionalProperties": true }),
         )
+        .expect("valid declared tool schemas")
     }
 
     #[async_trait::async_trait]
@@ -597,6 +598,7 @@ async fn scoped_retry_sleep_records_turn_and_parent_tool_identity() {
             }),
             serde_json::json!({ "type": "object", "additionalProperties": true }),
         )
+        .expect("valid declared tool schemas")
         .with_retry_policy(lash_core::ToolRetryPolicy::safe(2, 1, 1))
     }
 

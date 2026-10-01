@@ -54,6 +54,7 @@ fn main() {
     let _failure = lash::remote::triggers::RemoteTriggerDeliveryEmitOutcome::Failed {
         code: lash::remote::triggers::RemoteTriggerDeliveryFailureCode::TriggerRouteRevoked,
         reason: "grant withdrawn".into(),
+        value_mismatch: None,
     };
 
     let _cause = lash::remote::turn_result::RemoteCausalRef::TriggerOccurrence {

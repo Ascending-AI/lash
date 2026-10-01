@@ -73,7 +73,7 @@ async fn register_intent_law_target_observed_by(
             .with_extra_event_types(event_types.iter().map(|event_type| {
                 crate::ProcessEventType {
                     name: (*event_type).to_string(),
-                    payload_schema: crate::LashSchema::any(),
+                    payload_schema: crate::JsonSchema::any(),
                     semantics: crate::ProcessEventSemanticsSpec::default(),
                 }
             })),
@@ -722,7 +722,7 @@ async fn retry_drains_only_the_final_attempts_intents() {
             )
             .with_extra_event_types([crate::ProcessEventType {
                 name: "attempt.retry.final".to_string(),
-                payload_schema: crate::LashSchema::any(),
+                payload_schema: crate::JsonSchema::any(),
                 semantics: crate::ProcessEventSemanticsSpec::default(),
             }]),
         )
@@ -793,12 +793,12 @@ async fn empty_v2_batch_is_a_noop() {
 async fn register_trigger_intent_subscription(
     world: &IntentLawWorld,
 ) -> crate::TriggerSubscriptionRecord {
-    register_trigger_intent_subscription_with_schema(world, crate::LashSchema::any()).await
+    register_trigger_intent_subscription_with_schema(world, crate::JsonSchema::any()).await
 }
 
 async fn register_trigger_intent_subscription_with_schema(
     world: &IntentLawWorld,
-    payload_schema: crate::LashSchema,
+    payload_schema: crate::JsonSchema,
 ) -> crate::TriggerSubscriptionRecord {
     let store = &world.trigger_store;
     let process_env_ref =
@@ -1074,7 +1074,7 @@ async fn recorded_trigger_refuses_when_a_delivery_does_not_start() {
     let world = intent_law_world().await;
     register_trigger_intent_subscription_with_schema(
         &world,
-        crate::LashSchema::new(json!({"type": "string"})),
+        crate::JsonSchema::admit(json!({"type": "string"})).expect("valid declared payload schema"),
     )
     .await;
     let controller = Arc::new(IntentReplayController::new(None).await);
@@ -1098,7 +1098,7 @@ async fn recorded_trigger_refuses_when_a_delivery_does_not_start() {
     };
     assert!(
         cause.to_string().contains("did not start")
-            && cause.to_string().contains("invalid payload for trigger"),
+            && cause.to_string().contains("payload for trigger"),
         "the refusal must name the unstarted delivery and why: {cause}"
     );
 }

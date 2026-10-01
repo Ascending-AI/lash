@@ -81,11 +81,20 @@ pub(super) fn process_worker_failure(
     use lash_vm_broker::{BrokerFailure, CheckoutRefusal};
     use lash_vm_protocol::{InfrastructureOutcome, RunRefusal};
     let refused = |refusal: &RunRefusal| {
-        process_lashlang_failure(
+        let mut terminal = process_lashlang_failure(
             LashlangProcessFailureCode::ProcessRunRefused,
             format!("the worker refuses the run: {refusal}"),
             Some(serde_json::json!({ "run_refusal": refusal })),
-        )
+        );
+        if let RunRefusal::UnusableSchema { source } = refusal
+            && let lash_core::ProcessAwaitOutput::Settled { output } = &mut terminal
+            && let lash_core::ToolCallOutcome::Failure(failure) = &mut output.outcome
+        {
+            failure.cause = Some(Box::new(lash_core::ToolFailureCause::SchemaAdmission {
+                source: source.as_ref().clone(),
+            }));
+        }
+        terminal
     };
     let outcome = match failure {
         BrokerFailure::WorkerLost { outcome, .. }

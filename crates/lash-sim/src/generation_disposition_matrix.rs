@@ -296,8 +296,10 @@ impl Setting {
                 request.tools = Arc::new(vec![LlmToolSpec {
                     name: "lookup".into(),
                     description: "Lookup".into(),
-                    input_schema: json!({"type":"object"}).into(),
-                    output_schema: json!({}).into(),
+                    input_schema: lash_sansio::SchemaContract::admit(json!({"type":"object"}))
+                        .expect("valid declared schema"),
+                    output_schema: lash_sansio::SchemaContract::admit(json!({}))
+                        .expect("valid declared schema"),
                 }]);
                 request.generation.parallel_tool_calls = Some(false);
                 json!(false)

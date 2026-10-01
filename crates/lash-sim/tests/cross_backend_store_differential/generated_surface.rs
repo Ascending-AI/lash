@@ -238,7 +238,7 @@ impl SurfaceRunner {
                     draft: TriggerSubscriptionDraft {
                         source_capture: lash_core::TriggerSourceCapture::provider(
                             ["surface", "event"],
-                            lash_core::LashSchema::any(),
+                            lash_core::JsonSchema::any(),
                             "surface-provider",
                             serde_json::json!({"account": "surface"}),
                         ),
@@ -249,7 +249,7 @@ impl SurfaceRunner {
                         source_type: "surface.event".to_string(),
                         source_key: format!("source-{key}"),
                         source: serde_json::json!({"source": key}),
-                        payload_schema: lash_core::LashSchema::any(),
+                        payload_schema: lash_core::JsonSchema::any(),
                         target: ProcessInput::Engine {
                             kind: "surface".to_string(),
                             payload: serde_json::json!({"key": key}),

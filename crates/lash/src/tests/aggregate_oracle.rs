@@ -354,6 +354,7 @@ fn step_definition() -> lash_core::ToolDefinition {
         }),
         serde_json::json!({ "type": "object" }),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["oracle"], "step"))
 }
 
@@ -551,7 +552,7 @@ async fn register_intent_target(
             )
             .with_extra_event_types(vec![lash_core::ProcessEventType {
                 name: INTENT_EVENT.to_string(),
-                payload_schema: lash_core::LashSchema::any(),
+                payload_schema: lash_core::JsonSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec::default(),
             }]),
             &[SessionId::from(session_id.to_string())],

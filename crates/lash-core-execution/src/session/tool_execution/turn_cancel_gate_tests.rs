@@ -218,6 +218,7 @@ async fn scalar_retry_sleep_attaches_the_owning_turn_cancel_gate() {
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({"type": "object"}),
     )
+    .expect("valid declared tool schemas")
     .with_retry_policy(crate::ToolRetryPolicy::safe(2, 1, 1));
     let provider = Arc::new(ScalarRetryTool {
         definition: definition.clone(),

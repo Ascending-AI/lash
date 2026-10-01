@@ -65,13 +65,62 @@ async fn mcp_json_copy_uses_the_structured_value_without_a_view() {
 fn imported_mcp_tools_declare_the_fixed_result_envelope() {
     let with_schema: rmcp::model::Tool = serde_json::from_value(json!({
         "name":"lookup", "inputSchema":{"type":"object"},
-        "outputSchema":{"type":"object","properties":{"answer":{"type":"integer"}}}
+        "outputSchema":{"type":"object","properties":{"answer":{"$ref":"#/$defs/Answer"}},
+            "$defs":{"Answer":{"type":"integer"}}}
     }))
     .expect("tool");
+    for field in ["inputSchema", "outputSchema"] {
+        let mut defective = serde_json::to_value(&with_schema).expect("encode tool");
+        defective[field] = json!({"type":"unknown"});
+        let defective = serde_json::from_value(defective).expect("wire tool");
+        let error = import_tools("test", vec![defective], None)
+            .err()
+            .expect("unusable schema refused at discovery");
+        assert!(matches!(
+            error,
+            McpError::UnusableSchema(
+                lash_core::facade_support::ToolCatalogBuildError::UnusableSchema {
+                    source: lash_core::SchemaAdmissionError::Compilation { .. },
+                    ..
+                }
+            )
+        ));
+    }
+    let source = ToolDefinition::raw("bad", "bad", "bad", Value::Null, json!({}))
+        .expect_err("invalid schema");
+    let fault = McpServerFault::UnusableSchema(Box::new(source.clone()));
+    for health in [
+        McpServerHealth::Connected {
+            catalog_error: Some(fault.clone()),
+        },
+        McpServerHealth::Reconnecting {
+            last_error: Some(fault.clone()),
+        },
+        McpServerHealth::Exhausted {
+            attempts: 3,
+            last_error: Some(fault.clone()),
+        },
+        McpServerHealth::ShuttingDown {
+            reason: Some(fault.clone()),
+        },
+    ] {
+        let restored: McpServerHealth =
+            serde_json::from_value(serde_json::to_value(&health).expect("encode health"))
+                .expect("restore health");
+        assert_eq!(restored.fault(), Some(&fault));
+        let failure =
+            lash_core::ToolFailure::from(crate::call_failure::McpCallFailure::ServerUnavailable {
+                server: "test".into(),
+                health: restored,
+                after_ms: 0,
+            });
+        assert!(matches!(failure.cause.as_deref(),
+            Some(lash_core::ToolFailureCause::ToolSchemaAdmission { source: retained }) if retained.as_ref() == &source));
+    }
     let without_schema = advertised_tool("plain");
     let tools = import_tools("test", vec![with_schema, without_schema], None).expect("imports");
     for tool in tools.values() {
-        let schema = &tool.definition.contract.output_schema.canonical;
+        let schema = tool.definition.contract.output_schema.canonical.as_value();
         assert_eq!(schema["required"], json!(["content"]));
         assert_eq!(schema["properties"]["content"]["type"], "array");
         assert_eq!(
@@ -80,10 +129,24 @@ fn imported_mcp_tools_declare_the_fixed_result_envelope() {
                 .map(Vec::len),
             Some(4)
         );
+        tool.definition
+            .contract
+            .output_schema
+            .canonical
+            .validate(&json!({"content": [], "structuredContent": {"answer": 42}}))
+            .expect("embedded refs validate against the server resource");
         if tool.original_name == "lookup" {
+            let mismatch = tool
+                .definition
+                .contract
+                .output_schema
+                .canonical
+                .validate(&json!({"content": [], "structuredContent": {"answer": "wrong"}}))
+                .expect_err("embedded constraints remain active");
+            assert_eq!(mismatch.instance_path, "/structuredContent/answer");
             assert_eq!(
-                schema["properties"]["structuredContent"]["properties"]["answer"]["type"],
-                "integer"
+                schema["properties"]["structuredContent"]["properties"]["answer"]["$ref"],
+                "#/$defs/Answer"
             );
         } else {
             assert_eq!(schema["properties"]["structuredContent"], json!({}));
@@ -728,7 +791,8 @@ async fn colliding_attach_cannot_kill_native_tools_during_catalog_rebuild() {
         "native status",
         ToolDefinition::default_input_schema(),
         json!({ "type": "string" }),
-    );
+    )
+    .expect("valid declared tool schemas");
     let native_id = native.manifest.id.clone();
     let rebuilt = lash_core::ToolRegistry::from_tool_provider(Arc::new(NativeAndMcpProvider {
         native,
@@ -1835,7 +1899,7 @@ async fn discovery_hang_surfaces_startup_timeout() {
     assert!(
         matches!(
             &*entry.health.read_recover(),
-            McpServerHealth::Reconnecting { last_error: Some(err) }
+            McpServerHealth::Reconnecting { last_error: Some(McpServerFault::Connection(err)) }
                 if err.contains("timed out") || err.contains("timeout")
         ),
         "the failure is recorded for status reporting"

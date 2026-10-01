@@ -101,7 +101,7 @@ impl ServerView {
             connected: status.health.is_connected(),
             tool_count: status.tool_count,
             reconnect_exhausted: matches!(&status.health, McpServerHealth::Exhausted { .. }),
-            last_error: status.health.error().map(str::to_owned),
+            last_error: status.health.error().map(std::borrow::Cow::into_owned),
             tools,
         }
     }

@@ -185,6 +185,10 @@ pub(crate) fn done_without_intents(result: ToolOutcome) -> lash_core::ToolAttemp
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 pub fn process_list_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:list_process_handles",
@@ -209,7 +213,7 @@ pub fn process_list_tool_definition() -> ToolDefinition {
             "additionalProperties": false
         }),
         process_list_output_schema(),
-    )
+    ).expect("valid declared tool schemas")
     .with_examples(vec![
         "await processes.list({})?".into(),
         r#"await processes.list({ status: "any" })?"#.into(),
@@ -246,6 +250,10 @@ fn processes_tool_definitions(include_cancel_process: bool) -> Vec<ToolDefinitio
 /// arbitrary awaited process. `handle` is the *trigger* handle kind and carries
 /// the payload its trigger delivers, which is a different type and would refuse
 /// a process value here.
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 pub fn process_await_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:await_process",
@@ -265,11 +273,15 @@ pub fn process_await_tool_definition() -> ToolDefinition {
         serde_json::json!({
             "description": "The process's terminal outcome."
         }),
-    )
+    ).expect("valid declared tool schemas")
     .with_examples(vec!["await processes.await({ handle: h })?".into()])
     .with_tool_binding(ToolBinding::new(["processes"], "await"))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 pub fn process_cancel_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:cancel_process",
@@ -301,7 +313,7 @@ pub fn process_cancel_tool_definition() -> ToolDefinition {
             "required": ["process_id", "status"],
             "additionalProperties": false
         }),
-    )
+    ).expect("valid declared tool schemas")
     .with_examples(vec![
         "await processes.cancel({ handle: h })?".into(),
         r#"await processes.cancel({ process_id: "tool:call-01JZK7G4QP9Q4J7W3Q2E1H6M9C" })?"#.into(),
@@ -671,7 +683,7 @@ mod tests {
         // handle in the type checker before the handler ran (FIG-2989), which
         // is exactly what the `x-lash` keyword exists to avoid.
         assert_eq!(
-            definition.contract.input_schema.canonical["properties"]["handle"]["x-lash"],
+            definition.contract.input_schema.canonical.as_value()["properties"]["handle"]["x-lash"],
             serde_json::json!({ "kind": "process_unknown" })
         );
     }
@@ -681,7 +693,7 @@ mod tests {
         let definition = process_list_tool_definition();
 
         assert_eq!(
-            definition.contract.output_schema.canonical["type"],
+            definition.contract.output_schema.canonical.as_value()["type"],
             serde_json::json!("array")
         );
         let rendered = definition.compact_contract().render_signature();

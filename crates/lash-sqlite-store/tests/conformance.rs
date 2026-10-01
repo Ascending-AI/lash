@@ -66,7 +66,7 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
             )
             .with_extra_event_types([lash_core_execution::ProcessEventType {
                 name: "snapshot.tail".to_string(),
-                payload_schema: lash_core_execution::LashSchema::any(),
+                payload_schema: lash_core_execution::JsonSchema::any(),
                 semantics: lash_core_execution::ProcessEventSemanticsSpec::default(),
             }]),
         )

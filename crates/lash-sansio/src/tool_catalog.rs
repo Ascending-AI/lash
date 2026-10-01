@@ -239,8 +239,16 @@ impl ToolCatalog {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub enum ToolCatalogBuildError {
+    UnusableSchema {
+        tool_id: crate::ToolId,
+        name: String,
+        purpose: crate::SchemaPurpose,
+        source: crate::SchemaAdmissionError,
+    },
     MissingContract {
         tool_id: crate::ToolId,
         name: String,
@@ -256,6 +264,17 @@ pub enum ToolCatalogBuildError {
 impl std::fmt::Display for ToolCatalogBuildError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::UnusableSchema {
+                tool_id,
+                name,
+                purpose,
+                source,
+            } => {
+                write!(
+                    formatter,
+                    "tool `{name}` ({tool_id}) has unusable {purpose:?} schema: {source}"
+                )
+            }
             Self::MissingContract { tool_id, name } => {
                 write!(
                     formatter,
@@ -336,6 +355,7 @@ mod tests {
             }),
             serde_json::json!({ "type": "string" }),
         )
+        .expect("valid declared tool schemas")
     }
 
     fn build_input(
@@ -353,6 +373,89 @@ mod tests {
             })),
             contributions,
         }
+    }
+
+    #[test]
+    fn schema_admission_refuses_defects_before_catalog_or_value_validation() {
+        for schema in [
+            serde_json::json!(null),
+            serde_json::json!(42),
+            serde_json::json!("string"),
+            serde_json::json!([]),
+            serde_json::json!({ "type": "unknown" }),
+            serde_json::json!({ "$ref": "https://example.invalid/schema" }),
+            serde_json::json!({ "$ref": "#/$defs/Missing" }),
+        ] {
+            let encoded = serde_json::json!({ "canonical": schema });
+            assert!(
+                serde_json::from_value::<crate::SchemaContract>(encoded).is_err(),
+                "schema defect entered as a contract: {schema}"
+            );
+        }
+    }
+
+    #[test]
+    fn schema_admission_keeps_typed_cause_and_value_mismatch_separate() {
+        let literal_reference = serde_json::json!({
+            "type": "object",
+            "properties": {"$ref": {"type": "string"}},
+            "default": {"$ref": "https://example.invalid/default"},
+            "enum": [{"$ref": "https://example.invalid/value"}]
+        });
+        let admitted = crate::JsonSchema::admit(literal_reference.clone())
+            .expect("reference keys inside literal data are not schema references");
+        assert_eq!(admitted.as_value(), &literal_reference);
+        assert!(
+            admitted
+                .validate(&serde_json::json!({
+                    "$ref": "https://example.invalid/value"
+                }))
+                .is_ok()
+        );
+        let error = ToolDefinition::raw(
+            "bad",
+            "bad",
+            "bad",
+            serde_json::json!({"type": "unknown"}),
+            serde_json::json!({}),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            ToolCatalogBuildError::UnusableSchema {
+                purpose: crate::SchemaPurpose::ToolInput,
+                source: crate::SchemaAdmissionError::Compilation { .. },
+                ..
+            }
+        ));
+        let schema = crate::JsonSchema::admit(
+            serde_json::json!({"type": "object", "properties": {"count": {"type": "integer"}}}),
+        )
+        .unwrap();
+        let mismatch = schema
+            .validate(&serde_json::json!({"count": "bad"}))
+            .unwrap_err();
+        assert_eq!(mismatch.instance_path, "/count");
+        assert!(!mismatch.message.is_empty());
+        let clone = schema.clone();
+        assert_eq!(
+            clone.validate(&serde_json::json!({"count": "bad"})),
+            Err(mismatch)
+        );
+        assert_eq!(
+            serde_json::to_value(crate::SchemaContract::default()).unwrap(),
+            serde_json::json!({"canonical": {}})
+        );
+        assert_eq!(
+            crate::JsonSchema::admit(serde_json::json!(true)).unwrap(),
+            crate::JsonSchema::any()
+        );
+        assert!(
+            crate::JsonSchema::admit(serde_json::json!(false))
+                .unwrap()
+                .validate(&serde_json::json!(null))
+                .is_err()
+        );
     }
 
     #[test]
@@ -492,14 +595,16 @@ mod tests {
                     "First",
                     ToolDefinition::default_input_schema(),
                     serde_json::json!({ "type": "string" }),
-                ),
+                )
+                .expect("valid declared tool schemas"),
                 ToolDefinition::raw(
                     repeated_name.id,
                     repeated_name.name,
                     "Second",
                     ToolDefinition::default_input_schema(),
                     serde_json::json!({ "type": "string" }),
-                ),
+                )
+                .expect("valid declared tool schemas"),
             ],
             Vec::new(),
         ))

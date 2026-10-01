@@ -22,15 +22,16 @@ fn tool_definition_uses_canonical_model_schemas() {
             "required": ["hits"],
             "additionalProperties": false
         }),
-    );
+    )
+    .expect("valid declared tool schemas");
 
     let model_tool = tool.model_tool();
     assert_eq!(
-        model_tool.input_schema.canonical["properties"]["limit"]["type"],
+        model_tool.input_schema.canonical.as_value()["properties"]["limit"]["type"],
         serde_json::json!("integer")
     );
     assert_eq!(
-        model_tool.output_schema.canonical["properties"]["hits"]["type"],
+        model_tool.output_schema.canonical.as_value()["properties"]["hits"]["type"],
         serde_json::json!("array")
     );
 }
@@ -43,7 +44,8 @@ fn tool_retry_policy_defaults_to_never_and_is_omitted_from_manifest_json() {
         "Demo",
         ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "string" }),
-    );
+    )
+    .expect("valid declared tool schemas");
 
     assert_eq!(tool.manifest.retry_policy, ToolRetryPolicy::Never);
     let manifest = tool.manifest();
@@ -61,6 +63,7 @@ fn tool_retry_policy_propagates_through_manifest_and_definition_roundtrip() {
         ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "string" }),
     )
+    .expect("valid declared tool schemas")
     .with_retry_policy(ToolRetryPolicy::safe(3, 10, 100));
 
     let manifest = tool.manifest();
@@ -87,7 +90,8 @@ fn tool_argument_projection_defaults_to_materialize_and_is_omitted_from_manifest
         "Demo",
         ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "string" }),
-    );
+    )
+    .expect("valid declared tool schemas");
 
     assert_eq!(
         tool.manifest.argument_projection,
@@ -111,6 +115,7 @@ fn tool_argument_projection_propagates_through_manifest_and_definition_roundtrip
         ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "string" }),
     )
+    .expect("valid declared tool schemas")
     .with_argument_projection(
         ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed"),
     );
@@ -148,30 +153,35 @@ fn model_tool_preserves_schema_projection_overrides() {
         }),
         serde_json::json!({ "type": "object" }),
     )
+    .expect("valid declared tool schemas")
     .with_input_schema_projection(
         "provider.tool_parameters",
-        serde_json::json!({
+        crate::JsonSchema::admit(serde_json::json!({
             "type": "object",
             "properties": { "raw": { "type": "string", "enum": ["x"] } }
-        }),
+        }))
+        .expect("valid declared projection schema"),
     )
     .with_output_schema_projection(
         "provider.structured_output",
-        serde_json::json!({
+        crate::JsonSchema::admit(serde_json::json!({
             "type": "object",
             "properties": {},
             "required": [],
             "additionalProperties": false
-        }),
+        }))
+        .expect("valid declared projection schema"),
     );
 
     let model_tool = tool.model_tool();
     assert_eq!(
-        model_tool.input_schema.canonical["properties"]["raw"]["const"],
+        model_tool.input_schema.canonical.as_value()["properties"]["raw"]["const"],
         "x"
     );
     assert_eq!(
-        model_tool.input_schema.projection.overrides[0].schema["properties"]["raw"]["enum"],
+        model_tool.input_schema.projection.overrides[0]
+            .schema
+            .as_value()["properties"]["raw"]["enum"],
         serde_json::json!(["x"])
     );
     assert_eq!(
@@ -208,7 +218,8 @@ fn typed_tool_definition_generates_input_and_output_schema() {
         confidence: f32,
     }
 
-    let tool = ToolDefinition::typed::<Args, Output>("tool:test/demo", "demo", "Demo");
+    let tool = ToolDefinition::typed::<Args, Output>("tool:test/demo", "demo", "Demo")
+        .expect("valid declared tool schemas");
     let metadata = tool.parameter_metadata();
     assert!(metadata.iter().any(|param| {
         param["name"] == "page_limit"
@@ -227,11 +238,12 @@ fn typed_tool_definition_generates_input_and_output_schema() {
                 .is_some_and(|ty| ty.ends_with(" | null"))
     }));
     assert_eq!(
-        tool.contract.output_schema.canonical["properties"]["answer"]["type"],
+        tool.contract.output_schema.canonical.as_value()["properties"]["answer"]["type"],
         "string"
     );
     assert_eq!(
-        tool.contract.output_schema.canonical["properties"]["confidence"]["minimum"].as_f64(),
+        tool.contract.output_schema.canonical.as_value()["properties"]["confidence"]["minimum"]
+            .as_f64(),
         Some(0.0)
     );
 }
@@ -261,10 +273,11 @@ fn raw_tool_definition_preserves_caller_provided_schemas() {
         "Raw demo",
         input_schema.clone(),
         output_schema.clone(),
-    );
+    )
+    .expect("valid declared tool schemas");
 
-    assert_eq!(tool.contract.input_schema.canonical, input_schema);
-    assert_eq!(tool.contract.output_schema.canonical, output_schema);
+    assert_eq!(tool.contract.input_schema.canonical(), &input_schema);
+    assert_eq!(tool.contract.output_schema.canonical(), &output_schema);
 }
 
 #[test]
@@ -293,6 +306,7 @@ fn compact_tool_contract_renders_prompt_and_search_shape_from_schemas() {
             "required": ["matches"]
         }),
     )
+    .expect("valid declared tool schemas")
     .with_examples(vec![
         "await tools.search_docs({ query: \"rust\" })?".to_string(),
         "await tools.search_docs({ query: \"rust\", limit: 3 })?".to_string(),
@@ -373,7 +387,8 @@ fn compact_tool_contract_resolves_local_refs_in_string_or_list_parameters() {
             "type": "array",
             "items": { "type": "object" }
         }),
-    );
+    )
+    .expect("valid declared tool schemas");
 
     let signature = tool.compact_contract().render_signature();
 
@@ -392,7 +407,8 @@ fn static_output_contract_keeps_existing_compact_docs_and_serde_shape() {
         "Read text",
         ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "string" }),
-    );
+    )
+    .expect("valid declared tool schemas");
     let explicit_static = tool
         .clone()
         .with_output_contract(ToolOutputContract::Static);
@@ -423,6 +439,7 @@ fn dynamic_output_contract_renders_schema_from_input_without_return_fields() {
         }),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
+    .expect("valid declared tool schemas")
     .with_output_from_input_schema("output", None);
 
     let contract = tool.compact_contract();
@@ -455,7 +472,14 @@ fn dynamic_output_contract_renders_default_schema() {
         }),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
-    .with_output_from_input_schema("output", Some(serde_json::json!({ "type": "string" })));
+    .expect("valid declared tool schemas")
+    .with_output_from_input_schema(
+        "output",
+        Some(
+            crate::JsonSchema::admit(serde_json::json!({ "type": "string" }))
+                .expect("valid output default schema"),
+        ),
+    );
 
     let contract = tool.compact_contract();
     assert_eq!(
@@ -949,7 +973,8 @@ fn tool_bindings_round_trip_as_opaque_metadata() {
         "Read a file",
         ToolDefinition::default_input_schema(),
         serde_json::json!({"type": "string"}),
-    );
+    )
+    .expect("valid declared tool schemas");
     with_metadata.manifest.bindings.insert(
         "example.binding".to_string(),
         serde_json::json!({ "name": "read" }),
@@ -982,7 +1007,8 @@ fn compact_contract_shared_memoizes_and_matches_owned() {
             "additionalProperties": false
         }),
         serde_json::json!({ "type": "string" }),
-    );
+    )
+    .expect("valid declared tool schemas");
     let manifest = tool.manifest();
 
     let owned = tool.contract.compact_contract(&manifest);
@@ -1008,7 +1034,8 @@ fn compact_contract_shared_reuses_manifest_stored_contract() {
         "Read a file",
         ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "string" }),
-    );
+    )
+    .expect("valid declared tool schemas");
     let manifest = tool.manifest();
     let stored = manifest.compact_contract.clone().expect("compact contract");
 
@@ -1028,7 +1055,8 @@ fn arc_compact_contract_serializes_identically_and_round_trips() {
             "required": ["path"]
         }),
         serde_json::json!({ "type": "string" }),
-    );
+    )
+    .expect("valid declared tool schemas");
     let manifest = tool.manifest();
     assert!(manifest.compact_contract.is_some());
 
@@ -1089,7 +1117,8 @@ fn compact_contract_renders_an_open_nested_schema_with_full_fidelity() {
                 "required": ["id"]
             }
         }),
-    );
+    )
+    .expect("valid declared tool schemas");
 
     assert_eq!(
         tool.compact_contract().render_markdown(),

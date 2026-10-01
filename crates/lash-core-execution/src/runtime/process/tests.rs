@@ -399,7 +399,7 @@ fn replayed_generic_tail_repairs_projection_across_sender_floor_gap() {
     let registration =
         registration("process-generic-repair").with_extra_event_types([ProcessEventType {
             name: "producer.progress".to_string(),
-            payload_schema: crate::LashSchema::any(),
+            payload_schema: crate::JsonSchema::any(),
             semantics: ProcessEventSemanticsSpec::default(),
         }]);
     let mut stale_record =
@@ -452,7 +452,7 @@ fn replayed_generic_non_tail_does_not_rewind_projection_timestamp() {
     let registration =
         registration("process-generic-stale-replay").with_extra_event_types([ProcessEventType {
             name: "producer.progress".to_string(),
-            payload_schema: crate::LashSchema::any(),
+            payload_schema: crate::JsonSchema::any(),
             semantics: ProcessEventSemanticsSpec::default(),
         }]);
     let record =

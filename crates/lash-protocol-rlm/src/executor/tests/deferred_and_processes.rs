@@ -265,6 +265,7 @@ pub(super) fn deferred_fetch_definition() -> lash_core::ToolDefinition {
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "string" }),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["web"], "fetch"))
 }
 
@@ -281,6 +282,7 @@ fn ambient_definition(
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "boolean" }),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new([module], operation))
 }
 
@@ -462,7 +464,6 @@ pub(super) fn deferred_link_is_scoped_to_the_exec_code_link() {
                 batches: Arc::clone(&batches),
                 installed: Arc::clone(&installed),
             });
-
         // Both links of turn 1 run in that turn's handler, and turn 2 runs
         // in its own.
         let double =
@@ -1690,6 +1691,7 @@ pub(super) fn status_inspect_definition() -> lash_core::ToolDefinition {
         }),
         serde_json::json!({ "type": "string" }),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
         ["status_tool"],
         "inspect",

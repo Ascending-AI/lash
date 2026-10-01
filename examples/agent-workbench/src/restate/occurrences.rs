@@ -32,7 +32,7 @@ pub(crate) fn trigger_delivery_trace(
                     lash::triggers::TriggerDeliveryEmitOutcome::Started { .. } => {
                         ("started", None, None)
                     }
-                    lash::triggers::TriggerDeliveryEmitOutcome::Failed { code, reason } => {
+                    lash::triggers::TriggerDeliveryEmitOutcome::Failed { code, reason, .. } => {
                         ("failed", Some(code), Some(reason))
                     }
                 };

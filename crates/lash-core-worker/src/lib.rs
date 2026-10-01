@@ -1,4 +1,6 @@
 #[doc(hidden)]
+pub use lash_core::JsonSchema;
+#[doc(hidden)]
 pub use lash_core::facade_support;
 #[doc(hidden)]
 pub use lash_core::facade_support::*;

@@ -51,7 +51,8 @@ fn retention_tool(name: &str) -> lash_core::ToolDefinition {
             "A tool whose output is larger than history keeps.",
             serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
             serde_json::json!({}),
-        ),
+        )
+        .expect("valid declared tool schemas"),
         name,
     )
 }

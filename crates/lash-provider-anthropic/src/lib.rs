@@ -798,7 +798,7 @@ mod tests {
         req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
             name: "rank_result".to_string(),
             strict: true,
-            schema: json!({
+            schema: lash_sansio::SchemaContract::admit(json!({
                 "type": "object",
                 "required": ["ranked"],
                 "properties": {
@@ -809,8 +809,8 @@ mod tests {
                         "items": { "type": "string" }
                     }
                 }
-            })
-            .into(),
+            }))
+            .expect("valid declared schema"),
         }));
 
         let body = provider.build_request_body(&req).expect("body");
@@ -832,7 +832,7 @@ mod tests {
         req.tools = Arc::new(vec![LlmToolSpec {
             name: "rank".to_string(),
             description: "Rank".to_string(),
-            input_schema: json!({
+            input_schema: lash_sansio::SchemaContract::admit(json!({
                 "type": "object",
                 "properties": {
                     "ids": {
@@ -842,9 +842,10 @@ mod tests {
                         "items": { "type": "string" }
                     }
                 }
-            })
-            .into(),
-            output_schema: json!({}).into(),
+            }))
+            .expect("valid declared schema"),
+            output_schema: lash_sansio::SchemaContract::admit(json!({}))
+                .expect("valid declared schema"),
         }]);
 
         let body = provider.build_request_body(&req).expect("body");

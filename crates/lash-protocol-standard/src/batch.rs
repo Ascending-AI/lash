@@ -22,6 +22,10 @@ pub type BatchResultRow = lash_sansio::BatchResultRow;
 /// The name the model calls the sugar by.
 pub(crate) const BATCH_TOOL_NAME: &str = "batch";
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 pub(crate) fn batch_tool_definition(max_members: NonZeroUsize) -> ToolDefinition {
     ToolDefinition::raw(
         "tool:batch",
@@ -50,7 +54,7 @@ pub(crate) fn batch_tool_definition(max_members: NonZeroUsize) -> ToolDefinition
             &["tool_calls"],
         ),
         batch_output_schema(),
-    )
+    ).expect("valid declared tool schemas")
 }
 
 fn batch_output_schema() -> Value {

@@ -135,8 +135,10 @@ fn parallel_tool_calls_rides_tool_choice_and_needs_tools() {
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "lookup".to_string(),
         description: "Lookup".to_string(),
-        input_schema: json!({ "type": "object" }).into(),
-        output_schema: json!({}).into(),
+        input_schema: lash_sansio::SchemaContract::admit(json!({ "type": "object" }))
+            .expect("valid declared schema"),
+        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+            .expect("valid declared schema"),
     }]);
     let (body, receipt) = AnthropicProvider::new("key")
         .build_request(&req)

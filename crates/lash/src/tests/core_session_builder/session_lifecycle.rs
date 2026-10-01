@@ -294,7 +294,8 @@ pub(super) fn compile_surface_tool_definition(name: &str) -> lash_core::ToolDefi
                 "additionalProperties": false
             }),
             serde_json::json!({ "type": "object" }),
-        ),
+        )
+        .expect("valid declared tool schemas"),
         name.to_string(),
     )
 }

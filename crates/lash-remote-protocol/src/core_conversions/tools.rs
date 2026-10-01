@@ -156,12 +156,12 @@ impl TryFrom<&RemoteToolGrant> for ToolDefinition {
             retry_policy,
             bindings,
         } = value;
-        let mut definition = ToolDefinition::raw(
+        let mut definition = ToolDefinition::new(
             id.clone(),
             name.clone(),
             description.clone(),
-            input_schema.canonical.clone(),
-            output_schema.canonical.clone(),
+            input_schema.clone().into(),
+            output_schema.clone().into(),
         )
         .with_examples(examples.clone())
         .with_output_contract(output_contract.clone().into());

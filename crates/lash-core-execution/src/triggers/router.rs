@@ -172,7 +172,7 @@ pub(super) fn project_trigger_draft(
     identity.string(source_type);
     identity.string(source_key);
     project_process_payload_leaf(identity, source);
-    project_process_schema_leaf(identity, &payload_schema.schema);
+    project_process_schema_leaf(identity, payload_schema.as_value());
     project_trigger_source_capture(identity, source_capture);
     project_trigger_process_input(identity, target);
     // A definition ID is projected when present. Existing engine targets
@@ -233,7 +233,7 @@ pub(super) fn project_trigger_source_capture(
     identity.sequence(constructor_path.iter(), |identity, segment| {
         identity.string(segment);
     });
-    project_process_schema_leaf(identity, &config_schema.schema);
+    project_process_schema_leaf(identity, config_schema.as_value());
     match route {
         TriggerProviderRoute::Resident => identity.tag(1),
         TriggerProviderRoute::Provider { provider_id, route } => {
@@ -279,7 +279,10 @@ fn project_trigger_process_input(
                 crate::SessionTurnOutcome::Turn => identity.tag(1),
                 crate::SessionTurnOutcome::FinalValue { schema } => {
                     identity.tag(2);
-                    identity.optional(schema.as_ref(), project_process_schema_leaf);
+                    identity.optional(
+                        schema.as_ref().map(crate::JsonSchema::as_value),
+                        project_process_schema_leaf,
+                    );
                 }
             }
         }
@@ -373,12 +376,20 @@ fn unstarted_delivery(
     subscription_id: &str,
     code: &crate::RuntimeErrorCode,
     reason: &str,
+    value_mismatch: Option<&lash_sansio::ValueMismatch>,
 ) -> PluginError {
-    crate::RuntimeEffectControllerError::new(
+    let mut error = crate::RuntimeEffectControllerError::new(
         code.clone(),
         format!("trigger delivery for subscription `{subscription_id}` did not start: {reason}"),
-    )
-    .into()
+    );
+    if let Some(source) = value_mismatch {
+        error.cause = Some(crate::RuntimeErrorCause::ValueMismatch {
+            context: format!("trigger delivery for subscription `{subscription_id}`")
+                .into_boxed_str(),
+            source: Box::new(source.clone()),
+        });
+    }
+    error.into()
 }
 
 /// What a router wired for immediate `ProcessStart` attempts carries: the
@@ -518,8 +529,18 @@ impl TriggerRouter {
             .emit_reporting_realization(request, effect_controller)
             .await?;
         for delivery in &report.deliveries {
-            if let TriggerDeliveryEmitOutcome::Failed { code, reason } = &delivery.outcome {
-                return Err(unstarted_delivery(&delivery.subscription_id, code, reason));
+            if let TriggerDeliveryEmitOutcome::Failed {
+                code,
+                reason,
+                value_mismatch,
+            } = &delivery.outcome
+            {
+                return Err(unstarted_delivery(
+                    &delivery.subscription_id,
+                    code,
+                    reason,
+                    value_mismatch.as_deref(),
+                ));
             }
         }
         Ok((report, realization))
@@ -584,9 +605,18 @@ impl TriggerRouter {
                 Err(DeliveryStartFault::Attempt(fault)) => return Err(fault.into()),
                 Err(DeliveryStartFault::Delivery(err)) => {
                     let error = crate::RuntimeEffectControllerError::from(err);
+                    let value_mismatch =
+                        if let Some(crate::RuntimeErrorCause::ValueMismatch { source, .. }) =
+                            &error.cause
+                        {
+                            Some(source.clone())
+                        } else {
+                            None
+                        };
                     deliveries.push(reservation.emit_report(TriggerDeliveryEmitOutcome::Failed {
                         code: error.code,
                         reason: error.message,
+                        value_mismatch,
                     }));
                     continue;
                 }
@@ -1049,22 +1079,18 @@ impl TriggerRouter {
         subscription
             .payload_schema
             .validate(&occurrence.payload)
-            .map_err(|err| {
-                PluginError::Session(format!(
-                    "invalid payload for trigger `{}`: {err}",
-                    subscription.subscription_key
-                ))
+            .map_err(|err| PluginError::ValueMismatch {
+                context: format!("payload for trigger `{}`", subscription.subscription_key),
+                source: Box::new(err),
             })?;
         if let Some(source) = occurrence.source.as_ref() {
             subscription
                 .source_capture
                 .config_schema
                 .validate(source)
-                .map_err(|err| {
-                    PluginError::Session(format!(
-                        "trigger `{}` occurrence source does not match the captured source contract: {err}",
-                        subscription.subscription_key
-                    ))
+                .map_err(|err| PluginError::ValueMismatch {
+                    context: format!("source for trigger `{}`", subscription.subscription_key),
+                    source: Box::new(err),
                 })?;
         }
         let args =

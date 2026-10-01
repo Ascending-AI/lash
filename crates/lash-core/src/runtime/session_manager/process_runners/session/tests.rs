@@ -462,12 +462,15 @@ fn spawn_agent_projects_final_value() {
 
     // The declared schema is checked: a match passes, a mismatch fails.
     let typed = crate::SessionTurnOutcome::FinalValue {
-        schema: Some(serde_json::json!({
-            "type": "object",
-            "properties": { "answer": { "type": "integer" } },
-            "required": ["answer"],
-            "additionalProperties": false
-        })),
+        schema: Some(
+            lash_sansio::JsonSchema::admit(serde_json::json!({
+                "type": "object",
+                "properties": { "answer": { "type": "integer" } },
+                "required": ["answer"],
+                "additionalProperties": false
+            }))
+            .expect("declared result schema"),
+        ),
     };
     let output = project_turn(
         finished_turn(

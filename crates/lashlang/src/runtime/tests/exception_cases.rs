@@ -125,6 +125,7 @@ impl ExecutionHost for StructuredToolFailureHost {
         if matches!(op, AbilityOp::ResourceOperation(_)) {
             return Err(ExecutionHostError::from_tool_failure(
                 &lash_sansio::ToolFailure {
+                    cause: None,
                     class: lash_sansio::ToolFailureClass::PermissionDenied,
                     code: "approval_denied".to_string(),
                     message: "approval was denied".to_string(),

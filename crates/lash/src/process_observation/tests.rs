@@ -93,7 +93,7 @@ fn finished_record(process_id: &ProcessId) -> TraceRecord {
 fn tick_type() -> lash_core::ProcessEventType {
     lash_core::ProcessEventType {
         name: TICK.to_string(),
-        payload_schema: lash_core::LashSchema::any(),
+        payload_schema: lash_core::JsonSchema::any(),
         semantics: lash_core::ProcessEventSemanticsSpec::default(),
     }
 }

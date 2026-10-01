@@ -40,6 +40,10 @@ pub fn continue_as_tool_definition(dialect: &dyn crate::dialect::Dialect) -> Too
     continue_as_tool_definition_for(dialect.prompt_vocabulary())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 pub(crate) fn continue_as_tool_definition_for(
     vocabulary: crate::dialect::DialectPromptVocabulary,
 ) -> ToolDefinition {
@@ -49,7 +53,7 @@ pub(crate) fn continue_as_tool_definition_for(
         format!("Switch to a fresh AgentFrame when context is stale or crowded. `task` states the goal and next steps; `seed` carries all needed state: nothing is inherited. Read-only seeds stay read-only. Terminal action: last in the {cell_noun}; do not finish or work afterward.", cell_noun = vocabulary.cell_noun),
         continue_as_input_schema(),
         continue_as_output_schema(),
-    )
+    ).expect("valid declared tool schemas")
     .with_examples(vec![vocabulary.continue_as_example.into()])
     .with_tool_binding(ToolBinding::new(["control"], "continue_as"))
     .with_argument_projection(ToolArgumentProjectionPolicy::preserve_projected_refs_in_field(
@@ -194,7 +198,7 @@ mod tests {
         );
 
         assert_eq!(
-            definition.contract.output_schema.canonical["required"],
+            definition.contract.output_schema.canonical.as_value()["required"],
             json!(["ok", "frame_key", "task", "seed_keys", "seed_count"])
         );
         let rendered = definition.compact_contract().render_signature();
@@ -507,11 +511,14 @@ mod tests {
                 snapshot.authority.plugin_config.insert(
                     crate::RLM_PROTOCOL_PLUGIN_ID,
                     lash_core::ProtocolTurnOptions::typed(RlmTermination::FinishRequired {
-                        schema: Some(json!({
-                            "type": "object",
-                            "properties": { "answer": { "type": "string" } },
-                            "required": ["answer"]
-                        })),
+                        schema: Some(
+                            lash_sansio::JsonSchema::admit(json!({
+                                "type": "object",
+                                "properties": { "answer": { "type": "string" } },
+                                "required": ["answer"]
+                            }))
+                            .expect("valid finish schema"),
+                        ),
                     })
                     .expect("valid rlm turn options")
                     .payload,

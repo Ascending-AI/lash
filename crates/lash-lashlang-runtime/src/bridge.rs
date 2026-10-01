@@ -197,6 +197,7 @@ mod tests {
 
     fn policy_failure(retry: ToolRetryStatus) -> ToolFailure {
         ToolFailure {
+            cause: None,
             class: ToolFailureClass::PermissionDenied,
             code: "approval_denied".to_string(),
             message: "approval was denied".to_string(),

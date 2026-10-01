@@ -95,8 +95,9 @@ impl InvalidLashlangBindingTool {
             "invalid_lashlang_binding",
             "Malformed Lashlang binding fixture.",
             serde_json::json!({ "type": "object" }),
-            serde_json::Value::Null,
-        );
+            lash_core::JsonSchema::any().into_value(),
+        )
+        .expect("valid declared tool schemas");
         definition.manifest.bindings.insert(
             lash_lashlang_runtime::TOOL_BINDING_KEY.to_string(),
             serde_json::json!({ "not": "a tool binding" }),
@@ -402,9 +403,10 @@ pub(super) async fn typescript_process_registration() -> ProcessRegistration {
         lash_core::Lifetime::Detached,
     )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
-    .with_extra_event_types(lash_lashlang_runtime::lashlang_process_signal_event_types(
-        process,
-    ))
+    .with_extra_event_types(
+        lash_lashlang_runtime::lashlang_process_signal_event_types(process)
+            .expect("valid signal payload schemas"),
+    )
     .with_execution_env_ref(Some(env_ref))
 }
 
@@ -972,6 +974,7 @@ impl CountingProcessTool {
             }),
             serde_json::json!({ "type": "object" }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["tools"], "recovery_count"))
     }
 }

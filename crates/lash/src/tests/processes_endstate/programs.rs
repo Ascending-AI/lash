@@ -39,6 +39,8 @@ impl LinkedTestProcess {
             .ir()
             .process(process_name)
             .map(lash_lashlang_runtime::lashlang_process_signal_event_types)
+            .transpose()
+            .expect("valid signal payload schemas")
             .unwrap_or_default();
         Self {
             module_ref: linked.artifact.module_ref().clone(),

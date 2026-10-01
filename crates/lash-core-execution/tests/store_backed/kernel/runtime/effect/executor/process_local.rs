@@ -938,7 +938,7 @@ mod tests {
                 )))
                 .with_extra_event_types([crate::ProcessEventType {
                     name: "signal.ready".to_string(),
-                    payload_schema: crate::LashSchema::any(),
+                    payload_schema: crate::JsonSchema::any(),
                     semantics: crate::ProcessEventSemanticsSpec::default(),
                 }]),
             )

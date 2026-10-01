@@ -54,6 +54,7 @@ pub(crate) fn park_tool_definition() -> lash_core::ToolDefinition {
         }),
         serde_json::json!({ "type": "number" }),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(ToolBinding::new(["cell"], "park"))
 }
 

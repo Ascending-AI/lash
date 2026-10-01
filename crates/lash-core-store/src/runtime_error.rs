@@ -1445,7 +1445,10 @@ impl RuntimeError {
             | RuntimeErrorCause::StoreRefusal { .. }
             | RuntimeErrorCause::PluginFormat { .. }
             | RuntimeErrorCause::ProcessParentEnded { .. }
-            | RuntimeErrorCause::ProcessStartKeyConflict { .. } => None,
+            | RuntimeErrorCause::ProcessStartKeyConflict { .. }
+            | RuntimeErrorCause::SchemaRefused { .. }
+            | RuntimeErrorCause::ToolSchemaRefused { .. }
+            | RuntimeErrorCause::ValueMismatch { .. } => None,
         }
     }
 

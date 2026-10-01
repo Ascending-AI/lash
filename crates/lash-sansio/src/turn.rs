@@ -98,6 +98,7 @@ mod tests {
             }),
             serde_json::json!({ "type": "string" }),
         )
+        .expect("valid declared tool schemas")
     }
 
     /// Minimal no-op driver so the turn-machine test can build a

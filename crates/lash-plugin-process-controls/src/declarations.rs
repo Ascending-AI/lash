@@ -33,6 +33,10 @@ pub fn definition_id_schema() -> Value {
     serde_json::json!({ "type": "object", "properties": { "$lash_definition_id": { "type": "string", "pattern": "^lash\\.definition:sha256:[0-9a-f]{64}$" } }, "required": ["$lash_definition_id"], "additionalProperties": false })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 pub fn process_start_tool_definition() -> ToolDefinition {
     ToolDefinition::raw("tool:start_process", "start_process", "Start a durable process by immutable definition or tagged definition ID and return its handle.",
         serde_json::json!({
@@ -46,14 +50,18 @@ pub fn process_start_tool_definition() -> ToolDefinition {
             "oneOf": [{"required": ["definition"], "not": {"required": ["definition_id"]}}, {"required": ["definition_id"], "not": {"required": ["definition"]}}],
             "additionalProperties": false
         }),
-        serde_json::json!({"x-lash": {"kind": "process_unknown"}}))
+        serde_json::json!({"x-lash": {"kind": "process_unknown"}})).expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["processes"], "start"))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 pub fn process_get_tool_definition() -> ToolDefinition {
     ToolDefinition::raw("tool:get_process_definition", "get_process_definition", "Resolve a tagged definition ID and retain its definition in this execution.",
         serde_json::json!({"type": "object", "properties": {"definition_id": definition_id_schema()}, "required": ["definition_id"], "additionalProperties": false}),
-        serde_json::json!({"type": "object", "properties": {"id": definition_id_schema(), "signature": {}}, "required": ["id", "signature"], "additionalProperties": false}))
+        serde_json::json!({"type": "object", "properties": {"id": definition_id_schema(), "signature": {}}, "required": ["id", "signature"], "additionalProperties": false})).expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["processes"], "get"))
 }
 
@@ -96,6 +104,10 @@ fn exact_fields<'a>(
 }
 
 /// `processes.signal(handle, name, payload)` — deliver a named signal.
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 pub fn process_signal_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:signal_process",
@@ -120,7 +132,7 @@ pub fn process_signal_tool_definition() -> ToolDefinition {
             "additionalProperties": false
         }),
         serde_json::json!({ "description": "The recorded signal event." }),
-    )
+    ).expect("valid declared tool schemas")
     .with_examples(vec![
         r#"await processes.signal({ handle: h, name: "approved", payload: { by: "sam" } })?"#.into(),
     ])
@@ -133,6 +145,10 @@ pub fn process_signal_tool_definition() -> ToolDefinition {
 /// caller is running inside, and a cell has no such process. That refusal is
 /// the tool's contract, not a missing capability, so it is refused with a typed
 /// reason rather than silently appending nowhere.
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 pub fn process_emit_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:emit_process_event",
@@ -149,7 +165,7 @@ pub fn process_emit_tool_definition() -> ToolDefinition {
             "additionalProperties": false
         }),
         serde_json::json!({ "description": "The appended process event." }),
-    )
+    ).expect("valid declared tool schemas")
     .with_examples(vec![
         r#"await processes.emit({ value: { stage: "approved" } })?"#.into(),
     ])

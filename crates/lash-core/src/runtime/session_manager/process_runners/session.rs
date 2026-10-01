@@ -432,23 +432,23 @@ fn final_value_of_turn(
 /// the child to repair it.
 fn checked_final_value(
     value: serde_json::Value,
-    schema: Option<&serde_json::Value>,
+    schema: Option<&crate::JsonSchema>,
 ) -> Result<serde_json::Value, Box<crate::ToolFailure>> {
     let Some(schema) = schema else {
         return Ok(value);
     };
-    crate::LashSchema::new(schema.clone())
-        .validate(&value)
-        .map(|()| value)
-        .map_err(|error| {
-            Box::new(crate::ToolFailure::tool(
+    schema.validate(&value).map(|()| value).map_err(|error| {
+        Box::new(
+            crate::ToolFailure::tool(
                 crate::ToolFailureClass::Execution,
                 "process_session_turn_result_schema_mismatch",
                 format!(
                     "the child's final value did not match the declared output schema: {error}"
                 ),
-            ))
-        })
+            )
+            .with_cause(crate::ToolFailureCause::ValueMismatch { source: error }),
+        )
+    })
 }
 
 #[cfg(test)]

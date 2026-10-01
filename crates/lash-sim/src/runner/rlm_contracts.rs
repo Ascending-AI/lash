@@ -190,19 +190,23 @@ fn rlm_exec_error_max_turn_stop_execution() -> Result<Value, FixedScriptRunnerEr
     )
 }
 
+#[expect(clippy::expect_used, reason = "this fixture declares valid schemas")]
 fn rlm_typed_finish_emits_outcome_and_done_execution() -> Result<Value, FixedScriptRunnerError> {
     run_rlm_protocol_contract(
         "rlm typed finish emits outcome and done",
         "return typed data",
         RlmTermination::FinishRequired {
-            schema: Some(json!({
-                "type": "object",
-                "properties": {
-                    "ok": { "type": "boolean" }
-                },
-                "required": ["ok"],
-                "additionalProperties": false
-            })),
+            schema: Some(
+                lash_sansio::JsonSchema::admit(json!({
+                    "type": "object",
+                    "properties": {
+                        "ok": { "type": "boolean" }
+                    },
+                    "required": ["ok"],
+                    "additionalProperties": false
+                }))
+                .expect("valid finish schema"),
+            ),
         },
         None,
         None,
@@ -452,18 +456,22 @@ fn rlm_natural_allows_finish_value_execution() -> Result<Value, FixedScriptRunne
     )
 }
 
+#[expect(clippy::expect_used, reason = "this fixture declares valid schemas")]
 fn rlm_typed_schema_mismatch_repair_loop_execution() -> Result<Value, FixedScriptRunnerError> {
     run_rlm_protocol_contract(
         "rlm typed schema mismatch repair loop",
         "return typed data",
         RlmTermination::FinishRequired {
-            schema: Some(json!({
-                "type": "object",
-                "properties": {
-                    "ok": { "type": "boolean" }
-                },
-                "required": ["ok"]
-            })),
+            schema: Some(
+                lash_sansio::JsonSchema::admit(json!({
+                    "type": "object",
+                    "properties": {
+                        "ok": { "type": "boolean" }
+                    },
+                    "required": ["ok"]
+                }))
+                .expect("valid finish schema"),
+            ),
         },
         None,
         None,
@@ -481,17 +489,21 @@ fn rlm_typed_schema_mismatch_repair_loop_execution() -> Result<Value, FixedScrip
     )
 }
 
+#[expect(clippy::expect_used, reason = "this fixture declares valid schemas")]
 fn rlm_typed_schema_any_of_mismatch_execution() -> Result<Value, FixedScriptRunnerError> {
     run_rlm_protocol_contract(
         "rlm typed schema anyOf mismatch",
         "return typed data",
         RlmTermination::FinishRequired {
-            schema: Some(json!({
-                "anyOf": [
-                    { "type": "string" },
-                    { "type": "integer" }
-                ]
-            })),
+            schema: Some(
+                lash_sansio::JsonSchema::admit(json!({
+                    "anyOf": [
+                        { "type": "string" },
+                        { "type": "integer" }
+                    ]
+                }))
+                .expect("valid finish schema"),
+            ),
         },
         None,
         None,

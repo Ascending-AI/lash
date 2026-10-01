@@ -857,8 +857,9 @@ pub fn prepare_process_event_append(
     declared
         .payload_schema
         .validate(&request.payload)
-        .map_err(|err| {
-            PluginError::Session(format!("invalid `{}` payload: {err}", request.event_type))
+        .map_err(|err| PluginError::ValueMismatch {
+            context: format!("`{}` payload", request.event_type),
+            source: Box::new(err),
         })?;
     let mut semantics = materialize_process_event_semantics(
         process_id,

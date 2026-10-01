@@ -296,6 +296,7 @@ impl ReplayScalarPendingTools {
                 "additionalProperties": false
             }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["tools"], "replay_scalar_counter"))
     }
 
@@ -316,6 +317,7 @@ impl ReplayScalarPendingTools {
                 "additionalProperties": true
             }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["tools"], "replay_pending_input"))
     }
 }
@@ -504,7 +506,7 @@ finish(await handle);
             )
             .with_extra_event_types([lash_core::ProcessEventType {
                 name: "signal.resume".to_string(),
-                payload_schema: lash_core::LashSchema::any(),
+                payload_schema: lash_core::JsonSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec::default(),
             }]),
             &[SessionId::from(session_id.to_string())],

@@ -1011,7 +1011,7 @@ async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
             },
             lash_core_execution::ProcessIdentity::new("test"),
         )
-        .with_payload_schema(lash_core_execution::LashSchema::any()),
+        .with_payload_schema(lash_core_execution::JsonSchema::any()),
     };
     let malformed = store
         .execute_command("register-malformed", register("malformed", "malformed-key"))

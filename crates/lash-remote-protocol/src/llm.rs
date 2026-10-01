@@ -12,7 +12,7 @@ use crate::usage_activity::RemoteUsage;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteSchemaContract {
-    pub canonical: serde_json::Value,
+    pub canonical: lash_sansio::JsonSchema,
     #[serde(
         default,
         skip_serializing_if = "RemoteSchemaProjectionPolicy::is_default"
@@ -21,7 +21,7 @@ pub struct RemoteSchemaContract {
 }
 
 impl RemoteSchemaContract {
-    fn new(canonical: serde_json::Value) -> Self {
+    fn new(canonical: lash_sansio::JsonSchema) -> Self {
         Self {
             canonical,
             projection: RemoteSchemaProjectionPolicy::default(),
@@ -31,7 +31,7 @@ impl RemoteSchemaContract {
 
 impl Default for RemoteSchemaContract {
     fn default() -> Self {
-        Self::new(serde_json::Value::Null)
+        Self::new(lash_sansio::JsonSchema::any())
     }
 }
 
@@ -76,15 +76,11 @@ impl RemoteProjectionMode {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteSchemaProjectionOverride {
     pub dialect: String,
-    pub schema: serde_json::Value,
+    pub schema: lash_sansio::JsonSchema,
 }
 
 pub(crate) fn default_remote_input_schema() -> RemoteSchemaContract {
-    RemoteSchemaContract::new(serde_json::json!({
-        "type": "object",
-        "properties": {},
-        "additionalProperties": true
-    }))
+    lash_sansio::ToolContract::default().input_schema.into()
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

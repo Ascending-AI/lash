@@ -53,6 +53,10 @@ struct ProbeTool {
 }
 
 impl ProbeTool {
+    #[expect(
+        clippy::expect_used,
+        reason = "this module declares the tool or payload schema and admission checks its invariant"
+    )]
     fn definition(&self) -> Option<crate::ToolDefinition> {
         let description = match self.probe {
             Probe::Registered | Probe::Retried => "Binding-drift probe tool.",
@@ -65,7 +69,7 @@ impl ProbeTool {
             description,
             serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false }),
             serde_json::json!({ "type": "object" }),
-        )
+        ).expect("valid declared tool schemas")
         .with_tool_binding(crate::ToolBinding::new(["tools"], "probe"));
         if matches!(self.probe, Probe::Retried) {
             definition.manifest.retry_policy = crate::ToolRetryPolicy::Safe {

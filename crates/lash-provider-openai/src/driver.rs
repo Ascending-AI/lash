@@ -319,7 +319,6 @@ pub(crate) async fn complete(
         let tool_argument_decoder = crate::responses_shared::ToolArgumentDecoder::for_request(
             endpoint.provider_kind(),
             &req,
-            compat.strict_tools,
             &compat.schema_capabilities,
         )?;
         Ok::<_, LlmTransportError>((

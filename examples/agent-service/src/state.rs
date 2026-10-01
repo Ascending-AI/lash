@@ -768,6 +768,7 @@ mod session_language_tests {
             lash::tools::ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "object", "additionalProperties": true }),
         )
+        .expect("valid declared tool schemas")
     }
 
     #[async_trait::async_trait]

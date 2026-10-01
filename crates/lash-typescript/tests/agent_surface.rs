@@ -368,6 +368,7 @@ impl ExecutionHost for ProcessAwaitFailureHost {
             AbilityOp::Await(handle) if handle == process_handle("rejected-run") => match self {
                 Self::Typed => Err(ExecutionHostError::from_tool_failure(
                     &lash_sansio::ToolFailure {
+                        cause: None,
                         class: lash_sansio::ToolFailureClass::PermissionDenied,
                         code: "approval_denied".to_string(),
                         message: "approval was denied".to_string(),

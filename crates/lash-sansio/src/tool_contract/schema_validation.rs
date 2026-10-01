@@ -1,183 +1,22 @@
-/// version_surface = "coexist"
-/// version_guard(items(LASH_TOOL_SCHEMA_CACHE_DOMAIN_VERSION, schema_content_fingerprint))
-const LASH_TOOL_SCHEMA_CACHE_DOMAIN_VERSION: &str = "lash-tool-schema-cache/v2";
+use crate::{ToolContract, ValueMismatch};
 
-use crate::sync::MutexExt;
-use std::collections::HashMap;
-use std::io::{self, Write};
-use std::sync::{Arc, Mutex, OnceLock};
-
-use crate::core_support::Blake3DomainHasher;
-use serde_json::Value;
-
-use crate::tool_contract::ToolContract;
-
-const COMPILED_SCHEMA_CACHE_CAPACITY: usize = 1_024;
-const COMPILED_SCHEMA_CACHE_SCHEMA_BYTES: usize = 16 * 1024 * 1024;
-
-struct CachedSchema {
-    schema: Value,
-    compiled: Result<Arc<jsonschema::Validator>, String>,
-}
-
-#[derive(Default)]
-struct CompiledSchemaCache {
-    entries: HashMap<[u8; 32], Vec<CachedSchema>>,
-    entry_count: usize,
-    schema_bytes: usize,
-}
-
-impl CompiledSchemaCache {
-    fn find_compiled(
-        &self,
-        hash: &[u8; 32],
-        schema: &Value,
-    ) -> Option<Result<Arc<jsonschema::Validator>, String>> {
-        self.entries
-            .get(hash)
-            .and_then(|entries| entries.iter().find(|entry| entry.schema == *schema))
-            .map(|entry| entry.compiled.clone())
-    }
-
-    fn insert(
-        &mut self,
-        hash: [u8; 32],
-        schema: &Value,
-        serialized_bytes: usize,
-        compiled: Result<Arc<jsonschema::Validator>, String>,
-    ) {
-        // The byte cap accounts for serialized schema input rather than the
-        // validator's opaque heap use; the entry cap is a second backstop.
-        if self.entry_count >= COMPILED_SCHEMA_CACHE_CAPACITY
-            || serialized_bytes
-                > COMPILED_SCHEMA_CACHE_SCHEMA_BYTES.saturating_sub(self.schema_bytes)
-        {
-            return;
-        }
-        self.entries.entry(hash).or_default().push(CachedSchema {
-            schema: schema.clone(),
-            compiled,
-        });
-        self.entry_count += 1;
-        self.schema_bytes += serialized_bytes;
-    }
-}
-
-fn compiled_schema_cache() -> &'static Mutex<CompiledSchemaCache> {
-    static CACHE: OnceLock<Mutex<CompiledSchemaCache>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(CompiledSchemaCache::default()))
-}
-
-fn schema_content_fingerprint(schema: &Value) -> Result<([u8; 32], usize), String> {
-    struct DigestWriter<'a> {
-        digest: &'a mut Blake3DomainHasher,
-        bytes_written: usize,
-    }
-
-    impl Write for DigestWriter<'_> {
-        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            self.digest.update(bytes);
-            self.bytes_written = self.bytes_written.saturating_add(bytes.len());
-            Ok(bytes.len())
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-
-    let mut digest = Blake3DomainHasher::new(LASH_TOOL_SCHEMA_CACHE_DOMAIN_VERSION);
-    let serialized_bytes = {
-        let mut writer = DigestWriter {
-            digest: &mut digest,
-            bytes_written: 0,
-        };
-        serde_json::to_writer(&mut writer, schema).map_err(|error| error.to_string())?;
-        writer.bytes_written
-    };
-    Ok((digest.finalize(), serialized_bytes))
-}
-
-fn compiled_schema(schema: &Value) -> Result<Arc<jsonschema::Validator>, String> {
-    let (hash, serialized_bytes) = schema_content_fingerprint(schema)?;
-    if let Some(cached) = compiled_schema_cache()
-        .lock_recover()
-        .find_compiled(&hash, schema)
-    {
-        return cached;
-    }
-
-    let compiled = reject_non_local_references(schema).and_then(|()| {
-        jsonschema::options()
-            .with_draft(jsonschema::Draft::Draft7.detect(schema))
-            .should_validate_formats(true)
-            .build(schema)
-            .map(Arc::new)
-            .map_err(|error| error.to_string())
-    });
-
-    let mut cache = compiled_schema_cache().lock_recover();
-    if let Some(existing) = cache.find_compiled(&hash, schema) {
-        return existing;
-    }
-    cache.insert(hash, schema, serialized_bytes, compiled.clone());
-    compiled
-}
-
-pub(super) fn validate_schema(schema: &Value, value: &Value) -> Result<(), String> {
-    let compiled = compiled_schema(schema)?;
-    compiled.validate(value).map_err(format_validation_error)
-}
-
-pub fn validate_tool_input(contract: &ToolContract, args: &Value) -> Result<(), String> {
-    validate_schema(contract.input_schema.canonical(), args)
-}
-
-fn reject_non_local_references(schema: &Value) -> Result<(), String> {
-    match schema {
-        Value::Array(values) => {
-            for value in values {
-                reject_non_local_references(value)?;
-            }
-        }
-        Value::Object(object) => {
-            for (keyword, value) in object {
-                if matches!(keyword.as_str(), "$ref" | "$dynamicRef")
-                    && !value
-                        .as_str()
-                        .is_some_and(|reference| reference.starts_with('#'))
-                {
-                    return Err(format!(
-                        "non-local schema reference rejected: `{keyword}` must start with `#`, got {value}"
-                    ));
-                }
-                reject_non_local_references(value)?;
-            }
-        }
-        _ => {}
-    }
-
-    Ok(())
-}
-
-fn format_validation_error(error: jsonschema::ValidationError<'_>) -> String {
-    let instance_path = error.instance_path().to_string();
-    if instance_path.is_empty() {
-        error.to_string()
-    } else {
-        format!("{instance_path}: {error}")
-    }
+pub fn validate_tool_input(
+    contract: &ToolContract,
+    args: &serde_json::Value,
+) -> Result<(), ValueMismatch> {
+    contract.input_schema.canonical.validate(args)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{LashSchema, ToolDefinition};
+    use crate::{JsonSchema, ToolDefinition};
     use std::time::{Duration, Instant};
 
     #[test]
     fn unversioned_schemas_keep_draft7_validation() {
-        let email = LashSchema::new(serde_json::json!({ "type": "string", "format": "email" }));
+        let email = JsonSchema::admit(serde_json::json!({ "type": "string", "format": "email" }))
+            .expect("valid declared payload schema");
         assert!(
             email
                 .validate(&serde_json::json!("sam@example.com"))
@@ -185,17 +24,19 @@ mod tests {
         );
         assert!(email.validate(&serde_json::json!("invalid")).is_err());
 
-        let reference = LashSchema::new(serde_json::json!({
+        let reference = JsonSchema::admit(serde_json::json!({
             "$ref": "#/definitions/Value",
             "definitions": { "Value": { "type": "string" } },
             "maxLength": 1
-        }));
+        }))
+        .expect("valid declared payload schema");
         assert!(reference.validate(&serde_json::json!("long")).is_ok());
         assert!(reference.validate(&serde_json::json!(42)).is_err());
 
-        let tuple = LashSchema::new(serde_json::json!({
+        let tuple = JsonSchema::admit(serde_json::json!({
             "type": "array", "items": [{ "type": "string" }], "additionalItems": false
-        }));
+        }))
+        .expect("valid declared payload schema");
         assert!(tuple.validate(&serde_json::json!(["item"])).is_ok());
         assert!(tuple.validate(&serde_json::json!([42])).is_err());
         assert!(
@@ -208,10 +49,11 @@ mod tests {
     #[test]
     fn declared_draft4_and_draft6_keep_their_keywords() {
         for (draft, accepts_other) in [("04", true), ("06", false)] {
-            let schema = LashSchema::new(serde_json::json!({
+            let schema = JsonSchema::admit(serde_json::json!({
                 "$schema": format!("http://json-schema.org/draft-{draft}/schema#"),
                 "type": "string", "const": "expected"
-            }));
+            }))
+            .expect("valid declared payload schema");
             assert!(schema.validate(&serde_json::json!("expected")).is_ok());
             assert_eq!(
                 schema.validate(&serde_json::json!("other")).is_ok(),
@@ -227,7 +69,9 @@ mod tests {
             ("idn-hostname", "münchen.de", "bad..hostname"),
             ("idn-email", "sam@münchen.de", "invalid"),
         ] {
-            let schema = LashSchema::new(serde_json::json!({ "type": "string", "format": format }));
+            let schema =
+                JsonSchema::admit(serde_json::json!({ "type": "string", "format": format }))
+                    .expect("valid declared payload schema");
             assert!(
                 schema.validate(&serde_json::json!(valid)).is_ok(),
                 "{format}"
@@ -241,7 +85,7 @@ mod tests {
 
     #[test]
     fn declared_draft202012_validates_prefix_items_and_closed_unevaluated_properties() {
-        let schema = LashSchema::new(serde_json::json!({
+        let schema = JsonSchema::admit(serde_json::json!({
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "type": "object",
             "$defs": {
@@ -254,7 +98,7 @@ mod tests {
             },
             "allOf": [{ "properties": { "pair": { "$ref": "#/$defs/Pair" } }, "required": ["pair"] }],
             "unevaluatedProperties": false
-        }));
+        })).expect("valid declared payload schema");
         assert!(
             schema
                 .validate(&serde_json::json!({ "pair": ["item", 42] }))
@@ -269,46 +113,6 @@ mod tests {
         ] {
             assert!(schema.validate(&invalid).is_err(), "{invalid}");
         }
-    }
-
-    #[test]
-    fn repeated_schema_compilation_reuses_the_cached_validator() {
-        let schema = serde_json::json!({
-            "type": "object",
-            "properties": { "cache_probe_20260723": { "type": "string" } }
-        });
-
-        let first = compiled_schema(&schema).expect("compile schema once");
-        let second = compiled_schema(&schema).expect("reuse compiled schema");
-
-        assert!(Arc::ptr_eq(&first, &second));
-    }
-
-    #[test]
-    fn cache_hits_require_structural_equality_after_hash_match() {
-        let hash = [7; 32];
-        let first_schema = serde_json::json!({ "type": "string" });
-        let second_schema = serde_json::json!({ "type": "integer" });
-        let first =
-            Arc::new(jsonschema::validator_for(&first_schema).expect("compile first validator"));
-        let second =
-            Arc::new(jsonschema::validator_for(&second_schema).expect("compile second validator"));
-        let mut cache = CompiledSchemaCache::default();
-        cache.insert(hash, &first_schema, 17, Ok(first.clone()));
-        cache.insert(hash, &second_schema, 18, Ok(second.clone()));
-
-        let first_hit = cache
-            .find_compiled(&hash, &first_schema)
-            .expect("find first colliding schema")
-            .expect("first validator");
-        let second_hit = cache
-            .find_compiled(&hash, &second_schema)
-            .expect("find second colliding schema")
-            .expect("second validator");
-
-        assert!(Arc::ptr_eq(&first, &first_hit));
-        assert!(Arc::ptr_eq(&second, &second_hit));
-        assert!(!Arc::ptr_eq(&first_hit, &second_hit));
     }
 
     #[test]
@@ -333,17 +137,21 @@ mod tests {
                 }
             });
 
-            let error = LashSchema::new(schema)
+            let error = JsonSchema::admit(schema)
+                .expect("valid declared payload schema")
                 .validate(&serde_json::json!({ "item": { "name": 42 } }))
                 .unwrap_err();
 
-            assert_eq!(error, "/item/name: 42 is not of type \"string\"");
+            assert_eq!(
+                error.to_string(),
+                "/item/name: 42 is not of type \"string\""
+            );
         }
     }
 
     #[test]
     fn validation_rejects_bad_value_through_all_of_wrapped_ref() {
-        let schema = LashSchema::new(serde_json::json!({
+        let schema = JsonSchema::admit(serde_json::json!({
             "definitions": {
                 "Inner": { "type": "string" }
             },
@@ -351,11 +159,12 @@ mod tests {
                 { "$ref": "#/definitions/Inner" }
             ],
             "description": "A documented field"
-        }));
+        }))
+        .expect("valid declared payload schema");
 
         let error = schema.validate(&serde_json::json!(42)).unwrap_err();
 
-        assert_eq!(error, "42 is not of type \"string\"");
+        assert_eq!(error.to_string(), "42 is not of type \"string\"");
     }
 
     #[test]
@@ -379,10 +188,11 @@ mod tests {
             );
         }
         definitions.insert(format!("D{DEPTH}"), serde_json::json!({ "type": "string" }));
-        let schema = LashSchema::new(serde_json::json!({
+        let schema = JsonSchema::admit(serde_json::json!({
             "$ref": "#/definitions/D0",
             "definitions": definitions
-        }));
+        }))
+        .expect("valid declared payload schema");
         let mut value = serde_json::json!(42);
         for _ in 0..DEPTH {
             value = serde_json::json!({ "left": value });
@@ -392,8 +202,13 @@ mod tests {
         let error = schema.validate(&value).unwrap_err();
         let elapsed = started.elapsed();
 
-        assert!(error.ends_with(": 42 is not of type \"string\""), "{error}");
-        assert!(error.contains("/left"), "{error}");
+        assert!(
+            error
+                .to_string()
+                .ends_with(": 42 is not of type \"string\""),
+            "{error}"
+        );
+        assert!(error.to_string().contains("/left"), "{error}");
         assert!(
             elapsed < TIME_LIMIT,
             "chained reference validation took {elapsed:?}, limit is {TIME_LIMIT:?}"
@@ -401,42 +216,28 @@ mod tests {
     }
 
     #[test]
-    fn validation_rejects_unresolvable_local_ref() {
-        let schema = LashSchema::new(serde_json::json!({
-            "$ref": "#/definitions/Missing"
-        }));
-
-        let error = schema.validate(&serde_json::json!(42)).unwrap_err();
-
-        assert_eq!(error, "Pointer '/definitions/Missing' does not exist");
-    }
-
-    #[test]
-    fn validation_rejects_external_ref_before_compilation() {
-        let schema = LashSchema::new(serde_json::json!({
-            "$ref": "https://example.com/schema.json"
-        }));
-
-        let error = schema.validate(&serde_json::json!(42)).unwrap_err();
-
-        assert_eq!(
+    fn admission_rejects_unresolvable_local_ref() {
+        let error =
+            JsonSchema::admit(serde_json::json!({ "$ref": "#/definitions/Missing" })).unwrap_err();
+        assert!(matches!(
             error,
-            "non-local schema reference rejected: `$ref` must start with `#`, got \"https://example.com/schema.json\""
-        );
+            crate::SchemaAdmissionError::Compilation { .. }
+        ));
     }
 
     #[test]
-    fn validation_rejects_external_dynamic_ref_before_compilation() {
-        let schema = LashSchema::new(serde_json::json!({
-            "$dynamicRef": "https://example.com/schema.json#node"
-        }));
-
-        let error = schema.validate(&serde_json::json!(42)).unwrap_err();
-
-        assert!(
-            error.contains("`$dynamicRef` must start with `#`"),
-            "{error}"
-        );
+    fn admission_rejects_external_references() {
+        for keyword in ["$ref", "$dynamicRef"] {
+            let error = JsonSchema::admit(serde_json::json!({
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                (keyword): "https://example.com/schema.json"
+            }))
+            .unwrap_err();
+            assert!(matches!(
+                error,
+                crate::SchemaAdmissionError::NonLocalReference { .. }
+            ));
+        }
     }
 
     #[test]
@@ -449,13 +250,18 @@ mod tests {
             .expect_err("external references must fail during validator construction")
             .to_string();
 
-        assert!(error.contains("https://example.com/schema.json"), "{error}");
-        assert!(error.contains("retriev"), "{error}");
+        assert!(
+            error
+                .to_string()
+                .contains("https://example.com/schema.json"),
+            "{error}"
+        );
+        assert!(error.to_string().contains("retriev"), "{error}");
     }
 
     #[test]
     fn validation_rejects_deep_recursive_violation() {
-        let schema = LashSchema::new(serde_json::json!({
+        let schema = JsonSchema::admit(serde_json::json!({
             "$ref": "#/definitions/Node",
             "definitions": {
                 "Node": {
@@ -467,7 +273,8 @@ mod tests {
                     "required": ["name"]
                 }
             }
-        }));
+        }))
+        .expect("valid declared payload schema");
 
         let error = schema
             .validate(&serde_json::json!({
@@ -483,14 +290,14 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(
-            error,
+            error.to_string(),
             "/child/child/child/name: 123 is not of type \"string\""
         );
     }
 
     #[test]
     fn validation_combines_ref_target_and_sibling_constraints() {
-        let schema = LashSchema::new(serde_json::json!({
+        let schema = JsonSchema::admit(serde_json::json!({
             "$ref": "#/$defs/AtLeastFive",
             "minimum": 1,
             "$defs": {
@@ -499,11 +306,12 @@ mod tests {
                     "minimum": 5
                 }
             }
-        }));
+        }))
+        .expect("valid declared payload schema");
 
         let error = schema.validate(&serde_json::json!(2)).unwrap_err();
 
-        assert_eq!(error, "2 is less than the minimum of 5");
+        assert_eq!(error.to_string(), "2 is less than the minimum of 5");
     }
 
     #[test]
@@ -521,10 +329,11 @@ mod tests {
                 "additionalProperties": false
             }),
             serde_json::json!({}),
-        );
+        )
+        .expect("valid declared tool schemas");
 
         let error = validate_tool_input(&tool.contract(), &serde_json::json!({})).unwrap_err();
-        assert_eq!(error, "\"access_token\" is a required property");
+        assert_eq!(error.to_string(), "\"access_token\" is a required property");
     }
 
     #[test]
@@ -542,12 +351,16 @@ mod tests {
                 "additionalProperties": false
             }),
             serde_json::json!({}),
-        );
+        )
+        .expect("valid declared tool schemas");
 
         let error =
             validate_tool_input(&tool.contract(), &serde_json::json!({ "page_limit": 100 }))
                 .unwrap_err();
-        assert_eq!(error, "/page_limit: 100 is greater than the maximum of 20");
+        assert_eq!(
+            error.to_string(),
+            "/page_limit: 100 is greater than the maximum of 20"
+        );
     }
 
     #[test]
@@ -566,7 +379,8 @@ mod tests {
                 "required": ["limit"]
             }),
             serde_json::json!({}),
-        );
+        )
+        .expect("valid declared tool schemas");
 
         validate_tool_input(
             &tool.contract(),
@@ -592,7 +406,8 @@ mod tests {
                 "additionalProperties": true
             }),
             serde_json::json!({}),
-        );
+        )
+        .expect("valid declared tool schemas");
 
         validate_tool_input(
             &tool.contract(),

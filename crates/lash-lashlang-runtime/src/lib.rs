@@ -532,7 +532,9 @@ fn lashlang_tool_operation_contract(
         } => lashlang::OperationContract::from_input_field(
             input_schema,
             input_field.clone(),
-            default_schema.clone(),
+            default_schema
+                .as_ref()
+                .map(|schema| schema.as_value().clone()),
         ),
     }
 }

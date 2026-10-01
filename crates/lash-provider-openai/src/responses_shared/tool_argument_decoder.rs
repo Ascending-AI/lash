@@ -19,12 +19,8 @@ impl ToolArgumentDecoder {
     pub fn for_request(
         provider: &str,
         req: &LlmRequest,
-        strict_tools: bool,
         capabilities: &ProviderSchemaCapabilities,
     ) -> Result<Self, LlmTransportError> {
-        if !strict_tools {
-            return Ok(Self::default());
-        }
         let mut omission_paths_by_tool = HashMap::new();
         for tool in req.tools.iter() {
             let resolved = resolve_schema(
@@ -36,7 +32,9 @@ impl ToolArgumentDecoder {
                 },
             )
             .map_err(|error| projection_error(provider, error))?;
-            if !resolved.omission_null_paths.is_empty() {
+            if resolved.dialect == lash_sansio::SchemaDialect::openai_strict_tool_parameters()
+                && !resolved.omission_null_paths.is_empty()
+            {
                 omission_paths_by_tool.insert(tool.name.clone(), resolved.omission_null_paths);
             }
         }

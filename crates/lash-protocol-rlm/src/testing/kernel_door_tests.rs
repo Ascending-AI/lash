@@ -45,6 +45,7 @@ fn echo_definition() -> lash_core::ToolDefinition {
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object" }),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["echo"], "say"))
 }
 

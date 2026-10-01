@@ -1,6 +1,8 @@
 use crate::responses_shared as shared;
 use crate::support::*;
-use lash_core::facade_support::{ModelToolReturnPart, tool_result_text};
+use lash_core::facade_support::{
+    ModelToolReturnPart, SchemaResolutionRequest, resolve_schema, tool_result_text,
+};
 use lash_core::llm::types::ExecutionEvidenceMergeError;
 use std::borrow::Cow;
 
@@ -236,25 +238,26 @@ impl OpenAiCompatibleProvider {
 
     fn build_chat_tools(
         req: &LlmRequest,
-        strict_tools: bool,
         capabilities: &ProviderSchemaCapabilities,
     ) -> Result<Vec<Value>, LlmTransportError> {
         req.tools
             .iter()
             .map(|tool| {
-                let parameters = shared::projected_schema(
-                    PROVIDER,
+                let resolved = resolve_schema(
                     &tool.input_schema,
-                    capabilities,
-                    SchemaPurpose::ToolInput,
-                )?;
+                    SchemaResolutionRequest {
+                        provider: PROVIDER,
+                        purpose: SchemaPurpose::ToolInput,
+                        dialects: capabilities.dialects_for(SchemaPurpose::ToolInput),
+                    },
+                ).map_err(|error| shared::projection_error(PROVIDER, error))?;
                 Ok(json!({
                     "type": "function",
                     "function": {
                         "name": tool.name,
                         "description": tool.description,
-                        "parameters": parameters,
-                        "strict": strict_tools,
+                        "parameters": resolved.schema,
+                        "strict": resolved.dialect == lash_sansio::SchemaDialect::openai_strict_tool_parameters(),
                     },
                 }))
             })
@@ -480,8 +483,7 @@ impl OpenAiCompatibleProvider {
             emission.reasoning = true;
         }
         let mut messages = Self::build_chat_messages(req);
-        let mut tools =
-            Self::build_chat_tools(req, compat.strict_tools, &compat.schema_capabilities)?;
+        let mut tools = Self::build_chat_tools(req, &compat.schema_capabilities)?;
         let cache_diagnostics =
             Self::apply_chat_cache_control(req, policy.cache_retention, &mut messages, &mut tools);
         emission.cache = cache_diagnostics.cache_control_emitted;

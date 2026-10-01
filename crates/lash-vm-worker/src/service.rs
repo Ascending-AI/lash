@@ -431,9 +431,14 @@ fn inspect(
                         signal.name.as_str(),
                     )
                     .map_err(inconsistent_artifact)?,
-                    payload_schema: lash_core_execution::LashSchema::new(
+                    payload_schema: lash_core_execution::JsonSchema::admit(
                         lashlang::type_expr_to_json_schema(&artifact.resolve_type(&signal.ty)),
-                    ),
+                    )
+                    .map_err(|source| {
+                        PoolError::refused(RunRefusal::UnusableSchema {
+                            source: Box::new(source),
+                        })
+                    })?,
                     semantics: Default::default(),
                 })
             })

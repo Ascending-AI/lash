@@ -13,6 +13,8 @@
 //! The wire-level transport is provided by the official [`rmcp`] SDK.
 
 mod catalog;
+mod result_schema;
+use result_schema::mcp_result_schema;
 mod lifecycle_actor;
 
 use lash_sansio::sync::{LockResultExt, MutexExt, RwLockExt};
@@ -34,7 +36,9 @@ use rmcp::model::{
     Request, ResourceContents, Role, ServerResult,
 };
 use rmcp::service::{Peer, PeerRequestOptions, RoleClient};
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(test)]
+use serde_json::json;
 use tokio::time::timeout;
 
 use lash_core::{
@@ -107,6 +111,29 @@ pub struct McpConnectionPool {
     lifecycle_observer: RwLock<Option<crate::service_lifecycle::LifecycleObserver>>,
 }
 
+/// The diagnostic of an actor-owned health state, retaining schema admission causes.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", content = "cause", rename_all = "snake_case")]
+pub enum McpServerFault {
+    UnusableSchema(Box<lash_core::ToolCatalogBuildError>),
+    Connection(String),
+}
+
+impl McpServerFault {
+    pub fn message(&self) -> std::borrow::Cow<'_, str> {
+        match self {
+            Self::UnusableSchema(source) => source.to_string().into(),
+            Self::Connection(message) => message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for McpServerFault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message())
+    }
+}
+
 /// Availability published by the entry's lifecycle actor. Diagnostics belong
 /// to the state that produced them; dispatch only observes this value.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -114,17 +141,17 @@ pub struct McpConnectionPool {
 pub enum McpServerHealth {
     Connecting,
     Connected {
-        catalog_error: Option<String>,
+        catalog_error: Option<McpServerFault>,
     },
     Reconnecting {
-        last_error: Option<String>,
+        last_error: Option<McpServerFault>,
     },
     Exhausted {
         attempts: u64,
-        last_error: Option<String>,
+        last_error: Option<McpServerFault>,
     },
     ShuttingDown {
-        reason: Option<String>,
+        reason: Option<McpServerFault>,
     },
 }
 
@@ -137,16 +164,20 @@ impl McpServerHealth {
         matches!(self, Self::ShuttingDown { .. })
     }
 
-    /// Diagnostic recorded by the actor for this state.
-    pub fn error(&self) -> Option<&str> {
+    /// Typed diagnostic recorded by the actor for this state.
+    pub fn fault(&self) -> Option<&McpServerFault> {
         match self {
             Self::Connecting => None,
-            Self::Connected { catalog_error } => catalog_error.as_deref(),
+            Self::Connected { catalog_error } => catalog_error.as_ref(),
             Self::Reconnecting { last_error } | Self::Exhausted { last_error, .. } => {
-                last_error.as_deref()
+                last_error.as_ref()
             }
-            Self::ShuttingDown { reason } => reason.as_deref(),
+            Self::ShuttingDown { reason } => reason.as_ref(),
         }
+    }
+
+    pub fn error(&self) -> Option<std::borrow::Cow<'_, str>> {
+        self.fault().map(McpServerFault::message)
     }
 }
 
@@ -1333,7 +1364,7 @@ fn import_tools_with_name_builder(
             description,
             input_schema,
             output_schema,
-        )
+        )?
         .with_tool_binding(lashlang_binding);
         definition.manifest.module = Some(Arc::clone(&module));
         let imported_tool = ImportedTool {
@@ -1354,26 +1385,6 @@ fn import_tools_with_name_builder(
         }
     }
     Ok(imported)
-}
-
-fn mcp_result_schema(structured_schema: Option<&serde_json::Map<String, Value>>) -> Value {
-    let block = json!({
-        "oneOf": [
-            {"type":"object","properties":{"type":{"const":"text"},"text":{"type":"string"}},"required":["type","text"]},
-            {"type":"object","properties":{"type":{"enum":["image","audio"]},"attachment":{},"mimeType":{"type":"string"}},"required":["type","attachment","mimeType"]},
-            {"type":"object","properties":{"type":{"const":"resource"},"uri":{"type":"string"},"mimeType":{"type":"string"},"text":{"type":"string"},"attachment":{}},"required":["type","uri"]},
-            {"type":"object","properties":{"type":{"const":"resource_link"},"uri":{"type":"string"},"name":{"type":"string"},"title":{"type":"string"},"description":{"type":"string"},"mimeType":{"type":"string"}},"required":["type","uri","name"]}
-        ]
-    });
-    let mut properties = serde_json::Map::new();
-    properties.insert("content".into(), json!({"type":"array","items":block}));
-    properties.insert(
-        "structuredContent".into(),
-        structured_schema
-            .map(|schema| Value::Object(schema.clone()))
-            .unwrap_or_else(|| json!({})),
-    );
-    json!({"type":"object","properties":properties,"required":["content"]})
 }
 
 fn mcp_block(kind: &str, fields: impl IntoIterator<Item = (&'static str, ToolValue)>) -> ToolValue {

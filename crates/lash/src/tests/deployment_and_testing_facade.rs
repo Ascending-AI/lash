@@ -394,6 +394,7 @@ fn grant_bound_tool_definition() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "object", "additionalProperties": false }),
         serde_json::json!({ "type": "object" }),
     )
+    .expect("valid declared tool schemas")
 }
 
 #[tokio::test]

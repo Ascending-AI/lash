@@ -307,6 +307,7 @@ impl TryFrom<lash_core::ToolCallOutput> for RemoteProcessToolCallOutput {
                     message,
                     source,
                     retry,
+                    cause,
                     raw,
                 } = failure;
                 RemoteProcessToolCallOutcome::Failure(RemoteProcessToolFailure {
@@ -315,6 +316,7 @@ impl TryFrom<lash_core::ToolCallOutput> for RemoteProcessToolCallOutput {
                     message,
                     source: source.into(),
                     retry: retry.into(),
+                    cause,
                     raw: raw
                         .map(|raw| {
                             encode_remote_json(
@@ -383,6 +385,7 @@ impl TryFrom<RemoteProcessToolCallOutput> for lash_core::ToolCallOutput {
                     message,
                     source,
                     retry,
+                    cause,
                     raw,
                 } = failure;
                 lash_core::ToolCallOutcome::Failure(lash_core::ToolFailure {
@@ -391,6 +394,7 @@ impl TryFrom<RemoteProcessToolCallOutput> for lash_core::ToolCallOutput {
                     message,
                     source: source.into(),
                     retry: retry.into(),
+                    cause,
                     raw: raw
                         .map(|raw| {
                             decode_remote_json(

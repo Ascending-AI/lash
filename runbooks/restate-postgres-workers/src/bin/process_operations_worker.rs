@@ -73,7 +73,7 @@ fn registration() -> ProcessRegistration {
     ))
     .with_extra_event_types([ProcessEventType {
         name: EVENT_TYPE.to_string(),
-        payload_schema: lash_core::LashSchema::any(),
+        payload_schema: lash_core::JsonSchema::any(),
         semantics: ProcessEventSemanticsSpec {
             wake: Some(ProcessWakeSpec {
                 when: None,
@@ -185,7 +185,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
             ))
             .with_extra_event_types([ProcessEventType {
                 name: EVENT_TYPE.to_string(),
-                payload_schema: lash_core::LashSchema::any(),
+                payload_schema: lash_core::JsonSchema::any(),
                 semantics: ProcessEventSemanticsSpec {
                     wake: Some(ProcessWakeSpec {
                         when: None,

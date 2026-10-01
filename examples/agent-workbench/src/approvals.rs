@@ -283,6 +283,10 @@ struct ApprovalToolProvider {
 }
 
 impl ApprovalToolProvider {
+    #[expect(
+        clippy::expect_used,
+        reason = "this module declares the tool or payload schema and admission checks its invariant"
+    )]
     fn definition() -> ToolDefinition {
         ToolDefinition::raw(
             "tool:workbench_ops_apply_change",
@@ -307,7 +311,7 @@ impl ApprovalToolProvider {
                 "required": ["status", "target", "change"],
                 "additionalProperties": false
             }),
-        )
+        ).expect("valid declared tool schemas")
         .with_tool_binding(
             ToolBinding::new(["ops"], "apply_change").with_authority_type("Ops"),
         )

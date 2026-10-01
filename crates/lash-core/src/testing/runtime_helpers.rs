@@ -1192,6 +1192,7 @@ fn echo_tool_definition() -> crate::ToolDefinition {
         }),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
+    .expect("valid declared tool schemas")
 }
 
 #[async_trait::async_trait]
@@ -1261,6 +1262,7 @@ fn terminal_tool_definition(index: usize) -> crate::ToolDefinition {
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
+    .expect("valid declared tool schemas")
 }
 
 /// Tool that sleeps for 10 seconds unless its future is aborted or the
@@ -1313,6 +1315,7 @@ fn slow_tool_definition() -> crate::ToolDefinition {
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
+    .expect("valid declared tool schemas")
 }
 
 pub struct MemoryProbeTool;
@@ -1340,6 +1343,7 @@ fn memory_probe_tool_definition() -> crate::ToolDefinition {
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "string" }),
     )
+    .expect("valid declared tool schemas")
 }
 
 pub async fn standard_runtime_with_transport_and_host(

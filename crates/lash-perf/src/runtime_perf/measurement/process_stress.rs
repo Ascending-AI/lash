@@ -65,7 +65,7 @@ pub(super) async fn run_once_process_list_stress(
                     )
                     .with_event_types(vec![lash_core::ProcessEventType {
                         name: signal_event_type.clone(),
-                        payload_schema: lash_core::LashSchema::any(),
+                        payload_schema: lash_core::JsonSchema::any(),
                         semantics: lash_core::ProcessEventSemanticsSpec::default(),
                     }]),
                 )
@@ -603,6 +603,10 @@ fn push_sse_event(body: &mut String, event: serde_json::Value) {
     body.push_str("\n\n");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 pub(super) fn direct_llm_client_request(turn_index: usize) -> lash::direct::DirectRequest {
     lash::direct::DirectRequest::json_schema(
         "mock-model",
@@ -612,7 +616,7 @@ pub(super) fn direct_llm_client_request(turn_index: usize) -> lash::direct::Dire
         ),
         lash::direct::DirectJsonSchema {
             name: "runtime_perf_direct_completion".to_string(),
-            schema: serde_json::json!({
+            schema: lash_sansio::SchemaContract::admit(serde_json::json!({
                 "type": "object",
                 "additionalProperties": false,
                 "required": ["kind", "value", "error"],
@@ -631,8 +635,8 @@ pub(super) fn direct_llm_client_request(turn_index: usize) -> lash::direct::Dire
                         ]
                     }
                 }
-            })
-            .into(),
+            }))
+            .expect("valid declared schema"),
             strict: true,
         },
     )

@@ -1,3 +1,4 @@
+use crate::SchemaContract;
 use crate::SessionId;
 use crate::llm::transport::LlmTransportError;
 use crate::llm::types::{
@@ -5,7 +6,6 @@ use crate::llm::types::{
     LlmRequest, LlmRequestScope, LlmResponse, LlmRole, LlmStreamEvent, LlmToolChoice,
 };
 use crate::provider::{LlmProfileCapability, LlmProfileEffortValidationCategory, ProviderHandle};
-use crate::{LashSchema, SchemaContract};
 use lash_trace::{TraceContext, TraceSink};
 use std::sync::Arc;
 
@@ -173,13 +173,22 @@ pub enum DirectLlmError {
         category: LlmProfileEffortValidationCategory,
         message: String,
     },
-    #[error("invalid response: {message}")]
+    #[error("invalid response: {source}")]
     InvalidResponse {
-        message: String,
+        source: crate::ValueMismatch,
         result: Box<DirectLlmOutcome>,
     },
     #[error("transport error: {0}")]
     Transport(#[from] Box<LlmTransportError>),
+}
+
+impl DirectLlmError {
+    pub fn value_mismatch(&self) -> Option<&crate::ValueMismatch> {
+        match self {
+            Self::InvalidResponse { source, .. } => Some(source),
+            Self::LeadingSystemMessage | Self::InvalidRequest { .. } | Self::Transport(_) => None,
+        }
+    }
 }
 
 /// Successful single-shot direct LLM result with the sealed provider-attempt
@@ -292,11 +301,11 @@ impl DirectLlmClient {
                     response: response.response,
                     llm_call: response.call_record,
                 };
-                if let Err(message) =
+                if let Err(source) =
                     validate_direct_output(&output_for_validation, &result.response)
                 {
                     let error = DirectLlmError::InvalidResponse {
-                        message,
+                        source,
                         result: Box::new(result),
                     };
                     if let Some(llm_call_id) = llm_call_id {
@@ -463,14 +472,20 @@ pub fn build_llm_request(
     })
 }
 
-fn validate_direct_output(output: &DirectOutputSpec, response: &LlmResponse) -> Result<(), String> {
+fn validate_direct_output(
+    output: &DirectOutputSpec,
+    response: &LlmResponse,
+) -> Result<(), crate::ValueMismatch> {
     let DirectOutputSpec::JsonSchema(schema) = output else {
         return Ok(());
     };
     let response_text = response.full_text();
-    let parsed: serde_json::Value = serde_json::from_str(response_text.trim())
-        .map_err(|err| format!("expected JSON: {err}"))?;
-    LashSchema::new(schema.schema.canonical().clone()).validate(&parsed)
+    let parsed: serde_json::Value =
+        serde_json::from_str(response_text.trim()).map_err(|err| crate::ValueMismatch {
+            instance_path: String::new(),
+            message: format!("expected JSON: {err}"),
+        })?;
+    schema.schema.canonical.validate(&parsed)
 }
 
 fn transport_stream_events_for_direct(
@@ -589,14 +604,14 @@ mod tests {
     fn json_schema_request_preserves_output_schema() {
         let schema = DirectJsonSchema {
             name: "answer_shape".to_string(),
-            schema: json!({
+            schema: lash_sansio::SchemaContract::admit(json!({
                 "type": "object",
                 "properties": {
                     "answer": { "type": "string" }
                 },
                 "required": ["answer"]
-            })
-            .into(),
+            }))
+            .expect("valid declared schema"),
             strict: true,
         };
 
@@ -697,12 +712,12 @@ mod tests {
                 "trace structured rejection",
                 DirectJsonSchema {
                     name: "answer_shape".to_string(),
-                    schema: json!({
+                    schema: lash_sansio::SchemaContract::admit(json!({
                         "type": "object",
                         "required": ["answer"],
                         "properties": {"answer": {"type": "string"}}
-                    })
-                    .into(),
+                    }))
+                    .expect("valid declared schema"),
                     strict: true,
                 },
             ))
@@ -859,7 +874,7 @@ mod tests {
             "return items",
             DirectJsonSchema {
                 name: "items_result".to_string(),
-                schema: json!({
+                schema: lash_sansio::SchemaContract::admit(json!({
                     "type": "object",
                     "required": ["items"],
                     "properties": {
@@ -869,8 +884,8 @@ mod tests {
                             "items": { "type": "string" }
                         }
                     }
-                })
-                .into(),
+                }))
+                .expect("valid declared schema"),
                 strict: true,
             },
         );

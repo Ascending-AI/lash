@@ -22,7 +22,7 @@ fn register_command(owner: &str, key: &str, source_type: &'static str) -> Trigge
             },
             lash_core_execution::ProcessIdentity::new("test"),
         )
-        .with_payload_schema(lash_core_execution::LashSchema::any()),
+        .with_payload_schema(lash_core_execution::JsonSchema::any()),
     }
 }
 

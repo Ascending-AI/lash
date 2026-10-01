@@ -9,13 +9,16 @@ const SENTINEL_SECRET: &str = "sentinel-secret-7b1d9e40-execution-binding";
 
 fn sentinel_grant() -> lash_lashlang_runtime::Resolution {
     lash_lashlang_runtime::Resolution::Resolved(Box::new(
-        lash_lashlang_runtime::ToolGrant::new(lash_core::ToolDefinition::raw(
-            "tool:vault",
-            "vault.read",
-            "Read one vault entry.",
-            serde_json::json!({"type": "object"}),
-            serde_json::json!({"type": "string"}),
-        ))
+        lash_lashlang_runtime::ToolGrant::new(
+            lash_core::ToolDefinition::raw(
+                "tool:vault",
+                "vault.read",
+                "Read one vault entry.",
+                serde_json::json!({"type": "object"}),
+                serde_json::json!({"type": "string"}),
+            )
+            .expect("valid declared tool schemas"),
+        )
         .with_source_id("registry:vault")
         .with_execution_binding(serde_json::json!({"token": SENTINEL_SECRET})),
     ))
@@ -173,13 +176,16 @@ async fn worker_returned_state_cannot_replace_parent_authority() {
     forged_grants.record(
         "vault.read",
         lash_lashlang_runtime::Resolution::Resolved(Box::new(
-            lash_lashlang_runtime::ToolGrant::new(lash_core::ToolDefinition::raw(
-                "tool:vault",
-                "vault.read",
-                "Read one vault entry.",
-                serde_json::json!({"type": "object"}),
-                serde_json::json!({"type": "string"}),
-            ))
+            lash_lashlang_runtime::ToolGrant::new(
+                lash_core::ToolDefinition::raw(
+                    "tool:vault",
+                    "vault.read",
+                    "Read one vault entry.",
+                    serde_json::json!({"type": "object"}),
+                    serde_json::json!({"type": "string"}),
+                )
+                .expect("valid declared tool schemas"),
+            )
             .with_execution_binding(serde_json::json!({"token": "forged-by-the-worker"})),
         )),
     );

@@ -376,7 +376,7 @@ pub mod triggers {
     pub use lash_core::TriggerEventCatalog;
     pub use lash_core::facade_support::deterministic_subscription_id;
     pub use lash_core::{
-        LashSchema, TriggerCommandOutcome, TriggerDeliveryReservation,
+        JsonSchema, TriggerCommandOutcome, TriggerDeliveryReservation,
         TriggerDeliveryRetentionCandidate, TriggerEffectResult, TriggerIngressReceipt,
         TriggerInputBinding, TriggerMutationOutcome, TriggerMutationReceipt,
         TriggerOccurrenceFilter, TriggerOccurrenceOutcome, TriggerOccurrenceReclamationReport,
@@ -438,12 +438,13 @@ pub mod tools {
         ToolArgumentProjectionPolicy, ToolAttachmentClient, ToolAttemptOutcome, ToolCall,
         ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCatalogEntry, ToolContract,
         ToolDefinition, ToolDirectCompletionClient, ToolDiscovery, ToolExecutionGrant, ToolFailure,
-        ToolFailureClass, ToolFailureSource, ToolIntent, ToolIntentCommandFailure,
-        ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentRealized,
-        ToolIntentRefusalReason, ToolIntentRuntimeFailure, ToolIntents, ToolManifest, ToolModule,
-        ToolOutcome, ToolOutcomeDone, ToolOutputContract, ToolPrepareCall, ToolPrepareContext,
-        ToolProvider, ToolRegistry, ToolRetryStatus, ToolSessionLlmProfile, ToolValue, ToolView,
-        ToolViewBlock, ToolViewMeta, derive_tool_intent_identity, facade_support::ReconfigureError,
+        ToolFailureCause, ToolFailureClass, ToolFailureSource, ToolIntent,
+        ToolIntentCommandFailure, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
+        ToolIntentRealized, ToolIntentRefusalReason, ToolIntentRuntimeFailure, ToolIntents,
+        ToolManifest, ToolModule, ToolOutcome, ToolOutcomeDone, ToolOutputContract,
+        ToolPrepareCall, ToolPrepareContext, ToolProvider, ToolRegistry, ToolRetryStatus,
+        ToolSessionLlmProfile, ToolValue, ToolView, ToolViewBlock, ToolViewMeta,
+        derive_tool_intent_identity, facade_support::ReconfigureError,
         facade_support::ToolSourceHandle, facade_support::ToolStateFacadeOps,
         turn_outcome_from_tool_control,
     };
@@ -778,15 +779,14 @@ pub mod plugins {
 
     /// Host-specialized driver configuration required by every [`TurnDriverPreamble`].
     pub use lash_core::TurnDriverConfig;
-    /// The schema crate config wire types derive with, so an owner's
-    /// namespace, commands and refusals generate the schemas the config
-    /// command catalog publishes: derive
-    /// `#[derive(lash::plugins::JsonSchema)]` with
-    /// `#[schemars(crate = "lash::plugins::schemars")]`.
-    pub use lash_core::facade_support::JsonSchema;
     /// Durable session-lifecycle operations a hook context carries, alongside
     /// [`SessionStateService`] and [`SessionGraphService`]; runtime-implemented.
     pub use lash_core::facade_support::SessionLifecycleService;
+    /// The schema crate config wire types derive with, so an owner's
+    /// namespace, commands and refusals generate the schemas the config
+    /// command catalog publishes: derive
+    /// `#[derive(lash::plugins::schemars::JsonSchema)]` with
+    /// `#[schemars(crate = "lash::plugins::schemars")]`.
     pub use lash_core::facade_support::schemars;
     pub use lash_core::facade_support::{
         AbortTurnDirective, AfterToolCallPluginDirective, AfterTurnPluginDirective,

@@ -66,6 +66,7 @@ impl DynamicToolSpec {
             lash_core::ToolDefinition::default_input_schema(),
             json!({ "type": "object", "additionalProperties": true }),
         )
+        .expect("valid declared tool schemas")
     }
 }
 
@@ -721,7 +722,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
                 .with_extra_event_types([
                     lash_core::ProcessEventType {
                         name: "filter.wake".to_string(),
-                        payload_schema: lash_core::LashSchema::any(),
+                        payload_schema: lash_core::JsonSchema::any(),
                         semantics: lash_core::ProcessEventSemanticsSpec {
                             wake: Some(lash_core::ProcessWakeSpec {
                                 when: None,
@@ -734,7 +735,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
                     },
                     lash_core::ProcessEventType {
                         name: "signal.ready".to_string(),
-                        payload_schema: lash_core::LashSchema::any(),
+                        payload_schema: lash_core::JsonSchema::any(),
                         semantics: lash_core::ProcessEventSemanticsSpec::default(),
                     },
                 ])
@@ -991,7 +992,7 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
             )
             .with_extra_event_types([lash_core::ProcessEventType {
                 name: "signal.ready".to_string(),
-                payload_schema: lash_core::LashSchema::any(),
+                payload_schema: lash_core::JsonSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec::default(),
             }]),
             &[SessionId::from(session_id.to_string())],

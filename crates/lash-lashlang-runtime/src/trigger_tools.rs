@@ -24,6 +24,10 @@ use crate::trigger_commands::prepare_trigger_draft;
 
 /// The `triggers.register` tool definition: the record the retired resource
 /// operation accepted, answered by the trigger handle its realization mints.
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 pub fn register_trigger_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         lashlang::REGISTER_TRIGGER_TOOL_ID,
@@ -32,7 +36,7 @@ pub fn register_trigger_tool_definition() -> ToolDefinition {
          that start the target process with the declared inputs.",
         lashlang::register_trigger_tool_input_schema(),
         lashlang::register_trigger_tool_output_schema(),
-    )
+    ).expect("valid declared tool schemas")
     .with_examples(vec![
         r#"await triggers.register({ source: timer.Schedule({ expr: "0 8 * * *" }), target: { definition: scan }, inputs: (event) => ({ tick: event }) })"#
             .into(),
@@ -189,7 +193,7 @@ mod tests {
             ),
         );
 
-        let input = &definition.contract.input_schema.canonical;
+        let input = definition.contract.input_schema.canonical.as_value();
         assert_eq!(
             input["required"],
             serde_json::json!(["source", "target", "inputs"])
@@ -207,7 +211,7 @@ mod tests {
                 .all(|target| target["additionalProperties"] == false)
         );
 
-        let output = &definition.contract.output_schema.canonical;
+        let output = definition.contract.output_schema.canonical.as_value();
         assert_eq!(
             output["x-lash"],
             serde_json::json!({ "kind": "handle", "payload": {} })

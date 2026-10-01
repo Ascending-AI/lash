@@ -1237,7 +1237,7 @@ pub(super) async fn tool_intent_corpus_endpoint() -> (Endpoint, Arc<dyn ProcessR
             )
             .with_extra_event_types([lash_core::ProcessEventType {
                 name: "signal.resume".to_string(),
-                payload_schema: lash_core::LashSchema::any(),
+                payload_schema: lash_core::JsonSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec::default(),
             }]),
         )

@@ -260,6 +260,7 @@ impl SchemaChangingTool {
             }),
             serde_json::json!({ "type": "object", "additionalProperties": true }),
         )
+        .expect("valid declared tool schemas")
     }
 }
 
@@ -783,6 +784,7 @@ fn pending_echo_tool_definition() -> lash_core::ToolDefinition {
         }),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
+    .expect("valid declared tool schemas")
 }
 
 #[tokio::test(flavor = "multi_thread")]

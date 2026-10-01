@@ -570,12 +570,12 @@ fn registration(
         .with_extra_event_types([
             ProcessEventType {
                 name: "property.signal".to_string(),
-                payload_schema: LashSchema::any(),
+                payload_schema: JsonSchema::any(),
                 semantics: ProcessEventSemanticsSpec::default(),
             },
             ProcessEventType {
                 name: "property.wake".to_string(),
-                payload_schema: LashSchema::any(),
+                payload_schema: JsonSchema::any(),
                 semantics: ProcessEventSemanticsSpec {
                     wake: Some(ProcessWakeSpec {
                         when: Some(ProcessValueSelector::Present("/wake_input".to_string())),

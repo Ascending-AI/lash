@@ -617,6 +617,7 @@ fn panic_tool_definition() -> ToolDefinition {
         ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object" }),
     )
+    .expect("valid declared tool schemas")
 }
 
 fn request() -> LlmRequest {

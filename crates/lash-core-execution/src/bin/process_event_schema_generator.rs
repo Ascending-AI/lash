@@ -48,7 +48,7 @@ fn documents() -> Result<Vec<Document>, String> {
         .map(|(shape, event_type, title)| {
             let registered = runtime_lifecycle_event_type(event_type)
                 .ok_or_else(|| format!("{event_type} is not a runtime-owned event kind"))?;
-            let mut schema = registered.payload_schema.schema;
+            let mut schema = registered.payload_schema.into_value();
             let root = schema
                 .as_object_mut()
                 .ok_or_else(|| format!("{event_type} payload schema is not an object"))?;
@@ -94,7 +94,7 @@ mod tests {
             let registered = runtime_lifecycle_event_type(event_type)
                 .expect("runtime-owned kind")
                 .payload_schema
-                .schema;
+                .into_value();
             let mut unstamped = document.schema.clone();
             let root = unstamped.as_object_mut().expect("object schema");
             for stamp in [

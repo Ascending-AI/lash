@@ -271,7 +271,7 @@ impl RecoveryEchoTool {
             "Echo once after process recovery.",
             serde_json::json!({"type":"object","properties":{"line":{"type":"string"}},"required":["line"],"additionalProperties":false}),
             serde_json::json!({"type":"object"}),
-        )
+        ).expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["tools"], "recovery_echo"))
     }
 }
@@ -291,6 +291,7 @@ impl lash_core::ToolProvider for RecoveryEchoTool {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if call.args.get("line").and_then(serde_json::Value::as_str) == Some("deny") {
             return lash_core::ToolOutcome::failure(lash_core::ToolFailure {
+                cause: None,
                 class: lash_core::ToolFailureClass::PermissionDenied,
                 code: "approval_denied".to_owned(),
                 message: "approval was denied".to_owned(),

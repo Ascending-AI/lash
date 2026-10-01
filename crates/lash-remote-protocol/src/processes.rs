@@ -324,7 +324,7 @@ pub enum RemoteSessionTurnOutcome {
     /// The child's final value, checked against `schema` when one is given.
     FinalValue {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        schema: Option<serde_json::Value>,
+        schema: Option<lash_sansio::JsonSchema>,
     },
 }
 
@@ -967,7 +967,7 @@ impl RemoteProcessEvent {
 pub struct RemoteProcessEventType {
     pub name: String,
     #[serde(default)]
-    pub payload_schema: serde_json::Value,
+    pub payload_schema: lash_sansio::JsonSchema,
     #[serde(default)]
     pub semantics: RemoteProcessEventSemanticsSpec,
 }

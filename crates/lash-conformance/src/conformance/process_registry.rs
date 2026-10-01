@@ -499,7 +499,7 @@ pub(super) fn executed_registration(id: &str) -> ProcessRegistration {
 pub(super) fn wake_event_type(name: &str) -> ProcessEventType {
     ProcessEventType {
         name: name.to_string(),
-        payload_schema: LashSchema::any(),
+        payload_schema: JsonSchema::any(),
         semantics: ProcessEventSemanticsSpec {
             wake: Some(ProcessWakeSpec {
                 when: Some(ProcessValueSelector::Present("/wake_input".to_string())),
@@ -513,7 +513,7 @@ pub(super) fn wake_event_type(name: &str) -> ProcessEventType {
 pub(super) fn plain_event_type(name: &str) -> ProcessEventType {
     ProcessEventType {
         name: name.to_string(),
-        payload_schema: LashSchema::any(),
+        payload_schema: JsonSchema::any(),
         semantics: ProcessEventSemanticsSpec::default(),
     }
 }
@@ -1374,7 +1374,7 @@ pub async fn producer_terminal_status_must_match_materialized_outcome(
             registration("producer-terminal-outcome-mismatch").with_extra_event_types([
                 ProcessEventType {
                     name: "producer.failed".to_string(),
-                    payload_schema: LashSchema::any(),
+                    payload_schema: JsonSchema::any(),
                     semantics: ProcessEventSemanticsSpec {
                         terminal: Some(crate::ProcessTerminalSpec {
                             status: crate::TerminalProcessStatus::Failed,
@@ -2201,7 +2201,8 @@ pub async fn signals_refuse_undeclared_invalid_and_terminal_sends(
         .register_process(
             registration("signal-refusal-matrix").with_extra_event_types([ProcessEventType {
                 name: "signal.ready".to_string(),
-                payload_schema: LashSchema::new(serde_json::json!({"type":"integer"})),
+                payload_schema: JsonSchema::admit(serde_json::json!({"type":"integer"}))
+                    .expect("valid declared payload schema"),
                 semantics: Default::default(),
             }]),
         )
@@ -2216,7 +2217,12 @@ pub async fn signals_refuse_undeclared_invalid_and_terminal_sends(
             .await
             .expect_err("signal refused");
         assert!(
-            matches!(error, PluginError::Session(ref message) if message.contains(reason)),
+            if name == "ready" {
+                matches!(&error, PluginError::ValueMismatch { source, .. }
+                    if source.instance_path.is_empty() && source.message.contains("integer"))
+            } else {
+                matches!(&error, PluginError::Session(message) if message.contains(reason))
+            },
             "{error:?}"
         );
         assert_eq!(

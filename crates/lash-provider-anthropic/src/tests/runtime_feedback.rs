@@ -19,15 +19,15 @@ fn structured_output_uses_native_output_config_format() {
     req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
         name: "extract_result".to_string(),
         strict: true,
-        schema: json!({
+        schema: lash_sansio::SchemaContract::admit(json!({
             "type": "object",
             "additionalProperties": false,
             "required": ["answer"],
             "properties": {
                 "answer": { "type": "string" }
             }
-        })
-        .into(),
+        }))
+        .expect("valid declared schema"),
     }));
 
     let body = provider.build_request_body(&req).expect("body");

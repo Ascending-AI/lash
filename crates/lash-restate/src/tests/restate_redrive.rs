@@ -1510,7 +1510,7 @@ pub(super) async fn fig806_reserved_trigger_redrive_replays_the_process_start_pr
                     },
                     lash_core::ProcessIdentity::new("testing-fixture"),
                 )
-                .with_payload_schema(lash_core::LashSchema::any()),
+                .with_payload_schema(lash_core::JsonSchema::any()),
             },
         )
         .await
@@ -1660,7 +1660,7 @@ pub(super) async fn register_fig811_subscription(
                     },
                     lash_core::ProcessIdentity::new("testing-fixture"),
                 )
-                .with_payload_schema(lash_core::LashSchema::any()),
+                .with_payload_schema(lash_core::JsonSchema::any()),
             },
         )
         .await

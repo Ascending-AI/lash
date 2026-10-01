@@ -1512,7 +1512,7 @@ pub(super) async fn fig1464_unjournalable_effect_outcome_gives_up_with_a_typed_t
                     },
                     lash_core::ProcessIdentity::new("fig1464-engine"),
                 )
-                .with_payload_schema(lash_core::LashSchema::any()),
+                .with_payload_schema(lash_core::JsonSchema::any()),
             },
         )
         .await
@@ -1816,7 +1816,7 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
         .register_process(external_registration().with_extra_event_types([
             lash_core::ProcessEventType {
                 name: "signal.resume".to_string(),
-                payload_schema: lash_core::LashSchema::any(),
+                payload_schema: lash_core::JsonSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec::default(),
             },
         ]))
@@ -1933,7 +1933,7 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
         .register_process(external_registration().with_extra_event_types([
             lash_core::ProcessEventType {
                 name: "signal.resume".to_string(),
-                payload_schema: lash_core::LashSchema::any(),
+                payload_schema: lash_core::JsonSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec::default(),
             },
         ]))
@@ -1966,7 +1966,7 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
         .register_process(external_registration().with_extra_event_types([
             lash_core::ProcessEventType {
                 name: "fig1767.sample".to_string(),
-                payload_schema: lash_core::LashSchema::any(),
+                payload_schema: lash_core::JsonSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec::default(),
             },
         ]))

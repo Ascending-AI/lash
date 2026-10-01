@@ -23,6 +23,10 @@ impl WitnessTool {
         self.key.lock_recover().take()
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "The soak tool definition contains fixed valid schema literals"
+    )]
     fn definition() -> lash_core::ToolDefinition {
         lash_core::ToolDefinition::raw(
             "tool:soak_witness",
@@ -31,6 +35,7 @@ impl WitnessTool {
             serde_json::json!({"type":"object", "properties":{}, "additionalProperties":false}),
             serde_json::json!({"type":"object"}),
         )
+        .expect("valid soak witness schemas")
     }
 }
 

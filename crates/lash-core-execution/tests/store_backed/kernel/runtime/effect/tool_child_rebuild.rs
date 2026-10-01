@@ -34,6 +34,7 @@ mod tests {
             crate::ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "object", "additionalProperties": true }),
         )
+        .expect("valid declared tool schemas")
         .manifest;
         manifest.retry_policy = retry_policy;
         manifest

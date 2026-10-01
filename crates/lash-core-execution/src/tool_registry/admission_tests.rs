@@ -72,6 +72,7 @@ impl MutableAdmissionSource {
             crate::ToolDefinition::default_input_schema(),
             json!({}),
         )
+        .expect("valid declared tool schemas")
         .manifest()
     }
 }

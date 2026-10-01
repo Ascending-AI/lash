@@ -189,7 +189,7 @@ pub enum RemoteToolOutputContract {
     FromInputSchema {
         input_field: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        default_schema: Option<serde_json::Value>,
+        default_schema: Option<lash_sansio::JsonSchema>,
     },
 }
 

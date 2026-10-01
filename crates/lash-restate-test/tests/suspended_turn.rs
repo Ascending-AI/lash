@@ -84,7 +84,8 @@ fn tool_definition(retries: bool) -> lash_core::ToolDefinition {
         "Answer once the test opens the gate.",
         json!({"type": "object", "properties": {}, "additionalProperties": false}),
         json!({"type": "object"}),
-    );
+    )
+    .expect("valid declared tool schemas");
     if retries {
         definition.manifest.retry_policy =
             lash_core::ToolRetryPolicy::safe(3, RETRY_AFTER_MS, RETRY_AFTER_MS);

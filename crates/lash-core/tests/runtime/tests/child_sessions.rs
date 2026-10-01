@@ -55,6 +55,7 @@ fn first_turn_process_tool_definition() -> lash_core::ToolDefinition {
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": false }),
     )
+    .expect("valid declared tool schemas")
 }
 
 #[async_trait::async_trait]
@@ -103,6 +104,7 @@ fn attachment_writing_tool_definition() -> lash_core::ToolDefinition {
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
+    .expect("valid declared tool schemas")
 }
 
 #[tokio::test(flavor = "multi_thread")]

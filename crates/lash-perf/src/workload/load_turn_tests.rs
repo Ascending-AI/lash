@@ -122,6 +122,7 @@ impl ReplayTools {
                 input_schema,
                 output_schema,
             )
+            .expect("valid declared tool schemas")
             .with_tool_binding(ToolBinding::new(["tools"], name))
         })
         .collect()

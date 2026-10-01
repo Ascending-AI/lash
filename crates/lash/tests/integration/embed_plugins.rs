@@ -33,7 +33,9 @@ fn assistant_prose(result: &lash::turn::TurnOutput) -> String {
 const TEST_PLUGIN_ID: &str = "test_typed";
 
 /// The plugin's recorded namespace: the label a session is created with.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, lash::plugins::JsonSchema)]
+#[derive(
+    Clone, Debug, serde::Serialize, serde::Deserialize, lash::plugins::schemars::JsonSchema,
+)]
 #[schemars(crate = "lash::plugins::schemars")]
 #[serde(deny_unknown_fields)]
 struct TestPluginConfig {
@@ -220,6 +222,7 @@ fn typed_probe_definition() -> ToolDefinition {
         }),
         json!({ "type": "object" }),
     )
+    .expect("valid declared tool schemas")
 }
 
 fn response_text(text: &str) -> LlmResponse {

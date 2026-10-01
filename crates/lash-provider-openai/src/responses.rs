@@ -67,12 +67,8 @@ impl OpenAiCompatibleProvider {
             )?;
             emission.reasoning = true;
         }
-        let tools = shared::build_tools_with_capabilities(
-            PROVIDER,
-            req,
-            compat.strict_tools,
-            &compat.schema_capabilities,
-        )?;
+        let tools =
+            shared::build_tools_with_capabilities(PROVIDER, req, &compat.schema_capabilities)?;
         let input = shared::build_responses_input(req);
         let mut body = json!({
             "model": req.model,

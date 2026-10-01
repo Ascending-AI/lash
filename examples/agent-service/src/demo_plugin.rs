@@ -140,6 +140,10 @@ fn demo_tool_definitions() -> Vec<ToolDefinition> {
     vec![read_board_tool(), play_move_tool()]
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn read_board_tool() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:read_board",
@@ -151,10 +155,14 @@ fn read_board_tool() -> ToolDefinition {
             "additionalProperties": false
         }),
         json!({ "type": "object" }),
-    )
+    ).expect("valid declared tool schemas")
     .with_tool_binding(ToolBinding::new(["board"], "read"))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn play_move_tool() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:play_move",
@@ -167,7 +175,7 @@ fn play_move_tool() -> ToolDefinition {
             "additionalProperties": false
         }),
         json!({ "type": "object" }),
-    )
+    ).expect("valid declared tool schemas")
     .with_tool_binding(ToolBinding::new(["board"], "play"))
 }
 

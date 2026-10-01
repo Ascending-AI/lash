@@ -274,7 +274,7 @@ async fn fixtures() -> Fixtures {
     .into_iter()
     .map(|name| lash_core::ProcessEventType {
         name: name.to_string(),
-        payload_schema: lash_core::LashSchema::any(),
+        payload_schema: lash_core::JsonSchema::any(),
         semantics: lash_core::ProcessEventSemanticsSpec::default(),
     })
     .collect::<Vec<_>>();
@@ -523,6 +523,7 @@ impl PureLeafProbeProvider {
             lash_core::ToolDefinition::default_input_schema(),
             serde_json::json!({"type": "string"}),
         )
+        .expect("valid declared tool schemas")
     }
 }
 
@@ -1077,7 +1078,7 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
                 )
                 .with_extra_event_types([lash_core::ProcessEventType {
                     name: "structural.note".to_string(),
-                    payload_schema: lash_core::LashSchema::any(),
+                    payload_schema: lash_core::JsonSchema::any(),
                     semantics: lash_core::ProcessEventSemanticsSpec::default(),
                 }]),
             )
@@ -1722,6 +1723,7 @@ impl RawClientDirectProvider {
             lash_core::ToolDefinition::default_input_schema(),
             serde_json::json!({"type": "string"}),
         )
+        .expect("valid declared tool schemas")
     }
 }
 

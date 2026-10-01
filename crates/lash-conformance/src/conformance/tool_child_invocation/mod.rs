@@ -351,6 +351,10 @@ impl LawObservation {
 /// One definition per leaf lane, plus the retry policy the retry leaf needs.
 /// It is the catalog a law opener dispatches against, and so the surface it
 /// records for its children (FIG-3712).
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn leaf_definitions() -> Vec<crate::ToolDefinition> {
     [
         LEAF_PLAIN,
@@ -381,7 +385,8 @@ fn leaf_definitions() -> Vec<crate::ToolDefinition> {
             format!("conformance leaf {name}"),
             crate::ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "object", "additionalProperties": true }),
-        );
+        )
+        .expect("valid declared tool schemas");
         if id == LEAF_RETRY || id == LEAF_BILLED {
             definition = definition.with_retry_policy(crate::ToolRetryPolicy::safe(3, 0, 0));
         }
@@ -1776,7 +1781,7 @@ async fn register_intent_target(
                 ["law.intent-event", "signal.law_intent_signal"].map(|name| {
                     crate::ProcessEventType {
                         name: name.to_string(),
-                        payload_schema: crate::LashSchema::any(),
+                        payload_schema: crate::JsonSchema::any(),
                         semantics: crate::ProcessEventSemanticsSpec::default(),
                     }
                 }),

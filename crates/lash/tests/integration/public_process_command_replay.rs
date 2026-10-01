@@ -334,7 +334,7 @@ async fn law(kind: StorageKind, method: Method, live: bool) {
             )
             .with_extra_event_types([lash_core::ProcessEventType {
                 name: "signal.ready".into(),
-                payload_schema: lash_core::LashSchema::any(),
+                payload_schema: lash_core::JsonSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec::default(),
             }]),
         )

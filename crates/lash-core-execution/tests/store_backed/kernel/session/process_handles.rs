@@ -262,6 +262,7 @@ mod tests {
             }),
             serde_json::json!({ "type": "object", "additionalProperties": true }),
         )
+        .expect("valid declared tool schemas")
     }
 
     #[async_trait::async_trait]
@@ -324,7 +325,7 @@ mod tests {
                 )
                 .with_extra_event_types([crate::ProcessEventType {
                     name: "signal.ready".to_string(),
-                    payload_schema: crate::LashSchema::any(),
+                    payload_schema: crate::JsonSchema::any(),
                     semantics: crate::ProcessEventSemanticsSpec::default(),
                 }]),
             )
@@ -627,7 +628,7 @@ mod tests {
                 )
                 .with_extra_event_types([crate::ProcessEventType {
                     name: "signal.ready".to_string(),
-                    payload_schema: crate::LashSchema::any(),
+                    payload_schema: crate::JsonSchema::any(),
                     semantics: crate::ProcessEventSemanticsSpec::default(),
                 }]),
             )
@@ -765,7 +766,7 @@ mod tests {
             if label == "local-signal" {
                 registration = registration.with_extra_event_types([crate::ProcessEventType {
                     name: "signal.ready".to_string(),
-                    payload_schema: crate::LashSchema::any(),
+                    payload_schema: crate::JsonSchema::any(),
                     semantics: crate::ProcessEventSemanticsSpec::default(),
                 }]);
             }

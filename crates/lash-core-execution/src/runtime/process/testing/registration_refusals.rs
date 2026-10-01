@@ -54,7 +54,7 @@ fn with_event_type(event_type: ProcessEventType) -> ProcessRegistration {
 fn custom_event_type(name: &str, semantics: ProcessEventSemanticsSpec) -> ProcessEventType {
     ProcessEventType {
         name: name.to_string(),
-        payload_schema: crate::LashSchema::any(),
+        payload_schema: crate::JsonSchema::any(),
         semantics,
     }
 }
@@ -151,7 +151,9 @@ pub fn refused_process_registrations(rule: ProcessRegistrationRefusal) -> Vec<Pr
                 .iter_mut()
                 .find(|event_type| event_type.name == "process.waiting")
                 .expect("the default event types declare `process.waiting`");
-            declared.payload_schema = crate::LashSchema::new(serde_json::json!({"type": "object"}));
+            declared.payload_schema =
+                crate::JsonSchema::admit(serde_json::json!({"type": "object"}))
+                    .expect("valid declared payload schema");
             vec![registration]
         }
         ProcessRegistrationRefusal::TerminalEventWithoutAwaitOutput => {

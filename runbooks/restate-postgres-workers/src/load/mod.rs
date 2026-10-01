@@ -446,8 +446,12 @@ fn load_cron_tick_event_type() -> lash::rlm::NamedDataType {
     .expect("valid load cron payload type")
 }
 
-fn load_cron_tick_payload_schema() -> lash::triggers::LashSchema {
-    lash::triggers::LashSchema::new(serde_json::json!({
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
+fn load_cron_tick_payload_schema() -> lash::triggers::JsonSchema {
+    lash::triggers::JsonSchema::admit(serde_json::json!({
         "type": "object",
         "properties": {
             "schedule": { "type": "string" },
@@ -456,6 +460,7 @@ fn load_cron_tick_payload_schema() -> lash::triggers::LashSchema {
         "required": ["schedule", "tick"],
         "additionalProperties": false
     }))
+    .expect("valid declared payload schema")
 }
 
 /// Declare the `load.cron.tick({schedule})` trigger source cells register on.

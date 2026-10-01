@@ -130,6 +130,11 @@ impl PluginSession {
             contributions,
         })
         .map_err(|err| match err {
+            source @ lash_sansio::ToolCatalogBuildError::UnusableSchema { .. } => {
+                PluginError::UnusableToolSchema {
+                    source: Box::new(source),
+                }
+            }
             lash_sansio::ToolCatalogBuildError::MissingContract { tool_id, name } => {
                 PluginError::ResidentToolContractUnavailable { tool_id, name }
             }

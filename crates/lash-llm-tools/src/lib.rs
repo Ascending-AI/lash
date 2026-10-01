@@ -44,6 +44,21 @@ impl PluginFactory for LlmToolsPluginFactory {
     }
 }
 
+#[derive(Debug)]
+enum LlmQueryError {
+    Message(String),
+    Failure(Box<lash_core::ToolFailure>),
+}
+impl From<String> for LlmQueryError {
+    fn from(message: String) -> Self {
+        Self::Message(message)
+    }
+}
+impl From<lash_core::ToolFailure> for LlmQueryError {
+    fn from(failure: lash_core::ToolFailure) -> Self {
+        Self::Failure(Box::new(failure))
+    }
+}
 pub struct LlmToolsProvider;
 
 pub fn llm_query_provider() -> StaticToolProvider<LlmToolsProvider> {
@@ -51,7 +66,11 @@ pub fn llm_query_provider() -> StaticToolProvider<LlmToolsProvider> {
 }
 
 impl LlmToolsProvider {
-    async fn llm_query(&self, args: &Value, context: &AttemptContext<'_>) -> Result<Value, String> {
+    async fn llm_query(
+        &self,
+        args: &Value,
+        context: &AttemptContext<'_>,
+    ) -> Result<Value, LlmQueryError> {
         let task = required_string(args, "task")?;
         let inputs = args.get("inputs").cloned().unwrap_or(Value::Null);
         let output_schema = lash_sansio::schema_contract::parse_output_schema(args.get("output"))
@@ -64,12 +83,20 @@ impl LlmToolsProvider {
         // The sub-question runs on the session's behalf, so it carries the
         // session's sampling intent rather than provider defaults.
         let generation = session_model.generation;
-        let response_schema = llm_query_response_schema(output_schema.as_ref());
+        let response_schema =
+            lash_sansio::JsonSchema::admit(llm_query_response_schema(output_schema.as_ref()))
+                .map_err(|source| {
+                    lash_core::ToolFailure::invalid_request(
+                        "unusable_output_schema",
+                        source.to_string(),
+                    )
+                    .with_cause(lash_core::ToolFailureCause::SchemaAdmission { source })
+                })?;
         let prompt = llm_query_prompt(&task, &inputs, output_schema.as_ref());
 
         let output = DirectOutputSpec::JsonSchema(DirectJsonSchema {
             name: "llm_query_result".to_string(),
-            schema: response_schema.clone().into(),
+            schema: lash_sansio::SchemaContract::new(response_schema.clone()),
             strict: true,
         });
 
@@ -107,7 +134,35 @@ impl LlmToolsProvider {
                 "llm_query",
             )
             .await
-            .map_err(|err| format!("llm_query failed: {err}"))?;
+            .map_err(|error| -> LlmQueryError {
+                if let PluginError::ValueMismatch { source, .. } = error {
+                    lash_core::ToolFailure::tool(
+                        lash_core::ToolFailureClass::External,
+                        "invalid_llm_response",
+                        source.to_string(),
+                    )
+                    .with_cause(lash_core::ToolFailureCause::ValueMismatch { source: *source })
+                    .into()
+                } else if let PluginError::UnusableSchema { source } = error {
+                    lash_core::ToolFailure::tool(
+                        lash_core::ToolFailureClass::Internal,
+                        "unusable_output_schema",
+                        source.to_string(),
+                    )
+                    .with_cause(lash_core::ToolFailureCause::SchemaAdmission { source: *source })
+                    .into()
+                } else if let PluginError::UnusableToolSchema { source } = error {
+                    lash_core::ToolFailure::tool(
+                        lash_core::ToolFailureClass::Internal,
+                        "unusable_tool_schema",
+                        source.to_string(),
+                    )
+                    .with_cause(lash_core::ToolFailureCause::ToolSchemaAdmission { source })
+                    .into()
+                } else {
+                    LlmQueryError::Message(format!("llm_query failed: {error}"))
+                }
+            })?;
 
         parse_llm_query_result(&completion.text, &response_schema)
     }
@@ -118,12 +173,23 @@ impl StaticToolExecute for LlmToolsProvider {
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let result = match call.name() {
             "llm_query" => self.llm_query(call.args, call.context).await,
-            _ => Err(format!("Unknown tool: {}", call.name())),
+            _ => Err(LlmQueryError::Message(format!(
+                "Unknown tool: {}",
+                call.name()
+            ))),
         };
-        finalise_tool_result(result).into()
+        match result {
+            Ok(value) => ToolOutcome::ok(value).into(),
+            Err(LlmQueryError::Message(message)) => ToolOutcome::err(json!(message)).into(),
+            Err(LlmQueryError::Failure(failure)) => ToolOutcome::failure(*failure).into(),
+        }
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the output default is this tool's fixed string schema"
+)]
 pub fn llm_query_tool_definition() -> ToolDefinition {
     tool_definition(
         "llm_query",
@@ -135,7 +201,13 @@ pub fn llm_query_tool_definition() -> ToolDefinition {
         ],
     )
     .with_tool_binding(ToolBinding::new(["llm"], "query"))
-    .with_output_from_input_schema("output", Some(json!({ "type": "string" })))
+    .with_output_from_input_schema(
+        "output",
+        Some(
+            lash_sansio::JsonSchema::admit(json!({ "type": "string" }))
+                .expect("valid output default schema"),
+        ),
+    )
 }
 
 fn llm_query_input_schema() -> Value {
@@ -195,10 +267,13 @@ fn llm_query_response_schema(output_schema: Option<&Value>) -> Value {
     })
 }
 
-fn parse_llm_query_result(text: &str, schema: &Value) -> Result<Value, String> {
+fn parse_llm_query_result(
+    text: &str,
+    schema: &lash_sansio::JsonSchema,
+) -> Result<Value, LlmQueryError> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
-        return Err("llm_query returned empty output".to_string());
+        return Err("llm_query returned empty output".to_string().into());
     }
     let value = serde_json::from_str::<Value>(trimmed).or_else(|err| {
         let Some(start) = trimmed.find(['{', '[', '"']) else {
@@ -213,20 +288,15 @@ fn parse_llm_query_result(text: &str, schema: &Value) -> Result<Value, String> {
         serde_json::from_str::<Value>(&trimmed[start..=end])
             .map_err(|parse_err| format!("llm_query returned malformed JSON output: {parse_err}"))
     })?;
-    let compiled = jsonschema::options()
-        .with_draft(jsonschema::Draft::Draft7.detect(schema))
-        .should_validate_formats(true)
-        .build(schema)
-        .map_err(|err| format!("llm_query output schema is invalid: {err}"))?;
-    if !compiled.is_valid(&value) {
-        let errors = compiled.iter_errors(&value);
-        let message = errors
-            .map(|err| err.to_string())
-            .collect::<Vec<_>>()
-            .join("; ");
-        return Err(format!("llm_query output did not match schema: {message}"));
-    }
-    match value.get("kind").and_then(Value::as_str) {
+    schema.validate(&value).map_err(|source| {
+        lash_core::ToolFailure::tool(
+            lash_core::ToolFailureClass::External,
+            "invalid_llm_response",
+            format!("llm_query output did not match schema: {source}"),
+        )
+        .with_cause(lash_core::ToolFailureCause::ValueMismatch { source })
+    })?;
+    let result: Result<Value, String> = match value.get("kind").and_then(Value::as_str) {
         Some("value") => value
             .get("value")
             .cloned()
@@ -241,9 +311,14 @@ fn parse_llm_query_result(text: &str, schema: &Value) -> Result<Value, String> {
             .to_string()),
         Some(other) => Err(format!("llm_query returned unknown result kind `{other}`")),
         None => Err("llm_query returned result without kind field".to_string()),
-    }
+    };
+    result.map_err(LlmQueryError::Message)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn tool_definition(
     name: &str,
     description: impl Into<String>,
@@ -257,6 +332,7 @@ fn tool_definition(
         input_schema,
         json!({ "type": "object", "additionalProperties": true }),
     )
+    .expect("valid declared tool schemas")
     .with_examples(examples)
 }
 
@@ -267,13 +343,6 @@ fn required_string(args: &Value, key: &str) -> Result<String, String> {
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
         .ok_or_else(|| format!("missing required parameter: {key}"))
-}
-
-fn finalise_tool_result(result: Result<Value, String>) -> ToolOutcome {
-    match result {
-        Ok(value) => ToolOutcome::ok(value),
-        Err(err) => ToolOutcome::err(json!(err)),
-    }
 }
 
 #[cfg(test)]
@@ -415,7 +484,10 @@ mod tests {
                 "count": { "type": "integer" }
             }
         });
-        let schema = serde_json::json!({ "type": "object", "properties": { "value": output } });
+        let schema = lash_sansio::JsonSchema::admit(
+            serde_json::json!({ "type": "object", "properties": { "value": output } }),
+        )
+        .expect("valid result schema");
         let valid = serde_json::json!({ "email": "sam@example.com", "count": 1 });
         assert_eq!(
             parse_llm_query_result(
@@ -430,6 +502,14 @@ mod tests {
             &schema,
         )
         .unwrap_err();
+        let LlmQueryError::Failure(failure) = error else {
+            panic!("typed value mismatch expected")
+        };
+        assert!(matches!(
+            failure.cause.as_deref(),
+            Some(lash_core::ToolFailureCause::ValueMismatch { .. })
+        ));
+        let error = failure.message;
         assert!(error.contains("schema"), "{error}");
         assert!(error.contains("email"), "{error}");
         assert!(error.contains("integer"), "{error}");

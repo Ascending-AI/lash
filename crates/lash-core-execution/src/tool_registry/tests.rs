@@ -45,6 +45,7 @@ fn test_tool(name: &str, description: &str) -> ToolDefinition {
         ToolDefinition::default_input_schema(),
         json!({ "type": "string" }),
     )
+    .expect("valid declared tool schemas")
 }
 
 fn tool_id(name: &str) -> crate::ToolId {
@@ -289,25 +290,8 @@ impl ToolSourceExecutor for ExternalMockSource {
     }
 
     fn advertised_tools(&self) -> Vec<ToolManifest> {
-        manifests(vec![ToolDefinition::raw(
-            "tool:mcp__demo__search",
-            "mcp__demo__search",
-            "search",
-            json!({
-                "type": "object",
-                "properties": {
-                    "query": { "type": "string" }
-                },
-                "required": ["query"],
-                "additionalProperties": false
-            }),
-            json!({ "type": "object", "additionalProperties": true }),
-        )])
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
-        contract_from(
-            vec![ToolDefinition::raw(
+        manifests(vec![
+            ToolDefinition::raw(
                 "tool:mcp__demo__search",
                 "mcp__demo__search",
                 "search",
@@ -320,7 +304,30 @@ impl ToolSourceExecutor for ExternalMockSource {
                     "additionalProperties": false
                 }),
                 json!({ "type": "object", "additionalProperties": true }),
-            )],
+            )
+            .expect("valid declared tool schemas"),
+        ])
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+        contract_from(
+            vec![
+                ToolDefinition::raw(
+                    "tool:mcp__demo__search",
+                    "mcp__demo__search",
+                    "search",
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "query": { "type": "string" }
+                        },
+                        "required": ["query"],
+                        "additionalProperties": false
+                    }),
+                    json!({ "type": "object", "additionalProperties": true }),
+                )
+                .expect("valid declared tool schemas"),
+            ],
             name,
         )
     }
@@ -635,13 +642,16 @@ fn indexed_contract_lookup_does_not_cross_identity_after_name_drift() {
         }
     }
 
-    let definitions = Arc::new(std::sync::Mutex::new(vec![ToolDefinition::raw(
-        "tool:stable-id",
-        "search",
-        "original search",
-        json!({ "type": "object", "properties": { "query": { "type": "string" } } }),
-        json!({ "type": "string" }),
-    )]));
+    let definitions = Arc::new(std::sync::Mutex::new(vec![
+        ToolDefinition::raw(
+            "tool:stable-id",
+            "search",
+            "original search",
+            json!({ "type": "object", "properties": { "query": { "type": "string" } } }),
+            json!({ "type": "string" }),
+        )
+        .expect("valid declared tool schemas"),
+    ]));
     let registry = ToolRegistry::from_tool_providers(vec![Arc::new(DriftingProvider {
         definitions: Arc::clone(&definitions),
     })])
@@ -653,14 +663,16 @@ fn indexed_contract_lookup_does_not_cross_identity_after_name_drift() {
         "same id with a new name",
         json!({ "type": "object", "properties": { "needle": { "type": "integer" } } }),
         json!({ "type": "integer" }),
-    );
+    )
+    .expect("valid declared tool schemas");
     let reused_name = ToolDefinition::raw(
         "tool:different-id",
         "search",
         "old name reassigned to another id",
         json!({ "type": "object", "properties": { "query": { "type": "boolean" } } }),
         json!({ "type": "boolean" }),
-    );
+    )
+    .expect("valid declared tool schemas");
     *definitions.lock_recover() = vec![reassigned_id.clone(), reused_name.clone()];
 
     let actual = registry
@@ -1308,6 +1320,7 @@ async fn execution_grant_routes_multi_provider_source_by_id_not_name() {
                 ToolDefinition::default_input_schema(),
                 json!({ "type": "string" }),
             )
+            .expect("valid declared tool schemas")
         }
     }
 
@@ -1348,13 +1361,16 @@ async fn execution_grant_routes_multi_provider_source_by_id_not_name() {
     let registry = registry
         .compose_session_catalog(Vec::new())
         .expect("resident snapshot keeps hidden providers out of its admitted source");
-    let grant = crate::ToolExecutionGrant::from_definition(ToolDefinition::raw(
-        "tool:hidden_zeta",
-        "shared_hidden_name",
-        "grant selects the second hidden provider by id",
-        ToolDefinition::default_input_schema(),
-        json!({ "type": "string" }),
-    ))
+    let grant = crate::ToolExecutionGrant::from_definition(
+        ToolDefinition::raw(
+            "tool:hidden_zeta",
+            "shared_hidden_name",
+            "grant selects the second hidden provider by id",
+            ToolDefinition::default_input_schema(),
+            json!({ "type": "string" }),
+        )
+        .expect("valid declared tool schemas"),
+    )
     .with_source_id(crate::PLUGIN_TOOL_SOURCE_ID);
 
     let context = crate::testing::mock_attempt_context_from(
@@ -1634,6 +1650,7 @@ fn unadmitted_alias_lookup_does_not_fall_through_to_source() {
                     ToolDefinition::default_input_schema(),
                     json!({ "type": "string" }),
                 )
+                .expect("valid declared tool schemas")
                 .manifest()
             })
         }

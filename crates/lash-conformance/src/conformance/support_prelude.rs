@@ -17,7 +17,7 @@ pub(crate) use crate::{
 };
 pub(crate) use crate::{AttachmentStore, AttachmentStoreError, AttachmentStorePersistence};
 pub(crate) use crate::{
-    CausalRef, LashSchema, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
+    CausalRef, JsonSchema, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
     ProcessCompletionAuthority, ProcessEventAppendRequest, ProcessEventSemanticsSpec,
     ProcessEventType, ProcessExecutionEnvRef, ProcessIdentity, ProcessInput, ProcessListFilter,
     ProcessLiveReferenceView, ProcessOriginatorFilter, ProcessProvenance, ProcessRegistration,

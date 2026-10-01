@@ -107,11 +107,11 @@ fn request(model: &str, stream: bool, structured: bool) -> LlmRequest {
         output_spec: structured.then(|| {
             LlmOutputSpec::JsonSchema(LlmJsonSchema {
                 name: "answer".to_string(),
-                schema: json!({
+                schema: lash_sansio::SchemaContract::admit(json!({
                     "type": "object",
                     "properties": { "answer": { "type": "string" } }
-                })
-                .into(),
+                }))
+                .expect("valid declared schema"),
                 strict: true,
             })
         }),

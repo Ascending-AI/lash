@@ -164,6 +164,7 @@ impl BatchEnvelopeProbeTools {
             }),
             json!({ "type": "object" }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
             ["tools"],
             "envelope_probe",

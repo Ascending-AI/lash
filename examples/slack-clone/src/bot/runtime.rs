@@ -225,7 +225,7 @@ pub async fn build_core(
             status.server_name,
             status.health.is_connected(),
             status.tool_count,
-            status.health.error().unwrap_or("none")
+            status.health.error().unwrap_or_else(|| "none".into())
         );
     }
     // The bot runs one model: the registry keys it by its wire model, and

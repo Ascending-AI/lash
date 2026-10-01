@@ -225,18 +225,21 @@ fn into_result<T: Serialize>(output: &T) -> ToolOutcome {
     }
 }
 
+#[expect(clippy::expect_used, reason = "this fixture declares valid schemas")]
 pub fn workspace_tools(api: Arc<SlackApi>) -> Arc<dyn ToolProvider> {
     let definitions = vec![
         ToolDefinition::typed::<ListChannelsArgs, ListChannelsOutput>(
             "tool:slack_clone.list_channels",
             LIST_CHANNELS,
             "List the channels in this workspace, with their topics and member counts.",
-        ),
+        )
+        .expect("valid declared tool schemas"),
         ToolDefinition::typed::<ChannelHistoryArgs, ChannelHistoryOutput>(
             "tool:slack_clone.channel_history",
             CHANNEL_HISTORY,
             "Read recent messages from a channel by id or name, oldest first.",
-        ),
+        )
+        .expect("valid declared tool schemas"),
     ];
     Arc::new(StaticToolProvider::new(definitions, WorkspaceTools { api })) as Arc<dyn ToolProvider>
 }

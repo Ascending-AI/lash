@@ -230,18 +230,21 @@ fn llm_request_and_response_round_trip_owned_dtos() {
         tools: Arc::new(vec![core_llm::LlmToolSpec {
             name: "search".to_string(),
             description: "Search".to_string(),
-            input_schema: lash_core::SchemaContract::new(serde_json::json!({
+            input_schema: lash_core::SchemaContract::admit(serde_json::json!({
                 "type": "object",
                 "properties": { "raw": { "const": "x" } }
             }))
+            .expect("valid declared schema")
             .with_override(
                 lash_core::test_support::SchemaDialect::OPENAI_TOOL_PARAMETERS,
-                serde_json::json!({
+                lash_sansio::JsonSchema::admit(serde_json::json!({
                     "type": "object",
                     "properties": { "raw": { "type": "string", "enum": ["x"] } }
-                }),
+                }))
+                .expect("valid declared projection schema"),
             ),
-            output_schema: serde_json::Value::Null.into(),
+            output_schema: lash_sansio::SchemaContract::admit(serde_json::json!({}))
+                .expect("valid declared schema"),
         }]),
         tool_choice: core_llm::LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
@@ -732,7 +735,10 @@ fn process_start_requests_round_trip_core_values() {
             ),
             turn_input: Box::new(lash_core::TurnInput::text("hello child")),
             result: lash_core::SessionTurnOutcome::FinalValue {
-                schema: Some(serde_json::json!({ "type": "object" })),
+                schema: Some(
+                    lash_sansio::JsonSchema::admit(serde_json::json!({ "type": "object" }))
+                        .expect("valid final-value schema"),
+                ),
             },
         },
         lash_core::ProcessOriginator::host(),
@@ -905,6 +911,7 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
 #[test]
 fn process_await_wire_round_trip_preserves_failure_source_and_retry() {
     let failure = lash_core::ToolFailure {
+        cause: None,
         class: lash_core::ToolFailureClass::External,
         code: "plugin_busy".to_string(),
         message: "plugin asked the host to retry".to_string(),
@@ -924,6 +931,7 @@ fn process_await_wire_round_trip_preserves_failure_source_and_retry() {
         RemoteProcessAwaitOutput::Settled {
             output: RemoteProcessToolCallOutput {
                 outcome: RemoteProcessToolCallOutcome::Failure(RemoteProcessToolFailure {
+                    cause: None,
                     source: RemoteProcessToolFailureSource::Plugin,
                     retry: RemoteProcessToolRetryStatus::Safe { after_ms: Some(41) },
                     ..
@@ -2111,7 +2119,7 @@ fn trigger_subscription_draft() -> lash_core::TriggerSubscriptionDraft {
     lash_core::TriggerSubscriptionDraft {
         source_capture: lash_core::TriggerSourceCapture::provider(
             ["ui", "button"],
-            lash_core::LashSchema::any(),
+            lash_core::JsonSchema::any(),
             "ui-provider",
             serde_json::json!({"account": "a"}),
         ),
@@ -2124,7 +2132,7 @@ fn trigger_subscription_draft() -> lash_core::TriggerSubscriptionDraft {
         source_type: "ui.button.pressed".to_string(),
         source_key: "source-key".to_string(),
         source: serde_json::json!({ "button": "blue" }),
-        payload_schema: lash_core::LashSchema::any(),
+        payload_schema: lash_core::JsonSchema::any(),
         target: engine_process_input("on_button", serde_json::json!({})).into(),
         target_identity: engine_process_identity("on_button"),
         event_types: vec![process_event_type()],

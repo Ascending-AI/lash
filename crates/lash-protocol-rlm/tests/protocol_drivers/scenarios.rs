@@ -846,13 +846,16 @@ fn rlm_protocol_scenario_typed_schema_mismatch_loops_with_feedback() {
     let run = RlmProtocolScenario::new(TYPED_SCHEMA_MISMATCH_REPAIR.display_name)
         .user_message("return typed data")
         .termination(RlmTermination::FinishRequired {
-            schema: Some(serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "ok": { "type": "boolean" }
-                },
-                "required": ["ok"]
-            })),
+            schema: Some(
+                lash_sansio::JsonSchema::admit(serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "ok": { "type": "boolean" }
+                    },
+                    "required": ["ok"]
+                }))
+                .expect("declared result schema"),
+            ),
         })
         .llm_response(vec![text_part(&typescript_block(
             "finish({ missing: true });",
@@ -909,12 +912,15 @@ fn rlm_protocol_scenario_typed_schema_mismatch_checks_any_of() {
     RlmProtocolScenario::new(TYPED_SCHEMA_MISMATCH_ANY_OF.display_name)
         .user_message("return typed data")
         .termination(RlmTermination::FinishRequired {
-            schema: Some(serde_json::json!({
-                "anyOf": [
-                    { "type": "string" },
-                    { "type": "integer" }
-                ]
-            })),
+            schema: Some(
+                lash_sansio::JsonSchema::admit(serde_json::json!({
+                    "anyOf": [
+                        { "type": "string" },
+                        { "type": "integer" }
+                    ]
+                }))
+                .expect("declared result schema"),
+            ),
         })
         .llm_response(vec![text_part(&typescript_block("finish(true);"))])
         .exec_result(exec_response(&[], None, Some(serde_json::json!(true))))
@@ -927,7 +933,10 @@ fn rlm_protocol_scenario_typed_schema_mismatch_checks_any_of() {
                 output: Vec::new(),
                 outcome: lash_rlm_types::CellOutcome::Failed(program_failure(
                     "true is not valid under any of the schemas listed in the 'anyOf' keyword",
-                )),
+                ).with_value_mismatch(lash_sansio::ValueMismatch {
+                    instance_path: String::new(),
+                    message: "true is not valid under any of the schemas listed in the 'anyOf' keyword".into(),
+                })),
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -943,13 +952,16 @@ fn rlm_protocol_scenario_typed_schema_repair_survives_a_cell_checkpoint_boundary
     let run = RlmProtocolScenario::new(TYPED_SCHEMA_REPAIR_ACROSS_CELL_BOUNDARY.display_name)
         .user_message("return typed data")
         .termination(RlmTermination::FinishRequired {
-            schema: Some(serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "ok": { "type": "boolean" }
-                },
-                "required": ["ok"]
-            })),
+            schema: Some(
+                lash_sansio::JsonSchema::admit(serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "ok": { "type": "boolean" }
+                    },
+                    "required": ["ok"]
+                }))
+                .expect("declared result schema"),
+            ),
         })
         .llm_response(vec![text_part(&typescript_block(
             "finish({ missing: true });",
@@ -971,9 +983,14 @@ fn rlm_protocol_scenario_typed_schema_repair_survives_a_cell_checkpoint_boundary
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "finish({ missing: true });",
                 output: Vec::new(),
-                outcome: lash_rlm_types::CellOutcome::Failed(program_failure(
-                    "\"ok\" is a required property",
-                )),
+                outcome: lash_rlm_types::CellOutcome::Failed(
+                    program_failure("\"ok\" is a required property").with_value_mismatch(
+                        lash_sansio::ValueMismatch {
+                            instance_path: String::new(),
+                            message: "\"ok\" is a required property".into(),
+                        },
+                    ),
+                ),
             }),
             ..RlmProtocolExpectations::default()
         })

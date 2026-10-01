@@ -392,7 +392,7 @@ impl World {
                 )
                 .with_extra_event_types([lash_core::ProcessEventType {
                     name: format!("signal.{SIGNAL}"),
-                    payload_schema: lash_core::LashSchema::any(),
+                    payload_schema: lash_core::JsonSchema::any(),
                     semantics: lash_core::ProcessEventSemanticsSpec::default(),
                 }]),
                 std::slice::from_ref(&self.session_id),

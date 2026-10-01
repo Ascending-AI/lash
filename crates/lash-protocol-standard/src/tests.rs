@@ -286,6 +286,7 @@ pub(super) fn runtime_test_tool(name: &str) -> lash_core::ToolDefinition {
         }),
         serde_json::json!({ "type": "string" }),
     )
+    .expect("valid declared tool schemas")
 }
 
 #[async_trait::async_trait]

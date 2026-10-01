@@ -152,6 +152,7 @@ async fn assembled_prompt_fragments_with_projection(
         }),
         serde_json::json!({ "type": "string" }),
     )
+    .expect("valid declared tool schemas")
     .with_examples(vec![
         // Authored as Lashlang, like every example in the resident catalog.
         // Six of seven in the shipped catalog carry the try-operator, which is
@@ -196,6 +197,7 @@ async fn assembled_prompt_fragments_with_projection(
             }
         }),
     )
+    .expect("valid declared tool schemas")
     .with_examples(vec![
         r#"await processes.list({ status: "any" })?"#.to_string(),
     ])
@@ -245,6 +247,7 @@ async fn assembled_prompt_fragments_with_projection(
             "required": ["issues"]
         }),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
         ["tracker"],
         "issues_search",
@@ -395,7 +398,10 @@ async fn assembled_prompt_fragments_with_projection(
         "finalization (schema)",
         dialect.finalization_copy(
             &lash_rlm_types::RlmTermination::FinishRequired {
-                schema: Some(serde_json::json!({"type": "number"})),
+                schema: Some(
+                    lash_sansio::JsonSchema::admit(serde_json::json!({"type": "number"}))
+                        .expect("valid finish schema"),
+                ),
             },
             crate::plugin::RlmChannel::Cell,
         ),

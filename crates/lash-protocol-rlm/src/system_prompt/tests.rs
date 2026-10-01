@@ -27,6 +27,7 @@ fn tool(
         }),
         serde_json::json!({ "type": "string" }),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(ToolBinding::new([module], operation))
 }
 

@@ -356,8 +356,9 @@ mod tests {
             "Search",
             schema.clone(),
             json!({}),
-        );
-        assert_eq!(definition.contract.input_schema.canonical, schema);
+        )
+        .expect("valid declared tool schemas");
+        assert_eq!(definition.contract.input_schema.canonical(), &schema);
         assert_eq!(definition.parameter_metadata().len(), 3);
     }
 
@@ -497,6 +498,7 @@ mod tests {
                 .contract
                 .input_schema
                 .canonical
+                .as_value()
                 .get("properties")
                 .and_then(Value::as_object)
                 .and_then(|props| props.get("query"))
@@ -505,8 +507,9 @@ mod tests {
             Some(json!("string"))
         );
         assert_eq!(
-            defs[0].contract.output_schema.canonical["properties"]["structuredContent"],
+            defs[0].contract.output_schema.canonical.as_value()["properties"]["structuredContent"],
             json!({
+                "$id": "urn:lash:mcp:structured-content",
                 "type": "object",
                 "properties": {
                     "matches": { "type": "array" }
@@ -515,7 +518,7 @@ mod tests {
             })
         );
         assert_eq!(
-            defs[0].contract.output_schema.canonical["properties"]["content"]["type"],
+            defs[0].contract.output_schema.canonical.as_value()["properties"]["content"]["type"],
             json!("array")
         );
 

@@ -87,6 +87,7 @@ fn probe_tool(name: &str) -> crate::ToolDefinition {
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "string" }),
     )
+    .expect("valid declared tool schemas")
 }
 
 /// A leaf that never parks: it blocks inside its own attempt and then returns a

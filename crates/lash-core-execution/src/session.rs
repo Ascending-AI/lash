@@ -969,6 +969,7 @@ mod tool_catalog_cache_tests {
                 }),
                 serde_json::json!({ "type": "string" }),
             )
+            .expect("valid declared tool schemas")
         }
     }
 
@@ -1038,6 +1039,7 @@ mod tool_catalog_cache_tests {
                 crate::ToolDefinition::default_input_schema(),
                 serde_json::json!({ "type": "string" }),
             )
+            .expect("valid declared tool schemas")
         }
     }
 
@@ -1055,6 +1057,7 @@ mod tool_catalog_cache_tests {
                 }),
                 serde_json::json!({ "type": "string" }),
             )
+            .expect("valid declared tool schemas")
         }
     }
 
@@ -1132,7 +1135,8 @@ mod tool_catalog_cache_tests {
             "authority-defined tool",
             crate::ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "string" }),
-        )])
+        )
+        .expect("valid declared tool schemas")])
         .expect("valid restricted definition");
 
         assert_ne!(
@@ -1531,7 +1535,8 @@ mod tool_catalog_cache_tests {
                 "additionalProperties": false
             }),
             serde_json::json!({ "type": "string" }),
-        );
+        )
+        .expect("valid declared tool schemas");
         let renamed_surface = session
             .pin_tool_surface(
                 &crate::SessionToolAccess::restricted([renamed])
@@ -1556,7 +1561,8 @@ mod tool_catalog_cache_tests {
             "no resident execution route",
             crate::ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "string" }),
-        );
+        )
+        .expect("valid declared tool schemas");
         let error = match session.pin_tool_surface(
             &crate::SessionToolAccess::restricted([missing]).expect("valid restricted definition"),
             None,
@@ -1581,7 +1587,8 @@ mod tool_catalog_cache_tests {
             "no resident execution route",
             crate::ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "string" }),
-        );
+        )
+        .expect("valid declared tool schemas");
         let plugins = admission_probe_plugins(
             Arc::new(AdmissionProbeProvider {
                 contract_available: true,

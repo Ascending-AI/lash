@@ -50,6 +50,10 @@ struct SwitchTool {
     executed: Arc<AtomicUsize>,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn switch_tool() -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         format!("tool:{SWITCH_TOOL}"),
@@ -58,6 +62,7 @@ fn switch_tool() -> crate::ToolDefinition {
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({"type": "object", "additionalProperties": true}),
     )
+    .expect("valid declared tool schemas")
 }
 
 #[async_trait::async_trait]

@@ -38,6 +38,22 @@ fn cancel(actor: &str) -> Box<crate::CancelRequest> {
 }
 
 plugin_error_samples! {
+    UnusableSchema { .. } => PluginError::UnusableSchema {
+        source: Box::new(crate::JsonSchema::admit(serde_json::Value::Null)
+            .expect_err("null cannot be admitted as a schema")),
+    },
+    UnusableToolSchema { .. } => PluginError::UnusableToolSchema {
+        source: Box::new(crate::ToolDefinition::raw(
+            "sampled", "sampled", "sampled", serde_json::Value::Null, serde_json::json!({}),
+        ).expect_err("a tool cannot publish an unusable schema")),
+    },
+    ValueMismatch { .. } => PluginError::ValueMismatch {
+        context: "payload".into(),
+        source: Box::new(crate::ValueMismatch {
+            instance_path: "/count".into(),
+            message: "integer required".into(),
+        }),
+    },
     MissingRecordedProcessConfig { .. } => PluginError::MissingRecordedProcessConfig {
         engine_kind: "sampled".to_string(),
     },

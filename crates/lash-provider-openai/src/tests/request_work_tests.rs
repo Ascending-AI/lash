@@ -134,7 +134,10 @@ fn request_work_budget_rejects_large_field_before_json_writer() {
     schema.tools = Arc::new(vec![LlmToolSpec {
         name: "tool".into(),
         description: String::new(),
-        input_schema: json!({"properties": {"field": {"description": large}}}).into(),
+        input_schema: lash_sansio::SchemaContract::admit(
+            json!({"properties": {"field": {"description": large}}}),
+        )
+        .expect("valid declared schema"),
         output_schema: Default::default(),
     }]);
     let inline = request(vec![LlmMessage::new(

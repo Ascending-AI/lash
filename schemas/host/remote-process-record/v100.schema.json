@@ -324,6 +324,25 @@
         }
       ]
     },
+    "InvalidSchemaKind": {
+      "enum": [
+        "null",
+        "number",
+        "string",
+        "array"
+      ],
+      "type": "string"
+    },
+    "JsonSchema": {
+      "anyOf": [
+        {
+          "type": "object"
+        },
+        {
+          "type": "boolean"
+        }
+      ]
+    },
     "ModuleArtifactAstRefusal": {
       "description": "Owned validation evidence suitable for a worker response or a durable journal.",
       "oneOf": [
@@ -1375,7 +1394,8 @@
           "type": "string"
         },
         "payload_schema": {
-          "default": null
+          "$ref": "#/$defs/JsonSchema",
+          "default": {}
         },
         "semantics": {
           "$ref": "#/$defs/RemoteProcessEventSemanticsSpec",
@@ -1968,6 +1988,16 @@
     },
     "RemoteProcessToolFailure": {
       "properties": {
+        "cause": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolFailureCause"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "class": {
           "$ref": "#/$defs/RemoteToolFailureClass"
         },
@@ -2284,7 +2314,16 @@
               "const": "final_value",
               "type": "string"
             },
-            "schema": true
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/JsonSchema"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
           },
           "required": [
             "kind"
@@ -2334,6 +2373,227 @@
         }
       },
       "type": "object"
+    },
+    "SchemaAdmissionError": {
+      "oneOf": [
+        {
+          "properties": {
+            "actual": {
+              "$ref": "#/$defs/InvalidSchemaKind"
+            },
+            "kind": {
+              "const": "invalid_kind",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "actual"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "compilation",
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "schema_path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "schema_path",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "non_local_reference",
+              "type": "string"
+            },
+            "reference": {
+              "type": "string"
+            },
+            "schema_path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "schema_path",
+            "reference"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "SchemaPurpose": {
+      "enum": [
+        "tool_input",
+        "tool_output",
+        "structured_output",
+        "prompt_schema"
+      ],
+      "type": "string"
+    },
+    "ToolCatalogBuildError": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "UnusableSchema": {
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "purpose": {
+                  "$ref": "#/$defs/SchemaPurpose"
+                },
+                "source": {
+                  "$ref": "#/$defs/SchemaAdmissionError"
+                },
+                "tool_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tool_id",
+                "name",
+                "purpose",
+                "source"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "UnusableSchema"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "MissingContract": {
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "tool_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tool_id",
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "MissingContract"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "DuplicateId": {
+              "properties": {
+                "tool_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tool_id"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "DuplicateId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "DuplicateName": {
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "DuplicateName"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ToolFailureCause": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "tool_schema_admission",
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/$defs/ToolCatalogBuildError"
+            }
+          },
+          "required": [
+            "kind",
+            "source"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "schema_admission",
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/$defs/SchemaAdmissionError"
+            }
+          },
+          "required": [
+            "kind",
+            "source"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "value_mismatch",
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/$defs/ValueMismatch"
+            }
+          },
+          "required": [
+            "kind",
+            "source"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "ToolView": {
       "additionalProperties": false,
@@ -2453,6 +2713,21 @@
           ]
         }
       },
+      "type": "object"
+    },
+    "ValueMismatch": {
+      "properties": {
+        "instance_path": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "instance_path",
+        "message"
+      ],
       "type": "object"
     }
   },

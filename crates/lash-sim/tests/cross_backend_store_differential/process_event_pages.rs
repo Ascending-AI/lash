@@ -73,7 +73,7 @@ pub(super) async fn compare_bounded_process_event_pages(
         )
         .with_extra_event_types([lash_core::ProcessEventType {
             name: "page.event".to_string(),
-            payload_schema: lash_core::LashSchema::any(),
+            payload_schema: lash_core::JsonSchema::any(),
             semantics: lash_core::ProcessEventSemanticsSpec::default(),
         }])
     };

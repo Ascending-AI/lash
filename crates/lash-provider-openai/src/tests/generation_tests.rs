@@ -139,14 +139,19 @@ fn sampling_controls_do_not_disturb_the_rest_of_the_chat_body() {
     req.model = "anthropic/claude-sonnet-4.6".to_string();
     req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
         name: "answer".to_string(),
-        schema: json!({ "type": "object", "properties": {} }).into(),
+        schema: lash_sansio::SchemaContract::admit(json!({ "type": "object", "properties": {} }))
+            .expect("valid declared schema"),
         strict: true,
     }));
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "lookup".to_string(),
         description: "look something up".to_string(),
-        input_schema: json!({ "type": "object", "properties": {} }).into(),
-        output_schema: json!({}).into(),
+        input_schema: lash_sansio::SchemaContract::admit(
+            json!({ "type": "object", "properties": {} }),
+        )
+        .expect("valid declared schema"),
+        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+            .expect("valid declared schema"),
     }]);
     req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
     req.llm_profile_capability = LlmProfileCapability {
@@ -292,8 +297,12 @@ fn tool(name: &str) -> LlmToolSpec {
     LlmToolSpec {
         name: name.to_string(),
         description: name.to_string(),
-        input_schema: json!({ "type": "object", "properties": {} }).into(),
-        output_schema: json!({}).into(),
+        input_schema: lash_sansio::SchemaContract::admit(
+            json!({ "type": "object", "properties": {} }),
+        )
+        .expect("valid declared schema"),
+        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+            .expect("valid declared schema"),
     }
 }
 

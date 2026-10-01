@@ -16,7 +16,6 @@ use lash_core::{
     SessionStartPoint, SessionToolAccess, SubagentSessionContext, facade_support::SessionSpec,
 };
 use lash_rlm_types::RlmTermination;
-use serde_json::Value;
 
 const RECURSIVE_SUBAGENT_TOOL: &str = "spawn_agent";
 
@@ -65,7 +64,7 @@ pub struct SubagentSpawnContext<'a> {
     /// tool catalog is a subset of the parent's effective catalog.
     pub base_tool_access: &'a SessionToolAccess,
     pub final_answer_format: lash_rlm_types::RlmFinalAnswerFormat,
-    pub output_schema: Option<Value>,
+    pub output_schema: Option<lash_sansio::JsonSchema>,
     pub seed: lash_protocol_rlm::RlmSeed,
     pub parent_subagent: Option<&'a SubagentSessionContext>,
     pub caused_by: Option<CausalRef>,

@@ -82,6 +82,7 @@ fn tool_argument_projection_policy_resolves_from_active_catalog_and_defaults_unk
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "string" }),
     )
+    .expect("valid declared tool schemas")
     .with_argument_projection(
         crate::ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed"),
     );

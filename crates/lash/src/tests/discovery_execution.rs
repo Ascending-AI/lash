@@ -14,6 +14,7 @@ fn definition(name: &str) -> lash_core::ToolDefinition {
         serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
         serde_json::json!({"type":"string"}),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["tools"], name));
     tool.manifest.inline = name != "hidden";
     tool

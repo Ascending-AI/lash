@@ -956,7 +956,7 @@ pub struct RlmDiagnosticEvent {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RlmTermination {
     FinishRequired {
-        schema: Option<serde_json::Value>,
+        schema: Option<lash_sansio::JsonSchema>,
     },
     #[default]
     Natural,

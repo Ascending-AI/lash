@@ -14,6 +14,10 @@ struct SignalIntentProvider {
     calls: Arc<AtomicUsize>,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn signal_intent_tool() -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         "tool:conformance_signal_intent",
@@ -22,6 +26,7 @@ fn signal_intent_tool() -> crate::ToolDefinition {
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({"type": "object", "additionalProperties": true}),
     )
+    .expect("valid declared tool schemas")
 }
 
 #[async_trait::async_trait]
@@ -84,7 +89,7 @@ pub async fn public_signal_intent_wakes_parked_process(
             )
             .with_extra_event_types([crate::ProcessEventType {
                 name: "signal.resume".to_string(),
-                payload_schema: crate::LashSchema::any(),
+                payload_schema: crate::JsonSchema::any(),
                 semantics: crate::ProcessEventSemanticsSpec::default(),
             }]),
             std::slice::from_ref(&session_id),

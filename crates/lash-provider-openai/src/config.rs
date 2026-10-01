@@ -94,8 +94,6 @@ pub struct OpenAiCompat {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_cache_retention: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub strict_tools: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub store: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub streaming_usage: Option<bool>,
@@ -173,7 +171,6 @@ pub(crate) struct OpenAiResolvedCompat {
     pub(crate) cache_session_affinity: bool,
     pub(crate) prompt_cache_key: bool,
     pub(crate) prompt_cache_retention: bool,
-    pub(crate) strict_tools: bool,
     pub(crate) store: bool,
     pub(crate) streaming_usage: bool,
     pub(crate) schema_capabilities: ProviderSchemaCapabilities,
@@ -212,13 +209,11 @@ impl OpenAiCompatibleProvider {
             cache_session_affinity: false,
             prompt_cache_key: false,
             prompt_cache_retention: false,
-            strict_tools: false,
             store: true,
             streaming_usage: true,
             schema_capabilities: ProviderSchemaCapabilities::openai(false),
             provider_routing: None,
         };
-        let strict_tools = self.compat.strict_tools.unwrap_or(defaults.strict_tools);
         OpenAiResolvedCompat {
             stream_termination: self
                 .compat
@@ -245,7 +240,6 @@ impl OpenAiCompatibleProvider {
                 .compat
                 .prompt_cache_retention
                 .unwrap_or(defaults.prompt_cache_retention),
-            strict_tools,
             store: self.compat.store.unwrap_or(defaults.store),
             streaming_usage: self
                 .compat
@@ -255,7 +249,7 @@ impl OpenAiCompatibleProvider {
                 .compat
                 .schema_capabilities
                 .clone()
-                .unwrap_or_else(|| ProviderSchemaCapabilities::openai(strict_tools)),
+                .unwrap_or(defaults.schema_capabilities),
             provider_routing: self
                 .compat
                 .provider_routing

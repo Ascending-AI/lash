@@ -537,6 +537,11 @@ pub mod runtime_ops {
                 })
                 .await
                 .map_err(|error| match error {
+                    PoolError::Infrastructure(
+                        lash_vm_protocol::InfrastructureOutcome::RunRefused {
+                            refusal: lash_vm_protocol::RunRefusal::UnusableSchema { source },
+                        },
+                    ) => lash_core_execution::ArtifactStoreError::UnusableSchema { source },
                     PoolError::CheckoutTimedOut => {
                         lash_core_execution::ArtifactStoreError::WorkerCheckoutTimedOut
                     }

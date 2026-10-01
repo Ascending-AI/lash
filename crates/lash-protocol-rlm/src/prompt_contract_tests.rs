@@ -16,7 +16,7 @@ fn catalog_definitions() -> Vec<lash_core::ToolDefinition> {
             lash_core::ToolDefinition::raw(format!("tool:probe{index}"), format!("probe{index}"),
                 "Return a STRING containing record-looking text, not a structured record.",
                 serde_json::json!({"type":"object","properties":{"id":{"type":"string","description":"Record identifier"}},"required":["id"]}),
-                serde_json::json!({"type":"string"}))
+                serde_json::json!({"type":"string"})).expect("valid declared tool schemas")
                 .with_tool_binding(ToolBinding::new(["probe"], format!("op{index}")))
         })).collect()
 }
@@ -45,6 +45,7 @@ fn process_catalog() -> lash_core::ToolCatalog {
                 "additionalProperties": false
             }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["processes"], "start")),
     );
     lash_core::ToolCatalog::from_tool_definitions(tools)
@@ -467,7 +468,7 @@ fn each_host_capability_gates_its_own_vocabulary() {
 #[test]
 fn tool_signatures_cover_every_operation_parameter_and_return_shape() {
     use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
-    let catalog = lash_core::ToolCatalog::from_tool_definitions(["first", "second"].map(|operation| lash_core::ToolDefinition::raw(operation, operation, format!("Description for {operation}"), serde_json::json!({"type":"object","properties":{"required_id":{"type":"string"},"optional_limit":{"type":"integer"}},"required":["required_id"],"additionalProperties":false}), serde_json::json!({"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false})).with_tool_binding(ToolBinding::new(["lookup"], operation))).to_vec());
+    let catalog = lash_core::ToolCatalog::from_tool_definitions(["first", "second"].map(|operation| lash_core::ToolDefinition::raw(operation, operation, format!("Description for {operation}"), serde_json::json!({"type":"object","properties":{"required_id":{"type":"string"},"optional_limit":{"type":"integer"}},"required":["required_id"],"additionalProperties":false}), serde_json::json!({"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false})).expect("valid declared tool schemas").with_tool_binding(ToolBinding::new(["lookup"], operation))).to_vec());
     {
         let dialect = dialect(false);
         let docs =
@@ -546,7 +547,7 @@ fn typescript_capabilities_gate_in_both_assembled_channels() {
 #[test]
 fn nested_return_shapes_ride_in_plain_signatures() {
     use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
-    let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![lash_core::ToolDefinition::raw("get", "get", "Read a nested record.", serde_json::json!({"type":"object","properties":{},"additionalProperties":false}), serde_json::json!({"type":"object","properties":{"outer":{"type":"object","properties":{"inner":{"type":"string"}},"required":["inner"]}},"required":["outer"]})).with_tool_binding(ToolBinding::new(["kv"], "get"))]);
+    let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![lash_core::ToolDefinition::raw("get", "get", "Read a nested record.", serde_json::json!({"type":"object","properties":{},"additionalProperties":false}), serde_json::json!({"type":"object","properties":{"outer":{"type":"object","properties":{"inner":{"type":"string"}},"required":["inner"]}},"required":["outer"]})).expect("valid declared tool schemas").with_tool_binding(ToolBinding::new(["kv"], "get"))]);
     {
         let dialect = dialect(false);
         let docs =

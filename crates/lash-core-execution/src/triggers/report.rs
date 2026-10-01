@@ -20,6 +20,8 @@ pub enum TriggerDeliveryEmitOutcome {
     Failed {
         code: crate::RuntimeErrorCode,
         reason: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_mismatch: Option<Box<lash_sansio::ValueMismatch>>,
     },
 }
 

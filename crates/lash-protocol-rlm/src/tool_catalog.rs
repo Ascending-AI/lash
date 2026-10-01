@@ -134,6 +134,7 @@ mod tests {
                 ToolContract::default_input_schema(),
                 json!({ "type": "string" }),
             )
+            .expect("valid declared tool schemas")
             .with_tool_binding(ToolBinding::new(["web"], "fetch")),
             ToolDefinition::raw(
                 "tool:test/read_file",
@@ -142,6 +143,7 @@ mod tests {
                 ToolContract::default_input_schema(),
                 json!({ "type": "string" }),
             )
+            .expect("valid declared tool schemas")
             .with_tool_binding(ToolBinding::new(["files"], "read")),
         ];
         let contracts: std::collections::BTreeMap<_, _> = tools
@@ -201,6 +203,7 @@ mod tests {
             }),
             json!({ "type": "string" }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["authority"], "pinned"));
         let drifted = ToolDefinition::raw(
             "tool:test/pinned",
@@ -214,6 +217,7 @@ mod tests {
             }),
             json!({ "type": "integer" }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["authority"], "pinned"));
         let resolutions = Arc::new(AtomicUsize::new(0));
         let resolution_count = Arc::clone(&resolutions);
@@ -288,7 +292,8 @@ mod tests {
             "Update plan",
             ToolContract::default_input_schema(),
             json!({ "type": "string" }),
-        );
+        )
+        .expect("valid declared tool schemas");
 
         let err = rlm_tool_catalog(
             ToolCatalogContext {
@@ -325,6 +330,7 @@ mod tests {
                 ToolContract::default_input_schema(),
                 json!({ "type": "string" }),
             )
+            .expect("valid declared tool schemas")
             .with_tool_binding(ToolBinding::new([module], "run"));
 
             let err = rlm_tool_catalog(
@@ -368,6 +374,7 @@ mod tests {
             ToolContract::default_input_schema(),
             json!({ "type": "string" }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["plan"], "update"));
         let binding = retired_only
             .manifest
@@ -425,6 +432,7 @@ mod tests {
             }),
             json!({ "type": "string" }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["plan"], "update"));
 
         let contracts: std::collections::BTreeMap<_, _> = [update_plan.clone()]
@@ -534,6 +542,7 @@ mod tests {
                 "required": ["issues"]
             }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["tracker"], "issues_search"));
         let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![search]);
 
@@ -576,6 +585,7 @@ mod tests {
             }),
             json!({ "type": "string" }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["agents"], "spawn"))
     }
 
@@ -660,6 +670,7 @@ mod discovery_tests {
                 serde_json::json!({"type":"object"}),
                 serde_json::json!({"type":"string"}),
             )
+            .expect("valid declared tool schemas")
             .with_tool_binding(ToolBinding::new(["tools"], name));
             tool.manifest.inline = inline;
             tool

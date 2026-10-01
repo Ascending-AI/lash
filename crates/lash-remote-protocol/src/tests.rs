@@ -1510,7 +1510,7 @@ fn remote_trigger_subscription_dtos_json_round_trip() {
         spec: RemoteTriggerSubscriptionSpec {
             source_capture: RemoteTriggerSourceCapture {
                 constructor_path: vec!["ui".to_string(), "button".to_string()],
-                config_schema: serde_json::json!({"type": "object"}),
+                config_schema: lash_sansio::JsonSchema::admit(serde_json::json!({"type": "object"})).expect("valid config schema"),
                 route: RemoteTriggerProviderRoute::Provider {
                     provider_id: "ui-provider".to_string(),
                     route: serde_json::json!({"account": "a"}),
@@ -1526,7 +1526,7 @@ fn remote_trigger_subscription_dtos_json_round_trip() {
             source_type: "ui.button.pressed".to_string(),
             source_key: "source-key".to_string(),
             source: serde_json::json!({ "button": "blue" }),
-            payload_schema: serde_json::json!({ "kind": "any" }),
+            payload_schema: lash_sansio::JsonSchema::any(),
             target: RemoteProcessStartTarget::Input(RemoteProcessInput::Engine {
                 kind: "lashlang".to_string(),
                 payload: serde_json::json!({
@@ -2190,7 +2190,7 @@ fn remote_process_definition_identity() -> RemoteProcessDefinition {
 fn remote_process_event_type() -> RemoteProcessEventType {
     RemoteProcessEventType {
         name: "process.completed".to_string(),
-        payload_schema: serde_json::json!({}),
+        payload_schema: lash_sansio::JsonSchema::any(),
         semantics: RemoteProcessEventSemanticsSpec {
             terminal: Some(RemoteProcessTerminalSpec {
                 status: RemoteTerminalProcessStatus::Completed,

@@ -374,6 +374,10 @@ fn operation_schemas(operation: &str) -> (Value, &'static str) {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn definition_for(slug: &str, display_name: &str, operation: &str) -> ToolDefinition {
     let name = tool_name(slug, operation);
     let (input_schema, summary) = operation_schemas(operation);
@@ -394,6 +398,7 @@ fn definition_for(slug: &str, display_name: &str, operation: &str) -> ToolDefini
         input_schema,
         json!({ "type": "object" }),
     )
+    .expect("valid declared tool schemas")
     .with_retry_policy(retry_policy)
     .with_tool_binding(ToolBinding::new(["inbox", slug], operation).with_authority_type("Inbox"))
 }

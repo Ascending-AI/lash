@@ -296,6 +296,10 @@ impl std::fmt::Display for RunInput {
 #[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RunRefusal {
+    #[error("unusable payload schema: {source}")]
+    UnusableSchema {
+        source: Box<lash_sansio::SchemaAdmissionError>,
+    },
     #[error("{refusal}")]
     State { refusal: OpaqueStateRefusal },
     #[error("the run's {input} does not decode: {detail}")]

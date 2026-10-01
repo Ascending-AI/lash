@@ -5,7 +5,7 @@ use lash_core::facade_support::{
     empty_trigger_source_key,
 };
 use lash_core::{
-    CommitBudget, LashSchema, PluginError, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
+    CommitBudget, JsonSchema, PluginError, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
     ProcessOriginator, QueuedWorkBatchingConfig, SessionPolicy, TriggerCommand,
     TriggerCommandOutcome, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
     TriggerSubscriptionDraft, TurnBudget,
@@ -204,7 +204,7 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
             .expect("process input encodes"),
         process_input.process_identity(),
     )
-    .with_payload_schema(LashSchema::any());
+    .with_payload_schema(JsonSchema::any());
     let registration = trigger_store
         .execute_command(
             "fig3344-trigger-register",

@@ -125,7 +125,7 @@ pub async fn trigger_emit(kind: StorageKind, live: bool) {
                         Some("raa-trigger-delivery"),
                     ),
                 )
-                .with_payload_schema(lash_core::LashSchema::any()),
+                .with_payload_schema(lash_core::JsonSchema::any()),
             },
         )
         .await
@@ -252,10 +252,10 @@ async fn trigger_route_world(
                         Some("raa-route-delivery"),
                     ),
                 )
-                .with_payload_schema(lash_core::LashSchema::any())
+                .with_payload_schema(lash_core::JsonSchema::any())
                 .with_source_capture(lash_core::TriggerSourceCapture::provider(
                     ["raa", "route"],
-                    lash_core::LashSchema::any(),
+                    lash_core::JsonSchema::any(),
                     "raa-provider",
                     json!({"grant": "opaque"}),
                 )),

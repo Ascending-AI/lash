@@ -511,9 +511,21 @@ impl LoadWorker {
         .with_extra_event_types(
             lash::process::lashlang_process_event_types()
                 .into_iter()
-                .chain(lash::process::lashlang_process_signal_event_types(
-                    declaration,
-                )),
+                .chain(
+                    lash::process::lashlang_process_signal_event_types(declaration).map_err(
+                        |source| {
+                            turn_handler_error(
+                                lash_core::PluginError::UnusableSchema {
+                                    source: Box::new(source),
+                                }
+                                .into_turn_failure(
+                                    lash_core::RuntimeErrorCode::PluginSessionManager,
+                                )
+                                .into(),
+                            )
+                        },
+                    )?,
+                ),
         );
         let processes = self.core.processes();
         let receipt = processes

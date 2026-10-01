@@ -654,13 +654,17 @@ fn actor(session_id: &SessionId) -> ProcessOriginator {
     ProcessOriginator::session(SessionScope::new(session_id))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn draft(session_id: &SessionId, key: &str, source_key: &str) -> TriggerSubscriptionDraft {
     let mut input_template = BTreeMap::new();
     input_template.insert("event".to_string(), crate::TriggerInputBinding::Event);
     TriggerSubscriptionDraft {
         source_capture: crate::TriggerSourceCapture::provider(
             ["ui", "button"],
-            crate::LashSchema::any(),
+            crate::JsonSchema::any(),
             "ui-provider",
             serde_json::json!({"account": "a"}),
         ),
@@ -671,12 +675,13 @@ fn draft(session_id: &SessionId, key: &str, source_key: &str) -> TriggerSubscrip
         source_type: "ui.button.pressed".to_string(),
         source_key: source_key.to_string(),
         source: serde_json::json!({ "button": "Blue" }),
-        payload_schema: crate::LashSchema::new(serde_json::json!({
+        payload_schema: crate::JsonSchema::admit(serde_json::json!({
             "type": "object",
             "properties": { "button": { "type": "string" } },
             "required": ["button"],
             "additionalProperties": false
-        })),
+        }))
+        .expect("valid declared payload schema"),
         target: ProcessInput::Engine {
             kind: "test".to_string(),
             payload: serde_json::json!({ "process": "worker" }),
@@ -2048,9 +2053,9 @@ async fn captured_delivery_refusals(handles: ProcessTriggerRetentionHandles) {
         .expect("publish environment");
     let captured = crate::TriggerSourceCapture::provider(
         ["old", "constructor"],
-        crate::LashSchema::new(
+        crate::JsonSchema::admit(
             serde_json::json!({"type":"object", "required":["old"], "properties":{"old":{"type":"boolean"}}, "additionalProperties":false}),
-        ),
+        ).expect("valid declared payload schema"),
         "old-provider",
         serde_json::json!({"route":"old"}),
     );
@@ -2108,7 +2113,7 @@ async fn captured_delivery_refusals(handles: ProcessTriggerRetentionHandles) {
                 draft: TriggerSubscriptionDraft {
                     source_capture: crate::TriggerSourceCapture::resident(
                         ["new", "constructor"],
-                        crate::LashSchema::any(),
+                        crate::JsonSchema::any(),
                     ),
                     target_label: Some("new-process-label".to_string()),
                     ..original
@@ -2200,11 +2205,9 @@ async fn captured_delivery_refusals(handles: ProcessTriggerRetentionHandles) {
             .await
             .expect_err("invalid captured occurrence refused");
         assert!(
-            refusal.to_string().contains(if index == 1 {
-                "captured source contract"
-            } else {
-                "invalid payload"
-            }),
+            matches!(&refusal, crate::PluginError::ValueMismatch { context, source }
+                if context.contains(if index == 1 { "source for trigger" } else { "payload for trigger" })
+                    && source.instance_path == if index == 1 { "" } else { "/button" }),
             "{refusal}"
         );
         assert!(

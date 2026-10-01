@@ -1393,6 +1393,7 @@ fn ask_model_definition() -> lash::tools::ToolDefinition {
         serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
         serde_json::json!({"type": "string"}),
     )
+    .expect("valid declared tool schemas")
 }
 
 /// A tool whose attempt makes one direct completion on the session's model.
@@ -1653,6 +1654,7 @@ fn ask_twice_definition() -> lash::tools::ToolDefinition {
         serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
         serde_json::json!({"type": "string"}),
     )
+    .expect("valid declared tool schemas")
 }
 
 /// Where an [`AskTwice`] attempt retires the session's key, once.

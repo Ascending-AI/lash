@@ -27,6 +27,7 @@ fn test_tool(name: &str, description: &str) -> ToolDefinition {
         ToolDefinition::default_input_schema(),
         json!({ "type": "string" }),
     )
+    .expect("valid declared tool schemas")
 }
 
 fn tool_id(name: &str) -> ToolId {
@@ -367,6 +368,7 @@ async fn pinned_source_executes_with_the_provider_manifest_under_alias_drift_and
             ToolDefinition::default_input_schema(),
             json!({ "type": "string" }),
         )
+        .expect("valid declared tool schemas")
     }
 
     let a_active = Arc::new(AtomicBool::new(true));
@@ -405,6 +407,7 @@ async fn pinned_source_executes_with_the_provider_manifest_under_alias_drift_and
                 ToolDefinition::default_input_schema(),
                 json!({ "type": "string" }),
             )
+            .expect("valid declared tool schemas")
             .manifest(),
         ),
     );
@@ -424,6 +427,7 @@ async fn pinned_source_executes_with_the_provider_manifest_under_alias_drift_and
         ToolDefinition::default_input_schema(),
         json!({ "type": "string" }),
     )
+    .expect("valid declared tool schemas")
     .manifest();
     let attempt = test_attempt_context();
     let outcome = pinned

@@ -5,6 +5,10 @@ use lash_core::{LlmOutputPart, Part, PartKind};
 /// The sole provider-native RLM tool. Termination remains inside its program.
 pub const NATIVE_EXECUTE_TOOL_NAME: &str = "execute_code";
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 pub(super) fn tool_spec(dialect: &SessionDialect) -> LlmToolSpec {
     let definition = lash_core::ToolDefinition::raw(
         "rlm:execute_code",
@@ -15,7 +19,7 @@ pub(super) fn tool_spec(dialect: &SessionDialect) -> LlmToolSpec {
         ),
         serde_json::json!({"type":"object","properties":{"code":{"type":"string","description":format!("{} program to execute in the persistent session", dialect.language_id())}},"required":["code"],"additionalProperties":false}),
         serde_json::json!({"type":"string"}),
-    );
+    ).expect("valid declared tool schemas");
     let contract = definition.contract();
     LlmToolSpec {
         name: NATIVE_EXECUTE_TOOL_NAME.to_string(),

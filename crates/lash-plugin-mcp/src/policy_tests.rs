@@ -529,7 +529,7 @@ async fn consecutive_timeout_threshold_resets_only_after_success() {
         ToolFailureClass::Timeout
     );
     *entry(&pool).health.write_recover() = McpServerHealth::Connected {
-        catalog_error: Some("stale error".to_string()),
+        catalog_error: Some(McpServerFault::Connection("stale error".to_string())),
     };
     let mut request = Box::pin(call(&pool));
     assert!(futures_util::poll!(request.as_mut()).is_pending());
@@ -1156,7 +1156,9 @@ async fn startup_timeout_drops_handshake_before_graceful_reap() {
     assert_eq!(
         current_entry.health.read_recover().clone(),
         McpServerHealth::Reconnecting {
-            last_error: Some("MCP startup timed out for `mock` after 400ms".to_string())
+            last_error: Some(McpServerFault::Connection(
+                "MCP startup timed out for `mock` after 400ms".to_string()
+            ))
         }
     );
     pool.shutdown_all().await;
@@ -1203,9 +1205,9 @@ async fn shutdown_during_live_handshake_reaps_actor_owned_child() {
     assert_eq!(
         current_entry.health.read_recover().clone(),
         McpServerHealth::ShuttingDown {
-            reason: Some(format!(
+            reason: Some(McpServerFault::Connection(format!(
                 "MCP stdio child PID {pid} handshake interrupted by pool shutdown"
-            ))
+            )))
         }
     );
     assert_eq!(current_entry.active_pid.load(Ordering::SeqCst), 0);
@@ -1278,9 +1280,9 @@ async fn non_finishing_child_reap_records_literal_pid_at_cleanup_deadline() {
     assert_eq!(
         current_entry.health.read_recover().clone(),
         McpServerHealth::ShuttingDown {
-            reason: Some(format!(
+            reason: Some(McpServerFault::Connection(format!(
                 "MCP stdio child PID {pid} abandoned unreaped after bounded lifecycle cleanup: MCP stdio child PID {pid} did not exit within 1s after the kill request"
-            ))
+            )))
         }
     );
     assert_eq!(current_entry.active_pid.load(Ordering::SeqCst), 0);
@@ -1414,10 +1416,8 @@ async fn shutdown_all_bounds_an_actor_that_never_finishes() {
     assert_eq!(pool.entries.read_recover().len(), 0);
     assert_eq!(
         entry.health.read_recover().clone(),
-        McpServerHealth::ShuttingDown { reason: Some(
-            "MCP stdio child PID 424242 abandoned: lifecycle actor did not finish within the 6s per-entry total shutdown deadline"
-                .to_string()
-        ) }
+        McpServerHealth::ShuttingDown { reason: Some(McpServerFault::Connection("MCP stdio child PID 424242 abandoned: lifecycle actor did not finish within the 6s per-entry total shutdown deadline"
+                .to_string())) }
     );
     let trace = String::from_utf8(traces.0.lock_recover().clone()).unwrap();
     assert!(
@@ -1457,7 +1457,7 @@ async fn shutdown_policy_shortens_shutdown_all_budget() {
     assert_eq!(pool.entries.read_recover().len(), 0);
     let fault = entry.health.read_recover().clone();
     let McpServerHealth::ShuttingDown {
-        reason: Some(reason),
+        reason: Some(McpServerFault::Connection(reason)),
     } = fault
     else {
         panic!("expected a shutdown fault, got {fault:?}");
@@ -1699,17 +1699,13 @@ async fn two_wedged_entries_shutdown_concurrently_within_one_total_bound() {
     assert_eq!(pool.entries.read_recover().len(), 0);
     assert_eq!(
         first.health.read_recover().clone(),
-        McpServerHealth::ShuttingDown { reason: Some(
-            "MCP stdio child PID 111111 abandoned: lifecycle actor did not finish within the 6s per-entry total shutdown deadline"
-                .to_string()
-        ) }
+        McpServerHealth::ShuttingDown { reason: Some(McpServerFault::Connection("MCP stdio child PID 111111 abandoned: lifecycle actor did not finish within the 6s per-entry total shutdown deadline"
+                .to_string())) }
     );
     assert_eq!(
         second.health.read_recover().clone(),
-        McpServerHealth::ShuttingDown { reason: Some(
-            "MCP stdio child PID 222222 abandoned: lifecycle actor did not finish within the 6s per-entry total shutdown deadline"
-                .to_string()
-        ) }
+        McpServerHealth::ShuttingDown { reason: Some(McpServerFault::Connection("MCP stdio child PID 222222 abandoned: lifecycle actor did not finish within the 6s per-entry total shutdown deadline"
+                .to_string())) }
     );
 }
 
@@ -1754,7 +1750,7 @@ async fn actor_panic_surfaces_as_join_error_and_shutdown_continues() {
     assert!(
         matches!(
             &*entry.health.read_recover(),
-            McpServerHealth::ShuttingDown { reason: Some(error) } if error.contains("JoinError")
+            McpServerHealth::ShuttingDown { reason: Some(McpServerFault::Connection(error)) } if error.contains("JoinError")
         ),
         "actor panic must surface through its retained JoinHandle"
     );
@@ -2008,7 +2004,7 @@ async fn idle_service_death_updates_status_without_a_tool_call() {
     assert!(
         matches!(
             &status.health,
-            McpServerHealth::Reconnecting { last_error: Some(error) } if error.contains("service quit")
+            McpServerHealth::Reconnecting { last_error: Some(McpServerFault::Connection(error)) } if error.contains("service quit")
         ),
         "idle death must retain its quit reason: {status:?}"
     );
@@ -2051,7 +2047,9 @@ async fn discovery_publishes_received_catalog_before_observing_same_burst_quit()
     assert_eq!(
         status.health,
         McpServerHealth::Reconnecting {
-            last_error: Some("MCP server `mock` service quit: Ok(Closed)".to_string())
+            last_error: Some(McpServerFault::Connection(
+                "MCP server `mock` service quit: Ok(Closed)".to_string()
+            ))
         }
     );
     assert_eq!(status.tool_count, 1);
@@ -2108,7 +2106,9 @@ async fn service_quit_records_cause_before_close_ignoring_child_cleanup() {
     assert_eq!(
         status_during_cleanup.health,
         McpServerHealth::Reconnecting {
-            last_error: Some("MCP server `mock` service quit: Ok(Closed)".to_string())
+            last_error: Some(McpServerFault::Connection(
+                "MCP server `mock` service quit: Ok(Closed)".to_string()
+            ))
         },
         "service quit cause must be visible throughout bounded child cleanup"
     );
@@ -2163,7 +2163,9 @@ async fn probe_loop_observes_waiting_reason_and_reaps() {
     assert_eq!(
         current_entry.health.read_recover().clone(),
         McpServerHealth::Reconnecting {
-            last_error: Some("MCP server `mock` service quit: Ok(Closed)".to_string())
+            last_error: Some(McpServerFault::Connection(
+                "MCP server `mock` service quit: Ok(Closed)".to_string()
+            ))
         },
         "the probe loop must retain the same quit cause as the outer connected loop"
     );
@@ -2400,7 +2402,7 @@ async fn interval_probe_marks_unresponsive_peer_disconnected() {
     unpublished(&entry(&pool)).await;
     assert!(matches!(
         &pool.server_statuses()[0].health,
-        McpServerHealth::Reconnecting { last_error: Some(error) }
+        McpServerHealth::Reconnecting { last_error: Some(McpServerFault::Connection(error)) }
             if error.contains("background liveness probe failed")
     ));
     drop(clock);

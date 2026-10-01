@@ -49770,7 +49770,6 @@
       ],
       "dependencies": [
         "async-trait",
-        "jsonschema",
         "lash-internal-core",
         "lash-internal-sansio",
         "lash-internal-tool-support",
@@ -50325,7 +50324,6 @@
       "dependencies": [
         "async-trait",
         "insta",
-        "jsonschema",
         "lash-internal-conformance",
         "lash-internal-core",
         "lash-internal-core-store",

@@ -77,7 +77,7 @@ use lash_core::runtime::{
 };
 use lash_core::{
     ArtifactReferrer, AttachmentId, AttachmentReferrers, AttachmentWrite, BoundaryReason, Clock,
-    DeploymentStore, ExecutionScope, LashSchema, MessageOrigin, MessageRole, OperationId, PartKind,
+    DeploymentStore, ExecutionScope, JsonSchema, MessageOrigin, MessageRole, OperationId, PartKind,
     PendingTurnInputDraft, PersistedSegmentHandover, PluginNamespaceState, PluginState,
     ProcessAwaitOutput, ProcessChange, ProcessChangeCursor, ProcessCompletionAuthority,
     ProcessContinuationStore, ProcessEventAppendRequest, ProcessEventLogTestSupport as _,
@@ -616,7 +616,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
             )
             .with_extra_event_types([ProcessEventType {
                 name: "fixture.wake".to_string(),
-                payload_schema: LashSchema::any(),
+                payload_schema: JsonSchema::any(),
                 semantics: ProcessEventSemanticsSpec {
                     wake: Some(ProcessWakeSpec {
                         when: Some(ProcessValueSelector::Present("/wake_input".to_string())),
@@ -1558,19 +1558,21 @@ fn fixture_register_command(env_ref: ProcessExecutionEnvRef) -> TriggerCommand {
             source_type: "fixture.event".to_string(),
             source_key: "fixture-source".to_string(),
             source: serde_json::json!({"fixture": "source"}),
-            payload_schema: LashSchema::new(serde_json::json!({
+            payload_schema: JsonSchema::admit(serde_json::json!({
                 "type": "object",
                 "properties": {"value": {"type": "integer"}},
                 "required": ["value"],
                 "additionalProperties": false
-            })),
+            }))
+            .expect("valid declared payload schema"),
             source_capture: lash_core::TriggerSourceCapture::provider(
                 ["fixture", "event"],
-                LashSchema::new(serde_json::json!({
+                JsonSchema::admit(serde_json::json!({
                     "type": "object",
                     "properties": {"fixture": {"type": "string"}},
                     "additionalProperties": false
-                })),
+                }))
+                .expect("valid declared payload schema"),
                 "fixture-provider",
                 serde_json::json!({"account": "fixture"}),
             ),

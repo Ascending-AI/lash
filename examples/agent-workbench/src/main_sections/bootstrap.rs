@@ -337,7 +337,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             status.server_name,
             status.health.is_connected(),
             status.tool_count,
-            status.health.error().unwrap_or("none")
+            status.health.error().unwrap_or_else(|| "none".into())
         );
     }
     let plugin_mcp: Arc<dyn PluginFactory> = Arc::clone(&mcp_search) as Arc<dyn PluginFactory>;

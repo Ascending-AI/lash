@@ -115,6 +115,7 @@ fn tool_definition() -> ToolDefinition {
         ToolDefinition::default_input_schema(),
         serde_json::json!({"type":"string"}),
     )
+    .expect("valid declared tool schemas")
 }
 
 struct FixtureTool {

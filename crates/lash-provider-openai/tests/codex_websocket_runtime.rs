@@ -165,6 +165,7 @@ fn echo_probe_definition() -> ToolDefinition {
         }),
         json!({ "type": "object" }),
     )
+    .expect("valid declared tool schemas")
 }
 
 #[tokio::test(flavor = "multi_thread")]

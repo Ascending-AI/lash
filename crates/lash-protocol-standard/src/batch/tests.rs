@@ -85,7 +85,7 @@ fn the_definition_renders_the_configured_maximum() {
         let definition = batch_tool_definition(max(members));
         let schema = &definition.contract().input_schema.canonical;
         assert_eq!(
-            schema["properties"]["tool_calls"]["maxItems"],
+            schema.as_value()["properties"]["tool_calls"]["maxItems"],
             serde_json::json!(members)
         );
         assert!(
@@ -100,7 +100,7 @@ fn the_definition_renders_the_configured_maximum() {
 fn the_definition_documents_the_results_array() {
     let definition = batch_tool_definition(max(64));
     assert_eq!(
-        definition.contract().output_schema.canonical["required"],
+        definition.contract().output_schema.canonical.as_value()["required"],
         serde_json::json!(["results"])
     );
 }

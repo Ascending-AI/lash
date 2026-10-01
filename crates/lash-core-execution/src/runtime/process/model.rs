@@ -214,7 +214,7 @@ pub enum SessionTurnOutcome {
     /// when one is given.
     FinalValue {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        schema: Option<serde_json::Value>,
+        schema: Option<lash_sansio::JsonSchema>,
     },
 }
 

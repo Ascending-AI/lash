@@ -144,7 +144,10 @@ impl std::fmt::Display for McpCallFailure {
                 } => write!(
                     f,
                     "MCP server `{server}` reconnect attempts exhausted after {attempts} attempt(s); no background recovery is active; last error: {}",
-                    last_error.as_deref().unwrap_or("unknown connection error")
+                    last_error
+                        .as_ref()
+                        .map(super::pool::McpServerFault::message)
+                        .unwrap_or_else(|| "unknown connection error".into())
                 ),
                 McpServerHealth::ShuttingDown { .. } => write!(
                     f,
@@ -338,6 +341,17 @@ impl From<McpCallFailure> for ToolFailure {
                 ToolRetryStatus::Never,
             ),
         };
+        let schema_cause = if let F::ServerUnavailable { health, .. } = &cause {
+            if let Some(super::pool::McpServerFault::UnusableSchema(source)) = health.fault() {
+                Some(Box::new(lash_core::ToolFailureCause::ToolSchemaAdmission {
+                    source: source.clone(),
+                }))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         let message = cause.to_string();
         let raw = match cause {
             F::ToolError { message, content } => ToolValue::Object(BTreeMap::from([
@@ -348,6 +362,7 @@ impl From<McpCallFailure> for ToolFailure {
             cause => ToolValue::untrusted_json(json!(cause)),
         };
         Self {
+            cause: schema_cause,
             class,
             code: code.into(),
             message,

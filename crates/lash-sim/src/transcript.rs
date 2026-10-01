@@ -507,7 +507,7 @@ mod tests {
                 )
                 .with_extra_event_types([ProcessEventType {
                     name: "producer.wake".to_string(),
-                    payload_schema: lash_core::LashSchema::any(),
+                    payload_schema: lash_core::JsonSchema::any(),
                     semantics: ProcessEventSemanticsSpec {
                         wake: Some(ProcessWakeSpec {
                             when: Some(ProcessValueSelector::Present("/wake_input".to_string())),

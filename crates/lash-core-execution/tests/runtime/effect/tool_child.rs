@@ -15,6 +15,7 @@ mod tests {
             serde_json::json!({ "type": "object" }),
             serde_json::json!({ "type": "object" }),
         )
+        .expect("valid declared tool schemas")
     }
 
     fn manifest(id: &str) -> ToolManifest {

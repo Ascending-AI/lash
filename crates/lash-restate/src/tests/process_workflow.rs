@@ -691,6 +691,7 @@ impl RecoveryProcessTool {
             }),
             serde_json::json!({ "type": "object" }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["tools"], "recovery_echo"))
     }
 }
@@ -754,6 +755,7 @@ impl SnapshotRecoveryTool {
             }),
             serde_json::json!({ "type": "object" }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["tools"], "snapshot_echo"))
     }
 }
@@ -1227,7 +1229,7 @@ fn recorded_standard_render() -> lash_core::RecordedRender {
 pub(super) fn process_wake_event_type() -> lash_core::ProcessEventType {
     lash_core::ProcessEventType {
         name: "process.wake".to_string(),
-        payload_schema: lash_core::LashSchema::any(),
+        payload_schema: lash_core::JsonSchema::any(),
         semantics: lash_core::ProcessEventSemanticsSpec {
             wake: Some(lash_core::ProcessWakeSpec {
                 when: Some(lash_core::ProcessValueSelector::Present(

@@ -21,6 +21,7 @@ impl ReassignableProcessTool {
             }),
             serde_json::json!({ "type": "string" }),
         )
+        .expect("valid declared tool schemas")
     }
 }
 

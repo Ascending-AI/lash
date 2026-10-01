@@ -98,7 +98,7 @@ pub(crate) struct PreparedTriggerDraft {
     pub source_type: String,
     pub source_key: String,
     pub source: Value,
-    pub payload_schema: lash_core::LashSchema,
+    pub payload_schema: lash_core::JsonSchema,
     pub source_capture: lash_core::TriggerSourceCapture,
     pub target: lash_core::ProcessStartTarget,
     pub target_identity: lash_core::ProcessIdentity,
@@ -168,8 +168,13 @@ pub(crate) async fn prepare_trigger_draft(
     let artifact = workers
         .inspect_artifact(artifact_store, &definition.module_ref)
         .await
-        .map_err(|err| {
-            ExecutionHostError::new(format!("failed to load lashlang module artifact: {err}"))
+        .map_err(|err| match err {
+            lash_core::ArtifactStoreError::UnusableSchema { source } => {
+                ExecutionHostError::from_schema_admission(*source)
+            }
+            err => {
+                ExecutionHostError::new(format!("failed to load lashlang module artifact: {err}"))
+            }
         })?
         .ok_or_else(|| {
             ExecutionHostError::new(format!(
@@ -241,10 +246,11 @@ pub(crate) async fn prepare_trigger_draft(
         source_type: request.source.source_type.clone(),
         source_key,
         source: request.source.to_json(),
-        payload_schema: lash_core::LashSchema::new(lashlang_type_expr_schema(
+        payload_schema: lash_core::JsonSchema::admit(lashlang_type_expr_schema(
             &compatibility.resolved_event_type,
-        )),
-        source_capture: captured_trigger_source(&request.source.source_type, &compatibility),
+        ))
+        .map_err(ExecutionHostError::from_schema_admission)?,
+        source_capture: captured_trigger_source(&request.source.source_type, &compatibility)?,
         target,
         target_identity,
         event_types,
@@ -263,14 +269,15 @@ pub(crate) async fn prepare_trigger_draft(
 fn captured_trigger_source(
     source_type: &str,
     compatibility: &lashlang::TriggerCompatibility,
-) -> lash_core::TriggerSourceCapture {
+) -> Result<lash_core::TriggerSourceCapture, ExecutionHostError> {
     let constructor_path = source_type
         .split('.')
         .map(ToString::to_string)
         .collect::<Vec<_>>();
     let config_schema =
-        lash_core::LashSchema::new(lashlang_type_expr_schema(&compatibility.config_type));
-    match compatibility.provider_id.as_deref() {
+        lash_core::JsonSchema::admit(lashlang_type_expr_schema(&compatibility.config_type))
+            .map_err(ExecutionHostError::from_schema_admission)?;
+    Ok(match compatibility.provider_id.as_deref() {
         Some(provider_id) => lash_core::TriggerSourceCapture::provider(
             constructor_path,
             config_schema,
@@ -282,7 +289,7 @@ fn captured_trigger_source(
                 .unwrap_or(Value::Null),
         ),
         None => lash_core::TriggerSourceCapture::resident(constructor_path, config_schema),
-    }
+    })
 }
 
 async fn list_triggers(

@@ -32,6 +32,7 @@ pub fn fixture_echo_definition() -> ToolDefinition {
             "additionalProperties": false
         }),
     )
+    .expect("valid declared tool schemas")
 }
 
 /// A fixed provider that serves the command-free [`fixture_echo_definition`].

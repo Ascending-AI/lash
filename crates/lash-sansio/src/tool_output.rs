@@ -583,6 +583,9 @@ fn decode_object(mut map: Map<String, Value>) -> serde_json::Result<ToolValue> {
     }
 }
 
+mod failure_cause;
+pub use failure_cause::ToolFailureCause;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolFailure {
     pub class: ToolFailureClass,
@@ -591,10 +594,16 @@ pub struct ToolFailure {
     pub source: ToolFailureSource,
     pub retry: ToolRetryStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause: Option<Box<ToolFailureCause>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<ToolValue>,
 }
 
 impl ToolFailure {
+    pub fn with_cause(mut self, cause: ToolFailureCause) -> Self {
+        self.cause = Some(Box::new(cause));
+        self
+    }
     pub(crate) fn new(
         class: ToolFailureClass,
         code: impl Into<String>,
@@ -606,6 +615,7 @@ impl ToolFailure {
             message: message.into(),
             source: ToolFailureSource::Runtime,
             retry: ToolRetryStatus::Never,
+            cause: None,
             raw: None,
         }
     }
@@ -1405,6 +1415,7 @@ mod tests {
     fn tool_output_failure_projects_raw_attachments_after_failure_text() {
         let attachment = attachment_source("img");
         let output = ToolCallOutput::failure(ToolFailure {
+            cause: None,
             class: ToolFailureClass::Execution,
             code: "boom".into(),
             message: "boom".into(),

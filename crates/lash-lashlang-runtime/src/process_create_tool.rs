@@ -24,6 +24,10 @@ use lash_tool_support::{StaticToolExecute, StaticToolProvider, ToolDefinitionBin
 use crate::LashlangSurface;
 
 /// The `processes.create` tool definition.
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 pub fn process_create_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:create_process",
@@ -48,7 +52,7 @@ pub fn process_create_tool_definition() -> ToolDefinition {
             "x-lash": { "kind": "process_unknown" },
             "description": "The created process definition.",
         }),
-    )
+    ).expect("valid declared tool schemas")
     .with_tool_binding(lash_core::ToolBinding::new(["processes"], "create"))
 }
 
@@ -252,6 +256,7 @@ mod tests {
                 }),
                 serde_json::json!({ "type": "string" }),
             )
+            .expect("valid declared tool schemas")
             .with_tool_binding(lash_core::ToolBinding::new(["demo"], "echo")),
         ])
     }
@@ -413,10 +418,10 @@ mod tests {
                     .expect("binding serializes")
             ),
         );
-        let input = &definition.contract.input_schema.canonical;
+        let input = definition.contract.input_schema.canonical.as_value();
         assert_eq!(input["required"], serde_json::json!(["source", "dialect"]));
         assert_eq!(
-            definition.contract.output_schema.canonical["x-lash"],
+            definition.contract.output_schema.canonical.as_value()["x-lash"],
             serde_json::json!({ "kind": "process_unknown" })
         );
     }

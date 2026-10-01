@@ -147,7 +147,7 @@ async fn controller_owned_non_tool_trigger_reemission_answers_its_bound_process_
                 },
                 lash_core::ProcessIdentity::new("testing-fixture"),
             )
-            .with_payload_schema(lash_core::LashSchema::any()),
+            .with_payload_schema(lash_core::JsonSchema::any()),
         },
     )
     .await

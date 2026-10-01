@@ -134,6 +134,7 @@ impl ToolProvider for SeedSwitchTool {
     }
 }
 
+#[expect(clippy::expect_used, reason = "this fixture declares valid schemas")]
 fn switch_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:switch_frame",
@@ -142,6 +143,7 @@ fn switch_tool_definition() -> ToolDefinition {
         ToolDefinition::default_input_schema(),
         json!({"type": "object"}),
     )
+    .expect("valid declared tool schemas")
 }
 
 fn tool_call_response() -> LlmResponse {
@@ -504,6 +506,7 @@ struct BoundedSwitchTools {
 }
 
 impl BoundedSwitchTools {
+    #[expect(clippy::expect_used, reason = "this fixture declares valid schemas")]
     fn definition(index: usize) -> ToolDefinition {
         ToolDefinition::raw(
             format!("tool:terminal_tool_{index}"),
@@ -512,6 +515,7 @@ impl BoundedSwitchTools {
             ToolDefinition::default_input_schema(),
             json!({"type": "object"}),
         )
+        .expect("valid declared tool schemas")
     }
 }
 

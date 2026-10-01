@@ -589,6 +589,7 @@ mod tests {
             lash_core::ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "string" }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new([module], operation));
         ToolGrant::new(definition).with_execution_binding(serde_json::json!({ "account": name }))
     }
@@ -765,6 +766,7 @@ mod tests {
                 lash_core::ToolDefinition::default_input_schema(),
                 serde_json::json!({ "type": "string" }),
             )
+            .expect("valid declared tool schemas")
             .with_tool_binding(
                 ToolBinding::new(["catalog"], "fetch").with_authority_type("SharedFetch"),
             ),
@@ -832,6 +834,7 @@ mod tests {
             }),
             serde_json::json!({ "type": "boolean" }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["web"], "fetch").with_authority_type("Web"));
         let grant = ToolGrant::new(definition);
         let mut environment = empty_host_environment();
@@ -1085,6 +1088,7 @@ mod tests {
                 lash_core::ToolDefinition::default_input_schema(),
                 serde_json::json!({ "type": "boolean" }),
             )
+            .expect("valid declared tool schemas")
             .with_tool_binding(ToolBinding::new(["web"], "fetch")),
         );
         let captured_id = captured.definition.manifest.id.to_string();
@@ -1129,6 +1133,7 @@ mod tests {
                 lash_core::ToolDefinition::default_input_schema(),
                 serde_json::json!({ "type": "string" }),
             )
+            .expect("valid declared tool schemas")
             .with_tool_binding(
                 ToolBinding::new(["web"], operation).with_authority_type("AmbientWeb"),
             );
@@ -1142,6 +1147,7 @@ mod tests {
                 lash_core::ToolDefinition::default_input_schema(),
                 serde_json::json!({ "type": "string" }),
             )
+            .expect("valid declared tool schemas")
             .with_tool_binding(
                 ToolBinding::new(["web"], "fetch").with_authority_type("CapturedWeb"),
             ),

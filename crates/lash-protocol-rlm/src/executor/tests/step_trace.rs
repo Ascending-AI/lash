@@ -50,7 +50,7 @@ impl lash_lashlang_runtime::DeferredToolResolver for InboxResolver {
                 "tool:send_item", "send_item", "Send an item",
                 serde_json::json!({"type":"object","properties":{"body":{"type":"string"}},"required":["body"],"additionalProperties":false}),
                 serde_json::json!({"type":"string"}),
-            ).with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["inbox"], "send_item")))
+            ).expect("valid declared tool schemas").with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["inbox"], "send_item")))
         )))])
     }
 }

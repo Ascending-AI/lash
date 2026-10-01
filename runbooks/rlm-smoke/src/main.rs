@@ -318,6 +318,7 @@ fn tool_definitions() -> Vec<ToolDefinition> {
     ]
 }
 
+#[expect(clippy::expect_used, reason = "this fixture declares valid schemas")]
 fn definition<const N: usize>(
     name: &'static str,
     module: [&'static str; N],
@@ -333,6 +334,7 @@ fn definition<const N: usize>(
         input_schema,
         output_schema,
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(ToolBinding::new(module, operation))
 }
 

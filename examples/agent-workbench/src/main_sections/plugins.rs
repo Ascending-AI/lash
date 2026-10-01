@@ -525,8 +525,12 @@ pub(crate) fn mail_received_event_type() -> lashlang::NamedDataType {
     .expect("valid mail received event type")
 }
 
-pub(crate) fn mail_received_payload_schema() -> lash::triggers::LashSchema {
-    lash::triggers::LashSchema::new(serde_json::json!({
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
+pub(crate) fn mail_received_payload_schema() -> lash::triggers::JsonSchema {
+    lash::triggers::JsonSchema::admit(serde_json::json!({
         "type": "object",
         "properties": {
             "account": { "type": "string" },
@@ -536,10 +540,15 @@ pub(crate) fn mail_received_payload_schema() -> lash::triggers::LashSchema {
         "required": ["account", "title", "text"],
         "additionalProperties": false
     }))
+    .expect("valid declared payload schema")
 }
 
-pub(crate) fn button_trigger_payload_schema() -> lash::triggers::LashSchema {
-    lash::triggers::LashSchema::new(serde_json::json!({
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
+pub(crate) fn button_trigger_payload_schema() -> lash::triggers::JsonSchema {
+    lash::triggers::JsonSchema::admit(serde_json::json!({
         "type": "object",
         "properties": {
             "button": { "type": "string", "enum": ["Red", "Blue"] },
@@ -549,6 +558,7 @@ pub(crate) fn button_trigger_payload_schema() -> lash::triggers::LashSchema {
         "required": ["button", "message", "pressed_at"],
         "additionalProperties": false
     }))
+    .expect("valid declared payload schema")
 }
 
 pub(crate) fn field(name: &str, ty: lashlang::TypeExpr) -> lashlang::TypeField {

@@ -31,7 +31,10 @@ impl RuntimeErrorCause {
             | Self::MaxToolCallsExceeded { .. }
             | Self::PluginFormat { .. }
             | Self::ProcessParentEnded { .. }
-            | Self::ProcessStartKeyConflict { .. } => true,
+            | Self::ProcessStartKeyConflict { .. }
+            | Self::SchemaRefused { .. }
+            | Self::ToolSchemaRefused { .. }
+            | Self::ValueMismatch { .. } => true,
         }
     }
 

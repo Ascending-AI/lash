@@ -202,18 +202,21 @@ mod tests {
 
     impl MockToolProvider {
         fn tool_definitions(&self) -> Vec<ToolDefinition> {
-            vec![ToolDefinition::raw(
-                "tool:mock_tool",
-                "mock_tool",
-                "",
-                json!({
-                    "type": "object",
-                    "properties": { "value": { "type": "string" } },
-                    "required": ["value"],
-                    "additionalProperties": false
-                }),
-                json!({ "type": "string" }),
-            )]
+            vec![
+                ToolDefinition::raw(
+                    "tool:mock_tool",
+                    "mock_tool",
+                    "",
+                    json!({
+                        "type": "object",
+                        "properties": { "value": { "type": "string" } },
+                        "required": ["value"],
+                        "additionalProperties": false
+                    }),
+                    json!({ "type": "string" }),
+                )
+                .expect("valid declared tool schemas"),
+            ]
         }
     }
 
@@ -230,6 +233,7 @@ mod tests {
                     ToolDefinition::default_input_schema(),
                     json!({}),
                 )
+                .expect("valid declared tool schemas")
                 .manifest(),
             ]
         }
@@ -470,7 +474,7 @@ mod tests {
                     "Button",
                     "ui.button",
                     "pressed",
-                    crate::LashSchema::any(),
+                    crate::JsonSchema::any(),
                 ))
             }
         }

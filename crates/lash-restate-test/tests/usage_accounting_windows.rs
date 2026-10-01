@@ -24,6 +24,7 @@ fn definition() -> lash_core::ToolDefinition {
         serde_json::json!({"type":"object"}),
         serde_json::json!({"type":"object"}),
     )
+    .expect("valid declared tool schemas")
 }
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Probe {

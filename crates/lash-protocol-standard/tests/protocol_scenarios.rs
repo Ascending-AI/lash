@@ -818,6 +818,7 @@ struct StandardIntentProvider {
     target: lash_core::ProcessId,
 }
 
+#[expect(clippy::expect_used, reason = "this fixture declares valid schemas")]
 fn standard_intent_tool() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:intent_leaf",
@@ -826,6 +827,7 @@ fn standard_intent_tool() -> lash_core::ToolDefinition {
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::json!({"type": "object", "additionalProperties": true}),
     )
+    .expect("valid declared tool schemas")
 }
 
 #[async_trait::async_trait]
@@ -894,12 +896,12 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
             .with_extra_event_types([
                 lash_core::ProcessEventType {
                     name: "signal.resume".to_string(),
-                    payload_schema: lash_core::LashSchema::any(),
+                    payload_schema: lash_core::JsonSchema::any(),
                     semantics: lash_core::ProcessEventSemanticsSpec::default(),
                 },
                 lash_core::ProcessEventType {
                     name: "standard.intent.note".to_string(),
-                    payload_schema: lash_core::LashSchema::any(),
+                    payload_schema: lash_core::JsonSchema::any(),
                     semantics: lash_core::ProcessEventSemanticsSpec::default(),
                 },
             ]),

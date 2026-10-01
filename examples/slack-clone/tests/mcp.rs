@@ -758,6 +758,7 @@ impl ToolProvider for CollidingTool {
     }
 }
 
+#[expect(clippy::expect_used, reason = "this fixture declares valid schemas")]
 fn collision_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:native_collision",
@@ -766,6 +767,7 @@ fn collision_definition() -> ToolDefinition {
         json!({ "type": "object", "properties": {} }),
         json!({}),
     )
+    .expect("valid declared tool schemas")
 }
 
 #[tokio::test]

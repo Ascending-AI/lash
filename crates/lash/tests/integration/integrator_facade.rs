@@ -177,6 +177,7 @@ fn facade_tool_binding_is_dialect_agnostic() {
         serde_json::json!({ "type": "object", "additionalProperties": true }),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(binding.clone());
 
     let manifest = definition.manifest();

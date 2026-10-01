@@ -625,14 +625,15 @@ fn request(stream_events: Option<LlmEventSender>) -> LlmRequest {
         tools: Arc::new(vec![LlmToolSpec {
             name: "lookup".to_string(),
             description: "Lookup".to_string(),
-            input_schema: json!({
+            input_schema: lash_sansio::SchemaContract::admit(json!({
                 "type": "object",
                 "properties": {
                     "q": { "type": "string" }
                 }
-            })
-            .into(),
-            output_schema: json!({}).into(),
+            }))
+            .expect("valid declared schema"),
+            output_schema: lash_sansio::SchemaContract::admit(json!({}))
+                .expect("valid declared schema"),
         }]),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),

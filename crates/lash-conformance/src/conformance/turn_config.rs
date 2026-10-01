@@ -960,6 +960,10 @@ const SWITCH_TOOL: &str = "turn_config_switch_probe";
 
 struct SwitchTool;
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn switch_tool() -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         format!("tool:{SWITCH_TOOL}"),
@@ -968,6 +972,7 @@ fn switch_tool() -> crate::ToolDefinition {
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({"type": "object", "additionalProperties": true}),
     )
+    .expect("valid declared tool schemas")
 }
 
 #[async_trait::async_trait]
@@ -1762,6 +1767,10 @@ const LOOKUP_TOOL: &str = "turn_config_lookup_probe";
 
 struct LookupTool;
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn lookup_tool() -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         format!("tool:{LOOKUP_TOOL}"),
@@ -1770,6 +1779,7 @@ fn lookup_tool() -> crate::ToolDefinition {
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({"type": "object", "additionalProperties": true}),
     )
+    .expect("valid declared tool schemas")
 }
 
 #[async_trait::async_trait]

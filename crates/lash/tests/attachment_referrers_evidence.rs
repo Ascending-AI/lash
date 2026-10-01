@@ -104,6 +104,7 @@ fn tool_definition(name: &str, input: serde_json::Value) -> lash_core::ToolDefin
         input,
         serde_json::json!({}),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], name))
 }
 

@@ -227,11 +227,11 @@ fn journal_definitions() -> Vec<lash_core::ToolDefinition> {
         lash_core::ToolDefinition::raw(
             "tool:container_mint", "container_mint", "Return a process handle for the journal law",
             serde_json::json!({"type":"object"}), handle.clone(),
-        ).with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["tools"], "mint")),
+        ).expect("valid declared tool schemas").with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["tools"], "mint")),
         lash_core::ToolDefinition::raw(
             "tool:container_check", "container_check", "Check the journaled process handle",
             serde_json::json!({"type":"object","additionalProperties":false,"properties":{"handle":handle},"required":["handle"]}), handle,
-        ).with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["tools"], "check")),
+        ).expect("valid declared tool schemas").with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["tools"], "check")),
     ]
 }
 

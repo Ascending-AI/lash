@@ -163,7 +163,7 @@ fn the_decoder_guard_preserves_the_peer_declared_event_types() {
     let mut registration = accepted_process_registration();
     registration.event_types.push(lash_core::ProcessEventType {
         name: "app.declared".to_string(),
-        payload_schema: lash_core::LashSchema::any(),
+        payload_schema: lash_core::JsonSchema::any(),
         semantics: lash_core::ProcessEventSemanticsSpec::default(),
     });
     let normalized = lash_core::runtime::prepare_process_registration(registration.clone())

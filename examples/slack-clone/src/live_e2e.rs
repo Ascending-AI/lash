@@ -967,24 +967,25 @@ fn swap_tools(
     api: Arc<SlackApi>,
     state: Arc<Mutex<SwapState>>,
 ) -> Arc<dyn ToolProvider> {
-    let definitions = vec![
+    let definitions =
+        vec![
         ToolDefinition::typed::<ReadChannelArgs, ReadChannelOutput>(
             "tool:slack_clone.live.read_channel",
             "read_channel",
             "Read the shared channel oldest-first. Use this to obtain the peer's published nonce.",
-        )
+        ).expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["channel"], "history")),
         ToolDefinition::typed::<PostMessageArgs, PostMessageOutput>(
             "tool:slack_clone.live.post_channel_message",
             "post_channel_message",
             "Post to the shared channel. Publish your own nonce verbatim here.",
-        )
+        ).expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["channel"], "post")),
         ToolDefinition::typed::<SubmitNonceArgs, SubmitNonceOutput>(
             "tool:slack_clone.live.submit_peer_nonce",
             "submit_peer_nonce",
             "Submit the peer nonce after reading it from the shared channel. Exact value only.",
-        )
+        ).expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["exchange"], "submit")),
     ];
     Arc::new(StaticToolProvider::new(

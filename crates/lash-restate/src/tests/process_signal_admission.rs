@@ -37,7 +37,7 @@ async fn parked_signal_target(registry: &Arc<dyn ProcessRegistry>) -> ProcessId 
         .register_process(executed_registration().with_extra_event_types([
             lash_core::ProcessEventType {
                 name: signal_event_type(),
-                payload_schema: lash_core::LashSchema::any(),
+                payload_schema: lash_core::JsonSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec::default(),
             },
         ]))

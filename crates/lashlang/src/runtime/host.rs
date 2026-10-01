@@ -680,17 +680,93 @@ impl<H: ExecutionHost> ExecutionHost for ExecutionEnvironment<'_, H> {
 
 #[derive(Clone, Debug, Error, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[error("{message}")]
+#[serde(try_from = "ExecutionHostErrorWire", into = "ExecutionHostErrorWire")]
 pub struct ExecutionHostError {
+    message: String,
+    cause: Option<Box<ExecutionHostErrorCause>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ExecutionHostErrorCause {
+    ToolFailure(ExecutionHostToolFailure),
+    SchemaAdmission(lash_sansio::SchemaAdmissionError),
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExecutionHostErrorWire {
     message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     tool_failure: Option<Box<ExecutionHostToolFailure>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    schema_admission: Option<Box<lash_sansio::SchemaAdmissionError>>,
+}
+
+#[derive(Debug, Error)]
+#[error("an execution host error cannot carry both tool and schema causes")]
+struct ConflictingExecutionHostCauses;
+
+impl From<ExecutionHostError> for ExecutionHostErrorWire {
+    fn from(error: ExecutionHostError) -> Self {
+        let (tool_failure, schema_admission) = match error.cause.map(|cause| *cause) {
+            Some(ExecutionHostErrorCause::ToolFailure(failure)) => (Some(Box::new(failure)), None),
+            Some(ExecutionHostErrorCause::SchemaAdmission(source)) => {
+                (None, Some(Box::new(source)))
+            }
+            None => (None, None),
+        };
+        Self {
+            message: error.message,
+            tool_failure,
+            schema_admission,
+        }
+    }
+}
+
+impl TryFrom<ExecutionHostErrorWire> for ExecutionHostError {
+    type Error = ConflictingExecutionHostCauses;
+
+    fn try_from(wire: ExecutionHostErrorWire) -> Result<Self, Self::Error> {
+        let cause = match (wire.tool_failure, wire.schema_admission) {
+            (Some(failure), None) => Some(Box::new(ExecutionHostErrorCause::ToolFailure(*failure))),
+            (None, Some(source)) => {
+                Some(Box::new(ExecutionHostErrorCause::SchemaAdmission(*source)))
+            }
+            (None, None) => None,
+            (Some(_), Some(_)) => return Err(ConflictingExecutionHostCauses),
+        };
+        Ok(Self {
+            message: wire.message,
+            cause,
+        })
+    }
 }
 
 impl ExecutionHostError {
+    pub fn from_schema_admission(source: lash_sansio::SchemaAdmissionError) -> Self {
+        Self {
+            message: source.to_string(),
+            cause: Some(Box::new(ExecutionHostErrorCause::SchemaAdmission(source))),
+        }
+    }
+
+    pub fn schema_admission(&self) -> Option<&lash_sansio::SchemaAdmissionError> {
+        match self.cause.as_deref() {
+            Some(ExecutionHostErrorCause::SchemaAdmission(source)) => Some(source),
+            Some(ExecutionHostErrorCause::ToolFailure(_)) | None => None,
+        }
+    }
+
+    fn tool_failure_details(&self) -> Option<&ExecutionHostToolFailure> {
+        match self.cause.as_deref() {
+            Some(ExecutionHostErrorCause::ToolFailure(failure)) => Some(failure),
+            Some(ExecutionHostErrorCause::SchemaAdmission(_)) | None => None,
+        }
+    }
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
-            tool_failure: None,
+            cause: None,
         }
     }
 
@@ -703,19 +779,22 @@ impl ExecutionHostError {
     pub fn from_tool_failure(failure: &ToolFailure, replay_key: impl Into<String>) -> Self {
         Self {
             message: failure.message.clone(),
-            tool_failure: Some(Box::new(ExecutionHostToolFailure {
-                class: failure.class.clone(),
-                code: failure.code.clone(),
-                source: failure.source.clone(),
-                retry: failure.retry.clone(),
-                replay_key: replay_key.into(),
-            })),
+            cause: Some(Box::new(ExecutionHostErrorCause::ToolFailure(
+                ExecutionHostToolFailure {
+                    class: failure.class.clone(),
+                    code: failure.code.clone(),
+                    source: failure.source.clone(),
+                    retry: failure.retry.clone(),
+                    cause: failure.cause.clone(),
+                    replay_key: replay_key.into(),
+                },
+            ))),
         }
     }
 
     /// The recorded tool failure attached to this host error, if any.
     pub fn tool_failure(&self) -> Option<LashlangEffectFailure> {
-        let failure = self.tool_failure.as_ref()?;
+        let failure = self.tool_failure_details()?;
         Some(LashlangEffectFailure {
             class: failure.class.clone(),
             code: failure.code.clone(),
@@ -723,6 +802,7 @@ impl ExecutionHostError {
             replay_key: failure.replay_key.clone(),
             source: failure.source.clone(),
             retry: failure.retry.clone(),
+            cause: failure.cause.clone(),
         })
     }
 
@@ -731,22 +811,21 @@ impl ExecutionHostError {
     }
 
     pub fn tool_failure_class(&self) -> Option<&ToolFailureClass> {
-        self.tool_failure.as_ref().map(|failure| &failure.class)
+        self.tool_failure_details().map(|failure| &failure.class)
     }
 
     pub fn tool_failure_code(&self) -> Option<&str> {
-        self.tool_failure
-            .as_ref()
+        self.tool_failure_details()
             .map(|failure| failure.code.as_str())
     }
 
     pub fn tool_failure_source(&self) -> Option<&ToolFailureSource> {
-        self.tool_failure.as_ref().map(|failure| &failure.source)
+        self.tool_failure_details().map(|failure| &failure.source)
     }
 
     /// Returns the tool retry disposition when this error crossed a tool bridge.
     pub fn tool_failure_retry(&self) -> Option<&ToolRetryStatus> {
-        self.tool_failure.as_ref().map(|failure| &failure.retry)
+        self.tool_failure_details().map(|failure| &failure.retry)
     }
 }
 

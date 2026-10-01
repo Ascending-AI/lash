@@ -72,6 +72,10 @@ impl MemberWitness {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn member_definition(name: &str) -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         format!("tool:{name}"),
@@ -80,6 +84,7 @@ fn member_definition(name: &str) -> crate::ToolDefinition {
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(crate::ToolBinding::new(["tools"], name))
 }
 

@@ -8,8 +8,9 @@ fn conflicting_tool_catalog_lashlang_bindings_return_an_error() {
             name,
             description,
             lash_core::ToolDefinition::default_input_schema(),
-            serde_json::Value::Null,
+            lash_core::JsonSchema::any().into_value(),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["shared"], "run").with_authority_type("Shared"))
     };
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![

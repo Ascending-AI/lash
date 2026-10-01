@@ -274,13 +274,16 @@ mod tests {
 
     #[test]
     fn granted_batch_identity_pins_present_grant_routing_grammar() {
-        let grant = crate::ToolExecutionGrant::from_definition(crate::ToolDefinition::raw(
-            "tool:granted",
-            "granted",
-            "golden",
-            serde_json::json!({"type": "object"}),
-            serde_json::json!({"type": "string"}),
-        ))
+        let grant = crate::ToolExecutionGrant::from_definition(
+            crate::ToolDefinition::raw(
+                "tool:granted",
+                "granted",
+                "golden",
+                serde_json::json!({"type": "object"}),
+                serde_json::json!({"type": "string"}),
+            )
+            .expect("valid declared tool schemas"),
+        )
         .with_source_id("plugin\0route")
         .with_execution_binding(serde_json::json!({"route": ["λ", -0.0]}));
         let calls = vec![
@@ -300,15 +303,17 @@ mod tests {
             "tool-batch:v3:blake3:a23081705b7fb825a1e6f93180c85b108c73193eb2d42f2c8a01d0ec45784cd9"
         );
 
-        let without_source =
-            crate::ToolExecutionGrant::from_definition(crate::ToolDefinition::raw(
+        let without_source = crate::ToolExecutionGrant::from_definition(
+            crate::ToolDefinition::raw(
                 "tool:granted",
                 "granted",
                 "golden",
                 serde_json::json!({"type": "object"}),
                 serde_json::json!({"type": "string"}),
-            ))
-            .with_execution_binding(serde_json::json!({"route": ["λ", -0.0]}));
+            )
+            .expect("valid declared tool schemas"),
+        )
+        .with_execution_binding(serde_json::json!({"route": ["λ", -0.0]}));
         let without_source = vec![
             ToolInvocation::new(
                 crate::ToolCallId::fixture("grant\0call"),

@@ -156,6 +156,7 @@ fn echo_definition() -> lash_core::ToolDefinition {
             "additionalProperties": false
         }),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(lash_core::ToolBinding::new(["probe"], "echo"))
 }
 

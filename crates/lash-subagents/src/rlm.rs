@@ -72,6 +72,18 @@ impl RlmSubagentToolsProvider {
         let plugin_source = capability.plugin_source();
         let output_schema = lash_sansio::schema_contract::parse_output_schema(args.get("output"))
             .map_err(|err| ToolOutcome::err(serde_json::json!(err.to_string())))?;
+        let output_schema = output_schema
+            .map(lash_sansio::JsonSchema::admit)
+            .transpose()
+            .map_err(|source| {
+                ToolOutcome::failure(
+                    lash_core::ToolFailure::invalid_request(
+                        "unusable_output_schema",
+                        source.to_string(),
+                    )
+                    .with_cause(lash_core::ToolFailureCause::SchemaAdmission { source }),
+                )
+            })?;
         let seed = lash_protocol_rlm::RlmSeed::from_tool_args(args)
             .map_err(|err| ToolOutcome::err(serde_json::json!(err)))?;
         let parent = spawn_parent(context)?;
@@ -119,7 +131,12 @@ impl RlmSubagentToolsProvider {
         // The child session is the process's own, derived from the id its
         // start mints (ADR 0107), so the request names none.
         create_request.session_id = None;
-        let turn_input = turn_input_for_task(render_task_prompt(&task, output_schema.as_ref()));
+        let turn_input = turn_input_for_task(render_task_prompt(
+            &task,
+            output_schema
+                .as_ref()
+                .map(lash_sansio::JsonSchema::as_value),
+        ));
         let payload = serde_json::to_value(PreparedSpawnAgent {
             create_request: Box::new(create_request),
             turn_input,
@@ -268,7 +285,7 @@ struct PreparedSpawnAgent {
     /// The caller's declared output schema, parsed once at prepare. The
     /// SessionTurn runner checks the child's final value against it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    output_schema: Option<Value>,
+    output_schema: Option<lash_sansio::JsonSchema>,
 }
 
 #[async_trait]

@@ -123,7 +123,7 @@ fn effect_summary_refuses_unknown_runtime_kind() {
         fixture_registration("effect-summary-unknown-kind").with_extra_event_types([
             crate::ProcessEventType {
                 name: "process.effect_future".to_string(),
-                payload_schema: crate::LashSchema::any(),
+                payload_schema: crate::JsonSchema::any(),
                 semantics: crate::ProcessEventSemanticsSpec::default(),
             },
         ]);
@@ -629,7 +629,7 @@ fn typed_signal_id_with_fold_validation_suffix_does_not_panic() {
     let registration = fixture_registration("host-signal-fold-validation-key")
         .with_extra_event_types([crate::ProcessEventType {
             name: "signal.ready".to_string(),
-            payload_schema: crate::LashSchema::any(),
+            payload_schema: crate::JsonSchema::any(),
             semantics: crate::ProcessEventSemanticsSpec::default(),
         }]);
     let record =
@@ -669,7 +669,7 @@ fn a_signal_append_selects_its_declared_wait_or_its_position() {
     let registration = fixture_registration("signal-wait-selection").with_extra_event_types([
         crate::ProcessEventType {
             name: "signal.ready".to_string(),
-            payload_schema: crate::LashSchema::any(),
+            payload_schema: crate::JsonSchema::any(),
             semantics: crate::ProcessEventSemanticsSpec::default(),
         },
     ]);

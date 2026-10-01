@@ -52,13 +52,16 @@ async fn run_batch(
     )
     .expect("the law's leaf provider registers");
     let mut definitions = leaf_definitions();
-    definitions.push(crate::ToolDefinition::raw(
-        LEAF_FAIL,
-        LEAF_FAIL.trim_start_matches("tool:"),
-        "conformance failing leaf",
-        crate::ToolDefinition::default_input_schema(),
-        serde_json::json!({ "type": "object", "additionalProperties": true }),
-    ));
+    definitions.push(
+        crate::ToolDefinition::raw(
+            LEAF_FAIL,
+            LEAF_FAIL.trim_start_matches("tool:"),
+            "conformance failing leaf",
+            crate::ToolDefinition::default_input_schema(),
+            serde_json::json!({ "type": "object", "additionalProperties": true }),
+        )
+        .expect("valid declared tool schemas"),
+    );
     let context = crate::testing::TestExecutionContextBuilder::new(
         crate::testing::TestExecutionPorts::over_host(
             Arc::clone(host),

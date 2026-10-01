@@ -490,6 +490,7 @@ fn retrying_direct_tool_definition() -> lash_core::ToolDefinition {
             }),
             serde_json::json!({ "type": "string" }),
         )
+        .expect("valid declared tool schemas")
         .with_retry_policy(lash_core::ToolRetryPolicy::safe(2, 0, 0)),
         "retrying_direct",
     )
@@ -593,7 +594,8 @@ fn durable_input_tool_definition() -> lash_core::ToolDefinition {
                 "required": ["request_id", "answer"],
                 "additionalProperties": true
             }),
-        ),
+        )
+        .expect("valid declared tool schemas"),
         "mock_input_request",
     )
 }
@@ -648,6 +650,7 @@ fn agent_frame_switch_tool_definition() -> lash_core::ToolDefinition {
         }),
         serde_json::json!({ "type": "object" }),
     )
+    .expect("valid declared tool schemas")
 }
 
 fn app_tool_definition() -> lash_core::ToolDefinition {
@@ -662,7 +665,8 @@ fn app_tool_definition() -> lash_core::ToolDefinition {
                 "additionalProperties": false
             }),
             serde_json::json!({ "type": "object" }),
-        ),
+        )
+        .expect("valid declared tool schemas"),
         "app_lookup",
     )
 }
@@ -700,7 +704,8 @@ fn long_text_tool_definition() -> lash_core::ToolDefinition {
                 "additionalProperties": false
             }),
             serde_json::json!({ "type": "string" }),
-        ),
+        )
+        .expect("valid declared tool schemas"),
         "app_lookup",
     )
 }

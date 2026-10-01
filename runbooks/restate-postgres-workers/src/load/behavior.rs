@@ -169,6 +169,10 @@ impl lash_core::facade_support::ContextPressureHook for LoadCompaction {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 pub(crate) fn register(
     reg: &mut lash_core::plugin::PluginRegistrar,
 ) -> Result<(), lash_core::PluginError> {
@@ -180,7 +184,7 @@ pub(crate) fn register(
     })));
     reg.context().compact(100, Arc::new(LoadCompaction));
     reg.context().pressure(100, Arc::new(LoadCompaction));
-    reg.triggers().declare(lash::triggers::TriggerEvent::new("Event", "load.external", "event", lash::triggers::LashSchema::new(json!({"type":"object","properties":{"schedule":{"type":"string"},"tick":{"type":"string"}},"required":["schedule","tick"],"additionalProperties":false}))))?;
+    reg.triggers().declare(lash::triggers::TriggerEvent::new("Event", "load.external", "event", lash::triggers::JsonSchema::admit(json!({"type":"object","properties":{"schedule":{"type":"string"},"tick":{"type":"string"}},"required":["schedule","tick"],"additionalProperties":false})).expect("valid declared payload schema")))?;
     Ok(())
 }
 

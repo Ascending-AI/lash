@@ -1,6 +1,10 @@
 use super::*;
 use lash_core::plugin::PluginSessionRequest;
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn definition(id: &str, name: &str) -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         id,
@@ -9,6 +13,7 @@ fn definition(id: &str, name: &str) -> crate::ToolDefinition {
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "string" }),
     )
+    .expect("valid declared tool schemas")
 }
 
 struct ResidentProvider;

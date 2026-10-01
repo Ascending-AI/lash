@@ -481,10 +481,13 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                         &state,
                         // The program finished with a value its declared
                         // schema refuses: a defect in the program.
-                        Some(CellOutcome::Failed(lash_core::CellFailure::new(
-                            lash_core::CellFailureKind::Program,
-                            error_text,
-                        ))),
+                        Some(CellOutcome::Failed(
+                            lash_core::CellFailure::new(
+                                lash_core::CellFailureKind::Program,
+                                error_text.to_string(),
+                            )
+                            .with_value_mismatch(error_text),
+                        )),
                         lash_core::driver_writer_version!(ctx, NATIVE_TRANSPORT_VERSION),
                     ),
                     vec![conversation_event(finish_schema_mismatch_message(

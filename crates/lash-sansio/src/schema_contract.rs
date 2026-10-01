@@ -5,6 +5,7 @@
 //! dialects they accept for each purpose and resolve contracts lazily at the
 //! request boundary.
 
+pub use crate::json_schema::{InvalidSchemaKind, JsonSchema, SchemaAdmissionError, ValueMismatch};
 use std::collections::BTreeSet;
 
 use serde_json::{Map, Value, json};
@@ -27,39 +28,50 @@ pub use omission_null::{OmissionNullPath, OmissionNullPathSegment};
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct SchemaContract {
-    pub canonical: Value,
+    pub canonical: JsonSchema,
     #[serde(default, skip_serializing_if = "SchemaProjectionPolicy::is_default")]
     pub projection: SchemaProjectionPolicy,
 }
 
 impl SchemaContract {
-    pub fn new(canonical: Value) -> Self {
+    pub fn new(canonical: JsonSchema) -> Self {
         Self {
             canonical,
             projection: SchemaProjectionPolicy::default(),
         }
     }
 
-    pub fn with_override(mut self, dialect: impl Into<String>, schema: Value) -> Self {
+    pub fn admit(canonical: Value) -> Result<Self, SchemaAdmissionError> {
+        JsonSchema::admit(canonical).map(Self::new)
+    }
+
+    pub fn with_override(mut self, dialect: impl Into<String>, schema: JsonSchema) -> Self {
         self.projection
             .set_override(SchemaProjectionOverride::new(dialect, schema));
         self
     }
 
     pub fn canonical(&self) -> &Value {
-        &self.canonical
+        self.canonical.as_value()
     }
 }
 
 impl Default for SchemaContract {
     fn default() -> Self {
-        Self::new(Value::Null)
+        Self::new(JsonSchema::any())
     }
 }
 
-impl From<Value> for SchemaContract {
-    fn from(value: Value) -> Self {
+impl From<JsonSchema> for SchemaContract {
+    fn from(value: JsonSchema) -> Self {
         Self::new(value)
+    }
+}
+
+impl TryFrom<Value> for SchemaContract {
+    type Error = SchemaAdmissionError;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        Self::admit(value)
     }
 }
 
@@ -124,11 +136,11 @@ impl ProjectionMode {
 )]
 pub struct SchemaProjectionOverride {
     pub dialect: String,
-    pub schema: Value,
+    pub schema: JsonSchema,
 }
 
 impl SchemaProjectionOverride {
-    pub(crate) fn new(dialect: impl Into<String>, schema: Value) -> Self {
+    pub(crate) fn new(dialect: impl Into<String>, schema: JsonSchema) -> Self {
         Self {
             dialect: dialect.into(),
             schema,
@@ -203,7 +215,9 @@ impl From<String> for SchemaDialect {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SchemaPurpose {
     ToolInput,
@@ -355,7 +369,7 @@ pub fn resolve_schema(
         {
             let diagnostics = diagnostics;
             return Ok(ResolvedSchema {
-                schema: override_schema.schema.clone(),
+                schema: override_schema.schema.as_value().clone(),
                 dialect: dialect.clone(),
                 diagnostics,
                 omission_null_paths: Vec::new(),
@@ -376,14 +390,14 @@ pub fn resolve_schema(
                         .to_string(),
                 );
             }
-            ProjectionMode::Exact => match project_for_dialect(&contract.canonical, dialect) {
+            ProjectionMode::Exact => match project_for_dialect(contract.canonical(), dialect) {
                 Ok(projection)
-                    if projection.schema == contract.canonical
+                    if projection.schema == *contract.canonical()
                         && projection.diagnostics.is_empty() =>
                 {
                     let diagnostics = diagnostics;
                     return Ok(ResolvedSchema {
-                        schema: contract.canonical.clone(),
+                        schema: contract.canonical().clone(),
                         dialect: dialect.clone(),
                         diagnostics,
                         omission_null_paths: Vec::new(),
@@ -396,7 +410,7 @@ pub fn resolve_schema(
                 )),
                 Err(err) => diagnostics.extend(err.diagnostics),
             },
-            ProjectionMode::Auto => match project_for_dialect(&contract.canonical, dialect) {
+            ProjectionMode::Auto => match project_for_dialect(contract.canonical(), dialect) {
                 Ok(projection) => {
                     diagnostics.extend(projection.diagnostics);
                     return Ok(ResolvedSchema {
@@ -1480,16 +1494,18 @@ mod tests {
 
     #[test]
     fn resolver_auto_prefers_explicit_override_for_matching_dialect() {
-        let contract = SchemaContract::new(json!({
+        let contract = SchemaContract::admit(json!({
             "type": "object",
             "properties": { "raw": { "const": "x" } }
         }))
+        .expect("valid declared schema")
         .with_override(
             SchemaDialect::OPENAI_TOOL_PARAMETERS,
-            json!({
+            crate::JsonSchema::admit(json!({
                 "type": "object",
                 "properties": { "raw": { "type": "string", "enum": ["x"] } }
-            }),
+            }))
+            .expect("valid declared projection schema"),
         );
 
         let resolved = resolve_schema(
@@ -1510,10 +1526,11 @@ mod tests {
 
     #[test]
     fn resolver_explicit_only_fails_without_matching_override() {
-        let mut contract = SchemaContract::new(json!({
+        let mut contract = SchemaContract::admit(json!({
             "type": "object",
             "properties": {}
-        }));
+        }))
+        .expect("valid declared schema");
         contract.projection.mode = ProjectionMode::ExplicitOnly;
 
         let err = resolve_schema(
@@ -1535,7 +1552,7 @@ mod tests {
 
     #[test]
     fn bedrock_projection_strips_array_constraints_from_wire_schema_only() {
-        let contract = SchemaContract::new(json!({
+        let contract = SchemaContract::admit(json!({
             "type": "object",
             "required": ["ranked"],
             "properties": {
@@ -1546,7 +1563,8 @@ mod tests {
                     "items": { "type": "string" }
                 }
             }
-        }));
+        }))
+        .expect("valid declared schema");
 
         let resolved = resolve_schema(
             &contract,
@@ -1561,7 +1579,10 @@ mod tests {
         let ranked = &resolved.schema["properties"]["ranked"];
         assert!(ranked.get("minItems").is_none());
         assert!(ranked.get("maxItems").is_none());
-        assert_eq!(contract.canonical["properties"]["ranked"]["minItems"], 3);
+        assert_eq!(
+            contract.canonical.as_value()["properties"]["ranked"]["minItems"],
+            3
+        );
         assert!(
             ranked["description"]
                 .as_str()

@@ -14,7 +14,8 @@ fn authoritative_signature() -> ProcessSignature {
 fn declared_signal() -> ProcessEventType {
     ProcessEventType {
         name: "signed.progress".to_string(),
-        payload_schema: crate::LashSchema::new(serde_json::json!({"type": "object"})),
+        payload_schema: crate::JsonSchema::admit(serde_json::json!({"type": "object"}))
+            .expect("valid declared payload schema"),
         semantics: crate::ProcessEventSemanticsSpec::default(),
     }
 }

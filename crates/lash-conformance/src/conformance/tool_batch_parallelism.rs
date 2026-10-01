@@ -887,6 +887,10 @@ pub fn tool_batch_granted_leaf(path: &str) -> Option<(crate::ToolDefinition, &'s
     })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn leaf_definition(name: &str) -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         format!("tool:{name}"),
@@ -895,6 +899,7 @@ fn leaf_definition(name: &str) -> crate::ToolDefinition {
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(crate::ToolBinding::new(["tools"], name))
 }
 

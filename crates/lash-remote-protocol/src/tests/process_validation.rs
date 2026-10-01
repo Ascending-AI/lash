@@ -180,6 +180,7 @@ fn settled_failed() -> RemoteProcessAwaitOutput {
     RemoteProcessAwaitOutput::Settled {
         output: RemoteProcessToolCallOutput {
             outcome: RemoteProcessToolCallOutcome::Failure(RemoteProcessToolFailure {
+                cause: None,
                 class: RemoteToolFailureClass::Execution,
                 code: "failed".to_string(),
                 message: "failed".to_string(),

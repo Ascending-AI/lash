@@ -136,11 +136,14 @@ impl StaticToolExecute for EchoTool {
 /// The structural-echo tool the standard smoke probe asks the model to call.
 pub(super) fn echo_tools() -> Arc<dyn ToolProvider> {
     Arc::new(StaticToolProvider::new(
-        vec![ToolDefinition::typed::<EchoArgs, EchoOutput>(
-            "tool:slack_clone.structural_echo",
-            "structural_echo",
-            "Return the supplied value unchanged. You must call this when requested.",
-        )],
+        vec![
+            ToolDefinition::typed::<EchoArgs, EchoOutput>(
+                "tool:slack_clone.structural_echo",
+                "structural_echo",
+                "Return the supplied value unchanged. You must call this when requested.",
+            )
+            .expect("valid declared tool schemas"),
+        ],
         EchoTool,
     ))
 }

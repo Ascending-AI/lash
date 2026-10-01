@@ -252,13 +252,16 @@ fn restore_drops_superseded_orphan_and_does_not_transfer_opt_out() {
     #[async_trait::async_trait]
     impl ToolProvider for ReplacedSearchTool {
         fn tool_manifests(&self) -> Vec<ToolManifest> {
-            manifests(vec![ToolDefinition::raw(
-                "tool:replaced",
-                "mcp__demo__search",
-                "a different implementation under the same name",
-                ToolDefinition::default_input_schema(),
-                json!({}),
-            )])
+            manifests(vec![
+                ToolDefinition::raw(
+                    "tool:replaced",
+                    "mcp__demo__search",
+                    "a different implementation under the same name",
+                    ToolDefinition::default_input_schema(),
+                    json!({}),
+                )
+                .expect("valid declared tool schemas"),
+            ])
         }
         fn resolve_contract(&self, _name: &str) -> Option<Arc<ToolContract>> {
             None
@@ -495,6 +498,7 @@ fn project_tool_catalog_projects_all_members_with_catalog_metadata() {
             crate::ToolDefinition::default_input_schema(),
             serde_json::json!({}),
         )
+        .expect("valid declared tool schemas")
     }
     let catalog = project_tool_catalog(["read_file", "search_tools"].map(|name| {
         let definition = member_fixture(name);
@@ -527,9 +531,15 @@ fn project_tool_catalog_preserves_dynamic_output_contracts() {
             crate::ToolDefinition::default_input_schema(),
             serde_json::json!({}),
         )
+        .expect("valid declared tool schemas")
     }
-    let definition = member_fixture("llm_query")
-        .with_output_from_input_schema("output", Some(serde_json::json!({ "type": "string" })));
+    let definition = member_fixture("llm_query").with_output_from_input_schema(
+        "output",
+        Some(
+            lash_sansio::JsonSchema::admit(serde_json::json!({ "type": "string" }))
+                .expect("valid output default schema"),
+        ),
+    );
     let catalog = project_tool_catalog([crate::ToolCatalogEntry {
         manifest: definition.manifest,
         contract: Arc::new(definition.contract),

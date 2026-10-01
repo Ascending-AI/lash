@@ -3,7 +3,7 @@ use super::*;
 pub(super) fn process_event_type() -> lash_core::ProcessEventType {
     lash_core::ProcessEventType {
         name: "process.completed".to_string(),
-        payload_schema: lash_core::LashSchema::any(),
+        payload_schema: lash_core::JsonSchema::any(),
         semantics: lash_core::ProcessEventSemanticsSpec {
             terminal: Some(lash_core::ProcessTerminalSpec {
                 status: lash_core::TerminalProcessStatus::Completed,

@@ -45,6 +45,7 @@ fn test_tool(name: &str) -> crate::ToolDefinition {
         crate::ToolDefinition::default_input_schema(),
         json!({ "type": "string" }),
     )
+    .expect("valid declared tool schemas")
 }
 
 fn beta_tool() -> crate::ToolDefinition {
@@ -62,6 +63,7 @@ fn beta_tool() -> crate::ToolDefinition {
         }),
         json!({ "type": "string" }),
     )
+    .expect("valid declared tool schemas")
 }
 
 fn named_beta_tool(name: &str) -> crate::ToolDefinition {
@@ -79,6 +81,7 @@ fn named_beta_tool(name: &str) -> crate::ToolDefinition {
         }),
         json!({ "type": "string" }),
     )
+    .expect("valid declared tool schemas")
 }
 
 fn manifests(definitions: Vec<crate::ToolDefinition>) -> Vec<crate::ToolManifest> {
@@ -715,6 +718,7 @@ fn strict_mcp_tool_definition() -> crate::ToolDefinition {
         }),
         json!({ "type": "object", "additionalProperties": true }),
     )
+    .expect("valid declared tool schemas")
 }
 
 struct ProjectionPolicyTools;
@@ -742,6 +746,7 @@ fn projection_policy_tool_definition() -> crate::ToolDefinition {
         crate::ToolDefinition::default_input_schema(),
         json!({ "type": "string" }),
     )
+    .expect("valid declared tool schemas")
     .with_argument_projection(
         crate::ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed"),
     )
@@ -1836,7 +1841,7 @@ async fn attempt_context_provider_realizes_every_v2_intent_through_the_coordinat
         .into_iter()
         .map(|name| crate::ProcessEventType {
             name: name.to_string(),
-            payload_schema: crate::LashSchema::any(),
+            payload_schema: crate::JsonSchema::any(),
             semantics: crate::ProcessEventSemanticsSpec::default(),
         })
         .collect::<Vec<_>>();

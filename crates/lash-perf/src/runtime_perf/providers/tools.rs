@@ -385,6 +385,10 @@ fn benchmark_mail_tool_definitions() -> Vec<ToolDefinition> {
     definitions
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn benchmark_mail_tool_definition(account: &str, operation: &str) -> ToolDefinition {
     let (input_schema, output_schema, description) = match operation {
         "send" => (
@@ -434,6 +438,7 @@ fn benchmark_mail_tool_definition(account: &str, operation: &str) -> ToolDefinit
         input_schema,
         output_schema,
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(ToolBinding::new(["inbox", account], operation).with_authority_type("Inbox"))
 }
 
@@ -519,6 +524,10 @@ async fn execute_benchmark_async(
     ToolOutcome::pending(lash_core::PendingCompletion::new())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn benchmark_echo_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:benchmark_echo",
@@ -547,9 +556,14 @@ fn benchmark_echo_tool_definition() -> ToolDefinition {
             "additionalProperties": false
         }),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(ToolBinding::new(["tools"], "benchmark_echo").with_authority_type("Tools"))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn benchmark_slow_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:benchmark_slow",
@@ -572,12 +586,16 @@ fn benchmark_slow_tool_definition() -> ToolDefinition {
             "required": ["value", "delay_ms"],
             "additionalProperties": false
         }),
-    )
+    ).expect("valid declared tool schemas")
     .with_tool_binding(
         ToolBinding::new(["tools"], "benchmark_slow").with_authority_type("Tools"),
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn benchmark_async_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:benchmark_async",
@@ -603,6 +621,7 @@ fn benchmark_async_tool_definition() -> ToolDefinition {
             "additionalProperties": false
         }),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(ToolBinding::new(["tools"], "benchmark_async").with_authority_type("Tools"))
 }
 
@@ -623,6 +642,10 @@ fn benchmark_oblique_tool_definition_for(name: &str) -> Option<ToolDefinition> {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 pub(super) fn benchmark_oblique_search_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:oblique_search",
@@ -645,12 +668,16 @@ pub(super) fn benchmark_oblique_search_tool_definition() -> ToolDefinition {
             "additionalProperties": false
         }),
         oblique_search_output_schema(),
-    )
+    ).expect("valid declared tool schemas")
     .with_tool_binding(
         ToolBinding::new(["obliq"], "search").with_authority_type("Obliq"),
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn benchmark_oblique_judge_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:oblique_judge_candidates",
@@ -686,9 +713,14 @@ fn benchmark_oblique_judge_tool_definition() -> ToolDefinition {
             "additionalProperties": false
         }),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(ToolBinding::new(["obliq"], "judge_candidates").with_authority_type("Obliq"))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn benchmark_oblique_list_handles_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:oblique_list_async_handles",
@@ -710,6 +742,7 @@ fn benchmark_oblique_list_handles_tool_definition() -> ToolDefinition {
             "additionalProperties": false
         }),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(
         ToolBinding::new(["obliq"], "list_async_handles").with_authority_type("Obliq"),
     )
@@ -841,6 +874,10 @@ async fn execute_oblique_list_async_handles(_call: lash_core::ToolCall<'_>) -> T
     }))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn oblique_judge_direct_request(candidate_ids: &[String]) -> DirectRequest {
     DirectRequest::json_schema(
         "mock-model",
@@ -851,7 +888,7 @@ fn oblique_judge_direct_request(candidate_ids: &[String]) -> DirectRequest {
         DirectJsonSchema {
             name: "runtime_perf_oblique_judge".to_string(),
             strict: true,
-            schema: serde_json::json!({
+            schema: lash_sansio::SchemaContract::admit(serde_json::json!({
                 "type": "object",
                 "additionalProperties": false,
                 "required": ["ranked_doc_ids", "rationale"],
@@ -862,8 +899,8 @@ fn oblique_judge_direct_request(candidate_ids: &[String]) -> DirectRequest {
                     },
                     "rationale": { "type": "string" }
                 }
-            })
-            .into(),
+            }))
+            .expect("valid declared schema"),
         },
     )
 }
@@ -913,6 +950,10 @@ impl BenchmarkLargeToolCatalog {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn gmail_like_tool_definition(index: usize, name: &str) -> ToolDefinition {
     let mut definition = ToolDefinition::raw(
         format!("tool:{name}"),
@@ -920,7 +961,7 @@ fn gmail_like_tool_definition(index: usize, name: &str) -> ToolDefinition {
         gmail_like_tool_description(index, name),
         gmail_like_input_schema(name),
         gmail_like_output_schema(name),
-    )
+    ).expect("valid declared tool schemas")
     .with_examples(vec![
         format!(
             r#"call {name} {{ user_id: "me", message_id: "msg_123", payload: {{ label_ids: ["INBOX", "IMPORTANT"] }} }}"#
@@ -943,14 +984,17 @@ fn gmail_like_tool_definition(index: usize, name: &str) -> ToolDefinition {
     if index.is_multiple_of(7) {
         definition.contract.output_contract = ToolOutputContract::from_input_schema(
             "projection",
-            Some(serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "id": { "type": "string" },
-                    "status": { "type": "string" }
-                },
-                "additionalProperties": true
-            })),
+            Some(
+                lash_sansio::JsonSchema::admit(serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string" },
+                        "status": { "type": "string" }
+                    },
+                    "additionalProperties": true
+                }))
+                .expect("valid output default schema"),
+            ),
         );
     }
 

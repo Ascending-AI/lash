@@ -1,4 +1,5 @@
 mod runtime_feedback;
+mod schema_projection;
 use crate::support::*;
 use lash_core::llm::transport::ProviderFailureKind;
 use lash_core::llm::types::{LlmJsonSchema, LlmMessage, LlmToolChoice, LlmToolSpec};
@@ -1070,8 +1071,10 @@ fn anthropic_cache_dialect_marks_canonical_breakpoints_for_an_arbitrary_model() 
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "search".to_string(),
         description: "Search".to_string(),
-        input_schema: json!({"type": "object"}).into(),
-        output_schema: json!({}).into(),
+        input_schema: lash_sansio::SchemaContract::admit(json!({"type": "object"}))
+            .expect("valid declared schema"),
+        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+            .expect("valid declared schema"),
     }]);
 
     let body = OpenAiCompatibleProvider::new("key", "https://router-proxy.example/v1")
@@ -1123,8 +1126,10 @@ fn gemini_cache_dialect_emits_one_ephemeral_explicit_breakpoint() {
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "search".to_string(),
         description: "Search".to_string(),
-        input_schema: json!({"type": "object"}).into(),
-        output_schema: json!({}).into(),
+        input_schema: lash_sansio::SchemaContract::admit(json!({"type": "object"}))
+            .expect("valid declared schema"),
+        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+            .expect("valid declared schema"),
     }]);
 
     let body = openrouter_provider()
@@ -1168,88 +1173,15 @@ fn absent_cache_dialect_strips_breakpoint_even_on_the_openrouter_url() {
 }
 
 #[test]
-fn chat_tools_use_projected_openai_schema_and_preserve_override() {
-    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model = "anthropic/claude-sonnet-4.6".to_string();
-    req.tools = Arc::new(vec![
-        LlmToolSpec {
-            name: "empty".to_string(),
-            description: "Empty".to_string(),
-            input_schema: json!({"type": "object"}).into(),
-            output_schema: json!({}).into(),
-        },
-        LlmToolSpec {
-            name: "override".to_string(),
-            description: "Override".to_string(),
-            input_schema: lash_core::SchemaContract::new(json!({
-                "type": "object",
-                "properties": {"raw": {"const": "x"}}
-            }))
-            .with_override(
-                lash_core::test_support::SchemaDialect::OPENAI_TOOL_PARAMETERS,
-                json!({
-                    "type": "object",
-                    "properties": { "raw": { "type": "string", "enum": ["x"] } }
-                }),
-            ),
-            output_schema: json!({}).into(),
-        },
-        LlmToolSpec {
-            name: "schemars".to_string(),
-            description: "Schemars".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "limit": {
-                        "description": "Maximum number of results.",
-                        "allOf": [
-                            {
-                                "type": "integer",
-                                "minimum": 1,
-                                "maximum": 100
-                            }
-                        ]
-                    }
-                }
-            })
-            .into(),
-            output_schema: json!({}).into(),
-        },
-    ]);
-
-    let body = openrouter_provider()
-        .build_chat_request_body(&req, true)
-        .unwrap();
-
-    assert_eq!(
-        body["tools"][0]["function"]["parameters"]["properties"],
-        json!({})
-    );
-    assert_eq!(
-        body["tools"][1]["function"]["parameters"]["properties"]["raw"],
-        json!({ "type": "string", "enum": ["x"] })
-    );
-    assert_eq!(
-        body["tools"][2]["function"]["parameters"]["properties"]["limit"],
-        json!({
-            "description": "Maximum number of results.",
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 100
-        })
-    );
-}
-
-#[test]
 fn structured_output_schema_is_projected_or_rejected_locally() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
         name: "result".to_string(),
-        schema: json!({
+        schema: lash_sansio::SchemaContract::admit(json!({
             "type": "object",
             "properties": { "summary": { "type": "string" } }
-        })
-        .into(),
+        }))
+        .expect("valid declared schema"),
         strict: true,
     }));
 
@@ -1267,7 +1199,10 @@ fn structured_output_schema_is_projected_or_rejected_locally() {
 
     req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
         name: "bad".to_string(),
-        schema: json!({"type": "object", "allOf": []}).into(),
+        schema: lash_sansio::SchemaContract::admit(
+            json!({"type": "object", "allOf": [{"type": "object"}, {"type": "object"}]}),
+        )
+        .expect("valid declared schema"),
         strict: true,
     }));
     let err = OpenAiProvider::new("key")
@@ -1282,7 +1217,7 @@ fn openrouter_can_be_configured_for_bedrock_safe_schema_dialect() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "rank")]);
     req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
         name: "rank_result".to_string(),
-        schema: json!({
+        schema: lash_sansio::SchemaContract::admit(json!({
             "type": "object",
             "required": ["ranked"],
             "properties": {
@@ -1293,8 +1228,8 @@ fn openrouter_can_be_configured_for_bedrock_safe_schema_dialect() {
                     "items": { "type": "string" }
                 }
             }
-        })
-        .into(),
+        }))
+        .expect("valid declared schema"),
         strict: true,
     }));
 
@@ -1602,12 +1537,13 @@ fn chat_body_honors_compat_max_token_field_streaming_usage_and_strict_tools() {
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "lookup".to_string(),
         description: "Lookup".to_string(),
-        input_schema: json!({
+        input_schema: lash_sansio::SchemaContract::admit(json!({
             "type": "object",
             "properties": { "q": { "type": "string" } }
-        })
-        .into(),
-        output_schema: json!({}).into(),
+        }))
+        .expect("valid declared schema"),
+        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+            .expect("valid declared schema"),
     }]);
 
     req.generation.output_token_cap = std::num::NonZeroUsize::new(2_048);
@@ -1616,7 +1552,7 @@ fn chat_body_honors_compat_max_token_field_streaming_usage_and_strict_tools() {
         .with_compat(OpenAiCompat {
             max_tokens_field: Some(OpenAiCompatMaxTokensField::MaxCompletionTokens),
             streaming_usage: Some(false),
-            strict_tools: Some(true),
+            schema_capabilities: Some(ProviderSchemaCapabilities::openai(true)),
             ..OpenAiCompat::default()
         })
         .build_chat_request_body(&req, true)
@@ -1639,8 +1575,10 @@ fn local_preset_suppresses_optional_openai_fields() {
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "lookup".to_string(),
         description: "Lookup".to_string(),
-        input_schema: json!({"type": "object"}).into(),
-        output_schema: json!({}).into(),
+        input_schema: lash_sansio::SchemaContract::admit(json!({"type": "object"}))
+            .expect("valid declared schema"),
+        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+            .expect("valid declared schema"),
     }]);
 
     let local = OpenAiCompatibleProvider::new("key", "https://gpu-box.example/v1")

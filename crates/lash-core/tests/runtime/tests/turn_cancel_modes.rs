@@ -953,6 +953,7 @@ fn retry_once_tool_definition() -> lash_core::ToolDefinition {
         }),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
+    .expect("valid declared tool schemas")
     .with_retry_policy(lash_core::ToolRetryPolicy::safe(
         2,
         RETRY_AFTER_MS,

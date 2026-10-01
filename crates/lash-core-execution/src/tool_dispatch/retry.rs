@@ -131,6 +131,7 @@ async fn build_attempt_context<'run>(
 fn tool_panicked(payload: Box<dyn std::any::Any + Send>) -> ToolOutcome {
     let message = crate::panic_containment::payload_message(payload.as_ref());
     let failure = ToolOutcome::failure(crate::ToolFailure {
+        cause: None,
         class: crate::ToolFailureClass::Internal,
         code: "tool_panicked".to_string(),
         message,
@@ -219,6 +220,7 @@ async fn normalize_tool_result_attachments(
 
 fn attachment_failure(code: &str, error: impl std::fmt::Display) -> crate::ToolCallOutput {
     crate::ToolCallOutput::failure(crate::ToolFailure {
+        cause: None,
         class: crate::ToolFailureClass::Execution,
         code: code.to_string(),
         message: error.to_string(),
@@ -318,6 +320,7 @@ mod panic_tests {
     #[test]
     fn process_await_preserves_plugin_retry_evidence_for_retry_policy() {
         let output = crate::ToolCallOutput::failure(crate::ToolFailure {
+            cause: None,
             class: crate::ToolFailureClass::External,
             code: "plugin_temporarily_unavailable".to_string(),
             message: "plugin asks the caller to retry".to_string(),
@@ -383,6 +386,7 @@ mod panic_tests {
             crate::ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "object" }),
         )
+        .expect("valid declared tool schemas")
     }
 
     impl crate::ToolProvider for ConstructionPanicTool {

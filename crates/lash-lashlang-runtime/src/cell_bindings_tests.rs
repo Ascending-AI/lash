@@ -7,8 +7,9 @@ fn tool(id: &str, operation: &str, description: &str) -> lash_core::ToolDefiniti
         operation,
         description,
         lash_core::ToolDefinition::default_input_schema(),
-        serde_json::Value::Null,
+        lash_core::JsonSchema::any().into_value(),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(crate::ToolBinding::new(["app"], operation).with_authority_type("App"))
 }
 

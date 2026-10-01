@@ -526,6 +526,10 @@ fn actor(session_id: &SessionId) -> crate::ProcessOriginator {
     crate::ProcessOriginator::session(crate::SessionScope::new(session_id))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn sample_draft(
     session_id: &SessionId,
     subscription_key: &str,
@@ -537,7 +541,7 @@ fn sample_draft(
     crate::TriggerSubscriptionDraft {
         source_capture: crate::TriggerSourceCapture::provider(
             ["ui", "button"],
-            crate::LashSchema::any(),
+            crate::JsonSchema::any(),
             "ui-provider",
             serde_json::json!({"account": "a"}),
         ),
@@ -548,12 +552,13 @@ fn sample_draft(
         source_type: "ui.button.pressed".to_string(),
         source_key: source_key.to_string(),
         source: serde_json::json!({ "button": "Blue" }),
-        payload_schema: crate::LashSchema::new(serde_json::json!({
+        payload_schema: crate::JsonSchema::admit(serde_json::json!({
             "type": "object",
             "properties": { "button": { "type": "string" } },
             "required": ["button"],
             "additionalProperties": false
-        })),
+        }))
+        .expect("valid declared payload schema"),
         target: crate::ProcessInput::Engine {
             kind: "test".to_string(),
             payload: serde_json::json!({ "process": process_name }),

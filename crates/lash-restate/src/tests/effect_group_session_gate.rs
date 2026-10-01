@@ -97,7 +97,8 @@ fn tool_request(scope: &ExecutionScope) -> lash_core::runtime::effect::ToolChild
         "the batch's tool",
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object" }),
-    );
+    )
+    .expect("valid declared tool schemas");
     lash_core::runtime::effect::ToolChildRequest::new(
         prepared_tool_call(),
         lash_core::runtime::effect::ToolChildAdmission::Catalog {

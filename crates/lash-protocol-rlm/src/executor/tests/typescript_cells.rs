@@ -212,6 +212,7 @@ fn approval_request_definition() -> lash_core::ToolDefinition {
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object" }),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
         ["approval"],
         "request",
@@ -240,6 +241,7 @@ impl lash_core::ToolProvider for PolicyDeniedToolProvider {
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         (async {
             lash_core::ToolOutcome::failure(lash_core::ToolFailure {
+                cause: None,
                 class: lash_core::ToolFailureClass::PermissionDenied,
                 code: "approval_denied".to_string(),
                 message: "approval was denied".to_string(),
@@ -654,6 +656,7 @@ fn echo_definition() -> lash_core::ToolDefinition {
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object" }),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["echo"], "say"))
 }
 
@@ -1025,7 +1028,7 @@ fn widened_contract_definition() -> lash_core::ToolDefinition {
             { "type":"object", "properties": {"text":{"type":"string","minLength":4}}, "required":["text"] },
             { "type":"object", "properties": {"text":{}}, "additionalProperties":false }
         ]
-    }), serde_json::json!({"type":"string"}))
+    }), serde_json::json!({"type":"string"})).expect("valid declared tool schemas")
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["bounded"], "say"))
 }
 

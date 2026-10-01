@@ -1108,8 +1108,9 @@ fn missing_tool_binding_is_not_fabricated() {
         "read_file",
         "read a file",
         lash_core::ToolDefinition::default_input_schema(),
-        serde_json::Value::Null,
-    );
+        lash_core::JsonSchema::any().into_value(),
+    )
+    .expect("valid declared tool schemas");
 
     let err =
         required_tool_executable(&tool.manifest).expect_err("missing explicit binding should fail");
@@ -1130,8 +1131,9 @@ fn explicit_tool_binding_attaches_exactly_one_manifest_key() {
         "read_file",
         "read a file",
         lash_core::ToolDefinition::default_input_schema(),
-        serde_json::Value::Null,
+        lash_core::JsonSchema::any().into_value(),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(
         ToolBinding::new(["fs"], "read")
             .with_authority_type("Filesystem")
@@ -1171,6 +1173,7 @@ fn tool_catalog_imports_declared_static_schema_types() {
             "items": { "type": ["string", "null"] }
         }),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(ToolBinding::new(["fs"], "read").with_authority_type("Filesystem"));
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
 
@@ -1223,6 +1226,7 @@ fn tool_contracts_carry_lash_types_and_refuse_malformed_ones() {
         }),
         serde_json::json!({ "x-lash": { "kind": "handle", "payload": { "type": "string" } } }),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(ToolBinding::new(["spawner"], "spawn").with_authority_type("Spawner"));
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
     let resources = lashlang_resources_from_tool_catalog(&catalog).expect("tool schemas import");
@@ -1254,6 +1258,7 @@ fn tool_contracts_carry_lash_types_and_refuse_malformed_ones() {
         }),
         serde_json::json!({}),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(ToolBinding::new(["broken"], "run").with_authority_type("Broken"));
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![malformed]);
     let error = lashlang_resources_from_tool_catalog(&catalog)
@@ -1278,7 +1283,14 @@ fn from_input_schema_tool_imports_contract_marker_and_default() {
         }),
         serde_json::json!({ "type": "string" }),
     )
-    .with_output_from_input_schema("schema", Some(serde_json::json!({ "type": "string" })))
+    .expect("valid declared tool schemas")
+    .with_output_from_input_schema(
+        "schema",
+        Some(
+            lash_sansio::JsonSchema::admit(serde_json::json!({ "type": "string" }))
+                .expect("valid output default schema"),
+        ),
+    )
     .with_tool_binding(ToolBinding::new(["generate"], "run").with_authority_type("Generator"));
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
 
@@ -1335,8 +1347,9 @@ fn dotted_operation_names_are_rejected() {
         "update_plan",
         "update a plan",
         lash_core::ToolDefinition::default_input_schema(),
-        serde_json::Value::Null,
+        lash_core::JsonSchema::any().into_value(),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(ToolBinding::new(["tools"], "update.plan"));
 
     let err = required_tool_executable(&tool.manifest)
@@ -1359,8 +1372,9 @@ fn empty_operation_names_render_as_empty_invalid_identifiers() {
         "empty_operation",
         "an operation with an empty name",
         lash_core::ToolDefinition::default_input_schema(),
-        serde_json::Value::Null,
+        lash_core::JsonSchema::any().into_value(),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(ToolBinding::new(["tools"], ""));
 
     let err = required_tool_executable(&tool.manifest)
@@ -1379,8 +1393,9 @@ fn manifest_tool_binding_accessor_reports_absent_valid_and_malformed() {
         "read_file",
         "read a file",
         lash_core::ToolDefinition::default_input_schema(),
-        serde_json::Value::Null,
+        lash_core::JsonSchema::any().into_value(),
     )
+    .expect("valid declared tool schemas")
     .manifest;
     assert_eq!(manifest.tool_binding().expect("absent binding"), None);
 
@@ -1555,8 +1570,9 @@ process scan(root: str) -> str {
         "four_shape_invalid_host",
         "malformed Lashlang binding fixture",
         serde_json::json!({"type": "object"}),
-        serde_json::Value::Null,
-    );
+        lash_core::JsonSchema::any().into_value(),
+    )
+    .expect("valid declared tool schemas");
     malformed_tool.manifest.bindings.insert(
         TOOL_BINDING_KEY.to_string(),
         serde_json::json!({"not": "a tool binding"}),
@@ -1973,6 +1989,7 @@ fn masked_host_environment_is_the_environment_without_the_masked_members() {
             }),
             serde_json::json!({ "type": "string" }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new([module], operation).with_authority_type(authority))
     };
     let unmasked_tools = vec![
@@ -2085,7 +2102,10 @@ fn remote_tool_grant(name: &str) -> lash_remote_protocol::RemoteToolGrant {
         name: name.to_string(),
         description: String::new(),
         input_schema: lash_remote_protocol::RemoteSchemaContract {
-            canonical: lash_core::ToolDefinition::default_input_schema(),
+            canonical: lash_core::JsonSchema::admit(
+                lash_core::ToolDefinition::default_input_schema(),
+            )
+            .unwrap(),
             projection: lash_remote_protocol::RemoteSchemaProjectionPolicy::default(),
         },
         output_schema: lash_remote_protocol::RemoteSchemaContract::default(),
@@ -2414,13 +2434,14 @@ async fn nested_signal_admission_registers_each_process_payload_independently() 
         vec![("signal.second", "string")],
         vec![("signal.after", "string"), ("signal.daily", "string")],
     ]) {
-        let event_types = lashlang_process_signal_event_types(process);
+        let event_types =
+            lashlang_process_signal_event_types(process).expect("valid signal payload schemas");
         let declarations = event_types
             .iter()
             .map(|event| {
                 (
                     event.name.as_str(),
-                    event.payload_schema.schema["type"]
+                    event.payload_schema.as_value()["type"]
                         .as_str()
                         .expect("typed payload"),
                 )

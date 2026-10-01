@@ -348,7 +348,8 @@ fn module_catalog() -> lash_core::ToolCatalog {
             "Issue operation",
             serde_json::json!({"type":"object"}),
             serde_json::json!({"type":"string"}),
-        );
+        )
+        .expect("valid declared tool schemas");
         let hidden = name == "hidden";
         tool.manifest.inline = !hidden;
         tool.manifest.module = Some(Arc::new(lash_core::ToolModule {

@@ -460,11 +460,15 @@ impl SessionPlugin for FaultPlugin {
     fn id(&self) -> &'static str {
         "operator-fault"
     }
+    #[expect(
+        clippy::expect_used,
+        reason = "this module declares the tool or payload schema and admission checks its invariant"
+    )]
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), lash::plugins::PluginError> {
         reg.tools().provider(Arc::new(StaticToolProvider::new(vec![
             ToolDefinition::raw("tool:operator-hold", "hold", "Operator runbook fault boundary.",
                 json!({"type":"object","properties":{"running":{"type":"boolean"}},"required":["running"],"additionalProperties":false}),
-                json!({"type":"null"})).with_tool_binding(ToolBinding::new(["tools"], "hold")),
+                json!({"type":"null"})).expect("valid declared tool schemas").with_tool_binding(ToolBinding::new(["tools"], "hold")),
         ], Hold)))?;
         let repaired = self.repaired.clone();
         let pool = self.pool.clone();

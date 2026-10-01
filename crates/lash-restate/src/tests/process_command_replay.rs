@@ -84,7 +84,7 @@ pub(super) async fn a_signal_replayed_after_its_target_is_pruned_answers_as_reco
         .register_process(external_registration().with_extra_event_types([
             lash_core::ProcessEventType {
                 name: "signal.notify".to_string(),
-                payload_schema: lash_core::LashSchema::any(),
+                payload_schema: lash_core::JsonSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec::default(),
             },
         ]))

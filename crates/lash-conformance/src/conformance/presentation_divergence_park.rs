@@ -36,6 +36,10 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicBeforeTurnCommit {
     fn begin_named(&self, _phase: &str) {}
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn definition() -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         format!("tool:{TOOL}"),
@@ -44,6 +48,7 @@ fn definition() -> crate::ToolDefinition {
         serde_json::json!({ "type": "object" }),
         serde_json::json!({ "type": "object" }),
     )
+    .expect("valid declared tool schemas")
 }
 
 /// Refuses every call in preparation with a message naming `pass`: the

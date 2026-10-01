@@ -133,7 +133,7 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
             )
             .with_extra_event_types([lash_core::ProcessEventType {
                 name: "builder.clock.wake".to_string(),
-                payload_schema: lash_core::LashSchema::any(),
+                payload_schema: lash_core::JsonSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec {
                     wake: Some(lash_core::ProcessWakeSpec {
                         when: None,
@@ -613,7 +613,7 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
             )
             .with_extra_event_types([lash_core::ProcessEventType {
                 name: "fork.wake".to_string(),
-                payload_schema: lash_core::LashSchema::any(),
+                payload_schema: lash_core::JsonSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec {
                     wake: Some(lash_core::ProcessWakeSpec {
                         when: Some(lash_core::ProcessValueSelector::Present(

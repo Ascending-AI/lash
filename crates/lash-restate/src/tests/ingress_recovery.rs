@@ -371,7 +371,8 @@ async fn start_tool_child(
         "Held body",
         serde_json::json!({"type": "object"}),
         serde_json::json!({"type": "object"}),
-    );
+    )
+    .expect("valid declared tool schemas");
     let provider = Arc::new(HeldTool {
         definition: definition.clone(),
         gate: gate.clone(),

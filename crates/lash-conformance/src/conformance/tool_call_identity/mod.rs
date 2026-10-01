@@ -225,6 +225,10 @@ impl ProbeArgs {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn probe_definition(name: &str) -> crate::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     crate::ToolDefinition::raw(
@@ -234,6 +238,7 @@ fn probe_definition(name: &str) -> crate::ToolDefinition {
         object.clone(),
         object,
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(crate::ToolBinding::new(["tools"], name))
     .with_retry_policy(crate::ToolRetryPolicy::safe(3, 1, 1))
 }

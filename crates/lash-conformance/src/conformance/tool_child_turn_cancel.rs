@@ -217,6 +217,10 @@ struct RetryOnceTool {
     attempts: Arc<AtomicUsize>,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn retry_once_tool() -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         "tool:conformance_retry_once",
@@ -225,6 +229,7 @@ fn retry_once_tool() -> crate::ToolDefinition {
         empty_object_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
+    .expect("valid declared tool schemas")
     .with_retry_policy(crate::ToolRetryPolicy::safe(
         2,
         RETRY_AFTER_MS,
@@ -353,6 +358,10 @@ struct FollowOnPendingTools {
     pending_attempts: AtomicUsize,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn follow_on_switch_tool() -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         "tool:conformance_follow_on_switch",
@@ -361,8 +370,13 @@ fn follow_on_switch_tool() -> crate::ToolDefinition {
         empty_object_schema(),
         serde_json::json!({ "type": "object" }),
     )
+    .expect("valid declared tool schemas")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn follow_on_pending_tool() -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         "tool:conformance_follow_on_pending",
@@ -376,6 +390,7 @@ fn follow_on_pending_tool() -> crate::ToolDefinition {
             "additionalProperties": true
         }),
     )
+    .expect("valid declared tool schemas")
     .with_retry_policy(crate::ToolRetryPolicy::safe(2, 1, 1))
 }
 
@@ -572,6 +587,10 @@ struct IgnoresCancellationTool {
     dropped: Arc<std::sync::atomic::AtomicBool>,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn ignores_cancellation_tool() -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         "tool:conformance_ignores_cancellation",
@@ -580,6 +599,7 @@ fn ignores_cancellation_tool() -> crate::ToolDefinition {
         empty_object_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
+    .expect("valid declared tool schemas")
 }
 
 #[async_trait::async_trait]

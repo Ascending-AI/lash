@@ -14,10 +14,14 @@ fn provider() -> GoogleOAuthProvider {
     )
 }
 fn projected_contract() -> SchemaContract {
-    SchemaContract::new(json!({"type":"object","properties":{"canonical":{"type":"string"}}}))
+    SchemaContract::admit(json!({"type":"object","properties":{"canonical":{"type":"string"}}}))
+        .expect("valid declared schema")
         .with_override(
             SchemaDialect::google_schema().as_str(),
-            json!({"type":"object","properties":{"projected":{"type":"string"}}}),
+            lash_sansio::JsonSchema::admit(
+                json!({"type":"object","properties":{"projected":{"type":"string"}}}),
+            )
+            .expect("valid declared projection schema"),
         )
 }
 fn tool_request(model: &str) -> LlmRequest {
@@ -27,7 +31,8 @@ fn tool_request(model: &str) -> LlmRequest {
         name: "lookup".into(),
         description: "lookup".into(),
         input_schema: projected_contract(),
-        output_schema: json!({}).into(),
+        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+            .expect("valid declared schema"),
     }]);
     req
 }
@@ -112,9 +117,10 @@ fn protocol53_schema_contract_modes_apply_to_every_dialect_and_site() {
                 let mut req = request(None);
                 req.model = "host-catalog-alias".into();
                 req.llm_profile_capability.google_dialect = dialect;
-                let mut contract = SchemaContract::new(
+                let mut contract = SchemaContract::admit(
                     json!({"type":"object","properties":{"value":{"type":"string"}}}),
-                );
+                )
+                .expect("valid declared schema");
                 contract.projection.mode = mode;
                 if output {
                     req.output_spec = Some(LlmOutputSpec::JsonSchema(
@@ -129,7 +135,8 @@ fn protocol53_schema_contract_modes_apply_to_every_dialect_and_site() {
                         name: "lookup".into(),
                         description: "lookup".into(),
                         input_schema: contract,
-                        output_schema: json!({}).into(),
+                        output_schema: lash_sansio::SchemaContract::admit(json!({}))
+                            .expect("valid declared schema"),
                     }]);
                 }
                 let result = GoogleOAuthProvider::build_request(&provider(), &req, vec![], None);

@@ -375,6 +375,7 @@ fn tool_definition() -> lash_core::ToolDefinition {
         json!({"type": "object", "properties": {}, "additionalProperties": false}),
         json!({}),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(ToolBinding::new(["tools"], TOOL))
 }
 
@@ -1036,7 +1037,7 @@ async fn a_reserved_delivery_crash_recovers_one_bound_process(engine: Engine) {
                 draft: lash_core::TriggerSubscriptionDraft {
                     source_capture: lash_core::TriggerSourceCapture::resident(
                         ["crash", "windows"],
-                        lash_core::LashSchema::any(),
+                        lash_core::JsonSchema::any(),
                     ),
                     subscription_key: run_tag("delivery-subscription"),
                     env_ref,
@@ -1045,7 +1046,7 @@ async fn a_reserved_delivery_crash_recovers_one_bound_process(engine: Engine) {
                     source_type: TRIGGER_SOURCE_TYPE.to_owned(),
                     source_key: source_key.clone(),
                     source: json!({}),
-                    payload_schema: lash_core::LashSchema::any(),
+                    payload_schema: lash_core::JsonSchema::any(),
                     target: input
                         .clone()
                         .into_process_input()

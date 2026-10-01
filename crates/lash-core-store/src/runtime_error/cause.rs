@@ -37,6 +37,16 @@ pub enum RuntimeErrorCause {
     ModuleArtifactRefused {
         refusal: Box<lash_sansio::module_artifact_refusal::ModuleArtifactRefusal>,
     },
+    SchemaRefused {
+        source: Box<lash_sansio::SchemaAdmissionError>,
+    },
+    ToolSchemaRefused {
+        source: Box<lash_sansio::ToolCatalogBuildError>,
+    },
+    ValueMismatch {
+        context: Box<str>,
+        source: Box<lash_sansio::ValueMismatch>,
+    },
     IngressReservedSourceKey {
         #[serde(flatten)]
         refusal: Box<IngressReservedSourceKeyRefusal>,

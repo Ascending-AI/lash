@@ -319,3 +319,35 @@ async fn worker_continuation_info(
         other => Err(format!("unexpected continuation response: {other:?}")),
     }
 }
+
+#[test]
+fn schema_admission_remains_typed_in_a_process_terminal() {
+    use lash_vm_broker::{BrokerFailure, CheckoutRefusal, Settlement};
+    use lash_vm_protocol::{InfrastructureOutcome, RunRefusal};
+    let source = lash_core::JsonSchema::admit(serde_json::Value::Null)
+        .expect_err("null cannot enter as a payload schema");
+    let outcome = InfrastructureOutcome::from(RunRefusal::UnusableSchema {
+        source: Box::new(source.clone()),
+    });
+    for failure in [
+        BrokerFailure::WorkerLost {
+            outcome: outcome.clone(),
+            settlement: Settlement::default(),
+        },
+        BrokerFailure::Unavailable {
+            refusal: CheckoutRefusal::Infrastructure(outcome),
+        },
+    ] {
+        assert!(!failure.is_retryable());
+        let terminal = super::execution_result::process_worker_failure(&failure)
+            .expect("a schema refusal terminates the process");
+        let lash_core::ProcessAwaitOutput::Settled { output } = terminal else {
+            panic!("a schema refusal settles with a failure")
+        };
+        let lash_core::ToolCallOutcome::Failure(failure) = output.outcome else {
+            panic!("a schema refusal remains a failure")
+        };
+        assert!(matches!(failure.cause.as_deref(),
+            Some(lash_core::ToolFailureCause::SchemaAdmission { source: retained }) if retained == &source));
+    }
+}

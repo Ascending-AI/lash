@@ -271,7 +271,7 @@ async fn start_request(
             .chain([lash_core::ProcessEventType {
                 name: lash_core::facade_support::process_signal_event_type(SIGNAL)
                     .map_err(|error| anyhow!("signal event type: {error}"))?,
-                payload_schema: lash_core::LashSchema::any(),
+                payload_schema: lash_core::JsonSchema::any(),
                 semantics: Default::default(),
             }]),
     ))

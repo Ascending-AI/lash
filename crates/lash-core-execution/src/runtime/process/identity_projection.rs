@@ -19,8 +19,7 @@ pub(crate) fn project_process_event_type(
         semantics,
     } = event_type;
     identity.string(name);
-    let crate::LashSchema { schema } = payload_schema;
-    project_process_schema_leaf(identity, schema);
+    project_process_schema_leaf(identity, payload_schema.as_value());
     let crate::ProcessEventSemanticsSpec { terminal, wake } = semantics;
     identity.optional(terminal.as_ref(), |identity, terminal| {
         let crate::ProcessTerminalSpec {

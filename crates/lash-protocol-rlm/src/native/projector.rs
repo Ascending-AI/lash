@@ -124,7 +124,7 @@ fn required_output_block(dialect: &SessionDialect, termination: &RlmTermination)
     match termination {
         RlmTermination::FinishRequired {
             schema: Some(schema),
-        } => Some(dialect.required_output_contract(schema)),
+        } => Some(dialect.required_output_contract(schema.as_value())),
         _ => None,
     }
 }

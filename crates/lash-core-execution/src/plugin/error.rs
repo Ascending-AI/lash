@@ -284,6 +284,30 @@ define_plugin_errors! {
         => Self::InvalidBatchMaximum { .. }
         => "invalid_batch_maximum"
         => crate::ToolFailureClass::InvalidRequest;
+    #[error("{source}")]
+    UnusableSchema { source: Box<crate::SchemaAdmissionError> }
+        => PluginError::UnusableSchema { source }
+        => { source: Box<crate::SchemaAdmissionError> }
+        => Self::UnusableSchema { source: source.clone() }
+        => Self::UnusableSchema { .. }
+        => "unusable_schema"
+        => crate::ToolFailureClass::InvalidRequest;
+    #[error("unusable tool schema: {source}")]
+    UnusableToolSchema { source: Box<crate::ToolCatalogBuildError> }
+        => PluginError::UnusableToolSchema { source }
+        => { source: Box<crate::ToolCatalogBuildError> }
+        => Self::UnusableToolSchema { source: source.clone() }
+        => Self::UnusableToolSchema { .. }
+        => "unusable_tool_schema"
+        => crate::ToolFailureClass::InvalidRequest;
+    #[error("invalid {context}: {source}")]
+    ValueMismatch { context: String, source: Box<crate::ValueMismatch> }
+        => PluginError::ValueMismatch { context, source }
+        => { context: String, source: Box<crate::ValueMismatch> }
+        => Self::ValueMismatch { context: context.clone(), source: source.clone() }
+        => Self::ValueMismatch { .. }
+        => "value_mismatch"
+        => crate::ToolFailureClass::InvalidRequest;
 /// An effective resident catalog member could not supply its immutable definition.
     #[error("resident tool `{name}` ({tool_id}) has no contract")]
     ResidentToolContractUnavailable {
@@ -1007,7 +1031,10 @@ impl PluginError {
             // answer is `StoreUnavailable`, and infrastructure that did not
             // is an attempt fault ([`Self::attempt_fault`]): neither is a
             // session, registration or invoke error.
-            Self::Session(_)
+            Self::UnusableSchema { .. }
+            | Self::UnusableToolSchema { .. }
+            | Self::ValueMismatch { .. }
+            | Self::Session(_)
             | Self::Registration(_)
             | Self::ConfigRegistration(_)
             | Self::Invoke(_)
@@ -1067,6 +1094,21 @@ impl PluginError {
     /// settled once instead of retried.
     pub fn into_turn_failure(self, refusal: crate::RuntimeErrorCode) -> crate::RuntimeError {
         match self {
+            Self::UnusableSchema { source } => {
+                crate::RuntimeError::new(refusal, source.to_string())
+                    .with_cause(crate::RuntimeErrorCause::SchemaRefused { source })
+            }
+            Self::UnusableToolSchema { source } => {
+                crate::RuntimeError::new(refusal, source.to_string())
+                    .with_cause(crate::RuntimeErrorCause::ToolSchemaRefused { source })
+            }
+            Self::ValueMismatch { context, source } => {
+                crate::RuntimeError::new(refusal, format!("invalid {context}: {source}"))
+                    .with_cause(crate::RuntimeErrorCause::ValueMismatch {
+                        context: context.into_boxed_str(),
+                        source,
+                    })
+            }
             Self::Runtime(error) if keeps_its_code(&error) => error,
             Self::RuntimeEffectController(error)
                 if error.turn_failure_cause().aborts_invocation()
@@ -1142,6 +1184,9 @@ fn keeps_its_code(error: &crate::RuntimeError) -> bool {
             Some(
                 crate::RuntimeErrorCause::ModuleArtifactRefused { .. }
                     | crate::RuntimeErrorCause::PluginFormat { .. }
+                    | crate::RuntimeErrorCause::SchemaRefused { .. }
+                    | crate::RuntimeErrorCause::ToolSchemaRefused { .. }
+                    | crate::RuntimeErrorCause::ValueMismatch { .. }
             )
         )
         || error.is_session_retirement()
@@ -1158,6 +1203,81 @@ fn keeps_its_code(error: &crate::RuntimeError) -> bool {
 
 #[cfg(test)]
 mod classification_tests {
+    #[test]
+    fn schema_causes_retain_typed_fields_through_recorded_intent_and_runtime() {
+        let admission = crate::JsonSchema::admit(serde_json::Value::Null)
+            .expect_err("null cannot be admitted as a schema");
+        let catalog = crate::ToolDefinition::raw(
+            "bad",
+            "bad",
+            "bad",
+            serde_json::Value::Null,
+            serde_json::json!({}),
+        )
+        .expect_err("a tool cannot publish an unusable schema");
+        let mismatch = crate::ValueMismatch {
+            instance_path: "/count".into(),
+            message: "integer required".into(),
+        };
+        for (plugin, source, expected_runtime) in [
+            (
+                super::PluginError::UnusableSchema {
+                    source: Box::new(admission.clone()),
+                },
+                serde_json::to_value(&admission).expect("encode admission cause"),
+                crate::RuntimeErrorCause::SchemaRefused {
+                    source: Box::new(admission),
+                },
+            ),
+            (
+                super::PluginError::UnusableToolSchema {
+                    source: Box::new(catalog.clone()),
+                },
+                serde_json::to_value(&catalog).expect("encode catalog cause"),
+                crate::RuntimeErrorCause::ToolSchemaRefused {
+                    source: Box::new(catalog),
+                },
+            ),
+            (
+                super::PluginError::ValueMismatch {
+                    context: "payload".into(),
+                    source: Box::new(mismatch.clone()),
+                },
+                serde_json::to_value(&mismatch).expect("encode value mismatch"),
+                crate::RuntimeErrorCause::ValueMismatch {
+                    context: "payload".into(),
+                    source: Box::new(mismatch),
+                },
+            ),
+        ] {
+            let command = super::ToolIntentCommandFailure::from(&plugin);
+            assert_eq!(
+                command.failure_class(),
+                crate::ToolFailureClass::InvalidRequest
+            );
+            let recorded = serde_json::to_value(&command).expect("record command refusal");
+            assert_eq!(recorded["message"]["source"], source);
+            let replayed: super::ToolIntentCommandFailure =
+                serde_json::from_value(recorded).expect("replay command refusal");
+            assert_eq!(replayed, command);
+            let controller = crate::RuntimeEffectControllerError::from(plugin.clone());
+            for carried in [
+                plugin,
+                super::PluginError::RuntimeEffectController(controller.clone()),
+                super::PluginError::Runtime(controller.into_runtime_error()),
+            ] {
+                assert_eq!(carried.class(), super::PluginErrorClass::Terminal);
+                let runtime = carried.into_turn_failure(crate::RuntimeErrorCode::Plugin);
+                assert!(runtime.is_terminal());
+                assert!(!runtime.is_retryable());
+                assert_eq!(
+                    serde_json::to_value(runtime.cause).expect("encode runtime cause"),
+                    serde_json::to_value(Some(&expected_runtime)).expect("encode expected cause"),
+                );
+            }
+        }
+    }
+
     #[test]
     fn format_refusal_retains_fields_through_intent_and_runtime_boundaries() {
         let refusal = super::super::FormatRefusal {

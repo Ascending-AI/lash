@@ -2174,8 +2174,10 @@ fn recorded_environment(prompt: &str, tool: &str) -> ExecutionEnvironmentSync {
         tool_specs: Arc::new(vec![crate::llm::types::LlmToolSpec {
             name: tool.to_string(),
             description: "desc".to_string(),
-            input_schema: serde_json::json!({ "type": "object" }).into(),
-            output_schema: serde_json::json!({ "type": "object" }).into(),
+            input_schema: crate::SchemaContract::admit(serde_json::json!({ "type": "object" }))
+                .expect("valid declared schema"),
+            output_schema: crate::SchemaContract::admit(serde_json::json!({ "type": "object" }))
+                .expect("valid declared schema"),
         }]),
         projector_turn_inputs: ProjectorTurnInputs::default(),
     }

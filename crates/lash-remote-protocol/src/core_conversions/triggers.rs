@@ -227,12 +227,15 @@ impl From<lash_core::facade_support::TriggerDeliveryEmitOutcome>
             lash_core::facade_support::TriggerDeliveryEmitOutcome::Started { process_id } => {
                 Self::Started { process_id }
             }
-            lash_core::facade_support::TriggerDeliveryEmitOutcome::Failed { code, reason } => {
-                Self::Failed {
-                    code: code.into(),
-                    reason,
-                }
-            }
+            lash_core::facade_support::TriggerDeliveryEmitOutcome::Failed {
+                code,
+                reason,
+                value_mismatch,
+            } => Self::Failed {
+                code: code.into(),
+                reason,
+                value_mismatch,
+            },
         }
     }
 }
@@ -245,9 +248,14 @@ impl From<RemoteTriggerDeliveryEmitOutcome>
             RemoteTriggerDeliveryEmitOutcome::Started { process_id } => {
                 Self::Started { process_id }
             }
-            RemoteTriggerDeliveryEmitOutcome::Failed { code, reason } => Self::Failed {
+            RemoteTriggerDeliveryEmitOutcome::Failed {
+                code,
+                reason,
+                value_mismatch,
+            } => Self::Failed {
                 code: code.into(),
                 reason,
+                value_mismatch,
             },
         }
     }
@@ -501,7 +509,7 @@ impl From<RemoteTriggerSourceCapture> for lash_core::TriggerSourceCapture {
         } = value;
         Self {
             constructor_path,
-            config_schema: lash_core::LashSchema::new(config_schema),
+            config_schema,
             route: route.into(),
         }
     }
@@ -516,7 +524,7 @@ impl From<lash_core::TriggerSourceCapture> for RemoteTriggerSourceCapture {
         } = value;
         Self {
             constructor_path,
-            config_schema: config_schema.schema,
+            config_schema,
             route: route.into(),
         }
     }
@@ -573,7 +581,7 @@ impl TryFrom<RemoteTriggerSubscriptionDraft> for lash_core::TriggerSubscriptionD
             source_type,
             source_key,
             source,
-            payload_schema: lash_core::LashSchema::new(payload_schema),
+            payload_schema,
             source_capture: source_capture.into(),
             target: target.try_into()?,
             target_identity: target_identity.into(),
@@ -613,7 +621,7 @@ impl TryFrom<lash_core::TriggerSubscriptionDraft> for RemoteTriggerSubscriptionD
                 source_type,
                 source_key,
                 source,
-                payload_schema: payload_schema.schema,
+                payload_schema,
                 source_capture: source_capture.into(),
                 target: target.try_into()?,
                 target_identity: target_identity.into(),
@@ -669,7 +677,7 @@ impl TryFrom<lash_core::TriggerSubscriptionRecord> for RemoteTriggerSubscription
                 source_type,
                 source_key,
                 source,
-                payload_schema: payload_schema.schema,
+                payload_schema,
                 source_capture: source_capture.into(),
                 target: target.try_into()?,
                 target_identity: target_identity.into(),
@@ -731,7 +739,7 @@ impl TryFrom<RemoteTriggerSubscriptionRecord> for lash_core::TriggerSubscription
             source_type,
             source_key,
             source,
-            payload_schema: lash_core::LashSchema::new(payload_schema),
+            payload_schema,
             source_capture: source_capture.into(),
             target: target.try_into()?,
             target_identity: target_identity.into(),

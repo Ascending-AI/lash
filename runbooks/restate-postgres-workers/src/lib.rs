@@ -1,6 +1,8 @@
 use lash::ProcessId;
 use lash::SessionId;
 mod batch_journal;
+mod button_event;
+use button_event::{button_pressed_event_type, button_pressed_payload_schema};
 mod e2e_llm_profile;
 pub use e2e_llm_profile::{E2E_PROFILE_KEY, e2e_llm_profile_metadata, e2e_session_spec};
 pub mod load;
@@ -21,8 +23,8 @@ use lash::plugins::{
 };
 use lash::rlm::{
     InstructionBound, LASHLANG_SURFACE_EXTENSION_ID, LashlangAbilities, LashlangHostCatalog,
-    LashlangLanguageFeatures, LashlangSurfaceContribution, MemoryBound, NamedDataType, RlmChannel,
-    RlmProtocolPluginConfig, TypeExpr, TypeField,
+    LashlangLanguageFeatures, LashlangSurfaceContribution, MemoryBound, RlmChannel,
+    RlmProtocolPluginConfig, TypeExpr,
 };
 use lash::tools::{
     StaticToolExecute, StaticToolProvider, ToolBinding, ToolCall, ToolDefinition,
@@ -654,51 +656,6 @@ impl SessionPlugin for E2eSessionPlugin {
     }
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "`ui.button.Pressed` and its enum/string fields satisfy NamedDataType::object's \
-              validation"
-)]
-fn button_pressed_event_type() -> NamedDataType {
-    NamedDataType::object(
-        "ui.button.Pressed",
-        vec![
-            TypeField {
-                name: "button".into(),
-                ty: TypeExpr::union(vec![
-                    TypeExpr::Enum(vec!["Red".into()]),
-                    TypeExpr::Enum(vec!["Blue".into()]),
-                ]),
-                optional: false,
-            },
-            TypeField {
-                name: "message".into(),
-                ty: TypeExpr::Str,
-                optional: false,
-            },
-            TypeField {
-                name: "pressed_at".into(),
-                ty: TypeExpr::Str,
-                optional: false,
-            },
-        ],
-    )
-    .expect("valid e2e button payload type")
-}
-
-fn button_pressed_payload_schema() -> lash::triggers::LashSchema {
-    lash::triggers::LashSchema::new(serde_json::json!({
-        "type": "object",
-        "properties": {
-            "button": { "type": "string", "enum": ["Red", "Blue"] },
-            "message": { "type": "string" },
-            "pressed_at": { "type": "string" }
-        },
-        "required": ["button", "message", "pressed_at"],
-        "additionalProperties": false
-    }))
-}
-
 fn e2e_tool_provider(
     pool: PgPool,
     worker_id: String,
@@ -899,6 +856,10 @@ fn e2e_tool_provider(
     )) as Arc<dyn ToolProvider>
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn e2e_tool_definition(
     id: &'static str,
     name: &'static str,
@@ -908,6 +869,7 @@ fn e2e_tool_definition(
     surface: ToolBinding,
 ) -> ToolDefinition {
     ToolDefinition::raw(id, name, description, input_schema, output_schema)
+        .expect("valid declared tool schemas")
         .with_tool_binding(surface)
 }
 
@@ -1648,3 +1610,6 @@ mod scripted_cell_tests {
         assert!(!cell.contains("lashlang"));
     }
 }
+
+#[cfg(test)]
+mod schema_admission_tests;

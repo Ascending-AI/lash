@@ -678,6 +678,10 @@ impl lash_core::facade_support::ContextCompactor for ReportCompactor {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn oversized_tool_provider(tool_bytes: Arc<AtomicUsize>) -> Arc<dyn ToolProvider> {
     Arc::new(StaticToolProvider::new(
         vec![
@@ -693,6 +697,7 @@ fn oversized_tool_provider(tool_bytes: Arc<AtomicUsize>) -> Arc<dyn ToolProvider
                     "additionalProperties": false
                 }),
             )
+            .expect("valid declared tool schemas")
             .with_tool_binding(ToolBinding::new(["tools"], OVERSIZED_TOOL)),
         ],
         OversizedTools { tool_bytes },

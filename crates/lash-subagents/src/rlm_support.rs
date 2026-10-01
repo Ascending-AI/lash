@@ -48,7 +48,7 @@ pub(crate) struct SpawnCreateRequestInput<'a> {
     pub(crate) tool_access: &'a SessionToolAccess,
     pub(crate) final_answer_format: lash_rlm_types::RlmFinalAnswerFormat,
     pub(crate) capability_name: &'a str,
-    pub(crate) output_schema: Option<Value>,
+    pub(crate) output_schema: Option<lash_sansio::JsonSchema>,
     pub(crate) seed: lash_protocol_rlm::RlmSeed,
     pub(crate) parent_subagent: Option<&'a SubagentSessionContext>,
     pub(crate) caused_by: Option<CausalRef>,
@@ -159,6 +159,10 @@ pub(crate) fn example_capability_name(capability_names: &[String]) -> String {
         .unwrap_or_else(|| "explore".to_string())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 pub(crate) fn tool_definition(
     name: &str,
     description: impl Into<String>,
@@ -172,6 +176,7 @@ pub(crate) fn tool_definition(
         input_schema,
         json!({ "type": "object", "additionalProperties": true }),
     )
+    .expect("valid declared tool schemas")
     .with_examples(examples)
 }
 
@@ -205,6 +210,10 @@ pub(crate) fn spawn_agent_input_schema(capability_names: &[String]) -> Value {
     })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 pub(crate) fn submit_error_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:submit_error",
@@ -222,7 +231,7 @@ pub(crate) fn submit_error_tool_definition() -> ToolDefinition {
             "additionalProperties": false
         }),
         submit_error_output_schema(),
-    )
+    ).expect("valid declared tool schemas")
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
         ["task"],
         "fail",

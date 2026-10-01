@@ -75,6 +75,16 @@
         "message": {
           "type": "string"
         },
+        "schema_admission": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SchemaAdmissionError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "tool_call_limit": {
           "anyOf": [
             {
@@ -85,6 +95,16 @@
             }
           ],
           "description": "The session's `max_tool_calls` refusal, when that is why the cell\nfailed (FIG-4546), kept typed through the plugin and host result."
+        },
+        "value_mismatch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueMismatch"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "worker_limit": {
           "anyOf": [
@@ -421,6 +441,15 @@
           "type": "string"
         }
       ]
+    },
+    "InvalidSchemaKind": {
+      "enum": [
+        "null",
+        "number",
+        "string",
+        "array"
+      ],
+      "type": "string"
     },
     "LlmTerminalReason": {
       "enum": [
@@ -998,6 +1027,66 @@
         "backoff"
       ],
       "type": "string"
+    },
+    "SchemaAdmissionError": {
+      "oneOf": [
+        {
+          "properties": {
+            "actual": {
+              "$ref": "#/$defs/InvalidSchemaKind"
+            },
+            "kind": {
+              "const": "invalid_kind",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "actual"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "compilation",
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "schema_path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "schema_path",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "non_local_reference",
+              "type": "string"
+            },
+            "reference": {
+              "type": "string"
+            },
+            "schema_path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "schema_path",
+            "reference"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "TextProjectionMetadata": {
       "properties": {
@@ -5092,6 +5181,21 @@
           "type": "object"
         }
       ]
+    },
+    "ValueMismatch": {
+      "properties": {
+        "instance_path": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "instance_path",
+        "message"
+      ],
+      "type": "object"
     },
     "WorkerFrameKind": {
       "description": "The worker message an encoder refused, without its guest data.",

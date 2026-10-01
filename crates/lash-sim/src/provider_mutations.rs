@@ -563,6 +563,10 @@ fn provider_transport(transport: &Arc<ScriptedLlmHttpTransport>) -> Arc<dyn LlmH
     transport.clone()
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn openai_compatible_request(stream: bool) -> LlmRequest {
     LlmRequest {
         instructions: None,
@@ -572,14 +576,15 @@ fn openai_compatible_request(stream: bool) -> LlmRequest {
         tools: Arc::new(vec![LlmToolSpec {
             name: "lookup".to_string(),
             description: "Lookup".to_string(),
-            input_schema: json!({
+            input_schema: lash_sansio::SchemaContract::admit(json!({
                 "type": "object",
                 "properties": {
                     "q": { "type": "string" }
                 }
-            })
-            .into(),
-            output_schema: json!({}).into(),
+            }))
+            .expect("valid declared schema"),
+            output_schema: lash_sansio::SchemaContract::admit(json!({}))
+                .expect("valid declared schema"),
         }]),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),

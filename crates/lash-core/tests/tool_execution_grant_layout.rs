@@ -2,25 +2,28 @@ use lash_core::{ToolDefinition, ToolExecutionGrant};
 
 #[test]
 fn tool_execution_grant_json_layout_is_stable() {
-    let grant = ToolExecutionGrant::from_definition(ToolDefinition::raw(
-        "tool:layout_probe",
-        "layout_probe",
-        "Pinned grant layout",
-        serde_json::json!({
-            "type": "object",
-            "properties": { "query": { "type": "string" } },
-            "required": ["query"],
-            "additionalProperties": false
-        }),
-        serde_json::json!({ "type": "string" }),
-    ))
+    let grant = ToolExecutionGrant::from_definition(
+        ToolDefinition::raw(
+            "tool:layout_probe",
+            "layout_probe",
+            "Pinned grant layout",
+            serde_json::json!({
+                "type": "object",
+                "properties": { "query": { "type": "string" } },
+                "required": ["query"],
+                "additionalProperties": false
+            }),
+            serde_json::json!({ "type": "string" }),
+        )
+        .expect("valid declared tool schemas"),
+    )
     .with_source_id("registry:layout")
     .with_execution_binding(serde_json::json!({ "route": "pinned" }));
 
     let serialized = serde_json::to_string(&grant).expect("grant must serialize");
     assert_eq!(grant.manifest().id.as_str(), "tool:layout_probe");
     assert_eq!(
-        grant.contract().input_schema.canonical["required"],
+        grant.contract().input_schema.canonical.as_value()["required"],
         serde_json::json!(["query"])
     );
     assert_eq!(

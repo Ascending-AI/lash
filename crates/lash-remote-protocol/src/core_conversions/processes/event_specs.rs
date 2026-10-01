@@ -9,7 +9,7 @@ impl From<lash_core::ProcessEventType> for RemoteProcessEventType {
         } = value;
         Self {
             name,
-            payload_schema: payload_schema.schema,
+            payload_schema,
             semantics: semantics.into(),
         }
     }
@@ -24,7 +24,7 @@ impl From<RemoteProcessEventType> for lash_core::ProcessEventType {
         } = value;
         Self {
             name,
-            payload_schema: lash_core::LashSchema::new(payload_schema),
+            payload_schema,
             semantics: semantics.into(),
         }
     }

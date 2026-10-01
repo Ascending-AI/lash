@@ -146,7 +146,7 @@ use lash::tracing::TraceToolCallStatus as _;
 use lash::tracing::TraceTurnCompletionReason as _;
 use lash::tracing::TraceTurnFailureReason as _;
 use lash::tracing::TraceTurnOutcome as _;
-use lash::triggers::LashSchema as _;
+use lash::triggers::JsonSchema as _;
 use lash::triggers::TriggerDeliveryReservation as _;
 use lash::triggers::TriggerInputBinding as _;
 use lash::triggers::TriggerOccurrenceFilter as _;

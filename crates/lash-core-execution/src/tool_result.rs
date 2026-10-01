@@ -423,6 +423,7 @@ impl ToolOutcome {
             .map(ToOwned::to_owned)
             .unwrap_or_else(|| result.to_string());
         Self::from_output(crate::ToolCallOutput::failure(crate::ToolFailure {
+            cause: None,
             class: crate::ToolFailureClass::Execution,
             code: "tool_error".to_string(),
             message,

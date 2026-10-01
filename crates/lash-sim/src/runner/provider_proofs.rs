@@ -83,17 +83,22 @@ fn codex_provider(
     Ok((provider, transport))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn codex_request(tools: bool, stream_events: Option<LlmEventSender>) -> LlmRequest {
     let tool_specs = if tools {
         vec![LlmToolSpec {
             name: "lookup".to_string(),
             description: "Lookup".to_string(),
-            input_schema: json!({
+            input_schema: lash_sansio::SchemaContract::admit(json!({
                 "type": "object",
                 "properties": { "q": { "type": "string" } }
-            })
-            .into(),
-            output_schema: json!({}).into(),
+            }))
+            .expect("valid declared schema"),
+            output_schema: lash_sansio::SchemaContract::admit(json!({}))
+                .expect("valid declared schema"),
         }]
     } else {
         Vec::new()
@@ -837,6 +842,10 @@ pub(super) fn openai_compatible_request(stream: bool) -> LlmRequest {
     openai_compatible_request_with_events(stream.then(|| LlmEventSender::new(|_event| {})))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn openai_compatible_request_with_events(stream_events: Option<LlmEventSender>) -> LlmRequest {
     LlmRequest {
         instructions: None,
@@ -846,14 +855,15 @@ fn openai_compatible_request_with_events(stream_events: Option<LlmEventSender>) 
         tools: Arc::new(vec![LlmToolSpec {
             name: "lookup".to_string(),
             description: "Lookup".to_string(),
-            input_schema: json!({
+            input_schema: lash_sansio::SchemaContract::admit(json!({
                 "type": "object",
                 "properties": {
                     "q": { "type": "string" }
                 }
-            })
-            .into(),
-            output_schema: json!({}).into(),
+            }))
+            .expect("valid declared schema"),
+            output_schema: lash_sansio::SchemaContract::admit(json!({}))
+                .expect("valid declared schema"),
         }]),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),

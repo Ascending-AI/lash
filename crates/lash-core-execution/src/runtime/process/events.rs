@@ -13,7 +13,7 @@ use super::model::{ProcessId, ProcessObserverBy};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessEventType {
     pub name: String,
-    pub payload_schema: crate::LashSchema,
+    pub payload_schema: crate::JsonSchema,
     pub semantics: ProcessEventSemanticsSpec,
 }
 
@@ -1258,7 +1258,7 @@ pub fn runtime_lifecycle_event_type(name: &str) -> Option<ProcessEventType> {
         | ProcessEventKind::ObserverRemoved
         | ProcessEventKind::SubscriptionRetargeted => Some(ProcessEventType {
             name: name.to_string(),
-            payload_schema: crate::LashSchema::any(),
+            payload_schema: crate::JsonSchema::any(),
             semantics: ProcessEventSemanticsSpec::default(),
         }),
     }
@@ -1297,7 +1297,7 @@ pub(super) fn default_process_event_types() -> Vec<ProcessEventType> {
 fn terminal_event_type(status: TerminalProcessStatus) -> ProcessEventType {
     ProcessEventType {
         name: terminal_event_type_name(status).to_string(),
-        payload_schema: crate::LashSchema::any(),
+        payload_schema: crate::JsonSchema::any(),
         semantics: ProcessEventSemanticsSpec {
             terminal: Some(ProcessTerminalSpec {
                 status,

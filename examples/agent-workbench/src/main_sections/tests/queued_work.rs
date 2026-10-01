@@ -237,7 +237,7 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
                 )
                 .with_extra_event_types([lash::process::ProcessEventType {
                     name: "producer.wake".to_string(),
-                    payload_schema: lash::triggers::LashSchema::any(),
+                    payload_schema: lash::triggers::JsonSchema::any(),
                     semantics: lash::process::ProcessEventSemanticsSpec {
                         wake: Some(lash::process::ProcessWakeSpec {
                             when: Some(lash::process::ProcessValueSelector::Present(
@@ -361,7 +361,7 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
                 )
                 .with_extra_event_types([lash::process::ProcessEventType {
                     name: "producer.wake".to_string(),
-                    payload_schema: lash::triggers::LashSchema::any(),
+                    payload_schema: lash::triggers::JsonSchema::any(),
                     semantics: lash::process::ProcessEventSemanticsSpec {
                         wake: Some(lash::process::ProcessWakeSpec {
                             when: Some(lash::process::ProcessValueSelector::Present(
@@ -459,7 +459,7 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
                 )
                 .with_extra_event_types([lash::process::ProcessEventType {
                     name: "producer.wake".to_string(),
-                    payload_schema: lash::triggers::LashSchema::any(),
+                    payload_schema: lash::triggers::JsonSchema::any(),
                     semantics: lash::process::ProcessEventSemanticsSpec {
                         wake: Some(lash::process::ProcessWakeSpec {
                             when: Some(lash::process::ProcessValueSelector::Present(
@@ -560,7 +560,7 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
                 )
                 .with_extra_event_types([lash::process::ProcessEventType {
                     name: "producer.wake".to_string(),
-                    payload_schema: lash::triggers::LashSchema::any(),
+                    payload_schema: lash::triggers::JsonSchema::any(),
                     semantics: lash::process::ProcessEventSemanticsSpec {
                         wake: Some(lash::process::ProcessWakeSpec {
                             when: Some(lash::process::ProcessValueSelector::Present(
@@ -779,7 +779,7 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
                 )
                 .with_extra_event_types([lash::process::ProcessEventType {
                     name: "producer.wake".to_string(),
-                    payload_schema: lash::triggers::LashSchema::any(),
+                    payload_schema: lash::triggers::JsonSchema::any(),
                     semantics: lash::process::ProcessEventSemanticsSpec {
                         wake: Some(lash::process::ProcessWakeSpec {
                             when: Some(lash::process::ProcessValueSelector::Present(

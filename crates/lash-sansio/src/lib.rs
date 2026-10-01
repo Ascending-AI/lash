@@ -12,6 +12,8 @@ pub mod future;
 pub mod handle;
 pub mod identity;
 pub mod json_decode;
+pub mod json_schema;
+pub use json_schema::{InvalidSchemaKind, JsonSchema, SchemaAdmissionError, ValueMismatch};
 pub mod llm;
 pub mod module_artifact_refusal;
 pub mod plugin;
@@ -174,8 +176,8 @@ pub use tool_catalog::{
 #[cfg(feature = "schema-validation")]
 pub use tool_contract::validate_tool_input;
 pub use tool_contract::{
-    CompactToolContract, ExtraKeys, LashSchema, ModelTool, ObjectShape, ProcessParamShape,
-    ProcessShape, SchemaShape, ShapeConstraints, ShapeField, ShapeKind, ShapeRow, TOOL_BINDING_KEY,
+    CompactToolContract, ExtraKeys, ModelTool, ObjectShape, ProcessParamShape, ProcessShape,
+    SchemaShape, ShapeConstraints, ShapeField, ShapeKind, ShapeRow, TOOL_BINDING_KEY,
     ToolArgumentProjectionPolicy, ToolBinding, ToolContract, ToolDefinition,
     ToolDefinitionBindingExt, ToolDiscovery, ToolId, ToolManifest, ToolModule, ToolOutputContract,
     ToolRetryPolicy, X_LASH_KEYWORD, XLashParam, XLashSignature, XLashType,
@@ -185,7 +187,7 @@ pub use tool_output::{
     AttachmentMaterializationNotice, AttachmentMaterializationReason,
     AttachmentMaterializationSource, CancelOrigin, CancelRequest, ModelToolReturn,
     ModelToolReturnPart, ObservedProcessFailure, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
-    ToolCallStatus, ToolCancellation, ToolControl, ToolFailure, ToolFailureClass,
+    ToolCallStatus, ToolCancellation, ToolControl, ToolFailure, ToolFailureCause, ToolFailureClass,
     ToolFailureSource, ToolIntentIdentity, ToolIntentKind, ToolRetryStatus, ToolValue, ToolView,
     ToolViewBlock, ToolViewMeta, format_tool_output_content, tool_result_text,
 };

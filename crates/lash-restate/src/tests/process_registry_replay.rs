@@ -307,7 +307,7 @@ pub(super) async fn restate_controller_awaits_and_signals_through_process_effect
                 .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
                 .with_extra_event_types([lash_core::ProcessEventType {
                     name: "signal.notify".to_string(),
-                    payload_schema: lash_core::LashSchema::any(),
+                    payload_schema: lash_core::JsonSchema::any(),
                     semantics: lash_core::ProcessEventSemanticsSpec::default(),
                 }]),
         )
@@ -449,7 +449,7 @@ pub(super) async fn restate_signal_uses_declared_wait_ordinal_when_event_count_d
         .register_process(executed_registration().with_extra_event_types([
             lash_core::ProcessEventType {
                 name: event_type.clone(),
-                payload_schema: lash_core::LashSchema::any(),
+                payload_schema: lash_core::JsonSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec::default(),
             },
         ]))

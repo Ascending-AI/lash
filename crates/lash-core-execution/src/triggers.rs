@@ -36,7 +36,7 @@ pub struct TriggerEvent {
     pub resource_type: String,
     pub alias: String,
     pub event: String,
-    pub payload_schema: crate::LashSchema,
+    pub payload_schema: crate::JsonSchema,
 }
 
 impl TriggerEvent {
@@ -44,7 +44,7 @@ impl TriggerEvent {
         resource_type: impl Into<String>,
         alias: impl Into<String>,
         event: impl Into<String>,
-        payload_schema: crate::LashSchema,
+        payload_schema: crate::JsonSchema,
     ) -> Self {
         Self {
             resource_type: resource_type.into(),
@@ -54,7 +54,7 @@ impl TriggerEvent {
         }
     }
 
-    pub fn payload_schema(&self) -> &crate::LashSchema {
+    pub fn payload_schema(&self) -> &crate::JsonSchema {
         &self.payload_schema
     }
 
@@ -412,7 +412,7 @@ pub struct TriggerSourceCapture {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub constructor_path: Vec<String>,
     /// The configuration contract that constructor declared.
-    pub config_schema: crate::LashSchema,
+    pub config_schema: crate::JsonSchema,
     /// The authorized provider route, opaque to core.
     pub route: TriggerProviderRoute,
 }
@@ -421,7 +421,7 @@ impl TriggerSourceCapture {
     /// Captures a resident source: no provider route, only its contract.
     pub fn resident(
         constructor_path: impl IntoIterator<Item = impl Into<String>>,
-        config_schema: crate::LashSchema,
+        config_schema: crate::JsonSchema,
     ) -> Self {
         Self {
             constructor_path: constructor_path.into_iter().map(Into::into).collect(),
@@ -433,7 +433,7 @@ impl TriggerSourceCapture {
     /// Captures a provider-admitted source with its opaque authorized route.
     pub fn provider(
         constructor_path: impl IntoIterator<Item = impl Into<String>>,
-        config_schema: crate::LashSchema,
+        config_schema: crate::JsonSchema,
         provider_id: impl Into<String>,
         route: serde_json::Value,
     ) -> Self {
@@ -450,7 +450,7 @@ impl TriggerSourceCapture {
     /// A capture that names no contract, for the host-owned subscriptions whose
     /// source is not a linked constructor.
     pub fn untyped() -> Self {
-        Self::resident(Vec::<String>::new(), crate::LashSchema::any())
+        Self::resident(Vec::<String>::new(), crate::JsonSchema::any())
     }
 
     /// The provider that authorized the route, or `None` for a resident source.
@@ -591,7 +591,7 @@ pub struct TriggerSubscriptionDraft {
     pub source_type: String,
     pub source_key: String,
     pub source: serde_json::Value,
-    pub payload_schema: crate::LashSchema,
+    pub payload_schema: crate::JsonSchema,
     /// The admitted source contract and provider route this registration
     /// captured. Required: a subscription with no capture cannot validate a
     /// delivery or restore its route, so a record written before the capture
@@ -608,6 +608,10 @@ pub struct TriggerSubscriptionDraft {
 }
 
 impl TriggerSubscriptionDraft {
+    #[expect(
+        clippy::expect_used,
+        reason = "this module declares the tool or payload schema and admission checks its invariant"
+    )]
     pub fn for_process(
         subscription_key: impl Into<String>,
         env_ref: crate::ProcessExecutionEnvRef,
@@ -626,9 +630,10 @@ impl TriggerSubscriptionDraft {
             source_type: source_type.into(),
             source_key: source_key.into(),
             source: serde_json::Value::Object(serde_json::Map::new()),
-            payload_schema: crate::LashSchema::new(serde_json::Value::Object(
+            payload_schema: crate::JsonSchema::admit(serde_json::Value::Object(
                 serde_json::Map::new(),
-            )),
+            ))
+            .expect("valid declared payload schema"),
             source_capture: TriggerSourceCapture::untyped(),
             target,
             target_identity,
@@ -648,7 +653,7 @@ impl TriggerSubscriptionDraft {
         self
     }
 
-    pub fn with_payload_schema(mut self, payload_schema: crate::LashSchema) -> Self {
+    pub fn with_payload_schema(mut self, payload_schema: crate::JsonSchema) -> Self {
         self.payload_schema = payload_schema;
         self
     }
@@ -910,7 +915,7 @@ pub struct TriggerSubscriptionRecord {
     pub source_type: String,
     pub source_key: String,
     pub source: serde_json::Value,
-    pub payload_schema: crate::LashSchema,
+    pub payload_schema: crate::JsonSchema,
     /// The source contract and provider route admitted at registration. A row
     /// written before the capture existed has no authority to deliver against
     /// and is refused at decode; see the store's format-version refusal.

@@ -55,6 +55,7 @@ pub(super) fn manifest(id: &str) -> ToolManifest {
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
+    .expect("valid declared tool schemas")
     .manifest;
     manifest.retry_policy = ToolRetryPolicy::safe(4, 10, 100);
     manifest

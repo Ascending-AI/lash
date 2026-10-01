@@ -587,6 +587,16 @@
         "message": {
           "type": "string"
         },
+        "schema_admission": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SchemaAdmissionError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "tool_call_limit": {
           "anyOf": [
             {
@@ -597,6 +607,16 @@
             }
           ],
           "description": "The session's `max_tool_calls` refusal, when that is why the cell\nfailed (FIG-4546), kept typed through the plugin and host result."
+        },
+        "value_mismatch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueMismatch"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "worker_limit": {
           "anyOf": [
@@ -1192,6 +1212,75 @@
             "refusal",
             "surface",
             "label"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A plugin namespace is stamped with a format the fleet record does not\npermit its plugin to write (FIG-4746). Nothing was published.",
+          "properties": {
+            "namespace": {
+              "$ref": "#/$defs/FormatNamespace"
+            },
+            "permitted": {
+              "$ref": "#/$defs/VersionRange"
+            },
+            "plugin": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "plugin_writer_outside_range",
+              "type": "string"
+            },
+            "writer": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "refusal",
+            "plugin",
+            "namespace",
+            "writer",
+            "permitted"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The fleet record carries no writer range for a plugin (FIG-4746): a\nplugin the record does not name publishes only its first format.",
+          "properties": {
+            "plugin": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "plugin_writer_unprovisioned",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "plugin"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A recorded plugin writer range is not a range (FIG-4746). The store\nfails closed: no publication of that store is admitted.",
+          "properties": {
+            "detail": {
+              "type": "string"
+            },
+            "plugin": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "plugin_writer_range_malformed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "plugin",
+            "detail"
           ],
           "type": "object"
         }
@@ -2023,6 +2112,25 @@
             "worker_limit_exceeded"
           ],
           "type": "object"
+        }
+      ]
+    },
+    "InvalidSchemaKind": {
+      "enum": [
+        "null",
+        "number",
+        "string",
+        "array"
+      ],
+      "type": "string"
+    },
+    "JsonSchema": {
+      "anyOf": [
+        {
+          "type": "object"
+        },
+        {
+          "type": "boolean"
         }
       ]
     },
@@ -4786,7 +4894,8 @@
           "type": "string"
         },
         "payload_schema": {
-          "default": null
+          "$ref": "#/$defs/JsonSchema",
+          "default": {}
         },
         "semantics": {
           "$ref": "#/$defs/RemoteProcessEventSemanticsSpec",
@@ -5659,6 +5768,16 @@
     },
     "RemoteProcessToolFailure": {
       "properties": {
+        "cause": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolFailureCause"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "class": {
           "$ref": "#/$defs/RemoteToolFailureClass"
         },
@@ -6553,7 +6672,16 @@
               "const": "final_value",
               "type": "string"
             },
-            "schema": true
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/JsonSchema"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
           },
           "required": [
             "kind"
@@ -6819,6 +6947,16 @@
     "RemoteToolFailure": {
       "additionalProperties": false,
       "properties": {
+        "cause": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolFailureCause"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "class": {
           "$ref": "#/$defs/RemoteToolFailureClass"
         },
@@ -7448,6 +7586,16 @@
                 },
                 "reason": {
                   "type": "string"
+                },
+                "value_mismatch": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ValueMismatch"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
@@ -7696,7 +7844,8 @@
       "description": "Peer projection of the source contract and route admitted at registration.",
       "properties": {
         "config_schema": {
-          "default": null
+          "$ref": "#/$defs/JsonSchema",
+          "default": {}
         },
         "constructor_path": {
           "items": {
@@ -7807,7 +7956,8 @@
           "$ref": "#/$defs/RemoteTriggerOwnerScope"
         },
         "payload_schema": {
-          "default": null
+          "$ref": "#/$defs/JsonSchema",
+          "default": {}
         },
         "registrant": {
           "$ref": "#/$defs/RemoteProcessOriginator"
@@ -9323,6 +9473,26 @@
         {
           "additionalProperties": false,
           "properties": {
+            "unusable_schema": {
+              "properties": {
+                "source": {
+                  "$ref": "#/$defs/SchemaAdmissionError"
+                }
+              },
+              "required": [
+                "source"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "unusable_schema"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "state": {
               "properties": {
                 "refusal": {
@@ -9777,6 +9947,58 @@
           "type": "object"
         },
         {
+          "properties": {
+            "kind": {
+              "const": "schema_refused",
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/$defs/SchemaAdmissionError"
+            }
+          },
+          "required": [
+            "kind",
+            "source"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "tool_schema_refused",
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/$defs/ToolCatalogBuildError"
+            }
+          },
+          "required": [
+            "kind",
+            "source"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "context": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "value_mismatch",
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/$defs/ValueMismatch"
+            }
+          },
+          "required": [
+            "kind",
+            "context",
+            "source"
+          ],
+          "type": "object"
+        },
+        {
           "description": "The identity of a submission refused for using another ingress kind's\nreserved source-key namespace.",
           "properties": {
             "ingress_kind": {
@@ -10020,6 +10242,75 @@
           "type": "object"
         }
       ]
+    },
+    "SchemaAdmissionError": {
+      "oneOf": [
+        {
+          "properties": {
+            "actual": {
+              "$ref": "#/$defs/InvalidSchemaKind"
+            },
+            "kind": {
+              "const": "invalid_kind",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "actual"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "compilation",
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "schema_path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "schema_path",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "non_local_reference",
+              "type": "string"
+            },
+            "reference": {
+              "type": "string"
+            },
+            "schema_path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "schema_path",
+            "reference"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "SchemaPurpose": {
+      "enum": [
+        "tool_input",
+        "tool_output",
+        "structured_output",
+        "prompt_schema"
+      ],
+      "type": "string"
     },
     "ScopeId": {
       "description": "A scope a process may live until.\n\nAn effect opener (a logical turn root, a session operation, one process)\nor a session. A session is never an effect-group opener:\nit owns lifetimes, not effects.",
@@ -10543,6 +10834,158 @@
         }
       ]
     },
+    "ToolCatalogBuildError": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "UnusableSchema": {
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "purpose": {
+                  "$ref": "#/$defs/SchemaPurpose"
+                },
+                "source": {
+                  "$ref": "#/$defs/SchemaAdmissionError"
+                },
+                "tool_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tool_id",
+                "name",
+                "purpose",
+                "source"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "UnusableSchema"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "MissingContract": {
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "tool_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tool_id",
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "MissingContract"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "DuplicateId": {
+              "properties": {
+                "tool_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tool_id"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "DuplicateId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "DuplicateName": {
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "DuplicateName"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ToolFailureCause": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "tool_schema_admission",
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/$defs/ToolCatalogBuildError"
+            }
+          },
+          "required": [
+            "kind",
+            "source"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "schema_admission",
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/$defs/SchemaAdmissionError"
+            }
+          },
+          "required": [
+            "kind",
+            "source"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "value_mismatch",
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/$defs/ValueMismatch"
+            }
+          },
+          "required": [
+            "kind",
+            "source"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ToolFailureSource": {
       "enum": [
         "runtime",
@@ -10844,6 +11287,88 @@
             },
             "type": {
               "const": "invalid_batch_maximum",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "message": {
+              "additionalProperties": false,
+              "properties": {
+                "source": {
+                  "$ref": "#/$defs/SchemaAdmissionError"
+                }
+              },
+              "required": [
+                "source"
+              ],
+              "type": "object"
+            },
+            "type": {
+              "const": "unusable_schema",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "message": {
+              "additionalProperties": false,
+              "properties": {
+                "source": {
+                  "$ref": "#/$defs/ToolCatalogBuildError"
+                }
+              },
+              "required": [
+                "source"
+              ],
+              "type": "object"
+            },
+            "type": {
+              "const": "unusable_tool_schema",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "message": {
+              "additionalProperties": false,
+              "properties": {
+                "context": {
+                  "type": "string"
+                },
+                "source": {
+                  "$ref": "#/$defs/ValueMismatch"
+                }
+              },
+              "required": [
+                "context",
+                "source"
+              ],
+              "type": "object"
+            },
+            "type": {
+              "const": "value_mismatch",
               "type": "string"
             }
           },
@@ -12467,6 +12992,21 @@
           "type": "object"
         }
       ]
+    },
+    "ValueMismatch": {
+      "properties": {
+        "instance_path": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "instance_path",
+        "message"
+      ],
+      "type": "object"
     },
     "VersionRange": {
       "description": "The wire form of [`VersionRange`], before validation.",

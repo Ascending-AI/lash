@@ -36,7 +36,7 @@ fn store_faults() -> Vec<(&'static str, lash_core::StoreError)> {
 fn tick_type() -> lash_core::ProcessEventType {
     lash_core::ProcessEventType {
         name: "producer.tick".to_string(),
-        payload_schema: lash_core::LashSchema::any(),
+        payload_schema: lash_core::JsonSchema::any(),
         semantics: lash_core::ProcessEventSemanticsSpec::default(),
     }
 }

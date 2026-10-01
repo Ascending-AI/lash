@@ -11,7 +11,7 @@ pub fn lashlang_process_event_types() -> Vec<lash_core::ProcessEventType> {
         // append, and both producers go through it.
         lash_core::ProcessEventType {
             name: "process.yield".to_string(),
-            payload_schema: lash_core::LashSchema::any(),
+            payload_schema: lash_core::JsonSchema::any(),
             semantics: lash_core::ProcessEventSemanticsSpec {
                 wake: Some(lash_core::ProcessWakeSpec {
                     when: None,
@@ -22,7 +22,7 @@ pub fn lashlang_process_event_types() -> Vec<lash_core::ProcessEventType> {
         },
         lash_core::ProcessEventType {
             name: "process.wake".to_string(),
-            payload_schema: lash_core::LashSchema::any(),
+            payload_schema: lash_core::JsonSchema::any(),
             semantics: lash_core::ProcessEventSemanticsSpec {
                 wake: Some(lash_core::ProcessWakeSpec {
                     when: None,
@@ -40,15 +40,19 @@ pub fn lashlang_process_event_types() -> Vec<lash_core::ProcessEventType> {
 )]
 pub fn lashlang_process_signal_event_types(
     process: &lashlang::ProcessDecl,
-) -> Vec<lash_core::ProcessEventType> {
+) -> Result<Vec<lash_core::ProcessEventType>, lash_core::SchemaAdmissionError> {
     process
         .signals
         .iter()
-        .map(|signal| lash_core::ProcessEventType {
-            name: lash_core::facade_support::process_signal_event_type(signal.name.as_str())
-                .expect("lashlang process signal declarations use parser-validated names"),
-            payload_schema: lash_core::LashSchema::new(lashlang_type_expr_schema(&signal.ty)),
-            semantics: lash_core::ProcessEventSemanticsSpec::default(),
+        .map(|signal| {
+            Ok(lash_core::ProcessEventType {
+                name: lash_core::facade_support::process_signal_event_type(signal.name.as_str())
+                    .expect("lashlang process signal declarations use parser-validated names"),
+                payload_schema: lash_core::JsonSchema::admit(lashlang_type_expr_schema(
+                    &signal.ty,
+                ))?,
+                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+            })
         })
         .collect()
 }

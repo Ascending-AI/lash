@@ -1021,7 +1021,10 @@ fn final_answer_format_guidance_honors_custom_text_and_raw_suppression() {
 fn required_output_schema_suppresses_final_answer_format_guidance() {
     let guidance = final_answer_format_prompt_test(&RlmTurnOptions {
         termination: Some(RlmTermination::FinishRequired {
-            schema: Some(serde_json::json!({ "type": "object" })),
+            schema: Some(
+                lash_sansio::JsonSchema::admit(serde_json::json!({ "type": "object" }))
+                    .expect("valid finish schema"),
+            ),
         }),
         final_answer_format: Some(RlmFinalAnswerFormat::Markdown),
         render: None,

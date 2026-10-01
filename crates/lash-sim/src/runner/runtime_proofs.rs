@@ -748,6 +748,10 @@ impl lash_core::ToolProvider for PendingToolProvider {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn pending_tool_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:app_lookup",
@@ -760,6 +764,7 @@ fn pending_tool_definition() -> lash_core::ToolDefinition {
         }),
         json!({ "type": "object" }),
     )
+    .expect("valid declared tool schemas")
 }
 
 pub(super) fn pending_tool_roundtrip_provider() -> ProviderHandle {
@@ -804,6 +809,10 @@ impl SuspendToolProvider {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "this module declares the tool or payload schema and admission checks its invariant"
+    )]
     fn definition(&self) -> lash_core::ToolDefinition {
         lash_core::ToolDefinition::raw(
             format!("tool:{}", self.tool_name),
@@ -816,6 +825,7 @@ impl SuspendToolProvider {
             }),
             json!({ "type": "object" }),
         )
+        .expect("valid declared tool schemas")
     }
 }
 

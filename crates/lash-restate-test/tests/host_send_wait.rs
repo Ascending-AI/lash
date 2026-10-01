@@ -1833,6 +1833,7 @@ fn switch_frame_definition() -> lash_core::ToolDefinition {
         serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
         serde_json::json!({"type": "object"}),
     )
+    .expect("valid declared tool schemas")
 }
 
 /// Switches agent frame, handing the follow-on [`FOLLOW_ON_TASK`].

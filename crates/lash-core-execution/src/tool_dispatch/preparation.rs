@@ -234,7 +234,14 @@ async fn prepare_authorized_tool_call_with_context(
                 &ids,
                 tool_name,
                 args,
-                runtime_failure(ToolFailureClass::InvalidRequest, "invalid_tool_args", err),
+                crate::ToolOutcome::failure(
+                    crate::ToolFailure::runtime(
+                        ToolFailureClass::InvalidRequest,
+                        "invalid_tool_args",
+                        err.to_string(),
+                    )
+                    .with_cause(crate::ToolFailureCause::ValueMismatch { source: err }),
+                ),
             )
             .await,
         );

@@ -400,6 +400,10 @@ impl lash_core::ToolProvider for ContractAppTools {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn contract_app_lookup_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:app_lookup",
@@ -418,6 +422,7 @@ fn contract_app_lookup_definition() -> lash_core::ToolDefinition {
             "additionalProperties": false
         }),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
         ["tools"],
         "app_lookup",
@@ -511,6 +516,10 @@ impl lash_core::ToolProvider for ContractDurableInputTools {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn contract_durable_input_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:mock_input_request",
@@ -534,6 +543,7 @@ fn contract_durable_input_definition() -> lash_core::ToolDefinition {
             "additionalProperties": true
         }),
     )
+    .expect("valid declared tool schemas")
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
         ["tools"],
         "mock_input_request",

@@ -60,7 +60,7 @@ async fn waiting_request(engine: &Engine) -> lash_core::ProcessStartRequest {
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
     .with_extra_event_types([lash_core::ProcessEventType {
         name: format!("signal.{SIGNAL}"),
-        payload_schema: lash_core::LashSchema::any(),
+        payload_schema: lash_core::JsonSchema::any(),
         semantics: lash_core::ProcessEventSemanticsSpec::default(),
     }])
 }

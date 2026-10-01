@@ -1102,13 +1102,17 @@ impl SessionPlugin for BenchmarkWorkbenchTriggerPlugin {
         "runtime_perf_workbench_trigger"
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "this module declares the tool or payload schema and admission checks its invariant"
+    )]
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
         reg.triggers()
             .declare(lash_core::facade_support::TriggerEvent::new(
                 BENCHMARK_MAIL_RESOURCE,
                 BENCHMARK_MAIL_ALIAS,
                 BENCHMARK_MAIL_EVENT,
-                lash_core::LashSchema::new(serde_json::json!({
+                lash_core::JsonSchema::admit(serde_json::json!({
                     "type": "object",
                     "properties": {
                         "account": { "type": "string" },
@@ -1117,7 +1121,8 @@ impl SessionPlugin for BenchmarkWorkbenchTriggerPlugin {
                     },
                     "required": ["account", "title", "text"],
                     "additionalProperties": false
-                })),
+                }))
+                .expect("valid declared payload schema"),
             ))?;
         reg.tools().provider(Arc::new(BenchmarkWorkbenchMailTool))?;
         Ok(())

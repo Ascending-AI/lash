@@ -15,6 +15,7 @@
     reason = "relocated unit-test fixtures assert that their setup is valid; in-crate they sat in `cfg(test)` modules the lints exempt"
 )]
 
+pub use lash_core_execution::JsonSchema;
 /// The relocated tests derive intent and trigger keys as the kernel does.
 pub use lash_core_execution::core_internal::StartKeyDerivation;
 pub use lash_core_execution::facade_support::*;

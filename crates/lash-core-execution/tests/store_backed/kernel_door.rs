@@ -36,6 +36,7 @@ fn echo_tool() -> crate::ToolDefinition {
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object" }),
     )
+    .expect("valid declared tool schemas")
 }
 
 #[async_trait::async_trait]

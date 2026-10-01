@@ -46,7 +46,7 @@ mod tests {
             },
             crate::ProcessIdentity::labelled("testing-fixture", Some(process_name)),
         )
-        .with_payload_schema(crate::LashSchema::any())
+        .with_payload_schema(crate::JsonSchema::any())
     }
 
     async fn register(
@@ -111,12 +111,13 @@ mod tests {
     fn captured_provider_source() -> TriggerSourceCapture {
         TriggerSourceCapture::provider(
             ["ui", "button"],
-            crate::LashSchema::new(serde_json::json!({
+            crate::JsonSchema::admit(serde_json::json!({
                 "type": "object",
                 "properties": {"account": {"type": "string"}},
                 "required": ["account"],
                 "additionalProperties": false
-            })),
+            }))
+            .expect("valid declared payload schema"),
             "ui-provider",
             serde_json::json!({"account": "a", "grant": "opaque"}),
         )
@@ -190,7 +191,7 @@ mod tests {
 
         let rerouted = TriggerSourceCapture::provider(
             ["ui", "button"],
-            crate::LashSchema::any(),
+            crate::JsonSchema::any(),
             "other-provider",
             serde_json::json!({"account": "b"}),
         );
@@ -269,27 +270,40 @@ mod tests {
             .expect("open the emit handler");
         let scoped = handler.scoped();
 
-        let report = router
-            .emit(
-                TriggerOccurrenceRequest::new(
-                    "ui.button.pressed",
-                    source_key.clone(),
-                    serde_json::json!({"button": "Blue"}),
-                    "off-contract",
-                )
-                .with_source(serde_json::json!({"unexpected": true})),
-                &scoped,
-            )
-            .await
-            .expect("emit");
+        let request = TriggerOccurrenceRequest::new(
+            "ui.button.pressed",
+            source_key.clone(),
+            serde_json::json!({"button": "Blue"}),
+            "off-contract",
+        )
+        .with_source(serde_json::json!({"unexpected": true}));
+        let report = router.emit(request.clone(), &scoped).await.expect("emit");
+        assert!(
+            serde_json::to_value(&report.deliveries[0].outcome)
+                .expect("the delivery report serializes")["failed"]["value_mismatch"]
+                .is_object(),
+            "a trigger delivery report must retain its typed value mismatch"
+        );
         assert!(
             matches!(
                 &report.deliveries[0].outcome,
-                TriggerDeliveryEmitOutcome::Failed { reason, .. }
-                    if reason.contains("captured source contract")
+                TriggerDeliveryEmitOutcome::Failed { value_mismatch: Some(source), .. }
+                    if source.instance_path.is_empty() && source.message.contains("account")
             ),
             "off-contract occurrence must refuse, got {:?}",
             report.deliveries[0].outcome
+        );
+
+        let refusal = router
+            .emit_recorded(request, &scoped)
+            .await
+            .expect_err("recorded emission refuses an unstarted delivery");
+        let refusal = crate::RuntimeEffectControllerError::from(refusal);
+        assert!(
+            matches!(refusal.cause,
+            Some(crate::RuntimeErrorCause::ValueMismatch { source, .. })
+                if source.instance_path.is_empty() && source.message.contains("account")),
+            "recorded emission retains the typed value mismatch"
         );
 
         let on_contract = router

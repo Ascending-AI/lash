@@ -114,16 +114,18 @@ fn enriched_identity_corpus_draft(input: crate::ProcessInput) -> TriggerSubscrip
     );
     let mut draft = minimal_identity_corpus_draft(input)
         .with_source(serde_json::json!({"source": [0, "0"]}))
-        .with_payload_schema(crate::LashSchema::new(
-            serde_json::json!({"type": "object"}),
-        ))
+        .with_payload_schema(
+            crate::JsonSchema::admit(serde_json::json!({"type": "object"}))
+                .expect("valid declared payload schema"),
+        )
         .with_wake_target(crate::SessionScope::for_agent_frame(
             "session",
             crate::FrameNodeId::new("frame").expect("test frame identity is non-empty"),
         ))
         .with_event_types([crate::ProcessEventType {
             name: "app.event".to_string(),
-            payload_schema: crate::LashSchema::new(serde_json::json!({"type": "object"})),
+            payload_schema: crate::JsonSchema::admit(serde_json::json!({"type": "object"}))
+                .expect("valid declared payload schema"),
             semantics: crate::ProcessEventSemanticsSpec {
                 terminal: Some(crate::ProcessTerminalSpec {
                     status: crate::TerminalProcessStatus::Completed,
@@ -163,7 +165,10 @@ fn trigger_definition_identity_golden_corpus() {
             )),
             turn_input: Box::new(crate::TurnInput::empty()),
             result: crate::SessionTurnOutcome::FinalValue {
-                schema: Some(serde_json::json!({})),
+                schema: Some(
+                    lash_sansio::JsonSchema::admit(serde_json::json!({}))
+                        .expect("declared result schema"),
+                ),
             },
         },
         crate::ProcessInput::External {
@@ -228,21 +233,24 @@ fn executable_trigger_definition_changes_rotate_the_fingerprint() {
     });
     first.event_types = vec![crate::ProcessEventType {
         name: "app.event".to_string(),
-        payload_schema: crate::LashSchema::new(serde_json::json!({"type": "string"})),
+        payload_schema: crate::JsonSchema::admit(serde_json::json!({"type": "string"}))
+            .expect("valid declared payload schema"),
         semantics: crate::ProcessEventSemanticsSpec::default(),
     }];
     let mut second = first.clone();
     second.event_types[0].payload_schema =
-        crate::LashSchema::new(serde_json::json!({"type": "number"}));
+        crate::JsonSchema::admit(serde_json::json!({"type": "number"}))
+            .expect("valid declared payload schema");
     assert_ne!(
         trigger_subscription_definition_fingerprint(&TriggerOwnerScope::Platform, &first),
         trigger_subscription_definition_fingerprint(&TriggerOwnerScope::Platform, &second)
     );
 
     let mut annotated = first.clone();
-    annotated.event_types[0].payload_schema = crate::LashSchema::new(
+    annotated.event_types[0].payload_schema = crate::JsonSchema::admit(
         serde_json::json!({"type": "string", "description": "display only"}),
-    );
+    )
+    .expect("valid declared payload schema");
     assert_eq!(
         trigger_subscription_definition_fingerprint(&TriggerOwnerScope::Platform, &first),
         trigger_subscription_definition_fingerprint(&TriggerOwnerScope::Platform, &annotated),
@@ -252,7 +260,7 @@ fn executable_trigger_definition_changes_rotate_the_fingerprint() {
     let mut ordered = first.clone();
     ordered.event_types.push(crate::ProcessEventType {
         name: "app.another".to_string(),
-        payload_schema: crate::LashSchema::any(),
+        payload_schema: crate::JsonSchema::any(),
         semantics: crate::ProcessEventSemanticsSpec::default(),
     });
     let mut reversed = ordered.clone();
@@ -428,8 +436,8 @@ fn trigger_operation_identity_golden_corpus() {
     );
 }
 
-fn button_payload_schema() -> crate::LashSchema {
-    crate::LashSchema::any()
+fn button_payload_schema() -> crate::JsonSchema {
+    crate::JsonSchema::any()
 }
 
 #[test]

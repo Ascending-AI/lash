@@ -74,7 +74,7 @@ async fn assert_catalog_refused(behavior: &'static str, reason: &str) {
     let error = status
         .health
         .error()
-        .unwrap_or("")
+        .unwrap_or_default()
         .to_string();
     pool.shutdown_all().await;
     assert!(!status.health.is_connected(), "oversized catalog was installed");

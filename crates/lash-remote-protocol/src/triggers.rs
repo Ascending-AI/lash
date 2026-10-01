@@ -132,6 +132,8 @@ pub enum RemoteTriggerDeliveryEmitOutcome {
     Failed {
         code: RemoteTriggerDeliveryFailureCode,
         reason: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_mismatch: Option<Box<lash_sansio::ValueMismatch>>,
     },
 }
 
@@ -334,7 +336,7 @@ pub struct RemoteTriggerSourceCapture {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub constructor_path: Vec<String>,
     #[serde(default)]
-    pub config_schema: serde_json::Value,
+    pub config_schema: lash_sansio::JsonSchema,
     #[serde(default)]
     pub route: RemoteTriggerProviderRoute,
 }
@@ -371,7 +373,7 @@ pub struct RemoteTriggerSubscriptionSpec {
     #[serde(default)]
     pub source: serde_json::Value,
     #[serde(default)]
-    pub payload_schema: serde_json::Value,
+    pub payload_schema: lash_sansio::JsonSchema,
     pub source_capture: RemoteTriggerSourceCapture,
     pub target: RemoteProcessStartTarget,
     pub target_identity: RemoteProcessIdentity,
@@ -455,7 +457,7 @@ impl RemoteTriggerSubscriptionDraft {
                 source_type: source_type.into(),
                 source_key: source_key.into(),
                 source: serde_json::Value::Object(serde_json::Map::new()),
-                payload_schema: serde_json::Value::Object(serde_json::Map::new()),
+                payload_schema: lash_sansio::JsonSchema::any(),
                 source_capture: RemoteTriggerSourceCapture::default(),
                 target,
                 target_identity,
@@ -476,7 +478,7 @@ impl RemoteTriggerSubscriptionDraft {
         self
     }
 
-    pub fn with_payload_schema(mut self, payload_schema: serde_json::Value) -> Self {
+    pub fn with_payload_schema(mut self, payload_schema: lash_sansio::JsonSchema) -> Self {
         self.payload_schema = payload_schema;
         self
     }

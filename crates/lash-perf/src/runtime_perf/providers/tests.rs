@@ -24,7 +24,7 @@ fn large_tool_catalog_fixture_matches_gmail_sized_callable_catalog() {
             .expect("valid lashlang binding")
             .expect("benchmark tool has lashlang binding");
         binding.module_path == vec!["gmail".to_string()]
-            && !def.contract.input_schema.canonical["properties"]
+            && !def.contract.input_schema.canonical.as_value()["properties"]
                 .as_object()
                 .expect("object schema")
                 .is_empty()
@@ -36,7 +36,7 @@ fn large_tool_catalog_fixture_matches_gmail_sized_callable_catalog() {
     );
     let first = defs.first().expect("fixture tool");
     assert!(
-        first.contract.input_schema.canonical["$defs"]["message_part"]["properties"]["parts"]
+        first.contract.input_schema.canonical.as_value()["$defs"]["message_part"]["properties"]["parts"]
             ["items"]
             ["$ref"]
             .as_str()
@@ -44,13 +44,13 @@ fn large_tool_catalog_fixture_matches_gmail_sized_callable_catalog() {
         "fixture should include recursive nested schema refs"
     );
     assert!(
-        first.contract.input_schema.canonical["properties"]["payload"]["oneOf"]
+        first.contract.input_schema.canonical.as_value()["properties"]["payload"]["oneOf"]
             .as_array()
             .is_some_and(|variants| variants.len() >= 4),
         "fixture should include provider-style payload unions"
     );
     assert!(
-        first.contract.input_schema.canonical["properties"]["projection"]["anyOf"]
+        first.contract.input_schema.canonical.as_value()["properties"]["projection"]["anyOf"]
             .as_array()
             .is_some_and(|variants| variants.len() >= 2),
         "fixture should include output projection unions"
@@ -126,7 +126,7 @@ fn oblique_fixture_exposes_retrieval_judge_and_handle_tools_to_lashlang() {
     let search_contract = benchmark_oblique_search_tool_definition().contract;
     assert!(search_contract.output_contract.is_static());
     assert_eq!(
-        search_contract.output_schema.canonical,
+        search_contract.output_schema.canonical().clone(),
         oblique_search_output_schema()
     );
 }

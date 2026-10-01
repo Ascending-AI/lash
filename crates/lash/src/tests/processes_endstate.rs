@@ -88,7 +88,7 @@ impl LinkedTestProcess {
         lash_core::TriggerSubscriptionDraft {
             source_capture: lash_core::TriggerSourceCapture::provider(
                 ["ui", "button"],
-                lash_core::LashSchema::any(),
+                lash_core::JsonSchema::any(),
                 "ui-provider",
                 serde_json::json!({"account": "a"}),
             ),
@@ -99,7 +99,7 @@ impl LinkedTestProcess {
             source_type: source_type.to_string(),
             source_key,
             source: serde_json::json!({}),
-            payload_schema: lash_core::LashSchema::any(),
+            payload_schema: lash_core::JsonSchema::any(),
             target: self.process_input().into(),
             target_identity: self.process_identity(),
             event_types: lash_lashlang_runtime::lashlang_process_event_types()
@@ -517,7 +517,7 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
                 draft: lash_core::TriggerSubscriptionDraft {
                     source_capture: lash_core::TriggerSourceCapture::provider(
                         ["ui", "button"],
-                        lash_core::LashSchema::any(),
+                        lash_core::JsonSchema::any(),
                         "ui-provider",
                         serde_json::json!({"account": "a"}),
                     ),
@@ -530,7 +530,7 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
                     source_type: "ui.button.pressed".to_string(),
                     source_key: source_key.to_string(),
                     source: serde_json::json!({ "button": "Blue" }),
-                    payload_schema: lash_core::LashSchema::any(),
+                    payload_schema: lash_core::JsonSchema::any(),
                     target: lash_core::ProcessInput::Engine {
                         kind: "test".to_string(),
                         payload: serde_json::json!({ "process": "worker" }),

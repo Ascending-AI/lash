@@ -188,6 +188,10 @@ finish("started deterministic failing process");"#,
         })
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "this module declares the tool or payload schema and admission checks its invariant"
+    )]
     pub(crate) fn tool_provider(self) -> Option<Arc<dyn lash::tools::ToolProvider>> {
         (self == Self::ToolValue).then(|| {
             use lash::tools::ToolDefinitionBindingExt as _;
@@ -203,6 +207,7 @@ finish("started deterministic failing process");"#,
                 }),
                 serde_json::json!({ "type": "object" }),
             )
+            .expect("valid declared tool schemas")
             .with_tool_binding(lash::tools::ToolBinding::new(
                 ["workbench_surface"],
                 "terminal",

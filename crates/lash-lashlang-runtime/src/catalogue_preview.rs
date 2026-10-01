@@ -191,6 +191,7 @@ mod tests {
             lash_core::ToolDefinition::default_input_schema(),
             json!({ "type": "object" }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(module_path.iter().copied(), operation));
         let manifest = definition.manifest();
         json!({
@@ -231,6 +232,7 @@ mod tests {
             lash_core::ToolDefinition::default_input_schema(),
             json!({ "type": "object" }),
         )
+        .expect("valid declared tool schemas")
         .with_tool_binding(ToolBinding::new(["calendar", "work"], "create"));
         let manifest = definition.manifest();
 

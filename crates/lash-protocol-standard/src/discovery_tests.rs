@@ -37,14 +37,16 @@ fn an_open_nested_schema_reaches_the_provider_spec_and_the_schema_docs_whole() {
         },
         "required": ["query"]
     });
-    let catalog =
-        lash_core::ToolCatalog::from_tool_definitions(vec![lash_core::ToolDefinition::raw(
+    let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![
+        lash_core::ToolDefinition::raw(
             "tool:mcp/issues_search",
             "issues_search",
             "Search issues.",
             input_schema.clone(),
             serde_json::json!({"type":"string"}),
-        )]);
+        )
+        .expect("valid declared tool schemas"),
+    ]);
     let preamble = StandardProtocolDriver {
         config: StandardProtocolConfig {
             batch: BatchSugar::Disabled,
@@ -91,7 +93,8 @@ fn standard_discovery_filters_provider_specs_and_requires_an_inline_member() {
             name,
             serde_json::json!({"type":"object"}),
             serde_json::json!({"type":"string"}),
-        );
+        )
+        .expect("valid declared tool schemas");
         tool.manifest.inline = inline;
         tool
     };
@@ -231,7 +234,8 @@ fn discovery_runtime_tool(name: &str, inline: bool) -> lash_core::ToolDefinition
             "additionalProperties": false
         }),
         serde_json::json!({ "type": "string" }),
-    );
+    )
+    .expect("valid declared tool schemas");
     tool.manifest.inline = inline;
     tool
 }

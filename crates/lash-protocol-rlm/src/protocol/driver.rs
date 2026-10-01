@@ -595,10 +595,13 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         &state,
                         // The program finished with a value its declared
                         // schema refuses: a defect in the program.
-                        Some(CellOutcome::Failed(lash_core::CellFailure::new(
-                            lash_core::CellFailureKind::Program,
-                            error_text,
-                        ))),
+                        Some(CellOutcome::Failed(
+                            lash_core::CellFailure::new(
+                                lash_core::CellFailureKind::Program,
+                                error_text.to_string(),
+                            )
+                            .with_value_mismatch(error_text),
+                        )),
                     ),
                     vec![conversation_event(finish_schema_mismatch_message(
                         self.dialect.as_ref(),

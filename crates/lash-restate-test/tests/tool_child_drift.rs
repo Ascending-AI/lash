@@ -43,7 +43,8 @@ fn definition(name: &str, drifted: bool) -> lash_core::ToolDefinition {
         "A drift-probe tool.",
         json!({ "type": "object", "additionalProperties": true }),
         json!({ "type": "object", "additionalProperties": true }),
-    );
+    )
+    .expect("valid declared tool schemas");
     if drifted {
         definition.manifest.retry_policy = lash_core::ToolRetryPolicy::safe(3, 10, 100);
     }

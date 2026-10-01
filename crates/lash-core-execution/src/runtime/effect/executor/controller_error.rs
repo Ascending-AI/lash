@@ -87,6 +87,11 @@ impl From<PluginError> for RuntimeEffectControllerError {
             err @ PluginError::ProcessNoLongerRetained { .. } => {
                 Self::new(RuntimeErrorCode::ProcessNoLongerRetained, err.to_string())
             }
+            err @ (PluginError::UnusableSchema { .. }
+            | PluginError::UnusableToolSchema { .. }
+            | PluginError::ValueMismatch { .. }) => {
+                err.into_turn_failure(RuntimeErrorCode::Plugin).into()
+            }
             err @ (PluginError::AppendReceiptRequestedNodeCountCorrupt { .. }
             | PluginError::MonotonicCounterOverflow { .. }) => {
                 Self::new(RuntimeErrorCode::RuntimeStoreCorrupt, err.to_string())

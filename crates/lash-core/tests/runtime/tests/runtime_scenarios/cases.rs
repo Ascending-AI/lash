@@ -520,6 +520,7 @@ fn runtime_scenario_intent_tool() -> lash_core::ToolDefinition {
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::json!({"type": "object", "additionalProperties": true}),
     )
+    .expect("valid declared tool schemas")
 }
 
 #[async_trait::async_trait]
@@ -652,12 +653,12 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
             .with_extra_event_types([
                 lash_core::ProcessEventType {
                     name: "signal.resume".to_string(),
-                    payload_schema: lash_core::LashSchema::any(),
+                    payload_schema: lash_core::JsonSchema::any(),
                     semantics: lash_core::ProcessEventSemanticsSpec::default(),
                 },
                 lash_core::ProcessEventType {
                     name: "runtime.intent.note".to_string(),
-                    payload_schema: lash_core::LashSchema::any(),
+                    payload_schema: lash_core::JsonSchema::any(),
                     semantics: lash_core::ProcessEventSemanticsSpec::default(),
                 },
             ]),

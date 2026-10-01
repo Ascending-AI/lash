@@ -55,7 +55,7 @@ pub use host::{
 pub use plugin::{
     McpDeferredToolProvider, McpPluginFactory, McpPluginFactoryBuilder, McpToolProvider,
 };
-pub use pool::{McpConnectionPool, McpServerHealth, McpServerStatus};
+pub use pool::{McpConnectionPool, McpServerFault, McpServerHealth, McpServerStatus};
 pub use rmcp::model::{
     CreateElicitationRequestParams, CreateElicitationResult as CreateElicitationOutcome,
     CreateMessageRequestParams, CreateMessageResult as CreateMessageOutcome, ElicitationAction,

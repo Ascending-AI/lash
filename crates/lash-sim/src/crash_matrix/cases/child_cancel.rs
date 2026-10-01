@@ -45,6 +45,10 @@ struct StuckTool {
     executions: Arc<AtomicUsize>,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool or payload schema and admission checks its invariant"
+)]
 fn tool_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         format!("tool:{TOOL}"),
@@ -53,6 +57,7 @@ fn tool_definition() -> lash_core::ToolDefinition {
         serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
         serde_json::json!({"type": "object"}),
     )
+    .expect("valid declared tool schemas")
 }
 
 #[async_trait::async_trait]

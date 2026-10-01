@@ -147,7 +147,8 @@ async fn a_scalar_presentation_replays_from_the_journal_on_redrive() {
         "scalar echo",
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({"type": "object"}),
-    );
+    )
+    .expect("valid declared tool schemas");
     let journal = Arc::new(JournalByEffectId::default());
     let runs = Arc::new(AtomicUsize::new(0));
     let seen_ids = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -453,7 +454,8 @@ async fn a_cell_call_whose_presentation_diverged_stops_the_run() {
         "scalar echo",
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({"type": "object"}),
-    );
+    )
+    .expect("valid declared tool schemas");
     let context = crate::testing::TestExecutionContextBuilder::over_controller(
         crate::ScopedEffectController::shared(
             Arc::new(DivergedPresentation) as Arc<dyn crate::RuntimeEffectController>,

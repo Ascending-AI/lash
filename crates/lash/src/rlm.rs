@@ -27,7 +27,11 @@ impl RlmSendBuilderExt for crate::SendBuilder {
         with_rlm_termination(
             self,
             lash_rlm_types::RlmTermination::FinishRequired {
-                schema: Some(schema),
+                schema: Some(lash_core::JsonSchema::admit(schema).map_err(|source| {
+                    crate::EmbedError::Plugin(lash_core::PluginError::UnusableSchema {
+                        source: Box::new(source),
+                    })
+                })?),
             },
         )
     }

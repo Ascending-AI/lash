@@ -1385,6 +1385,20 @@ fn worker_setup_failure(
         }
         return response;
     }
+    if let lash_vm_client::PoolError::Infrastructure(
+        lash_vm_protocol::InfrastructureOutcome::RunRefused {
+            refusal: lash_vm_protocol::RunRefusal::UnusableSchema { source },
+        },
+    ) = &error
+    {
+        if ctx.is_cancelled() {
+            state.cancel_code_execution();
+        }
+        return exec_setup_failure(
+            lash_core::CellFailure::new(lash_core::CellFailureKind::Host, source.to_string())
+                .with_schema_admission(source.as_ref().clone()),
+        );
+    }
     fail_attempt_on_host_verdict(ctx, &error);
     exec_setup_failure_or_stop(
         state,

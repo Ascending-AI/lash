@@ -48,7 +48,8 @@ mod tests {
             "a rebind fixture tool",
             crate::ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "object", "additionalProperties": true }),
-        );
+        )
+        .expect("valid declared tool schemas");
         definition.manifest.retry_policy = ToolRetryPolicy::safe(4, 10, 100);
         definition
     }

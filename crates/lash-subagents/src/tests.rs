@@ -275,6 +275,7 @@ fn spawn_schema_is_strict_and_nameless() {
     let registry = default_registry(&BTreeMap::new());
     let tool = rlm::spawn_agent_tool_definition(&registry.names());
     let schema = tool.contract.input_schema.canonical;
+    let schema = schema.as_value();
     let retired_key = ["agent", "_", "name"].concat();
 
     let properties = schema
@@ -298,7 +299,7 @@ fn spawn_schema_is_strict_and_nameless() {
         Some(&serde_json::Value::Bool(false))
     );
 
-    let compiled = jsonschema::validator_for(&schema).expect("spawn schema compiles");
+    let compiled = jsonschema::validator_for(schema).expect("spawn schema compiles");
     assert!(
         compiled
             .validate(&json!({ "task": "inspect routing", "capability": "explore" }))
@@ -338,6 +339,7 @@ fn single_capability_spawn_can_omit_capability_field() {
             .contract
             .input_schema
             .canonical
+            .as_value()
             .get("required")
             .and_then(serde_json::Value::as_array)
             .expect("required fields")
@@ -437,11 +439,14 @@ async fn spawn_uses_live_parent_provider_when_selecting_subagent_model() {
         tool_access: &tool_access,
         final_answer_format: lash_rlm_types::RlmFinalAnswerFormat::RawFinalValue,
         capability_name: "explore",
-        output_schema: Some(json!({
-            "type": "object",
-            "properties": { "ok": { "type": "boolean" } },
-            "required": ["ok"]
-        })),
+        output_schema: Some(
+            lash_sansio::JsonSchema::admit(json!({
+                "type": "object",
+                "properties": { "ok": { "type": "boolean" } },
+                "required": ["ok"]
+            }))
+            .expect("valid child output schema"),
+        ),
         seed: Default::default(),
         parent_subagent: None,
         caused_by: None,

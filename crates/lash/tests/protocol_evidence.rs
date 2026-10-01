@@ -1022,8 +1022,11 @@ fn drain_area_witnesses() {
         let _ = &value.projection;
     });
     // W0292: lash_core::SchemaContract::with_override [function]
-    let _: fn(lash_core::SchemaContract, String, serde_json::Value) -> lash_core::SchemaContract =
-        lash_core::SchemaContract::with_override;
+    let _: fn(
+        lash_core::SchemaContract,
+        String,
+        lash_core::JsonSchema,
+    ) -> lash_core::SchemaContract = lash_core::SchemaContract::with_override;
     // W0293: lash_core::SchemaProjectionOverride [struct]
     type_witness::<lash_core::SchemaProjectionOverride>();
     // W0294: lash_core::SchemaProjectionOverride::dialect [field]

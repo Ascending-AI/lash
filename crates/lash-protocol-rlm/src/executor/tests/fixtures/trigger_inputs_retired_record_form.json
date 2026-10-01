@@ -471,9 +471,7 @@
     "event_types": [
       {
         "name": "process.yield",
-        "payload_schema": {
-          "schema": {}
-        },
+        "payload_schema": {},
         "semantics": {
           "wake": {
             "input": "payload"
@@ -482,9 +480,7 @@
       },
       {
         "name": "process.wake",
-        "payload_schema": {
-          "schema": {}
-        },
+        "payload_schema": {},
         "semantics": {
           "wake": {
             "input": {
@@ -505,18 +501,16 @@
     },
     "name": "remembered",
     "payload_schema": {
-      "schema": {
-        "additionalProperties": true,
-        "properties": {
-          "fired_at": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "fired_at"
-        ],
-        "type": "object"
-      }
+      "additionalProperties": true,
+      "properties": {
+        "fired_at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fired_at"
+      ],
+      "type": "object"
     },
     "source": {
       "$lash_host_descriptor_type": "timer.Schedule",
@@ -527,21 +521,19 @@
     },
     "source_capture": {
       "config_schema": {
-        "schema": {
-          "additionalProperties": true,
-          "properties": {
-            "expr": {
-              "type": "string"
-            },
-            "tz": {
-              "type": "string"
-            }
+        "additionalProperties": true,
+        "properties": {
+          "expr": {
+            "type": "string"
           },
-          "required": [
-            "expr"
-          ],
-          "type": "object"
-        }
+          "tz": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "expr"
+        ],
+        "type": "object"
       },
       "constructor_path": [
         "timer",
