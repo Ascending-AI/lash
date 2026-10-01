@@ -111,6 +111,7 @@ def pool_identity(worker):
 
 
 POOL_EPOCH_CHANGED = 'pool epoch changed with an unobserved counter interval'
+MISSING_INVOKER_EXPORTER = 'missing Restate invoker exporter'
 
 
 def pool_report(run, operations, samples):
@@ -572,6 +573,7 @@ def summarize(run, operations, samples, witness, faults=(), sample_errors=(), wi
                            'latency_by_outcome_ns': {outcome: distribution([row['observed_ns'] - row['scheduled_ns'] for row in rows if row['outcome'] == outcome]) for outcome in population['outcomes']}})
     counters = defaultdict(CounterDeltas)
     counter_gaps = []
+    exporter_gaps = []
     observations = {}
 
     def observe_counter(name, identity, epoch, value, observed_ns, target):
@@ -648,7 +650,17 @@ def summarize(run, operations, samples, witness, faults=(), sample_errors=(), wi
             require(metadata is not None, 'Restate metrics have no node epoch')
             node_epoch = metadata['gen_node_id']
             metrics = prometheus(node['prometheus'])
-            require(any(name in {'restate_invoker_invocation_tasks_total', 'restate_num_active_partitions'} for name, _, _ in metrics), 'missing Restate invoker exporter')
+            if not any(name in {'restate_invoker_invocation_tasks_total', 'restate_num_active_partitions'} for name, _, _ in metrics):
+                # A restarted node answers its scrape before its partition
+                # processors publish these series. The scrape is a gap at its
+                # instant, the node's counters untouched: a fault on that
+                # node may explain it, and the first and last samples never.
+                interior = 0 < sample_index < len(samples) - 1
+                exporter_gaps.append(dict(schema_version=1, record='sample_error', run=run['run'],
+                                          sample_kind='periodic' if interior else 'final',
+                                          monotonic_ns=node['metrics_observed_ns'], error=MISSING_INVOKER_EXPORTER,
+                                          target={'component': 'restate', 'endpoint': node['node']}))
+                metrics = []
             for name, labels, value in metrics:
                 if name == 'restate_invoker_invocation_tasks_total':
                     partition = labels['partition_id']
@@ -689,7 +701,8 @@ def summarize(run, operations, samples, witness, faults=(), sample_errors=(), wi
                             'complete': value.gaps == 0} for name, value in sorted(counters.items())}
     recovery = recovery_report(run, operations, witness, faults, anchors)
     pool = pool_report(run, operations, samples)
-    gaps = collection_gaps(run, [*sample_errors, *counter_gaps, *pool.pop('epoch_gaps')], recovery['normalized_rows'])
+    gaps = collection_gaps(run, [*sample_errors, *exporter_gaps, *counter_gaps, *pool.pop('epoch_gaps')],
+                           recovery['normalized_rows'])
     pool_gaps = [row for row in gaps if row.get('counter') == 'pool_identity']
     epoch_gaps = [row for row in gaps if row['record'] == 'counter_gap' and row not in pool_gaps]
     if any(row['attribution']['status'] == 'UNATTRIBUTED' for row in epoch_gaps):
@@ -714,6 +727,8 @@ def summarize(run, operations, samples, witness, faults=(), sample_errors=(), wi
     pool.update(epoch_gaps=len(pool_gaps), fault_attributed_epoch_gaps=pool_attributed, complete=not pool_gaps)
     unattributed = any(row['attribution']['status'] == 'UNATTRIBUTED' for row in gaps if row not in pool_gaps)
     reasons = recovery['reasons'][:] + pool['reasons']
+    if any(row.get('error') == MISSING_INVOKER_EXPORTER and row['attribution']['status'] == 'UNATTRIBUTED' for row in gaps):
+        reasons.append(MISSING_INVOKER_EXPORTER)
     if unattributed:
         reasons.append('required collection intervals are missing')
     if unfinished:

@@ -694,6 +694,60 @@ class MeasurementsTests(unittest.TestCase):
                 self.assertEqual(injected['signal_not_before_bounds_ns'], [38000, 42000])
                 self.assertEqual(injected['clock_bounds_ns'], [48000, 52000])
 
+    def restarted_node_without_invoker_series(self, observed_ns=82000):
+        """A Restate restart, and a scrape of the restarted node that answers
+        before its partition processors publish any invoker series."""
+        fixture = self.gap_campaign()
+        samples, faults, gap = fixture[2], fixture[4], fixture[6]
+        target = {'component': 'restate', 'endpoint': 'node-0'}
+        for row in faults:
+            row.update(fault_id='restate-restart', kind='restate-restart')
+        faults[0]['detail_json'] = json.dumps({'collection_targets': [target]})
+        gap['target'] = dict(target)
+        scraped = copy.deepcopy(samples[0])
+        scraped.update(monotonic_ns=observed_ns - 2000, collection_finished_ns=observed_ns + 3000)
+        scraped['workers'][0]['observed_ns'] = observed_ns - 1000
+        for node in scraped['restate']:
+            node['metrics_observed_ns'] = observed_ns
+        scraped['restate'][0]['prometheus'] = 'restate_failure_detector_gossip_sent_total 3'
+        samples.insert(1, scraped)
+        return fixture
+
+    @staticmethod
+    def exporter_gaps(result):
+        return [row for row in result['collection_gaps'] if row.get('error') == 'missing Restate invoker exporter']
+
+    def test_a_restarted_nodes_scrape_without_invoker_series_is_its_restarts_gap(self):
+        result = self.gap_summary(self.restarted_node_without_invoker_series())
+        self.assertEqual(result['qualification']['status'], 'PASSED')
+        gap, = self.exporter_gaps(result)
+        self.assertEqual((gap['record'], gap['sample_kind'], gap['monotonic_ns']), ('sample_error', 'periodic', 82000))
+        self.assertEqual(gap['target'], {'component': 'restate', 'endpoint': 'node-0'})
+        self.assertEqual((gap['attribution']['status'], gap['attribution']['fault_id']),
+                         ('FAULT_ATTRIBUTED', 'restate-restart'))
+        # The scrape contributes nothing; the node's counter keeps its epoch.
+        self.assertEqual(result['counters']['restate_task_started']['observed_delta'], 2)
+        self.assertTrue(result['counters']['restate_task_started']['complete'])
+
+    def test_a_scrape_without_invoker_series_no_fault_explains_fails(self):
+        for case in ['after', 'before', 'target', 'final']:
+            with self.subTest(case=case):
+                fixture = self.restarted_node_without_invoker_series(
+                    {'after': 109000, 'before': 51000}.get(case, 82000))
+                if case == 'target':
+                    target = {'component': 'restate', 'endpoint': 'node-1'}
+                    fixture[4][0]['detail_json'] = json.dumps({'collection_targets': [target]})
+                    fixture[6]['target'] = target
+                if case == 'final':
+                    del fixture[2][1]
+                    fixture[2][-1]['restate'][1]['prometheus'] = 'restate_failure_detector_gossip_sent_total 3'
+                result = self.gap_summary(fixture)
+                self.assertEqual(result['qualification']['status'], 'FAILED')
+                self.assertIn('missing Restate invoker exporter', result['qualification']['reasons'])
+                gap, = self.exporter_gaps(result)
+                self.assertEqual(gap['attribution'], {'status': 'UNATTRIBUTED'})
+                self.assertEqual(gap['sample_kind'], 'final' if case == 'final' else 'periodic')
+
     def test_wrong_component_gap_fails(self):
         for target in [{'component': 'restate', 'endpoint': 'worker'},
                        {'component': 'postgres', 'endpoint': 'database'},
