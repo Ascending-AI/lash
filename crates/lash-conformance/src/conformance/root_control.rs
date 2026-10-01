@@ -257,7 +257,15 @@ struct Fixture {
     input: crate::InputId,
     park: TurnPark,
 }
-impl Fixture {
+/// A session whose root holds its admitted input under a live drive fence,
+/// before anything parked it.
+struct AdmittedRoot {
+    parts: DriveParts,
+    root: TurnId,
+    input: crate::InputId,
+    lease: DriveFence,
+}
+impl AdmittedRoot {
     async fn new(
         prefix: &str,
         name: &str,
@@ -308,11 +316,28 @@ impl Fixture {
             .expect("admit the root")
             .expect("the root's admission reaches its head");
         assert_eq!(admission.input_ids(), vec![input.clone()]);
-        let park = parts
+        Self {
+            parts,
+            root,
+            input,
+            lease,
+        }
+    }
+}
+impl Fixture {
+    async fn new(
+        prefix: &str,
+        name: &str,
+        host: &Arc<dyn crate::EffectHost>,
+        stores: &Arc<dyn crate::StoreSet>,
+    ) -> Self {
+        let admitted = AdmittedRoot::new(prefix, name, host, stores).await;
+        let park = admitted
+            .parts
             .store
             .record_turn_park(&TurnParkWrite::refusal(
-                parts.session_id.clone(),
-                root.clone(),
+                admitted.parts.session_id.clone(),
+                admitted.root.clone(),
                 ParkReason::ReplayDivergence {
                     message: "old build".into(),
                 },
@@ -320,6 +345,21 @@ impl Fixture {
             ))
             .await
             .expect("park");
+        Self::parked(admitted, stores, park).await
+    }
+    /// The fixture over `admitted`, whose root `park` holds: its execution
+    /// stops here.
+    async fn parked(
+        admitted: AdmittedRoot,
+        stores: &Arc<dyn crate::StoreSet>,
+        park: TurnPark,
+    ) -> Self {
+        let AdmittedRoot {
+            parts,
+            root,
+            input,
+            lease,
+        } = admitted;
         parts
             .store
             .supersede_drive_epoch_for_test(&lease)

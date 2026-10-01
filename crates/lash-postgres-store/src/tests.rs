@@ -1810,8 +1810,7 @@ async fn postgres_batch_session_delete_writes_one_cancel_event_per_park() {
                     message: format!("{label} diverged"),
                 },
                 at_ms: 1_700_000_000_000,
-                engine: None,
-                after_redrive: None,
+                origin: lash_core_execution::store::TurnParkOrigin::Refusal,
                 build_generation: None,
             })
             .await

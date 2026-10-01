@@ -131,10 +131,7 @@ pub(crate) async fn record_turn_park_tx(
             message: error.to_string(),
         })?;
     let at_ms = sql_i64("turn park instant", write.at_ms)?;
-    let engine_ref = write
-        .engine
-        .as_ref()
-        .map(|engine| engine.as_str().to_string());
+    let engine_ref = write.engine().map(|engine| engine.as_str().to_string());
     let park_executable_generation = write
         .reason
         .retired_executable_generation_key()
@@ -173,7 +170,7 @@ pub(crate) async fn record_turn_park_tx(
                 .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
-            park.engine.clone_from(&write.engine);
+            park.engine = write.engine().cloned();
             return Ok(park);
         }
         (TurnParkWriteDecision::Repark, Some(mut park)) => {
@@ -194,7 +191,9 @@ pub(crate) async fn record_turn_park_tx(
                 .map_err(store_sqlx_error)?;
             // The root ran past a redrive the park still named open: its
             // resume reached the execution and only its acknowledgement was
-            // lost. Settle it here, so it never resumes the root again.
+            // lost. Settle it here, so it never resumes the root again. Only
+            // the root's own refusal re-parks past an open redrive: a
+            // reconcile write is decided `Unchanged` against one.
             if let Some(open) = redrive.filter(|redrive| redrive.state.is_open()) {
                 let mut settled = open.clone();
                 settled.state = ControlIntentState::Acknowledged { at_ms: write.at_ms };
@@ -206,8 +205,8 @@ pub(crate) async fn record_turn_park_tx(
             park.last_refused_ms = write.at_ms;
             park.attempts = park.attempts.saturating_add(1);
             park.resume_intent = None;
-            if write.engine.is_some() {
-                park.engine.clone_from(&write.engine);
+            if let Some(engine) = write.engine() {
+                park.engine = Some(engine.clone());
             }
             // COALESCE on the row: a stamp-less write keeps the recorded
             // generation.
@@ -283,7 +282,7 @@ pub(crate) async fn record_turn_park_tx(
         since_ms: write.at_ms,
         last_refused_ms: write.at_ms,
         attempts: 1,
-        engine: write.engine.clone(),
+        engine: write.engine().cloned(),
         resume_intent: None,
         build_generation: write.build_generation.clone(),
     })

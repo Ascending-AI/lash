@@ -21,8 +21,7 @@ fn park(
         turn_id: turn_id.clone(),
         reason,
         at_ms: 1_234,
-        engine: None,
-        after_redrive: None,
+        origin: crate::store::TurnParkOrigin::Refusal,
         build_generation: None,
     }
 }

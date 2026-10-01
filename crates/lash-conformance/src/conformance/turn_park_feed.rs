@@ -34,8 +34,7 @@ fn park_write(
         turn_id: TurnId::from(turn_id),
         reason,
         at_ms,
-        engine: None,
-        after_redrive: None,
+        origin: crate::store::TurnParkOrigin::Refusal,
         build_generation: None,
     }
 }

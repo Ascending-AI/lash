@@ -651,8 +651,8 @@ pub mod persistence {
         ParkReasonCode, ParkReport, PendingFollowOn, PhysicalTurn, ProcessPark, ProcessParkKey,
         ProcessParkQuery, RuntimeCommit, RuntimeCommitReceipt, RuntimeStoreDecorator,
         RuntimeTurnCommitStamp, SemanticBoundaryOperation, SessionCheckpoint, SessionHeadMeta,
-        SessionHeadPayload, TurnCommitFailureCause, TurnCommitOutcome, TurnPark, TurnParkQuery,
-        TurnParkTarget, TurnParkWrite, UnparkCause, UnsettledTurnCounts,
+        SessionHeadPayload, TurnCommitFailureCause, TurnCommitOutcome, TurnPark, TurnParkOrigin,
+        TurnParkQuery, TurnParkTarget, TurnParkWrite, UnparkCause, UnsettledTurnCounts,
         commit_runtime_state_verified, validate_turn_commit_outcome_code,
     };
     /// A logical root's durable terminal evidence and the store segment that

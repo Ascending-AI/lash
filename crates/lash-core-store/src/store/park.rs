@@ -87,18 +87,36 @@ pub struct TurnParkWrite {
     pub build_generation: Option<crate::build_generation::BuildGeneration>,
     /// Host-clock epoch milliseconds at which the refusal was recorded.
     pub at_ms: u64,
-    /// The engine's handle on the stopped execution, when the engine parked
-    /// the root itself (its retry loop ran out, recorded by reconcile): the
-    /// handle a redrive resumes and a cancel releases. `None` from the
-    /// execution's own park write, which keeps any handle already stored.
-    pub engine: Option<EnginePark>,
-    /// For an engine write: the settled redrive the stored park named when
-    /// the writer read it, after which the writer confirmed with the engine
-    /// that the execution is still stopped. The execution then stopped again
-    /// after that redrive resumed it, and the write re-parks the root; an
-    /// engine write naming no such redrive is from a listing that may predate
-    /// the resume, and leaves a redriven park as it is.
-    pub after_redrive: Option<super::ControlIntentId>,
+    /// Who writes the park, which decides what it does to a park the root
+    /// already holds.
+    pub origin: TurnParkOrigin,
+}
+
+/// Who writes a park (FIG-4626). The store decides a write by its origin in
+/// the write's own transaction: only the execution's own refusal re-parks a
+/// root unconditionally, and a reconcile write is fenced by the redrive the
+/// stored park names, whether or not it carries a handle.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TurnParkOrigin {
+    /// The aborting execution itself refused: it ran, so it ran past any
+    /// redrive the park names. Keeps any engine handle already stored.
+    Refusal,
+    /// The engine's park reconcile found stopped work and reports it: an
+    /// observation of the engine's state, never a new refusal of the root.
+    Reconcile {
+        /// The engine's handle on the stopped execution, when it is the
+        /// root's own: the handle a redrive resumes and a cancel releases.
+        /// `None` when the stopped work is what the root waits on (a child,
+        /// or its session's drive), which the engine finds itself.
+        engine: Option<EnginePark>,
+        /// The settled redrive the stored park named when the writer read
+        /// it, after which the writer confirmed with the engine that the
+        /// work is still stopped. The work then stopped again after that
+        /// redrive resumed it, and the write re-parks the root; a write
+        /// naming no such redrive is from a listing that may predate the
+        /// resume, and leaves a redriven park as it is.
+        after_redrive: Option<super::ControlIntentId>,
+    },
 }
 
 impl TurnParkWrite {
@@ -113,8 +131,36 @@ impl TurnParkWrite {
             reason,
             build_generation: None,
             at_ms,
-            engine: None,
-            after_redrive: None,
+            origin: TurnParkOrigin::Refusal,
+        }
+    }
+
+    /// The park the engine's reconcile writes for `root` (see
+    /// [`TurnParkOrigin::Reconcile`]).
+    #[must_use]
+    pub fn reconcile(
+        session_id: SessionId,
+        root: TurnId,
+        reason: ParkReason,
+        at_ms: u64,
+        engine: Option<EnginePark>,
+        after_redrive: Option<super::ControlIntentId>,
+    ) -> Self {
+        Self {
+            origin: TurnParkOrigin::Reconcile {
+                engine,
+                after_redrive,
+            },
+            ..Self::refusal(session_id, root, reason, at_ms)
+        }
+    }
+
+    /// The engine handle the write carries, if any.
+    #[must_use]
+    pub fn engine(&self) -> Option<&EnginePark> {
+        match &self.origin {
+            TurnParkOrigin::Refusal => None,
+            TurnParkOrigin::Reconcile { engine, .. } => engine.as_ref(),
         }
     }
 }
@@ -151,19 +197,21 @@ pub enum TurnParkWriteDecision {
     Open,
     /// Another root's park: close it `Superseded`, then open this root's.
     Supersede,
-    /// The same root refused again, or its engine stopped again after a
-    /// redrive resumed it: keep `park_id` and `since_ms`, refresh the reason,
-    /// count the attempt, clear `resume_intent` (P3), and store the write's
-    /// engine handle if it carries one. A redrive the park named that is
-    /// still open is settled with it: the root ran past it.
+    /// The same root refused again, or its engine found its work stopped
+    /// again after a redrive resumed it: keep `park_id` and `since_ms`,
+    /// refresh the reason, count the attempt, clear `resume_intent` (P3), and
+    /// store the write's engine handle if it carries one. A redrive the park
+    /// named that is still open is settled with it: the root ran past it,
+    /// which only the root's own refusal can show.
     Repark,
     /// The engine stopped the root's execution and the root already holds
     /// a park without a handle: keep its reason and attempts, store the
     /// handle (P4, `AttachedToExisting`).
     AttachEngine,
     /// Nothing to write: the park already carries this handle and no
-    /// redrive ran since, a redrive is still on its way to resuming it, or
-    /// the engine's listing may predate a redrive's resume.
+    /// redrive ran since, the root is already parked and the stopped work
+    /// is what it waits on, a redrive is still on its way to resuming it,
+    /// or the engine's listing may predate a redrive's resume.
     Unchanged,
 }
 
@@ -179,25 +227,34 @@ pub fn decide_turn_park_write(
     if stored.root != write.turn_id {
         return TurnParkWriteDecision::Supersede;
     }
-    let Some(engine) = write.engine.as_ref() else {
+    let (engine, after_redrive) = match &write.origin {
         // The execution itself refused again.
-        return TurnParkWriteDecision::Repark;
+        TurnParkOrigin::Refusal => return TurnParkWriteDecision::Repark,
+        TurnParkOrigin::Reconcile {
+            engine,
+            after_redrive,
+        } => (engine, after_redrive),
     };
     if let Some(redrive) = stored.redrive {
-        // A redrive owns the stopped execution until it resumes it; once it
-        // did, only a writer that saw it settled and then found the
-        // execution stopped again re-parks: an engine listing read before
-        // the resume is stale and must not re-park the running root.
-        return if !redrive.open && write.after_redrive == Some(redrive.intent) {
+        // A redrive owns the stopped work until it resumes it; once it did,
+        // only a writer that saw it settled and then found the work stopped
+        // again re-parks: an engine listing read before the resume is stale
+        // and must not re-park the running root. A writer that read the park
+        // before this redrive was requested names no redrive, or another.
+        return if !redrive.open && *after_redrive == Some(redrive.intent) {
             TurnParkWriteDecision::Repark
         } else {
             TurnParkWriteDecision::Unchanged
         };
     }
-    match stored.engine.as_ref() {
-        None => TurnParkWriteDecision::AttachEngine,
-        Some(stored) if stored == engine => TurnParkWriteDecision::Unchanged,
-        Some(_) => TurnParkWriteDecision::Repark,
+    match (stored.engine.as_ref(), engine) {
+        // The root is parked and no redrive ran since: work that stopped
+        // behind the park, or that another pass already parked it for, adds
+        // nothing to it, however many writers found it at once.
+        (_, None) => TurnParkWriteDecision::Unchanged,
+        (None, Some(_)) => TurnParkWriteDecision::AttachEngine,
+        (Some(stored), Some(engine)) if stored == engine => TurnParkWriteDecision::Unchanged,
+        (Some(_), Some(_)) => TurnParkWriteDecision::Repark,
     }
 }
 
@@ -1081,29 +1138,38 @@ pub struct UnsettledTurnCounts {
 mod tests {
     use super::*;
 
+    fn reconcile_write(engine: Option<&str>, after_redrive: Option<u64>) -> TurnParkWrite {
+        TurnParkWrite::reconcile(
+            SessionId::from("s"),
+            TurnId::from("r"),
+            ParkReason::ReplayDivergence {
+                message: "m".into(),
+            },
+            1,
+            engine.map(EnginePark::new),
+            after_redrive.map(super::super::ControlIntentId::from_sequence),
+        )
+    }
+
     fn engine_write(after_redrive: Option<u64>) -> TurnParkWrite {
-        TurnParkWrite {
-            engine: Some(EnginePark::new("paused")),
-            after_redrive: after_redrive.map(super::super::ControlIntentId::from_sequence),
-            ..TurnParkWrite::refusal(
-                SessionId::from("s"),
-                TurnId::from("r"),
-                ParkReason::ReplayDivergence {
-                    message: "m".into(),
-                },
-                1,
-            )
+        reconcile_write(Some("paused"), after_redrive)
+    }
+
+    fn parked(engine: Option<&str>) -> StoredTurnParkHead {
+        StoredTurnParkHead {
+            root: TurnId::from("r"),
+            engine: engine.map(EnginePark::new),
+            redrive: None,
         }
     }
 
     fn redriven(open: bool) -> StoredTurnParkHead {
         StoredTurnParkHead {
-            root: TurnId::from("r"),
-            engine: Some(EnginePark::new("paused")),
             redrive: Some(StoredParkRedrive {
                 intent: super::super::ControlIntentId::from_sequence(4),
                 open,
             }),
+            ..parked(Some("paused"))
         }
     }
 
@@ -1132,11 +1198,51 @@ mod tests {
             TurnParkWriteDecision::Repark
         );
         let mut execution = engine_write(None);
-        execution.engine = None;
+        execution.origin = TurnParkOrigin::Refusal;
         assert_eq!(
             decide_turn_park_write(Some(&redriven(true)), &execution),
             TurnParkWriteDecision::Repark,
             "the execution's own refusal always re-parks"
+        );
+    }
+
+    /// FIG-4626: a reconcile write without a handle (a stopped child, a
+    /// stopped drive) is a reconcile write, not the root's own refusal: the
+    /// redrive fence holds for it, and a root already parked keeps its park.
+    #[test]
+    fn a_handle_free_reconcile_write_never_reparks_past_an_open_redrive_or_a_held_park() {
+        assert_eq!(
+            decide_turn_park_write(None, &reconcile_write(None, None)),
+            TurnParkWriteDecision::Open
+        );
+        for held in [parked(None), parked(Some("paused"))] {
+            assert_eq!(
+                decide_turn_park_write(Some(&held), &reconcile_write(None, None)),
+                TurnParkWriteDecision::Unchanged,
+                "a second first write counts no refusal"
+            );
+        }
+        for after_redrive in [None, Some(4), Some(9)] {
+            assert_eq!(
+                decide_turn_park_write(
+                    Some(&redriven(true)),
+                    &reconcile_write(None, after_redrive)
+                ),
+                TurnParkWriteDecision::Unchanged,
+                "an open redrive owns the root's stopped work"
+            );
+        }
+        for stale in [None, Some(9)] {
+            assert_eq!(
+                decide_turn_park_write(Some(&redriven(false)), &reconcile_write(None, stale)),
+                TurnParkWriteDecision::Unchanged,
+                "a write prepared before the redrive names no such redrive"
+            );
+        }
+        assert_eq!(
+            decide_turn_park_write(Some(&redriven(false)), &reconcile_write(None, Some(4))),
+            TurnParkWriteDecision::Repark,
+            "work still stopped after the settled redrive re-parks the root"
         );
     }
 

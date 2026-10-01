@@ -120,8 +120,7 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
                     message: "diverged".to_string(),
                 },
                 at_ms: 1,
-                engine: None,
-                after_redrive: None,
+                origin: lash_core::store::TurnParkOrigin::Refusal,
                 build_generation: None,
             })
             .await
@@ -267,8 +266,7 @@ async fn parked_work_merges_parked_turns_and_processes() {
                 message: "diverged".to_string(),
             },
             at_ms: 1,
-            engine: None,
-            after_redrive: None,
+            origin: lash_core::store::TurnParkOrigin::Refusal,
             build_generation: None,
         })
         .await

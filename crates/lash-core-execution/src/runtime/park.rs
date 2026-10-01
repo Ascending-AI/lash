@@ -50,6 +50,15 @@ pub async fn record_root_park(
 /// number of passes, write one park; a child still stopped after a settled
 /// redrive re-parks the root, so the operator can act again.
 ///
+/// Every write here is a reconcile write
+/// ([`TurnParkOrigin::Reconcile`](crate::store::TurnParkOrigin::Reconcile)),
+/// decided against the stored park in the store's own transaction
+/// (FIG-4626). What this writer reads before it only spares a write or
+/// probes the engine: a park or a redrive that lands between its read and
+/// its write is the store's to see, so passes that race each other, or an
+/// operator's redrive, never count a refusal twice or settle a redrive
+/// whose engine half has not run.
+///
 /// Processes park through their registry, which the engine's own process
 /// reconcile writes; this writer refuses a process target.
 pub struct StoreParkRecovery<'a> {
@@ -123,13 +132,9 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
                         .await?
                         .is_some_and(|intent| intent.state.is_open());
                     if open {
-                        // The redrive owns the root's stopped children until
-                        // it resumes them. A write without a handle reads as
-                        // the execution's own refusal and would clear the
-                        // redrive.
-                        if engine.is_none() {
-                            return Ok(EngineParkRecorded::Redriven);
-                        }
+                        // The redrive owns the stopped work until it resumes
+                        // it: the store would leave the park as it is.
+                        return Ok(EngineParkRecorded::Redriven);
                     } else {
                         // The redrive already resumed the execution: the
                         // engine listed it before or after. Only an execution
@@ -155,20 +160,18 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
             }
             None => {}
         }
-        let write = crate::store::TurnParkWrite {
+        let write = crate::store::TurnParkWrite::reconcile(
+            session.clone(),
+            root.clone(),
+            reason,
+            self.clock.timestamp_ms(),
             engine,
             after_redrive,
-            ..crate::store::TurnParkWrite::refusal(
-                session.clone(),
-                root.clone(),
-                reason,
-                self.clock.timestamp_ms(),
-            )
-        };
+        );
         let held = held.map(|park| park.park_id);
         match record_root_park(store, &write).await {
             Ok(park) if park.resume_intent.is_some() => Ok(EngineParkRecorded::Redriven),
-            Ok(park) if held == Some(park.park_id) => {
+            Ok(park) if held == Some(park.park_id) || !records(&park, &write) => {
                 Ok(EngineParkRecorded::AttachedToExisting(park.park_id))
             }
             Ok(park) => {
@@ -190,6 +193,14 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
             Err(error) => Err(error),
         }
     }
+}
+
+/// Whether `park`, as the store answered `write`, records that write's
+/// refusal: the store opened or re-parked it. A park another writer recorded
+/// between this writer's read and its write is left as it was, and carries
+/// that writer's reason and instant.
+fn records(park: &crate::store::TurnPark, write: &crate::store::TurnParkWrite) -> bool {
+    park.last_refused_ms == write.at_ms && park.reason == write.reason
 }
 
 impl StoreParkRecovery<'_> {
@@ -265,17 +276,19 @@ impl StoreParkRecovery<'_> {
                 (root, None)
             }
         };
-        let write = crate::store::TurnParkWrite {
+        let write = crate::store::TurnParkWrite::reconcile(
+            session.clone(),
+            root.clone(),
+            reason,
+            self.clock.timestamp_ms(),
+            None,
             after_redrive,
-            ..crate::store::TurnParkWrite::refusal(
-                session.clone(),
-                root.clone(),
-                reason,
-                self.clock.timestamp_ms(),
-            )
-        };
+        );
         match record_root_park(store, &write).await {
             Ok(park) if park.resume_intent.is_some() => Ok(EngineParkRecorded::Redriven),
+            Ok(park) if !records(&park, &write) => {
+                Ok(EngineParkRecorded::AttachedToExisting(park.park_id))
+            }
             Ok(park) => {
                 crate::operational_metrics::record_work_parked("turn", park.reason.code().as_str());
                 tracing::warn!(
