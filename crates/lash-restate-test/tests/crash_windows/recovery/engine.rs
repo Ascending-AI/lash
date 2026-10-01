@@ -100,6 +100,16 @@ async fn object<T: serde::Serialize, R: serde::de::DeserializeOwned>(
     reply.body
 }
 
+/// The dispatcher lane of the engine's build: the route its groups open on
+/// and its dispatcher runs under.
+fn dispatch_lane(engine: &Engine) -> String {
+    format!(
+        "{}_g{}",
+        live(engine).service_name("EffectGroupDispatch"),
+        engine.lash_backend().build_generation()
+    )
+}
+
 struct GroupCheckpoint {
     key: String,
     request: EffectGroupOpenRequest,
@@ -108,7 +118,15 @@ struct GroupCheckpoint {
     addresses: std::collections::BTreeMap<usize, String>,
 }
 
-async fn group_checkpoint(engine: &Engine) -> GroupCheckpoint {
+/// A Ready group of three children, none committed: its index record, its
+/// retained membership and a registered dispatch.
+async fn ready_group(
+    engine: &Engine,
+) -> (
+    String,
+    EffectGroupOpenRequest,
+    std::collections::BTreeMap<usize, String>,
+) {
     let key = run_tag("cold-group");
     let scope = lash_core::ExecutionScope::runtime_operation(&key);
     let children: Vec<_> = (0..3)
@@ -142,7 +160,7 @@ async fn group_checkpoint(engine: &Engine) -> GroupCheckpoint {
                 .map(|c| serde_json::to_string(c).unwrap())
                 .collect(),
         ),
-        dispatch_route: "EffectGroupDispatch".to_owned(),
+        dispatch_route: dispatch_lane(engine),
         content_checked: true,
     };
     let fresh: EffectGroupOpenResponse =
@@ -186,6 +204,11 @@ async fn group_checkpoint(engine: &Engine) -> GroupCheckpoint {
     )
     .await;
     assert_eq!(registered, EffectGroupRegisterDispatchResponse::Registered);
+    (key, request, addresses)
+}
+
+async fn group_checkpoint(engine: &Engine) -> GroupCheckpoint {
+    let (key, request, addresses) = ready_group(engine).await;
     let first: serde_json::Value = object(
         engine,
         "EffectGroupIndex",
@@ -248,18 +271,6 @@ async fn recover_group(engine: &Engine, checkpoint: GroupCheckpoint) {
         second_commit,
         addresses,
     } = checkpoint;
-    let reopened: EffectGroupOpenResponse =
-        object(engine, "EffectGroupIndex", &key, "open", request.clone()).await;
-    assert_eq!(reopened, EffectGroupOpenResponse::ReopenedReady);
-    let mut drifted = request.clone();
-    drifted.membership.0[0] = drifted.membership.0[0].replace("recorded-0", "unrecorded-0");
-    let refused: EffectGroupOpenResponse =
-        object(engine, "EffectGroupIndex", &key, "open", drifted).await;
-    assert_eq!(
-        refused,
-        EffectGroupOpenResponse::ContentMismatch { position: 0 },
-        "divergence is rejected before dispatch"
-    );
     let stored: EffectGroupPayloadGetResponse = object(
         engine,
         "EffectGroupPayload",
@@ -350,6 +361,22 @@ async fn recover_group(engine: &Engine, checkpoint: GroupCheckpoint) {
         json!({"type": "drained"}),
         "the lower commit's seat lifts the barrier and answers its waiter"
     );
+    // The index law seats its commits itself, so it reopens the group only
+    // once no seat is owed: a reopen re-sends every committed child whose
+    // seat is owed on the group's lane (FIG-4454), and that child's
+    // dispatcher, not this oracle, would seat it.
+    let reopened: EffectGroupOpenResponse =
+        object(engine, "EffectGroupIndex", &key, "open", request.clone()).await;
+    assert_eq!(reopened, EffectGroupOpenResponse::ReopenedReady);
+    let mut drifted = request.clone();
+    drifted.membership.0[0] = drifted.membership.0[0].replace("recorded-0", "unrecorded-0");
+    let refused: EffectGroupOpenResponse =
+        object(engine, "EffectGroupIndex", &key, "open", drifted).await;
+    assert_eq!(
+        refused,
+        EffectGroupOpenResponse::ContentMismatch { position: 0 },
+        "divergence is rejected before dispatch"
+    );
     let ranks: EffectGroupReadRankResponse = object(
         engine,
         "EffectGroupIndex",
@@ -424,7 +451,7 @@ async fn recover_group(engine: &Engine, checkpoint: GroupCheckpoint) {
     assert_eq!(late_commit["type"], "cancel_decided");
     assert!(
         engine
-            .invocations(&format!("EffectGroupDispatch/{key}/child"))
+            .invocations(&format!("{}/{key}/child", dispatch_lane(engine)))
             .await
             .is_empty(),
         "the rejected offers dispatch nothing"
@@ -640,8 +667,10 @@ async fn live_restate_stateless_service_rebuild_recovers_each_service_kind() {
     })
     .await
     .expect("attach is in flight before reconstruction");
-    // A Ready dispatcher owes no new child sends. Cut its final frame so
-    // the new instance must replay that retained guard, with no old cache.
+    // A dispatcher started for a Ready group that owes no seat sends no
+    // child. Cut its final frame so the new instance must replay that
+    // retained guard, with no old cache.
+    let (dispatched, _, _) = ready_group(&engine).await;
     let Engine::Live { restarts, .. } = &engine else {
         unreachable!()
     };
@@ -650,18 +679,18 @@ async fn live_restate_stateless_service_rebuild_recovers_each_service_kind() {
         CrashRule::new(CrashPoint::BeforeFrame {
             ty: MessageType::OutputCommand,
         })
-        .service("EffectGroupDispatch")
+        .service(dispatch_lane(&engine))
         .handler("run")
-        .key(&checkpoint.key),
+        .key(&dispatched),
     );
     let dispatch = live(&engine)
         .ingress()
         .send_workflow_json(
-            "EffectGroupDispatch",
-            &checkpoint.key,
+            &dispatch_lane(&engine),
+            &dispatched,
             "run",
             &Call::new(EffectGroupDispatchRequest {
-                group_key: checkpoint.key.clone(),
+                group_key: dispatched.clone(),
             }),
         )
         .await

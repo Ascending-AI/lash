@@ -54,6 +54,18 @@ impl Leg {
     }
 }
 
+/// A dispatcher lane a deployment on the server binds: the route an open
+/// declares. The index refuses a route that names no generation's lane.
+fn dispatch_lane(view: &RestateView) -> Result<String> {
+    let lane = format!("{}_g", view.service_name("EffectGroupDispatch"));
+    block_on(view.deployments())?
+        .into_iter()
+        .flat_map(|deployment| deployment.services)
+        .filter(|service| service.starts_with(&lane))
+        .max()
+        .context("no deployment binds a dispatcher lane")
+}
+
 /// The body of an `open` that creates a fresh one-child effect group: the
 /// index records it as `Preparing`, and nothing is dispatched.
 pub fn open_group_body(view: &RestateView, key: &str) -> Result<serde_json::Value> {
@@ -65,7 +77,7 @@ pub fn open_group_body(view: &RestateView, key: &str) -> Result<serde_json::Valu
             opener: lash_core::AdmittedScope::turn(format!("{key}-session"), "turn"),
         },
         membership: lash_restate::EffectGroupMembership(vec!["{}".to_owned()]),
-        dispatch_route: view.service_name("EffectGroupDispatch"),
+        dispatch_route: dispatch_lane(view)?,
         content_checked: false,
     };
     serde_json::to_value(&request).context("encode an open request")

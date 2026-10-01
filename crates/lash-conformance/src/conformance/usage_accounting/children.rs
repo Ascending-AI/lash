@@ -132,6 +132,15 @@ async fn incorporate(world: &World, scoped: &crate::ScopedEffectController<'_>) 
             tokio_util::sync::CancellationToken::new(),
         ),
     );
+    // The opener's handler may suspend at the open's first await, and its
+    // registration ends with it. Pin its context for the group's children
+    // first, as the session's own tool-group opener does.
+    let group_key = "usage-three-children";
+    child_host.pin_open_tool_group(
+        group_key,
+        &crate::EffectOpener::for_scope(&world.admitted()).expect("opener"),
+        0..3,
+    );
     let env = dispatch
         .execution_env_spec
         .stable_ref()
@@ -162,7 +171,6 @@ async fn incorporate(world: &World, scoped: &crate::ScopedEffectController<'_>) 
         .turn_control_binding(scoped)
         .await
         .expect("record cancellation binding");
-    let group_key = "usage-three-children";
     let definition = probe_definition();
     let children: Vec<_> = (0..3)
         .map(|index| {
