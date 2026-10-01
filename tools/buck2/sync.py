@@ -156,6 +156,7 @@ def is_content_input(relative: str) -> bool:
             "tools/buck2/reindeer.toml",
             "tools/buck2/source-ownership.json",
             "tools/buck2/sync.py",
+            "tools/buck2/target-kind-sizes.json",
             "tools/buck2/test-run-sizes.json",
         }
         or relative.startswith("tools/buck2/fixups/")

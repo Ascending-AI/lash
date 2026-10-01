@@ -1171,6 +1171,7 @@ load("//tools/buck2:facade_completeness.bzl", "facade_completeness_test")
 
 facade_completeness_test(
     name = "facade_completeness",
+    exec_properties = {"cpu_count": "1", "memory_kb": "2621440"},
     facade = ":lash",
     libraries = [
         "//crates/lash-core-effect:lash-core-effect",

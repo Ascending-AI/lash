@@ -431,6 +431,11 @@ contention_floor = { cpu_count = 4, packages = ["lash-perf", "lash-sim"] }
 # inherits its base label's pin, as it does a measured row.
 [test_runs.pinned]
 "//crates/lash-typescript:test_batch" = { cpu_count = 4, memory_kb = 1048576 }
+# The facade check runs rustdoc over the facade and its closure in one test
+# action. At the 1.5 GiB default it held 1.91 GiB of anonymous memory and
+# peaked at 2.06 GiB of the dense workers' 2.08 GiB slot share in all 38 runs
+# recorded on 2026-10-01; 1.91 GiB x 1.25, in 256 MiB steps, is 2.5 GiB.
+"//crates/lash:facade_completeness" = { cpu_count = 1, memory_kb = 2621440 }
 # --- Service jobs --------------------------------------------------------------
 
 # The service jobs build these packages' test labels from the shared cache and

@@ -135,10 +135,14 @@ class TableTest(unittest.TestCase):
         self.assertEqual(entry["memory_kb"], 3932160)
 
     def test_a_run_inside_its_request_needs_no_more_than_that_request(self) -> None:
-        # 3.9 GiB under a 4 GiB request: the request was enough, so the row
+        # 3.5 GiB under a 4 GiB request: the request was enough, so the row
         # does not climb a quarter at every refresh.
-        lines = [record(cores=2.0, peak_bytes=int(3.9 * GIB))] * 20
+        lines = [record(cores=2.0, peak_bytes=int(3.5 * GIB))] * 20
         self.assertEqual(table(lines)["lash-internal-core/lash_core"]["memory_kb"], 4194304)
+        # 3.9 GiB is within a tenth of the request: the runs that needed a
+        # little more were killed and left no sample, so the margin applies.
+        lines = [record(cores=2.0, peak_bytes=int(3.9 * GIB))] * 20
+        self.assertEqual(table(lines)["lash-internal-core/lash_core"]["memory_kb"], 5242880)
 
     def test_compile_memory_never_goes_below_the_largest_peak(self) -> None:
         lines = [record(cores=2.0, peak_bytes=GIB, requested_kb=1048576)] * 199
@@ -330,9 +334,12 @@ class TestRunTableTest(unittest.TestCase):
         # 7.45 GiB x 1.25 = 9.31 GiB, rounded up to 9.5 GiB.
         entry = run_table([run_record(peak_bytes=7_999_586_304)] * 3)
         self.assertEqual(entry["//crates/lash-core:runtime_turns__test"]["memory_kb"], 9961472)
-        # Inside its own request the run needs no more than that request.
-        entry = run_table([run_record(peak_bytes=7_999_586_304, requested_kb=8388608)] * 3)
+        # Well inside its own request the run needs no more than that request.
+        entry = run_table([run_record(peak_bytes=7 * GIB, requested_kb=8388608)] * 3)
         self.assertEqual(entry["//crates/lash-core:runtime_turns__test"]["memory_kb"], 8388608)
+        # Within a tenth of it, the request is not proven and the margin applies.
+        entry = run_table([run_record(peak_bytes=7_999_586_304, requested_kb=8388608)] * 3)
+        self.assertEqual(entry["//crates/lash-core:runtime_turns__test"]["memory_kb"], 9961472)
 
     def test_one_run_at_the_cgroup_limit_does_not_price_the_label(self) -> None:
         # Page cache fills whatever limit the box gives; the p99 is the need.

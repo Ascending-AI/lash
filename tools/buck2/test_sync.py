@@ -172,14 +172,45 @@ def check_sizing() -> None:
     compile_requests = bzl_value(text, "COMPILE_REQUESTS")
     test_requests = bzl_value(text, "TEST_RUN_REQUESTS")
     batches = bzl_value(text, "BATCH_BUDGETS")
+    test_compile_requests = bzl_value(text, "TEST_COMPILE_REQUESTS")
     measured_compile = load_json("action-sizes.json")
+    measured_kinds = load_json("target-kind-sizes.json")
     measured_tests = load_json("test-run-sizes.json")
-    for key, measured in measured_compile.items():
-        assert key in compile_requests
-        assert {
-            "cpu_count": compile_requests[key]["cpu_count"],
-            "memory_kb": compile_requests[key]["memory_kb"],
-        } == {"cpu_count": measured["cpu_count"], "memory_kb": measured["memory_kb"]}
+
+    def request(row):
+        return {"cpu_count": row["cpu_count"], "memory_kb": row["memory_kb"]}
+
+    # A library and its unit-test binary each resolve their own kind's row,
+    # else the crate's, else the default; a test binary is listed only where
+    # its request differs from its library's.
+    sys.path.insert(0, str(HERE))
+    import action_categories_from_events as joined
+    import action_sizes_from_log as sizes
+
+    assert set(measured_kinds) <= joined.shared_identities(load_json("target-inventory.json"))
+    assert set(compile_requests) == set(measured_compile) | set(measured_kinds)
+    assert set(test_compile_requests) <= set(compile_requests)
+    default = {"cpu_count": sizes.DEFAULT_CPU_COUNT, "memory_kb": sizes.DEFAULT_MEMORY_KB}
+    for key, target in compile_requests.items():
+        crate = request(measured_compile[key]) if key in measured_compile else default
+        kinds = measured_kinds.get(key, {})
+        assert kinds or key not in measured_kinds, key
+        assert set(kinds) <= {"target", "test"}, key
+        test = test_compile_requests.get(key, target)
+        assert key not in test_compile_requests or test != target, key
+        assert target == (request(kinds["target"]) if "target" in kinds else crate), key
+        assert test == (request(kinds["test"]) if "test" in kinds else crate), key
+        # No recorded peak may exceed the request made for it: the action
+        # cgroup kills at the request once it is above the worker's slot
+        # share. A kind's peak is its own target's; the crate's is whichever
+        # target ran it, so the larger request has to cover it.
+        for kind, resolved in (("target", target), ("test", test)):
+            if kind in kinds:
+                assert kinds[kind]["samples"] >= sizes.MIN_SAMPLES, (key, kind)
+                assert kinds[kind]["peak_bytes"] <= resolved["memory_kb"] * 1024, (key, kind)
+        if key in measured_compile:
+            largest = max(target["memory_kb"], test["memory_kb"])
+            assert measured_compile[key]["peak_bytes"] <= largest * 1024, key
     for label, measured in measured_tests.items():
         assert label in test_requests or label in batches
         actual = test_requests.get(label, batches.get(label))
@@ -191,7 +222,8 @@ def check_sizing() -> None:
     budgets = [tuple(budget) for budget in bzl_value(text, "POOL_BUDGETS")]
     assert len(budgets) == len(set(budgets))
     requested = {
-        (value["cpu_count"], value["memory_kb"]) for value in compile_requests.values()
+        (value["cpu_count"], value["memory_kb"])
+        for value in list(compile_requests.values()) + list(test_compile_requests.values())
     } | {(1, 1572864), (2, 3145728)}
     assert requested <= set(budgets), f"unregistered pool budgets: {sorted(requested - set(budgets))}"
     # A target that names no budget takes the first platform: it must stay the
@@ -201,15 +233,13 @@ def check_sizing() -> None:
         encoding="utf-8"
     )
 
-    # No recorded peak may exceed the request made for it: the action cgroup
-    # kills at the request once it is above the worker's slot share.
-    for key, measured in measured_compile.items():
-        assert measured["peak_bytes"] <= compile_requests[key]["memory_kb"] * 1024, key
     # A test's largest peak can be page cache filled to the box's limit, so
-    # its row is held to the p99 peak the sizing rule prices.
+    # its row is held to the p99 peak the sizing rule prices -- with headroom:
+    # the cgroup kills at the request, so a p99 within a tenth of it means the
+    # runs that needed a little more died and left no sample.
     for label, measured in measured_tests.items():
         actual = test_requests.get(label, batches.get(label))
-        assert measured["p99_peak_bytes"] <= actual["memory_kb"] * 1024, label
+        assert measured["p99_peak_bytes"] < sizes.HEADROOM * actual["memory_kb"] * 1024, label
 
     for path in sorted(ROOT.rglob("BUCK")):
         if ".buck2" in path.parts or "vendor" in path.parts:
@@ -248,6 +278,25 @@ def check_action_categories() -> None:
             declared.setdefault(category, path)
     unsized = {category: str(path) for category, path in declared.items() if category not in sized}
     assert not unsized, f"action categories without a deliberate size: {unsized}"
+
+    # What the pool recorded. A category the workers ran is sized here, and an
+    # action no row sizes -- a helper, a build script, a third-party compile --
+    # never held more than the smallest request its category can run under.
+    smallest = {
+        "compile": model.DEFAULT_MEMORY_KB,
+        "default": model.DEFAULT_MEMORY_KB,
+        "probe": model.DEFAULT_MEMORY_KB,
+        "unsized": model.UNSIZED_ACTION_BUDGET[1],
+    }
+    for category, measured in load_json("category-sizes.json").items():
+        assert category in sized, f"recorded action category without a deliberate size: {category}"
+        assert sorted(measured) == [
+            "p99_peak_bytes",
+            "peak_bytes",
+            "samples",
+            "unsized_peak_bytes",
+        ], category
+        assert measured["unsized_peak_bytes"] <= smallest[sized[category]] * 1024, category
 
     # A rule of ours that runs an action names its request to the supervisor
     # and its platform to the scheduler; nothing falls through to the first
@@ -447,6 +496,16 @@ def check_measurement_filter() -> None:
     measured = module.collect(lines, known)
     assert list(measured) == ["lash-internal-store-sql/lash_store_sql"]
     assert len(measured["lash-internal-store-sql/lash_store_sql"].records) == 1
+
+
+def check_target_kind_rule() -> None:
+    """The event join, the per-kind rows and the row-in-force rule hold."""
+    result = subprocess.run(
+        [sys.executable, str(HERE / "tests/test_action_kinds.py")],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def check_native_inputs() -> None:
@@ -1421,6 +1480,7 @@ def main() -> int:
         check_repo_rooted_source_remap,
         check_failure_filter_runs_in_daemon,
         check_measurement_filter,
+        check_target_kind_rule,
         check_native_inputs,
         check_dependency_and_profile_projection,
         check_sync_receipt,

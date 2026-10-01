@@ -254,7 +254,9 @@ scripts/hermetic-build.sh --local build //crates/lash-core:lash-core
 
 Platforms preserve `cpu_count`, `memory_kb`, `cpu_arch`, `OSFamily` and
 `kiln_executor_runtime`. Compile requests derive from
-`tools/buck2/action-sizes.json`; test runs use the separate
+`tools/buck2/action-sizes.json`, one row per crate, and
+`tools/buck2/target-kind-sizes.json`, which sizes a library apart from the
+unit-test binary built from the same crate; test runs use the separate
 `tools/buck2/test-run-sizes.json`. Generated `exec_sizes.bzl` resolves measured rows,
 inherited feature rows, policy floors and pinned exceptions. Inherited compiles
 request 1 CPU and 1.5 GiB. Unmeasured tests retain their existing policy requests,
@@ -269,10 +271,23 @@ capacity and an undersized one is a throttled or killed action. The rule, in
   worker runs a one-CPU request under its slot share (1.67 cores at the least),
   not under a one-core quota. Above that, and for every test run, the request
   is `ceil(p95 - 0.2)`, capped at 8: there the cgroup's `cpu.max` is the request.
-- Memory is the p99 peak x 1.25, rounded up to 256 MiB. A run that stayed
-  inside the request it ran under needs no more than that request. A compile
-  row never drops below its largest recorded peak or the 1.5 GiB default; a
-  test row never drops below 1 GiB.
+- Memory is the p99 peak x 1.25, rounded up to 256 MiB, where a run's peak is
+  the larger of its cgroup peak and its sampled anonymous peak. A run that
+  stayed inside the request it ran under needs no more than that request. A
+  compile row never drops below its largest recorded peak or the 1.5 GiB
+  default; a test row never drops below 1 GiB.
+- Buck2 resolves one execution platform per target, so a request covers every
+  category the target runs: a library's metadata, rlib, Clippy and Rustdoc
+  actions share one, as do a test binary's check, Clippy and link. The split
+  that is possible is between targets. A library and its unit-test binary
+  share a crate name and so a crate row, but the test binary's link peaks
+  several times higher than anything the library runs; where Buck2's event
+  logs told the two apart at least 20 times, each has its own row in
+  `target-kind-sizes.json`, and a kind without one keeps the crate row.
+- A request is a platform property and so part of the action key. A refresh
+  keeps the row in force unless the request moves by a whole CPU or at least
+  512 MiB, or a recorded peak exceeds it: a smaller correction is not worth
+  re-executing the row's targets on a cold cache.
 - Each remote action category takes its request from the target that runs it;
   `ACTION_CATEGORY_SIZES` in `tools/buck2/generate_model.py` names the source
   for every category. A target that names no budget resolves to the first
@@ -283,19 +298,26 @@ Refresh the sizes from the workers' usage logs
 command, then commit the three files it rewrites:
 
 ```sh
-python3 tools/buck2/action_sizes_from_log.py --refresh --since <unix seconds> usage-*.log
+python3 tools/buck2/action_sizes_from_log.py --refresh --since <unix seconds> \
+  --events <checkout>/buck-out/kiln/log/*_events.pb.zst -- usage-*.log
 python3 tools/buck2/action_sizes_from_log.py --report --since <unix seconds> usage-*.log
 ```
 
-`--refresh` rewrites `action-sizes.json` and `test-run-sizes.json` and runs
-`sync.py`, which regenerates `exec_sizes.bzl`, including the execution
-platforms. `--report` prints reserved against used CPU and memory per action
-category. The usage log cannot tell a target's metadata, Clippy, codegen and
-link actions apart; `tools/buck2/action_categories_from_events.py` joins it
-with `buck2 log show` output to measure each. A changed request changes the
-action key, so the first build after a refresh recompiles the resized crates. The graph contracts fail when a
-category has no entry, when a compile row is below its recorded peak, and when
-a test row is below its p99 peak.
+`--refresh` rewrites `action-sizes.json`, `target-kind-sizes.json`,
+`category-sizes.json` and `test-run-sizes.json` and runs `sync.py`, which
+regenerates `exec_sizes.bzl`, including the execution platforms. `--report`
+prints reserved against used CPU and memory per Buck2 category. The usage log
+names an action's category and crate but not its target or what it emitted,
+so it cannot tell a library's rlib from its test binary's link; `--events`
+names the Buck2 event logs of any checkouts that built on the pool in the
+same period, and the join (`tools/buck2/action_categories_from_events.py`,
+which also prints it per category, emit and target kind) labels the records
+those builds executed. Without `--events` the target-kind rows stay as they
+are. A changed request changes the action key, so the first build after a
+refresh re-executes the resized targets. The graph contracts fail when a
+category in the rules or in `category-sizes.json` has no entry, when an action
+no row sizes peaked above its category's smallest request, when a compile row
+is below its recorded peak, and when a test row is below its p99 peak.
 
 These are scheduler reservations, not compiler-thread counts. The worker
 supervisor uses the requests to size cgroups within unchanged floors and
