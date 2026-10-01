@@ -42,7 +42,9 @@ All actions stay remote: the shared platforms are remote-only. The overlay
 replaces the prelude's remote `failure_filter` round trip with a daemon-side
 decision read from the compile's build status. A passing compile's output is a
 declared copy; a failing compile still runs the stock remote action and reports
-the same error. See [local and remote actions](../../docs/agents/hermetic-build.md#execution-and-resource-accounting).
+the same error. See [local and remote actions](../../docs/agents/hermetic-build.md#execution-and-resource-accounting),
+which also covers what `[project] ignore` does and does not do for the file
+watcher.
 
 The external test runner uses Buck2's Execute2 API. Its Python wheels and
 upstream protocol definitions are checksum-pinned and private to the checkout.

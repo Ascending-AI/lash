@@ -19,7 +19,7 @@ execution_platforms = root//tools/buck2:platforms
 [buck2]
 digest_algorithms = SHA256
 [project]
-ignore = .git, buck-out, .buck2, vendor, tools/buck2/bin
+ignore = .git, buck-out, .buck2, vendor, tools/buck2/bin, bazel-*
 
 [buck2_re_client]
 execution_concurrency_limit = 2

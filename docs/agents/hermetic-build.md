@@ -255,6 +255,14 @@ same action and diagnostics. Source trees, argument files and that copy are
 daemon-internal actions. The transitive-dependency symlink tree (`deps`) remains
 a remote action; it reruns only when a target's dependency set changes.
 
+Buck2's `notify` watcher follows directory symlinks when the daemon starts, and
+the pinned release has no setting that stops it (`buck2.file_watcher` selects
+only `notify`, `watchman` or the whole-tree `fs_hash_crawler`). `.buckconfig`
+ignores root `bazel-*` entries so listings never descend into a leftover Bazel
+link, but an ignore does not stop the watcher walking it: the driver's admission
+still removes those links and restarts the daemon, and refuses any other root
+link leading back into the project.
+
 The executable remains the official release. Pinned Starlark rule changes are
 repository build logic with explicit source/version checks and a coverage audit.
 A prelude update requires reviewing every action-registration site. This cutover
