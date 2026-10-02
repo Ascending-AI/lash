@@ -1,5 +1,5 @@
 use super::*;
-use crate::ast::{AstPath, JavaScriptUnaryOp};
+use crate::ast::{AstPath, CoercingUnaryOp};
 
 /// `process scan(tick: timer.Tick) { finish tick.fired_at }`
 fn scan_tick_process() -> Declaration {
@@ -67,13 +67,13 @@ fn assert_link_and_facet_binding(expr: Expr, expected: TypeExpr) {
 #[test]
 fn canonical_walk_aligns_javascript_and_map_bindings_with_facets() {
     for (op, expected) in [
-        (crate::JavaScriptUnaryOp::Not, TypeExpr::Bool),
-        (crate::JavaScriptUnaryOp::TypeOf, TypeExpr::Str),
-        (crate::JavaScriptUnaryOp::Plus, TypeExpr::Float),
-        (crate::JavaScriptUnaryOp::Negate, TypeExpr::Float),
+        (crate::CoercingUnaryOp::Not, TypeExpr::Bool),
+        (crate::CoercingUnaryOp::TypeOf, TypeExpr::Str),
+        (crate::CoercingUnaryOp::Plus, TypeExpr::Float),
+        (crate::CoercingUnaryOp::Negate, TypeExpr::Float),
     ] {
         assert_link_and_facet_binding(
-            Expr::JavaScriptUnary {
+            Expr::CoercingUnary {
                 op,
                 expr: Box::new(Expr::Number(1.0)),
             },
@@ -82,17 +82,17 @@ fn canonical_walk_aligns_javascript_and_map_bindings_with_facets() {
     }
 
     for op in [
-        crate::JavaScriptBinaryOp::StrictEqual,
-        crate::JavaScriptBinaryOp::StrictNotEqual,
-        crate::JavaScriptBinaryOp::LooseEqual,
-        crate::JavaScriptBinaryOp::LooseNotEqual,
-        crate::JavaScriptBinaryOp::Less,
-        crate::JavaScriptBinaryOp::LessEqual,
-        crate::JavaScriptBinaryOp::Greater,
-        crate::JavaScriptBinaryOp::GreaterEqual,
+        crate::CoercingBinaryOp::StrictEqual,
+        crate::CoercingBinaryOp::StrictNotEqual,
+        crate::CoercingBinaryOp::LooseEqual,
+        crate::CoercingBinaryOp::LooseNotEqual,
+        crate::CoercingBinaryOp::Less,
+        crate::CoercingBinaryOp::LessEqual,
+        crate::CoercingBinaryOp::Greater,
+        crate::CoercingBinaryOp::GreaterEqual,
     ] {
         assert_link_and_facet_binding(
-            Expr::JavaScriptBinary {
+            Expr::CoercingBinary {
                 left: Box::new(Expr::Number(1.0)),
                 op,
                 right: Box::new(Expr::Number(2.0)),
@@ -102,9 +102,9 @@ fn canonical_walk_aligns_javascript_and_map_bindings_with_facets() {
     }
 
     assert_link_and_facet_binding(
-        Expr::JavaScriptBinary {
+        Expr::CoercingBinary {
             left: Box::new(Expr::Number(1.0)),
-            op: crate::JavaScriptBinaryOp::Add,
+            op: crate::CoercingBinaryOp::Add,
             right: Box::new(Expr::Number(2.0)),
         },
         TypeExpr::Any,
@@ -138,7 +138,7 @@ fn canonical_walk_visits_index_and_unary_operands_for_link_and_facets() {
         ),
         (
             "value = -missing",
-            builders::unary(JavaScriptUnaryOp::Negate, builders::var("missing")),
+            builders::unary(CoercingUnaryOp::Negate, builders::var("missing")),
         ),
     ];
     for (source, operand) in witnesses {
@@ -690,7 +690,7 @@ fn try_keeps_its_compatible_any_binding_while_lowering_its_body() {
 fn finally_completion_restores_each_lexical_scope() {
     for completion in [
         Expr::Null,
-        Expr::Return(Box::new(Expr::Number(1.0))),
+        Expr::FunctionReturn(Box::new(Expr::Number(1.0))),
         Expr::Throw(Box::new(Expr::String("thrown".into()))),
         Expr::Break,
         Expr::Continue,

@@ -16,7 +16,7 @@ use crate::runtime::state::MAX_SNAPSHOT_VALUE_DEPTH;
 /// It is the durable boundary's ceiling (`MAX_SNAPSHOT_VALUE_DEPTH`), reused
 /// rather than restated: a value nested deeper than a snapshot will accept has
 /// no future anyway, and the walks that materialize a value — export at the
-/// instruction boundary, at the terminal-exit boundary, and JavaScript's
+/// instruction boundary, at the terminal-exit boundary, and ECMA-262's
 /// object-to-primitive coercion — are recursive. Bounding them at the same
 /// number turns an over-deep value into a deterministic typed refusal at the
 /// first walk that touches it, instead of a stack overflow that aborts the
@@ -290,15 +290,13 @@ impl Heap {
 fn validate_exotic_invariants(heap: &Heap, id: HeapId, object: &HeapObject) -> Result<(), String> {
     match object {
         HeapObject::RegExp(regexp) => {
-            crate::runtime::validate_typescript_regexp(&regexp.pattern, &regexp.flags).map_err(
-                |error| {
-                    format!(
-                        "RegExp object {} violates TypeScript bounds: {}",
-                        id.get(),
-                        error.diagnostic_code()
-                    )
-                },
-            )?;
+            crate::runtime::validate_regexp(&regexp.pattern, &regexp.flags).map_err(|error| {
+                format!(
+                    "RegExp object {} violates TypeScript bounds: {}",
+                    id.get(),
+                    error.diagnostic_code()
+                )
+            })?;
             let canonical = canonical_regexp_flags(&regexp.flags)
                 .map_err(|reason| format!("RegExp object {} has {reason}", id.get()))?;
             if canonical != regexp.flags {
@@ -353,7 +351,7 @@ fn validate_exotic_invariants(heap: &Heap, id: HeapId, object: &HeapObject) -> R
                 )
             {
                 return Err(format!(
-                    "AggregateError object {} errors must reference a JavaScript list",
+                    "AggregateError object {} errors must reference a ECMA-262 list",
                     id.get()
                 ));
             }

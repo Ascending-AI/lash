@@ -76,21 +76,20 @@ impl Compiler {
             self.compile_declared_call(name, args, path);
             return;
         }
-        if let ("__typescript_call_dynamic", [function, arguments]) = (name, args) {
+        if let ("__lashlang_call_dynamic", [function, arguments]) = (name, args) {
             self.compile_expr(function, &path.child(0));
             self.compile_expr(arguments, &path.child(1));
             self.code.push(Instruction::CallDynamic);
             return;
         }
-        if let ("__typescript_call_method_dynamic", [receiver, function, arguments]) = (name, args)
-        {
+        if let ("__lashlang_call_method_dynamic", [receiver, function, arguments]) = (name, args) {
             self.compile_expr(receiver, &path.child(0));
             self.compile_expr(function, &path.child(1));
             self.compile_expr(arguments, &path.child(2));
             self.code.push(Instruction::CallMethodDynamic);
             return;
         }
-        if let ("__typescript_pending_tool", [call @ Expr::ReceiverCall { .. }]) = (name, args) {
+        if let ("__lashlang_pending_tool", [call @ Expr::ReceiverCall { .. }]) = (name, args) {
             self.compile_awaitable_effect_expr(call, None, &path.child(0));
             let instruction = self.code.last_mut().expect("tool call instruction");
             let Instruction::ResourceCall { operation, argc } = *instruction else {
@@ -100,33 +99,33 @@ impl Compiler {
             self.mark_instruction_source_span(self.code.len() - 1, path);
             return;
         }
-        if let ("__typescript_pending_timer", [duration]) = (name, args) {
+        if let ("__lashlang_pending_timer", [duration]) = (name, args) {
             self.compile_expr(duration, &path.child(0));
             let instruction = self.code.len();
             self.code.push(Instruction::PendingTimer);
             self.mark_instruction_source_span(instruction, path);
             return;
         }
-        if let ("__typescript_await_array", [items, Expr::String(mode)]) = (name, args)
-            && let Some(consumer) = AggregateConsumer::from_typescript_method(mode)
+        if let ("__lashlang_await_array", [items, Expr::String(mode)]) = (name, args)
+            && let Some(consumer) = AggregateConsumer::from_aggregate_method(mode)
         {
             self.compile_expr(items, &path.child(0));
             self.code.push(Instruction::AwaitArray { consumer });
             return;
         }
-        if let ("__typescript_await_pending", [value]) = (name, args) {
+        if let ("__lashlang_await_pending", [value]) = (name, args) {
             self.compile_expr(value, &path.child(0));
             self.code.push(Instruction::AwaitPending);
             return;
         }
-        if let ("__typescript_async_map", [items, function]) = (name, args) {
+        if let ("__lashlang_async_map", [items, function]) = (name, args) {
             self.compile_expr(items, &path.child(0));
             self.compile_expr(function, &path.child(1));
             self.code.push(Instruction::AsyncMap);
             return;
         }
         if let (
-            "__typescript_closure",
+            "__lashlang_closure",
             [
                 Expr::Function(function),
                 Expr::Number(required_count),
@@ -146,7 +145,7 @@ impl Compiler {
         {
             self.emit_function(
                 function,
-                ClosureParameterModel::TypeScript {
+                ClosureParameterModel::Permissive {
                     required_count: *required_count as usize,
                     accepts_rest: *accepts_rest,
                 },
@@ -290,7 +289,7 @@ impl Compiler {
             Expr::Null => {
                 self.code.push(Instruction::PushNull);
             }
-            Expr::Undefined => {
+            Expr::Absent => {
                 self.code.push(Instruction::PushUndefined);
             }
             Expr::Bool(value) => {
@@ -376,7 +375,7 @@ impl Compiler {
             Expr::Function(function) => {
                 self.emit_function(
                     function,
-                    ClosureParameterModel::TypeScript {
+                    ClosureParameterModel::Permissive {
                         required_count: function.params.len(),
                         accepts_rest: false,
                     },
@@ -459,7 +458,7 @@ impl Compiler {
                 self.compile_expr(value, &path.child(0));
                 self.code.push(Instruction::Throw);
             }
-            Expr::Return(value) => {
+            Expr::FunctionReturn(value) => {
                 self.compile_expr(value, &path.child(0));
                 self.emit_return_scope_exit();
                 self.code.push(Instruction::Return);
@@ -520,31 +519,31 @@ impl Compiler {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
             }
-            Expr::JavaScriptUnary { op, expr } => {
+            Expr::CoercingUnary { op, expr } => {
                 self.compile_expr(expr, &path.child(0));
-                self.code.push(Instruction::JavaScriptUnary(*op));
+                self.code.push(Instruction::CoercingUnary(*op));
             }
-            Expr::JavaScriptBinary { left, op, right } => {
+            Expr::CoercingBinary { left, op, right } => {
                 self.compile_expr(left, &path.child(0));
                 self.compile_expr(right, &path.child(1));
-                self.code.push(Instruction::JavaScriptBinary(*op));
+                self.code.push(Instruction::CoercingBinary(*op));
             }
-            Expr::JavaScriptLogical { left, op, right } => {
+            Expr::OperandLogical { left, op, right } => {
                 self.compile_expr(left, &path.child(0));
                 self.code.push(Instruction::Duplicate);
                 match op {
-                    JavaScriptLogicalOp::And | JavaScriptLogicalOp::Or => {
+                    OperandLogicalOp::And | OperandLogicalOp::Or => {
                         self.code.push(Instruction::ToBool);
                     }
-                    JavaScriptLogicalOp::NullishCoalesce => {
+                    OperandLogicalOp::NullishCoalesce => {
                         self.code.push(Instruction::IsNullish);
                     }
                 }
                 let jump = match op {
-                    JavaScriptLogicalOp::And | JavaScriptLogicalOp::NullishCoalesce => {
+                    OperandLogicalOp::And | OperandLogicalOp::NullishCoalesce => {
                         self.emit_jump_if_false()
                     }
-                    JavaScriptLogicalOp::Or => self.emit_jump_if_true(),
+                    OperandLogicalOp::Or => self.emit_jump_if_true(),
                 };
                 self.code.push(Instruction::Pop);
                 self.compile_expr(right, &path.child(1));

@@ -34,28 +34,24 @@ pub(super) fn intrinsic_for_builtin(name: &str, argc: usize) -> Option<Intrinsic
         "ends_with" => IntrinsicOp::EndsWith,
         "split" => IntrinsicOp::Split,
         "join" => IntrinsicOp::Join,
-        "__typescript_split" => IntrinsicOp::JavaScriptSplit,
-        "__typescript_join" => IntrinsicOp::JavaScriptJoin,
-        "__typescript_stdlib" => IntrinsicOp::JavaScriptStdlib(argc),
-        "__typescript_heap_new" => IntrinsicOp::JavaScriptHeapNew(argc),
-        "__typescript_heap_instanceof" => IntrinsicOp::JavaScriptHeapInstanceOf,
-        "__typescript_heap_delete_member" => IntrinsicOp::JavaScriptHeapDeleteMember,
-        "__typescript_regexp" => IntrinsicOp::JavaScriptRegExp(argc),
-        "__typescript_global_delete" => IntrinsicOp::JavaScriptGlobalDelete,
-        "__typescript_global_get" => IntrinsicOp::JavaScriptGlobalGet,
-        "__typescript_global_has" => IntrinsicOp::JavaScriptGlobalHas,
-        "__typescript_global_set" => IntrinsicOp::JavaScriptGlobalSet,
-        "__typescript_cell_new" => IntrinsicOp::BindingCellNew,
-        "__typescript_cell_get" => IntrinsicOp::BindingCellGet,
-        "__typescript_cell_set" => IntrinsicOp::BindingCellSet,
-        "__typescript_encode_uri_component" => {
-            IntrinsicOp::JavaScriptUriCodec(JavaScriptUriCodec::EncodeComponent)
-        }
-        "__typescript_decode_uri_component" => {
-            IntrinsicOp::JavaScriptUriCodec(JavaScriptUriCodec::DecodeComponent)
-        }
-        "__typescript_encode_uri" => IntrinsicOp::JavaScriptUriCodec(JavaScriptUriCodec::EncodeUri),
-        "__typescript_decode_uri" => IntrinsicOp::JavaScriptUriCodec(JavaScriptUriCodec::DecodeUri),
+        "__lashlang_split" => IntrinsicOp::TextSplit,
+        "__lashlang_join" => IntrinsicOp::TextJoin,
+        "__lashlang_stdlib" => IntrinsicOp::IntrinsicDispatch(argc),
+        "__lashlang_heap_new" => IntrinsicOp::HeapConstruct(argc),
+        "__lashlang_heap_instanceof" => IntrinsicOp::HeapInstanceOf,
+        "__lashlang_heap_delete_member" => IntrinsicOp::HeapDeleteMember,
+        "__lashlang_regexp" => IntrinsicOp::RegExpIntrinsic(argc),
+        "__lashlang_global_delete" => IntrinsicOp::GlobalDelete,
+        "__lashlang_global_get" => IntrinsicOp::GlobalGet,
+        "__lashlang_global_has" => IntrinsicOp::GlobalHas,
+        "__lashlang_global_set" => IntrinsicOp::GlobalSet,
+        "__lashlang_cell_new" => IntrinsicOp::BindingCellNew,
+        "__lashlang_cell_get" => IntrinsicOp::BindingCellGet,
+        "__lashlang_cell_set" => IntrinsicOp::BindingCellSet,
+        "__lashlang_encode_uri_component" => IntrinsicOp::UriCodec(UriCodec::EncodeComponent),
+        "__lashlang_decode_uri_component" => IntrinsicOp::UriCodec(UriCodec::DecodeComponent),
+        "__lashlang_encode_uri" => IntrinsicOp::UriCodec(UriCodec::EncodeUri),
+        "__lashlang_decode_uri" => IntrinsicOp::UriCodec(UriCodec::DecodeUri),
         "trim" => IntrinsicOp::Trim,
         "slice" => IntrinsicOp::Slice,
         "to_string" => IntrinsicOp::ToString,
@@ -144,7 +140,7 @@ pub(crate) fn label_attaches_to_concrete_node(expr: &Expr) -> bool {
         Expr::ProcessLiteral(_) => false,
         Expr::Block(_)
         | Expr::Null
-        | Expr::Undefined
+        | Expr::Absent
         | Expr::Bool(_)
         | Expr::Number(_)
         | Expr::String(_)
@@ -166,12 +162,12 @@ pub(crate) fn label_attaches_to_concrete_node(expr: &Expr) -> bool {
         | Expr::Map { .. }
         | Expr::Try(_)
         | Expr::Throw(_)
-        | Expr::Return(_)
+        | Expr::FunctionReturn(_)
         | Expr::Field { .. }
         | Expr::Index { .. }
-        | Expr::JavaScriptUnary { .. }
-        | Expr::JavaScriptBinary { .. }
-        | Expr::JavaScriptLogical { .. } => false,
+        | Expr::CoercingUnary { .. }
+        | Expr::CoercingBinary { .. }
+        | Expr::OperandLogical { .. } => false,
     }
 }
 
@@ -192,7 +188,7 @@ pub fn is_pure_expr(expr: &Expr) -> bool {
     match expr {
         Expr::LabelAnnotated { expr, .. } | Expr::Role { expr, .. } => is_pure_expr(expr),
         Expr::Null
-        | Expr::Undefined
+        | Expr::Absent
         | Expr::Bool(_)
         | Expr::Number(_)
         | Expr::String(_)
@@ -218,17 +214,18 @@ pub fn is_pure_expr(expr: &Expr) -> bool {
         | Expr::Map { .. }
         | Expr::Try(_)
         | Expr::Throw(_)
-        | Expr::Return(_) => false,
+        | Expr::FunctionReturn(_) => false,
         Expr::Field { target, .. } => is_pure_expr(target),
         Expr::Index { target, index } => is_pure_expr(target) && is_pure_expr(index),
-        Expr::JavaScriptUnary { expr, .. } => is_pure_expr(expr),
+        Expr::CoercingUnary { expr, .. } => is_pure_expr(expr),
         Expr::If {
             condition,
             then_block,
             else_block,
         } => is_pure_expr(condition) && is_pure_expr(then_block) && is_pure_expr(else_block),
-        Expr::JavaScriptBinary { left, right, .. }
-        | Expr::JavaScriptLogical { left, right, .. } => is_pure_expr(left) && is_pure_expr(right),
+        Expr::CoercingBinary { left, right, .. } | Expr::OperandLogical { left, right, .. } => {
+            is_pure_expr(left) && is_pure_expr(right)
+        }
         Expr::Block(_)
         | Expr::Assign { .. }
         | Expr::For { .. }

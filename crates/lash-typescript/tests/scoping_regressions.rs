@@ -258,12 +258,12 @@ fn generated_binding_namespace_is_reserved() {
     // lowerer's own namespace and silently take a block-local value, including
     // over a durable root global.
     for source in [
-        "const __typescript_0_a = 'top'; { const a = 'inner'; } finish(__typescript_0_a);",
-        "const f = () => { const __typescript_0_b = 'fn'; { const b = 'blk'; } return __typescript_0_b; }; finish(f());",
-        "function __typescript_0_f(): number { return 1; } finish(__typescript_0_f());",
-        "const g = (__typescript_0_p: number): number => __typescript_0_p; finish(g(1));",
-        "try { throw 1; } catch (__typescript_0_e) { finish(1); }",
-        "let __typescript_0_frame = 1; finish(__typescript_0_frame);",
+        "const __lashlang_0_a = 'top'; { const a = 'inner'; } finish(__lashlang_0_a);",
+        "const f = () => { const __lashlang_0_b = 'fn'; { const b = 'blk'; } return __lashlang_0_b; }; finish(f());",
+        "function __lashlang_0_f(): number { return 1; } finish(__lashlang_0_f());",
+        "const g = (__lashlang_0_p: number): number => __lashlang_0_p; finish(g(1));",
+        "try { throw 1; } catch (__lashlang_0_e) { finish(1); }",
+        "let __lashlang_0_frame = 1; finish(__lashlang_0_frame);",
     ] {
         assert_eq!(
             lash_typescript::testing::compile(source)
@@ -317,7 +317,7 @@ fn named_function_expressions_bind_their_own_name() {
     // The generated namespace is reserved on this path too.
     assert_eq!(
         lash_typescript::testing::compile(
-            "const g = function __typescript_h(): number { return 1; };"
+            "const g = function __lashlang_h(): number { return 1; };"
         )
         .expect_err("a generated-namespace expression name must reject")
         .code,
@@ -386,7 +386,7 @@ fn assert_let_handle_matches_const(terminal: &str) {
 }
 
 fn contains_runtime_await(expr: &lashlang::Expr) -> bool {
-    matches!(expr, lashlang::Expr::BuiltinCall { name, .. } if name.as_str() == "__typescript_await_pending")
+    matches!(expr, lashlang::Expr::BuiltinCall { name, .. } if name.as_str() == "__lashlang_await_pending")
         || expr.children().any(contains_runtime_await)
 }
 

@@ -385,7 +385,7 @@ fn regexp_fuel_is_deterministic_and_uncatchable() {
     assert!(matches!(
         execute(&source),
         Err(RuntimeError::RegExpBudgetExceeded { limit })
-            if limit == lashlang::TYPESCRIPT_REGEXP_EXECUTION_FUEL
+            if limit == lashlang::REGEXP_EXECUTION_FUEL
     ));
 }
 
@@ -471,8 +471,7 @@ fn a_regexp_heavy_loop_exhausts_the_instruction_budget() {
 /// two runs of the same program spend the same budget on every replay.
 #[test]
 fn the_regexp_charge_is_the_documented_ratio() {
-    let per_call = lashlang::TYPESCRIPT_REGEXP_EXECUTION_FUEL
-        / lashlang::TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION;
+    let per_call = lashlang::REGEXP_EXECUTION_FUEL / lashlang::REGEXP_FUEL_PER_INSTRUCTION;
     let source = "finish(/ab+c/.test('xxabbbc'));";
     // One call costs its charge plus the handful of instructions the cell's own
     // opcodes cost, and cannot cost less than the charge.

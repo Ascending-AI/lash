@@ -163,7 +163,7 @@ impl MiniLowerer {
             } => self.attribute(object, field, |base| {
                 b::binary(
                     b::field(b::var(base), field),
-                    lashlang::JavaScriptBinaryOp::Add,
+                    lashlang::CoercingBinaryOp::Add,
                     value,
                 )
             }),
@@ -242,16 +242,12 @@ fn worker_body() -> Vec<Mini> {
             body: vec![
                 Mini::Let(
                     "next",
-                    b::binary(
-                        b::var("step"),
-                        lashlang::JavaScriptBinaryOp::Add,
-                        b::num(1.0),
-                    ),
+                    b::binary(b::var("step"), lashlang::CoercingBinaryOp::Add, b::num(1.0)),
                 ),
                 Mini::When {
                     condition: b::binary(
                         b::var("next"),
-                        lashlang::JavaScriptBinaryOp::Greater,
+                        lashlang::CoercingBinaryOp::Greater,
                         b::num(2.0),
                     ),
                     then: vec![Mini::SetAttr {
@@ -274,7 +270,7 @@ fn worker_body() -> Vec<Mini> {
             param: "item",
             result: b::binary(
                 b::var("item"),
-                lashlang::JavaScriptBinaryOp::Multiply,
+                lashlang::CoercingBinaryOp::Multiply,
                 b::num(2.0),
             ),
         },
@@ -298,7 +294,7 @@ fn mini_program() -> lashlang::Program {
                 Mini::When {
                     condition: b::binary(
                         b::var("item"),
-                        lashlang::JavaScriptBinaryOp::Greater,
+                        lashlang::CoercingBinaryOp::Greater,
                         b::num(1.0),
                     ),
                     then: vec![Mini::SetAttr {

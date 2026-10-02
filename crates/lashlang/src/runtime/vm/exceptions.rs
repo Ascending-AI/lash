@@ -428,7 +428,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             .execution_host_error()
             .filter(|error| error.tool_failure_code().is_some())
             .map_or_else(|| error.to_string(), |error| error.message().to_string());
-        // A catch clause holds an idiomatic JavaScript error: `instanceof
+        // A catch clause holds an idiomatic ECMA-262 error: `instanceof
         // Error`, an informative `String(error)`, and a `message` a model can
         // read. That is an Error object of the guest's own value model, not a
         // record shaped like one, so the typed payload rides on `cause` — the

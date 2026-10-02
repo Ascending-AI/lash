@@ -556,17 +556,17 @@ async fn effect_failure_catch_retry_is_a_new_occurrence() {
             expr: Box::new(Expr::Null),
         },
         Expr::While {
-            condition: Box::new(Expr::JavaScriptBinary {
+            condition: Box::new(Expr::CoercingBinary {
                 left: Box::new(Expr::Variable("attempt".into())),
-                op: crate::JavaScriptBinaryOp::Less,
+                op: crate::CoercingBinaryOp::Less,
                 right: Box::new(Expr::Number(2.0)),
             }),
             body: Box::new(Expr::Block(vec![
                 Expr::Assign {
                     target: crate::AssignTarget::variable("attempt".into()),
-                    expr: Box::new(Expr::JavaScriptBinary {
+                    expr: Box::new(Expr::CoercingBinary {
                         left: Box::new(Expr::Variable("attempt".into())),
-                        op: crate::JavaScriptBinaryOp::Add,
+                        op: crate::CoercingBinaryOp::Add,
                         right: Box::new(Expr::Number(1.0)),
                     }),
                 },

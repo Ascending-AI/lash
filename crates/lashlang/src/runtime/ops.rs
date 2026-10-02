@@ -187,18 +187,18 @@ pub(crate) fn execute_intrinsic(
                     .into(),
             ))
         }
-        IntrinsicOp::JavaScriptSplit
-        | IntrinsicOp::JavaScriptJoin
-        | IntrinsicOp::JavaScriptStdlib(_)
-        | IntrinsicOp::JavaScriptHeapNew(_)
-        | IntrinsicOp::JavaScriptHeapInstanceOf
-        | IntrinsicOp::JavaScriptHeapDeleteMember
-        | IntrinsicOp::JavaScriptRegExp(_)
-        | IntrinsicOp::JavaScriptGlobalDelete
-        | IntrinsicOp::JavaScriptGlobalGet
-        | IntrinsicOp::JavaScriptGlobalHas
-        | IntrinsicOp::JavaScriptGlobalSet
-        | IntrinsicOp::JavaScriptUriCodec(_)
+        IntrinsicOp::TextSplit
+        | IntrinsicOp::TextJoin
+        | IntrinsicOp::IntrinsicDispatch(_)
+        | IntrinsicOp::HeapConstruct(_)
+        | IntrinsicOp::HeapInstanceOf
+        | IntrinsicOp::HeapDeleteMember
+        | IntrinsicOp::RegExpIntrinsic(_)
+        | IntrinsicOp::GlobalDelete
+        | IntrinsicOp::GlobalGet
+        | IntrinsicOp::GlobalHas
+        | IntrinsicOp::GlobalSet
+        | IntrinsicOp::UriCodec(_)
         | IntrinsicOp::BindingCellNew
         | IntrinsicOp::BindingCellGet
         | IntrinsicOp::BindingCellSet => Err(RuntimeError::ContextDependentIntrinsicMisdispatch {

@@ -90,14 +90,13 @@ pub(crate) use vm::SlotState;
 pub(crate) use vm::VmParkableRun;
 #[allow(unused_imports)]
 pub use vm::{
-    ContinuationError, PendingOperation, PendingOperationMap, TYPESCRIPT_REGEXP_EXECUTION_FUEL,
-    TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION, TYPESCRIPT_REGEXP_MAX_NESTING,
-    TYPESCRIPT_REGEXP_MAX_PATTERN_CODE_UNITS, TypeScriptRegExpValidationError,
-    VM_CONTINUATION_FORMAT_VERSION, Vm, VmContinuation, VmFinallyCompletionContinuation,
-    VmFinallyContinuation, VmHandlerContinuation, VmHeapContinuation, VmIteratorContinuation,
-    VmIteratorCursor, VmLoopPhase, VmPendingErrorOriginContinuation, VmProfileContinuation,
-    VmResumePoint, VmRunOutcome, VmSuspendedOperation, validate_typescript_regexp,
-    validate_typescript_regexp_shape,
+    ContinuationError, PendingOperation, PendingOperationMap, REGEXP_EXECUTION_FUEL,
+    REGEXP_FUEL_PER_INSTRUCTION, REGEXP_MAX_NESTING, REGEXP_MAX_PATTERN_CODE_UNITS,
+    RegExpValidationError, VM_CONTINUATION_FORMAT_VERSION, Vm, VmContinuation,
+    VmFinallyCompletionContinuation, VmFinallyContinuation, VmHandlerContinuation,
+    VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmLoopPhase,
+    VmPendingErrorOriginContinuation, VmProfileContinuation, VmResumePoint, VmRunOutcome,
+    VmSuspendedOperation, validate_regexp, validate_regexp_shape,
 };
 // Re-exports of helpers that live in the focused submodules but need to be
 // reachable via `use super::*` from sibling submodules + via `super::name`
@@ -191,7 +190,7 @@ pub(crate) const COOPERATIVE_YIELD_INSTRUCTION_BUDGET: usize = 1024;
 ///     items(path = "crates/lashlang/src/runtime/vm/control.rs", charge_intrinsic_work),
 ///     items(
 ///         path = "crates/lashlang/src/runtime/vm/javascript_regexp.rs",
-///         TYPESCRIPT_REGEXP_EXECUTION_FUEL, TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION,
+///         REGEXP_EXECUTION_FUEL, REGEXP_FUEL_PER_INSTRUCTION,
 ///         grant_regexp_fuel,
 ///     ),
 ///     file(path = "crates/lashlang/src/runtime/compiler/*.rs"),

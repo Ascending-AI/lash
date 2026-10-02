@@ -364,7 +364,7 @@ pub(super) fn terminal_expression(
     // Inside a process the terminal is the `return` that ends the run body;
     // `finish` is cell-only. Both render through the lens's own printer.
     if scope.in_process && matches!(terminal, WorkflowTerminalKind::Finish) {
-        return Ok(Expr::Return(Box::new(value)));
+        return Ok(Expr::FunctionReturn(Box::new(value)));
     }
     let expression = match terminal {
         WorkflowTerminalKind::Finish => Expr::Finish(Box::new(value)),

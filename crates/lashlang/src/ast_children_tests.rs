@@ -34,7 +34,7 @@ fn every_expr_variant() -> Vec<Expr> {
     };
     vec![
         Expr::Null,
-        Expr::Undefined,
+        Expr::Absent,
         Expr::Bool(true),
         Expr::Number(1.0),
         Expr::String("s".into()),
@@ -98,15 +98,15 @@ fn every_expr_variant() -> Vec<Expr> {
         Expr::ResultUnwrap(Box::new(var("unwrapped"))),
         Expr::Print(Box::new(var("printed"))),
         Expr::Fail(Box::new(var("failed"))),
-        Expr::JavaScriptUnary {
-            op: JavaScriptUnaryOp::Not,
+        Expr::CoercingUnary {
+            op: CoercingUnaryOp::Not,
             expr: Box::new(var("unary")),
         },
-        Expr::JavaScriptUnary {
-            op: JavaScriptUnaryOp::TypeOf,
+        Expr::CoercingUnary {
+            op: CoercingUnaryOp::TypeOf,
             expr: Box::new(var("js_unary")),
         },
-        Expr::Return(Box::new(var("returned"))),
+        Expr::FunctionReturn(Box::new(var("returned"))),
         Expr::Finish(Box::new(var("finished"))),
         Expr::BuiltinCall {
             name: "len".into(),
@@ -153,19 +153,19 @@ fn every_expr_variant() -> Vec<Expr> {
             target: Box::new(var("index_target")),
             index: Box::new(var("index_index")),
         },
-        Expr::JavaScriptBinary {
+        Expr::CoercingBinary {
             left: Box::new(var("bin_left")),
-            op: JavaScriptBinaryOp::Add,
+            op: CoercingBinaryOp::Add,
             right: Box::new(var("bin_right")),
         },
-        Expr::JavaScriptBinary {
+        Expr::CoercingBinary {
             left: Box::new(var("js_bin_left")),
-            op: JavaScriptBinaryOp::StrictEqual,
+            op: CoercingBinaryOp::StrictEqual,
             right: Box::new(var("js_bin_right")),
         },
-        Expr::JavaScriptLogical {
+        Expr::OperandLogical {
             left: Box::new(var("js_log_left")),
-            op: JavaScriptLogicalOp::NullishCoalesce,
+            op: OperandLogicalOp::NullishCoalesce,
             right: Box::new(var("js_log_right")),
         },
     ]

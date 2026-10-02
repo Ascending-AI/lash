@@ -952,7 +952,7 @@ fn forbidden_function_construct(expr: &Expr) -> Option<&'static str> {
         Expr::Block(_)
         | Expr::Role { .. }
         | Expr::Null
-        | Expr::Undefined
+        | Expr::Absent
         | Expr::Bool(_)
         | Expr::Number(_)
         | Expr::String(_)
@@ -977,11 +977,11 @@ fn forbidden_function_construct(expr: &Expr) -> Option<&'static str> {
         | Expr::Map { .. }
         | Expr::Try(_)
         | Expr::Throw(_)
-        | Expr::Return(_)
+        | Expr::FunctionReturn(_)
         | Expr::Field { .. }
         | Expr::Index { .. }
-        | Expr::JavaScriptUnary { .. }
-        | Expr::JavaScriptBinary { .. }
-        | Expr::JavaScriptLogical { .. } => None,
+        | Expr::CoercingUnary { .. }
+        | Expr::CoercingBinary { .. }
+        | Expr::OperandLogical { .. } => None,
     }
 }

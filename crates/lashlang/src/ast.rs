@@ -165,7 +165,7 @@ pub enum InvalidAst {
     /// to be told.
     #[error("`{keyword}` is used outside a loop")]
     LoopControlOutsideLoop { keyword: &'static str },
-    /// A JavaScript-style `return` appears outside a function body.
+    /// A function return appears outside a function body.
     #[error("`return` is used outside a function")]
     ReturnOutsideFunction,
     #[error(transparent)]
@@ -316,7 +316,9 @@ fn check_loop_control_inner(root: &Expr, in_function: bool) -> Result<(), Invali
                     keyword: "continue",
                 });
             }
-            Expr::Return(_) if !in_function => return Err(InvalidAst::ReturnOutsideFunction),
+            Expr::FunctionReturn(_) if !in_function => {
+                return Err(InvalidAst::ReturnOutsideFunction);
+            }
             Expr::For {
                 iterable,
                 bind,
@@ -506,8 +508,10 @@ pub enum Expr {
         expr: Box<Expr>,
     },
     Null,
-    /// The JavaScript `undefined` value. This node is AST-only.
-    Undefined,
+    /// Produces the absent-value sentinel, distinct from null. Source front
+    /// ends may spell this value `undefined`; it converts to NaN as a number
+    /// and to "undefined" as text, and is false by VM truthiness.
+    Absent,
     Bool(bool),
     /// A number literal. Its identity and stored form follow the one IR
     /// number rule ([`number`]): distinct `-0`, one canonical NaN, and a
@@ -644,9 +648,9 @@ pub enum Expr {
     Try(Box<TryExpr>),
     /// AST-only explicit throw. The thrown value is transferred unchanged.
     Throw(Box<Expr>),
-    /// AST-only JavaScript function return. The compiler runs every enclosing
-    /// `finally` before returning from the current function.
-    Return(Box<Expr>),
+    /// Returns the evaluated value from the current function. The compiler
+    /// runs every enclosing `finally` before returning from the function.
+    FunctionReturn(Box<Expr>),
     Field {
         target: Box<Expr>,
         field: AstString,
@@ -655,21 +659,24 @@ pub enum Expr {
         target: Box<Expr>,
         index: Box<Expr>,
     },
-    /// An ECMA-262 unary operation whose coercion differs from Lashlang.
-    JavaScriptUnary {
-        op: JavaScriptUnaryOp,
+    /// Evaluates its operand once, then applies the named coercion rule.
+    /// The rules are defined on [`CoercingUnaryOp`].
+    CoercingUnary {
+        op: CoercingUnaryOp,
         expr: Box<Expr>,
     },
-    /// An eager ECMA-262 binary operation whose coercion differs from Lashlang.
-    JavaScriptBinary {
+    /// Evaluates left, then right, then applies the named coercion rule.
+    /// The rules are defined on [`CoercingBinaryOp`].
+    CoercingBinary {
         left: Box<Expr>,
-        op: JavaScriptBinaryOp,
+        op: CoercingBinaryOp,
         right: Box<Expr>,
     },
-    /// A short-circuiting ECMA-262 logical operation that returns an operand.
-    JavaScriptLogical {
+    /// Evaluates left, then conditionally evaluates right, returning the
+    /// selected operand unchanged. See [`OperandLogicalOp`] for the condition.
+    OperandLogical {
         left: Box<Expr>,
-        op: JavaScriptLogicalOp,
+        op: OperandLogicalOp,
         right: Box<Expr>,
     },
 }
@@ -757,7 +764,7 @@ impl Expr {
         let mut buffer = SmallExprVec::new();
         match self {
             Expr::Null
-            | Expr::Undefined
+            | Expr::Absent
             | Expr::Bool(_)
             | Expr::Number(_)
             | Expr::String(_)
@@ -823,8 +830,8 @@ impl Expr {
             | Expr::ResultUnwrap(expr)
             | Expr::Print(expr)
             | Expr::Fail(expr)
-            | Expr::JavaScriptUnary { expr, .. }
-            | Expr::Return(expr) => buffer.push(expr),
+            | Expr::CoercingUnary { expr, .. }
+            | Expr::FunctionReturn(expr) => buffer.push(expr),
             Expr::Finish(expr) => buffer.push(expr),
             Expr::BuiltinCall { args, .. } | Expr::FunctionCall { args, .. } => {
                 buffer.extend(args.iter())
@@ -874,8 +881,7 @@ impl Expr {
                 buffer.push(target);
                 buffer.push(index);
             }
-            Expr::JavaScriptBinary { left, right, .. }
-            | Expr::JavaScriptLogical { left, right, .. } => {
+            Expr::CoercingBinary { left, right, .. } | Expr::OperandLogical { left, right, .. } => {
                 buffer.push(left);
                 buffer.push(right);
             }
@@ -896,7 +902,7 @@ impl Expr {
         let mut buffer = SmallExprMutVec::new();
         match self {
             Expr::Null
-            | Expr::Undefined
+            | Expr::Absent
             | Expr::Bool(_)
             | Expr::Number(_)
             | Expr::String(_)
@@ -962,8 +968,8 @@ impl Expr {
             | Expr::ResultUnwrap(expr)
             | Expr::Print(expr)
             | Expr::Fail(expr)
-            | Expr::JavaScriptUnary { expr, .. }
-            | Expr::Return(expr) => buffer.push(expr),
+            | Expr::CoercingUnary { expr, .. }
+            | Expr::FunctionReturn(expr) => buffer.push(expr),
             Expr::Finish(expr) => buffer.push(expr),
             Expr::BuiltinCall { args, .. } | Expr::FunctionCall { args, .. } => {
                 buffer.extend(args.iter_mut())
@@ -1013,8 +1019,7 @@ impl Expr {
                 buffer.push(target);
                 buffer.push(index);
             }
-            Expr::JavaScriptBinary { left, right, .. }
-            | Expr::JavaScriptLogical { left, right, .. } => {
+            Expr::CoercingBinary { left, right, .. } | Expr::OperandLogical { left, right, .. } => {
                 buffer.push(left);
                 buffer.push(right);
             }
@@ -1527,21 +1532,31 @@ impl ResourceRefExpr {
     }
 }
 
+/// Unary value operations with explicit ECMA-262 coercion rules.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub enum JavaScriptUnaryOp {
+pub enum CoercingUnaryOp {
+    /// `+x`: ECMA ToNumber, preserving NaN, infinities and signed zero.
     Plus,
+    /// `-x`: negates ECMA ToNumber, including flipping signed zero.
     Negate,
+    /// `!x`: negates VM truthiness. Null, absent, false, zero, NaN and empty
+    /// text are false; lists, records, resources, images and all heap
+    /// references are true. An inline tuple is true iff nonempty. A projected
+    /// value delegates to its host's truthiness implementation.
     Not,
+    /// Returns "undefined" for absent, "boolean", "number" or "string" for
+    /// those primitives, "function" for callable objects, and "object" for
+    /// null and every other value.
     TypeOf,
-    // `~`: ECMA-262's bitwise NOT over ToInt32 of the operand.
+    /// `~x`: complements ECMA ToInt32(ToNumber(x)), returned as a number.
     BitNot,
-    /// ECMA-262 ToString: `String(value)` and a template substitution. It
-    /// asks an object for its primitive with the string hint, `toString`
-    /// first.
+    /// ECMA ToString: asks an object for its primitive with the string hint,
+    /// trying `toString` before `valueOf`. Null and absent become "null" and
+    /// "undefined"; number text uses ECMA's decimal spelling.
     ToString,
 }
 
-impl JavaScriptUnaryOp {
+impl CoercingUnaryOp {
     /// Whether the operator reads its operand as a number (ToNumber, through
     /// ToPrimitive for an object).
     pub fn coerces_to_number(self) -> bool {
@@ -1549,37 +1564,74 @@ impl JavaScriptUnaryOp {
     }
 }
 
+/// Eager binary value operations with explicit ECMA-262 coercion rules.
+///
+/// Operand expressions evaluate left then right. Object-to-primitive hooks
+/// run left then right when the rule requires them. Numeric results are f64.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub enum JavaScriptBinaryOp {
+pub enum CoercingBinaryOp {
+    /// `+`: default ToPrimitive on both operands; concatenates ToString
+    /// results if either primitive is text, otherwise adds ToNumber results.
     Add,
+    /// `-`: subtracts the operands' ToNumber results.
     Subtract,
+    /// `*`: multiplies the operands' ToNumber results.
     Multiply,
+    /// `/`: divides the operands' ToNumber results, retaining infinities and NaN.
     Divide,
+    /// `%`: remainder of ToNumber results, with the dividend's sign.
     Remainder,
+    /// `===`: no coercion; compares primitive values or object identity.
+    /// NaN differs from itself, signed zeros compare equal, and null differs
+    /// from absent. Resources compare their reference values. Projected values
+    /// compare the values they represent; unavailable placeholders compare
+    /// equal only when their placeholder identities agree.
     StrictEqual,
+    /// `!==`: negates [`Self::StrictEqual`].
     StrictNotEqual,
+    /// `==`: ECMA abstract equality. Null and absent compare equal; booleans
+    /// become numbers, text compared to a number becomes a number, and an
+    /// object compared to a primitive uses default ToPrimitive.
     LooseEqual,
+    /// `!=`: negates [`Self::LooseEqual`].
     LooseNotEqual,
+    /// `<`: number-hint ToPrimitive, then UTF-16 code-unit order if both are text,
+    /// otherwise numeric order after ToNumber. A NaN operand yields false.
     Less,
+    /// `<=`: the inclusive order of [`Self::Less`]; NaN yields false.
     LessEqual,
+    /// `>`: the reversed order of [`Self::Less`]; NaN yields false.
     Greater,
+    /// `>=`: the inclusive reversed order of [`Self::Less`]; NaN yields false.
     GreaterEqual,
-    // `&`, `|` and `^`: ECMA-262's bitwise operators over ToInt32 of each
-    // operand.
+    /// `&`: bitwise AND of ToInt32(ToNumber) operands, returned as a number.
     BitAnd,
+    /// `|`: bitwise OR of ToInt32(ToNumber) operands, returned as a number.
     BitOr,
+    /// `^`: bitwise XOR of ToInt32(ToNumber) operands, returned as a number.
     BitXor,
-    // `<<`, `>>` and `>>>`: ECMA-262's shifts of ToInt32 (ToUint32 for
-    // `>>>`) of the left operand by ToUint32 of the right, modulo 32.
+    /// `<<`: wrapping 32-bit left shift of ToInt32(left) by ToUint32(right)
+    /// modulo 32, after ToNumber on both operands.
     ShiftLeft,
+    /// `>>`: sign-extending right shift of ToInt32(left) by ToUint32(right)
+    /// modulo 32, after ToNumber on both operands.
     ShiftRight,
+    /// `>>>`: zero-filling right shift of ToUint32(left) by ToUint32(right)
+    /// modulo 32, after ToNumber on both operands, returned as a number.
     ShiftRightUnsigned,
 }
 
+/// Short-circuiting operations that return an operand without coercing it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub enum JavaScriptLogicalOp {
+pub enum OperandLogicalOp {
+    /// `&&`: returns left when false by [`CoercingUnaryOp::Not`]'s truthiness;
+    /// otherwise evaluates and returns right.
     And,
+    /// `||`: returns left when true by [`CoercingUnaryOp::Not`]'s truthiness;
+    /// otherwise evaluates and returns right.
     Or,
+    /// `??`: returns left unless null or absent; otherwise evaluates and
+    /// returns right. False, zero, NaN and empty text retain left.
     NullishCoalesce,
 }
 

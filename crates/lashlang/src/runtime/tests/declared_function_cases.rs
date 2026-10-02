@@ -41,8 +41,8 @@ fn effects_around_a_call() -> Program {
             "twice",
             &[("n", TypeExpr::Float)],
             TypeExpr::Float,
-            Expr::JavaScriptBinary {
-                op: JavaScriptBinaryOp::Multiply,
+            Expr::CoercingBinary {
+                op: CoercingBinaryOp::Multiply,
                 left: Box::new(Expr::Variable("n".into())),
                 right: Box::new(Expr::Number(2.0)),
             },

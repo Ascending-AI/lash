@@ -640,7 +640,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                             | super::Instruction::BeginIter(_)
                     ) && matches!(
                         &self.stack[index],
-                        Value::Ref(id) if self.heap.is_javascript_vm_object(*id)?
+                        Value::Ref(id) if self.heap.is_always_truthy_object(*id)?
                             // A loop over an array reads the array itself, so
                             // it sees what its body changes (FIG-3625).
                             || matches!(instruction, super::Instruction::BeginIter(_))
@@ -1055,10 +1055,10 @@ mod tests {
     /// `while (i < n) { acc = (acc * 31 + i) & 65535; i = i + 1; }` with
     /// ECMA operators, then `finish acc`.
     fn javascript_numeric_loop(iterations: f64) -> crate::CompiledProgram {
-        use crate::ast::{Expr, JavaScriptBinaryOp as Op};
+        use crate::ast::{CoercingBinaryOp as Op, Expr};
         use crate::testing::ast_builders as b;
         fn js(left: Expr, op: Op, right: Expr) -> Expr {
-            Expr::JavaScriptBinary {
+            Expr::CoercingBinary {
                 left: Box::new(left),
                 op,
                 right: Box::new(right),

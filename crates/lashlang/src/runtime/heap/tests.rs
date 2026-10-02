@@ -319,7 +319,7 @@ fn exotic_host_boundary_errors_are_not_reported_as_function_values() {
     for value in values {
         assert!(matches!(
             heap.export_for_instruction(&value),
-            Err(RuntimeError::JavaScriptExoticAtHostBoundary { .. })
+            Err(RuntimeError::BuiltinObjectAtHostBoundary { .. })
         ));
     }
 }

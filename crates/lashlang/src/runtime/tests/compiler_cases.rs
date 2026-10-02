@@ -551,7 +551,7 @@ async fn generic_iterator_loops_cover_range_list_keys_nested_control_and_mutatio
                 builders::if_else(
                     builders::binary(
                         builders::var("i"),
-                        JavaScriptBinaryOp::StrictEqual,
+                        CoercingBinaryOp::StrictEqual,
                         builders::num(1.0),
                     ),
                     builders::block(vec![Expr::Continue]),
@@ -560,7 +560,7 @@ async fn generic_iterator_loops_cover_range_list_keys_nested_control_and_mutatio
                 builders::if_else(
                     builders::binary(
                         builders::var("i"),
-                        JavaScriptBinaryOp::StrictEqual,
+                        CoercingBinaryOp::StrictEqual,
                         builders::num(4.0),
                     ),
                     builders::block(vec![Expr::Break]),
@@ -570,7 +570,7 @@ async fn generic_iterator_loops_cover_range_list_keys_nested_control_and_mutatio
                     "total",
                     builders::binary(
                         builders::var("total"),
-                        JavaScriptBinaryOp::Add,
+                        CoercingBinaryOp::Add,
                         builders::var("i"),
                     ),
                 ),
@@ -586,10 +586,10 @@ async fn generic_iterator_loops_cover_range_list_keys_nested_control_and_mutatio
                     builders::binary(
                         builders::logical(
                             builders::index(builders::var("counts"), builders::var("item")),
-                            crate::ast::JavaScriptLogicalOp::NullishCoalesce,
+                            crate::ast::OperandLogicalOp::NullishCoalesce,
                             builders::num(0.0),
                         ),
-                        JavaScriptBinaryOp::Add,
+                        CoercingBinaryOp::Add,
                         builders::num(1.0),
                     ),
                 ),
@@ -733,7 +733,7 @@ async fn constant_propagation_does_not_cross_control_flow_boundaries() {
             "y",
             builders::binary(
                 builders::var("x"),
-                JavaScriptBinaryOp::Add,
+                CoercingBinaryOp::Add,
                 builders::num(1.0),
             ),
         ),
@@ -766,7 +766,7 @@ async fn reusable_execution_scratch_preserves_results_across_runs() {
                 "total",
                 builders::binary(
                     builders::var("total"),
-                    JavaScriptBinaryOp::Add,
+                    CoercingBinaryOp::Add,
                     builders::var("item"),
                 ),
             )]),
@@ -1159,7 +1159,7 @@ async fn field_index_unary_and_boolean_paths_are_covered() {
             "ok",
             builders::logical(
                 builders::bool_lit(false),
-                JavaScriptLogicalOp::And,
+                OperandLogicalOp::And,
                 builders::var("missing"),
             ),
         ),
@@ -1167,7 +1167,7 @@ async fn field_index_unary_and_boolean_paths_are_covered() {
             "alt",
             builders::logical(
                 builders::bool_lit(true),
-                JavaScriptLogicalOp::Or,
+                OperandLogicalOp::Or,
                 builders::var("missing"),
             ),
         ),
@@ -1175,15 +1175,9 @@ async fn field_index_unary_and_boolean_paths_are_covered() {
             builders::field(builders::field(builders::var("rec"), "nested"), "name"),
             builders::index(builders::var("xs"), builders::num(1.0)),
             builders::index(builders::string("abc"), builders::num(2.0)),
-            builders::unary(crate::ast::JavaScriptUnaryOp::Negate, builders::num(1.0)),
-            builders::unary(
-                crate::ast::JavaScriptUnaryOp::Not,
-                builders::bool_lit(false),
-            ),
-            builders::unary(
-                crate::ast::JavaScriptUnaryOp::Not,
-                builders::bool_lit(false),
-            ),
+            builders::unary(crate::ast::CoercingUnaryOp::Negate, builders::num(1.0)),
+            builders::unary(crate::ast::CoercingUnaryOp::Not, builders::bool_lit(false)),
+            builders::unary(crate::ast::CoercingUnaryOp::Not, builders::bool_lit(false)),
             builders::var("ok"),
             builders::var("alt"),
         ])),
@@ -1211,7 +1205,7 @@ async fn field_index_unary_and_boolean_paths_are_covered() {
     // `finish true and false`
     let value = exec(finish_logical(
         builders::bool_lit(true),
-        JavaScriptLogicalOp::And,
+        OperandLogicalOp::And,
         builders::bool_lit(false),
     ))
     .await
@@ -1221,7 +1215,7 @@ async fn field_index_unary_and_boolean_paths_are_covered() {
     // `finish false or true`
     let value = exec(finish_logical(
         builders::bool_lit(false),
-        JavaScriptLogicalOp::Or,
+        OperandLogicalOp::Or,
         builders::bool_lit(true),
     ))
     .await
@@ -1285,14 +1279,14 @@ async fn field_index_and_type_errors_are_covered() {
             "finish [1][-1]",
             finish_program(builders::index(
                 builders::list(vec![builders::num(1.0)]),
-                builders::unary(crate::ast::JavaScriptUnaryOp::Negate, builders::num(1.0)),
+                builders::unary(crate::ast::CoercingUnaryOp::Negate, builders::num(1.0)),
             )),
             Value::Undefined,
         ),
         (
             "finish not 1",
             finish_program(builders::unary(
-                crate::ast::JavaScriptUnaryOp::Not,
+                crate::ast::CoercingUnaryOp::Not,
                 builders::num(1.0),
             )),
             Value::Bool(false),
@@ -1300,7 +1294,7 @@ async fn field_index_and_type_errors_are_covered() {
         (
             "finish not 0",
             finish_program(builders::unary(
-                crate::ast::JavaScriptUnaryOp::Not,
+                crate::ast::CoercingUnaryOp::Not,
                 builders::num(0.0),
             )),
             Value::Bool(true),

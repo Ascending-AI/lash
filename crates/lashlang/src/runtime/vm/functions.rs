@@ -581,7 +581,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     });
                 }
             }
-            ClosureParameterModel::TypeScript {
+            ClosureParameterModel::Permissive {
                 required_count,
                 accepts_rest,
             } => {
@@ -820,7 +820,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }),
             "Boolean" => Value::Bool(match args.first() {
                 None => false,
-                Some(value) => self.is_truthy_for_dialect(value)?,
+                Some(value) => self.value_is_truthy(value)?,
             }),
             "Array" => match args {
                 [Value::Number(length)]
@@ -1050,13 +1050,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             CallbackCompletion::Discard => Ok(None),
             CallbackCompletion::Every => {
-                Ok((!self.is_truthy_for_dialect(result)?).then_some(Value::Bool(false)))
+                Ok((!self.value_is_truthy(result)?).then_some(Value::Bool(false)))
             }
             CallbackCompletion::Some => {
-                Ok((self.is_truthy_for_dialect(result)?).then_some(Value::Bool(true)))
+                Ok((self.value_is_truthy(result)?).then_some(Value::Bool(true)))
             }
             CallbackCompletion::Filter => {
-                if self.is_truthy_for_dialect(result)? {
+                if self.value_is_truthy(result)? {
                     callback.results.push(callback_call_arg(
                         &callback.calls,
                         callback.next_index,
@@ -1066,10 +1066,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 Ok(None)
             }
             CallbackCompletion::Find => Ok(self
-                .is_truthy_for_dialect(result)?
+                .value_is_truthy(result)?
                 .then(|| callback_call_arg(&callback.calls, callback.next_index, 0))),
             CallbackCompletion::FindIndex => Ok(self
-                .is_truthy_for_dialect(result)?
+                .value_is_truthy(result)?
                 .then(|| callback_call_arg(&callback.calls, callback.next_index, 1))),
             CallbackCompletion::Reduce { accumulator } => {
                 // The result is the next call's accumulator — the first

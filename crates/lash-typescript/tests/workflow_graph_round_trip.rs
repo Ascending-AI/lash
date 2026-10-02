@@ -50,28 +50,28 @@ fn sparse_array_literals_preserve_elisions() {
 fn malformed_sparse_array_helpers_are_typed_refusals() {
     use lashlang::Expr;
     let cases = [
-        (vec![Expr::Undefined], vec![Expr::Number(1.0)]),
+        (vec![Expr::Absent], vec![Expr::Number(1.0)]),
         (vec![], vec![Expr::Number(0.0)]),
         (
-            vec![Expr::Undefined; 2],
+            vec![Expr::Absent; 2],
             vec![Expr::Number(1.0), Expr::Number(0.0)],
         ),
         (
-            vec![Expr::Undefined],
+            vec![Expr::Absent],
             vec![Expr::Number(0.0), Expr::Number(0.0)],
         ),
-        (vec![Expr::Undefined], vec![Expr::Number(-1.0)]),
-        (vec![Expr::Undefined], vec![Expr::Number(-0.0)]),
-        (vec![Expr::Undefined], vec![Expr::Number(0.5)]),
-        (vec![Expr::Undefined], vec![Expr::Number(f64::NAN)]),
-        (vec![Expr::Undefined], vec![Expr::Number(f64::INFINITY)]),
-        (vec![Expr::Undefined], vec![Expr::String("0".into())]),
+        (vec![Expr::Absent], vec![Expr::Number(-1.0)]),
+        (vec![Expr::Absent], vec![Expr::Number(-0.0)]),
+        (vec![Expr::Absent], vec![Expr::Number(0.5)]),
+        (vec![Expr::Absent], vec![Expr::Number(f64::NAN)]),
+        (vec![Expr::Absent], vec![Expr::Number(f64::INFINITY)]),
+        (vec![Expr::Absent], vec![Expr::String("0".into())]),
         (vec![Expr::Number(1.0)], vec![Expr::Number(0.0)]),
-        (vec![Expr::Undefined], vec![]),
+        (vec![Expr::Absent], vec![]),
     ];
     for (values, holes) in cases {
         let helper = Expr::BuiltinCall {
-            name: "__typescript_stdlib".into(),
+            name: "__lashlang_stdlib".into(),
             args: vec![
                 Expr::String("Lash.SparseArray".into()),
                 Expr::List(values),
@@ -88,14 +88,14 @@ fn malformed_sparse_array_helpers_are_typed_refusals() {
     }
     for operands in [
         vec![],
-        vec![Expr::Undefined],
-        vec![Expr::List(vec![]), Expr::List(vec![]), Expr::Undefined],
+        vec![Expr::Absent],
+        vec![Expr::List(vec![]), Expr::List(vec![]), Expr::Absent],
     ] {
         let mut args = vec![Expr::String("Lash.SparseArray".into())];
         args.extend(operands);
         assert!(matches!(
             typescript_expression_source(&Expr::BuiltinCall {
-                name: "__typescript_stdlib".into(),
+                name: "__lashlang_stdlib".into(),
                 args,
             }),
             Err(TypeScriptSourceError::MalformedSparseArray { .. })
@@ -200,7 +200,7 @@ fn malformed_json_traversal_roles_are_refused() {
     let Expr::Role { expr, .. } = &mut expression else {
         panic!("JSON role");
     };
-    **expr = Expr::Undefined;
+    **expr = Expr::Absent;
     let mut program = parse("finish(1);").expect("program parses");
     program.main = expression.clone();
     assert!(matches!(
@@ -280,7 +280,7 @@ fn edited_json_traversals_are_refused() {
             let Expr::If { condition, .. } = prefix.last_mut().expect("dispatch") else {
                 panic!("JSON dispatch")
             };
-            let Expr::JavaScriptBinary { left, .. } = condition.as_mut() else {
+            let Expr::CoercingBinary { left, .. } = condition.as_mut() else {
                 panic!("JSON dispatch condition")
             };
             let Expr::BuiltinCall { args, .. } = left.as_mut() else {
@@ -313,7 +313,7 @@ fn edited_json_traversals_are_refused() {
                 let Expr::Function(transformer) = expr.as_mut() else {
                     panic!("transform function")
                 };
-                *transformer.body = Expr::Undefined;
+                *transformer.body = Expr::Absent;
             }
             2 => {
                 let Expr::If { condition, .. } = &mut traversal[6] else {

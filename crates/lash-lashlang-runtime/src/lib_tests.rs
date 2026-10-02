@@ -691,7 +691,7 @@ fn labeled_workflow_program() -> lashlang::Program {
         b::while_loop(
             b::binary(
                 b::var("count"),
-                lashlang::JavaScriptBinaryOp::Less,
+                lashlang::CoercingBinaryOp::Less,
                 b::num(1.0),
             ),
             b::block(vec![
@@ -700,7 +700,7 @@ fn labeled_workflow_program() -> lashlang::Program {
                     "count",
                     b::binary(
                         b::var("count"),
-                        lashlang::JavaScriptBinaryOp::Add,
+                        lashlang::CoercingBinaryOp::Add,
                         b::num(1.0),
                     ),
                 ),

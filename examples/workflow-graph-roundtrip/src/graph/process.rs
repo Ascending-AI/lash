@@ -66,9 +66,9 @@ pub(super) fn seeded_process_body(process_id: &str, params: &[ProcessParam]) -> 
             name_source: WorkflowNodeNameSource::Derived,
             kind: WorkflowNodeKind::Terminal {
                 terminal: WorkflowTerminalKind::Finish,
-                expression: lash::rlm::lang::Expr::Return(Box::new(lash::rlm::lang::Expr::Number(
-                    0.0,
-                ))),
+                expression: lash::rlm::lang::Expr::FunctionReturn(Box::new(
+                    lash::rlm::lang::Expr::Number(0.0),
+                )),
             },
             available_variables: params.iter().map(|param| param.name.to_string()).collect(),
             type_facets: None,

@@ -9,7 +9,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use crate::ast::{JavaScriptBinaryOp, JavaScriptUnaryOp};
+use crate::ast::{CoercingBinaryOp, CoercingUnaryOp};
 use crate::span::Span;
 use crate::tracking::LashlangExecutionSite;
 
@@ -153,7 +153,7 @@ impl CompiledFunction {
     pub(crate) fn expected_argument_count(&self) -> usize {
         match self.parameter_model {
             ClosureParameterModel::Exact => self.parameter_count,
-            ClosureParameterModel::TypeScript { required_count, .. } => required_count,
+            ClosureParameterModel::Permissive { required_count, .. } => required_count,
         }
     }
 }
@@ -162,12 +162,12 @@ impl CompiledFunction {
 pub(crate) enum ClosureParameterModel {
     /// Lashlang closures retain the language's declared-count-is-exact rule.
     Exact,
-    /// TypeScript closures follow ECMA call entry: absent fixed arguments are
+    /// Permissive call entry: absent fixed arguments are
     /// `undefined`, surplus arguments are ignored, and an optional final rest
     /// slot receives a fresh list. `required_count` is emitted by the lowerer
     /// for the declaration's pre-default prefix (and therefore Function.length
     /// semantics); it does not make missing arguments a call-time error.
-    TypeScript {
+    Permissive {
         required_count: usize,
         accepts_rest: bool,
     },
@@ -314,8 +314,8 @@ pub(crate) enum Instruction {
         path: usize,
     },
     ResultUnwrap,
-    JavaScriptUnary(JavaScriptUnaryOp),
-    JavaScriptBinary(JavaScriptBinaryOp),
+    CoercingUnary(CoercingUnaryOp),
+    CoercingBinary(CoercingBinaryOp),
     IsNullish,
     ToBool,
     Jump(usize),
@@ -388,10 +388,10 @@ pub(crate) enum Instruction {
     AbandonFinallyKeepValue,
     Throw,
     /// `s = s + rhs` under ECMA-262 `+` rules: the operand stack carries
-    /// `JavaScriptBinary`'s pair — the accumulator read, then the right
+    /// `CoercingBinary`'s pair — the accumulator read, then the right
     /// operand — and the instruction fuses the store, so a uniquely owned
     /// accumulator appends in place.
-    JavaScriptAddAssign(usize),
+    CoercingAddAssign(usize),
     Print,
     Finish,
     ProcessFail,
@@ -410,7 +410,7 @@ pub(crate) enum Instruction {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) enum JavaScriptUriCodec {
+pub(crate) enum UriCodec {
     EncodeComponent,
     DecodeComponent,
     EncodeUri,
@@ -430,18 +430,18 @@ pub(crate) enum IntrinsicOp {
     EndsWith,
     Split,
     Join,
-    JavaScriptSplit,
-    JavaScriptJoin,
-    JavaScriptStdlib(usize),
-    JavaScriptHeapNew(usize),
-    JavaScriptHeapInstanceOf,
-    JavaScriptHeapDeleteMember,
-    JavaScriptRegExp(usize),
-    JavaScriptGlobalDelete,
-    JavaScriptGlobalGet,
-    JavaScriptGlobalHas,
-    JavaScriptGlobalSet,
-    JavaScriptUriCodec(JavaScriptUriCodec),
+    TextSplit,
+    TextJoin,
+    IntrinsicDispatch(usize),
+    HeapConstruct(usize),
+    HeapInstanceOf,
+    HeapDeleteMember,
+    RegExpIntrinsic(usize),
+    GlobalDelete,
+    GlobalGet,
+    GlobalHas,
+    GlobalSet,
+    UriCodec(UriCodec),
     /// A fresh binding cell holding the value on top of the stack (FIG-3707).
     BindingCellNew,
     /// The value the binding cell on top of the stack holds.
@@ -508,8 +508,8 @@ impl Instruction {
             Instruction::ResultUnwrap | Instruction::LoadFieldUnwrap { .. } => {
                 InstructionProfileTag::ResultUnwrap
             }
-            Instruction::JavaScriptUnary(_) => InstructionProfileTag::Unary,
-            Instruction::JavaScriptBinary(_) => InstructionProfileTag::Binary,
+            Instruction::CoercingUnary(_) => InstructionProfileTag::Unary,
+            Instruction::CoercingBinary(_) => InstructionProfileTag::Binary,
             Instruction::ToBool | Instruction::IsNullish => InstructionProfileTag::ToBool,
             Instruction::Jump(_) => InstructionProfileTag::Jump,
             Instruction::JumpIfFalse(_) => InstructionProfileTag::JumpIfFalse,
@@ -541,7 +541,7 @@ impl Instruction {
             | Instruction::AbandonFinally
             | Instruction::AbandonFinallyKeepValue
             | Instruction::Throw => InstructionProfileTag::Exception,
-            Instruction::JavaScriptAddAssign(_) => InstructionProfileTag::AddAssign,
+            Instruction::CoercingAddAssign(_) => InstructionProfileTag::AddAssign,
             Instruction::Print => InstructionProfileTag::Print,
             Instruction::Finish => InstructionProfileTag::Finish,
             Instruction::ProcessFail => InstructionProfileTag::SessionProcessAdmin,
@@ -579,10 +579,10 @@ impl IntrinsicOp {
             | IntrinsicOp::Reverse
             | IntrinsicOp::ValidateCompiled(_)
             | IntrinsicOp::PushAssign(_)
-            | IntrinsicOp::JavaScriptGlobalDelete
-            | IntrinsicOp::JavaScriptGlobalGet
-            | IntrinsicOp::JavaScriptGlobalHas
-            | IntrinsicOp::JavaScriptUriCodec(_)
+            | IntrinsicOp::GlobalDelete
+            | IntrinsicOp::GlobalGet
+            | IntrinsicOp::GlobalHas
+            | IntrinsicOp::UriCodec(_)
             | IntrinsicOp::BindingCellNew
             | IntrinsicOp::BindingCellGet => 1,
             IntrinsicOp::Contains
@@ -591,12 +591,12 @@ impl IntrinsicOp {
             | IntrinsicOp::EndsWith
             | IntrinsicOp::Split
             | IntrinsicOp::Join
-            | IntrinsicOp::JavaScriptSplit
-            | IntrinsicOp::JavaScriptJoin
-            | IntrinsicOp::JavaScriptHeapInstanceOf
-            | IntrinsicOp::JavaScriptGlobalSet
+            | IntrinsicOp::TextSplit
+            | IntrinsicOp::TextJoin
+            | IntrinsicOp::HeapInstanceOf
+            | IntrinsicOp::GlobalSet
             | IntrinsicOp::BindingCellSet
-            | IntrinsicOp::JavaScriptHeapDeleteMember
+            | IntrinsicOp::HeapDeleteMember
             | IntrinsicOp::Validate
             | IntrinsicOp::CeilDiv
             | IntrinsicOp::FloorDiv
@@ -606,9 +606,9 @@ impl IntrinsicOp {
             IntrinsicOp::Find(argc)
             | IntrinsicOp::Format(argc)
             | IntrinsicOp::Range(argc)
-            | IntrinsicOp::JavaScriptStdlib(argc)
-            | IntrinsicOp::JavaScriptHeapNew(argc)
-            | IntrinsicOp::JavaScriptRegExp(argc)
+            | IntrinsicOp::IntrinsicDispatch(argc)
+            | IntrinsicOp::HeapConstruct(argc)
+            | IntrinsicOp::RegExpIntrinsic(argc)
             | IntrinsicOp::InvalidArity { argc, .. }
             | IntrinsicOp::Unknown { argc, .. } => argc,
             IntrinsicOp::FormatCompiled(_) | IntrinsicOp::FormatCompiledSlotNumber { .. } => {
@@ -630,21 +630,21 @@ impl IntrinsicOp {
             IntrinsicOp::EndsWith => BuiltinProfileTag::EndsWith,
             IntrinsicOp::Split => BuiltinProfileTag::Split,
             IntrinsicOp::Join => BuiltinProfileTag::Join,
-            IntrinsicOp::JavaScriptSplit => BuiltinProfileTag::Split,
-            IntrinsicOp::JavaScriptJoin => BuiltinProfileTag::Join,
-            IntrinsicOp::JavaScriptStdlib(_) => BuiltinProfileTag::TypeScriptStdlib,
-            IntrinsicOp::JavaScriptHeapNew(_) => BuiltinProfileTag::TypeScriptStdlib,
-            IntrinsicOp::JavaScriptHeapInstanceOf
-            | IntrinsicOp::JavaScriptHeapDeleteMember
-            | IntrinsicOp::JavaScriptRegExp(_)
-            | IntrinsicOp::JavaScriptGlobalDelete
-            | IntrinsicOp::JavaScriptGlobalGet
-            | IntrinsicOp::JavaScriptGlobalHas
-            | IntrinsicOp::JavaScriptGlobalSet
-            | IntrinsicOp::JavaScriptUriCodec(_)
+            IntrinsicOp::TextSplit => BuiltinProfileTag::Split,
+            IntrinsicOp::TextJoin => BuiltinProfileTag::Join,
+            IntrinsicOp::IntrinsicDispatch(_) => BuiltinProfileTag::IntrinsicDispatch,
+            IntrinsicOp::HeapConstruct(_) => BuiltinProfileTag::IntrinsicDispatch,
+            IntrinsicOp::HeapInstanceOf
+            | IntrinsicOp::HeapDeleteMember
+            | IntrinsicOp::RegExpIntrinsic(_)
+            | IntrinsicOp::GlobalDelete
+            | IntrinsicOp::GlobalGet
+            | IntrinsicOp::GlobalHas
+            | IntrinsicOp::GlobalSet
+            | IntrinsicOp::UriCodec(_)
             | IntrinsicOp::BindingCellNew
             | IntrinsicOp::BindingCellGet
-            | IntrinsicOp::BindingCellSet => BuiltinProfileTag::TypeScriptStdlib,
+            | IntrinsicOp::BindingCellSet => BuiltinProfileTag::IntrinsicDispatch,
             IntrinsicOp::Trim => BuiltinProfileTag::Trim,
             IntrinsicOp::Slice => BuiltinProfileTag::Slice,
             IntrinsicOp::ToString => BuiltinProfileTag::ToString,
@@ -752,7 +752,7 @@ pub(crate) enum BuiltinProfileTag {
     Upper,
     Unique,
     Reverse,
-    TypeScriptStdlib,
+    IntrinsicDispatch,
     Unknown,
 }
 
@@ -863,7 +863,7 @@ const BUILTIN_PROFILE_NAMES: [&str; BUILTIN_PROFILE_COUNT] = [
     "upper",
     "unique",
     "reverse",
-    "typescript_stdlib",
+    "intrinsic_dispatch",
     "unknown",
 ];
 

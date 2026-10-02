@@ -227,7 +227,7 @@ impl AggregateConsumer {
     /// The consumer a TypeScript `Promise.<method>` aggregate lowers to, by
     /// the method's name: `all`, `allSettled`, `race` or `any`.
     #[must_use]
-    pub fn from_typescript_method(method: &str) -> Option<Self> {
+    pub fn from_aggregate_method(method: &str) -> Option<Self> {
         match method {
             "all" => Some(Self::All),
             "allSettled" => Some(Self::AllSettled),

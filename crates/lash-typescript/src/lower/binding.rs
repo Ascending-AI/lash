@@ -411,7 +411,7 @@ impl super::Lowerer {
 
 pub(super) fn is_pending_tool(expression: &lashlang::Expr) -> bool {
     matches!(super::spans::unmarked(expression), lashlang::Expr::BuiltinCall { name, .. }
-        if name.as_str() == "__typescript_pending_tool")
+        if name.as_str() == "__lashlang_pending_tool")
 }
 
 pub(super) fn discarded_tool_span(
@@ -426,7 +426,7 @@ pub(super) fn discarded_tool_span(
         value,
     } = expression
         && let lashlang::Expr::Block(expressions) = super::spans::unmarked(lowered)
-        && let [inner, lashlang::Expr::Undefined] = expressions.as_slice()
+        && let [inner, lashlang::Expr::Absent] = expressions.as_slice()
     {
         return discarded_tool_span(value, inner);
     }

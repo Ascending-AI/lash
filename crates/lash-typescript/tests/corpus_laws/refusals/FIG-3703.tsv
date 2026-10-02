@@ -3,5 +3,5 @@
 # whose program now round-trips, or whose refusal changed, fails the law
 # until it is deleted or corrected.
 # program id	refusal	reason
-differential:FIG-3703:1	generated binding `__typescript_1_update_old` has no authored TypeScript spelling	an update expression used as a value lowers through a generated temporary, which has no authored spelling
-differential:FIG-3703:5	generated binding `__typescript_0_update_old` has no authored TypeScript spelling	an update expression used as a value lowers through a generated temporary, which has no authored spelling
+differential:FIG-3703:1	generated binding `__lashlang_1_update_old` has no authored TypeScript spelling	an update expression used as a value lowers through a generated temporary, which has no authored spelling
+differential:FIG-3703:5	generated binding `__lashlang_0_update_old` has no authored TypeScript spelling	an update expression used as a value lowers through a generated temporary, which has no authored spelling

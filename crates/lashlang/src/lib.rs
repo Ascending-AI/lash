@@ -44,12 +44,12 @@ pub use artifact::{
 };
 pub use ast::{
     AssignPathStep, AssignTarget, AstPath, AstRoot, AstString, BindingVisibility, CatchClause,
-    Declaration, Expr, ExprFolder, ExprVisitor, FunctionDecl, FunctionExpr, FunctionParam,
-    InvalidAst, JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp,
-    LIFTED_PROCESS_NAME_PREFIX, LabelMetadata, MAX_AST_NESTING_DEPTH, MethodKey, NestingTooDeep,
-    ProcessDecl, ProcessLiteralExpr, ProcessOrigin, ProcessParam, ProcessSignalDecl,
-    ProcessSignature, ProcessSignatureError, ProcessType, Program, ResourceRefExpr, StructuralRole,
-    TryExpr, TypeExpr, TypeField, UnionMembers, check_ast_nesting_depth, fold_expr_children,
+    CoercingBinaryOp, CoercingUnaryOp, Declaration, Expr, ExprFolder, ExprVisitor, FunctionDecl,
+    FunctionExpr, FunctionParam, InvalidAst, LIFTED_PROCESS_NAME_PREFIX, LabelMetadata,
+    MAX_AST_NESTING_DEPTH, MethodKey, NestingTooDeep, OperandLogicalOp, ProcessDecl,
+    ProcessLiteralExpr, ProcessOrigin, ProcessParam, ProcessSignalDecl, ProcessSignature,
+    ProcessSignatureError, ProcessType, Program, ResourceRefExpr, StructuralRole, TryExpr,
+    TypeExpr, TypeField, UnionMembers, check_ast_nesting_depth, fold_expr_children,
     format_type_expr, lifted_process_identity, process_wrapper_run_path, validate_ast, walk_expr,
 };
 pub use ast::{
@@ -118,10 +118,9 @@ pub use runtime::{
 };
 pub use runtime::{
     CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment,
-    TYPESCRIPT_REGEXP_EXECUTION_FUEL, TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION,
-    TYPESCRIPT_REGEXP_MAX_NESTING, TYPESCRIPT_REGEXP_MAX_PATTERN_CODE_UNITS,
-    TypeScriptRegExpValidationError, validate_canonical_messagepack_structure,
-    validate_typescript_regexp, validate_typescript_regexp_shape,
+    REGEXP_EXECUTION_FUEL, REGEXP_FUEL_PER_INSTRUCTION, REGEXP_MAX_NESTING,
+    REGEXP_MAX_PATTERN_CODE_UNITS, RegExpValidationError, validate_canonical_messagepack_structure,
+    validate_regexp, validate_regexp_shape,
 };
 pub use runtime::{DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, HEAP_GC_ALLOCATION_INTERVAL};
 pub use runtime::{DEFAULT_HOST_MEMORY_LIMIT_BYTES, DEFAULT_MAX_VM_FRAME_DEPTH};
@@ -157,7 +156,7 @@ pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
 /// and node ids — and so every node-keyed occurrence counter and replay key —
 /// come from the canonical carrier paths. A v19 instruction stream is refused.
 ///
-/// v21 (FIG-3620): `globalThis.name` reads compile to the `JavaScriptGlobalGet`
+/// v21 (FIG-3620): `globalThis.name` reads compile to the `GlobalGet`
 /// intrinsic, which reads the root frame's slot live from any frame, instead
 /// of a load of the name, and a top-level block binding of a name the cell
 /// addresses through `globalThis` takes a generated private slot. A v20
@@ -173,12 +172,12 @@ pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
 /// it no longer folds to a constant `undefined`, and the continuation's
 /// heap-object wire carries a `builtin_function` kind and the
 /// `IncompatibleReceiver` error. A v23 stream is refused.
-/// v25 (FIG-3730): `JavaScriptUnary` and `JavaScriptBinary` carry ECMA's
+/// v25 (FIG-3730): `CoercingUnary` and `CoercingBinary` carry ECMA's
 /// bitwise and shift operators (`~`, `&`, `|`, `^`, `<<`, `>>`, `>>>`) as
 /// single instructions. A v24 stream is refused.
-/// v26 (FIG-3652): the `JavaScriptUnaryOp::ToString` operator joins the
+/// v26 (FIG-3652): the `CoercingUnaryOp::ToString` operator joins the
 /// instruction vocabulary; a v25 stream is refused.
-/// v27 (FIG-3733): `JavaScriptAddAssign` fuses `s = s + rhs` under ECMA `+`
+/// v27 (FIG-3733): `CoercingAddAssign` fuses `s = s + rhs` under ECMA `+`
 /// rules, so a uniquely owned accumulator appends in place. A v26 stream is
 /// refused.
 /// v28 (FIG-3656): the continuation's `builtin_function` heap object names
@@ -198,9 +197,9 @@ pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
 /// version_guard(
 ///     roots(
 ///         path = "crates/lashlang/src/runtime/instruction.rs", Instruction, IntrinsicOp,
-///         JavaScriptUriCodec,
+///         UriCodec,
 ///     ),
-///     roots(path = "crates/lashlang/src/ast.rs", JavaScriptBinaryOp, JavaScriptUnaryOp),
+///     roots(path = "crates/lashlang/src/ast.rs", CoercingBinaryOp, CoercingUnaryOp),
 ///     shapes(path = "crates/lashlang/src/runtime/vm/continuation.rs", cover(VmContinuation)),
 ///     items(path = "crates/lashlang/src/runtime/entry_points.rs", compile, compile_main),
 /// )

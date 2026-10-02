@@ -23,7 +23,7 @@ fn summing_method() -> Expr {
             builders::while_loop(
                 builders::binary(
                     builders::var("i"),
-                    JavaScriptBinaryOp::Less,
+                    CoercingBinaryOp::Less,
                     builders::num(5.0),
                 ),
                 builders::block(vec![
@@ -31,7 +31,7 @@ fn summing_method() -> Expr {
                         "total",
                         builders::binary(
                             builders::var("total"),
-                            JavaScriptBinaryOp::Add,
+                            CoercingBinaryOp::Add,
                             builders::field(builders::var("self"), "k"),
                         ),
                     ),
@@ -39,15 +39,15 @@ fn summing_method() -> Expr {
                         "i",
                         builders::binary(
                             builders::var("i"),
-                            JavaScriptBinaryOp::Add,
+                            CoercingBinaryOp::Add,
                             builders::num(1.0),
                         ),
                     ),
                 ]),
             ),
-            Expr::Return(Box::new(builders::binary(
+            Expr::FunctionReturn(Box::new(builders::binary(
                 builders::var("total"),
-                JavaScriptBinaryOp::Add,
+                CoercingBinaryOp::Add,
                 builders::var("x"),
             ))),
         ])),
@@ -105,7 +105,7 @@ async fn a_plain_call_binds_an_undefined_receiver() {
                 receiver: Some("self".into()),
                 params: Vec::new(),
                 captures: Vec::new(),
-                body: Box::new(Expr::Return(Box::new(builders::var("self")))),
+                body: Box::new(Expr::FunctionReturn(Box::new(builders::var("self")))),
             })),
         ),
         builders::finish(builders::call(builders::var("f"), Vec::new())),

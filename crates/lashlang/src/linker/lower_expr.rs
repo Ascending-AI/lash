@@ -114,7 +114,7 @@ impl<'module> Linker<'module> {
             }
             Expr::Variable(name) => self.lower_variable(name, scope),
             Expr::Null
-            | Expr::Undefined
+            | Expr::Absent
             | Expr::Bool(_)
             | Expr::Number(_)
             | Expr::String(_)
@@ -188,16 +188,14 @@ impl<'module> Linker<'module> {
             Expr::Map { items, function } => self.lower_map(items, function, path, scope),
             Expr::Try(exception) => self.lower_try_expr(exception, path, scope),
             Expr::Throw(value) => self.lower_throw_expr(value, path, scope),
-            Expr::Return(value) => self.lower_return_expr(value, path, scope),
+            Expr::FunctionReturn(value) => self.lower_return_expr(value, path, scope),
             Expr::Field { target, field } => self.lower_field(target, field, path, scope),
             Expr::Index { target, index } => self.lower_index(target, index, path, scope),
-            Expr::JavaScriptUnary { op, expr } => {
-                self.lower_javascript_unary(op, expr, path, scope)
-            }
-            Expr::JavaScriptBinary { left, op, right } => {
+            Expr::CoercingUnary { op, expr } => self.lower_javascript_unary(op, expr, path, scope),
+            Expr::CoercingBinary { left, op, right } => {
                 self.lower_javascript_binary(left, op, right, path, scope)
             }
-            Expr::JavaScriptLogical { left, op, right } => {
+            Expr::OperandLogical { left, op, right } => {
                 self.lower_javascript_logical(left, op, right, path, scope)
             }
         }
@@ -1157,7 +1155,7 @@ impl<'module> Linker<'module> {
             .map(|(_, binding)| binding_type(binding))
             .collect::<Vec<_>>();
         self.validate_shaping_builtin(name.as_str(), &arg_types, scope.span)?;
-        let output = if name.as_str() == "__typescript_closure" {
+        let output = if name.as_str() == "__lashlang_closure" {
             lowered_args
                 .first()
                 .map(|(_, binding)| binding.clone())
@@ -1376,7 +1374,7 @@ impl<'module> Linker<'module> {
                 },
             );
         }
-        Ok((Expr::Return(Box::new(value)), binding))
+        Ok((Expr::FunctionReturn(Box::new(value)), binding))
     }
 }
 
@@ -1387,7 +1385,7 @@ impl<'module> Linker<'module> {
 fn settled_literal_kind(expr: &Expr) -> Option<&'static str> {
     match expr {
         Expr::Null => Some("null"),
-        Expr::Undefined => Some("undefined"),
+        Expr::Absent => Some("undefined"),
         Expr::Bool(_) => Some("bool"),
         Expr::Number(_) => Some("number"),
         Expr::String(_) => Some("string"),

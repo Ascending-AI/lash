@@ -477,14 +477,14 @@ async fn while_runs_inside_process_body() {
                 builders::while_loop(
                     builders::binary(
                         builders::var("n"),
-                        crate::ast::JavaScriptBinaryOp::Less,
+                        crate::ast::CoercingBinaryOp::Less,
                         builders::var("limit"),
                     ),
                     builders::block(vec![builders::assign(
                         "n",
                         builders::binary(
                             builders::var("n"),
-                            crate::ast::JavaScriptBinaryOp::Add,
+                            crate::ast::CoercingBinaryOp::Add,
                             builders::num(1.0),
                         ),
                     )]),
@@ -771,7 +771,7 @@ async fn profile_report_tracks_loop_append_and_iteration() {
             builders::if_else(
                 builders::binary(
                     builders::var("n"),
-                    JavaScriptBinaryOp::Greater,
+                    CoercingBinaryOp::Greater,
                     builders::num(1.0),
                 ),
                 builders::assign(
@@ -782,7 +782,7 @@ async fn profile_report_tracks_loop_append_and_iteration() {
                             builders::var("values"),
                             builders::binary(
                                 builders::var("n"),
-                                JavaScriptBinaryOp::Multiply,
+                                CoercingBinaryOp::Multiply,
                                 builders::num(2.0),
                             ),
                         ],
@@ -1105,7 +1105,7 @@ fn echo_round_trip_prefix() -> Vec<Expr> {
             "before",
             builders::binary(
                 builders::num(20.0),
-                JavaScriptBinaryOp::Add,
+                CoercingBinaryOp::Add,
                 builders::num(2.0),
             ),
         ),
@@ -1121,7 +1121,7 @@ fn echo_round_trip_prefix() -> Vec<Expr> {
             "after",
             builders::binary(
                 builders::var("echoed"),
-                JavaScriptBinaryOp::Add,
+                CoercingBinaryOp::Add,
                 builders::num(1.0),
             ),
         ),
@@ -1517,7 +1517,7 @@ async fn computation_strips_projection() {
     let (value, _) = exec_with_projected(
         builders::program(vec![builders::finish(builders::binary(
             builders::field(builders::var("input"), "n"),
-            crate::ast::JavaScriptBinaryOp::Add,
+            crate::ast::CoercingBinaryOp::Add,
             builders::num(1.0),
         ))]),
         &projected,

@@ -1,4 +1,4 @@
-//! The per-append cost law for JavaScript arrays (FIG-3063).
+//! The per-append cost law for ECMA-262 arrays (FIG-3063).
 //!
 //! The heap scenarios in the benchmark corpus exist to pin one law: the work a
 //! loop does on each step must not depend on how long the list it is building
@@ -16,7 +16,7 @@
 //! enters the assertion, so the test says the same thing on a loaded box.
 //!
 //! Both spellings are measured through the exact lowered forms the TypeScript
-//! adapter emits: `xs.push(item)` becomes a `__typescript_stdlib("push", …)`
+//! adapter emits: `xs.push(item)` becomes a `__lashlang_stdlib("push", …)`
 //! call, and `xs[xs.length] = item` becomes a terminal index assignment. What
 //! those spellings mean is pinned next door in
 //! `crates/lash-typescript/tests/array_append.rs`.
@@ -25,8 +25,8 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
 use lashlang::{
-    AbilityOp, AbilityOutcome, AssignPathStep, AssignTarget, ExecutionHost, ExecutionHostError,
-    ExecutionOutcome, Expr, JavaScriptBinaryOp, Program, State, Value, execute,
+    AbilityOp, AbilityOutcome, AssignPathStep, AssignTarget, CoercingBinaryOp, ExecutionHost,
+    ExecutionHostError, ExecutionOutcome, Expr, Program, State, Value, execute,
 };
 
 #[global_allocator]
@@ -139,13 +139,13 @@ fn assign(name: &str, expr: Expr) -> Expr {
     }
 }
 
-/// `appended = __typescript_stdlib("push", items, <member>)` — what `xs.push(m)`
+/// `appended = __lashlang_stdlib("push", items, <member>)` — what `xs.push(m)`
 /// lowers to.
 fn push_append(member: Expr) -> Expr {
     assign(
         "appended",
         builtin(
-            "__typescript_stdlib",
+            "__lashlang_stdlib",
             vec![Expr::String("push".into()), var("items"), member],
         ),
     )
@@ -189,8 +189,8 @@ fn probe_program(body: Expr, iterations: usize) -> Program {
             bind: None,
             body: Box::new(Expr::Block(vec![body])),
         },
-        Expr::Finish(Box::new(Expr::JavaScriptBinary {
-            op: JavaScriptBinaryOp::Add,
+        Expr::Finish(Box::new(Expr::CoercingBinary {
+            op: CoercingBinaryOp::Add,
             left: Box::new(var("total")),
             right: Box::new(builtin("len", vec![var("items")])),
         })),
@@ -203,8 +203,8 @@ fn bytes_per_append(body: fn() -> Expr, iterations: usize) -> f64 {
     let (built, with_append) = run_measured(&probe_program(body(), iterations));
     let baseline = assign(
         "total",
-        Expr::JavaScriptBinary {
-            op: JavaScriptBinaryOp::Add,
+        Expr::CoercingBinary {
+            op: CoercingBinaryOp::Add,
             left: Box::new(var("total")),
             right: Box::new(var("i")),
         },
@@ -275,8 +275,8 @@ fn an_append_charges_what_the_object_measures() {
     // items = []
     // for i in range(0, 64) {
     //     items[items.length] = "member-" + to_string(i)
-    //     appended = __typescript_stdlib("push", items, [i, "nested"])
-    //     also = __typescript_stdlib("push", items, i)
+    //     appended = __lashlang_stdlib("push", items, [i, "nested"])
+    //     also = __lashlang_stdlib("push", items, i)
     // }
     // finish items.length
     let program = Program::block(vec![
@@ -290,8 +290,8 @@ fn an_append_charges_what_the_object_measures() {
             )),
             bind: None,
             body: Box::new(Expr::Block(vec![
-                index_append(Expr::JavaScriptBinary {
-                    op: JavaScriptBinaryOp::Add,
+                index_append(Expr::CoercingBinary {
+                    op: CoercingBinaryOp::Add,
                     left: Box::new(Expr::String("member-".into())),
                     right: Box::new(builtin("to_string", vec![var("i")])),
                 }),
@@ -299,7 +299,7 @@ fn an_append_charges_what_the_object_measures() {
                 assign(
                     "also",
                     builtin(
-                        "__typescript_stdlib",
+                        "__lashlang_stdlib",
                         vec![Expr::String("push".into()), var("items"), var("i")],
                     ),
                 ),

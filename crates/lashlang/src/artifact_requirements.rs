@@ -417,8 +417,8 @@ impl<'program> RequirementsCollector<'program> {
                 Some(RequirementBinding::Value)
             }
             Expr::Throw(value)
-            | Expr::Return(value)
-            | Expr::JavaScriptUnary { expr: value, .. } => {
+            | Expr::FunctionReturn(value)
+            | Expr::CoercingUnary { expr: value, .. } => {
                 self.collect_expr(value, scope);
                 Some(RequirementBinding::Value)
             }
@@ -431,14 +431,13 @@ impl<'program> RequirementsCollector<'program> {
                 self.collect_expr(index, scope);
                 Some(RequirementBinding::Value)
             }
-            Expr::JavaScriptBinary { left, right, .. }
-            | Expr::JavaScriptLogical { left, right, .. } => {
+            Expr::CoercingBinary { left, right, .. } | Expr::OperandLogical { left, right, .. } => {
                 self.collect_expr(left, scope);
                 self.collect_expr(right, scope);
                 Some(RequirementBinding::Value)
             }
             Expr::Null
-            | Expr::Undefined
+            | Expr::Absent
             | Expr::Bool(_)
             | Expr::Number(_)
             | Expr::String(_)

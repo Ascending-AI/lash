@@ -631,7 +631,7 @@ fn a_parameter_default_keeps_reading_the_parameter_the_body_var_shadows() {
 }
 
 /// `s = s + rhs` on a captured, assigned binding writes through its cell —
-/// FIG-3733's fused `JavaScriptAddAssign` only fires on a plain slot, so a
+/// FIG-3733's fused `CoercingAddAssign` only fires on a plain slot, so a
 /// cell-bound name lowers to `cell_set(s, cell_get(s) + rhs)` — and a closure
 /// made before the append reads the grown text, as Node does.
 #[test]

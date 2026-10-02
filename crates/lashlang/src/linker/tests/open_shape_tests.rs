@@ -99,7 +99,7 @@ fn an_escape_opens_the_shape_and_a_read_that_keeps_no_reference_does_not() {
         builders::assign(
             "keys",
             builders::builtin(
-                "__typescript_stdlib",
+                "__lashlang_stdlib",
                 vec![builders::string("Object.keys"), builders::var("value")],
             ),
         ),
@@ -112,7 +112,7 @@ fn an_escape_opens_the_shape_and_a_read_that_keeps_no_reference_does_not() {
         builders::assign("value", record_ab()),
         builders::assign(
             "slot",
-            builders::builtin("__typescript_global_get", vec![builders::string("value")]),
+            builders::builtin("__lashlang_global_get", vec![builders::string("value")]),
         ),
         builders::finish(builders::field(builders::var("value"), "z")),
     ])

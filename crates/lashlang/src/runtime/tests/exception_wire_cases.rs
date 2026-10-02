@@ -383,7 +383,7 @@ async fn an_invalid_exception_state_bypasses_a_surrounding_catch() {
 async fn a_binding_cell_fault_bypasses_a_surrounding_catch() {
     let program = exception_finish(exception_try(
         super::typescript_exotic_cases::private_builtin(
-            "__typescript_cell_get",
+            "__lashlang_cell_get",
             vec![Expr::Number(1.0)],
         ),
         Some(("error", Expr::String("caught".into()))),
@@ -515,7 +515,7 @@ async fn every_honest_exception_boundary_resumes() {
         exception_try(
             Expr::Block(vec![
                 exception_resource_call("echo", Expr::String("in-call".into())),
-                Expr::Return(Box::new(Expr::Number(7.0))),
+                Expr::FunctionReturn(Box::new(Expr::Number(7.0))),
             ]),
             None,
             Some(exception_resource_call(
@@ -543,23 +543,23 @@ async fn every_honest_exception_boundary_resumes() {
                     Expr::Block(vec![
                         Expr::Assign {
                             target: crate::AssignTarget::variable("n".into()),
-                            expr: Box::new(Expr::JavaScriptBinary {
+                            expr: Box::new(Expr::CoercingBinary {
                                 left: Box::new(Expr::Variable("n".into())),
-                                op: crate::ast::JavaScriptBinaryOp::Add,
+                                op: crate::ast::CoercingBinaryOp::Add,
                                 right: Box::new(Expr::Number(1.0)),
                             }),
                         },
                         Expr::If {
-                            condition: Box::new(Expr::JavaScriptBinary {
+                            condition: Box::new(Expr::CoercingBinary {
                                 left: Box::new(Expr::Variable("n".into())),
-                                op: crate::ast::JavaScriptBinaryOp::Greater,
+                                op: crate::ast::CoercingBinaryOp::Greater,
                                 right: Box::new(Expr::Number(2.0)),
                             }),
                             then_block: Box::new(Expr::Break),
                             else_block: Box::new(Expr::If {
-                                condition: Box::new(Expr::JavaScriptBinary {
+                                condition: Box::new(Expr::CoercingBinary {
                                     left: Box::new(Expr::Variable("n".into())),
-                                    op: crate::ast::JavaScriptBinaryOp::StrictEqual,
+                                    op: crate::ast::CoercingBinaryOp::StrictEqual,
                                     right: Box::new(Expr::Number(1.0)),
                                 }),
                                 then_block: Box::new(Expr::Continue),
@@ -812,7 +812,7 @@ async fn the_handler_chain_holds_across_control_flow_shapes() {
 
     // A `return` leaving a cleanup that is itself inside a cleanup.
     let returning = exception_try(
-        cleanup(Expr::Return(Box::new(Expr::Number(1.0)))),
+        cleanup(Expr::FunctionReturn(Box::new(Expr::Number(1.0)))),
         None,
         Some(cleanup(Expr::Number(1.0))),
     );

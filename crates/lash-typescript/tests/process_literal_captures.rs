@@ -152,7 +152,7 @@ fn a_lifted_body_shares_its_own_bindings_with_its_closures() {
         .expect("a closure inside a process body may assign the body's own binding");
     let text = format!("{:?}", program.main);
     assert!(
-        text.contains("__typescript_cell_new"),
+        text.contains("__lashlang_cell_new"),
         "the body's binding lives in a cell its closure shares: {text}"
     );
 }

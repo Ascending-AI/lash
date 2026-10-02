@@ -62,7 +62,7 @@ fn normalized_traversal(expression: &Expr) -> Option<Vec<u8>> {
     };
     // Only the input is authored. Compare all other nodes, including both
     // cycle guards, by lossless wire so signed-zero edits remain visible.
-    **expr = Expr::Undefined;
+    **expr = Expr::Absent;
     let mut bindings = StructuralBindings::default();
     bindings.collect(&traversal);
     serde_json::to_vec(&bindings.fold_expr(traversal)).ok()

@@ -7,7 +7,7 @@
 
 use lashlang::{AssignPathStep, AssignTarget, Expr, StructuralRole, UpdateOperator};
 
-use super::GENERATED_BINDING_PREFIX;
+use super::LOWERED_BINDING_PREFIX;
 
 /// The role `target op= operand` lowers to, or `None` when `target` is not a
 /// one-step member target.
@@ -19,9 +19,9 @@ pub(crate) fn attribute_update(
     let [step] = target.steps.as_slice() else {
         return None;
     };
-    let base = format!("{GENERATED_BINDING_PREFIX}update_base");
-    let key = format!("{GENERATED_BINDING_PREFIX}update_key");
-    let result = format!("{GENERATED_BINDING_PREFIX}update_result");
+    let base = format!("{LOWERED_BINDING_PREFIX}update_base");
+    let key = format!("{LOWERED_BINDING_PREFIX}update_key");
+    let result = format!("{LOWERED_BINDING_PREFIX}update_result");
     let variable = |name: &str| Expr::Variable(name.into());
     let assign = |name: &str, expr: Expr| Expr::Assign {
         target: AssignTarget::variable(name.into()),
@@ -49,9 +49,9 @@ pub(crate) fn attribute_update(
     };
     block.push(assign(
         &result,
-        Expr::JavaScriptBinary {
+        Expr::CoercingBinary {
             left: Box::new(current),
-            op: operator.javascript_op(),
+            op: operator.coercing_op(),
             right: Box::new(operand),
         },
     ));

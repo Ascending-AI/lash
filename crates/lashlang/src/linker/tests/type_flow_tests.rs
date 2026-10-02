@@ -1,5 +1,5 @@
 use super::*;
-use crate::ast::JavaScriptBinaryOp;
+use crate::ast::CoercingBinaryOp;
 
 /// `await tools.accept_mode(<argument>)?`
 fn accept_mode(argument: Expr) -> Program {
@@ -349,15 +349,14 @@ fn union_field_assignments_update_matching_members_and_reject_unknown_fields() {
 
 #[test]
 fn javascript_binary_operators_link_without_category_checks() {
-    // `finish {} + 1` — JavaScript addition coerces operands, so the linker
+    // `finish {} + 1` — ECMA-262 addition coerces operands, so the linker
     // admits shapes the old dialect rejected.
     let known = builders::program(vec![builders::finish(builders::binary(
         builders::record(Vec::new()),
-        JavaScriptBinaryOp::Add,
+        CoercingBinaryOp::Add,
         builders::num(1.0),
     ))]);
-    LinkedModule::link(known, full_host_environment())
-        .expect("JavaScript addition coerces operands");
+    LinkedModule::link(known, full_host_environment()).expect("ECMA-262 addition coerces operands");
 
     // process combine(map: dict, unknown: any) {
     //   left = map + 1
@@ -375,13 +374,13 @@ fn javascript_binary_operators_link_without_category_checks() {
                     "left",
                     builders::binary(
                         builders::var("map"),
-                        JavaScriptBinaryOp::Add,
+                        CoercingBinaryOp::Add,
                         builders::num(1.0),
                     ),
                 ),
                 builders::finish(builders::binary(
                     builders::var("left"),
-                    JavaScriptBinaryOp::Add,
+                    CoercingBinaryOp::Add,
                     builders::var("unknown"),
                 )),
             ]),
@@ -419,7 +418,7 @@ fn equality_accepts_a_compatible_union_member_but_rejects_known_category_mismatc
                     "equal",
                     builders::binary(
                         builders::var("value"),
-                        JavaScriptBinaryOp::StrictEqual,
+                        CoercingBinaryOp::StrictEqual,
                         builders::string("text"),
                     ),
                 ),
@@ -427,7 +426,7 @@ fn equality_accepts_a_compatible_union_member_but_rejects_known_category_mismatc
                     "not_equal",
                     builders::binary(
                         builders::string("text"),
-                        JavaScriptBinaryOp::StrictNotEqual,
+                        CoercingBinaryOp::StrictNotEqual,
                         builders::var("value"),
                     ),
                 ),
@@ -444,11 +443,11 @@ fn equality_accepts_a_compatible_union_member_but_rejects_known_category_mismatc
 
     let strict = builders::program(vec![builders::finish(builders::binary(
         builders::record(Vec::new()),
-        JavaScriptBinaryOp::StrictEqual,
+        CoercingBinaryOp::StrictEqual,
         builders::num(1.0),
     ))]);
     LinkedModule::link(strict, full_host_environment())
-        .expect("strict equality is total over JavaScript values");
+        .expect("strict equality is total over ECMA-262 values");
 }
 
 #[test]

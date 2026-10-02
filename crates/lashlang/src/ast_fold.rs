@@ -171,7 +171,7 @@ where
                 .map(|finally| Box::new(folder.fold_expr(*finally))),
         })),
         Expr::Throw(value) => Expr::Throw(Box::new(folder.fold_expr(*value))),
-        Expr::Return(value) => Expr::Return(Box::new(folder.fold_expr(*value))),
+        Expr::FunctionReturn(value) => Expr::FunctionReturn(Box::new(folder.fold_expr(*value))),
         Expr::Field { target, field } => Expr::Field {
             target: Box::new(folder.fold_expr(*target)),
             field,
@@ -180,22 +180,22 @@ where
             target: Box::new(folder.fold_expr(*target)),
             index: Box::new(folder.fold_expr(*index)),
         },
-        Expr::JavaScriptUnary { op, expr } => Expr::JavaScriptUnary {
+        Expr::CoercingUnary { op, expr } => Expr::CoercingUnary {
             op,
             expr: Box::new(folder.fold_expr(*expr)),
         },
-        Expr::JavaScriptBinary { left, op, right } => Expr::JavaScriptBinary {
+        Expr::CoercingBinary { left, op, right } => Expr::CoercingBinary {
             left: Box::new(folder.fold_expr(*left)),
             op,
             right: Box::new(folder.fold_expr(*right)),
         },
-        Expr::JavaScriptLogical { left, op, right } => Expr::JavaScriptLogical {
+        Expr::OperandLogical { left, op, right } => Expr::OperandLogical {
             left: Box::new(folder.fold_expr(*left)),
             op,
             right: Box::new(folder.fold_expr(*right)),
         },
         leaf @ (Expr::Null
-        | Expr::Undefined
+        | Expr::Absent
         | Expr::Bool(_)
         | Expr::Number(_)
         | Expr::String(_)

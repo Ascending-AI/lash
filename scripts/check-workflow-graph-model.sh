@@ -180,7 +180,7 @@ from pathlib import Path
 
 RECOGNITION = re.compile(
     r"\.(starts_with|ends_with|strip_prefix|strip_suffix)\(\s*\"__"
-    r"|GENERATED_BINDING_PREFIX|LIFTED_PROCESS_NAME_PREFIX|\"__process_"
+    r"|LOWERED_BINDING_PREFIX|LIFTED_PROCESS_NAME_PREFIX|\"__process_"
 )
 # path (a file, or a directory with a trailing slash) -> reason.
 ALLOWED = {

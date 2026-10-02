@@ -121,7 +121,7 @@ impl Heap {
     /// through one of those names lands in the slot itself. `message` holds
     /// text: the constructor ToString's its argument at install, and a write
     /// of a non-string refuses because the durable wires carry `message` as a
-    /// bare string. `errors` keeps its constructor invariant, a JavaScript
+    /// bare string. `errors` keeps its constructor invariant, a ECMA-262
     /// list. Every other name keeps the standing refusal — this value model
     /// has no slot for a guest-named property on an error.
     fn assign_error_member(
@@ -664,7 +664,7 @@ pub(crate) fn unwritable_member(object: &HeapObject, key: &str) -> RuntimeError 
             _ => function_expando_refusal(key),
         },
         HeapObject::List { .. } | HeapObject::Tuple(_) | HeapObject::RegExpMatch(_) => {
-            RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported {
+            RuntimeError::ArrayNonIndexPropertyUnsupported {
                 key: key.to_string(),
             }
         }
@@ -735,8 +735,7 @@ fn function_expando_refusal(key: &str) -> RuntimeError {
 }
 
 fn decode_javascript_array_index(key: String) -> Result<usize, RuntimeError> {
-    javascript_array_index_key(&key)
-        .ok_or(RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported { key })
+    javascript_array_index_key(&key).ok_or(RuntimeError::ArrayNonIndexPropertyUnsupported { key })
 }
 
 fn lookup_regexp_match_field(

@@ -25,7 +25,7 @@ fn three_echo_chain() -> Program {
             "b",
             echo_call(builders::binary(
                 builders::var("a"),
-                JavaScriptBinaryOp::Add,
+                CoercingBinaryOp::Add,
                 builders::num(3.0),
             )),
         ),
@@ -33,7 +33,7 @@ fn three_echo_chain() -> Program {
             "c",
             echo_call(builders::binary(
                 builders::var("b"),
-                JavaScriptBinaryOp::Multiply,
+                CoercingBinaryOp::Multiply,
                 builders::num(4.0),
             )),
         ),
@@ -155,7 +155,7 @@ async fn continuation_resumes_jump_based_while_with_accumulator() {
         builders::while_loop(
             builders::binary(
                 builders::var("n"),
-                JavaScriptBinaryOp::Less,
+                CoercingBinaryOp::Less,
                 builders::num(6.0),
             ),
             builders::block(vec![
@@ -163,7 +163,7 @@ async fn continuation_resumes_jump_based_while_with_accumulator() {
                     "total",
                     builders::binary(
                         builders::var("total"),
-                        JavaScriptBinaryOp::Add,
+                        CoercingBinaryOp::Add,
                         builders::var("n"),
                     ),
                 ),
@@ -171,7 +171,7 @@ async fn continuation_resumes_jump_based_while_with_accumulator() {
                     "n",
                     builders::binary(
                         builders::var("n"),
-                        JavaScriptBinaryOp::Add,
+                        CoercingBinaryOp::Add,
                         builders::num(1.0),
                     ),
                 ),
@@ -262,10 +262,10 @@ async fn continuation_resumes_nested_inner_iterator() {
                     builders::binary(
                         builders::binary(
                             builders::var("total"),
-                            JavaScriptBinaryOp::Add,
+                            CoercingBinaryOp::Add,
                             builders::var("outer"),
                         ),
-                        JavaScriptBinaryOp::Add,
+                        CoercingBinaryOp::Add,
                         builders::var("inner"),
                     ),
                 )]),
@@ -296,7 +296,7 @@ async fn continuation_suspends_at_quiescent_post_effect_point() {
         builders::assign("value", echo_call(builders::num(7.0))),
         builders::finish(builders::binary(
             builders::var("value"),
-            JavaScriptBinaryOp::Add,
+            CoercingBinaryOp::Add,
             builders::num(1.0),
         )),
     ]));
@@ -326,13 +326,13 @@ async fn durable_segment_round_trip_preserves_nan_and_negative_zero() {
             "nan",
             builders::binary(
                 builders::num(0.0),
-                JavaScriptBinaryOp::Divide,
+                CoercingBinaryOp::Divide,
                 builders::num(0.0),
             ),
         ),
         builders::assign(
             "negative_zero",
-            builders::unary(crate::ast::JavaScriptUnaryOp::Negate, builders::num(0.0)),
+            builders::unary(crate::ast::CoercingUnaryOp::Negate, builders::num(0.0)),
         ),
         builders::assign("marker", echo_call(builders::num(1.0))),
         builders::finish(builders::list(vec![
@@ -962,7 +962,7 @@ async fn heap_conformance_run(stress_gc: bool) -> (ExecutionOutcome, Vec<u8>) {
                         "n",
                         builders::binary(
                             builders::var("n"),
-                            JavaScriptBinaryOp::Add,
+                            CoercingBinaryOp::Add,
                             builders::num(1.0),
                         ),
                     )]),
@@ -1087,7 +1087,7 @@ async fn indexed_add_exact_limit_succeeds_and_one_byte_over_preserves_state() {
             vec![builders::index_step(builders::var("key"))],
             builders::binary(
                 builders::index(builders::var("counts"), builders::var("key")),
-                JavaScriptBinaryOp::Add,
+                CoercingBinaryOp::Add,
                 builders::num(1.0),
             ),
         ),
@@ -1247,7 +1247,7 @@ async fn determinism_process_probe() {
         builders::if_else(
             builders::binary(
                 builders::var("n"),
-                JavaScriptBinaryOp::StrictEqual,
+                CoercingBinaryOp::StrictEqual,
                 builders::num(n),
             ),
             builders::block(vec![builders::assign(
@@ -1268,13 +1268,13 @@ async fn determinism_process_probe() {
                     "nan",
                     builders::binary(
                         builders::num(0.0),
-                        JavaScriptBinaryOp::Divide,
+                        CoercingBinaryOp::Divide,
                         builders::num(0.0),
                     ),
                 ),
                 (
                     "minus_zero",
-                    builders::unary(crate::ast::JavaScriptUnaryOp::Negate, builders::num(0.0)),
+                    builders::unary(crate::ast::CoercingUnaryOp::Negate, builders::num(0.0)),
                 ),
             ]),
         ),

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::ast::{JavaScriptBinaryOp, JavaScriptUnaryOp};
+use crate::ast::{CoercingBinaryOp, CoercingUnaryOp};
 use num_bigint::BigUint;
 use num_traits::ToPrimitive;
 
@@ -26,17 +26,17 @@ pub(crate) fn javascript_string_size_error(attempted: usize) -> super::RuntimeEr
 
 pub(crate) fn eval_javascript_unary(
     value: Value,
-    op: JavaScriptUnaryOp,
+    op: CoercingUnaryOp,
 ) -> Result<Value, super::RuntimeError> {
     Ok(match op {
-        JavaScriptUnaryOp::Plus => Value::Number(javascript_to_number(&value)),
-        JavaScriptUnaryOp::Negate => Value::Number(-javascript_to_number(&value)),
-        JavaScriptUnaryOp::BitNot => Value::Number(f64::from(!javascript_to_int32(
+        CoercingUnaryOp::Plus => Value::Number(javascript_to_number(&value)),
+        CoercingUnaryOp::Negate => Value::Number(-javascript_to_number(&value)),
+        CoercingUnaryOp::BitNot => Value::Number(f64::from(!javascript_to_int32(
             javascript_to_number(&value),
         ))),
-        JavaScriptUnaryOp::Not => Value::Bool(!is_truthy(&value)?),
-        JavaScriptUnaryOp::ToString => Value::String(javascript_to_string(&value).into()),
-        JavaScriptUnaryOp::TypeOf => Value::String(
+        CoercingUnaryOp::Not => Value::Bool(!is_truthy(&value)?),
+        CoercingUnaryOp::ToString => Value::String(javascript_to_string(&value).into()),
+        CoercingUnaryOp::TypeOf => Value::String(
             match value {
                 Value::Undefined => "undefined",
                 Value::Null => "object",
@@ -56,8 +56,8 @@ pub(crate) fn eval_javascript_unary(
     })
 }
 
-pub(crate) fn eval_javascript_binary(left: Value, op: JavaScriptBinaryOp, right: Value) -> Value {
-    use JavaScriptBinaryOp as Op;
+pub(crate) fn eval_javascript_binary(left: Value, op: CoercingBinaryOp, right: Value) -> Value {
+    use CoercingBinaryOp as Op;
     match op {
         Op::StrictEqual | Op::StrictNotEqual => {
             let equal = javascript_strict_equal(&left, &right);
@@ -241,10 +241,10 @@ pub(crate) fn javascript_to_primitive_string_or_number(value: &Value) -> Value {
             Value::String("[object Object]".into())
         }
         Value::Ref(_) => {
-            debug_assert_exported_value("scalar JavaScript primitive coercion");
+            debug_assert_exported_value("scalar ECMA-262 primitive coercion");
             Value::String("[object Object]".into())
         }
-        // JavaScript VM opcodes discover projections reachable through coercion
+        // ECMA-262 VM opcodes discover projections reachable through coercion
         // and use the async heap path before calling this synchronous fallback.
         // Other synchronous value helpers still materialize projected values.
         // A restored placeholder cannot be coerced; the VM's async coercion path
@@ -383,7 +383,7 @@ pub(crate) fn javascript_to_string(value: &Value) -> String {
         Value::Number(value) => javascript_number_to_string(*value),
         Value::String(value) => value.to_string(),
         Value::Ref(_) => {
-            debug_assert_exported_value("scalar JavaScript string coercion");
+            debug_assert_exported_value("scalar ECMA-262 string coercion");
             "[object Object]".to_string()
         }
         Value::Projected(projected) => {

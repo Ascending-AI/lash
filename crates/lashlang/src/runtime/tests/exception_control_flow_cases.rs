@@ -58,9 +58,9 @@ fn control_flow_while_once(counter: &str, body: Vec<Expr>) -> Vec<Expr> {
             expr: Box::new(Expr::Number(0.0)),
         },
         Expr::While {
-            condition: Box::new(Expr::JavaScriptBinary {
+            condition: Box::new(Expr::CoercingBinary {
                 left: Box::new(Expr::Variable(counter.into())),
-                op: crate::ast::JavaScriptBinaryOp::Less,
+                op: crate::ast::CoercingBinaryOp::Less,
                 right: Box::new(Expr::Number(1.0)),
             }),
             body: Box::new(Expr::Block(block)),
@@ -127,9 +127,9 @@ async fn a_cleanup_handler_left_by_break_must_not_rerun_its_finally() {
             None,
             Some(Expr::Assign {
                 target: crate::AssignTarget::variable("runs".into()),
-                expr: Box::new(Expr::JavaScriptBinary {
+                expr: Box::new(Expr::CoercingBinary {
                     left: Box::new(Expr::Variable("runs".into())),
-                    op: crate::ast::JavaScriptBinaryOp::Add,
+                    op: crate::ast::CoercingBinaryOp::Add,
                     right: Box::new(Expr::Number(1.0)),
                 }),
             }),

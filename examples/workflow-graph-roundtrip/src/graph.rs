@@ -569,7 +569,7 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
 /// parse in expression position, so it is read through the process door.
 fn terminal_value(expression: &Expr, _scope: &FragmentScope) -> Option<String> {
     let value = match expression {
-        Expr::Finish(value) | Expr::Fail(value) | Expr::Return(value) => value,
+        Expr::Finish(value) | Expr::Fail(value) | Expr::FunctionReturn(value) => value,
         _ => return None,
     };
     typescript_expression_source(value).ok()

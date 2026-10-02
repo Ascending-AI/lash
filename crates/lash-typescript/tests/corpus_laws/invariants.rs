@@ -381,7 +381,7 @@ fn exported_names(ir: &lashlang::Program) -> BTreeSet<String> {
     // name it spells from wherever it sits.
     fn walk_global_sets(expr: &Expr, names: &mut BTreeSet<String>) {
         if let Expr::BuiltinCall { name, args } = expr
-            && name.as_str() == "__typescript_global_set"
+            && name.as_str() == "__lashlang_global_set"
             && let Some(Expr::String(global)) = args.first()
         {
             names.insert(global.to_string());

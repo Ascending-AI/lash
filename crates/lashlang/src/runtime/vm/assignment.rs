@@ -12,10 +12,10 @@ use super::*;
 impl<H: ExecutionHost> Vm<'_, H> {
     /// `s = s + rhs` under ECMA-262 `+` rules (FIG-3733).
     ///
-    /// The operand stack carries `JavaScriptBinary`'s pair — the accumulator
+    /// The operand stack carries `CoercingBinary`'s pair — the accumulator
     /// the `LoadName` compiled in front of the right operand pushed — so
     /// evaluation order, the projection gate and the guest-coercion replay
-    /// are exactly the unfused `LoadName; JavaScriptBinary; StoreName`
+    /// are exactly the unfused `LoadName; CoercingBinary; StoreName`
     /// sequence's; only the store is fused. When the accumulator's buffer is
     /// uniquely owned the append reuses it — `StringValue`'s copy-on-write
     /// keeps a binding that aliases it (`const t = s`) on the old bytes —
@@ -27,17 +27,17 @@ impl<H: ExecutionHost> Vm<'_, H> {
         debug_assert!(!matches!(left, Value::Projected(_)));
         debug_assert!(!matches!(right, Value::Projected(_)));
         let (coerce_left, coerce_right) =
-            javascript_binary_operand_coercions(JavaScriptBinaryOp::Add, &left, &right);
+            javascript_binary_operand_coercions(CoercingBinaryOp::Add, &left, &right);
         if coerce_left && matches!(left, Value::Ref(_)) {
-            left = self.javascript_binary_operand_primitive(JavaScriptBinaryOp::Add, &left)?;
+            left = self.javascript_binary_operand_primitive(CoercingBinaryOp::Add, &left)?;
         }
         if coerce_right && matches!(right, Value::Ref(_)) {
-            right = self.javascript_binary_operand_primitive(JavaScriptBinaryOp::Add, &right)?;
+            right = self.javascript_binary_operand_primitive(CoercingBinaryOp::Add, &right)?;
         }
         let left_primitive =
-            self.javascript_binary_operand_primitive(JavaScriptBinaryOp::Add, &left)?;
+            self.javascript_binary_operand_primitive(CoercingBinaryOp::Add, &left)?;
         let right_primitive =
-            self.javascript_binary_operand_primitive(JavaScriptBinaryOp::Add, &right)?;
+            self.javascript_binary_operand_primitive(CoercingBinaryOp::Add, &right)?;
         let value = if matches!(left_primitive, Value::String(_))
             || matches!(right_primitive, Value::String(_))
         {
@@ -48,7 +48,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 // share leaves `accumulator` sole owner, so `push_str`'s
                 // copy-on-write extends the buffer in place. The slot is
                 // cleared rather than overwritten only after assignability —
-                // and the size cap, which an unfused `JavaScriptBinary` would
+                // and the size cap, which an unfused `CoercingBinary` would
                 // raise first — have settled, so a failing store leaves the
                 // binding intact.
                 Value::String(mut accumulator) if matches!(left_primitive, Value::String(_)) => {
@@ -85,7 +85,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
             }
         } else {
-            eval_javascript_binary(left, JavaScriptBinaryOp::Add, right)
+            eval_javascript_binary(left, CoercingBinaryOp::Add, right)
         };
         // `StoreName`'s order: the operands' values settle, then assignability
         // resolves and the slot takes the result.

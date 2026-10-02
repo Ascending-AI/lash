@@ -61,7 +61,7 @@ impl Lowerer {
                 Self::temp_assignment(
                     &next,
                     LashExpr::BuiltinCall {
-                        name: "__typescript_call_method_dynamic".into(),
+                        name: "__lashlang_call_method_dynamic".into(),
                         args: vec![
                             Self::variable(&receiver),
                             Self::variable(&callee),
@@ -74,14 +74,14 @@ impl Lowerer {
             let call = if *optional_call {
                 LashExpr::If {
                     condition: Box::new(Self::nullish(Self::variable(&callee))),
-                    then_block: Box::new(LashExpr::Undefined),
+                    then_block: Box::new(LashExpr::Absent),
                     else_block: Box::new(call),
                 }
             } else {
                 call
             };
             return Ok(LashExpr::Block(vec![
-                Self::temp_assignment(&receiver, LashExpr::Undefined),
+                Self::temp_assignment(&receiver, LashExpr::Absent),
                 Self::temp_assignment(&callee, inner),
                 call,
             ]));
@@ -149,7 +149,7 @@ impl Lowerer {
             return Ok(if optional {
                 LashExpr::If {
                     condition: Box::new(Self::nullish(current)),
-                    then_block: Box::new(LashExpr::Undefined),
+                    then_block: Box::new(LashExpr::Absent),
                     else_block: Box::new(continuation),
                 }
             } else {
@@ -187,7 +187,7 @@ impl Lowerer {
                 Self::temp_assignment(
                     &next,
                     LashExpr::BuiltinCall {
-                        name: "__typescript_call_method_dynamic".into(),
+                        name: "__lashlang_call_method_dynamic".into(),
                         args: vec![current.clone(), Self::variable(&callee), arguments],
                     },
                 ),
@@ -196,7 +196,7 @@ impl Lowerer {
             let call = if *optional_call {
                 LashExpr::If {
                     condition: Box::new(Self::nullish(Self::variable(&callee))),
-                    then_block: Box::new(LashExpr::Undefined),
+                    then_block: Box::new(LashExpr::Absent),
                     else_block: Box::new(call),
                 }
             } else {
@@ -206,7 +206,7 @@ impl Lowerer {
             return Ok(if optional {
                 LashExpr::If {
                     condition: Box::new(Self::nullish(current)),
-                    then_block: Box::new(LashExpr::Undefined),
+                    then_block: Box::new(LashExpr::Absent),
                     else_block: Box::new(continuation),
                 }
             } else {
@@ -243,7 +243,7 @@ impl Lowerer {
         if optional {
             Ok(LashExpr::If {
                 condition: Box::new(Self::nullish(current)),
-                then_block: Box::new(LashExpr::Undefined),
+                then_block: Box::new(LashExpr::Absent),
                 else_block: Box::new(continuation),
             })
         } else {

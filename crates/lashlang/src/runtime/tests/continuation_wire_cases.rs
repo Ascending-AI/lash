@@ -202,7 +202,7 @@ fn range_loop(end: f64, body: Vec<Expr>) -> Expr {
 fn plus_one(offset: f64) -> Expr {
     builders::binary(
         builders::var("n"),
-        JavaScriptBinaryOp::Add,
+        CoercingBinaryOp::Add,
         builders::num(offset + 1.0),
     )
 }

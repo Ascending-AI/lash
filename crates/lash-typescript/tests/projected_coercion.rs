@@ -6,7 +6,7 @@
 //! it — that is what `Binary` (the Lashlang arithmetic opcode) does by
 //! materializing a projected operand synchronously.
 //!
-//! The TypeScript opcodes `JavaScriptUnary`/`JavaScriptBinary` did not. A
+//! The TypeScript opcodes `CoercingUnary`/`CoercingBinary` did not. A
 //! projected operand fell straight into the scalar ECMA coercions, whose
 //! `Value::Projected` arm was a `debug_assert` plus a fallback: debug builds
 //! panicked out of the turn, and release builds silently carried

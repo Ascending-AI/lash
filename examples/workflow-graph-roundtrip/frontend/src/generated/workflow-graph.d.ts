@@ -142,7 +142,7 @@ export type Expr =
         [k: string]: unknown;
       };
     }
-  | 'Undefined'
+  | 'Absent'
   | {
       Bool: boolean;
     }
@@ -309,7 +309,7 @@ export type Expr =
       Throw: Expr;
     }
   | {
-      Return: Expr;
+      FunctionReturn: Expr;
     }
   | {
       Field: {
@@ -326,24 +326,24 @@ export type Expr =
       };
     }
   | {
-      JavaScriptUnary: {
+      CoercingUnary: {
         expr: Expr;
-        op: JavaScriptUnaryOp;
+        op: CoercingUnaryOp;
         [k: string]: unknown;
       };
     }
   | {
-      JavaScriptBinary: {
+      CoercingBinary: {
         left: Expr;
-        op: JavaScriptBinaryOp;
+        op: CoercingBinaryOp;
         right: Expr;
         [k: string]: unknown;
       };
     }
   | {
-      JavaScriptLogical: {
+      OperandLogical: {
         left: Expr;
-        op: JavaScriptLogicalOp;
+        op: OperandLogicalOp;
         right: Expr;
         [k: string]: unknown;
       };
@@ -437,8 +437,17 @@ export type MethodKey =
   | {
       Index: Expr;
     };
-export type JavaScriptUnaryOp = ('Plus' | 'Negate' | 'Not' | 'TypeOf' | 'BitNot') | 'ToString';
-export type JavaScriptBinaryOp =
+/**
+ * Unary value operations with explicit ECMA-262 coercion rules.
+ */
+export type CoercingUnaryOp = 'Plus' | 'Negate' | 'Not' | 'TypeOf' | 'BitNot' | 'ToString';
+/**
+ * Eager binary value operations with explicit ECMA-262 coercion rules.
+ *
+ * Operand expressions evaluate left then right. Object-to-primitive hooks
+ * run left then right when the rule requires them. Numeric results are f64.
+ */
+export type CoercingBinaryOp =
   | 'Add'
   | 'Subtract'
   | 'Multiply'
@@ -458,7 +467,10 @@ export type JavaScriptBinaryOp =
   | 'ShiftLeft'
   | 'ShiftRight'
   | 'ShiftRightUnsigned';
-export type JavaScriptLogicalOp = 'And' | 'Or' | 'NullishCoalesce';
+/**
+ * Short-circuiting operations that return an operand without coercing it.
+ */
+export type OperandLogicalOp = 'And' | 'Or' | 'NullishCoalesce';
 /**
  * One call or effect argument in graph order.
  *

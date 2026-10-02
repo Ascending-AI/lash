@@ -2028,7 +2028,7 @@ pub(super) fn executor_reports_a_disabled_lashlang_ability_at_link_time() {
 /// moved. The canonical IR is otherwise byte-identical.
 ///
 /// FIG-3620 moved `LASHLANG_SEMANTIC_HASH_VERSION` to `v18` for the new
-/// `__typescript_global_get` builtin: only the module, host-requirement and
+/// `__lashlang_global_get` builtin: only the module, host-requirement and
 /// component hashes moved; the lifted name and the canonical IR did not.
 ///
 /// FIG-3655 re-pinned them once more: `FunctionExpr` gained `js_name`, so the

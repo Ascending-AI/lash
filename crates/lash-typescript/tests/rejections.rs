@@ -305,7 +305,7 @@ rejection_test!(
 );
 rejection_test!(
     rejects_reserved_generated_identifier,
-    "const __typescript_0_a = 1;",
+    "const __lashlang_0_a = 1;",
     Code::ReservedIdentifier
 );
 

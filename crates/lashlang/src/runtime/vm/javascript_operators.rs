@@ -1,4 +1,4 @@
-//! JavaScript unary/binary fast evaluation and projected-operand preparation.
+//! ECMA-262 unary/binary fast evaluation and projected-operand preparation.
 
 use super::super::{
     StringValue, ensure_javascript_string_size, javascript_operand_text,
@@ -10,19 +10,19 @@ use crate::runtime::heap::guest_coercion::PrimitiveHint;
 impl<H: ExecutionHost> Vm<'_, H> {
     pub(super) fn javascript_unary_needs_slow_path(
         &self,
-        op: JavaScriptUnaryOp,
+        op: CoercingUnaryOp,
     ) -> Result<bool, RuntimeError> {
         let Some(value) = self.stack.last() else {
             return Ok(true);
         };
         Ok(matches!(value, Value::Projected(_))
-            || (op.coerces_to_number() || op == JavaScriptUnaryOp::ToString)
+            || (op.coerces_to_number() || op == CoercingUnaryOp::ToString)
                 && self.heap.javascript_coercion_contains_projected(value)?)
     }
 
     pub(super) fn javascript_binary_needs_slow_path(
         &self,
-        op: JavaScriptBinaryOp,
+        op: CoercingBinaryOp,
     ) -> Result<bool, RuntimeError> {
         if self.stack.len() < 2 {
             return Ok(true);
@@ -41,11 +41,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
 
     pub(super) fn execute_javascript_unary(
         &mut self,
-        op: JavaScriptUnaryOp,
+        op: CoercingUnaryOp,
     ) -> Result<(), RuntimeError> {
         let value = self.pop_stack()?;
         debug_assert!(!matches!(value, Value::Projected(_)));
-        if op == JavaScriptUnaryOp::TypeOf
+        if op == CoercingUnaryOp::TypeOf
             && let Value::Ref(id) = value
         {
             // A built-in answers by whether ECMA gives it a `[[Call]]`: the
@@ -65,13 +65,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
             let number = self.heap.javascript_to_number(&value)?;
             self.stack
                 .push(eval_javascript_unary(Value::Number(number), op)?);
-        } else if op == JavaScriptUnaryOp::ToString {
+        } else if op == CoercingUnaryOp::ToString {
             let text = self.heap.javascript_to_string_for_output(&value)?;
             ensure_javascript_string_size(text.len())?;
             // Stringifying writes each output byte once.
             self.charge_intrinsic_work(text.len());
             self.stack.push(Value::String(text.into()));
-        } else if op == JavaScriptUnaryOp::Not && matches!(value, Value::Ref(_)) {
+        } else if op == CoercingUnaryOp::Not && matches!(value, Value::Ref(_)) {
             self.stack.push(Value::Bool(false));
         } else {
             self.stack.push(eval_javascript_unary(value, op)?);
@@ -81,25 +81,25 @@ impl<H: ExecutionHost> Vm<'_, H> {
 
     pub(super) fn redispatch_javascript_unary(
         &mut self,
-        op: JavaScriptUnaryOp,
+        op: CoercingUnaryOp,
     ) -> Result<VmStep, RuntimeError> {
         let mut value = materialize_javascript_operand(self.pop_stack()?)?;
         if op.coerces_to_number() {
             value = self
                 .heap
                 .javascript_to_primitive_with_hint(&value, PrimitiveHint::Number)?;
-        } else if op == JavaScriptUnaryOp::ToString {
+        } else if op == CoercingUnaryOp::ToString {
             value = self
                 .heap
                 .javascript_to_primitive_with_hint(&value, PrimitiveHint::String)?;
         }
         self.stack.push(value);
-        self.redispatch_fast(Instruction::JavaScriptUnary(op))
+        self.redispatch_fast(Instruction::CoercingUnary(op))
     }
 
     pub(super) fn execute_javascript_binary(
         &mut self,
-        op: JavaScriptBinaryOp,
+        op: CoercingBinaryOp,
     ) -> Result<(), RuntimeError> {
         let mut right = self.pop_stack()?;
         let mut left = self.pop_stack()?;
@@ -112,7 +112,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if coerce_right && matches!(right, Value::Ref(_)) {
             right = self.javascript_binary_operand_primitive(op, &right)?;
         }
-        if op == JavaScriptBinaryOp::Add {
+        if op == CoercingBinaryOp::Add {
             let left_primitive = self.javascript_binary_operand_primitive(op, &left)?;
             let right_primitive = self.javascript_binary_operand_primitive(op, &right)?;
             if matches!(left_primitive, Value::String(_))
@@ -141,7 +141,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
 
     pub(super) fn prepare_javascript_binary_operands(
         &self,
-        op: JavaScriptBinaryOp,
+        op: CoercingBinaryOp,
         left: Value,
         right: Value,
     ) -> Result<(Value, Value), RuntimeError> {
@@ -162,7 +162,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// hint is its string, so the distinction is observable.
     pub(super) fn javascript_binary_operand_primitive(
         &self,
-        op: JavaScriptBinaryOp,
+        op: CoercingBinaryOp,
         value: &Value,
     ) -> Result<Value, RuntimeError> {
         self.heap
@@ -172,11 +172,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
 
 /// The hint ECMA-262 gives `op`'s ToPrimitive: default for `+` and loose
 /// equality, number for every other operator.
-fn javascript_binary_hint(op: JavaScriptBinaryOp) -> PrimitiveHint {
+fn javascript_binary_hint(op: CoercingBinaryOp) -> PrimitiveHint {
     match op {
-        JavaScriptBinaryOp::Add
-        | JavaScriptBinaryOp::LooseEqual
-        | JavaScriptBinaryOp::LooseNotEqual => PrimitiveHint::Default,
+        CoercingBinaryOp::Add | CoercingBinaryOp::LooseEqual | CoercingBinaryOp::LooseNotEqual => {
+            PrimitiveHint::Default
+        }
         _ => PrimitiveHint::Number,
     }
 }
@@ -186,24 +186,22 @@ fn javascript_binary_hint(op: JavaScriptBinaryOp) -> PrimitiveHint {
 /// ToPrimitive on an inline object, every arithmetic or bitwise operator runs
 /// ToNumber — which reads a text operand whole — and an ordering reads two
 /// texts until they differ.
-fn javascript_binary_work_units(op: JavaScriptBinaryOp, left: &Value, right: &Value) -> usize {
+fn javascript_binary_work_units(op: CoercingBinaryOp, left: &Value, right: &Value) -> usize {
     match op {
-        JavaScriptBinaryOp::LooseEqual | JavaScriptBinaryOp::LooseNotEqual => {
+        CoercingBinaryOp::LooseEqual | CoercingBinaryOp::LooseNotEqual => {
             deep_proportional_units(left).saturating_add(deep_proportional_units(right))
         }
-        JavaScriptBinaryOp::Less
-        | JavaScriptBinaryOp::LessEqual
-        | JavaScriptBinaryOp::Greater
-        | JavaScriptBinaryOp::GreaterEqual => match (left, right) {
+        CoercingBinaryOp::Less
+        | CoercingBinaryOp::LessEqual
+        | CoercingBinaryOp::Greater
+        | CoercingBinaryOp::GreaterEqual => match (left, right) {
             (Value::String(left), Value::String(right)) => left.len().min(right.len()),
             _ => proportional_units(left).saturating_add(proportional_units(right)),
         },
-        JavaScriptBinaryOp::StrictEqual | JavaScriptBinaryOp::StrictNotEqual => {
-            match (left, right) {
-                (Value::String(left), Value::String(right)) => left.len().min(right.len()),
-                _ => 0,
-            }
-        }
+        CoercingBinaryOp::StrictEqual | CoercingBinaryOp::StrictNotEqual => match (left, right) {
+            (Value::String(left), Value::String(right)) => left.len().min(right.len()),
+            _ => 0,
+        },
         _ => proportional_units(left).saturating_add(proportional_units(right)),
     }
 }
@@ -232,13 +230,13 @@ fn javascript_loose_equality_coerces_object(value: &Value) -> bool {
 }
 
 pub(super) fn javascript_binary_operand_coercions(
-    op: JavaScriptBinaryOp,
+    op: CoercingBinaryOp,
     left: &Value,
     right: &Value,
 ) -> (bool, bool) {
     match op {
-        JavaScriptBinaryOp::StrictEqual | JavaScriptBinaryOp::StrictNotEqual => (false, false),
-        JavaScriptBinaryOp::LooseEqual | JavaScriptBinaryOp::LooseNotEqual => (
+        CoercingBinaryOp::StrictEqual | CoercingBinaryOp::StrictNotEqual => (false, false),
+        CoercingBinaryOp::LooseEqual | CoercingBinaryOp::LooseNotEqual => (
             javascript_is_object(left) && javascript_loose_equality_coerces_object(right),
             javascript_is_object(right) && javascript_loose_equality_coerces_object(left),
         ),

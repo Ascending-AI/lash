@@ -17,9 +17,9 @@
 #![allow(dead_code)]
 
 use crate::ast::{
-    AssignPathStep, AssignTarget, AstPath, AstString, CatchClause, Declaration, Expr, FunctionDecl,
-    FunctionExpr, FunctionParam, JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp,
-    LabelMetadata, ProcessDecl, ProcessParam, ProcessSignalDecl, ProcessSignature, ProcessType,
+    AssignPathStep, AssignTarget, AstPath, AstString, CatchClause, CoercingBinaryOp,
+    CoercingUnaryOp, Declaration, Expr, FunctionDecl, FunctionExpr, FunctionParam, LabelMetadata,
+    OperandLogicalOp, ProcessDecl, ProcessParam, ProcessSignalDecl, ProcessSignature, ProcessType,
     Program, ResourceRefExpr, TryExpr, TypeExpr, TypeField,
 };
 use crate::span::Span;
@@ -420,24 +420,24 @@ pub fn index(target: Expr, index: Expr) -> Expr {
     }
 }
 
-pub fn binary(left: Expr, op: JavaScriptBinaryOp, right: Expr) -> Expr {
-    Expr::JavaScriptBinary {
+pub fn binary(left: Expr, op: CoercingBinaryOp, right: Expr) -> Expr {
+    Expr::CoercingBinary {
         left: Box::new(left),
         op,
         right: Box::new(right),
     }
 }
 
-pub fn logical(left: Expr, op: JavaScriptLogicalOp, right: Expr) -> Expr {
-    Expr::JavaScriptLogical {
+pub fn logical(left: Expr, op: OperandLogicalOp, right: Expr) -> Expr {
+    Expr::OperandLogical {
         left: Box::new(left),
         op,
         right: Box::new(right),
     }
 }
 
-pub fn unary(op: JavaScriptUnaryOp, expr: Expr) -> Expr {
-    Expr::JavaScriptUnary {
+pub fn unary(op: CoercingUnaryOp, expr: Expr) -> Expr {
+    Expr::CoercingUnary {
         op,
         expr: Box::new(expr),
     }
@@ -555,10 +555,10 @@ pub fn function_call(name: &str, args: Vec<Expr>) -> Expr {
     }
 }
 
-/// `left.concat(right)` — the `__typescript_stdlib` shape TypeScript lowering
+/// `left.concat(right)` — the `__lashlang_stdlib` shape TypeScript lowering
 /// emits for `Array.prototype.concat`.
 pub fn concat(left: Expr, right: Expr) -> Expr {
-    builtin("__typescript_stdlib", vec![string("concat"), left, right])
+    builtin("__lashlang_stdlib", vec![string("concat"), left, right])
 }
 
 /// `items.map(<param> => <body>)` — the `Expr::Map` shape TypeScript lowering

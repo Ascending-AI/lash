@@ -26,7 +26,7 @@ impl Printer<'_> {
             if indexes.last().is_some_and(|previous| *previous >= index) {
                 return Err(malformed("hole indexes are not strictly increasing"));
             }
-            if !matches!(values[index], Expr::Undefined) {
+            if !matches!(values[index], Expr::Absent) {
                 return Err(malformed("hole placeholder is not undefined"));
             }
             indexes.push(index);

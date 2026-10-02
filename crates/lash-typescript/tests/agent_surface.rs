@@ -1589,11 +1589,11 @@ fn durable_process_resumes_after_shared_promise_batch() {
 }
 
 fn contains_return(expr: &Expr) -> bool {
-    matches!(expr, Expr::Return(_)) || expr.children().any(contains_return)
+    matches!(expr, Expr::FunctionReturn(_)) || expr.children().any(contains_return)
 }
 
 fn contains_aggregate_await(expr: &Expr, unwrap: bool) -> bool {
-    matches!(expr, Expr::BuiltinCall { name, args } if name.as_str() == "__typescript_await_array" && matches!(args.last(), Some(Expr::String(method)) if (method.as_ref() == "allSettled") != unwrap))
+    matches!(expr, Expr::BuiltinCall { name, args } if name.as_str() == "__lashlang_await_array" && matches!(args.last(), Some(Expr::String(method)) if (method.as_ref() == "allSettled") != unwrap))
         || expr
             .children()
             .any(|child| contains_aggregate_await(child, unwrap))

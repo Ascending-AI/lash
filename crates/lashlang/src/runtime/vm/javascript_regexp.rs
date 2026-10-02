@@ -6,9 +6,9 @@ use crate::runtime::{
     javascript_string_size_error, javascript_to_uint32,
 };
 
-pub const TYPESCRIPT_REGEXP_MAX_PATTERN_CODE_UNITS: usize = 4_096;
-pub const TYPESCRIPT_REGEXP_MAX_NESTING: usize = 32;
-pub const TYPESCRIPT_REGEXP_EXECUTION_FUEL: u64 = 1_000_000;
+pub const REGEXP_MAX_PATTERN_CODE_UNITS: usize = 4_096;
+pub const REGEXP_MAX_NESTING: usize = 32;
+pub const REGEXP_EXECUTION_FUEL: u64 = 1_000_000;
 
 /// How much regexp fuel one unit of the instruction budget buys.
 ///
@@ -24,10 +24,10 @@ pub const TYPESCRIPT_REGEXP_EXECUTION_FUEL: u64 = 1_000_000;
 /// makes one call cost 100 instructions — steep enough to bound the
 /// amplification at ten thousand rather than a million, cheap enough that a
 /// cell which uses regexps at all stays affordable.
-pub const TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION: u64 = 10_000;
+pub const REGEXP_FUEL_PER_INSTRUCTION: u64 = 10_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TypeScriptRegExpValidationError {
+pub enum RegExpValidationError {
     PatternTooLong,
     PatternTooDeep,
     InvalidFlags,
@@ -35,7 +35,7 @@ pub enum TypeScriptRegExpValidationError {
     InvalidPattern,
 }
 
-impl TypeScriptRegExpValidationError {
+impl RegExpValidationError {
     pub const fn diagnostic_code(self) -> &'static str {
         match self {
             Self::PatternTooLong => "TS_REGEX_PATTERN_TOO_LONG",
@@ -48,18 +48,15 @@ impl TypeScriptRegExpValidationError {
     }
 }
 
-pub fn validate_typescript_regexp(
-    pattern: &str,
-    flags: &str,
-) -> Result<(), TypeScriptRegExpValidationError> {
+pub fn validate_regexp(pattern: &str, flags: &str) -> Result<(), RegExpValidationError> {
     validate_regexp_flags(flags)?;
-    validate_typescript_regexp_shape(pattern)?;
+    validate_regexp_shape(pattern)?;
     compile_regexp(pattern, flags)
         .map(|_| ())
-        .map_err(|_| TypeScriptRegExpValidationError::InvalidPattern)
+        .map_err(|_| RegExpValidationError::InvalidPattern)
 }
 
-fn validate_regexp_flags(flags: &str) -> Result<(), TypeScriptRegExpValidationError> {
+fn validate_regexp_flags(flags: &str) -> Result<(), RegExpValidationError> {
     let mut seen = [false; 6];
     for flag in flags.chars() {
         let index = match flag {
@@ -69,22 +66,20 @@ fn validate_regexp_flags(flags: &str) -> Result<(), TypeScriptRegExpValidationEr
             's' => 3,
             'u' => 4,
             'y' => 5,
-            'd' | 'v' => return Err(TypeScriptRegExpValidationError::UnsupportedFlag(flag)),
-            _ => return Err(TypeScriptRegExpValidationError::InvalidFlags),
+            'd' | 'v' => return Err(RegExpValidationError::UnsupportedFlag(flag)),
+            _ => return Err(RegExpValidationError::InvalidFlags),
         };
         if seen[index] {
-            return Err(TypeScriptRegExpValidationError::InvalidFlags);
+            return Err(RegExpValidationError::InvalidFlags);
         }
         seen[index] = true;
     }
     Ok(())
 }
 
-pub fn validate_typescript_regexp_shape(
-    pattern: &str,
-) -> Result<(), TypeScriptRegExpValidationError> {
-    if pattern.encode_utf16().count() > TYPESCRIPT_REGEXP_MAX_PATTERN_CODE_UNITS {
-        return Err(TypeScriptRegExpValidationError::PatternTooLong);
+pub fn validate_regexp_shape(pattern: &str) -> Result<(), RegExpValidationError> {
+    if pattern.encode_utf16().count() > REGEXP_MAX_PATTERN_CODE_UNITS {
+        return Err(RegExpValidationError::PatternTooLong);
     }
     let mut depth = 0_usize;
     let mut escaped = false;
@@ -100,8 +95,8 @@ pub fn validate_typescript_regexp_shape(
             ']' if in_class => in_class = false,
             '(' if !in_class => {
                 depth += 1;
-                if depth > TYPESCRIPT_REGEXP_MAX_NESTING {
-                    return Err(TypeScriptRegExpValidationError::PatternTooDeep);
+                if depth > REGEXP_MAX_NESTING {
+                    return Err(RegExpValidationError::PatternTooDeep);
                 }
             }
             ')' if !in_class => depth = depth.saturating_sub(1),
@@ -151,11 +146,11 @@ pub(super) fn collect_regress_match(
 ) -> Result<CapturedMatch, RuntimeError> {
     found.map(CapturedMatch::from).map_err(|error| match error {
         lash_regress::MatchError::Exhausted => RuntimeError::RegExpBudgetExceeded {
-            limit: TYPESCRIPT_REGEXP_EXECUTION_FUEL,
+            limit: REGEXP_EXECUTION_FUEL,
         },
         // Future matcher failures must stop execution just like exhausted fuel.
         _ => RuntimeError::RegExpBudgetExceeded {
-            limit: TYPESCRIPT_REGEXP_EXECUTION_FUEL,
+            limit: REGEXP_EXECUTION_FUEL,
         },
     })
 }
@@ -339,7 +334,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
         };
         if let Err(error) =
-            validate_regexp_flags(&flags).and_then(|()| validate_typescript_regexp_shape(&pattern))
+            validate_regexp_flags(&flags).and_then(|()| validate_regexp_shape(&pattern))
         {
             return Err(self.regexp_syntax_error(error, &pattern, &flags, None));
         }
@@ -347,7 +342,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         self.charge_intrinsic_work(pattern.encode_utf16().count());
         let program = compile_regexp(&pattern, &flags).map_err(|error| {
             self.regexp_syntax_error(
-                TypeScriptRegExpValidationError::InvalidPattern,
+                RegExpValidationError::InvalidPattern,
                 &pattern,
                 &flags,
                 Some(&error.to_string()),
@@ -364,19 +359,19 @@ impl<H: ExecutionHost> Vm<'_, H> {
 
     fn regexp_syntax_error(
         &mut self,
-        error: TypeScriptRegExpValidationError,
+        error: RegExpValidationError,
         pattern: &str,
         flags: &str,
         detail: Option<&str>,
     ) -> RuntimeError {
         let message = match error {
-            TypeScriptRegExpValidationError::PatternTooLong => format!(
-                "TS_REGEX_PATTERN_TOO_LONG: Invalid regular expression: /{pattern}/: pattern exceeds {TYPESCRIPT_REGEXP_MAX_PATTERN_CODE_UNITS} UTF-16 code units; split the pattern into smaller expressions"
+            RegExpValidationError::PatternTooLong => format!(
+                "TS_REGEX_PATTERN_TOO_LONG: Invalid regular expression: /{pattern}/: pattern exceeds {REGEXP_MAX_PATTERN_CODE_UNITS} UTF-16 code units; split the pattern into smaller expressions"
             ),
-            TypeScriptRegExpValidationError::PatternTooDeep => format!(
-                "TS_REGEX_PATTERN_NESTING_LIMIT: Invalid regular expression: /{pattern}/: pattern nesting exceeds {TYPESCRIPT_REGEXP_MAX_NESTING}; split the pattern into smaller expressions"
+            RegExpValidationError::PatternTooDeep => format!(
+                "TS_REGEX_PATTERN_NESTING_LIMIT: Invalid regular expression: /{pattern}/: pattern nesting exceeds {REGEXP_MAX_NESTING}; split the pattern into smaller expressions"
             ),
-            TypeScriptRegExpValidationError::UnsupportedFlag(flag) => {
+            RegExpValidationError::UnsupportedFlag(flag) => {
                 let repair = if flag == 'd' {
                     "; remove `d` and use match.index plus capture lengths"
                 } else {
@@ -384,13 +379,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 };
                 format!(
                     "{}: Invalid flags supplied to RegExp constructor '{flags}'",
-                    TypeScriptRegExpValidationError::UnsupportedFlag(flag).diagnostic_code()
+                    RegExpValidationError::UnsupportedFlag(flag).diagnostic_code()
                 ) + repair
             }
-            TypeScriptRegExpValidationError::InvalidFlags => {
+            RegExpValidationError::InvalidFlags => {
                 format!("Invalid flags supplied to RegExp constructor '{flags}'")
             }
-            TypeScriptRegExpValidationError::InvalidPattern => detail.map_or_else(
+            RegExpValidationError::InvalidPattern => detail.map_or_else(
                 || format!("Invalid regular expression: /{pattern}/"),
                 |detail| {
                     format!(
@@ -436,7 +431,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         self.charge_intrinsic_work(pattern.encode_utf16().count());
         let program = compile_regexp(&pattern, &flags).map_err(|_| {
             self.regexp_syntax_error(
-                TypeScriptRegExpValidationError::InvalidPattern,
+                RegExpValidationError::InvalidPattern,
                 &pattern,
                 &flags,
                 None,
@@ -505,10 +500,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// for the whole allowance first: the allowance is spent the moment it is
     /// handed out, so the link holds even for a match that never returns.
     pub(super) fn grant_regexp_fuel(&mut self) -> u64 {
-        self.instructions_executed = self.instructions_executed.saturating_add(
-            TYPESCRIPT_REGEXP_EXECUTION_FUEL.div_ceil(TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION),
-        );
-        TYPESCRIPT_REGEXP_EXECUTION_FUEL
+        self.instructions_executed = self
+            .instructions_executed
+            .saturating_add(REGEXP_EXECUTION_FUEL.div_ceil(REGEXP_FUEL_PER_INSTRUCTION));
+        REGEXP_EXECUTION_FUEL
     }
 
     pub(super) fn first_regexp_match(
@@ -544,11 +539,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
         .map_err(|error| match error {
             lash_regress::MatchError::Exhausted => RuntimeError::RegExpBudgetExceeded {
-                limit: TYPESCRIPT_REGEXP_EXECUTION_FUEL,
+                limit: REGEXP_EXECUTION_FUEL,
             },
             // Future matcher failures must stop execution just like exhausted fuel.
             _ => RuntimeError::RegExpBudgetExceeded {
-                limit: TYPESCRIPT_REGEXP_EXECUTION_FUEL,
+                limit: REGEXP_EXECUTION_FUEL,
             },
         })?
         .map(CapturedMatch::from);
@@ -864,11 +859,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if units.is_empty() {
             let found = matches.next().transpose().map_err(|error| match error {
                 lash_regress::MatchError::Exhausted => RuntimeError::RegExpBudgetExceeded {
-                    limit: TYPESCRIPT_REGEXP_EXECUTION_FUEL,
+                    limit: REGEXP_EXECUTION_FUEL,
                 },
                 // Future matcher failures must stop execution just like exhausted fuel.
                 _ => RuntimeError::RegExpBudgetExceeded {
-                    limit: TYPESCRIPT_REGEXP_EXECUTION_FUEL,
+                    limit: REGEXP_EXECUTION_FUEL,
                 },
             })?;
             return Ok(Value::List(

@@ -875,7 +875,7 @@ mod continuation_serde {
                 flags,
                 last_index,
             } => {
-                crate::runtime::validate_typescript_regexp(&pattern, &flags)
+                crate::runtime::validate_regexp(&pattern, &flags)
                     .map_err(|_| "RegExp pattern or flags violate TypeScript bounds")?;
                 HeapObject::RegExp(RegExpObject {
                     pattern,

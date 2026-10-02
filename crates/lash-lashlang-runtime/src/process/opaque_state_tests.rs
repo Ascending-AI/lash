@@ -56,7 +56,7 @@ async fn parked_regexp_continuation() -> Vec<u8> {
         b::assign(
             "pattern",
             b::builtin(
-                "__typescript_heap_new",
+                "__lashlang_heap_new",
                 vec![b::string("RegExp"), b::string("ab+c"), b::string("")],
             ),
         ),
@@ -89,7 +89,7 @@ async fn parent_state_decode_never_compiles_regexp() {
     let bytes = parked_regexp_continuation().await;
     let text = String::from_utf8(bytes.clone()).expect("the continuation wire is JSON text");
     assert!(text.contains("\"ab+c\""), "the witness parks its RegExp");
-    // An unbalanced group: `validate_typescript_regexp` refuses it.
+    // An unbalanced group: `validate_regexp` refuses it.
     let poisoned = text.replacen("\"ab+c\"", "\"ab+(c\"", 1).into_bytes();
 
     let process_id = lash_sansio::ProcessId::fixture("regexp-witness");

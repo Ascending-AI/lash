@@ -437,7 +437,7 @@ mod validation_tests {
                 _ => None,
             })
             .expect("fixture contains a terminal node");
-        *terminal = Expr::Return(Box::new(Expr::Number(1.0)));
+        *terminal = Expr::FunctionReturn(Box::new(Expr::Number(1.0)));
         graph
     }
 
@@ -905,7 +905,7 @@ fn splice_at(
             Expr::Block(statements) => statements,
             other => vec![other],
         };
-        statements.push(Expr::Undefined);
+        statements.push(Expr::Absent);
         let body = Expr::Role {
             role: lashlang::StructuralRole::Completion,
             expr: Box::new(Expr::Block(statements)),
@@ -950,7 +950,7 @@ fn splice_at(
             Expr::Block(statements) => statements,
             other => vec![other],
         };
-        statements.push(Expr::Undefined);
+        statements.push(Expr::Absent);
         let body = Expr::Role {
             role: lashlang::StructuralRole::Completion,
             expr: Box::new(Expr::Block(statements)),
@@ -1096,7 +1096,7 @@ fn node_to_expr(node: &WorkflowNode, context: RenderContext<'_>) -> Result<Expr,
                     (terminal, &expression),
                     (
                         WorkflowTerminalKind::Finish,
-                        Expr::Finish(_) | Expr::Return(_)
+                        Expr::Finish(_) | Expr::FunctionReturn(_)
                     ) | (WorkflowTerminalKind::Fail, Expr::Fail(_))
                 );
                 if !valid {

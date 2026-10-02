@@ -88,8 +88,8 @@ pub fn index(target: Expr, index: Expr) -> Expr {
 }
 
 pub fn add(left: Expr, right: Expr) -> Expr {
-    Expr::JavaScriptBinary {
-        op: lashlang::JavaScriptBinaryOp::Add,
+    Expr::CoercingBinary {
+        op: lashlang::CoercingBinaryOp::Add,
         left: Box::new(left),
         right: Box::new(right),
     }

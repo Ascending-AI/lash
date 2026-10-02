@@ -178,7 +178,7 @@ pub(super) fn journaled_runtime_call(operation: &str) -> LashExpr {
 }
 
 pub(super) fn all_settled_results(items: LashExpr) -> LashExpr {
-    let result_name = format!("{GENERATED_BINDING_PREFIX}settled");
+    let result_name = format!("{LOWERED_BINDING_PREFIX}settled");
     let result = || LashExpr::Variable(result_name.as_str().into());
     let field = |name: &str| LashExpr::Field {
         target: Box::new(result()),
@@ -209,7 +209,7 @@ pub(super) fn all_settled_results(items: LashExpr) -> LashExpr {
                     (
                         "reason".into(),
                         LashExpr::BuiltinCall {
-                            name: "__typescript_heap_new".into(),
+                            name: "__lashlang_heap_new".into(),
                             args: vec![
                                 LashExpr::String("EffectError".into()),
                                 field("error"),
@@ -257,7 +257,7 @@ impl Lowerer {
                 expr: Box::new(self.lower_expr(value)?),
             },
             LashExpr::Throw(Box::new(LashExpr::BuiltinCall {
-                name: "__typescript_heap_new".into(),
+                name: "__lashlang_heap_new".into(),
                 args: vec![
                     LashExpr::String("TypeError".into()),
                     LashExpr::String(
@@ -291,7 +291,7 @@ impl Lowerer {
                 expr: Box::new(self.lower_expr(value)?),
             },
             LashExpr::Throw(Box::new(LashExpr::BuiltinCall {
-                name: "__typescript_heap_new".into(),
+                name: "__lashlang_heap_new".into(),
                 args: vec![
                     LashExpr::String("TypeError".into()),
                     LashExpr::String(
@@ -347,22 +347,22 @@ pub(super) fn require_object_coercible(input: &str) -> LashExpr {
     ]
     .into_iter()
     .fold(LashExpr::String("Cannot destructure '".into()), js_add);
-    let is = |value: LashExpr| LashExpr::JavaScriptBinary {
+    let is = |value: LashExpr| LashExpr::CoercingBinary {
         left: Box::new(LashExpr::Variable(input.into())),
-        op: JavaScriptBinaryOp::StrictEqual,
+        op: CoercingBinaryOp::StrictEqual,
         right: Box::new(value),
     };
     LashExpr::If {
-        condition: Box::new(LashExpr::JavaScriptLogical {
+        condition: Box::new(LashExpr::OperandLogical {
             left: Box::new(is(LashExpr::Null)),
-            op: JavaScriptLogicalOp::Or,
-            right: Box::new(is(LashExpr::Undefined)),
+            op: OperandLogicalOp::Or,
+            right: Box::new(is(LashExpr::Absent)),
         }),
         then_block: Box::new(LashExpr::Throw(Box::new(LashExpr::BuiltinCall {
-            name: "__typescript_heap_new".into(),
+            name: "__lashlang_heap_new".into(),
             args: vec![LashExpr::String("TypeError".into()), message],
         }))),
-        else_block: Box::new(LashExpr::Undefined),
+        else_block: Box::new(LashExpr::Absent),
     }
 }
 

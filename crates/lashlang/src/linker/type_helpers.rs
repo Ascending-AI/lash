@@ -274,7 +274,7 @@ fn type_has_field(ty: &TypeExpr, field: &str) -> bool {
 pub(super) fn literal_type(expr: &Expr) -> TypeExpr {
     match expr {
         Expr::Null => TypeExpr::Null,
-        Expr::Undefined => TypeExpr::Any,
+        Expr::Absent => TypeExpr::Any,
         Expr::Bool(_) => TypeExpr::Bool,
         Expr::Number(value) if value.is_finite() && value.fract() == 0.0 => TypeExpr::Int,
         Expr::Number(_) => TypeExpr::Float,
@@ -711,7 +711,7 @@ mod tests {
         assert!(!type_has_field(&TypeExpr::Int, "field"));
         for (expr, expected) in [
             (Expr::Null, TypeExpr::Null),
-            (Expr::Undefined, TypeExpr::Any),
+            (Expr::Absent, TypeExpr::Any),
             (Expr::Break, TypeExpr::Null),
             (Expr::Continue, TypeExpr::Null),
             (

@@ -1,5 +1,5 @@
 use super::*;
-use crate::ast::{JavaScriptBinaryOp, JavaScriptUnaryOp};
+use crate::ast::{CoercingBinaryOp, CoercingUnaryOp};
 
 /// The lashlang spelling of the language-operation parity fixture, kept as the
 /// label the divergence assertions quote.
@@ -955,21 +955,14 @@ async fn projected_values_match_normal_values_for_language_operations() {
                         ),
                         (
                             "plus",
-                            builders::binary(
-                                record_a(),
-                                JavaScriptBinaryOp::Add,
-                                builders::num(1.0),
-                            ),
+                            builders::binary(record_a(), CoercingBinaryOp::Add, builders::num(1.0)),
                         ),
-                        (
-                            "neg",
-                            builders::unary(JavaScriptUnaryOp::Negate, record_a()),
-                        ),
+                        ("neg", builders::unary(CoercingUnaryOp::Negate, record_a())),
                         (
                             "cmp",
                             builders::binary(
                                 record_a(),
-                                JavaScriptBinaryOp::Less,
+                                CoercingBinaryOp::Less,
                                 builders::field(input("record"), "b"),
                             ),
                         ),
@@ -1023,7 +1016,7 @@ async fn projected_values_match_normal_values_for_ranges_validation_and_iteratio
                         "total",
                         builders::binary(
                             builders::var("total"),
-                            JavaScriptBinaryOp::Add,
+                            CoercingBinaryOp::Add,
                             builders::var("i"),
                         ),
                     )]),

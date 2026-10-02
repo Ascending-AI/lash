@@ -175,114 +175,114 @@ pub(crate) const SOURCE_BUILTINS: &[Builtin] = &[
     },
 ];
 
-// Dialect-private intrinsics. They are registered here so the shared linker,
+// Reserved IR intrinsics. They are registered here so the shared linker,
 // compiler, runtime arity diagnostics, and profiler agree on the call
 // contract; source Lashlang cannot spell or discover the reserved names.
-pub(crate) const TYPESCRIPT_BUILTINS: &[Builtin] = &[
+pub(crate) const IR_INTRINSICS: &[Builtin] = &[
     Builtin {
-        name: "__typescript_split",
+        name: "__lashlang_split",
         arity: Arity::Exact(2),
     },
     Builtin {
-        name: "__typescript_join",
+        name: "__lashlang_join",
         arity: Arity::Exact(2),
     },
     Builtin {
-        name: "__typescript_stdlib",
+        name: "__lashlang_stdlib",
         arity: Arity::AtLeast(1),
     },
     Builtin {
-        name: "__typescript_heap_new",
+        name: "__lashlang_heap_new",
         arity: Arity::AtLeast(1),
     },
     Builtin {
-        name: "__typescript_heap_instanceof",
+        name: "__lashlang_heap_instanceof",
         arity: Arity::Exact(2),
     },
     Builtin {
-        name: "__typescript_heap_delete_member",
+        name: "__lashlang_heap_delete_member",
         arity: Arity::Exact(2),
     },
     Builtin {
-        name: "__typescript_regexp",
+        name: "__lashlang_regexp",
         arity: Arity::AtLeast(1),
     },
     Builtin {
-        name: "__typescript_global_delete",
+        name: "__lashlang_global_delete",
         arity: Arity::Exact(1),
     },
     Builtin {
-        name: "__typescript_global_get",
+        name: "__lashlang_global_get",
         arity: Arity::Exact(1),
     },
     Builtin {
-        name: "__typescript_global_has",
+        name: "__lashlang_global_has",
         arity: Arity::Exact(1),
     },
     Builtin {
-        name: "__typescript_call_dynamic",
+        name: "__lashlang_call_dynamic",
         arity: Arity::Exact(2),
     },
     Builtin {
-        name: "__typescript_call_method_dynamic",
+        name: "__lashlang_call_method_dynamic",
         arity: Arity::Exact(3),
     },
     Builtin {
-        name: "__typescript_pending_tool",
+        name: "__lashlang_pending_tool",
         arity: Arity::Exact(1),
     },
     Builtin {
-        name: "__typescript_pending_timer",
+        name: "__lashlang_pending_timer",
         arity: Arity::Exact(1),
     },
     Builtin {
-        name: "__typescript_await_array",
+        name: "__lashlang_await_array",
         arity: Arity::Exact(2),
     },
     Builtin {
-        name: "__typescript_await_pending",
+        name: "__lashlang_await_pending",
         arity: Arity::Exact(1),
     },
     Builtin {
-        name: "__typescript_async_map",
+        name: "__lashlang_async_map",
         arity: Arity::Exact(2),
     },
     Builtin {
-        name: "__typescript_closure",
+        name: "__lashlang_closure",
         arity: Arity::Exact(3),
     },
     Builtin {
-        name: "__typescript_global_set",
+        name: "__lashlang_global_set",
         arity: Arity::Exact(2),
     },
     // Binding cells (FIG-3707): a captured binding that something assigns
     // lives in one cell the owning frame and every closure over it share.
     Builtin {
-        name: "__typescript_cell_new",
+        name: "__lashlang_cell_new",
         arity: Arity::Exact(1),
     },
     Builtin {
-        name: "__typescript_cell_get",
+        name: "__lashlang_cell_get",
         arity: Arity::Exact(1),
     },
     Builtin {
-        name: "__typescript_cell_set",
+        name: "__lashlang_cell_set",
         arity: Arity::Exact(2),
     },
     Builtin {
-        name: "__typescript_encode_uri_component",
+        name: "__lashlang_encode_uri_component",
         arity: Arity::Exact(1),
     },
     Builtin {
-        name: "__typescript_decode_uri_component",
+        name: "__lashlang_decode_uri_component",
         arity: Arity::Exact(1),
     },
     Builtin {
-        name: "__typescript_encode_uri",
+        name: "__lashlang_encode_uri",
         arity: Arity::Exact(1),
     },
     Builtin {
-        name: "__typescript_decode_uri",
+        name: "__lashlang_decode_uri",
         arity: Arity::Exact(1),
     },
 ];
@@ -291,7 +291,7 @@ pub(crate) const TYPESCRIPT_BUILTINS: &[Builtin] = &[
 pub(crate) fn lookup(name: &str) -> Option<Builtin> {
     SOURCE_BUILTINS
         .iter()
-        .chain(TYPESCRIPT_BUILTINS)
+        .chain(IR_INTRINSICS)
         .copied()
         .find(|builtin| builtin.name == name)
 }
@@ -309,32 +309,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn typescript_intrinsics_are_registered_but_not_advertised() {
+    fn intrinsic_names_are_dialect_neutral() {
+        for builtin in IR_INTRINSICS {
+            let name = builtin.name.to_ascii_lowercase();
+            assert!(
+                !name.contains("typescript") && !name.contains("javascript"),
+                "intrinsic name carries its producer dialect: {}",
+                builtin.name
+            );
+        }
+    }
+
+    #[test]
+    fn ir_intrinsics_are_registered_but_not_advertised() {
         let advertised = names().collect::<Vec<_>>();
         for (name, arity) in [
-            ("__typescript_heap_instanceof", Arity::Exact(2)),
-            ("__typescript_heap_delete_member", Arity::Exact(2)),
-            ("__typescript_regexp", Arity::AtLeast(1)),
-            ("__typescript_global_delete", Arity::Exact(1)),
-            ("__typescript_global_get", Arity::Exact(1)),
-            ("__typescript_global_has", Arity::Exact(1)),
-            ("__typescript_call_dynamic", Arity::Exact(2)),
-            ("__typescript_call_method_dynamic", Arity::Exact(3)),
-            ("__typescript_async_map", Arity::Exact(2)),
-            ("__typescript_closure", Arity::Exact(3)),
-            ("__typescript_global_set", Arity::Exact(2)),
-            ("__typescript_cell_new", Arity::Exact(1)),
-            ("__typescript_cell_get", Arity::Exact(1)),
-            ("__typescript_cell_set", Arity::Exact(2)),
-            ("__typescript_encode_uri_component", Arity::Exact(1)),
-            ("__typescript_decode_uri_component", Arity::Exact(1)),
-            ("__typescript_encode_uri", Arity::Exact(1)),
-            ("__typescript_decode_uri", Arity::Exact(1)),
+            ("__lashlang_heap_instanceof", Arity::Exact(2)),
+            ("__lashlang_heap_delete_member", Arity::Exact(2)),
+            ("__lashlang_regexp", Arity::AtLeast(1)),
+            ("__lashlang_global_delete", Arity::Exact(1)),
+            ("__lashlang_global_get", Arity::Exact(1)),
+            ("__lashlang_global_has", Arity::Exact(1)),
+            ("__lashlang_call_dynamic", Arity::Exact(2)),
+            ("__lashlang_call_method_dynamic", Arity::Exact(3)),
+            ("__lashlang_async_map", Arity::Exact(2)),
+            ("__lashlang_closure", Arity::Exact(3)),
+            ("__lashlang_global_set", Arity::Exact(2)),
+            ("__lashlang_cell_new", Arity::Exact(1)),
+            ("__lashlang_cell_get", Arity::Exact(1)),
+            ("__lashlang_cell_set", Arity::Exact(2)),
+            ("__lashlang_encode_uri_component", Arity::Exact(1)),
+            ("__lashlang_decode_uri_component", Arity::Exact(1)),
+            ("__lashlang_encode_uri", Arity::Exact(1)),
+            ("__lashlang_decode_uri", Arity::Exact(1)),
         ] {
             assert_eq!(lookup(name).map(|builtin| builtin.arity), Some(arity));
             assert!(!advertised.contains(&name));
         }
-        assert!(lookup("__typescript_btoa").is_none());
-        assert!(lookup("__typescript_atob").is_none());
+        assert!(lookup("__lashlang_btoa").is_none());
+        assert!(lookup("__lashlang_atob").is_none());
     }
 }

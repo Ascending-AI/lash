@@ -1,11 +1,11 @@
 use compact_str::ToCompactString;
 use lashlang::{
-    AbilityOp, AbilityOutcome, AssignTarget, Declaration, ExecutionHost, ExecutionHostError,
-    ExecutionMode, Expr, FunctionExpr, HostDescriptor, ImageValue, JavaScriptBinaryOp,
-    JavaScriptLogicalOp, JavaScriptUnaryOp, LashlangAbilities, LashlangHostCatalog,
-    LashlangHostEnvironment, LinkedModule, ListValue, Program, ProjectedBindings,
-    ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record,
-    State, TypeExpr, TypeField, Value, from_json,
+    AbilityOp, AbilityOutcome, AssignTarget, CoercingBinaryOp, CoercingUnaryOp, Declaration,
+    ExecutionHost, ExecutionHostError, ExecutionMode, Expr, FunctionExpr, HostDescriptor,
+    ImageValue, LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, LinkedModule,
+    ListValue, OperandLogicalOp, Program, ProjectedBindings, ProjectedHostDescriptor,
+    ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record, State, TypeExpr,
+    TypeField, Value, from_json,
 };
 use std::fmt;
 use std::sync::{Arc, OnceLock};
@@ -174,9 +174,9 @@ pub fn function_benchmark_program(scenario: FunctionScenario) -> Program {
                     None,
                     &["value"],
                     &[],
-                    Expr::JavaScriptBinary {
+                    Expr::CoercingBinary {
                         left: Box::new(ast_variable("value")),
-                        op: JavaScriptBinaryOp::Add,
+                        op: CoercingBinaryOp::Add,
                         right: Box::new(Expr::Number(1.0)),
                     },
                 ),
@@ -194,9 +194,9 @@ pub fn function_benchmark_program(scenario: FunctionScenario) -> Program {
                     None,
                     &["value"],
                     &["offset"],
-                    Expr::JavaScriptBinary {
+                    Expr::CoercingBinary {
                         left: Box::new(ast_variable("value")),
-                        op: JavaScriptBinaryOp::Add,
+                        op: CoercingBinaryOp::Add,
                         right: Box::new(Expr::Index {
                             target: Box::new(ast_variable("offset")),
                             index: Box::new(Expr::Number(0.0)),
@@ -221,9 +221,9 @@ pub fn function_benchmark_program(scenario: FunctionScenario) -> Program {
             };
             let recurse = ast_call(
                 ast_variable("countdown"),
-                vec![Expr::JavaScriptBinary {
+                vec![Expr::CoercingBinary {
                     left: Box::new(ast_variable("n")),
-                    op: JavaScriptBinaryOp::Subtract,
+                    op: CoercingBinaryOp::Subtract,
                     right: Box::new(Expr::Number(1.0)),
                 }],
             );
@@ -240,9 +240,9 @@ pub fn function_benchmark_program(scenario: FunctionScenario) -> Program {
                         &["n"],
                         &[],
                         Expr::If {
-                            condition: Box::new(Expr::JavaScriptBinary {
+                            condition: Box::new(Expr::CoercingBinary {
                                 left: Box::new(ast_variable("n")),
-                                op: JavaScriptBinaryOp::LessEqual,
+                                op: CoercingBinaryOp::LessEqual,
                                 right: Box::new(Expr::Number(0.0)),
                             }),
                             then_block: Box::new(terminal),
@@ -270,9 +270,9 @@ pub fn function_benchmark_program(scenario: FunctionScenario) -> Program {
                         None,
                         &["value"],
                         &[],
-                        Expr::JavaScriptBinary {
+                        Expr::CoercingBinary {
                             left: Box::new(ast_variable("value")),
-                            op: JavaScriptBinaryOp::Add,
+                            op: CoercingBinaryOp::Add,
                             right: Box::new(Expr::Number(1.0)),
                         },
                     ),

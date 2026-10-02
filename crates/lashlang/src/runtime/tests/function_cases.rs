@@ -46,22 +46,22 @@ fn format_call(template: &str, args: Vec<Expr>) -> Expr {
 fn factorial_program(n: f64) -> Program {
     let recursive = call(
         variable("factorial"),
-        vec![Expr::JavaScriptBinary {
+        vec![Expr::CoercingBinary {
             left: Box::new(variable("n")),
-            op: JavaScriptBinaryOp::Subtract,
+            op: CoercingBinaryOp::Subtract,
             right: Box::new(Expr::Number(1.0)),
         }],
     );
     let body = Expr::If {
-        condition: Box::new(Expr::JavaScriptBinary {
+        condition: Box::new(Expr::CoercingBinary {
             left: Box::new(variable("n")),
-            op: JavaScriptBinaryOp::LessEqual,
+            op: CoercingBinaryOp::LessEqual,
             right: Box::new(Expr::Number(1.0)),
         }),
         then_block: Box::new(Expr::Number(1.0)),
-        else_block: Box::new(Expr::JavaScriptBinary {
+        else_block: Box::new(Expr::CoercingBinary {
             left: Box::new(variable("n")),
-            op: JavaScriptBinaryOp::Multiply,
+            op: CoercingBinaryOp::Multiply,
             right: Box::new(recursive),
         }),
     };
@@ -81,12 +81,12 @@ async fn user_function_closure_capture_is_deep_by_value_and_recursion_is_stackle
                 None,
                 &["value"],
                 &["captured"],
-                Expr::JavaScriptBinary {
+                Expr::CoercingBinary {
                     left: Box::new(Expr::Index {
                         target: Box::new(variable("captured")),
                         index: Box::new(Expr::Number(0.0)),
                     }),
-                    op: JavaScriptBinaryOp::Add,
+                    op: CoercingBinaryOp::Add,
                     right: Box::new(variable("value")),
                 },
             ),
@@ -123,9 +123,9 @@ async fn builtin_map_reenters_the_flat_vm_and_rejects_effectful_callbacks() {
                 None,
                 &["value"],
                 &[],
-                Expr::JavaScriptBinary {
+                Expr::CoercingBinary {
                     left: Box::new(variable("value")),
-                    op: JavaScriptBinaryOp::Multiply,
+                    op: CoercingBinaryOp::Multiply,
                     right: Box::new(Expr::Number(2.0)),
                 },
             ),
@@ -996,9 +996,9 @@ async fn builtin_callback_continuation_preserves_reentry_and_occurrence_counters
                     None,
                     &["value"],
                     &[],
-                    Expr::JavaScriptBinary {
+                    Expr::CoercingBinary {
                         left: Box::new(variable("value")),
-                        op: JavaScriptBinaryOp::Add,
+                        op: CoercingBinaryOp::Add,
                         right: Box::new(Expr::Number(1.0)),
                     },
                 ),
@@ -1062,9 +1062,9 @@ async fn filter_shaped_callback_parks_inside_the_shared_driver_and_resumes() {
         &["value"],
         &[],
         Expr::If {
-            condition: Box::new(Expr::JavaScriptBinary {
+            condition: Box::new(Expr::CoercingBinary {
                 left: Box::new(variable("value")),
-                op: JavaScriptBinaryOp::Greater,
+                op: CoercingBinaryOp::Greater,
                 right: Box::new(Expr::Number(1.0)),
             }),
             then_block: Box::new(Expr::List(vec![variable("value")])),

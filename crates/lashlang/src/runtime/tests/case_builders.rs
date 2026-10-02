@@ -40,11 +40,11 @@ pub(super) fn finish_program(expr: Expr) -> Program {
 }
 
 /// `finish <left> <op> <right>`
-pub(super) fn finish_binary(left: Expr, op: JavaScriptBinaryOp, right: Expr) -> Program {
+pub(super) fn finish_binary(left: Expr, op: CoercingBinaryOp, right: Expr) -> Program {
     finish_program(builders::binary(left, op, right))
 }
 
 /// `finish <left> <op> <right>` for the short-circuiting logical operators.
-pub(super) fn finish_logical(left: Expr, op: JavaScriptLogicalOp, right: Expr) -> Program {
+pub(super) fn finish_logical(left: Expr, op: OperandLogicalOp, right: Expr) -> Program {
     finish_program(builders::logical(left, op, right))
 }

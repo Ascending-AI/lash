@@ -172,9 +172,9 @@ impl Lowerer {
         self.clear_process_handle_role(name)?;
         Ok(LashExpr::Assign {
             target,
-            expr: Box::new(LashExpr::JavaScriptBinary {
+            expr: Box::new(LashExpr::CoercingBinary {
                 left: Box::new(LashExpr::Variable(self.resolve(name)?.into())),
-                op: JavaScriptBinaryOp::Subtract,
+                op: CoercingBinaryOp::Subtract,
                 right: Box::new(LashExpr::Number(-delta)),
             }),
         })

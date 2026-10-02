@@ -10,11 +10,11 @@
 
 use lashlang::{CatchClause, Expr, StructuralRole, TryExpr};
 
-use super::GENERATED_BINDING_PREFIX;
+use super::LOWERED_BINDING_PREFIX;
 
 /// The generated binding the wrapper catches process failure into.
 fn process_error_binding() -> String {
-    format!("{GENERATED_BINDING_PREFIX}process_error")
+    format!("{LOWERED_BINDING_PREFIX}process_error")
 }
 
 /// `run(...args)` finishes the process with the closure's value, and anything

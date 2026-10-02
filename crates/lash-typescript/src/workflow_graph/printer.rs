@@ -10,17 +10,17 @@
 //!
 //! * A process body in the process-wrapper role prints back as
 //!   `const <name> = async (..) => { .. };`.
-//! * `Print(__typescript_stdlib("__consoleObservationText", ..))` prints back
+//! * `Print(__lashlang_stdlib("__consoleObservationText", ..))` prints back
 //!   as `console.log(..)`, with however many arguments were authored.
-//! * `__typescript_await_array([..], "all")` prints back as
+//! * `__lashlang_await_array([..], "all")` prints back as
 //!   `await Promise.all([..])`, and likewise for `allSettled`, `race` and
-//!   `any`; `__typescript_pending_timer(ms)` prints back as `sleep(ms)`.
+//!   `any`; `__lashlang_pending_timer(ms)` prints back as `sleep(ms)`.
 //! * A collection-transform role prints back as `receiver.<operation>(fn)`.
 //! * An attribute-assignment role prints back as `object.field = value`.
-//! * `__typescript_stdlib("<method>", receiver, ..)`, for a method of the
+//! * `__lashlang_stdlib("<method>", receiver, ..)`, for a method of the
 //!   instance standard-library surface, prints back as
 //!   `receiver.<method>(..)`.
-//! * `__typescript_stdlib("Lash.SparseArray", values, holes)` prints back as
+//! * `__lashlang_stdlib("Lash.SparseArray", values, holes)` prints back as
 //!   an array literal with elisions at the recorded hole positions.
 //! * The default JSON traversal prints back as `JSON.stringify(value)`.
 //! * An iteration whose bind copies the element into one authored binding
@@ -29,15 +29,15 @@
 //! Structure is read off IR forms and structural roles only; no generated
 //! name is ever inspected to decide what a shape is.
 //!
-//! A generated `__typescript_*` binding that reaches the printer without being
+//! A generated `__lashlang_*` binding that reaches the printer without being
 //! re-sugared is a defect, not a rendering choice: it has no authored spelling,
 //! so it is refused with [`TypeScriptSourceError::GeneratedBinding`] rather than
 //! surfaced to a user.
 
 use lashlang::{
-    AssignPathStep, AssignTarget, Declaration, Expr, FunctionDecl, FunctionExpr,
-    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, MethodKey, ProcessDecl,
-    ProcessLiteralExpr, Program, ResourceRefExpr, StructuralRole, TypeExpr,
+    AssignPathStep, AssignTarget, CoercingBinaryOp, CoercingUnaryOp, Declaration, Expr,
+    FunctionDecl, FunctionExpr, MethodKey, OperandLogicalOp, ProcessDecl, ProcessLiteralExpr,
+    Program, ResourceRefExpr, StructuralRole, TypeExpr,
 };
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -59,7 +59,7 @@ use templates::{template_parts, template_text};
 #[cfg(test)]
 use std::cell::Cell;
 
-use crate::GENERATED_BINDING_PREFIX;
+use crate::LOWERED_BINDING_PREFIX;
 use crate::node_label::render_label_comment;
 use crate::signatures::INSTANCE_STDLIB_SIGNATURES;
 
@@ -364,7 +364,7 @@ impl<'p> Printer<'p> {
         let mut count = 0;
         while let Some(Expr::Assign { target, expr }) = statements.get(count).copied() {
             let hoist = target.is_simple()
-                && matches!(expr.as_ref(), Expr::Undefined)
+                && matches!(expr.as_ref(), Expr::Absent)
                 && !bound
                     .iter()
                     .any(|name| name.as_str() == target.root.as_str());
@@ -436,7 +436,7 @@ impl<'p> Printer<'p> {
             }
             // The lowerer's unit completion value. It is not something a user
             // wrote, and `undefined;` is not a statement worth showing.
-            Expr::Undefined => Ok(String::new()),
+            Expr::Absent => Ok(String::new()),
             Expr::LabelAnnotated { label, expr } => {
                 // The label is a one-line doc comment on the statement it
                 // names, which is exactly what a parse reads back into this
@@ -581,7 +581,7 @@ impl<'p> Printer<'p> {
                     // whose else branch holds no nodes renders as an empty
                     // block too, so all three print alike: GetPut would break
                     // if canonical text kept an else the graph cannot hold.
-                    Expr::Undefined => {}
+                    Expr::Absent => {}
                     other if statement_block_contents(other).is_empty() => {}
                     other => {
                         let mut else_bound = bound.clone();
@@ -677,8 +677,8 @@ impl<'p> Printer<'p> {
                 Ok(out)
             }
             Expr::Throw(value) => Ok(format!("{prefix}throw {};\n", self.expression(value)?)),
-            Expr::Return(value) => match value.as_ref() {
-                Expr::Undefined => Ok(format!("{prefix}return;\n")),
+            Expr::FunctionReturn(value) => match value.as_ref() {
+                Expr::Absent => Ok(format!("{prefix}return;\n")),
                 value => Ok(format!("{prefix}return {};\n", self.expression(value)?)),
             },
             Expr::Break => Ok(format!("{prefix}break;\n")),
@@ -766,9 +766,9 @@ impl<'p> Printer<'p> {
     fn for_update(&self, update: &Expr) -> Printed {
         if let Expr::Assign { target, expr } = update
             && target.is_simple()
-            && let Expr::JavaScriptBinary {
+            && let Expr::CoercingBinary {
                 left,
-                op: JavaScriptBinaryOp::Subtract,
+                op: CoercingBinaryOp::Subtract,
                 right,
             } = expr.as_ref()
             && matches!(left.as_ref(), Expr::Variable(name) if name.as_str() == target.root.as_str())
@@ -822,7 +822,7 @@ impl<'p> Printer<'p> {
         }
         match expression {
             Expr::Null => Ok("null".to_string()),
-            Expr::Undefined => Ok("undefined".to_string()),
+            Expr::Absent => Ok("undefined".to_string()),
             Expr::Bool(value) => Ok(value.to_string()),
             Expr::Number(value) => number_literal(*value),
             Expr::String(value) => Ok(string_literal(value.as_str())),
@@ -982,32 +982,32 @@ impl<'p> Printer<'p> {
                 self.member_target(target)?,
                 self.expression(index)?
             )),
-            Expr::JavaScriptUnary { op, expr } => {
+            Expr::CoercingUnary { op, expr } => {
                 let op = match op {
-                    JavaScriptUnaryOp::Plus => "+",
-                    JavaScriptUnaryOp::Negate => "-",
-                    JavaScriptUnaryOp::Not => "!",
-                    JavaScriptUnaryOp::TypeOf => "typeof ",
-                    JavaScriptUnaryOp::BitNot => "~",
-                    JavaScriptUnaryOp::ToString => {
+                    CoercingUnaryOp::Plus => "+",
+                    CoercingUnaryOp::Negate => "-",
+                    CoercingUnaryOp::Not => "!",
+                    CoercingUnaryOp::TypeOf => "typeof ",
+                    CoercingUnaryOp::BitNot => "~",
+                    CoercingUnaryOp::ToString => {
                         return Ok(format!("String({})", self.expression(expr)?));
                     }
                 };
                 Ok(format!("{op}{}", self.unary_operand(expr)?))
             }
-            Expr::JavaScriptBinary { left, op, right } => Ok(format!(
+            Expr::CoercingBinary { left, op, right } => Ok(format!(
                 "({} {} {})",
                 self.binary_operand(left)?,
                 javascript_binary_op(*op),
                 self.binary_operand(right)?
             )),
-            Expr::JavaScriptLogical { left, op, right } => Ok(format!(
+            Expr::OperandLogical { left, op, right } => Ok(format!(
                 "({} {} {})",
                 self.expression(left)?,
                 match op {
-                    JavaScriptLogicalOp::And => "&&",
-                    JavaScriptLogicalOp::Or => "||",
-                    JavaScriptLogicalOp::NullishCoalesce => "??",
+                    OperandLogicalOp::And => "&&",
+                    OperandLogicalOp::Or => "||",
+                    OperandLogicalOp::NullishCoalesce => "??",
                 },
                 self.expression(right)?
             )),
@@ -1044,9 +1044,11 @@ impl<'p> Printer<'p> {
             Expr::Try(_) => Err(TypeScriptSourceError::Unrepresentable {
                 kind: "try/catch in expression position",
             }),
-            Expr::Throw(_) | Expr::Return(_) => Err(TypeScriptSourceError::Unrepresentable {
-                kind: "a jump in expression position",
-            }),
+            Expr::Throw(_) | Expr::FunctionReturn(_) => {
+                Err(TypeScriptSourceError::Unrepresentable {
+                    kind: "a jump in expression position",
+                })
+            }
             // A failed host operation throws in TypeScript, so the unwrap the
             // lowerer wraps every module call in has no spelling of its own.
             Expr::ResultUnwrap(value) => self.expression(value),
@@ -1060,7 +1062,7 @@ impl<'p> Printer<'p> {
     fn sugar(&self, expression: &Expr) -> Result<Option<String>, TypeScriptSourceError> {
         // `await x` on a value that may be a pending promise.
         if let Expr::BuiltinCall { name, args } = expression
-            && name.as_str() == "__typescript_await_pending"
+            && name.as_str() == "__lashlang_await_pending"
             && let [value] = args.as_slice()
         {
             return Ok(Some(format!("await {}", self.unary_operand(value)?)));
@@ -1071,7 +1073,7 @@ impl<'p> Printer<'p> {
             return Ok(Some(format!("console.log({})", self.arguments(args)?)));
         }
         if let Expr::BuiltinCall { name, args } = expression
-            && name.as_str() == "__typescript_await_array"
+            && name.as_str() == "__lashlang_await_array"
             && let [items, Expr::String(method)] = args.as_slice()
         {
             return Ok(Some(format!(
@@ -1080,13 +1082,13 @@ impl<'p> Printer<'p> {
             )));
         }
         if let Expr::BuiltinCall { name, args } = expression
-            && name.as_str() == "__typescript_pending_timer"
+            && name.as_str() == "__lashlang_pending_timer"
             && let [duration] = args.as_slice()
         {
             return Ok(Some(format!("sleep({})", self.expression(duration)?)));
         }
         if let Expr::BuiltinCall { name, args } = expression
-            && name.as_str() == "__typescript_pending_tool"
+            && name.as_str() == "__lashlang_pending_tool"
             && let [call @ Expr::ReceiverCall { .. }] = args.as_slice()
         {
             return Ok(Some(self.expression(call)?));
@@ -1109,7 +1111,7 @@ impl<'p> Printer<'p> {
         }
         // `globalThis.name`, read live through the root-global read.
         if let Expr::BuiltinCall { name, args } = expression
-            && name.as_str() == "__typescript_global_get"
+            && name.as_str() == "__lashlang_global_get"
             && let [Expr::String(global)] = args.as_slice()
         {
             return Ok(Some(format!(
@@ -1144,7 +1146,7 @@ impl<'p> Printer<'p> {
         }
         // An instance standard-library call, `receiver.method(..)`.
         if let Expr::BuiltinCall { name, args } = expression
-            && name.as_str() == "__typescript_stdlib"
+            && name.as_str() == "__lashlang_stdlib"
             && let [Expr::String(method), receiver, args @ ..] = args.as_slice()
             && INSTANCE_STDLIB_SIGNATURES
                 .iter()
@@ -1217,7 +1219,7 @@ impl<'p> Printer<'p> {
         // it prints back as an expression body, which lowers to that `return`
         // again, and a braced body would lower to a different program.
         let body = match function.body.as_ref() {
-            Expr::Block(items) if let [Expr::Return(value)] = items.as_slice() => {
+            Expr::Block(items) if let [Expr::FunctionReturn(value)] = items.as_slice() => {
                 format!("({})", self.expression(value)?)
             }
             body => self.rooted_block(body, 0, &mut bound)?,
@@ -1262,7 +1264,7 @@ impl<'p> Printer<'p> {
     fn member_target(&self, expression: &Expr) -> Printed {
         match expression {
             Expr::Null
-            | Expr::Undefined
+            | Expr::Absent
             | Expr::Bool(_)
             | Expr::String(_)
             | Expr::Variable(_)
@@ -1294,7 +1296,7 @@ impl<'p> Printer<'p> {
 
     fn unary_operand(&self, expression: &Expr) -> Printed {
         match expression {
-            Expr::JavaScriptBinary { .. } | Expr::JavaScriptLogical { .. } | Expr::If { .. } => {
+            Expr::CoercingBinary { .. } | Expr::OperandLogical { .. } | Expr::If { .. } => {
                 self.expression(expression)
             }
             _ => self.member_target(expression),
@@ -1347,7 +1349,7 @@ impl<'p> Printer<'p> {
     }
 
     fn identifier(&self, context: &'static str, name: &str) -> Printed {
-        if name.starts_with(GENERATED_BINDING_PREFIX) {
+        if name.starts_with(LOWERED_BINDING_PREFIX) {
             return Err(TypeScriptSourceError::GeneratedBinding {
                 name: name.to_string(),
             });
@@ -1388,11 +1390,11 @@ pub(super) fn process_literal_run_body(literal: &ProcessLiteralExpr) -> Option<&
 pub(super) fn statement_block_contents(expression: &Expr) -> Vec<&Expr> {
     match expression {
         // The unit value a missing branch is spelled as holds no statement.
-        Expr::Undefined => Vec::new(),
+        Expr::Absent => Vec::new(),
         expression => lashlang::statement_list(expression)
             .into_iter()
             .map(|listed| listed.expr)
-            .filter(|statement| !matches!(statement, Expr::Undefined))
+            .filter(|statement| !matches!(statement, Expr::Absent))
             .collect(),
     }
 }
@@ -1416,7 +1418,7 @@ fn compound_assign_block(items: &[Expr]) -> Option<(&str, &str, &Expr)> {
     let [Expr::Assign { target, expr }, Expr::Variable(read)] = items else {
         return None;
     };
-    let Expr::JavaScriptBinary { left, op, right } = expr.as_ref() else {
+    let Expr::CoercingBinary { left, op, right } = expr.as_ref() else {
         return None;
     };
     (target.is_simple()
@@ -1455,7 +1457,7 @@ fn attribute_assignment(
     Ok(Some(match parts.update {
         Some(update) => (
             target,
-            format!("{}=", javascript_binary_op(update.operator.javascript_op())),
+            format!("{}=", javascript_binary_op(update.operator.coercing_op())),
             update.operand,
         ),
         None => (target, "=".to_string(), parts.value),
@@ -1615,12 +1617,12 @@ fn loop_header<'a>(
     })
 }
 
-/// The arguments of a `__typescript_stdlib` call with the given selector.
+/// The arguments of a `__lashlang_stdlib` call with the given selector.
 pub(super) fn stdlib_call<'a>(expression: &'a Expr, selector: &str) -> Option<&'a [Expr]> {
     let Expr::BuiltinCall { name, args } = expression else {
         return None;
     };
-    if name.as_str() != "__typescript_stdlib" {
+    if name.as_str() != "__lashlang_stdlib" {
         return None;
     }
     let [Expr::String(found), rest @ ..] = args.as_slice() else {
@@ -1718,26 +1720,26 @@ fn is_typescript_identifier(name: &str) -> bool {
         && !name.is_reserved_in_strict_mode(true)
 }
 
-fn javascript_binary_op(op: JavaScriptBinaryOp) -> &'static str {
+fn javascript_binary_op(op: CoercingBinaryOp) -> &'static str {
     match op {
-        JavaScriptBinaryOp::Add => "+",
-        JavaScriptBinaryOp::Subtract => "-",
-        JavaScriptBinaryOp::Multiply => "*",
-        JavaScriptBinaryOp::Divide => "/",
-        JavaScriptBinaryOp::Remainder => "%",
-        JavaScriptBinaryOp::StrictEqual => "===",
-        JavaScriptBinaryOp::StrictNotEqual => "!==",
-        JavaScriptBinaryOp::LooseEqual => "==",
-        JavaScriptBinaryOp::LooseNotEqual => "!=",
-        JavaScriptBinaryOp::Less => "<",
-        JavaScriptBinaryOp::LessEqual => "<=",
-        JavaScriptBinaryOp::Greater => ">",
-        JavaScriptBinaryOp::GreaterEqual => ">=",
-        JavaScriptBinaryOp::BitAnd => "&",
-        JavaScriptBinaryOp::BitOr => "|",
-        JavaScriptBinaryOp::BitXor => "^",
-        JavaScriptBinaryOp::ShiftLeft => "<<",
-        JavaScriptBinaryOp::ShiftRight => ">>",
-        JavaScriptBinaryOp::ShiftRightUnsigned => ">>>",
+        CoercingBinaryOp::Add => "+",
+        CoercingBinaryOp::Subtract => "-",
+        CoercingBinaryOp::Multiply => "*",
+        CoercingBinaryOp::Divide => "/",
+        CoercingBinaryOp::Remainder => "%",
+        CoercingBinaryOp::StrictEqual => "===",
+        CoercingBinaryOp::StrictNotEqual => "!==",
+        CoercingBinaryOp::LooseEqual => "==",
+        CoercingBinaryOp::LooseNotEqual => "!=",
+        CoercingBinaryOp::Less => "<",
+        CoercingBinaryOp::LessEqual => "<=",
+        CoercingBinaryOp::Greater => ">",
+        CoercingBinaryOp::GreaterEqual => ">=",
+        CoercingBinaryOp::BitAnd => "&",
+        CoercingBinaryOp::BitOr => "|",
+        CoercingBinaryOp::BitXor => "^",
+        CoercingBinaryOp::ShiftLeft => "<<",
+        CoercingBinaryOp::ShiftRight => ">>",
+        CoercingBinaryOp::ShiftRightUnsigned => ">>>",
     }
 }

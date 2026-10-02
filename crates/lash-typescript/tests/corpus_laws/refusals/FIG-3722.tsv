@@ -3,22 +3,22 @@
 # whose program now round-trips, or whose refusal changed, fails the law
 # until it is deleted or corrected.
 # program id	refusal	reason
-differential:FIG-3722:1	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a built-in global read lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3722:2	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a built-in global read lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3722:3	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a built-in global read lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3722:4	generated binding `__typescript_stdlib` has no authored TypeScript spelling	the built-in constructor reference lowers to a stdlib helper, which the lens printer does not re-sugar
-differential:FIG-3722:5	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a built-in global read lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3722:6	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a built-in global read lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3722:7	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a built-in global read lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3722:8	generated binding `__typescript_global_has` has no authored TypeScript spelling	a written built-in global is seeded behind a live session-slot presence check, which the lens printer does not re-sugar
-differential:FIG-3722:9	generated binding `__typescript_global_has` has no authored TypeScript spelling	a written built-in global is seeded behind a live session-slot presence check, which the lens printer does not re-sugar
-differential:FIG-3722:10	generated binding `__typescript_global_has` has no authored TypeScript spelling	a written built-in global is seeded behind a live session-slot presence check, which the lens printer does not re-sugar
-differential:FIG-3722:11	generated binding `__typescript_global_has` has no authored TypeScript spelling	a written built-in global is seeded behind a live session-slot presence check, which the lens printer does not re-sugar
-differential:FIG-3722:12	generated binding `__typescript_global_has` has no authored TypeScript spelling	a written built-in global is seeded behind a live session-slot presence check, which the lens printer does not re-sugar
-differential:FIG-3722:13	generated binding `__typescript_global_has` has no authored TypeScript spelling	a written built-in global is seeded behind a live session-slot presence check, which the lens printer does not re-sugar
-differential:FIG-3722:14	generated binding `__typescript_global_has` has no authored TypeScript spelling	a written built-in global is seeded behind a live session-slot presence check, which the lens printer does not re-sugar
-differential:FIG-3722:15	generated binding `__typescript_global_has` has no authored TypeScript spelling	a written built-in global is seeded behind a live session-slot presence check, which the lens printer does not re-sugar
-differential:FIG-3722:16	generated binding `__typescript_global_has` has no authored TypeScript spelling	a written built-in global is seeded behind a live session-slot presence check, which the lens printer does not re-sugar
-differential:FIG-3722:17	generated binding `__typescript_0_constant_write_value` has no authored TypeScript spelling	a write to a built-in constant lowers to its TypeError through a generated temporary, which has no authored spelling
-differential:FIG-3722:18	generated binding `__typescript_0_constant_write_value` has no authored TypeScript spelling	a write to a built-in constant lowers to its TypeError through a generated temporary, which has no authored spelling
-differential:FIG-3722:19	generated binding `__typescript_0_constant_write_value` has no authored TypeScript spelling	a write to a built-in constant lowers to its TypeError through a generated temporary, which has no authored spelling
+differential:FIG-3722:1	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a built-in global read lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:FIG-3722:2	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a built-in global read lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:FIG-3722:3	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a built-in global read lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:FIG-3722:4	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	the built-in constructor reference lowers to a stdlib helper, which the lens printer does not re-sugar
+differential:FIG-3722:5	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a built-in global read lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:FIG-3722:6	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a built-in global read lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:FIG-3722:7	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a built-in global read lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:FIG-3722:8	generated binding `__lashlang_global_has` has no authored TypeScript spelling	a written built-in global is seeded behind a live session-slot presence check, which the lens printer does not re-sugar
+differential:FIG-3722:9	generated binding `__lashlang_global_has` has no authored TypeScript spelling	a written built-in global is seeded behind a live session-slot presence check, which the lens printer does not re-sugar
+differential:FIG-3722:10	generated binding `__lashlang_global_has` has no authored TypeScript spelling	a written built-in global is seeded behind a live session-slot presence check, which the lens printer does not re-sugar
+differential:FIG-3722:11	generated binding `__lashlang_global_has` has no authored TypeScript spelling	a written built-in global is seeded behind a live session-slot presence check, which the lens printer does not re-sugar
+differential:FIG-3722:12	generated binding `__lashlang_global_has` has no authored TypeScript spelling	a written built-in global is seeded behind a live session-slot presence check, which the lens printer does not re-sugar
+differential:FIG-3722:13	generated binding `__lashlang_global_has` has no authored TypeScript spelling	a written built-in global is seeded behind a live session-slot presence check, which the lens printer does not re-sugar
+differential:FIG-3722:14	generated binding `__lashlang_global_has` has no authored TypeScript spelling	a written built-in global is seeded behind a live session-slot presence check, which the lens printer does not re-sugar
+differential:FIG-3722:15	generated binding `__lashlang_global_has` has no authored TypeScript spelling	a written built-in global is seeded behind a live session-slot presence check, which the lens printer does not re-sugar
+differential:FIG-3722:16	generated binding `__lashlang_global_has` has no authored TypeScript spelling	a written built-in global is seeded behind a live session-slot presence check, which the lens printer does not re-sugar
+differential:FIG-3722:17	generated binding `__lashlang_0_constant_write_value` has no authored TypeScript spelling	a write to a built-in constant lowers to its TypeError through a generated temporary, which has no authored spelling
+differential:FIG-3722:18	generated binding `__lashlang_0_constant_write_value` has no authored TypeScript spelling	a write to a built-in constant lowers to its TypeError through a generated temporary, which has no authored spelling
+differential:FIG-3722:19	generated binding `__lashlang_0_constant_write_value` has no authored TypeScript spelling	a write to a built-in constant lowers to its TypeError through a generated temporary, which has no authored spelling

@@ -3,7 +3,7 @@
 use lash_sansio::profile::ProfileMark;
 use std::sync::Arc;
 
-use crate::ast::{JavaScriptBinaryOp, JavaScriptUnaryOp};
+use crate::ast::{CoercingBinaryOp, CoercingUnaryOp};
 use crate::span::Span;
 use crate::{LashlangExecutionObservation, LashlangExecutionSite, ProcessBranchSelection};
 use rustc_hash::FxHashMap;
@@ -50,9 +50,8 @@ use control::{VmMode, VmStep};
 use effects::VmEffect;
 use exceptions::{ExceptionHandler, FinallyCompletion, FinallyState};
 pub use javascript_regexp::{
-    TYPESCRIPT_REGEXP_EXECUTION_FUEL, TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION,
-    TYPESCRIPT_REGEXP_MAX_NESTING, TYPESCRIPT_REGEXP_MAX_PATTERN_CODE_UNITS,
-    TypeScriptRegExpValidationError, validate_typescript_regexp, validate_typescript_regexp_shape,
+    REGEXP_EXECUTION_FUEL, REGEXP_FUEL_PER_INSTRUCTION, REGEXP_MAX_NESTING,
+    REGEXP_MAX_PATTERN_CODE_UNITS, RegExpValidationError, validate_regexp, validate_regexp_shape,
 };
 
 use super::heap::same_value_zero;
@@ -557,13 +556,13 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     });
                 }
             }
-            Instruction::JavaScriptUnary(op) => {
+            Instruction::CoercingUnary(op) => {
                 if self.javascript_unary_needs_slow_path(op)? {
                     return Ok(None);
                 }
                 self.execute_javascript_unary(op)?;
             }
-            Instruction::JavaScriptBinary(op) => {
+            Instruction::CoercingBinary(op) => {
                 if self.javascript_binary_needs_slow_path(op)? {
                     return Ok(None);
                 }
@@ -591,8 +590,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     return Ok(None);
                 }
                 let value = self.pop_stack()?;
-                self.stack
-                    .push(Value::Bool(self.is_truthy_for_dialect(&value)?));
+                self.stack.push(Value::Bool(self.value_is_truthy(&value)?));
             }
             Instruction::Jump(target) => self.ip = target,
             Instruction::JumpIfFalse(target) => {
@@ -604,7 +602,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     return Ok(None);
                 }
                 let value = self.pop_stack()?;
-                if !self.is_truthy_for_dialect(&value)? {
+                if !self.value_is_truthy(&value)? {
                     self.observe_branch_selection(
                         self.current_instruction_ip(),
                         ProcessBranchSelection::Else,
@@ -626,7 +624,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     return Ok(None);
                 }
                 let value = self.pop_stack()?;
-                if self.is_truthy_for_dialect(&value)? {
+                if self.value_is_truthy(&value)? {
                     self.observe_branch_selection(
                         self.current_instruction_ip(),
                         ProcessBranchSelection::Then,
@@ -639,8 +637,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     );
                 }
             }
-            Instruction::JavaScriptAddAssign(slot) => {
-                if self.javascript_binary_needs_slow_path(JavaScriptBinaryOp::Add)? {
+            Instruction::CoercingAddAssign(slot) => {
+                if self.javascript_binary_needs_slow_path(CoercingBinaryOp::Add)? {
                     return Ok(None);
                 }
                 self.javascript_add_assign(slot)?;
@@ -728,7 +726,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     /// operands the opcode consumes with their materialized values.
     ///
     /// `step_instruction_fast` routes the stack-pair opcodes
-    /// (`JavaScriptBinary`, `JavaScriptAddAssign`) to the slow path when an
+    /// (`CoercingBinary`, `CoercingAddAssign`) to the slow path when an
     /// operand is `Value::Projected`. Materializing the top two operands in
     /// place — in the
     /// same right-then-left order the opcode pops them — and re-dispatching is
@@ -742,8 +740,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         let right = materialize_value(self.pop_stack()?)?;
         let left = materialize_value(self.pop_stack()?)?;
         let op = match &instruction {
-            Instruction::JavaScriptBinary(op) => Some(*op),
-            Instruction::JavaScriptAddAssign(_) => Some(JavaScriptBinaryOp::Add),
+            Instruction::CoercingBinary(op) => Some(*op),
+            Instruction::CoercingAddAssign(_) => Some(CoercingBinaryOp::Add),
             _ => None,
         };
         let (left, right) = match op {
@@ -769,7 +767,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     /// fully handles every pure-compute and effect-producing opcode on
     /// non-projected operands; it only yields `Ok(None)` (routing here) when an
     /// operand is `Value::Projected` or the opcode inherently can suspend —
-    /// guest-coercion paths (`JavaScriptUnary`/`JavaScriptBinary` operand
+    /// guest-coercion paths (`CoercingUnary`/`CoercingBinary` operand
     /// ToPrimitive), tool/process effects, intrinsics, type literals.
     /// Projected reads themselves are synchronous descriptor calls; nothing
     /// here awaits on behalf of a `Value::Projected` alone.
@@ -845,20 +843,20 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::HeapPathAssign { slot, path } => {
                 self.execute_reference_path_assignment(slot, path)?;
             }
-            Instruction::JavaScriptUnary(op) => {
+            Instruction::CoercingUnary(op) => {
                 return self.redispatch_javascript_unary(op);
             }
-            Instruction::JavaScriptBinary(_) => {
+            Instruction::CoercingBinary(_) => {
                 return self.redispatch_with_materialized_stack_pair(instruction);
             }
-            Instruction::JavaScriptAddAssign(_) => {
+            Instruction::CoercingAddAssign(_) => {
                 return self.redispatch_with_materialized_stack_pair(instruction);
             }
             Instruction::ToBool => {
                 let value = self.pop_stack()?;
                 let truthy = match &value {
                     Value::Projected(_) => is_truthy(&value)?,
-                    _ => self.is_truthy_for_dialect(&value)?,
+                    _ => self.value_is_truthy(&value)?,
                 };
                 self.stack.push(Value::Bool(truthy));
             }
@@ -866,7 +864,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let value = self.pop_stack()?;
                 let truthy = match &value {
                     Value::Projected(_) => is_truthy(&value)?,
-                    _ => self.is_truthy_for_dialect(&value)?,
+                    _ => self.value_is_truthy(&value)?,
                 };
                 if !truthy {
                     self.observe_branch_selection(
@@ -885,7 +883,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let value = self.pop_stack()?;
                 let truthy = match &value {
                     Value::Projected(_) => is_truthy(&value)?,
-                    _ => self.is_truthy_for_dialect(&value)?,
+                    _ => self.value_is_truthy(&value)?,
                 };
                 if truthy {
                     self.observe_branch_selection(
@@ -1040,23 +1038,21 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     fn execute_intrinsic_instruction(&mut self, op: IntrinsicOp) -> Result<(), RuntimeError> {
         let start = self.profile.as_ref().map(|_| ProfileMark::now());
         match op {
-            IntrinsicOp::JavaScriptSplit => self.execute_javascript_split()?,
-            IntrinsicOp::JavaScriptJoin => self.execute_javascript_join()?,
-            IntrinsicOp::JavaScriptStdlib(argc) => self.execute_javascript_stdlib(argc)?,
-            IntrinsicOp::JavaScriptHeapNew(argc) => self.execute_javascript_heap_new(argc)?,
-            IntrinsicOp::JavaScriptHeapInstanceOf => self.execute_javascript_instanceof()?,
-            IntrinsicOp::JavaScriptHeapDeleteMember => {
-                self.execute_javascript_heap_delete_member()?
-            }
-            IntrinsicOp::JavaScriptRegExp(argc) => self.execute_javascript_regexp(argc)?,
-            IntrinsicOp::JavaScriptGlobalDelete => self.execute_javascript_global_delete()?,
-            IntrinsicOp::JavaScriptGlobalGet => self.execute_javascript_global_get()?,
-            IntrinsicOp::JavaScriptGlobalHas => self.execute_javascript_global_has()?,
-            IntrinsicOp::JavaScriptGlobalSet => self.execute_javascript_global_set()?,
+            IntrinsicOp::TextSplit => self.execute_javascript_split()?,
+            IntrinsicOp::TextJoin => self.execute_javascript_join()?,
+            IntrinsicOp::IntrinsicDispatch(argc) => self.execute_javascript_stdlib(argc)?,
+            IntrinsicOp::HeapConstruct(argc) => self.execute_javascript_heap_new(argc)?,
+            IntrinsicOp::HeapInstanceOf => self.execute_javascript_instanceof()?,
+            IntrinsicOp::HeapDeleteMember => self.execute_javascript_heap_delete_member()?,
+            IntrinsicOp::RegExpIntrinsic(argc) => self.execute_javascript_regexp(argc)?,
+            IntrinsicOp::GlobalDelete => self.execute_javascript_global_delete()?,
+            IntrinsicOp::GlobalGet => self.execute_javascript_global_get()?,
+            IntrinsicOp::GlobalHas => self.execute_javascript_global_has()?,
+            IntrinsicOp::GlobalSet => self.execute_javascript_global_set()?,
             IntrinsicOp::BindingCellNew
             | IntrinsicOp::BindingCellGet
             | IntrinsicOp::BindingCellSet => self.execute_binding_cell(op)?,
-            IntrinsicOp::JavaScriptUriCodec(codec) => self.execute_javascript_uri_codec(codec)?,
+            IntrinsicOp::UriCodec(codec) => self.execute_javascript_uri_codec(codec)?,
             IntrinsicOp::Validate => {
                 let schema = self.pop_stack()?;
                 let value = self.pop_stack()?;

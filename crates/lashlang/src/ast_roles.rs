@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 use super::{
-    AssignPathStep, AstPath, AstString, CatchClause, Declaration, Expr, InvalidAst,
-    JavaScriptBinaryOp, Program, TryExpr,
+    AssignPathStep, AstPath, AstString, CatchClause, CoercingBinaryOp, Declaration, Expr,
+    InvalidAst, Program, TryExpr,
 };
 
 /// The origin of a [`super::ProcessDecl`].
@@ -214,25 +214,25 @@ pub enum UpdateOperator {
 }
 
 impl UpdateOperator {
-    fn of_javascript(op: JavaScriptBinaryOp) -> Option<Self> {
+    fn of_coercing(op: CoercingBinaryOp) -> Option<Self> {
         Some(match op {
-            JavaScriptBinaryOp::Add => Self::Add,
-            JavaScriptBinaryOp::Subtract => Self::Subtract,
-            JavaScriptBinaryOp::Multiply => Self::Multiply,
-            JavaScriptBinaryOp::Divide => Self::Divide,
-            JavaScriptBinaryOp::Remainder => Self::Remainder,
+            CoercingBinaryOp::Add => Self::Add,
+            CoercingBinaryOp::Subtract => Self::Subtract,
+            CoercingBinaryOp::Multiply => Self::Multiply,
+            CoercingBinaryOp::Divide => Self::Divide,
+            CoercingBinaryOp::Remainder => Self::Remainder,
             _ => return None,
         })
     }
 
     /// The ECMA-262 operator this update applies.
-    pub fn javascript_op(self) -> JavaScriptBinaryOp {
+    pub fn coercing_op(self) -> CoercingBinaryOp {
         match self {
-            Self::Add => JavaScriptBinaryOp::Add,
-            Self::Subtract => JavaScriptBinaryOp::Subtract,
-            Self::Multiply => JavaScriptBinaryOp::Multiply,
-            Self::Divide => JavaScriptBinaryOp::Divide,
-            Self::Remainder => JavaScriptBinaryOp::Remainder,
+            Self::Add => CoercingBinaryOp::Add,
+            Self::Subtract => CoercingBinaryOp::Subtract,
+            Self::Multiply => CoercingBinaryOp::Multiply,
+            Self::Divide => CoercingBinaryOp::Divide,
+            Self::Remainder => CoercingBinaryOp::Remainder,
         }
     }
 }
@@ -310,8 +310,8 @@ impl<'a> AttributeAssignParts<'a> {
             _ => false,
         };
         let update = match value.as_ref() {
-            Expr::JavaScriptBinary { left, op, right } if reads_current(left) => {
-                UpdateOperator::of_javascript(*op).map(|operator| AttributeUpdate {
+            Expr::CoercingBinary { left, op, right } if reads_current(left) => {
+                UpdateOperator::of_coercing(*op).map(|operator| AttributeUpdate {
                     operator,
                     operand: right.as_ref(),
                 })

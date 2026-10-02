@@ -57,18 +57,18 @@ fn coercing_operand_count(chunk: &Chunk, instruction: Instruction) -> Option<usi
         Instruction::PathAssign { path, .. } | Instruction::HeapPathAssign { path, .. } => {
             chunk.assign_paths[path].dynamic_index_count + 1
         }
-        Instruction::Intrinsic(IntrinsicOp::JavaScriptHeapDeleteMember) => 2,
-        Instruction::JavaScriptUnary(_) => 1,
-        Instruction::JavaScriptBinary(_)
-        | Instruction::JavaScriptAddAssign(_)
-        | Instruction::Index => 2,
+        Instruction::Intrinsic(IntrinsicOp::HeapDeleteMember) => 2,
+        Instruction::CoercingUnary(_) => 1,
+        Instruction::CoercingBinary(_) | Instruction::CoercingAddAssign(_) | Instruction::Index => {
+            2
+        }
         Instruction::Intrinsic(
-            IntrinsicOp::JavaScriptStdlib(argc)
-            | IntrinsicOp::JavaScriptHeapNew(argc)
-            | IntrinsicOp::JavaScriptRegExp(argc),
+            IntrinsicOp::IntrinsicDispatch(argc)
+            | IntrinsicOp::HeapConstruct(argc)
+            | IntrinsicOp::RegExpIntrinsic(argc),
         ) => argc,
-        Instruction::Intrinsic(IntrinsicOp::JavaScriptUriCodec(_)) => 1,
-        Instruction::Intrinsic(IntrinsicOp::JavaScriptSplit | IntrinsicOp::JavaScriptJoin) => 2,
+        Instruction::Intrinsic(IntrinsicOp::UriCodec(_)) => 1,
+        Instruction::Intrinsic(IntrinsicOp::TextSplit | IntrinsicOp::TextJoin) => 2,
         // A call suspends only through a built-in callee answering without a
         // frame: `detached_builtin_result` converts an argument (a
         // `hasOwnProperty` key) before its receiver check, and that

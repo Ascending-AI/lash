@@ -105,6 +105,141 @@
       ],
       "type": "object"
     },
+    "CoercingBinaryOp": {
+      "description": "Eager binary value operations with explicit ECMA-262 coercion rules.\n\nOperand expressions evaluate left then right. Object-to-primitive hooks\nrun left then right when the rule requires them. Numeric results are f64.",
+      "oneOf": [
+        {
+          "const": "Add",
+          "description": "`+`: default ToPrimitive on both operands; concatenates ToString\nresults if either primitive is text, otherwise adds ToNumber results.",
+          "type": "string"
+        },
+        {
+          "const": "Subtract",
+          "description": "`-`: subtracts the operands' ToNumber results.",
+          "type": "string"
+        },
+        {
+          "const": "Multiply",
+          "description": "`*`: multiplies the operands' ToNumber results.",
+          "type": "string"
+        },
+        {
+          "const": "Divide",
+          "description": "`/`: divides the operands' ToNumber results, retaining infinities and NaN.",
+          "type": "string"
+        },
+        {
+          "const": "Remainder",
+          "description": "`%`: remainder of ToNumber results, with the dividend's sign.",
+          "type": "string"
+        },
+        {
+          "const": "StrictEqual",
+          "description": "`===`: no coercion; compares primitive values or object identity.\nNaN differs from itself, signed zeros compare equal, and null differs\nfrom absent. Resources compare their reference values. Projected values\ncompare the values they represent; unavailable placeholders compare\nequal only when their placeholder identities agree.",
+          "type": "string"
+        },
+        {
+          "const": "StrictNotEqual",
+          "description": "`!==`: negates [`Self::StrictEqual`].",
+          "type": "string"
+        },
+        {
+          "const": "LooseEqual",
+          "description": "`==`: ECMA abstract equality. Null and absent compare equal; booleans\nbecome numbers, text compared to a number becomes a number, and an\nobject compared to a primitive uses default ToPrimitive.",
+          "type": "string"
+        },
+        {
+          "const": "LooseNotEqual",
+          "description": "`!=`: negates [`Self::LooseEqual`].",
+          "type": "string"
+        },
+        {
+          "const": "Less",
+          "description": "`<`: number-hint ToPrimitive, then UTF-16 code-unit order if both are text,\notherwise numeric order after ToNumber. A NaN operand yields false.",
+          "type": "string"
+        },
+        {
+          "const": "LessEqual",
+          "description": "`<=`: the inclusive order of [`Self::Less`]; NaN yields false.",
+          "type": "string"
+        },
+        {
+          "const": "Greater",
+          "description": "`>`: the reversed order of [`Self::Less`]; NaN yields false.",
+          "type": "string"
+        },
+        {
+          "const": "GreaterEqual",
+          "description": "`>=`: the inclusive reversed order of [`Self::Less`]; NaN yields false.",
+          "type": "string"
+        },
+        {
+          "const": "BitAnd",
+          "description": "`&`: bitwise AND of ToInt32(ToNumber) operands, returned as a number.",
+          "type": "string"
+        },
+        {
+          "const": "BitOr",
+          "description": "`|`: bitwise OR of ToInt32(ToNumber) operands, returned as a number.",
+          "type": "string"
+        },
+        {
+          "const": "BitXor",
+          "description": "`^`: bitwise XOR of ToInt32(ToNumber) operands, returned as a number.",
+          "type": "string"
+        },
+        {
+          "const": "ShiftLeft",
+          "description": "`<<`: wrapping 32-bit left shift of ToInt32(left) by ToUint32(right)\nmodulo 32, after ToNumber on both operands.",
+          "type": "string"
+        },
+        {
+          "const": "ShiftRight",
+          "description": "`>>`: sign-extending right shift of ToInt32(left) by ToUint32(right)\nmodulo 32, after ToNumber on both operands.",
+          "type": "string"
+        },
+        {
+          "const": "ShiftRightUnsigned",
+          "description": "`>>>`: zero-filling right shift of ToUint32(left) by ToUint32(right)\nmodulo 32, after ToNumber on both operands, returned as a number.",
+          "type": "string"
+        }
+      ]
+    },
+    "CoercingUnaryOp": {
+      "description": "Unary value operations with explicit ECMA-262 coercion rules.",
+      "oneOf": [
+        {
+          "const": "Plus",
+          "description": "`+x`: ECMA ToNumber, preserving NaN, infinities and signed zero.",
+          "type": "string"
+        },
+        {
+          "const": "Negate",
+          "description": "`-x`: negates ECMA ToNumber, including flipping signed zero.",
+          "type": "string"
+        },
+        {
+          "const": "Not",
+          "description": "`!x`: negates VM truthiness. Null, absent, false, zero, NaN and empty\ntext are false; lists, records, resources, images and all heap\nreferences are true. An inline tuple is true iff nonempty. A projected\nvalue delegates to its host's truthiness implementation.",
+          "type": "string"
+        },
+        {
+          "const": "TypeOf",
+          "description": "Returns \"undefined\" for absent, \"boolean\", \"number\" or \"string\" for\nthose primitives, \"function\" for callable objects, and \"object\" for\nnull and every other value.",
+          "type": "string"
+        },
+        {
+          "const": "BitNot",
+          "description": "`~x`: complements ECMA ToInt32(ToNumber(x)), returned as a number.",
+          "type": "string"
+        },
+        {
+          "const": "ToString",
+          "description": "ECMA ToString: asks an object for its primitive with the string hint,\ntrying `toString` before `valueOf`. Null and absent become \"null\" and\n\"undefined\"; number text uses ECMA's decimal spelling.",
+          "type": "string"
+        }
+      ]
+    },
     "ExecutionNodeKind": {
       "description": "Closed vocabulary of executable workflow sites.\n\nThis describes the site, not its current observation. A workflow node may\nexpose more than one site kind. Declaration order is the canonical order:\na node's execution sites sort by it, so reordering the variants changes\nthe serialized workflow graph and needs a graph schema bump.",
       "enum": [
@@ -170,8 +305,8 @@
           "type": "object"
         },
         {
-          "const": "Undefined",
-          "description": "The JavaScript `undefined` value. This node is AST-only.",
+          "const": "Absent",
+          "description": "Produces the absent-value sentinel, distinct from null. Source front\nends may spell this value `undefined`; it converts to NaN as a number\nand to \"undefined\" as text, and is false by VM truthiness.",
           "type": "string"
         },
         {
@@ -814,14 +949,14 @@
         },
         {
           "additionalProperties": false,
-          "description": "AST-only JavaScript function return. The compiler runs every enclosing\n`finally` before returning from the current function.",
+          "description": "Returns the evaluated value from the current function. The compiler\nruns every enclosing `finally` before returning from the function.",
           "properties": {
-            "Return": {
+            "FunctionReturn": {
               "$ref": "#/$defs/Expr"
             }
           },
           "required": [
-            "Return"
+            "FunctionReturn"
           ],
           "type": "object"
         },
@@ -875,15 +1010,15 @@
         },
         {
           "additionalProperties": false,
-          "description": "An ECMA-262 unary operation whose coercion differs from Lashlang.",
+          "description": "Evaluates its operand once, then applies the named coercion rule.\nThe rules are defined on [`CoercingUnaryOp`].",
           "properties": {
-            "JavaScriptUnary": {
+            "CoercingUnary": {
               "properties": {
                 "expr": {
                   "$ref": "#/$defs/Expr"
                 },
                 "op": {
-                  "$ref": "#/$defs/JavaScriptUnaryOp"
+                  "$ref": "#/$defs/CoercingUnaryOp"
                 }
               },
               "required": [
@@ -894,21 +1029,21 @@
             }
           },
           "required": [
-            "JavaScriptUnary"
+            "CoercingUnary"
           ],
           "type": "object"
         },
         {
           "additionalProperties": false,
-          "description": "An eager ECMA-262 binary operation whose coercion differs from Lashlang.",
+          "description": "Evaluates left, then right, then applies the named coercion rule.\nThe rules are defined on [`CoercingBinaryOp`].",
           "properties": {
-            "JavaScriptBinary": {
+            "CoercingBinary": {
               "properties": {
                 "left": {
                   "$ref": "#/$defs/Expr"
                 },
                 "op": {
-                  "$ref": "#/$defs/JavaScriptBinaryOp"
+                  "$ref": "#/$defs/CoercingBinaryOp"
                 },
                 "right": {
                   "$ref": "#/$defs/Expr"
@@ -923,21 +1058,21 @@
             }
           },
           "required": [
-            "JavaScriptBinary"
+            "CoercingBinary"
           ],
           "type": "object"
         },
         {
           "additionalProperties": false,
-          "description": "A short-circuiting ECMA-262 logical operation that returns an operand.",
+          "description": "Evaluates left, then conditionally evaluates right, returning the\nselected operand unchanged. See [`OperandLogicalOp`] for the condition.",
           "properties": {
-            "JavaScriptLogical": {
+            "OperandLogical": {
               "properties": {
                 "left": {
                   "$ref": "#/$defs/Expr"
                 },
                 "op": {
-                  "$ref": "#/$defs/JavaScriptLogicalOp"
+                  "$ref": "#/$defs/OperandLogicalOp"
                 },
                 "right": {
                   "$ref": "#/$defs/Expr"
@@ -952,7 +1087,7 @@
             }
           },
           "required": [
-            "JavaScriptLogical"
+            "OperandLogical"
           ],
           "type": "object"
         }
@@ -1054,57 +1189,6 @@
       ],
       "description": "The stored form of an IR number literal."
     },
-    "JavaScriptBinaryOp": {
-      "enum": [
-        "Add",
-        "Subtract",
-        "Multiply",
-        "Divide",
-        "Remainder",
-        "StrictEqual",
-        "StrictNotEqual",
-        "LooseEqual",
-        "LooseNotEqual",
-        "Less",
-        "LessEqual",
-        "Greater",
-        "GreaterEqual",
-        "BitAnd",
-        "BitOr",
-        "BitXor",
-        "ShiftLeft",
-        "ShiftRight",
-        "ShiftRightUnsigned"
-      ],
-      "type": "string"
-    },
-    "JavaScriptLogicalOp": {
-      "enum": [
-        "And",
-        "Or",
-        "NullishCoalesce"
-      ],
-      "type": "string"
-    },
-    "JavaScriptUnaryOp": {
-      "oneOf": [
-        {
-          "enum": [
-            "Plus",
-            "Negate",
-            "Not",
-            "TypeOf",
-            "BitNot"
-          ],
-          "type": "string"
-        },
-        {
-          "const": "ToString",
-          "description": "ECMA-262 ToString: `String(value)` and a template substitution. It\nasks an object for its primitive with the string hint, `toString`\nfirst.",
-          "type": "string"
-        }
-      ]
-    },
     "LabelMetadata": {
       "properties": {
         "description": {
@@ -1159,6 +1243,26 @@
         "-Infinity"
       ],
       "type": "string"
+    },
+    "OperandLogicalOp": {
+      "description": "Short-circuiting operations that return an operand without coercing it.",
+      "oneOf": [
+        {
+          "const": "And",
+          "description": "`&&`: returns left when false by [`CoercingUnaryOp::Not`]'s truthiness;\notherwise evaluates and returns right.",
+          "type": "string"
+        },
+        {
+          "const": "Or",
+          "description": "`||`: returns left when true by [`CoercingUnaryOp::Not`]'s truthiness;\notherwise evaluates and returns right.",
+          "type": "string"
+        },
+        {
+          "const": "NullishCoalesce",
+          "description": "`??`: returns left unless null or absent; otherwise evaluates and\nreturns right. False, zero, NaN and empty text retain left.",
+          "type": "string"
+        }
+      ]
     },
     "ProcessLiteralExpr": {
       "description": "The authored shape of an inline process body, as a dialect lowers it.\n\n`params` carries the parameter names and their declared types, so a\nTypeScript arrow's annotations reach the lifted declaration's signature\ninstead of widening to `Any`. `body` is the same wrapper a process literal\nrun lowers to: the authored statements inside the process-failure wrapper,\nwith the params passed through by name.",

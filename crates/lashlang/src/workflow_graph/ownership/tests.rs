@@ -19,7 +19,7 @@ fn echo(value: &str) -> Expr {
 }
 
 fn completion(mut statements: Vec<Expr>) -> Expr {
-    statements.push(Expr::Undefined);
+    statements.push(Expr::Absent);
     b::role(StructuralRole::Completion, b::block(statements))
 }
 

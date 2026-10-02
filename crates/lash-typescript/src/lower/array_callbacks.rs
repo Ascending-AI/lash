@@ -4,11 +4,11 @@
 //! continuation shape.
 
 use lashlang::{
-    AssignPathStep, AssignTarget, Expr as LashExpr, FunctionExpr, JavaScriptBinaryOp, MethodKey,
+    AssignPathStep, AssignTarget, CoercingBinaryOp, Expr as LashExpr, FunctionExpr, MethodKey,
     StructuralRole,
 };
 
-use super::{GENERATED_BINDING_PREFIX, Lowerer};
+use super::{LOWERED_BINDING_PREFIX, Lowerer};
 use crate::adapter::Expr;
 use crate::{Diagnostic, DiagnosticCode};
 
@@ -33,11 +33,11 @@ impl Lowerer {
             LashExpr::If {
                 condition: Box::new(binary(
                     variable(&index),
-                    JavaScriptBinaryOp::Less,
+                    CoercingBinaryOp::Less,
                     LashExpr::Number(0.0),
                 )),
-                then_block: Box::new(LashExpr::Return(Box::new(variable(&receiver)))),
-                else_block: Box::new(LashExpr::Undefined),
+                then_block: Box::new(LashExpr::FunctionReturn(Box::new(variable(&receiver)))),
+                else_block: Box::new(LashExpr::Absent),
             },
             assign(
                 &matched,
@@ -87,7 +87,7 @@ impl Lowerer {
                     name: None,
                     js_name: None,
                     receiver: None,
-                    params: vec![format!("{GENERATED_BINDING_PREFIX}ignored").into()],
+                    params: vec![format!("{LOWERED_BINDING_PREFIX}ignored").into()],
                     captures: vec![
                         receiver.as_str().into(),
                         needle.as_str().into(),
@@ -99,7 +99,7 @@ impl Lowerer {
             stdlib(
                 "__singleCallbackResult",
                 vec![LashExpr::Map {
-                    items: Box::new(LashExpr::List(vec![LashExpr::Undefined])),
+                    items: Box::new(LashExpr::List(vec![LashExpr::Absent])),
                     function: Box::new(variable(&worker)),
                 }],
             ),
@@ -155,7 +155,7 @@ impl Lowerer {
         );
         let output_value = if owner == "Map" {
             LashExpr::BuiltinCall {
-                name: "__typescript_heap_new".into(),
+                name: "__lashlang_heap_new".into(),
                 args: vec![LashExpr::String("Map".into())],
             }
         } else {
@@ -174,7 +174,7 @@ impl Lowerer {
                 assign(&key, callback_call),
                 LashExpr::If {
                     condition: Box::new(stdlib("has", vec![variable(&output), variable(&key)])),
-                    then_block: Box::new(LashExpr::Undefined),
+                    then_block: Box::new(LashExpr::Absent),
                     else_block: Box::new(stdlib(
                         "set",
                         vec![
@@ -200,7 +200,7 @@ impl Lowerer {
                         "Object.hasOwn",
                         vec![variable(&output), variable(&key)],
                     )),
-                    then_block: Box::new(LashExpr::Undefined),
+                    then_block: Box::new(LashExpr::Absent),
                     else_block: Box::new(LashExpr::Assign {
                         target: AssignTarget {
                             root: output.as_str().into(),
@@ -224,7 +224,7 @@ impl Lowerer {
             LashExpr::While {
                 condition: Box::new(binary(
                     variable(&index),
-                    JavaScriptBinaryOp::Less,
+                    CoercingBinaryOp::Less,
                     field(&source_name, "length"),
                 )),
                 body: Box::new(LashExpr::Block(vec![
@@ -232,7 +232,7 @@ impl Lowerer {
                     assign(&index, add(variable(&index), LashExpr::Number(1.0))),
                 ])),
             },
-            LashExpr::Undefined,
+            LashExpr::Absent,
         ]);
         Ok(LashExpr::Block(vec![
             assign(&source_name, source_value),
@@ -246,7 +246,7 @@ impl Lowerer {
                     name: None,
                     js_name: None,
                     receiver: None,
-                    params: vec![format!("{GENERATED_BINDING_PREFIX}ignored").into()],
+                    params: vec![format!("{LOWERED_BINDING_PREFIX}ignored").into()],
                     captures: vec![
                         source_name.as_str().into(),
                         callback_name.as_str().into(),
@@ -256,7 +256,7 @@ impl Lowerer {
                 })),
             ),
             LashExpr::Map {
-                items: Box::new(LashExpr::List(vec![LashExpr::Undefined])),
+                items: Box::new(LashExpr::List(vec![LashExpr::Absent])),
                 function: Box::new(variable(&worker)),
             },
             variable(&output),
@@ -366,8 +366,8 @@ impl Lowerer {
                 LashExpr::If {
                     condition: Box::new(binary(
                         variable(&callback_name),
-                        JavaScriptBinaryOp::StrictEqual,
-                        LashExpr::Undefined,
+                        CoercingBinaryOp::StrictEqual,
+                        LashExpr::Absent,
                     )),
                     then_block: Box::new(LashExpr::Function(Box::new(FunctionExpr {
                         name: None,
@@ -407,13 +407,13 @@ impl Lowerer {
                 name: None,
                 js_name: None,
                 receiver: None,
-                params: vec![format!("{GENERATED_BINDING_PREFIX}ignored").into()],
+                params: vec![format!("{LOWERED_BINDING_PREFIX}ignored").into()],
                 captures,
                 body: Box::new(body),
             })),
         ));
         let driven = LashExpr::Map {
-            items: Box::new(LashExpr::List(vec![LashExpr::Undefined])),
+            items: Box::new(LashExpr::List(vec![LashExpr::Absent])),
             function: Box::new(variable(&worker)),
         };
         let builtin = if matches!(method, "sort" | "toSorted") {
@@ -554,7 +554,7 @@ fn callback_body(
     // re-reads the length at every step.
     let present = binary(
         variable(&index),
-        JavaScriptBinaryOp::Less,
+        CoercingBinaryOp::Less,
         field(receiver, "length"),
     );
     let has_element = || {
@@ -566,7 +566,7 @@ fn callback_body(
     let condition = if reverse {
         binary(
             variable(&index),
-            JavaScriptBinaryOp::GreaterEqual,
+            CoercingBinaryOp::GreaterEqual,
             LashExpr::Number(0.0),
         )
     } else if method == "arrayFromMap" {
@@ -574,11 +574,7 @@ fn callback_body(
         // length at every step.
         present.clone()
     } else {
-        binary(
-            variable(&index),
-            JavaScriptBinaryOp::Less,
-            variable(&length),
-        )
+        binary(variable(&index), CoercingBinaryOp::Less, variable(&length))
     };
     let item = LashExpr::Index {
         target: Box::new(variable(receiver)),
@@ -614,7 +610,7 @@ fn callback_body(
         "reduce" | "reduceRight" => {
             expressions.push(assign(
                 &accumulator,
-                initial.clone().unwrap_or(LashExpr::Undefined),
+                initial.clone().unwrap_or(LashExpr::Absent),
             ));
             expressions.push(assign(&initialized, LashExpr::Bool(initial.is_some())));
         }
@@ -644,9 +640,9 @@ fn callback_body(
                 expr: Box::new(predicate()),
             }),
             else_block: Box::new(LashExpr::Block(vec![
-                append(&output, LashExpr::Undefined),
+                append(&output, LashExpr::Absent),
                 LashExpr::BuiltinCall {
-                    name: "__typescript_heap_delete_member".into(),
+                    name: "__lashlang_heap_delete_member".into(),
                     args: vec![variable(&output), variable(&index)],
                 },
             ])),
@@ -655,7 +651,7 @@ fn callback_body(
         "filter" => LashExpr::If {
             condition: Box::new(predicate()),
             then_block: Box::new(append(&output, item.clone())),
-            else_block: Box::new(LashExpr::Undefined),
+            else_block: Box::new(LashExpr::Absent),
         },
         "flatMap" => LashExpr::Assign {
             target: AssignTarget::variable(output.as_str().into()),
@@ -667,22 +663,24 @@ fn callback_body(
         "forEach" => predicate(),
         "some" => LashExpr::If {
             condition: Box::new(predicate()),
-            then_block: Box::new(LashExpr::Return(Box::new(LashExpr::Bool(true)))),
-            else_block: Box::new(LashExpr::Undefined),
+            then_block: Box::new(LashExpr::FunctionReturn(Box::new(LashExpr::Bool(true)))),
+            else_block: Box::new(LashExpr::Absent),
         },
         "every" => LashExpr::If {
             condition: Box::new(predicate()),
-            then_block: Box::new(LashExpr::Undefined),
-            else_block: Box::new(LashExpr::Return(Box::new(LashExpr::Bool(false)))),
+            then_block: Box::new(LashExpr::Absent),
+            else_block: Box::new(LashExpr::FunctionReturn(Box::new(LashExpr::Bool(false)))),
         },
         "find" | "findIndex" | "findLast" | "findLastIndex" => LashExpr::If {
             condition: Box::new(predicate()),
-            then_block: Box::new(LashExpr::Return(Box::new(if method.ends_with("Index") {
-                variable(&index)
-            } else {
-                item.clone()
-            }))),
-            else_block: Box::new(LashExpr::Undefined),
+            then_block: Box::new(LashExpr::FunctionReturn(Box::new(
+                if method.ends_with("Index") {
+                    variable(&index)
+                } else {
+                    item.clone()
+                },
+            ))),
+            else_block: Box::new(LashExpr::Absent),
         },
         "reduce" | "reduceRight" => LashExpr::If {
             condition: Box::new(variable(&initialized)),
@@ -709,7 +707,7 @@ fn callback_body(
         LashExpr::If {
             condition: Box::new(has_element()),
             then_block: Box::new(operation),
-            else_block: Box::new(LashExpr::Undefined),
+            else_block: Box::new(LashExpr::Absent),
         }
     } else {
         operation
@@ -720,10 +718,10 @@ fn callback_body(
     });
     expressions.push(match method {
         "map" | "arrayFromMap" | "filter" | "flatMap" => variable(&output),
-        "forEach" => LashExpr::Undefined,
+        "forEach" => LashExpr::Absent,
         "some" => LashExpr::Bool(false),
         "every" => LashExpr::Bool(true),
-        "find" | "findLast" => LashExpr::Undefined,
+        "find" | "findLast" => LashExpr::Absent,
         "findIndex" | "findLastIndex" => LashExpr::Number(-1.0),
         "reduce" | "reduceRight" => LashExpr::If {
             condition: Box::new(variable(&initialized)),
@@ -766,7 +764,7 @@ fn sort_body(receiver: &str, callback: &str, lowerer: &mut Lowerer) -> LashExpr 
         LashExpr::While {
             condition: Box::new(binary(
                 variable(&index),
-                JavaScriptBinaryOp::Less,
+                CoercingBinaryOp::Less,
                 field(receiver, "length"),
             )),
             body: Box::new(LashExpr::Block(vec![
@@ -782,10 +780,10 @@ fn sort_body(receiver: &str, callback: &str, lowerer: &mut Lowerer) -> LashExpr 
                     condition: Box::new(binary(
                         binary(
                             variable(&cursor),
-                            JavaScriptBinaryOp::Greater,
+                            CoercingBinaryOp::Greater,
                             LashExpr::Number(0.0),
                         ),
-                        JavaScriptBinaryOp::StrictEqual,
+                        CoercingBinaryOp::StrictEqual,
                         LashExpr::Bool(true),
                     )),
                     body: Box::new(LashExpr::If {
@@ -793,15 +791,15 @@ fn sort_body(receiver: &str, callback: &str, lowerer: &mut Lowerer) -> LashExpr 
                         // value without invoking compareFn for either case.
                         condition: Box::new(binary(
                             variable(&current),
-                            JavaScriptBinaryOp::StrictEqual,
-                            LashExpr::Undefined,
+                            CoercingBinaryOp::StrictEqual,
+                            LashExpr::Absent,
                         )),
                         then_block: Box::new(LashExpr::Break),
                         else_block: Box::new(LashExpr::If {
                             condition: Box::new(binary(
                                 previous(),
-                                JavaScriptBinaryOp::StrictEqual,
-                                LashExpr::Undefined,
+                                CoercingBinaryOp::StrictEqual,
+                                LashExpr::Absent,
                             )),
                             then_block: Box::new(LashExpr::Block(vec![
                                 shift.clone(),
@@ -810,7 +808,7 @@ fn sort_body(receiver: &str, callback: &str, lowerer: &mut Lowerer) -> LashExpr 
                             else_block: Box::new(LashExpr::If {
                                 condition: Box::new(binary(
                                     compare,
-                                    JavaScriptBinaryOp::Greater,
+                                    CoercingBinaryOp::Greater,
                                     LashExpr::Number(0.0),
                                 )),
                                 then_block: Box::new(LashExpr::Block(vec![
@@ -872,8 +870,8 @@ fn append(name: &str, value: LashExpr) -> LashExpr {
     }
 }
 
-fn binary(left: LashExpr, op: JavaScriptBinaryOp, right: LashExpr) -> LashExpr {
-    LashExpr::JavaScriptBinary {
+fn binary(left: LashExpr, op: CoercingBinaryOp, right: LashExpr) -> LashExpr {
+    LashExpr::CoercingBinary {
         left: Box::new(left),
         op,
         right: Box::new(right),
@@ -881,11 +879,11 @@ fn binary(left: LashExpr, op: JavaScriptBinaryOp, right: LashExpr) -> LashExpr {
 }
 
 fn add(left: LashExpr, right: LashExpr) -> LashExpr {
-    binary(left, JavaScriptBinaryOp::Add, right)
+    binary(left, CoercingBinaryOp::Add, right)
 }
 
 fn subtract(left: LashExpr, right: LashExpr) -> LashExpr {
-    binary(left, JavaScriptBinaryOp::Subtract, right)
+    binary(left, CoercingBinaryOp::Subtract, right)
 }
 
 /// IsCallable, throwing ECMA's TypeError when the value is not a function.
@@ -896,7 +894,7 @@ fn require_callable(value: LashExpr) -> LashExpr {
 fn stdlib(method: &str, mut args: Vec<LashExpr>) -> LashExpr {
     args.insert(0, LashExpr::String(method.into()));
     LashExpr::BuiltinCall {
-        name: "__typescript_stdlib".into(),
+        name: "__lashlang_stdlib".into(),
         args,
     }
 }

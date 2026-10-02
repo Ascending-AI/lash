@@ -101,7 +101,7 @@ impl<'module> Linker<'module> {
         // calls keep gradual typing: a callable's mutable results may have
         // acquired properties since construction, or its binding may change.
         let immediate_closure = matches!(&function, Expr::Function(_))
-            || matches!(&function, Expr::BuiltinCall { name, .. } if name.as_str() == "__typescript_closure");
+            || matches!(&function, Expr::BuiltinCall { name, .. } if name.as_str() == "__lashlang_closure");
         let output = match (immediate_closure, binding) {
             (true, Binding::Function { output }) => Binding::Value(output),
             _ => any_binding(),

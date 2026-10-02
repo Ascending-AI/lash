@@ -2,11 +2,11 @@
 //!
 //! A call with a spread argument has an argument count known only at run
 //! time. A call to a function the program defines already takes its
-//! arguments as a list (`__typescript_call_dynamic`). A builtin is dispatched
-//! by the standard library, `__typescript_stdlib(method, receiver?, ...args)`,
+//! arguments as a list (`__lashlang_call_dynamic`). A builtin is dispatched
+//! by the standard library, `__lashlang_stdlib(method, receiver?, ...args)`,
 //! so a spread call lowers the builtin call once, with one marker per
 //! argument, to learn that dispatch, and then replaces the markers with the
-//! runtime argument list: `__typescript_stdlib("Lash.Apply", method,
+//! runtime argument list: `__lashlang_stdlib("Lash.Apply", method,
 //! receiver?, arguments)`. The VM spreads `arguments` into the same dispatch,
 //! so `Math.max(...xs)` runs exactly as `Math.max(x0, x1, ...)` would.
 //!
@@ -97,7 +97,7 @@ fn splice_applied_arguments(
     arguments: &mut Option<LashExpr>,
 ) -> usize {
     if let LashExpr::BuiltinCall { name, args } = expr
-        && name.as_str() == "__typescript_stdlib"
+        && name.as_str() == "__lashlang_stdlib"
         && args.len() > markers.len()
     {
         let fixed = args.len() - markers.len();
@@ -151,7 +151,7 @@ impl Lowerer {
                 expr: Box::new(receiver_value),
             },
             LashExpr::BuiltinCall {
-                name: "__typescript_call_method_dynamic".into(),
+                name: "__lashlang_call_method_dynamic".into(),
                 args: vec![variable(), function, arguments],
             },
         ]))

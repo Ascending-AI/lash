@@ -22,7 +22,7 @@ pub(super) fn javascript_array_method_for_value(
     super::javascript::javascript_array_method(heap, method, items, args, instructions_executed)
 }
 
-/// A regexp match is array-shaped to JavaScript, so its method dispatch lives
+/// A regexp match is array-shaped to ECMA-262, so its method dispatch lives
 /// beside ordinary array methods while this helper preserves heap identity for
 /// `valueOf`.
 pub(super) fn javascript_regexp_match_method(

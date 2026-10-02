@@ -23,7 +23,7 @@ impl Default for RlmPromptFeatures {
 /// `__lashlang_runtime` — how a front end reaches the journaled clock and
 /// random source (TypeScript's `Date.now()`/`Math.random()`) — into *every*
 /// host, and this section once advertised it: a reader was handed
-/// `await __typescript_runtime.now(any)? -> float`, an internal name no cell
+/// `await __lashlang_runtime.now(any)? -> float`, an internal name no cell
 /// writes.
 ///
 /// The module is the substrate's, not a reader's, so it is hidden rather than
@@ -208,7 +208,7 @@ mod inventory_tests {
     #[test]
     fn reserved_namespace_is_hidden_from_every_prompt_inventory() {
         let mut catalog = LashlangHostCatalog::new();
-        for namespace in ["visible", "__private", "__typescript_runtime"] {
+        for namespace in ["visible", "__private", "__lashlang_runtime"] {
             catalog
                 .add_module_operation(
                     [namespace],

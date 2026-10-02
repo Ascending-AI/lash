@@ -1,4 +1,4 @@
-//! JSON encoding and decoding for the JavaScript dialect.
+//! JSON encoding and decoding for the ECMA-262 dialect.
 //!
 //! Split from the method-dispatch table because it is a different concern with
 //! a different hazard: `serde_json` cannot hold a non-finite number, so an

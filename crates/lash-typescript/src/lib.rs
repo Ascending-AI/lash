@@ -41,7 +41,7 @@ pub fn measure_source_nesting_charge(source: &str) -> usize {
 /// start with it are rejected. It is this front end's own namespace: the
 /// lowered program marks every generated binding private, so no caller needs
 /// to recognise the prefix.
-pub(crate) use lower::GENERATED_BINDING_PREFIX;
+pub(crate) use lower::LOWERED_BINDING_PREFIX;
 
 /// Exposed so the register's documented inventory can be pinned against the
 /// allowlist instead of being maintained by hand.

@@ -76,7 +76,7 @@ pub(super) fn validate_program_continuation(
                     | Instruction::CallMethod { .. }
                     | Instruction::CallDynamic
                     | Instruction::CallMethodDynamic
-                    | Instruction::Intrinsic(IntrinsicOp::JavaScriptStdlib(_)),
+                    | Instruction::Intrinsic(IntrinsicOp::IntrinsicDispatch(_)),
                 ),
                 VmFrameReturnContinuation::Direct,
             ) => true,
@@ -89,7 +89,7 @@ pub(super) fn validate_program_continuation(
                     && !callback.allow_effects
             }
             (
-                Some(Instruction::Intrinsic(IntrinsicOp::JavaScriptStdlib(_))),
+                Some(Instruction::Intrinsic(IntrinsicOp::IntrinsicDispatch(_))),
                 VmFrameReturnContinuation::Callback(callback),
             ) => {
                 matches!(callback.completion, VmCallbackCompletion::Discard)

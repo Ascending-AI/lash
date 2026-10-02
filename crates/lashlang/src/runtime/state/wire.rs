@@ -270,7 +270,7 @@ impl CanonicalHeapObject {
                 flags,
                 last_index,
             } => {
-                crate::runtime::validate_typescript_regexp(&pattern, &flags).map_err(|error| {
+                crate::runtime::validate_regexp(&pattern, &flags).map_err(|error| {
                     SnapshotDecodeError::InvalidEncoding(format!(
                         "RegExp pattern or flags violate TypeScript bounds: {}",
                         error.diagnostic_code()

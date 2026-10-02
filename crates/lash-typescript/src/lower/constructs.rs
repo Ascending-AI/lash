@@ -242,7 +242,7 @@ impl Lowerer {
     pub(super) fn generated_binding(&mut self, label: &str) -> String {
         let id = self.next_binding;
         self.next_binding += 1;
-        let name = format!("{GENERATED_BINDING_PREFIX}{id}_{label}");
+        let name = format!("{LOWERED_BINDING_PREFIX}{id}_{label}");
         self.private_bindings.insert(name.clone());
         name
     }
@@ -259,17 +259,17 @@ impl Lowerer {
     }
 
     pub(super) fn nullish(value: LashExpr) -> LashExpr {
-        LashExpr::JavaScriptLogical {
-            left: Box::new(LashExpr::JavaScriptBinary {
+        LashExpr::OperandLogical {
+            left: Box::new(LashExpr::CoercingBinary {
                 left: Box::new(value.clone()),
-                op: JavaScriptBinaryOp::StrictEqual,
+                op: CoercingBinaryOp::StrictEqual,
                 right: Box::new(LashExpr::Null),
             }),
-            op: JavaScriptLogicalOp::Or,
-            right: Box::new(LashExpr::JavaScriptBinary {
+            op: OperandLogicalOp::Or,
+            right: Box::new(LashExpr::CoercingBinary {
                 left: Box::new(value),
-                op: JavaScriptBinaryOp::StrictEqual,
-                right: Box::new(LashExpr::Undefined),
+                op: CoercingBinaryOp::StrictEqual,
+                right: Box::new(LashExpr::Absent),
             }),
         }
     }
@@ -278,7 +278,7 @@ impl Lowerer {
         let mut values = vec![LashExpr::String(method.into())];
         values.extend(args);
         LashExpr::BuiltinCall {
-            name: "__typescript_stdlib".into(),
+            name: "__lashlang_stdlib".into(),
             args: values,
         }
     }
@@ -419,38 +419,38 @@ impl Lowerer {
                 continue;
             };
             output.push(LashExpr::If {
-                condition: Box::new(LashExpr::JavaScriptBinary {
+                condition: Box::new(LashExpr::CoercingBinary {
                     left: Box::new(Self::variable(&matched)),
-                    op: JavaScriptBinaryOp::StrictEqual,
+                    op: CoercingBinaryOp::StrictEqual,
                     right: Box::new(LashExpr::Number(-1.0)),
                 }),
                 then_block: Box::new(LashExpr::If {
-                    condition: Box::new(LashExpr::JavaScriptBinary {
+                    condition: Box::new(LashExpr::CoercingBinary {
                         left: Box::new(Self::variable(&value)),
-                        op: JavaScriptBinaryOp::StrictEqual,
+                        op: CoercingBinaryOp::StrictEqual,
                         right: Box::new(self.lower_expr(test)?),
                     }),
                     then_block: Box::new(Self::temp_assignment(
                         &matched,
                         LashExpr::Number(index as f64),
                     )),
-                    else_block: Box::new(LashExpr::Undefined),
+                    else_block: Box::new(LashExpr::Absent),
                 }),
-                else_block: Box::new(LashExpr::Undefined),
+                else_block: Box::new(LashExpr::Absent),
             });
         }
         if let Some(default_index) = default_index {
             output.push(LashExpr::If {
-                condition: Box::new(LashExpr::JavaScriptBinary {
+                condition: Box::new(LashExpr::CoercingBinary {
                     left: Box::new(Self::variable(&matched)),
-                    op: JavaScriptBinaryOp::StrictEqual,
+                    op: CoercingBinaryOp::StrictEqual,
                     right: Box::new(LashExpr::Number(-1.0)),
                 }),
                 then_block: Box::new(Self::temp_assignment(
                     &matched,
                     LashExpr::Number(default_index as f64),
                 )),
-                else_block: Box::new(LashExpr::Undefined),
+                else_block: Box::new(LashExpr::Absent),
             });
         }
         self.switch_breaks.push(SwitchBreak {
@@ -464,25 +464,25 @@ impl Lowerer {
             let body =
                 LashExpr::Block(self.lower_statements(&case.consequent, StatementScope::Case)?);
             dispatch.push(LashExpr::If {
-                condition: Box::new(LashExpr::JavaScriptLogical {
-                    left: Box::new(LashExpr::JavaScriptLogical {
-                        left: Box::new(LashExpr::JavaScriptBinary {
+                condition: Box::new(LashExpr::OperandLogical {
+                    left: Box::new(LashExpr::OperandLogical {
+                        left: Box::new(LashExpr::CoercingBinary {
                             left: Box::new(Self::variable(&matched)),
-                            op: JavaScriptBinaryOp::GreaterEqual,
+                            op: CoercingBinaryOp::GreaterEqual,
                             right: Box::new(LashExpr::Number(0.0)),
                         }),
-                        op: JavaScriptLogicalOp::And,
-                        right: Box::new(LashExpr::JavaScriptBinary {
+                        op: OperandLogicalOp::And,
+                        right: Box::new(LashExpr::CoercingBinary {
                             left: Box::new(Self::variable(&matched)),
-                            op: JavaScriptBinaryOp::LessEqual,
+                            op: CoercingBinaryOp::LessEqual,
                             right: Box::new(LashExpr::Number(index as f64)),
                         }),
                     }),
-                    op: JavaScriptLogicalOp::And,
-                    right: Box::new(js_unary(JavaScriptUnaryOp::Not, Self::variable(&broken))),
+                    op: OperandLogicalOp::And,
+                    right: Box::new(js_unary(CoercingUnaryOp::Not, Self::variable(&broken))),
                 }),
                 then_block: Box::new(body),
-                else_block: Box::new(LashExpr::Undefined),
+                else_block: Box::new(LashExpr::Absent),
             });
         }
         self.switch_breaks.pop();
@@ -498,17 +498,17 @@ impl Lowerer {
                     .continue_epilogues
                     .last()
                     .and_then(Clone::clone)
-                    .unwrap_or(LashExpr::Undefined);
+                    .unwrap_or(LashExpr::Absent);
                 output.push(LashExpr::If {
                     condition: Box::new(Self::variable(continued)),
                     then_block: Box::new(LashExpr::Block(vec![epilogue, LashExpr::Continue])),
-                    else_block: Box::new(LashExpr::Undefined),
+                    else_block: Box::new(LashExpr::Absent),
                 });
             }
         } else {
             output.extend(dispatch);
         }
-        output.push(LashExpr::Undefined);
+        output.push(LashExpr::Absent);
         Ok(LashExpr::Block(output))
     }
 
@@ -572,7 +572,7 @@ impl Lowerer {
                     expressions.push(Self::temp_assignment(&source, self.lower_expr(value)?));
                     let copy = LashExpr::If {
                         condition: Box::new(Self::nullish(Self::variable(&source))),
-                        then_block: Box::new(LashExpr::Undefined),
+                        then_block: Box::new(LashExpr::Absent),
                         else_block: Box::new(LashExpr::For {
                             authored_binding: None,
                             binding: entry.as_str().into(),
@@ -665,10 +665,10 @@ impl Lowerer {
             Pattern::Assign { target, default } => {
                 let input = self.temporary("pattern_default");
                 let chosen = LashExpr::If {
-                    condition: Box::new(LashExpr::JavaScriptBinary {
+                    condition: Box::new(LashExpr::CoercingBinary {
                         left: Box::new(Self::variable(&input)),
-                        op: JavaScriptBinaryOp::StrictEqual,
-                        right: Box::new(LashExpr::Undefined),
+                        op: CoercingBinaryOp::StrictEqual,
+                        right: Box::new(LashExpr::Absent),
                     }),
                     // A binding default is SetFunctionName (`[f = () => {}]`).
                     then_block: Box::new(
@@ -745,7 +745,7 @@ impl Lowerer {
                     ));
                     for key in keys {
                         output.push(LashExpr::BuiltinCall {
-                            name: "__typescript_heap_delete_member".into(),
+                            name: "__lashlang_heap_delete_member".into(),
                             args: vec![Self::variable(&copy), Self::variable(&key)],
                         });
                     }
@@ -779,7 +779,7 @@ impl Lowerer {
                     self.record_global_write(global);
                     let target = AssignTarget::variable(global.into());
                     let setup = created
-                        .then(|| Self::temp_assignment(global, LashExpr::Undefined))
+                        .then(|| Self::temp_assignment(global, LashExpr::Absent))
                         .into_iter()
                         .collect();
                     return Ok((setup, LashExpr::Variable(global.into()), target));
@@ -868,7 +868,7 @@ impl Lowerer {
                 return Ok(LashExpr::Block(vec![
                     Self::temp_assignment(&result, self.lower_expr(value)?),
                     LashExpr::BuiltinCall {
-                        name: "__typescript_global_set".into(),
+                        name: "__lashlang_global_set".into(),
                         args: vec![LashExpr::String(global.into()), Self::variable(&result)],
                     },
                 ]));
@@ -936,16 +936,16 @@ impl Lowerer {
                 let update = member
                     && matches!(
                         updated,
-                        LashExpr::JavaScriptBinary {
-                            op: JavaScriptBinaryOp::Add
-                                | JavaScriptBinaryOp::Subtract
-                                | JavaScriptBinaryOp::Multiply
-                                | JavaScriptBinaryOp::Divide
-                                | JavaScriptBinaryOp::Remainder,
+                        LashExpr::CoercingBinary {
+                            op: CoercingBinaryOp::Add
+                                | CoercingBinaryOp::Subtract
+                                | CoercingBinaryOp::Multiply
+                                | CoercingBinaryOp::Divide
+                                | CoercingBinaryOp::Remainder,
                             ..
                         }
                     );
-                if member || !matches!(updated, LashExpr::JavaScriptBinary { .. }) {
+                if member || !matches!(updated, LashExpr::CoercingBinary { .. }) {
                     // Exponent `op=` lowers to a library call, and member
                     // targets keep the pinned base: both stay on the shared
                     // temporary path.
@@ -974,10 +974,10 @@ impl Lowerer {
             }
             AssignOp::Logical(op) => {
                 let should_keep = match op {
-                    LogicalOp::And => js_unary(JavaScriptUnaryOp::Not, old.clone()),
+                    LogicalOp::And => js_unary(CoercingUnaryOp::Not, old.clone()),
                     LogicalOp::Or => old.clone(),
                     LogicalOp::Nullish => {
-                        js_unary(JavaScriptUnaryOp::Not, Self::nullish(old.clone()))
+                        js_unary(CoercingUnaryOp::Not, Self::nullish(old.clone()))
                     }
                 };
                 // `f ??= () => {}` (and `||=`/`&&=`) is also a NamedEvaluation position.
@@ -1019,7 +1019,7 @@ impl Lowerer {
         let new_number = self.temporary("update_new");
         output.push(Self::temp_assignment(
             &old_number,
-            js_unary(JavaScriptUnaryOp::Plus, old),
+            js_unary(CoercingUnaryOp::Plus, old),
         ));
         output.push(Self::temp_assignment(
             &new_number,
@@ -1046,7 +1046,7 @@ impl Lowerer {
             self.refuse_global_this_in_process(global)?;
             self.record_global_write(global);
             return Ok(LashExpr::BuiltinCall {
-                name: "__typescript_global_delete".into(),
+                name: "__lashlang_global_delete".into(),
                 args: vec![LashExpr::String(global.into())],
             });
         }
@@ -1055,7 +1055,7 @@ impl Lowerer {
             MemberProperty::Index(index) => self.lower_expr(index)?,
         };
         Ok(LashExpr::BuiltinCall {
-            name: "__typescript_heap_delete_member".into(),
+            name: "__lashlang_heap_delete_member".into(),
             args: vec![self.lower_expr(object)?, key],
         })
     }
@@ -1067,7 +1067,7 @@ impl Lowerer {
     ) -> Result<LashExpr, Diagnostic> {
         let arguments = self.lower_argument_list(args)?;
         Ok(LashExpr::BuiltinCall {
-            name: "__typescript_call_dynamic".into(),
+            name: "__lashlang_call_dynamic".into(),
             args: vec![callee, arguments],
         })
     }
@@ -1113,7 +1113,7 @@ impl Lowerer {
                 };
                 self.refuse_global_this_in_process(name)?;
                 return Ok(LashExpr::BuiltinCall {
-                    name: "__typescript_global_has".into(),
+                    name: "__lashlang_global_has".into(),
                     args: vec![LashExpr::String(name.as_str().into())],
                 });
             }
@@ -1140,7 +1140,7 @@ impl Lowerer {
         Ok(match op {
             BinaryOp::Exponent => Self::stdlib_call("Math.pow", vec![left, right]),
             BinaryOp::In | BinaryOp::InstanceOf => unreachable!("handled before value lowering"),
-            op => LashExpr::JavaScriptBinary {
+            op => LashExpr::CoercingBinary {
                 left: Box::new(left),
                 op: map_binary(op),
                 right: Box::new(right),
@@ -1177,21 +1177,21 @@ impl Lowerer {
                 let value = Self::variable(&input);
                 Ok(LashExpr::Block(vec![
                     Self::temp_assignment(&input, self.lower_expr(left)?),
-                    LashExpr::JavaScriptLogical {
-                        left: Box::new(LashExpr::JavaScriptBinary {
-                            left: Box::new(js_unary(JavaScriptUnaryOp::TypeOf, value.clone())),
-                            op: JavaScriptBinaryOp::StrictEqual,
+                    LashExpr::OperandLogical {
+                        left: Box::new(LashExpr::CoercingBinary {
+                            left: Box::new(js_unary(CoercingUnaryOp::TypeOf, value.clone())),
+                            op: CoercingBinaryOp::StrictEqual,
                             right: Box::new(LashExpr::String("object".into())),
                         }),
-                        op: JavaScriptLogicalOp::And,
-                        right: Box::new(js_unary(JavaScriptUnaryOp::Not, Self::nullish(value))),
+                        op: OperandLogicalOp::And,
+                        right: Box::new(js_unary(CoercingUnaryOp::Not, Self::nullish(value))),
                     },
                 ]))
             }
             "Error" | "TypeError" | "RangeError" | "SyntaxError" | "ReferenceError"
             | "URIError" | "EvalError" | "AggregateError" | "Map" | "Set" | "Date" | "RegExp"
             | "URL" | "URLSearchParams" => Ok(LashExpr::BuiltinCall {
-                name: "__typescript_heap_instanceof".into(),
+                name: "__lashlang_heap_instanceof".into(),
                 args: vec![
                     self.lower_expr(left)?,
                     LashExpr::String(constructor.as_str().into()),
@@ -1303,7 +1303,7 @@ impl Lowerer {
         }
         if constructor == "Date" && args.is_empty() {
             return Ok(LashExpr::BuiltinCall {
-                name: "__typescript_heap_new".into(),
+                name: "__lashlang_heap_new".into(),
                 args: vec![
                     LashExpr::String("Date".into()),
                     LashExpr::ResultUnwrap(Box::new(journaled_runtime_call(
@@ -1325,7 +1325,7 @@ impl Lowerer {
                 .collect::<Result<Vec<_>, _>>()?,
         );
         Ok(LashExpr::BuiltinCall {
-            name: "__typescript_heap_new".into(),
+            name: "__lashlang_heap_new".into(),
             args: values,
         })
     }
@@ -1347,7 +1347,7 @@ pub(super) fn global_this_member_name<'a>(
 /// linker generates names in: the lowerer's own bindings, and the declarations
 /// the linker lifts process literals to.
 pub(super) fn is_reserved_name(name: &str) -> bool {
-    name.starts_with(GENERATED_BINDING_PREFIX)
+    name.starts_with(LOWERED_BINDING_PREFIX)
         || name.starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX)
 }
 
@@ -1355,24 +1355,24 @@ pub(super) fn reserved_identifier(name: &str) -> Diagnostic {
     Diagnostic::new(
         DiagnosticCode::ReservedIdentifier,
         format!(
-            "`{name}` is reserved: identifiers starting with `{GENERATED_BINDING_PREFIX}` or `{}` name generated bindings and lifted processes",
+            "`{name}` is reserved: identifiers starting with `{LOWERED_BINDING_PREFIX}` or `{}` name generated bindings and lifted processes",
             lashlang::LIFTED_PROCESS_NAME_PREFIX
         ),
         None,
     )
 }
 
-pub(super) fn js_unary(op: JavaScriptUnaryOp, expr: LashExpr) -> LashExpr {
-    LashExpr::JavaScriptUnary {
+pub(super) fn js_unary(op: CoercingUnaryOp, expr: LashExpr) -> LashExpr {
+    LashExpr::CoercingUnary {
         op,
         expr: Box::new(expr),
     }
 }
 
 pub(super) fn js_add(left: LashExpr, right: LashExpr) -> LashExpr {
-    LashExpr::JavaScriptBinary {
+    LashExpr::CoercingBinary {
         left: Box::new(left),
-        op: JavaScriptBinaryOp::Add,
+        op: CoercingBinaryOp::Add,
         right: Box::new(right),
     }
 }

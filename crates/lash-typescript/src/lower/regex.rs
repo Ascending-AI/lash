@@ -34,7 +34,7 @@ impl Lowerer {
                     call_args.push(self.lower_expr(arg)?);
                 }
                 if args.is_empty() {
-                    call_args.push(LashExpr::Undefined);
+                    call_args.push(LashExpr::Absent);
                 }
                 Ok(regexp_call(method, call_args))
             }
@@ -64,7 +64,7 @@ impl Lowerer {
                     .get(1)
                     .map(|limit| self.lower_expr(limit))
                     .transpose()?
-                    .unwrap_or(LashExpr::Undefined);
+                    .unwrap_or(LashExpr::Absent);
                 Ok(regexp_call(
                     method,
                     vec![self.lower_expr(object)?, self.lower_expr(&args[0])?, limit],
@@ -111,10 +111,10 @@ impl Lowerer {
             receiver: None,
             params: vec![entry_slot.as_str().into()],
             captures: vec![replacement_slot.as_str().into()],
-            body: Box::new(LashExpr::Return(Box::new(js_add(
+            body: Box::new(LashExpr::FunctionReturn(Box::new(js_add(
                 LashExpr::String("".into()),
                 LashExpr::BuiltinCall {
-                    name: "__typescript_call_dynamic".into(),
+                    name: "__lashlang_call_dynamic".into(),
                     args: vec![
                         variable(&replacement_slot),
                         LashExpr::Index {
@@ -150,12 +150,12 @@ impl Lowerer {
             ],
         );
         let builtin = LashExpr::If {
-            condition: Box::new(LashExpr::JavaScriptBinary {
+            condition: Box::new(LashExpr::CoercingBinary {
                 left: Box::new(js_unary(
-                    JavaScriptUnaryOp::TypeOf,
+                    CoercingUnaryOp::TypeOf,
                     variable(&replacement_slot),
                 )),
-                op: JavaScriptBinaryOp::StrictEqual,
+                op: CoercingBinaryOp::StrictEqual,
                 right: Box::new(LashExpr::String("function".into())),
             }),
             then_block: Box::new(callback_branch),
@@ -173,7 +173,7 @@ impl Lowerer {
         let call = if own_method_guard {
             LashExpr::If {
                 condition: Box::new(LashExpr::BuiltinCall {
-                    name: "__typescript_stdlib".into(),
+                    name: "__lashlang_stdlib".into(),
                     args: vec![
                         LashExpr::String("Lash.OwnMethod".into()),
                         variable(&input_slot),
@@ -200,7 +200,7 @@ impl Lowerer {
 fn regexp_call(operation: &str, mut args: Vec<LashExpr>) -> LashExpr {
     args.insert(0, LashExpr::String(operation.into()));
     LashExpr::BuiltinCall {
-        name: "__typescript_regexp".into(),
+        name: "__lashlang_regexp".into(),
         args,
     }
 }

@@ -112,10 +112,10 @@ impl UriBuiltin {
 
     fn intrinsic(self) -> &'static str {
         match self {
-            Self::EncodeComponent => "__typescript_encode_uri_component",
-            Self::DecodeComponent => "__typescript_decode_uri_component",
-            Self::Encode => "__typescript_encode_uri",
-            Self::Decode => "__typescript_decode_uri",
+            Self::EncodeComponent => "__lashlang_encode_uri_component",
+            Self::DecodeComponent => "__lashlang_decode_uri_component",
+            Self::Encode => "__lashlang_encode_uri",
+            Self::Decode => "__lashlang_decode_uri",
         }
     }
 
@@ -365,14 +365,13 @@ impl Lowerer {
             .transpose()?;
         Ok(match (builtin, value) {
             (CoercionBuiltin::String, None) => LashExpr::String("".into()),
-            (CoercionBuiltin::String, Some(value)) => js_unary(JavaScriptUnaryOp::ToString, value),
+            (CoercionBuiltin::String, Some(value)) => js_unary(CoercingUnaryOp::ToString, value),
             (CoercionBuiltin::Number, None) => LashExpr::Number(0.0),
-            (CoercionBuiltin::Number, Some(value)) => js_unary(JavaScriptUnaryOp::Plus, value),
+            (CoercionBuiltin::Number, Some(value)) => js_unary(CoercingUnaryOp::Plus, value),
             (CoercionBuiltin::Boolean, None) => LashExpr::Bool(false),
-            (CoercionBuiltin::Boolean, Some(value)) => js_unary(
-                JavaScriptUnaryOp::Not,
-                js_unary(JavaScriptUnaryOp::Not, value),
-            ),
+            (CoercionBuiltin::Boolean, Some(value)) => {
+                js_unary(CoercingUnaryOp::Not, js_unary(CoercingUnaryOp::Not, value))
+            }
         })
     }
 
@@ -402,7 +401,7 @@ impl Lowerer {
                 .collect::<Result<Vec<_>, _>>()?,
         );
         Ok(LashExpr::BuiltinCall {
-            name: "__typescript_stdlib".into(),
+            name: "__lashlang_stdlib".into(),
             args: values,
         })
     }
@@ -424,10 +423,10 @@ impl Lowerer {
             NumberPredicate::Finite => "Number.isFinite",
         };
         Ok(LashExpr::BuiltinCall {
-            name: "__typescript_stdlib".into(),
+            name: "__lashlang_stdlib".into(),
             args: vec![
                 LashExpr::String(intrinsic.into()),
-                js_unary(JavaScriptUnaryOp::Plus, self.lower_expr(value)?),
+                js_unary(CoercingUnaryOp::Plus, self.lower_expr(value)?),
             ],
         })
     }
@@ -446,7 +445,7 @@ impl Lowerer {
         };
         if builtin.rejects_lone_surrogate() && matches!(value, Expr::LoneSurrogateString) {
             return Ok(LashExpr::Throw(Box::new(LashExpr::BuiltinCall {
-                name: "__typescript_heap_new".into(),
+                name: "__lashlang_heap_new".into(),
                 args: vec![
                     LashExpr::String("URIError".into()),
                     LashExpr::String("URI malformed".into()),
@@ -498,7 +497,7 @@ impl Lowerer {
                 .collect::<Result<Vec<_>, _>>()?,
         );
         Ok(LashExpr::BuiltinCall {
-            name: "__typescript_regexp".into(),
+            name: "__lashlang_regexp".into(),
             args: values,
         })
     }
@@ -528,7 +527,7 @@ impl Lowerer {
             // pending tool call, settled by the aggregate that awaits it, whose
             // start point is that aggregate's admission (ADR 0099 §11).
             (AgentPrimitive::Sleep, [milliseconds]) => Ok(LashExpr::BuiltinCall {
-                name: "__typescript_pending_timer".into(),
+                name: "__lashlang_pending_timer".into(),
                 args: vec![self.lower_expr(milliseconds)?],
             }),
             (AgentPrimitive::WaitSignal, [Expr::String(name)]) if self.position.await_depth > 0 => {
@@ -725,11 +724,8 @@ impl Lowerer {
                 }
                 if args.is_empty() {
                     return Ok(LashExpr::BuiltinCall {
-                        name: "__typescript_stdlib".into(),
-                        args: vec![
-                            LashExpr::String("JSON.stringify".into()),
-                            LashExpr::Undefined,
-                        ],
+                        name: "__lashlang_stdlib".into(),
+                        args: vec![LashExpr::String("JSON.stringify".into()), LashExpr::Absent],
                     });
                 }
                 let value = &args[0];
@@ -920,14 +916,14 @@ impl Lowerer {
                         expr: Box::new(receiver_value),
                     },
                     LashExpr::BuiltinCall {
-                        name: "__typescript_stdlib".into(),
+                        name: "__lashlang_stdlib".into(),
                         args: vec![LashExpr::String(method.into()), variable()],
                     },
                 ]));
             }
             let array = match method {
                 "values" => LashExpr::BuiltinCall {
-                    name: "__typescript_stdlib".into(),
+                    name: "__lashlang_stdlib".into(),
                     args: vec![
                         LashExpr::String("Lash.ArrayFromIterable".into()),
                         variable(),
@@ -941,7 +937,7 @@ impl Lowerer {
                     };
                     LashExpr::Map {
                         items: Box::new(LashExpr::BuiltinCall {
-                            name: "__typescript_stdlib".into(),
+                            name: "__lashlang_stdlib".into(),
                             args: vec![LashExpr::String("__enumerate".into()), variable()],
                         }),
                         function: Box::new(LashExpr::Function(Box::new(FunctionExpr {
@@ -960,7 +956,7 @@ impl Lowerer {
                     let key = self.temporary("array_key");
                     LashExpr::Map {
                         items: Box::new(LashExpr::BuiltinCall {
-                            name: "__typescript_stdlib".into(),
+                            name: "__lashlang_stdlib".into(),
                             args: vec![LashExpr::String("__enumerate".into()), variable()],
                         }),
                         function: Box::new(LashExpr::Function(Box::new(FunctionExpr {
@@ -984,12 +980,12 @@ impl Lowerer {
             // read as an array answered its `keys()` as `[]` in silence.
             let iteration = LashExpr::If {
                 condition: Box::new(LashExpr::BuiltinCall {
-                    name: "__typescript_stdlib".into(),
+                    name: "__lashlang_stdlib".into(),
                     args: vec![LashExpr::String("Array.isArray".into()), variable()],
                 }),
                 then_block: Box::new(array),
                 else_block: Box::new(LashExpr::BuiltinCall {
-                    name: "__typescript_stdlib".into(),
+                    name: "__lashlang_stdlib".into(),
                     args: vec![LashExpr::String(method.into()), variable()],
                 }),
             };
@@ -1040,7 +1036,7 @@ impl Lowerer {
                 "Lash.ArrayIterationSource"
             };
             let array = LashExpr::BuiltinCall {
-                name: "__typescript_stdlib".into(),
+                name: "__lashlang_stdlib".into(),
                 args: vec![
                     LashExpr::String(source.into()),
                     self.lower_iterable_sink(value)?,
@@ -1064,7 +1060,7 @@ impl Lowerer {
                 ));
             };
             return Ok(LashExpr::BuiltinCall {
-                name: "__typescript_stdlib".into(),
+                name: "__lashlang_stdlib".into(),
                 args: vec![
                     LashExpr::String("Object.fromEntries".into()),
                     self.lower_iterable_sink(value)?,
@@ -1094,7 +1090,7 @@ impl Lowerer {
                     },
                     LashExpr::If {
                         condition: Box::new(LashExpr::BuiltinCall {
-                            name: "__typescript_stdlib".into(),
+                            name: "__lashlang_stdlib".into(),
                             args: vec![
                                 LashExpr::String("Lash.OwnMethod".into()),
                                 variable(&receiver),
@@ -1107,7 +1103,7 @@ impl Lowerer {
                             args: vec![self.lower_expr(key)?],
                         }),
                         else_block: Box::new(LashExpr::BuiltinCall {
-                            name: "__typescript_stdlib".into(),
+                            name: "__lashlang_stdlib".into(),
                             args: vec![
                                 LashExpr::String("Object.hasOwn".into()),
                                 variable(&receiver),
@@ -1118,7 +1114,7 @@ impl Lowerer {
                 ])
             } else {
                 LashExpr::BuiltinCall {
-                    name: "__typescript_stdlib".into(),
+                    name: "__lashlang_stdlib".into(),
                     args: vec![
                         LashExpr::String("Object.hasOwn".into()),
                         self.lower_expr(object)?,
@@ -1165,7 +1161,7 @@ impl Lowerer {
                     .collect::<Result<Vec<_>, _>>()?,
             );
             return Ok(LashExpr::BuiltinCall {
-                name: "__typescript_stdlib".into(),
+                name: "__lashlang_stdlib".into(),
                 args: builtin_args,
             });
         }
@@ -1241,7 +1237,7 @@ impl Lowerer {
                     .collect::<Result<Vec<_>, _>>()?,
             );
             return Ok(LashExpr::BuiltinCall {
-                name: "__typescript_stdlib".into(),
+                name: "__lashlang_stdlib".into(),
                 args: builtin_args,
             });
         }
@@ -1352,7 +1348,7 @@ impl Lowerer {
         };
         Ok(if self.position.await_depth == 0 {
             LashExpr::BuiltinCall {
-                name: "__typescript_pending_tool".into(),
+                name: "__lashlang_pending_tool".into(),
                 args: vec![call],
             }
         } else {
@@ -1375,7 +1371,7 @@ impl Lowerer {
 fn console_observation_text(mut arguments: Vec<LashExpr>) -> LashExpr {
     arguments.insert(0, LashExpr::String("__consoleObservationText".into()));
     LashExpr::BuiltinCall {
-        name: "__typescript_stdlib".into(),
+        name: "__lashlang_stdlib".into(),
         args: arguments,
     }
 }

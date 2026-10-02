@@ -93,7 +93,7 @@ impl Lowerer {
             };
             if !guard {
                 return Ok(LashExpr::BuiltinCall {
-                    name: "__typescript_async_map".into(),
+                    name: "__lashlang_async_map".into(),
                     args: vec![items, callback],
                 });
             }
@@ -108,7 +108,7 @@ impl Lowerer {
                 },
                 LashExpr::If {
                     condition: Box::new(LashExpr::BuiltinCall {
-                        name: "__typescript_stdlib".into(),
+                        name: "__lashlang_stdlib".into(),
                         args: vec![
                             LashExpr::String("Lash.OwnMethod".into()),
                             variable(),
@@ -121,7 +121,7 @@ impl Lowerer {
                         args: vec![lowered],
                     }),
                     else_block: Box::new(LashExpr::BuiltinCall {
-                        name: "__typescript_async_map".into(),
+                        name: "__lashlang_async_map".into(),
                         args: vec![variable(), callback],
                     }),
                 },
@@ -136,7 +136,7 @@ impl Lowerer {
                 // Pair each item with its index, then unpack in a generated
                 // one-parameter wrapper so the driver's arity still matches.
                 let pairs = LashExpr::BuiltinCall {
-                    name: "__typescript_stdlib".into(),
+                    name: "__lashlang_stdlib".into(),
                     args: vec![LashExpr::String("__enumerate".into()), items],
                 };
                 let pair = self.generated_binding("pair");
@@ -159,7 +159,7 @@ impl Lowerer {
                             receiver: None,
                             params: vec![pair.as_str().into()],
                             captures: vec![wrapper.as_str().into()],
-                            body: Box::new(LashExpr::Return(Box::new(LashExpr::Call {
+                            body: Box::new(LashExpr::FunctionReturn(Box::new(LashExpr::Call {
                                 function: Box::new(LashExpr::Variable(wrapper.as_str().into())),
                                 args: vec![index_of(0), index_of(1)],
                             }))),
@@ -198,8 +198,8 @@ impl ExprFolder for SettleReturns {
     fn fold_expr(&mut self, expr: LashExpr) -> LashExpr {
         match expr {
             LashExpr::Function(_) => expr,
-            LashExpr::Return(value) => {
-                LashExpr::Return(Box::new(settled_fulfilled(self.fold_expr(*value))))
+            LashExpr::FunctionReturn(value) => {
+                LashExpr::FunctionReturn(Box::new(settled_fulfilled(self.fold_expr(*value))))
             }
             other => fold_expr_children(self, other),
         }
@@ -209,7 +209,7 @@ impl ExprFolder for SettleReturns {
 fn settle_async_callback(mut callback: LashExpr, reason: String) -> LashExpr {
     let function = match spans::unmarked_mut(&mut callback) {
         LashExpr::Function(function) => function.as_mut(),
-        LashExpr::BuiltinCall { name, args } if name.as_str() == "__typescript_closure" => {
+        LashExpr::BuiltinCall { name, args } if name.as_str() == "__lashlang_closure" => {
             let Some(LashExpr::Function(function)) = args.first_mut() else {
                 unreachable!("closure intrinsic starts with a function")
             };
@@ -217,18 +217,15 @@ fn settle_async_callback(mut callback: LashExpr, reason: String) -> LashExpr {
         }
         _ => unreachable!("async callback lowers to a function or closure intrinsic"),
     };
-    let body = SettleReturns.fold_expr(std::mem::replace(
-        function.body.as_mut(),
-        LashExpr::Undefined,
-    ));
+    let body = SettleReturns.fold_expr(std::mem::replace(function.body.as_mut(), LashExpr::Absent));
     *function.body = LashExpr::Try(Box::new(TryExpr {
         body: Box::new(LashExpr::Block(vec![
             body,
-            LashExpr::Return(Box::new(settled_fulfilled(LashExpr::Undefined))),
+            LashExpr::FunctionReturn(Box::new(settled_fulfilled(LashExpr::Absent))),
         ])),
         catch: Some(CatchClause {
             binding: reason.as_str().into(),
-            body: Box::new(LashExpr::Return(Box::new(settled_rejected(
+            body: Box::new(LashExpr::FunctionReturn(Box::new(settled_rejected(
                 LashExpr::Variable(reason.into()),
             )))),
         }),

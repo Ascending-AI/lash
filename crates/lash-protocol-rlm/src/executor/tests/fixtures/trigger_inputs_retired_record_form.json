@@ -3,8 +3,8 @@
     "artifact": {
       "exports": {
         "processes": {
-          "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf": {
-            "component": "6fdd97c2176c4f1ed7fedbff4985b3a87fbcafd3c00092becd57ae0c84e5d5ef",
+          "__process_91173584f85826e2206f39ebd8d325ed5f9fd20fbc3d9ff4896c616ec4d67d0e": {
+            "component": "741bd9811ddeae378aa4e6ee7248a536ae60a1a553d02daf34c300bdfc970612",
             "pos": 0
           }
         }
@@ -213,7 +213,7 @@
           }
         }
       },
-      "host_requirements_ref": "lashlang-host-requirements:v2:blake3:b92e79f7db06a944afaf1fc26389fe8d76e12a73291de2dc14b5e171cf154ea8",
+      "host_requirements_ref": "lashlang-host-requirements:v2:blake3:479151bc07e51503c4108b8c82a43eb696ec26456660f103572a6b9e8455a755",
       "ir": {
         "declarations": [
           {
@@ -240,11 +240,11 @@
                                     "expr": {
                                       "Block": [
                                         {
-                                          "Return": {
+                                          "FunctionReturn": {
                                             "Bool": true
                                           }
                                         },
-                                        "Undefined"
+                                        "Absent"
                                       ]
                                     },
                                     "role": {
@@ -262,10 +262,10 @@
                         }
                       },
                       "catch": {
-                        "binding": "__typescript_process_error",
+                        "binding": "__lashlang_process_error",
                         "body": {
                           "Fail": {
-                            "Variable": "__typescript_process_error"
+                            "Variable": "__lashlang_process_error"
                           }
                         }
                       }
@@ -276,7 +276,7 @@
                   }
                 }
               },
-              "name": "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf",
+              "name": "__process_91173584f85826e2206f39ebd8d325ed5f9fd20fbc3d9ff4896c616ec4d67d0e",
               "origin": {
                 "hidden_params": 0,
                 "kind": "lifted",
@@ -310,7 +310,7 @@
               "Assign": {
                 "expr": {
                   "ProcessRef": {
-                    "process": "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf"
+                    "process": "__process_91173584f85826e2206f39ebd8d325ed5f9fd20fbc3d9ff4896c616ec4d67d0e"
                   }
                 },
                 "target": {
@@ -442,27 +442,27 @@
           ]
         }
       },
-      "module_ref": "lashlang:v2:blake3:2c36a96d080413bae3037f683403c8b931a9d23ff57ac6e557f51796b29d720e"
+      "module_ref": "lashlang:v2:blake3:3318ae4ebfe7036222fd1d593c1557c12f6426e93623924c6ba7882079c6a98c"
     },
-    "encoding": 1,
-    "family": "lashlang-semantic-v24"
+    "encoding": 2,
+    "family": "lashlang-semantic-v25"
   },
   "compiled_program_debug": "CompiledProgram { instruction_count: 22 }",
   "exports": {
     "processes": {
-      "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf": {
-        "component": "6fdd97c2176c4f1ed7fedbff4985b3a87fbcafd3c00092becd57ae0c84e5d5ef",
+      "__process_91173584f85826e2206f39ebd8d325ed5f9fd20fbc3d9ff4896c616ec4d67d0e": {
+        "component": "741bd9811ddeae378aa4e6ee7248a536ae60a1a553d02daf34c300bdfc970612",
         "pos": 0
       }
     }
   },
-  "host_requirements_ref": "lashlang-host-requirements:v2:blake3:b92e79f7db06a944afaf1fc26389fe8d76e12a73291de2dc14b5e171cf154ea8",
-  "module_ref": "lashlang:v2:blake3:2c36a96d080413bae3037f683403c8b931a9d23ff57ac6e557f51796b29d720e",
+  "host_requirements_ref": "lashlang-host-requirements:v2:blake3:479151bc07e51503c4108b8c82a43eb696ec26456660f103572a6b9e8455a755",
+  "module_ref": "lashlang:v2:blake3:3318ae4ebfe7036222fd1d593c1557c12f6426e93623924c6ba7882079c6a98c",
   "process_definition_identity": {
-    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:b92e79f7db06a944afaf1fc26389fe8d76e12a73291de2dc14b5e171cf154ea8",
-    "module_ref": "lashlang:v2:blake3:2c36a96d080413bae3037f683403c8b931a9d23ff57ac6e557f51796b29d720e",
+    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:479151bc07e51503c4108b8c82a43eb696ec26456660f103572a6b9e8455a755",
+    "module_ref": "lashlang:v2:blake3:3318ae4ebfe7036222fd1d593c1557c12f6426e93623924c6ba7882079c6a98c",
     "process_ref": {
-      "component": "6fdd97c2176c4f1ed7fedbff4985b3a87fbcafd3c00092becd57ae0c84e5d5ef",
+      "component": "741bd9811ddeae378aa4e6ee7248a536ae60a1a553d02daf34c300bdfc970612",
       "pos": 0
     }
   },
@@ -549,7 +549,7 @@
     "target": {
       "args": {},
       "definition_id": {
-        "$lash_definition_id": "lash.definition:sha256:60e4295f0c5978354801b5f1f3c2ae749990f842a8620762ee1e35a79a28e16f"
+        "$lash_definition_id": "lash.definition:sha256:ebc2341ff0d5f3830b4b60477acecdb93a87478fb9a37021a3b4cdd5f83cfacb"
       },
       "signature_claim": {
         "encoding": {
@@ -591,12 +591,12 @@
     },
     "target_identity": {
       "definition_id": {
-        "$lash_definition_id": "lash.definition:sha256:60e4295f0c5978354801b5f1f3c2ae749990f842a8620762ee1e35a79a28e16f"
+        "$lash_definition_id": "lash.definition:sha256:ebc2341ff0d5f3830b4b60477acecdb93a87478fb9a37021a3b4cdd5f83cfacb"
       },
       "kind": "lashlang",
-      "label": "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf"
+      "label": "__process_91173584f85826e2206f39ebd8d325ed5f9fd20fbc3d9ff4896c616ec4d67d0e"
     },
-    "target_label": "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf",
+    "target_label": "__process_91173584f85826e2206f39ebd8d325ed5f9fd20fbc3d9ff4896c616ec4d67d0e",
     "wake_target": {
       "agent_frame_id": "test-frame",
       "session_id": "test-session"

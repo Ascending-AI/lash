@@ -49,7 +49,7 @@ impl Lowerer {
                 let binding = self.binding(&name)?.clone();
                 hoisted.push(LashExpr::Assign {
                     target: AssignTarget::variable(binding.internal.as_str().into()),
-                    expr: Box::new(self.binding_initial_value(&binding, LashExpr::Undefined)),
+                    expr: Box::new(self.binding_initial_value(&binding, LashExpr::Absent)),
                 });
             }
             hoisted
@@ -103,7 +103,7 @@ impl Lowerer {
                         let [LashExpr::Function(definition), ..] = args.as_slice() else {
                             unreachable!("closure intrinsic starts with a function literal")
                         };
-                        debug_assert_eq!(name.as_str(), "__typescript_closure");
+                        debug_assert_eq!(name.as_str(), "__lashlang_closure");
                         definition
                     }
                     _ => unreachable!("function lowering returns a function expression"),
@@ -213,9 +213,9 @@ impl Lowerer {
             && !dead.is_empty()
         {
             output.push(LashExpr::If {
-                condition: Box::new(js_unary(JavaScriptUnaryOp::Not, Self::variable(&flag))),
+                condition: Box::new(js_unary(CoercingUnaryOp::Not, Self::variable(&flag))),
                 then_block: Box::new(LashExpr::Block(dead)),
-                else_block: Box::new(LashExpr::Undefined),
+                else_block: Box::new(LashExpr::Absent),
             });
         }
         if matches!(scope, StatementScope::Nested) {

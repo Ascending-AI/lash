@@ -1,6 +1,4 @@
-use super::super::{
-    ErrorKind, JavaScriptUriCodec, RuntimeError, Value, ensure_javascript_string_size,
-};
+use super::super::{ErrorKind, RuntimeError, UriCodec, Value, ensure_javascript_string_size};
 use super::{ExecutionHost, Vm};
 
 pub(super) const URI_MALFORMED: &str = "URI malformed";
@@ -8,17 +6,17 @@ pub(super) const URI_MALFORMED: &str = "URI malformed";
 impl<H: ExecutionHost> Vm<'_, H> {
     pub(super) fn execute_javascript_uri_codec(
         &mut self,
-        codec: JavaScriptUriCodec,
+        codec: UriCodec,
     ) -> Result<(), RuntimeError> {
         let input = self.pop_stack()?;
         let input = self.heap.javascript_to_string(&input)?;
         // Encoding or decoding reads every input byte once.
         self.charge_intrinsic_work(input.len());
         let result = match codec {
-            JavaScriptUriCodec::EncodeComponent => Ok(encode(&input, false)),
-            JavaScriptUriCodec::EncodeUri => Ok(encode(&input, true)),
-            JavaScriptUriCodec::DecodeComponent => decode(&input, false),
-            JavaScriptUriCodec::DecodeUri => decode(&input, true),
+            UriCodec::EncodeComponent => Ok(encode(&input, false)),
+            UriCodec::EncodeUri => Ok(encode(&input, true)),
+            UriCodec::DecodeComponent => decode(&input, false),
+            UriCodec::DecodeUri => decode(&input, true),
         };
         match result {
             Ok(value) => {

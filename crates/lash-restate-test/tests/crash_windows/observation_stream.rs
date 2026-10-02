@@ -31,7 +31,7 @@ const LONG_LOOP_BOUND: Duration = Duration::from_secs(300);
 /// }
 /// ```
 async fn long_loop_request(engine: &Engine) -> lash_core::ProcessStartRequest {
-    use lashlang::JavaScriptBinaryOp::{Add, Less};
+    use lashlang::CoercingBinaryOp::{Add, Less};
     let program = b::module(
         vec![b::process_with_signals(
             PROCESS,

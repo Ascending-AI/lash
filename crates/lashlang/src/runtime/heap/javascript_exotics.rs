@@ -12,7 +12,7 @@ pub(crate) const MAX_JAVASCRIPT_LENGTH: u64 = 9_007_199_254_740_991;
 /// The first eight are ECMA constructors a guest can call. [`Self::EffectError`]
 /// and [`Self::RuntimeError`] are brands only the substrate mints, and no
 /// constructor names them, so they answer `instanceof Error` and nothing
-/// narrower. They are the shape a JavaScript library would write as
+/// narrower. They are the shape a ECMA-262 library would write as
 /// `class EffectError extends Error`, which this value model expresses as a
 /// brand because a dense record has no prototype to subclass and no own slot to
 /// write `name` into.
@@ -99,7 +99,7 @@ pub(crate) struct ErrorObject {
     /// write installed one — `Some(Value::Undefined)` for `{cause: undefined}`.
     pub(crate) cause: Option<Value>,
     /// The own `errors` data property. `Some` only for AggregateError — the
-    /// constructor installs it and it is always a JavaScript List value; a
+    /// constructor installs it and it is always a ECMA-262 List value; a
     /// `delete` can remove it, so `None` on an AggregateError means deleted.
     pub(crate) errors: Option<Value>,
 }
@@ -336,7 +336,7 @@ impl Heap {
             )
         {
             return Err(RuntimeError::ValidationFailed {
-                reason: "AggregateError errors must be a JavaScript list".to_string(),
+                reason: "AggregateError errors must be a ECMA-262 list".to_string(),
             });
         }
         self.allocate_object(HeapObject::Error(ErrorObject {
@@ -361,7 +361,9 @@ impl Heap {
         ))
     }
 
-    pub(crate) fn is_javascript_vm_object(&self, id: HeapId) -> Result<bool, RuntimeError> {
+    /// Closures, builtin objects and specialized heap objects are always
+    /// true by the VM value truthiness rule, regardless of their contents.
+    pub(crate) fn is_always_truthy_object(&self, id: HeapId) -> Result<bool, RuntimeError> {
         Ok(self.get(id)?.is_function()
             || self.is_builtin_object(id)
             || self.is_javascript_exotic(id)?)
@@ -1100,7 +1102,7 @@ fn normalize_same_value_zero_storage(value: Value) -> Value {
 }
 
 pub(super) fn host_boundary_error(object: &HeapObject) -> RuntimeError {
-    RuntimeError::JavaScriptExoticAtHostBoundary {
+    RuntimeError::BuiltinObjectAtHostBoundary {
         kind: object.kind_name().to_string(),
     }
 }
@@ -1144,7 +1146,7 @@ pub(crate) fn same_value_zero(left: &Value, right: &Value) -> bool {
         (Value::Undefined, Value::Undefined) | (Value::Null, Value::Null) => true,
         (Value::Bool(left), Value::Bool(right)) => left == right,
         (Value::String(left), Value::String(right)) => left == right,
-        // Every JavaScript object that reaches Map/Set storage is heap-backed;
+        // Every ECMA-262 object that reaches Map/Set storage is heap-backed;
         // reference identity is therefore exactly HeapId identity.
         (Value::Ref(left), Value::Ref(right)) => left == right,
         (Value::Resource(left), Value::Resource(right)) => left == right,

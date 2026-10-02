@@ -76,7 +76,7 @@ impl Heap {
                     .ok_or_else(|| format!("dangling heap reference {}", id.get()))?;
                 visits.insert(id, Visit::OnPath);
                 carried.push(id);
-                reference_semantics |= is_typescript_exotic(&entry.object);
+                reference_semantics |= is_specialized_heap_object(&entry.object);
                 stack.push((id, true));
                 for child in entry.object.child_refs().into_iter().rev() {
                     reference_semantics |= claim(&mut ownership_edges, child);
@@ -100,7 +100,7 @@ fn claim(ownership_edges: &mut FxHashMap<HeapId, u32>, id: HeapId) -> bool {
     *edges > 1
 }
 
-fn is_typescript_exotic(object: &HeapObject) -> bool {
+fn is_specialized_heap_object(object: &HeapObject) -> bool {
     matches!(
         object,
         HeapObject::RegExp(_)

@@ -3,7 +3,7 @@
 // The host view carries a binding only when it has a detached host shape, so a
 // `Map`, a `Date` or a record holding one never appears there (ADR 0076). A
 // model still has to know such a binding exists and roughly what it holds, so
-// this renders any runtime value — exotics included — the way a JavaScript
+// this renders any runtime value — exotics included — the way a ECMA-262
 // console would show it, cut to a fixed number of members, a fixed depth and a
 // fixed length. It is a description, never a value: nothing reads it back.
 

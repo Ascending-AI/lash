@@ -177,16 +177,16 @@ async fn a_tuple_is_an_immutable_value_distinct_from_a_list() {
                 ("empty_pair".into(), call("empty", vec![pair()])),
                 (
                     "tuple_eq".into(),
-                    lashlang::Expr::JavaScriptBinary {
-                        op: lashlang::JavaScriptBinaryOp::StrictEqual,
+                    lashlang::Expr::CoercingBinary {
+                        op: lashlang::CoercingBinaryOp::StrictEqual,
                         left: Box::new(pair()),
                         right: Box::new(pair()),
                     },
                 ),
                 (
                     "tuple_not_list".into(),
-                    lashlang::Expr::JavaScriptBinary {
-                        op: lashlang::JavaScriptBinaryOp::StrictEqual,
+                    lashlang::Expr::CoercingBinary {
+                        op: lashlang::CoercingBinaryOp::StrictEqual,
                         left: Box::new(pair()),
                         right: Box::new(list(vec![number(1.0), string("x")])),
                     },

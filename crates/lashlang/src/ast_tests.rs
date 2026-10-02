@@ -311,9 +311,9 @@ fn children_yields_composite_subexpressions_in_order() {
     };
     assert_eq!(child_vars(&receiver), ["recv", "arg0", "arg1"]);
 
-    let binary = Expr::JavaScriptBinary {
+    let binary = Expr::CoercingBinary {
         left: Box::new(var("left")),
-        op: JavaScriptBinaryOp::Add,
+        op: CoercingBinaryOp::Add,
         right: Box::new(var("right")),
     };
     assert_eq!(child_vars(&binary), ["left", "right"]);

@@ -243,9 +243,9 @@ fn lower_pass(
         .into_iter()
         .map(|name| LashExpr::If {
             condition: Box::new(super::constructs::js_unary(
-                lashlang::JavaScriptUnaryOp::Not,
+                lashlang::CoercingUnaryOp::Not,
                 LashExpr::BuiltinCall {
-                    name: "__typescript_global_has".into(),
+                    name: "__lashlang_global_has".into(),
                     args: vec![LashExpr::String(name.clone().into())],
                 },
             )),
@@ -256,7 +256,7 @@ fn lower_pass(
                     vec![LashExpr::String(name.into())],
                 )),
             }),
-            else_block: Box::new(LashExpr::Undefined),
+            else_block: Box::new(LashExpr::Absent),
         })
         .collect::<Vec<_>>();
     expressions.extend(lowerer.lower_statements(&program.statements, StatementScope::Root)?);

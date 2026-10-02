@@ -13,7 +13,7 @@
 //! charge.
 //!
 //! Two tables cover two reachabilities. `CASES` are authored TypeScript: the
-//! JavaScript intrinsics are heap-native, so a seeded `input` reaches the
+//! ECMA-262 intrinsics are heap-native, so a seeded `input` reaches the
 //! method as a heap reference and the method's own charge is what spends the
 //! budget. `AST_CASES` are the Lash builtins no dialect spells (ADR 0096),
 //! built on the IR directly; there the generic intrinsic opcode exports its

@@ -1,8 +1,8 @@
 use super::vm::{VM_CONTINUATION_FORMAT_VERSION, VmFrameContinuation, VmFrameReturnContinuation};
 use super::*;
 use crate::ast::{
-    AssignTarget, Declaration, Expr, FunctionDecl, FunctionExpr, FunctionParam, JavaScriptBinaryOp,
-    JavaScriptLogicalOp, Program, TypeExpr,
+    AssignTarget, CoercingBinaryOp, Declaration, Expr, FunctionDecl, FunctionExpr, FunctionParam,
+    OperandLogicalOp, Program, TypeExpr,
 };
 use crate::runtime::entry_points::compile_program_internal;
 use crate::testing::ast_builders as builders;
@@ -144,14 +144,14 @@ fn counting_loop(limit: f64) -> Expr {
     builders::while_loop(
         builders::binary(
             builders::var("i"),
-            JavaScriptBinaryOp::Less,
+            CoercingBinaryOp::Less,
             builders::num(limit),
         ),
         builders::block(vec![builders::assign(
             "i",
             builders::binary(
                 builders::var("i"),
-                JavaScriptBinaryOp::Add,
+                CoercingBinaryOp::Add,
                 builders::num(1.0),
             ),
         )]),
@@ -470,7 +470,7 @@ fn golden_contract_program() -> Program {
                 vec![builders::index_step(builders::var("token"))],
                 builders::binary(
                     builders::index(builders::var("counts"), builders::var("token")),
-                    JavaScriptBinaryOp::Add,
+                    CoercingBinaryOp::Add,
                     builders::num(1.0),
                 ),
             )]),
@@ -699,8 +699,8 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
             assign_path_snapshot(chunk, path)
         ),
         Instruction::ResultUnwrap => "result_unwrap".to_string(),
-        Instruction::JavaScriptUnary(op) => format!("javascript_unary {op:?}"),
-        Instruction::JavaScriptBinary(op) => format!("javascript_binary {op:?}"),
+        Instruction::CoercingUnary(op) => format!("coercing_unary {op:?}"),
+        Instruction::CoercingBinary(op) => format!("coercing_binary {op:?}"),
         Instruction::IsNullish => "is_nullish".to_string(),
         Instruction::ToBool => "to_bool".to_string(),
         Instruction::Jump(target) => format!("jump {target}"),
@@ -731,8 +731,8 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
         }
         Instruction::AwaitHandleUnwrap => "await_handle_unwrap".to_string(),
         Instruction::Intrinsic(op) => intrinsic_snapshot(chunk, op),
-        Instruction::JavaScriptAddAssign(slot) => {
-            format!("javascript_add_assign {slot}:{}", slot_name(chunk, slot))
+        Instruction::CoercingAddAssign(slot) => {
+            format!("coercing_add_assign {slot}:{}", slot_name(chunk, slot))
         }
         Instruction::Print => "print".to_string(),
         Instruction::Finish => "finish".to_string(),
@@ -841,37 +841,37 @@ fn intrinsic_snapshot(chunk: &Chunk, op: IntrinsicOp) -> String {
         IntrinsicOp::EndsWith => format!("intrinsic ends_with argc={argc}"),
         IntrinsicOp::Split => format!("intrinsic split argc={argc}"),
         IntrinsicOp::Join => format!("intrinsic join argc={argc}"),
-        IntrinsicOp::JavaScriptSplit => format!("intrinsic typescript_split argc={argc}"),
-        IntrinsicOp::JavaScriptJoin => format!("intrinsic typescript_join argc={argc}"),
-        IntrinsicOp::JavaScriptStdlib(_) => {
-            format!("intrinsic typescript_stdlib argc={argc}")
+        IntrinsicOp::TextSplit => format!("intrinsic text_split argc={argc}"),
+        IntrinsicOp::TextJoin => format!("intrinsic text_join argc={argc}"),
+        IntrinsicOp::IntrinsicDispatch(_) => {
+            format!("intrinsic dispatch argc={argc}")
         }
-        IntrinsicOp::JavaScriptHeapNew(_) => {
-            format!("intrinsic typescript_heap_new argc={argc}")
+        IntrinsicOp::HeapConstruct(_) => {
+            format!("intrinsic heap_construct argc={argc}")
         }
-        IntrinsicOp::JavaScriptHeapInstanceOf => {
-            format!("intrinsic typescript_heap_instanceof argc={argc}")
+        IntrinsicOp::HeapInstanceOf => {
+            format!("intrinsic heap_instanceof argc={argc}")
         }
-        IntrinsicOp::JavaScriptHeapDeleteMember => {
-            format!("intrinsic typescript_heap_delete_member argc={argc}")
+        IntrinsicOp::HeapDeleteMember => {
+            format!("intrinsic heap_delete_member argc={argc}")
         }
-        IntrinsicOp::JavaScriptRegExp(_) => {
-            format!("intrinsic typescript_regexp argc={argc}")
+        IntrinsicOp::RegExpIntrinsic(_) => {
+            format!("intrinsic regexp argc={argc}")
         }
-        IntrinsicOp::JavaScriptGlobalDelete => {
-            format!("intrinsic typescript_global_delete argc={argc}")
+        IntrinsicOp::GlobalDelete => {
+            format!("intrinsic global_delete argc={argc}")
         }
-        IntrinsicOp::JavaScriptGlobalGet => {
-            format!("intrinsic typescript_global_get argc={argc}")
+        IntrinsicOp::GlobalGet => {
+            format!("intrinsic global_get argc={argc}")
         }
-        IntrinsicOp::JavaScriptGlobalHas => {
-            format!("intrinsic typescript_global_has argc={argc}")
+        IntrinsicOp::GlobalHas => {
+            format!("intrinsic global_has argc={argc}")
         }
-        IntrinsicOp::JavaScriptGlobalSet => {
-            format!("intrinsic typescript_global_set argc={argc}")
+        IntrinsicOp::GlobalSet => {
+            format!("intrinsic global_set argc={argc}")
         }
-        IntrinsicOp::JavaScriptUriCodec(_) => {
-            format!("intrinsic typescript_uri_codec argc={argc}")
+        IntrinsicOp::UriCodec(_) => {
+            format!("intrinsic uri_codec argc={argc}")
         }
         IntrinsicOp::BindingCellNew => format!("intrinsic binding_cell_new argc={argc}"),
         IntrinsicOp::BindingCellGet => format!("intrinsic binding_cell_get argc={argc}"),
@@ -1064,7 +1064,7 @@ async fn compiler_keeps_assignment_hot_paths_specialized() {
             "total",
             builders::binary(
                 builders::var("total"),
-                JavaScriptBinaryOp::Add,
+                CoercingBinaryOp::Add,
                 builders::num(2.0),
             ),
         ),
@@ -1072,7 +1072,7 @@ async fn compiler_keeps_assignment_hot_paths_specialized() {
             "total",
             builders::binary(
                 builders::var("total"),
-                JavaScriptBinaryOp::Add,
+                CoercingBinaryOp::Add,
                 builders::var("step"),
             ),
         ),
@@ -1096,7 +1096,7 @@ async fn compiler_keeps_assignment_hot_paths_specialized() {
             .chunk
             .code
             .iter()
-            .any(|instruction| matches!(instruction, Instruction::JavaScriptAddAssign(_))),
+            .any(|instruction| matches!(instruction, Instruction::CoercingAddAssign(_))),
         "`x = x + constant_number` should compile to fused add-assign"
     );
     assert!(
@@ -1104,7 +1104,7 @@ async fn compiler_keeps_assignment_hot_paths_specialized() {
             .chunk
             .code
             .iter()
-            .any(|instruction| matches!(instruction, Instruction::JavaScriptAddAssign(_))),
+            .any(|instruction| matches!(instruction, Instruction::CoercingAddAssign(_))),
         "`x = x + y` should compile to fused add-assign"
     );
     assert!(
@@ -1120,7 +1120,7 @@ async fn compiler_keeps_assignment_hot_paths_specialized() {
             .chunk
             .code
             .iter()
-            .any(|instruction| matches!(instruction, Instruction::JavaScriptBinary(_))),
+            .any(|instruction| matches!(instruction, Instruction::CoercingBinary(_))),
         "the assignment forms should not route through a generic add"
     );
 
@@ -1201,14 +1201,14 @@ async fn a_long_run_reaches_only_the_scheduled_checkpoints() {
         builders::while_loop(
             builders::binary(
                 builders::var("n"),
-                JavaScriptBinaryOp::Less,
+                CoercingBinaryOp::Less,
                 builders::num(1_500_000.0),
             ),
             builders::block(vec![builders::assign(
                 "n",
                 builders::binary(
                     builders::var("n"),
-                    JavaScriptBinaryOp::Add,
+                    CoercingBinaryOp::Add,
                     builders::num(1.0),
                 ),
             )]),

@@ -514,7 +514,11 @@ impl Compiler {
             Expr::While { condition, body } => {
                 self.compile_while_expr(condition, body, false, path)
             }
-            Expr::Finish(_) | Expr::Fail(_) | Expr::Return(_) | Expr::Break | Expr::Continue => {
+            Expr::Finish(_)
+            | Expr::Fail(_)
+            | Expr::FunctionReturn(_)
+            | Expr::Break
+            | Expr::Continue => {
                 self.compile_expr(expression, path);
             }
             expression => {
@@ -667,21 +671,21 @@ impl Compiler {
             let name = &target.root;
             let slot = self.push_slot(name);
 
-            if let Expr::JavaScriptBinary {
+            if let Expr::CoercingBinary {
                 left,
-                op: JavaScriptBinaryOp::Add,
+                op: CoercingBinaryOp::Add,
                 right,
             } = expr
                 && matches!(left.as_ref(), Expr::Variable(var) if var == name)
             {
                 // `s = s + rhs` under ECMA-262 `+` rules. The accumulator is
-                // compiled where the unfused `JavaScriptBinary` reads it, so
+                // compiled where the unfused `CoercingBinary` reads it, so
                 // the instruction stream keeps the exact operand order —
                 // including any write the right side makes to `s` — and the
                 // opcode fuses only the trailing store.
                 self.compile_expr(left, &value_path().child(0));
                 self.compile_expr(right, &value_path().child(1));
-                self.code.push(Instruction::JavaScriptAddAssign(slot));
+                self.code.push(Instruction::CoercingAddAssign(slot));
                 self.set_const_slot(slot, None);
                 self.push_null_if(leave_value);
                 return;
@@ -837,7 +841,7 @@ impl Compiler {
                 self.fold_compile_time_expr(expr)
             }
             Expr::Null => Some(Value::Null),
-            Expr::Undefined => Some(Value::Undefined),
+            Expr::Absent => Some(Value::Undefined),
             Expr::Bool(value) => Some(Value::Bool(*value)),
             Expr::Number(value) => Some(Value::Number(*value)),
             Expr::String(value) => Some(Value::String(value.clone().into())),
@@ -924,20 +928,20 @@ impl Compiler {
                     self.fold_compile_time_expr(else_block)
                 }
             }
-            Expr::JavaScriptUnary { op, expr } => {
+            Expr::CoercingUnary { op, expr } => {
                 eval_javascript_unary(self.fold_compile_time_expr(expr)?, *op).ok()
             }
-            Expr::JavaScriptBinary { left, op, right } => Some(eval_javascript_binary(
+            Expr::CoercingBinary { left, op, right } => Some(eval_javascript_binary(
                 self.fold_compile_time_expr(left)?,
                 *op,
                 self.fold_compile_time_expr(right)?,
             )),
-            Expr::JavaScriptLogical { left, op, right } => {
+            Expr::OperandLogical { left, op, right } => {
                 let left = self.fold_compile_time_expr(left)?;
                 let use_right = match op {
-                    JavaScriptLogicalOp::And => is_truthy(&left).ok()?,
-                    JavaScriptLogicalOp::Or => !is_truthy(&left).ok()?,
-                    JavaScriptLogicalOp::NullishCoalesce => {
+                    OperandLogicalOp::And => is_truthy(&left).ok()?,
+                    OperandLogicalOp::Or => !is_truthy(&left).ok()?,
+                    OperandLogicalOp::NullishCoalesce => {
                         matches!(left, Value::Null | Value::Undefined)
                     }
                 };
@@ -956,7 +960,7 @@ impl Compiler {
             | Expr::Map { .. }
             | Expr::Try(_)
             | Expr::Throw(_)
-            | Expr::Return(_)
+            | Expr::FunctionReturn(_)
             | Expr::Assign { .. }
             | Expr::For { .. }
             | Expr::While { .. }

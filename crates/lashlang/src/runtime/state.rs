@@ -477,12 +477,12 @@ pub(super) fn host_view(runtime_globals: &Record, heap: &mut Heap) -> Result<Rec
                 }
             }
             // Function values remain VM-private heap objects, and the remaining
-            // JavaScript exotics have no detached host shape at all. A refused
+            // ECMA-262 exotics have no detached host shape at all. A refused
             // value at any depth omits the whole global rather than leaking a
             // partial tree.
             Err(
                 RuntimeError::FunctionValueAtHostBoundary
-                | RuntimeError::JavaScriptExoticAtHostBoundary { .. },
+                | RuntimeError::BuiltinObjectAtHostBoundary { .. },
             ) => {}
             Err(error) => return Err(error),
         }

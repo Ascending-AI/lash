@@ -118,7 +118,7 @@ async fn optimized_concat_insertion_shares_the_appended_binding() {
             a::assign(
                 "acc",
                 a::call(
-                    "__typescript_stdlib",
+                    "__lashlang_stdlib",
                     vec![
                         a::string("concat"),
                         a::var("acc"),
@@ -145,7 +145,7 @@ async fn optimized_concat_insertion_shares_the_appended_binding() {
     assert_eq!(value, list(vec![list(vec![number(1.0), number(2.0)])]));
 }
 
-/// The general concat form copies the outer list but, like JavaScript's
+/// The general concat form copies the outer list but, like ECMA-262's
 /// `concat`, shares the operand's member objects: a later mutation of `x`
 /// shows through `acc`.
 #[tokio::test(flavor = "current_thread")]
@@ -165,7 +165,7 @@ async fn general_concat_shares_the_right_operand_members() {
             a::assign(
                 "acc",
                 a::call(
-                    "__typescript_stdlib",
+                    "__lashlang_stdlib",
                     vec![a::string("concat"), a::var("acc"), a::var("b")],
                 ),
             ),
@@ -205,7 +205,7 @@ async fn variable_concat_copies_the_list_but_shares_its_members() {
             a::assign(
                 "acc",
                 a::call(
-                    "__typescript_stdlib",
+                    "__lashlang_stdlib",
                     vec![a::string("concat"), a::var("acc"), a::var("b")],
                 ),
             ),
@@ -484,14 +484,14 @@ async fn multi_root_program_state_always_decodes() {
             a::assign(
                 "rows",
                 a::call(
-                    "__typescript_stdlib",
+                    "__lashlang_stdlib",
                     vec![a::string("concat"), a::var("base"), a::list(Vec::new())],
                 ),
             ),
             a::assign(
                 "joined",
                 a::call(
-                    "__typescript_stdlib",
+                    "__lashlang_stdlib",
                     vec![a::string("concat"), a::var("base"), a::var("alias")],
                 ),
             ),

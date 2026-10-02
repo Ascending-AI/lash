@@ -122,8 +122,7 @@ fn property_key_coercion_is_untouched() {
     // the array refusal that reports it keeps reporting it, with its own code.
     let text = refusal("const a: any = [1]; a[{ b: 2 }] = 3;");
     assert!(
-        text.contains("TypeScriptArrayNonIndexPropertyUnsupported")
-            && text.contains("[object Object]"),
+        text.contains("ArrayNonIndexPropertyUnsupported") && text.contains("[object Object]"),
         "key coercion still produces the type tag: {text}"
     );
 }

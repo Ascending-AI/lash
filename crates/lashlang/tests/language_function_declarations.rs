@@ -16,8 +16,7 @@
 use super::*;
 use crate::ast_support::{call, finish, number, string};
 use lashlang::{
-    Declaration, Expr, FunctionDecl, FunctionParam, JavaScriptBinaryOp, LinkError, Program,
-    TypeExpr,
+    CoercingBinaryOp, Declaration, Expr, FunctionDecl, FunctionParam, LinkError, Program, TypeExpr,
 };
 
 fn param(name: &str, ty: TypeExpr) -> FunctionParam {
@@ -51,8 +50,8 @@ fn var(name: &str) -> Expr {
     Expr::Variable(name.into())
 }
 
-fn binary(left: Expr, op: JavaScriptBinaryOp, right: Expr) -> Expr {
-    Expr::JavaScriptBinary {
+fn binary(left: Expr, op: CoercingBinaryOp, right: Expr) -> Expr {
+    Expr::CoercingBinary {
         left: Box::new(left),
         op,
         right: Box::new(right),
@@ -114,7 +113,7 @@ async fn a_function_is_callable_like_a_builtin() {
             "double",
             vec![param("n", TypeExpr::Int)],
             TypeExpr::Float,
-            binary(var("n"), JavaScriptBinaryOp::Multiply, number(2.0)),
+            binary(var("n"), CoercingBinaryOp::Multiply, number(2.0)),
         )],
         vec![finish(call("double", vec![number(21.0)]))],
     ))
@@ -172,11 +171,11 @@ async fn a_function_may_call_itself() {
             vec![param("n", TypeExpr::Float)],
             TypeExpr::Str,
             if_else(
-                binary(var("n"), JavaScriptBinaryOp::LessEqual, number(0.0)),
+                binary(var("n"), CoercingBinaryOp::LessEqual, number(0.0)),
                 string("done"),
                 call(
                     "countdown",
-                    vec![binary(var("n"), JavaScriptBinaryOp::Subtract, number(1.0))],
+                    vec![binary(var("n"), CoercingBinaryOp::Subtract, number(1.0))],
                 ),
             ),
         )],
@@ -198,11 +197,11 @@ async fn functions_may_call_each_other_in_either_direction() {
             vec![param("n", TypeExpr::Float)],
             TypeExpr::Bool,
             if_else(
-                binary(var("n"), JavaScriptBinaryOp::StrictEqual, number(0.0)),
+                binary(var("n"), CoercingBinaryOp::StrictEqual, number(0.0)),
                 Expr::Bool(at_zero),
                 call(
                     other,
-                    vec![binary(var("n"), JavaScriptBinaryOp::Subtract, number(1.0))],
+                    vec![binary(var("n"), CoercingBinaryOp::Subtract, number(1.0))],
                 ),
             ),
         )
@@ -259,7 +258,7 @@ async fn a_function_body_sees_only_its_parameters() {
             "read_outer",
             vec![param("n", TypeExpr::Int)],
             TypeExpr::Float,
-            binary(var("n"), JavaScriptBinaryOp::Add, var("outer")),
+            binary(var("n"), CoercingBinaryOp::Add, var("outer")),
         )],
         vec![
             assign("outer", number(1.0)),
@@ -280,7 +279,7 @@ async fn a_call_is_checked_against_the_declared_arity() {
             "add",
             vec![param("a", TypeExpr::Int), param("b", TypeExpr::Int)],
             TypeExpr::Float,
-            binary(var("a"), JavaScriptBinaryOp::Add, var("b")),
+            binary(var("a"), CoercingBinaryOp::Add, var("b")),
         )],
         vec![finish(call("add", vec![number(1.0)]))],
     ));
@@ -375,7 +374,7 @@ async fn a_function_name_is_not_a_value() {
             "double",
             vec![param("n", TypeExpr::Int)],
             TypeExpr::Float,
-            binary(var("n"), JavaScriptBinaryOp::Multiply, number(2.0)),
+            binary(var("n"), CoercingBinaryOp::Multiply, number(2.0)),
         )],
         vec![finish(var("double"))],
     ));
@@ -396,7 +395,7 @@ async fn a_function_name_cannot_be_bound_as_a_variable() {
             "double",
             vec![param("n", TypeExpr::Int)],
             TypeExpr::Float,
-            binary(var("n"), JavaScriptBinaryOp::Multiply, number(2.0)),
+            binary(var("n"), CoercingBinaryOp::Multiply, number(2.0)),
         )],
         vec![
             assign("double", number(3.0)),
@@ -505,7 +504,7 @@ async fn a_function_may_take_a_structured_type() {
                     target: Box::new(var("point")),
                     field: "x".into(),
                 },
-                JavaScriptBinaryOp::Add,
+                CoercingBinaryOp::Add,
                 Expr::Field {
                     target: Box::new(var("point")),
                     field: "y".into(),
@@ -671,7 +670,7 @@ async fn an_effect_nested_deep_in_a_function_is_still_rejected() {
                 body: Box::new(Expr::Block(vec![if_else(
                     binary(
                         call("len", vec![var("path")]),
-                        JavaScriptBinaryOp::Greater,
+                        CoercingBinaryOp::Greater,
                         number(0.0),
                     ),
                     Expr::Block(vec![assign(

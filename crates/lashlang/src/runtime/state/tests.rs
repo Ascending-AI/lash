@@ -1517,7 +1517,7 @@ fn pending_tool_handle_object() -> HeapObject {
 }
 
 /// Every heap object kind that stays bound in the runtime roots while the host
-/// view omits it: the JavaScript exotics that have no detached host shape, and
+/// view omits it: the ECMA-262 exotics that have no detached host shape, and
 /// a pending-tool handle, which has one and must not travel in it.
 ///
 /// Closures are deliberately absent: `install_runtime` drops a closure-rooted

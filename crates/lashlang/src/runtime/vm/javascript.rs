@@ -14,9 +14,9 @@ use smallvec::SmallVec;
 use std::collections::BTreeSet;
 
 impl<H: ExecutionHost> Vm<'_, H> {
-    pub(super) fn is_truthy_for_dialect(&self, value: &Value) -> Result<bool, RuntimeError> {
+    pub(super) fn value_is_truthy(&self, value: &Value) -> Result<bool, RuntimeError> {
         if let Value::Ref(id) = value
-            && self.heap.is_javascript_vm_object(*id)?
+            && self.heap.is_always_truthy_object(*id)?
         {
             return Ok(true);
         }

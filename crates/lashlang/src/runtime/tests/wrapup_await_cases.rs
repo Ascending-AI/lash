@@ -447,7 +447,7 @@ async fn mapped_aggregates_match_literal_expansion() {
     // one batch and nothing settles singly.
     let pending_echo = |value: Expr| {
         builders::builtin(
-            "__typescript_pending_tool",
+            "__lashlang_pending_tool",
             vec![builders::receiver_call(
                 builders::resource(&["tools"]),
                 "echo",
@@ -460,7 +460,7 @@ async fn mapped_aggregates_match_literal_expansion() {
     let one_two = || builders::list(vec![builders::num(1.0), builders::num(2.0)]);
     let finish_all = |expr: Expr| {
         aggregate_module(vec![builders::finish(builders::builtin(
-            "__typescript_await_array",
+            "__lashlang_await_array",
             vec![expr, builders::string("allSettled")],
         ))])
     };
@@ -483,7 +483,7 @@ async fn mapped_aggregates_match_literal_expansion() {
                     ]),
                 ),
                 builders::finish(builders::builtin(
-                    "__typescript_await_array",
+                    "__lashlang_await_array",
                     vec![
                         builders::map(
                             builders::var("inputs"),

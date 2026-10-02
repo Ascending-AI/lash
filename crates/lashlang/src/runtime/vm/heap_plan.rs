@@ -102,22 +102,22 @@ pub(super) fn instruction_heap_plan(
         | I::BuildHeapList(_)
         | I::BuildHeapRecord(_)
         | I::Duplicate
-        | I::JavaScriptUnary(_)
-        | I::JavaScriptBinary(_)
+        | I::CoercingUnary(_)
+        | I::CoercingBinary(_)
         | I::Pop
         | I::Intrinsic(
-            IntrinsicOp::JavaScriptSplit
-            | IntrinsicOp::JavaScriptJoin
-            | IntrinsicOp::JavaScriptStdlib(_)
-            | IntrinsicOp::JavaScriptHeapNew(_)
-            | IntrinsicOp::JavaScriptHeapInstanceOf
-            | IntrinsicOp::JavaScriptHeapDeleteMember
-            | IntrinsicOp::JavaScriptRegExp(_)
-            | IntrinsicOp::JavaScriptGlobalDelete
-            | IntrinsicOp::JavaScriptGlobalGet
-            | IntrinsicOp::JavaScriptGlobalHas
-            | IntrinsicOp::JavaScriptGlobalSet
-            | IntrinsicOp::JavaScriptUriCodec(_)
+            IntrinsicOp::TextSplit
+            | IntrinsicOp::TextJoin
+            | IntrinsicOp::IntrinsicDispatch(_)
+            | IntrinsicOp::HeapConstruct(_)
+            | IntrinsicOp::HeapInstanceOf
+            | IntrinsicOp::HeapDeleteMember
+            | IntrinsicOp::RegExpIntrinsic(_)
+            | IntrinsicOp::GlobalDelete
+            | IntrinsicOp::GlobalGet
+            | IntrinsicOp::GlobalHas
+            | IntrinsicOp::GlobalSet
+            | IntrinsicOp::UriCodec(_)
             | IntrinsicOp::BindingCellNew
             | IntrinsicOp::BindingCellGet
             | IntrinsicOp::BindingCellSet,
@@ -192,9 +192,9 @@ pub(super) fn instruction_heap_plan(
             InstructionHeapPlan::stack(Top(1 + chunk.assign_paths[path].dynamic_index_count))
                 .with_mutable_slot(slot)
         }
-        // Same shape as `JavaScriptBinary`: the operands are consumed as-is
+        // Same shape as `CoercingBinary`: the operands are consumed as-is
         // and the coercion exports what it needs inside the opcode.
-        I::JavaScriptAddAssign(_) => InstructionHeapPlan::heap_native(),
+        I::CoercingAddAssign(_) => InstructionHeapPlan::heap_native(),
 
         I::Intrinsic(IntrinsicOp::FormatCompiled(template)) => {
             InstructionHeapPlan::stack(Top(chunk.format_templates[template].argc))
@@ -250,9 +250,9 @@ pub(super) fn instruction_keeps_vm_state_heapified(
         | I::ToBool
         | I::IsNullish
         | I::ObserveStep
-        | I::JavaScriptUnary(_)
-        | I::JavaScriptBinary(_)
-        | I::JavaScriptAddAssign(_) => true,
+        | I::CoercingUnary(_)
+        | I::CoercingBinary(_)
+        | I::CoercingAddAssign(_) => true,
         _ => false,
     }
 }

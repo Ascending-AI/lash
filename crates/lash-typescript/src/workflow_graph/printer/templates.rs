@@ -1,7 +1,7 @@
 //! The template literal's shape in the lowered IR: the quasi/hole chain it
 //! lowers to, and the raw-text escapes a quasi's spelling needs.
 
-use lashlang::{Expr, JavaScriptBinaryOp, JavaScriptUnaryOp};
+use lashlang::{CoercingBinaryOp, CoercingUnaryOp, Expr};
 
 /// A template literal's text and holes, from the chain it lowers to:
 /// `q0 + ToString(e0) + q1 + … + ToString(en) + qn+1`, left-nested, a string
@@ -10,9 +10,9 @@ use lashlang::{Expr, JavaScriptBinaryOp, JavaScriptUnaryOp};
 pub(super) fn template_parts(expression: &Expr) -> Option<(Vec<&str>, Vec<&Expr>)> {
     let mut rights = Vec::new();
     let mut current = expression;
-    while let Expr::JavaScriptBinary {
+    while let Expr::CoercingBinary {
         left,
-        op: JavaScriptBinaryOp::Add,
+        op: CoercingBinaryOp::Add,
         right,
     } = current
     {
@@ -30,8 +30,8 @@ pub(super) fn template_parts(expression: &Expr) -> Option<(Vec<&str>, Vec<&Expr>
     let mut holes = Vec::with_capacity(rights.len() / 2);
     for pair in rights.chunks(2) {
         let [
-            Expr::JavaScriptUnary {
-                op: JavaScriptUnaryOp::ToString,
+            Expr::CoercingUnary {
+                op: CoercingUnaryOp::ToString,
                 expr: hole,
             },
             Expr::String(quasi),

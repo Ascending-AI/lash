@@ -638,6 +638,18 @@ fn workflow_type_facet_slot_json_golden_is_exact() {
 }
 
 #[test]
+#[ignore = "prints the faceted workflow golden for capture with --nocapture"]
+fn regenerate_workflow_graph_with_facets() {
+    let graph =
+        workflow_graph_from_source_with_facets(goldens::WITH_FACETS, Some(&facet_environment()))
+            .expect("golden fixture projects");
+    println!(
+        "WORKFLOW_GRAPH_GOLDEN_BEGIN\n{}\nWORKFLOW_GRAPH_GOLDEN_END",
+        serde_json::to_string_pretty(&graph).expect("golden graph serializes"),
+    )
+}
+
+#[test]
 fn workflow_graph_with_facets_json_golden_is_exact() {
     let graph =
         workflow_graph_from_source_with_facets(goldens::WITH_FACETS, Some(&facet_environment()))
@@ -891,7 +903,7 @@ fn validate_and_render_agree_on_every_graph_failure_class() {
             _ => None,
         })
         .expect("fixture contains a terminal node");
-    *terminal = lashlang::Expr::Return(Box::new(lashlang::Expr::Number(1.0)));
+    *terminal = lashlang::Expr::FunctionReturn(Box::new(lashlang::Expr::Number(1.0)));
 
     let cases = [
         ("unsupported_schema_version", unsupported_schema),

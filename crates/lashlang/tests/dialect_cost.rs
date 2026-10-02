@@ -343,7 +343,7 @@ async fn typescript_heap_list_iteration_is_measured_beside_the_ast_corpus() {
 /// index, and the write past the end additionally reads `.length`. Both
 /// differences are measured on their own programs and charged, so the
 /// comparisons hold the appends themselves equal. `concat` is a copy in
-/// JavaScript and stays one here, so it is held *above* a floor — fusing it
+/// ECMA-262 and stays one here, so it is held *above* a floor — fusing it
 /// into the accumulator would change what the program means, not just what
 /// it costs.
 #[tokio::test(flavor = "current_thread")]

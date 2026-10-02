@@ -34,7 +34,7 @@ impl Lowerer {
                     ArrayElement::Value(value) => values.push(self.lower_expr(value)?),
                     ArrayElement::Hole => {
                         holes.push(LashExpr::Number(index as f64));
-                        values.push(LashExpr::Undefined);
+                        values.push(LashExpr::Absent);
                     }
                     ArrayElement::Spread(_) => unreachable!(),
                 }
@@ -51,7 +51,7 @@ impl Lowerer {
                 ArrayElement::Value(value) => LashExpr::List(vec![self.lower_expr(value)?]),
                 // A hole beside a spread densifies to a stored `undefined` —
                 // the concat path has no hole channel.
-                ArrayElement::Hole => LashExpr::List(vec![LashExpr::Undefined]),
+                ArrayElement::Hole => LashExpr::List(vec![LashExpr::Absent]),
                 ArrayElement::Spread(value) => {
                     let value = self.lower_iterable_sink(value)?;
                     Self::iterable_copy(value)

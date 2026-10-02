@@ -464,7 +464,7 @@ impl Session<'_, '_> {
                         // `else if` chain is a list holding one statement `if`
                         // — which is the chain, not a block branch.
                         else_is_block: (is_statement_block(else_block)
-                            || matches!(else_block.as_ref(), Expr::Undefined))
+                            || matches!(else_block.as_ref(), Expr::Absent))
                             && else_if_chain(else_block).is_none(),
                         then_graph: Box::new(then_graph),
                         else_graph: Box::new(else_graph),
@@ -558,7 +558,7 @@ impl Session<'_, '_> {
             ),
             // A function body ends by returning, and in a process body that
             // return is the process's finish.
-            Expr::Return(_) => (
+            Expr::FunctionReturn(_) => (
                 WorkflowNodeKind::Terminal {
                     terminal: WorkflowTerminalKind::Finish,
                     expression: value.clone(),
@@ -1008,7 +1008,7 @@ fn effect_name(expression: &Expr, effect: &WorkflowEffectKind) -> String {
 /// shows as the kind of thing it is.
 fn builtin_name(name: &str) -> String {
     match name {
-        "__typescript_await_array" => "await all".to_string(),
+        "__lashlang_await_array" => "await all".to_string(),
         name if crate::builtin_names().any(|builtin| builtin == name) => name.to_string(),
         _ => "computation".to_string(),
     }
@@ -1048,7 +1048,7 @@ fn awaits(expression: &Expr) -> bool {
         Expr::Await(_) => true,
         // A closure's or a process literal's body awaits on its own account.
         Expr::Function(_) | Expr::ProcessLiteral(_) => false,
-        Expr::BuiltinCall { name, .. } if name.as_str() == "__typescript_await_pending" => true,
+        Expr::BuiltinCall { name, .. } if name.as_str() == "__lashlang_await_pending" => true,
         _ => expression.children().any(awaits),
     }
 }
@@ -1057,7 +1057,7 @@ fn opaque_name(expression: &Expr) -> &'static str {
     match expression {
         Expr::Try(_) => "try",
         Expr::Throw(_) => "throw",
-        Expr::Return(_) => "return",
+        Expr::FunctionReturn(_) => "return",
         Expr::Break => "break",
         Expr::Continue => "continue",
         Expr::Role {

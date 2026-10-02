@@ -153,7 +153,7 @@ impl Lowerer {
                         self.read_bindings.insert(binding.id);
                     }
                     Ok(LashExpr::BuiltinCall {
-                        name: "__typescript_global_get".into(),
+                        name: "__lashlang_global_get".into(),
                         args: vec![LashExpr::String(field.as_str().into())],
                     })
                 }

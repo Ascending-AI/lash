@@ -16,7 +16,7 @@ fn ts_assign(name: &str, expr: Expr) -> Expr {
 
 fn heap_new(kind: &str, args: Vec<Expr>) -> Expr {
     private_builtin(
-        "__typescript_heap_new",
+        "__lashlang_heap_new",
         std::iter::once(Expr::String(kind.into()))
             .chain(args)
             .collect(),
@@ -25,7 +25,7 @@ fn heap_new(kind: &str, args: Vec<Expr>) -> Expr {
 
 fn heap_method(method: &str, receiver: &str, args: Vec<Expr>) -> Expr {
     private_builtin(
-        "__typescript_stdlib",
+        "__lashlang_stdlib",
         std::iter::once(Expr::String(method.into()))
             .chain(std::iter::once(Expr::Variable(receiver.into())))
             .chain(args)
@@ -68,7 +68,7 @@ async fn regexp_last_index_mutation_survives_park_and_restore() {
         Expr::Assign {
             target: crate::AssignTarget::variable("regexp".into()),
             expr: Box::new(private_builtin(
-                "__typescript_heap_new",
+                "__lashlang_heap_new",
                 vec![
                     Expr::String("RegExp".into()),
                     Expr::String("a+".into()),
@@ -115,9 +115,9 @@ async fn url_search_params_live_link_and_order_survive_park_and_restore() {
         Expr::Finish(Box::new(Expr::List(vec![
             field("url", "href"),
             heap_method("toString", "params", Vec::new()),
-            Expr::JavaScriptBinary {
+            Expr::CoercingBinary {
                 left: Box::new(Expr::Variable("params".into())),
-                op: crate::JavaScriptBinaryOp::StrictEqual,
+                op: crate::CoercingBinaryOp::StrictEqual,
                 right: Box::new(field("url", "searchParams")),
             },
         ]))),
@@ -167,9 +167,9 @@ async fn url_search_params_live_link_survives_state_snapshot_round_trip() {
     let query = Program::block(vec![Expr::Finish(Box::new(Expr::List(vec![
         field("url", "href"),
         heap_method("toString", "params", Vec::new()),
-        Expr::JavaScriptBinary {
+        Expr::CoercingBinary {
             left: Box::new(Expr::Variable("params".into())),
-            op: crate::JavaScriptBinaryOp::StrictEqual,
+            op: crate::CoercingBinaryOp::StrictEqual,
             right: Box::new(field("url", "searchParams")),
         },
     ])))]);
@@ -225,7 +225,7 @@ async fn regexp_last_index_uses_heap_aware_to_number_and_to_length() {
             expr: Box::new(value),
         });
         expressions.push(private_builtin(
-            "__typescript_regexp",
+            "__lashlang_regexp",
             vec![
                 Expr::String("exec".into()),
                 Expr::Variable(regexp.into()),
@@ -402,7 +402,7 @@ async fn reference_object_key_nested_array_write_returns_a_deterministic_error()
         execute(&compiled, &mut State::new(), &Host)
             .await
             .expect_err("object-key nested array assignment must fail"),
-        RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported {
+        RuntimeError::ArrayNonIndexPropertyUnsupported {
             key: "[object Object]".into(),
         }
     );
@@ -447,9 +447,9 @@ async fn regexp_string_coercion_matches_node() {
             ),
         ),
         Expr::Finish(Box::new(Expr::List(vec![
-            Expr::JavaScriptBinary {
+            Expr::CoercingBinary {
                 left: Box::new(Expr::String(String::new().into())),
-                op: crate::JavaScriptBinaryOp::Add,
+                op: crate::CoercingBinaryOp::Add,
                 right: Box::new(Expr::Variable("regexp".into())),
             },
             heap_method("toString", "regexp", Vec::new()),
@@ -482,7 +482,7 @@ async fn regexp_match_value_of_preserves_receiver_identity() {
         ts_assign(
             "matched",
             private_builtin(
-                "__typescript_regexp",
+                "__lashlang_regexp",
                 vec![
                     Expr::String("match".into()),
                     Expr::String("abc".into()),
@@ -491,7 +491,7 @@ async fn regexp_match_value_of_preserves_receiver_identity() {
             ),
         ),
         Expr::Finish(Box::new(private_builtin(
-            "__typescript_stdlib",
+            "__lashlang_stdlib",
             vec![
                 Expr::String("Object.is".into()),
                 Expr::Variable("matched".into()),
@@ -518,7 +518,7 @@ async fn global_regexp_match_value_of_preserves_identity() {
         ts_assign(
             "matched",
             private_builtin(
-                "__typescript_regexp",
+                "__lashlang_regexp",
                 vec![
                     Expr::String("match".into()),
                     Expr::String("abc".into()),
@@ -526,9 +526,9 @@ async fn global_regexp_match_value_of_preserves_identity() {
                 ],
             ),
         ),
-        Expr::Finish(Box::new(Expr::JavaScriptBinary {
+        Expr::Finish(Box::new(Expr::CoercingBinary {
             left: Box::new(heap_method("valueOf", "matched", Vec::new())),
-            op: crate::JavaScriptBinaryOp::StrictEqual,
+            op: crate::CoercingBinaryOp::StrictEqual,
             right: Box::new(Expr::Variable("matched".into())),
         })),
     ]);
@@ -575,11 +575,11 @@ async fn javascript_unary_plus_and_minus_use_exact_reference_to_number() {
         ]
         .into_iter()
         .enumerate()
-        .map(|(index, name)| Expr::JavaScriptUnary {
+        .map(|(index, name)| Expr::CoercingUnary {
             op: if index < 6 {
-                crate::JavaScriptUnaryOp::Plus
+                crate::CoercingUnaryOp::Plus
             } else {
-                crate::JavaScriptUnaryOp::Negate
+                crate::CoercingUnaryOp::Negate
             },
             expr: Box::new(Expr::Variable(name.into())),
         })
@@ -679,9 +679,9 @@ async fn exotic_references_work_as_discarded_truthy_unary_iterable_and_binary_op
                     vec![Expr::String("k".into()), Expr::Number(5.0)],
                 ),
             ),
-            Expr::Finish(Box::new(Expr::JavaScriptBinary {
+            Expr::Finish(Box::new(Expr::CoercingBinary {
                 left: Box::new(Expr::Variable("bound".into())),
-                op: crate::JavaScriptBinaryOp::StrictEqual,
+                op: crate::CoercingBinaryOp::StrictEqual,
                 right: Box::new(Expr::Variable("map".into())),
             })),
         ]))
@@ -703,8 +703,8 @@ async fn exotic_references_work_as_discarded_truthy_unary_iterable_and_binary_op
     assert_eq!(
         run_typescript_ast_across_every_effect(Program::block(vec![
             set_setup(),
-            Expr::Finish(Box::new(Expr::JavaScriptUnary {
-                op: crate::JavaScriptUnaryOp::Not,
+            Expr::Finish(Box::new(Expr::CoercingUnary {
+                op: crate::CoercingUnaryOp::Not,
                 expr: Box::new(Expr::Variable("set".into())),
             })),
         ]))
@@ -727,9 +727,9 @@ async fn exotic_references_work_as_discarded_truthy_unary_iterable_and_binary_op
                 bind: None,
                 body: Box::new(ts_assign(
                     "total",
-                    Expr::JavaScriptBinary {
+                    Expr::CoercingBinary {
                         left: Box::new(Expr::Variable("total".into())),
-                        op: crate::JavaScriptBinaryOp::Add,
+                        op: crate::CoercingBinaryOp::Add,
                         right: Box::new(Expr::Variable("value".into())),
                     },
                 )),
@@ -760,9 +760,9 @@ async fn exotic_references_work_as_discarded_truthy_unary_iterable_and_binary_op
                 bind: None,
                 body: Box::new(ts_assign(
                     "total",
-                    Expr::JavaScriptBinary {
+                    Expr::CoercingBinary {
                         left: Box::new(Expr::Variable("total".into())),
-                        op: crate::JavaScriptBinaryOp::Add,
+                        op: crate::CoercingBinaryOp::Add,
                         right: Box::new(Expr::Index {
                             target: Box::new(Expr::Variable("entry".into())),
                             index: Box::new(Expr::Number(1.0)),
@@ -780,9 +780,9 @@ async fn exotic_references_work_as_discarded_truthy_unary_iterable_and_binary_op
         run_typescript_ast_across_every_effect(Program::block(vec![
             ts_assign("left", heap_new("Date", vec![Expr::Number(9.0)])),
             ts_assign("right", heap_new("Date", vec![Expr::Number(4.0)])),
-            Expr::Finish(Box::new(Expr::JavaScriptBinary {
+            Expr::Finish(Box::new(Expr::CoercingBinary {
                 left: Box::new(Expr::Variable("left".into())),
-                op: crate::JavaScriptBinaryOp::Subtract,
+                op: crate::CoercingBinaryOp::Subtract,
                 right: Box::new(Expr::Variable("right".into())),
             })),
         ]))
@@ -794,9 +794,9 @@ async fn exotic_references_work_as_discarded_truthy_unary_iterable_and_binary_op
     // concatenates the deterministic UTC DateString rather than refusing.
     let date_add = Program::block(vec![
         ts_assign("date", heap_new("Date", vec![Expr::Number(9.0)])),
-        Expr::Finish(Box::new(Expr::JavaScriptBinary {
+        Expr::Finish(Box::new(Expr::CoercingBinary {
             left: Box::new(Expr::Variable("date".into())),
-            op: crate::JavaScriptBinaryOp::Add,
+            op: crate::CoercingBinaryOp::Add,
             right: Box::new(Expr::String("x".into())),
         })),
     ]);
@@ -813,7 +813,7 @@ async fn set_normalizes_negative_zero_before_iteration() {
     let program = Program::block(vec![
         ts_assign("set", heap_new("Set", Vec::new())),
         heap_method("add", "set", vec![Expr::Number(-0.0)]),
-        ts_assign("reciprocal", Expr::Undefined),
+        ts_assign("reciprocal", Expr::Absent),
         Expr::For {
             authored_binding: None,
             binding: "value".into(),
@@ -821,9 +821,9 @@ async fn set_normalizes_negative_zero_before_iteration() {
             bind: None,
             body: Box::new(ts_assign(
                 "reciprocal",
-                Expr::JavaScriptBinary {
+                Expr::CoercingBinary {
                     left: Box::new(Expr::Number(1.0)),
-                    op: crate::JavaScriptBinaryOp::Divide,
+                    op: crate::CoercingBinaryOp::Divide,
                     right: Box::new(Expr::Variable("value".into())),
                 },
             )),
@@ -838,7 +838,7 @@ async fn set_normalizes_negative_zero_before_iteration() {
 
 // `lashlang_dialect_cannot_execute_javascript_heap_constructor_intrinsic` was
 // deleted with the second dialect (ADR 0096). Every compiled program now runs
-// with reference semantics, so the TYPESCRIPT_REFERENCE_SEMANTICS_REQUIRED gate
+// with reference semantics, so the REFERENCE_SEMANTICS_REQUIRED gate
 // has no non-reference caller left to refuse.
 #[tokio::test(flavor = "current_thread")]
 async fn map_for_each_callback_parks_and_resumes_through_the_shared_driver() {
@@ -850,7 +850,7 @@ async fn map_for_each_callback_parks_and_resumes_through_the_shared_driver() {
         captures: Vec::new(),
         body: Box::new(Expr::Block(vec![
             Expr::Print(Box::new(Expr::Variable("value".into()))),
-            Expr::Return(Box::new(Expr::Undefined)),
+            Expr::FunctionReturn(Box::new(Expr::Absent)),
         ])),
     }));
     let entries = Expr::List(vec![
@@ -861,7 +861,7 @@ async fn map_for_each_callback_parks_and_resumes_through_the_shared_driver() {
         Expr::Assign {
             target: crate::AssignTarget::variable("map".into()),
             expr: Box::new(private_builtin(
-                "__typescript_heap_new",
+                "__lashlang_heap_new",
                 vec![Expr::String("Map".into()), entries],
             )),
         },
@@ -870,7 +870,7 @@ async fn map_for_each_callback_parks_and_resumes_through_the_shared_driver() {
             expr: Box::new(callback),
         },
         private_builtin(
-            "__typescript_stdlib",
+            "__lashlang_stdlib",
             vec![
                 Expr::String("forEach".into()),
                 Expr::Variable("map".into()),
@@ -910,44 +910,44 @@ async fn error_family_observables_are_node_shaped_and_durable() {
                 index: Box::new(Expr::Number(0.0)),
             },
             private_builtin(
-                "__typescript_heap_instanceof",
+                "__lashlang_heap_instanceof",
                 vec![
                     Expr::Variable("error".into()),
                     Expr::String("TypeError".into()),
                 ],
             ),
             private_builtin(
-                "__typescript_heap_instanceof",
+                "__lashlang_heap_instanceof",
                 vec![Expr::Variable("error".into()), Expr::String("Error".into())],
             ),
             private_builtin(
-                "__typescript_heap_instanceof",
+                "__lashlang_heap_instanceof",
                 vec![
                     Expr::Variable("error".into()),
                     Expr::String("RangeError".into()),
                 ],
             ),
             heap_method("toString", "error", Vec::new()),
-            Expr::JavaScriptUnary {
-                op: crate::JavaScriptUnaryOp::Plus,
+            Expr::CoercingUnary {
+                op: crate::CoercingUnaryOp::Plus,
                 expr: Box::new(Expr::Variable("error".into())),
             },
             private_builtin(
-                "__typescript_stdlib",
+                "__lashlang_stdlib",
                 vec![
                     Expr::String("Object.keys".into()),
                     Expr::Variable("error".into()),
                 ],
             ),
             private_builtin(
-                "__typescript_stdlib",
+                "__lashlang_stdlib",
                 vec![
                     Expr::String("JSON.stringify".into()),
                     Expr::Record(vec![("error".into(), Expr::Variable("error".into()))]),
                 ],
             ),
             private_builtin(
-                "__typescript_stdlib",
+                "__lashlang_stdlib",
                 vec![
                     Expr::String("JSON.stringify".into()),
                     Expr::Variable("error".into()),
@@ -1003,14 +1003,14 @@ async fn every_error_brand_has_error_ancestry_and_each_ecma_kind_its_own() {
         };
         expressions.push(ts_assign(&name, heap_new(kind, args)));
         checks.push(private_builtin(
-            "__typescript_heap_instanceof",
+            "__lashlang_heap_instanceof",
             vec![
                 Expr::Variable(name.as_str().into()),
                 Expr::String(kind.into()),
             ],
         ));
         checks.push(private_builtin(
-            "__typescript_heap_instanceof",
+            "__lashlang_heap_instanceof",
             vec![
                 Expr::Variable(name.as_str().into()),
                 Expr::String("Error".into()),
@@ -1034,7 +1034,7 @@ async fn every_error_brand_has_error_ancestry_and_each_ecma_kind_its_own() {
         ));
         for constructor in ["Error", "TypeError"] {
             checks.push(private_builtin(
-                "__typescript_heap_instanceof",
+                "__lashlang_heap_instanceof",
                 vec![
                     Expr::Variable(name.as_str().into()),
                     Expr::String(constructor.into()),
@@ -1078,7 +1078,7 @@ async fn instanceof_hook_covers_every_javascript_heap_kind() {
     ];
     for (kind, value) in cases {
         let program = Program::block(vec![Expr::Finish(Box::new(private_builtin(
-            "__typescript_heap_instanceof",
+            "__lashlang_heap_instanceof",
             vec![value, Expr::String(kind.into())],
         )))]);
         assert_eq!(
@@ -1099,9 +1099,9 @@ async fn thrown_error_keeps_identity_and_internal_exotic_assignment_throws_type_
                 binding: "caught".into(),
                 body: Box::new(Expr::Block(vec![
                     Expr::Print(Box::new(Expr::String("park in catch".into()))),
-                    Expr::JavaScriptBinary {
+                    Expr::CoercingBinary {
                         left: Box::new(Expr::Variable("caught".into())),
-                        op: crate::JavaScriptBinaryOp::StrictEqual,
+                        op: crate::CoercingBinaryOp::StrictEqual,
                         right: Box::new(Expr::Variable("error".into())),
                     },
                 ])),
@@ -1133,7 +1133,7 @@ async fn thrown_error_keeps_identity_and_internal_exotic_assignment_throws_type_
             catch: Some(crate::CatchClause {
                 binding: "caught".into(),
                 body: Box::new(private_builtin(
-                    "__typescript_heap_instanceof",
+                    "__lashlang_heap_instanceof",
                     vec![
                         Expr::Variable("caught".into()),
                         Expr::String("TypeError".into()),
@@ -1159,10 +1159,10 @@ async fn dynamic_calls_apply_ecma_arguments_and_rest_then_resume_inside_the_call
         captures: Vec::new(),
         body: Box::new(Expr::Block(vec![
             Expr::Print(Box::new(Expr::String("callee park".into()))),
-            Expr::Return(Box::new(Expr::JavaScriptBinary {
+            Expr::FunctionReturn(Box::new(Expr::CoercingBinary {
                 left: Box::new(Expr::Variable("second".into())),
-                op: crate::JavaScriptBinaryOp::StrictEqual,
-                right: Box::new(Expr::Undefined),
+                op: crate::CoercingBinaryOp::StrictEqual,
+                right: Box::new(Expr::Absent),
             })),
         ])),
     }));
@@ -1172,7 +1172,7 @@ async fn dynamic_calls_apply_ecma_arguments_and_rest_then_resume_inside_the_call
         receiver: None,
         params: vec!["first".into(), "rest".into()],
         captures: Vec::new(),
-        body: Box::new(Expr::Return(Box::new(Expr::Field {
+        body: Box::new(Expr::FunctionReturn(Box::new(Expr::Field {
             target: Box::new(Expr::Variable("rest".into())),
             field: "length".into(),
         }))),
@@ -1182,20 +1182,20 @@ async fn dynamic_calls_apply_ecma_arguments_and_rest_then_resume_inside_the_call
         ts_assign(
             "rest",
             private_builtin(
-                "__typescript_closure",
+                "__lashlang_closure",
                 vec![rest, Expr::Number(1.0), Expr::Bool(true)],
             ),
         ),
         Expr::Finish(Box::new(Expr::List(vec![
             private_builtin(
-                "__typescript_call_dynamic",
+                "__lashlang_call_dynamic",
                 vec![
                     Expr::Variable("plain".into()),
                     Expr::List(vec![Expr::Number(1.0)]),
                 ],
             ),
             private_builtin(
-                "__typescript_call_dynamic",
+                "__lashlang_call_dynamic",
                 vec![
                     Expr::Variable("rest".into()),
                     Expr::List(vec![
@@ -1240,15 +1240,15 @@ async fn async_map_callbacks_park_before_and_after_work_and_replay_deterministic
         body: Box::new(Expr::Block(vec![
             Expr::Print(Box::new(Expr::String("before await".into()))),
             Expr::Print(Box::new(Expr::String("after await".into()))),
-            Expr::Return(Box::new(Expr::JavaScriptBinary {
+            Expr::FunctionReturn(Box::new(Expr::CoercingBinary {
                 left: Box::new(Expr::Variable("value".into())),
-                op: crate::JavaScriptBinaryOp::Multiply,
+                op: crate::CoercingBinaryOp::Multiply,
                 right: Box::new(Expr::Number(2.0)),
             })),
         ])),
     }));
     let program = Program::block(vec![Expr::Finish(Box::new(private_builtin(
-        "__typescript_async_map",
+        "__lashlang_async_map",
         vec![
             Expr::List(vec![Expr::Number(2.0), Expr::Number(4.0)]),
             callback,
@@ -1277,7 +1277,7 @@ async fn stored_per_iteration_closures_stay_inside_the_vm_across_calls_and_parks
         captures: vec!["i".into()],
         body: Box::new(Expr::Block(vec![
             Expr::Print(Box::new(Expr::String("park inside stored closure".into()))),
-            Expr::Return(Box::new(Expr::Variable("i".into()))),
+            Expr::FunctionReturn(Box::new(Expr::Variable("i".into()))),
         ])),
     }));
     let stored_call = |index| Expr::Call {
@@ -1324,7 +1324,7 @@ async fn discarded_and_boolean_tested_closures_are_vm_internal_values() {
             receiver: None,
             params: Vec::new(),
             captures: Vec::new(),
-            body: Box::new(Expr::Return(Box::new(Expr::Number(1.0)))),
+            body: Box::new(Expr::FunctionReturn(Box::new(Expr::Number(1.0)))),
         }))
     };
     let program = Program::block(vec![
@@ -1349,14 +1349,14 @@ async fn async_map_all_settled_wrapper_collects_throws_in_input_order_across_par
         receiver: None,
         params: vec!["value".into(), "index".into(), "array".into()],
         captures: Vec::new(),
-        body: Box::new(Expr::Return(Box::new(Expr::Try(Box::new(
+        body: Box::new(Expr::FunctionReturn(Box::new(Expr::Try(Box::new(
             crate::TryExpr {
                 body: Box::new(Expr::Block(vec![
                     Expr::Print(Box::new(Expr::String("park before settlement".into()))),
                     Expr::If {
-                        condition: Box::new(Expr::JavaScriptBinary {
+                        condition: Box::new(Expr::CoercingBinary {
                             left: Box::new(Expr::Variable("value".into())),
-                            op: crate::JavaScriptBinaryOp::StrictEqual,
+                            op: crate::CoercingBinaryOp::StrictEqual,
                             right: Box::new(Expr::Number(2.0)),
                         }),
                         then_block: Box::new(Expr::Throw(Box::new(Expr::String("boom".into())))),
@@ -1378,7 +1378,7 @@ async fn async_map_all_settled_wrapper_collects_throws_in_input_order_across_par
         ))))),
     }));
     let program = Program::block(vec![Expr::Finish(Box::new(private_builtin(
-        "__typescript_async_map",
+        "__lashlang_async_map",
         vec![
             Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)]),
             callback,
@@ -1405,17 +1405,17 @@ async fn async_map_all_settled_wrapper_collects_throws_in_input_order_across_par
 #[tokio::test(flavor = "current_thread")]
 async fn global_delete_and_presence_preserve_absent_vs_undefined_across_restart() {
     let program = Program::block(vec![
-        ts_assign("kept", Expr::Undefined),
+        ts_assign("kept", Expr::Absent),
         ts_assign("removed", Expr::Number(1.0)),
         private_builtin(
-            "__typescript_global_delete",
+            "__lashlang_global_delete",
             vec![Expr::String("removed".into())],
         ),
         Expr::Print(Box::new(Expr::String("park after deletion".into()))),
         Expr::Finish(Box::new(Expr::List(vec![
-            private_builtin("__typescript_global_has", vec![Expr::String("kept".into())]),
+            private_builtin("__lashlang_global_has", vec![Expr::String("kept".into())]),
             private_builtin(
-                "__typescript_global_has",
+                "__lashlang_global_has",
                 vec![Expr::String("removed".into())],
             ),
         ]))),
@@ -1428,7 +1428,7 @@ async fn global_delete_and_presence_preserve_absent_vs_undefined_across_restart(
     );
 
     let setup = Program::block(vec![
-        ts_assign("kept", Expr::Undefined),
+        ts_assign("kept", Expr::Absent),
         ts_assign("removed", Expr::Number(1.0)),
         Expr::Finish(Box::new(Expr::Null)),
     ]);
@@ -1445,7 +1445,7 @@ async fn global_delete_and_presence_preserve_absent_vs_undefined_across_restart(
     let mut state = State::from_snapshot(snapshot);
     let deletion = Program::block(vec![
         private_builtin(
-            "__typescript_global_delete",
+            "__lashlang_global_delete",
             vec![Expr::String("removed".into())],
         ),
         Expr::Finish(Box::new(Expr::Null)),
@@ -1461,9 +1461,9 @@ async fn global_delete_and_presence_preserve_absent_vs_undefined_across_restart(
     let snapshot = Snapshot::from_canonical_bytes(&bytes).expect("decode post-deletion snapshot");
     let mut state = State::from_snapshot(snapshot);
     let query = Program::block(vec![Expr::Finish(Box::new(Expr::List(vec![
-        private_builtin("__typescript_global_has", vec![Expr::String("kept".into())]),
+        private_builtin("__lashlang_global_has", vec![Expr::String("kept".into())]),
         private_builtin(
-            "__typescript_global_has",
+            "__lashlang_global_has",
             vec![Expr::String("removed".into())],
         ),
     ])))]);
@@ -1488,8 +1488,8 @@ async fn nested_global_set_is_durable_across_function_park_and_state_restore() {
         captures: Vec::new(),
         body: Box::new(Expr::Block(vec![
             Expr::Print(Box::new(Expr::String("park before global set".into()))),
-            Expr::Return(Box::new(private_builtin(
-                "__typescript_global_set",
+            Expr::FunctionReturn(Box::new(private_builtin(
+                "__lashlang_global_set",
                 vec![
                     Expr::String("answer".into()),
                     Expr::Record(vec![("value".into(), Expr::Number(42.0))]),
@@ -1547,16 +1547,10 @@ async fn global_get_reads_the_live_root_slot_across_function_park_and_state_rest
             captures: Vec::new(),
             body: Box::new(Expr::Block(vec![
                 Expr::Print(Box::new(Expr::String("park before global read".into()))),
-                Expr::Return(Box::new(Expr::List(vec![
-                    private_builtin("__typescript_global_get", vec![Expr::String("kept".into())]),
-                    private_builtin(
-                        "__typescript_global_get",
-                        vec![Expr::String("fresh".into())],
-                    ),
-                    private_builtin(
-                        "__typescript_global_get",
-                        vec![Expr::String("absent".into())],
-                    ),
+                Expr::FunctionReturn(Box::new(Expr::List(vec![
+                    private_builtin("__lashlang_global_get", vec![Expr::String("kept".into())]),
+                    private_builtin("__lashlang_global_get", vec![Expr::String("fresh".into())]),
+                    private_builtin("__lashlang_global_get", vec![Expr::String("absent".into())]),
                 ]))),
             ])),
         }))
@@ -1569,7 +1563,7 @@ async fn global_get_reads_the_live_root_slot_across_function_park_and_state_rest
         ts_assign("kept", Expr::Number(1.0)),
         ts_assign("first", call_reader()),
         private_builtin(
-            "__typescript_global_set",
+            "__lashlang_global_set",
             vec![Expr::String("fresh".into()), Expr::Number(7.0)],
         ),
         ts_assign("kept", Expr::Number(2.0)),
@@ -1592,7 +1586,7 @@ async fn global_get_reads_the_live_root_slot_across_function_park_and_state_rest
     let setup = Program::block(vec![
         ts_assign("kept", Expr::Number(3.0)),
         private_builtin(
-            "__typescript_global_set",
+            "__lashlang_global_set",
             vec![Expr::String("fresh".into()), Expr::Number(8.0)],
         ),
         Expr::Finish(Box::new(Expr::Null)),
@@ -1626,11 +1620,11 @@ async fn global_set_does_not_weaken_closure_session_persistence_policy() {
         receiver: None,
         params: Vec::new(),
         captures: Vec::new(),
-        body: Box::new(Expr::Return(Box::new(Expr::Null))),
+        body: Box::new(Expr::FunctionReturn(Box::new(Expr::Null))),
     }));
     let program = Program::block(vec![
         private_builtin(
-            "__typescript_global_set",
+            "__lashlang_global_set",
             vec![Expr::String("stored_function".into()), closure],
         ),
         Expr::Finish(Box::new(Expr::Null)),
@@ -1666,7 +1660,7 @@ async fn heap_member_delete_preserves_aliases_and_survives_continuation_round_tr
         ts_assign(
             "deleted",
             private_builtin(
-                "__typescript_heap_delete_member",
+                "__lashlang_heap_delete_member",
                 vec![
                     Expr::Variable("object".into()),
                     Expr::String("removed".into()),
@@ -1677,7 +1671,7 @@ async fn heap_member_delete_preserves_aliases_and_survives_continuation_round_tr
         Expr::Finish(Box::new(Expr::List(vec![
             Expr::Variable("deleted".into()),
             private_builtin(
-                "__typescript_stdlib",
+                "__lashlang_stdlib",
                 vec![
                     Expr::String("Object.hasOwn".into()),
                     Expr::Variable("alias".into()),
@@ -1697,7 +1691,7 @@ async fn heap_member_delete_preserves_aliases_and_survives_continuation_round_tr
     let array_delete = Program::block(vec![
         ts_assign("array", Expr::List(vec![Expr::Number(1.0)])),
         Expr::Finish(Box::new(private_builtin(
-            "__typescript_heap_delete_member",
+            "__lashlang_heap_delete_member",
             vec![Expr::Variable("array".into()), Expr::Number(0.0)],
         ))),
     ]);
@@ -1712,9 +1706,9 @@ async fn heap_member_delete_preserves_aliases_and_survives_continuation_round_tr
 #[tokio::test(flavor = "current_thread")]
 async fn reserved_global_names_are_rejected_by_all_root_intrinsics() {
     for intrinsic in [
-        "__typescript_global_delete",
-        "__typescript_global_get",
-        "__typescript_global_has",
+        "__lashlang_global_delete",
+        "__lashlang_global_get",
+        "__lashlang_global_has",
     ] {
         for name in ["undefined", "NaN", "Infinity"] {
             let program = Program::block(vec![Expr::Finish(Box::new(private_builtin(
@@ -1733,7 +1727,7 @@ async fn reserved_global_names_are_rejected_by_all_root_intrinsics() {
     }
     for name in ["undefined", "NaN", "Infinity"] {
         let program = Program::block(vec![Expr::Finish(Box::new(private_builtin(
-            "__typescript_global_set",
+            "__lashlang_global_set",
             vec![Expr::String(name.into()), Expr::Number(1.0)],
         )))]);
         let compiled = compile_ast(&program).expect("compile reserved global set probe");
@@ -1758,7 +1752,7 @@ async fn uri_codec_intrinsics_match_node_and_throw_real_uri_errors() {
                     field("caught", "name"),
                     field("caught", "message"),
                     private_builtin(
-                        "__typescript_heap_instanceof",
+                        "__lashlang_heap_instanceof",
                         vec![
                             Expr::Variable("caught".into()),
                             Expr::String("URIError".into()),
@@ -1771,25 +1765,25 @@ async fn uri_codec_intrinsics_match_node_and_throw_real_uri_errors() {
     };
     let program = Program::block(vec![Expr::Finish(Box::new(Expr::List(vec![
         private_builtin(
-            "__typescript_encode_uri_component",
+            "__lashlang_encode_uri_component",
             vec![Expr::String("A Z;/?:@&=+$,#-_.!~*'()é😀".into())],
         ),
         private_builtin(
-            "__typescript_encode_uri",
+            "__lashlang_encode_uri",
             vec![Expr::String("https://a.test/a b?x=é&y=#z".into())],
         ),
         private_builtin(
-            "__typescript_decode_uri_component",
+            "__lashlang_decode_uri_component",
             vec![Expr::String(
                 "A%20Z%3B%2F%3F%3A%40%26%3D%2B%24%2C%23%C3%A9%F0%9F%98%80".into(),
             )],
         ),
         private_builtin(
-            "__typescript_decode_uri",
+            "__lashlang_decode_uri",
             vec![Expr::String("https://a.test/a%20b?x=%C3%A9&y=%23z".into())],
         ),
-        caught_uri_error("__typescript_decode_uri_component", "%C0%AF"),
-        caught_uri_error("__typescript_decode_uri", "%E0%A4%A"),
+        caught_uri_error("__lashlang_decode_uri_component", "%C0%AF"),
+        caught_uri_error("__lashlang_decode_uri", "%E0%A4%A"),
     ])))]);
     let uri_error = || {
         Value::List(
@@ -1830,14 +1824,14 @@ async fn map_and_set_for_each_use_a_live_durable_cursor() {
         body: Box::new(Expr::Block(vec![
             Expr::Print(Box::new(Expr::Variable("value".into()))),
             Expr::If {
-                condition: Box::new(Expr::JavaScriptBinary {
+                condition: Box::new(Expr::CoercingBinary {
                     left: Box::new(Expr::Variable("key".into())),
-                    op: crate::JavaScriptBinaryOp::StrictEqual,
+                    op: crate::CoercingBinaryOp::StrictEqual,
                     right: Box::new(Expr::String("a".into())),
                 }),
                 then_block: Box::new(Expr::Block(vec![
                     private_builtin(
-                        "__typescript_stdlib",
+                        "__lashlang_stdlib",
                         vec![
                             Expr::String("delete".into()),
                             Expr::Variable("receiver".into()),
@@ -1845,7 +1839,7 @@ async fn map_and_set_for_each_use_a_live_durable_cursor() {
                         ],
                     ),
                     private_builtin(
-                        "__typescript_stdlib",
+                        "__lashlang_stdlib",
                         vec![
                             Expr::String("set".into()),
                             Expr::Variable("receiver".into()),
@@ -1854,9 +1848,9 @@ async fn map_and_set_for_each_use_a_live_durable_cursor() {
                         ],
                     ),
                 ])),
-                else_block: Box::new(Expr::Undefined),
+                else_block: Box::new(Expr::Absent),
             },
-            Expr::Return(Box::new(Expr::Undefined)),
+            Expr::FunctionReturn(Box::new(Expr::Absent)),
         ])),
     }));
     let map_program = Program::block(vec![
@@ -1895,14 +1889,14 @@ async fn map_and_set_for_each_use_a_live_durable_cursor() {
         body: Box::new(Expr::Block(vec![
             Expr::Print(Box::new(Expr::Variable("value".into()))),
             Expr::If {
-                condition: Box::new(Expr::JavaScriptBinary {
+                condition: Box::new(Expr::CoercingBinary {
                     left: Box::new(Expr::Variable("value".into())),
-                    op: crate::JavaScriptBinaryOp::StrictEqual,
+                    op: crate::CoercingBinaryOp::StrictEqual,
                     right: Box::new(Expr::String("a".into())),
                 }),
                 then_block: Box::new(Expr::Block(vec![
                     private_builtin(
-                        "__typescript_stdlib",
+                        "__lashlang_stdlib",
                         vec![
                             Expr::String("delete".into()),
                             Expr::Variable("receiver".into()),
@@ -1910,7 +1904,7 @@ async fn map_and_set_for_each_use_a_live_durable_cursor() {
                         ],
                     ),
                     private_builtin(
-                        "__typescript_stdlib",
+                        "__lashlang_stdlib",
                         vec![
                             Expr::String("add".into()),
                             Expr::Variable("receiver".into()),
@@ -1918,9 +1912,9 @@ async fn map_and_set_for_each_use_a_live_durable_cursor() {
                         ],
                     ),
                 ])),
-                else_block: Box::new(Expr::Undefined),
+                else_block: Box::new(Expr::Absent),
             },
-            Expr::Return(Box::new(Expr::Undefined)),
+            Expr::FunctionReturn(Box::new(Expr::Absent)),
         ])),
     }));
     let set_program = Program::block(vec![
@@ -1961,17 +1955,17 @@ async fn javascript_add_assign_fuses_a_self_concat() {
         ts_assign("s", Expr::String("a".into())),
         ts_assign(
             "s",
-            Expr::JavaScriptBinary {
+            Expr::CoercingBinary {
                 left: Box::new(Expr::Variable("s".into())),
-                op: crate::JavaScriptBinaryOp::Add,
+                op: crate::CoercingBinaryOp::Add,
                 right: Box::new(Expr::String("x".into())),
             },
         ),
         ts_assign(
             "s",
-            Expr::JavaScriptBinary {
+            Expr::CoercingBinary {
                 left: Box::new(Expr::Variable("s".into())),
-                op: crate::JavaScriptBinaryOp::Add,
+                op: crate::CoercingBinaryOp::Add,
                 right: Box::new(ts_assign("s", Expr::String("y".into()))),
             },
         ),
@@ -1983,7 +1977,7 @@ async fn javascript_add_assign_fuses_a_self_concat() {
             .chunk
             .code
             .iter()
-            .filter(|instruction| matches!(instruction, Instruction::JavaScriptAddAssign(_)))
+            .filter(|instruction| matches!(instruction, Instruction::CoercingAddAssign(_)))
             .count(),
         2,
         "both self-concats should compile to the fused add-assign opcode"
@@ -1993,7 +1987,7 @@ async fn javascript_add_assign_fuses_a_self_concat() {
             .chunk
             .code
             .iter()
-            .any(|instruction| matches!(instruction, Instruction::JavaScriptBinary(_))),
+            .any(|instruction| matches!(instruction, Instruction::CoercingBinary(_))),
         "neither `s = s + rhs` leaves an unfused binary op"
     );
     // The assignment expression's value is `null` at this level — the

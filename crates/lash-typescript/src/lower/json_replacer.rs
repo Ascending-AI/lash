@@ -6,11 +6,11 @@
 //! implementation used by ordinary stringify calls.
 
 use lashlang::{
-    AssignPathStep, AssignTarget, Expr as LashExpr, FunctionExpr, JavaScriptBinaryOp,
-    JavaScriptUnaryOp, MethodKey,
+    AssignPathStep, AssignTarget, CoercingBinaryOp, CoercingUnaryOp, Expr as LashExpr,
+    FunctionExpr, MethodKey,
 };
 
-use super::{GENERATED_BINDING_PREFIX, Lowerer};
+use super::{LOWERED_BINDING_PREFIX, Lowerer};
 use crate::Diagnostic;
 use crate::adapter::Expr;
 
@@ -56,9 +56,9 @@ impl Lowerer {
                     },
                     expr: Box::new(LashExpr::Bool(true)),
                 },
-                LashExpr::Return(Box::new(LashExpr::Undefined)),
+                LashExpr::FunctionReturn(Box::new(LashExpr::Absent)),
             ])),
-            else_block: Box::new(LashExpr::Undefined),
+            else_block: Box::new(LashExpr::Absent),
         };
         let push_active = || append(&active, current_value());
         let pop_active = || {
@@ -84,7 +84,7 @@ impl Lowerer {
             LashExpr::While {
                 condition: Box::new(binary(
                     variable(&index),
-                    JavaScriptBinaryOp::Less,
+                    CoercingBinaryOp::Less,
                     field(&current, "length"),
                 )),
                 body: Box::new(LashExpr::Block(vec![
@@ -100,8 +100,8 @@ impl Lowerer {
                         LashExpr::If {
                             condition: Box::new(binary(
                                 variable(&transformed),
-                                JavaScriptBinaryOp::StrictEqual,
-                                LashExpr::Undefined,
+                                CoercingBinaryOp::StrictEqual,
+                                LashExpr::Absent,
                             )),
                             then_block: Box::new(LashExpr::Null),
                             else_block: Box::new(variable(&transformed)),
@@ -111,7 +111,7 @@ impl Lowerer {
                 ])),
             },
             pop_active(),
-            LashExpr::Return(Box::new(variable(&output))),
+            LashExpr::FunctionReturn(Box::new(variable(&output))),
         ]);
         let object_branch = LashExpr::Block(vec![
             cycle_guard(),
@@ -128,8 +128,8 @@ impl Lowerer {
                     LashExpr::If {
                         condition: Box::new(binary(
                             variable(&transformed),
-                            JavaScriptBinaryOp::StrictNotEqual,
-                            LashExpr::Undefined,
+                            CoercingBinaryOp::StrictNotEqual,
+                            LashExpr::Absent,
                         )),
                         then_block: Box::new(LashExpr::Assign {
                             target: AssignTarget {
@@ -138,12 +138,12 @@ impl Lowerer {
                             },
                             expr: Box::new(variable(&transformed)),
                         }),
-                        else_block: Box::new(LashExpr::Undefined),
+                        else_block: Box::new(LashExpr::Absent),
                     },
                 ])),
             },
             pop_active(),
-            LashExpr::Return(Box::new(variable(&output))),
+            LashExpr::FunctionReturn(Box::new(variable(&output))),
         ]);
 
         let transform_body = LashExpr::Block(vec![
@@ -167,7 +167,7 @@ impl Lowerer {
                         args: vec![variable(&key)],
                     },
                 )),
-                else_block: Box::new(LashExpr::Undefined),
+                else_block: Box::new(LashExpr::Absent),
             },
             assign(
                 &current,
@@ -183,22 +183,22 @@ impl Lowerer {
             LashExpr::If {
                 condition: Box::new(binary(
                     variable(&kind),
-                    JavaScriptBinaryOp::StrictEqual,
+                    CoercingBinaryOp::StrictEqual,
                     LashExpr::String("array".into()),
                 )),
                 then_block: Box::new(array_branch),
-                else_block: Box::new(LashExpr::Undefined),
+                else_block: Box::new(LashExpr::Absent),
             },
             LashExpr::If {
                 condition: Box::new(binary(
                     variable(&kind),
-                    JavaScriptBinaryOp::StrictEqual,
+                    CoercingBinaryOp::StrictEqual,
                     LashExpr::String("record".into()),
                 )),
                 then_block: Box::new(object_branch),
-                else_block: Box::new(LashExpr::Undefined),
+                else_block: Box::new(LashExpr::Absent),
             },
-            LashExpr::Return(Box::new(current_value())),
+            LashExpr::FunctionReturn(Box::new(current_value())),
         ]);
         let transformer = LashExpr::Function(Box::new(FunctionExpr {
             name: Some(transform.as_str().into()),
@@ -244,11 +244,11 @@ impl Lowerer {
                 &replacer_name,
                 LashExpr::If {
                     condition: Box::new(binary(
-                        LashExpr::JavaScriptUnary {
-                            op: JavaScriptUnaryOp::TypeOf,
+                        LashExpr::CoercingUnary {
+                            op: CoercingUnaryOp::TypeOf,
                             expr: Box::new(variable(&replacer_name)),
                         },
-                        JavaScriptBinaryOp::StrictEqual,
+                        CoercingBinaryOp::StrictEqual,
                         LashExpr::String("function".into()),
                     )),
                     then_block: Box::new(variable(&replacer_name)),
@@ -266,7 +266,7 @@ impl Lowerer {
         let space_value = space
             .map(|value| self.lower_expr(value))
             .transpose()?
-            .unwrap_or(LashExpr::Undefined);
+            .unwrap_or(LashExpr::Absent);
         prefix.push(assign(&space_name, space_value));
         let mut expressions = vec![
             // Reject a durable cycle before the callback driver captures the
@@ -276,7 +276,7 @@ impl Lowerer {
             LashExpr::If {
                 condition: Box::new(stdlib("__jsonHasCycle", vec![variable(&input)])),
                 then_block: Box::new(LashExpr::Throw(Box::new(LashExpr::BuiltinCall {
-                    name: "__typescript_heap_new".into(),
+                    name: "__lashlang_heap_new".into(),
                     args: vec![
                         LashExpr::String("TypeError".into()),
                         LashExpr::String(
@@ -284,7 +284,7 @@ impl Lowerer {
                         ),
                     ],
                 }))),
-                else_block: Box::new(LashExpr::Undefined),
+                else_block: Box::new(LashExpr::Absent),
             },
             assign(&active, LashExpr::List(Vec::new())),
             assign(&cycle, LashExpr::List(vec![LashExpr::Bool(false)])),
@@ -295,7 +295,7 @@ impl Lowerer {
                     name: None,
                     js_name: None,
                     receiver: None,
-                    params: vec![format!("{GENERATED_BINDING_PREFIX}ignored").into()],
+                    params: vec![format!("{LOWERED_BINDING_PREFIX}ignored").into()],
                     captures: vec![input.as_str().into(), transform.as_str().into()],
                     body: Box::new(worker_body),
                 })),
@@ -306,7 +306,7 @@ impl Lowerer {
             stdlib(
                 "__singleCallbackResult",
                 vec![LashExpr::Map {
-                    items: Box::new(LashExpr::List(vec![LashExpr::Undefined])),
+                    items: Box::new(LashExpr::List(vec![LashExpr::Absent])),
                     function: Box::new(variable(&worker)),
                 }],
             ),
@@ -317,13 +317,13 @@ impl Lowerer {
                 index: Box::new(LashExpr::Number(0.0)),
             }),
             then_block: Box::new(LashExpr::Throw(Box::new(LashExpr::BuiltinCall {
-                name: "__typescript_heap_new".into(),
+                name: "__lashlang_heap_new".into(),
                 args: vec![
                     LashExpr::String("TypeError".into()),
                     LashExpr::String("Converting circular structure to JSON".into()),
                 ],
             }))),
-            else_block: Box::new(LashExpr::Undefined),
+            else_block: Box::new(LashExpr::Absent),
         });
         let stringify_args = vec![
             variable(&transformed_root),
@@ -338,7 +338,7 @@ impl Lowerer {
             prefix.push(LashExpr::If {
                 condition: Box::new(binary(
                     stdlib("__jsonContainerKind", vec![variable(&input)]),
-                    JavaScriptBinaryOp::StrictEqual,
+                    CoercingBinaryOp::StrictEqual,
                     LashExpr::String("opaque".into()),
                 )),
                 then_block: Box::new(stdlib(
@@ -406,7 +406,7 @@ impl Lowerer {
             LashExpr::While {
                 condition: Box::new(binary(
                     variable(&index),
-                    JavaScriptBinaryOp::Less,
+                    CoercingBinaryOp::Less,
                     field(&val, "length"),
                 )),
                 body: Box::new(LashExpr::Block(vec![
@@ -442,8 +442,8 @@ impl Lowerer {
                     LashExpr::If {
                         condition: Box::new(binary(
                             variable(&element),
-                            JavaScriptBinaryOp::StrictNotEqual,
-                            LashExpr::Undefined,
+                            CoercingBinaryOp::StrictNotEqual,
+                            LashExpr::Absent,
                         )),
                         then_block: Box::new(LashExpr::Assign {
                             target: AssignTarget {
@@ -452,7 +452,7 @@ impl Lowerer {
                             },
                             expr: Box::new(variable(&element)),
                         }),
-                        else_block: Box::new(LashExpr::Undefined),
+                        else_block: Box::new(LashExpr::Absent),
                     },
                 ])),
             },
@@ -470,22 +470,22 @@ impl Lowerer {
             LashExpr::If {
                 condition: Box::new(binary(
                     variable(&kind),
-                    JavaScriptBinaryOp::StrictEqual,
+                    CoercingBinaryOp::StrictEqual,
                     LashExpr::String("array".into()),
                 )),
                 then_block: Box::new(array_branch),
-                else_block: Box::new(LashExpr::Undefined),
+                else_block: Box::new(LashExpr::Absent),
             },
             LashExpr::If {
                 condition: Box::new(binary(
                     variable(&kind),
-                    JavaScriptBinaryOp::StrictEqual,
+                    CoercingBinaryOp::StrictEqual,
                     LashExpr::String("record".into()),
                 )),
                 then_block: Box::new(record_branch),
-                else_block: Box::new(LashExpr::Undefined),
+                else_block: Box::new(LashExpr::Absent),
             },
-            LashExpr::Return(Box::new(LashExpr::ThisCall {
+            LashExpr::FunctionReturn(Box::new(LashExpr::ThisCall {
                 this: Box::new(variable(&holder)),
                 function: Box::new(variable(&reviver_name)),
                 args: vec![variable(&key), val_value()],
@@ -506,7 +506,7 @@ impl Lowerer {
         let traversed = stdlib(
             "__singleCallbackResult",
             vec![LashExpr::Map {
-                items: Box::new(LashExpr::List(vec![LashExpr::Undefined])),
+                items: Box::new(LashExpr::List(vec![LashExpr::Absent])),
                 function: Box::new(variable(&worker)),
             }],
         );
@@ -521,7 +521,7 @@ impl Lowerer {
                     name: None,
                     js_name: None,
                     receiver: None,
-                    params: vec![format!("{GENERATED_BINDING_PREFIX}ignored").into()],
+                    params: vec![format!("{LOWERED_BINDING_PREFIX}ignored").into()],
                     captures: vec![parsed.as_str().into(), internalize.as_str().into()],
                     body: Box::new(worker_body),
                 })),
@@ -532,11 +532,11 @@ impl Lowerer {
                 &result,
                 LashExpr::If {
                     condition: Box::new(binary(
-                        LashExpr::JavaScriptUnary {
-                            op: JavaScriptUnaryOp::TypeOf,
+                        LashExpr::CoercingUnary {
+                            op: CoercingUnaryOp::TypeOf,
                             expr: Box::new(variable(&reviver_name)),
                         },
-                        JavaScriptBinaryOp::StrictEqual,
+                        CoercingBinaryOp::StrictEqual,
                         LashExpr::String("function".into()),
                     )),
                     then_block: Box::new(traversed),
@@ -576,8 +576,8 @@ fn append(name: &str, value: LashExpr) -> LashExpr {
     }
 }
 
-fn binary(left: LashExpr, op: JavaScriptBinaryOp, right: LashExpr) -> LashExpr {
-    LashExpr::JavaScriptBinary {
+fn binary(left: LashExpr, op: CoercingBinaryOp, right: LashExpr) -> LashExpr {
+    LashExpr::CoercingBinary {
         left: Box::new(left),
         op,
         right: Box::new(right),
@@ -585,17 +585,17 @@ fn binary(left: LashExpr, op: JavaScriptBinaryOp, right: LashExpr) -> LashExpr {
 }
 
 fn add(left: LashExpr, right: LashExpr) -> LashExpr {
-    binary(left, JavaScriptBinaryOp::Add, right)
+    binary(left, CoercingBinaryOp::Add, right)
 }
 
 fn sub(left: LashExpr, right: LashExpr) -> LashExpr {
-    binary(left, JavaScriptBinaryOp::Subtract, right)
+    binary(left, CoercingBinaryOp::Subtract, right)
 }
 
 fn stdlib(method: &str, mut args: Vec<LashExpr>) -> LashExpr {
     args.insert(0, LashExpr::String(method.into()));
     LashExpr::BuiltinCall {
-        name: "__typescript_stdlib".into(),
+        name: "__lashlang_stdlib".into(),
         args,
     }
 }

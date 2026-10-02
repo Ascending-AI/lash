@@ -2,7 +2,7 @@
 //!
 //! The linker refuses a read or write of a field an object's type lacks. That
 //! is sound only while the type is the whole truth about the object: a
-//! statically closed shape. In JavaScript any other object answers a missing
+//! statically closed shape. In ECMA-262 any other object answers a missing
 //! field with `undefined`, so the guard must not fire on one. An object stops
 //! being closed, for the whole program, when:
 //!
@@ -124,13 +124,13 @@ impl OpenPlaces {
                 (&**else_block, escapes),
             ]),
             // `&&`, `||` and `??` answer one of their operands.
-            Expr::JavaScriptLogical { left, right, .. } => {
+            Expr::OperandLogical { left, right, .. } => {
                 work.extend([(&**left, escapes), (&**right, escapes)]);
             }
-            Expr::JavaScriptBinary { left, right, .. } => {
+            Expr::CoercingBinary { left, right, .. } => {
                 work.extend([(&**left, false), (&**right, false)]);
             }
-            Expr::JavaScriptUnary { expr, .. } | Expr::Print(expr) => {
+            Expr::CoercingUnary { expr, .. } | Expr::Print(expr) => {
                 work.push((&**expr, false));
             }
             Expr::While { condition, body } => {
@@ -195,16 +195,14 @@ impl OpenPlaces {
         work: &mut Vec<(&'e Expr, bool)>,
     ) {
         let escapes = match (name, args.first()) {
-            ("__typescript_stdlib", Some(Expr::String(method))) => {
+            ("__lashlang_stdlib", Some(Expr::String(method))) => {
                 !NON_RETAINING_STDLIB.contains(&method.as_str())
             }
             // `globalThis.name` reads, writes or deletes the session slot a
             // top-level binding of that name also holds, so a read shares the
             // binding's object and a write or delete replaces it unseen.
             (
-                "__typescript_global_get"
-                | "__typescript_global_set"
-                | "__typescript_global_delete",
+                "__lashlang_global_get" | "__lashlang_global_set" | "__lashlang_global_delete",
                 Some(Expr::String(slot)),
             ) => {
                 self.open(slot.as_str(), Vec::new());

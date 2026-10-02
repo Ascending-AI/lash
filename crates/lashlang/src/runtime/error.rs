@@ -104,9 +104,9 @@ pub enum RuntimeError {
         "binding cell operation on a {actual}: a captured binding was lowered without its cell"
     )]
     NotABindingCell { actual: String },
-    /// JavaScript exotic objects have no detached host-facing value shape.
-    #[error("JavaScript {kind} values cannot cross a lashlang host boundary")]
-    JavaScriptExoticAtHostBoundary { kind: String },
+    /// ECMA-262 exotic objects have no detached host-facing value shape.
+    #[error("ECMA-262 {kind} values cannot cross a lashlang host boundary")]
+    BuiltinObjectAtHostBoundary { kind: String },
     /// Effects from callbacks require a resumable builtin protocol not yet present.
     #[error("effects are not supported inside builtin callbacks")]
     EffectInBuiltinCallback,
@@ -228,7 +228,7 @@ pub enum RuntimeError {
     #[error(
         "TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED: array property `{key}` is not representable in the v1 heap"
     )]
-    TypeScriptArrayNonIndexPropertyUnsupported { key: String },
+    ArrayNonIndexPropertyUnsupported { key: String },
     /// A TypeScript pending tool promise violated its lifetime contract.
     #[error("TS_PENDING_TOOL: {problem}{}", pending_tool_details(.pending))]
     PendingTool {
@@ -611,7 +611,7 @@ impl RuntimeError {
             Self::FunctionValueAtHostBoundary => ErrorTaxonomy::Catchable,
             // A lowering defect: a guest `try`/`catch` must never swallow it.
             Self::NotABindingCell { .. } => ErrorTaxonomy::UncatchableTerminal,
-            Self::JavaScriptExoticAtHostBoundary { .. } => ErrorTaxonomy::Catchable,
+            Self::BuiltinObjectAtHostBoundary { .. } => ErrorTaxonomy::Catchable,
             Self::EffectInBuiltinCallback => ErrorTaxonomy::Catchable,
             // Never raised past its instruction; were it to escape, it is an
             // invariant break, not a guest failure.
@@ -647,7 +647,7 @@ impl RuntimeError {
             Self::CannotAssignIndex { .. } => ErrorTaxonomy::Catchable,
             Self::CannotAssignThroughIndex { .. } => ErrorTaxonomy::Catchable,
             Self::InvalidListAssignmentIndex => ErrorTaxonomy::Catchable,
-            Self::TypeScriptArrayNonIndexPropertyUnsupported { .. } => ErrorTaxonomy::Catchable,
+            Self::ArrayNonIndexPropertyUnsupported { .. } => ErrorTaxonomy::Catchable,
             Self::PendingTool { .. } => ErrorTaxonomy::Catchable,
             Self::InvalidArgumentCount { .. } => ErrorTaxonomy::Catchable,
             Self::EmptyUnsupported => ErrorTaxonomy::Catchable,
@@ -752,7 +752,7 @@ impl RuntimeError {
             Self::ClosureCaptureCountMismatch { .. } => "ClosureCaptureCountMismatch",
             Self::FunctionValueAtHostBoundary => "FunctionValueAtHostBoundary",
             Self::NotABindingCell { .. } => "NotABindingCell",
-            Self::JavaScriptExoticAtHostBoundary { .. } => "JavaScriptExoticAtHostBoundary",
+            Self::BuiltinObjectAtHostBoundary { .. } => "BuiltinObjectAtHostBoundary",
             Self::EffectInBuiltinCallback => "EffectInBuiltinCallback",
             Self::GuestCoercionPending => "GuestCoercionPending",
             Self::InstructionBudgetExceeded { .. } => "InstructionBudgetExceeded",
@@ -783,9 +783,7 @@ impl RuntimeError {
             Self::CannotAssignIndex { .. } => "CannotAssignIndex",
             Self::CannotAssignThroughIndex { .. } => "CannotAssignThroughIndex",
             Self::InvalidListAssignmentIndex => "InvalidListAssignmentIndex",
-            Self::TypeScriptArrayNonIndexPropertyUnsupported { .. } => {
-                "TypeScriptArrayNonIndexPropertyUnsupported"
-            }
+            Self::ArrayNonIndexPropertyUnsupported { .. } => "ArrayNonIndexPropertyUnsupported",
             Self::PendingTool { .. } => "PendingTool",
             Self::InvalidArgumentCount { .. } => "InvalidArgumentCount",
             Self::EmptyUnsupported => "EmptyUnsupported",
@@ -1040,7 +1038,7 @@ mod tests {
             RuntimeError::NotABindingCell {
                 actual: "number".into(),
             },
-            RuntimeError::JavaScriptExoticAtHostBoundary { kind: "Map".into() },
+            RuntimeError::BuiltinObjectAtHostBoundary { kind: "Map".into() },
             RuntimeError::EffectInBuiltinCallback,
             RuntimeError::GuestCoercionPending,
             RuntimeError::InstructionBudgetExceeded { limit: 10 },
@@ -1089,7 +1087,7 @@ mod tests {
                 actual: "value".into(),
             },
             RuntimeError::InvalidListAssignmentIndex,
-            RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported { key: "-1".into() },
+            RuntimeError::ArrayNonIndexPropertyUnsupported { key: "-1".into() },
             RuntimeError::PendingTool {
                 problem: "test".into(),
                 pending: Vec::new(),
@@ -1364,8 +1362,8 @@ mod tests {
                 RuntimeError::NotABindingCell { .. } => {
                     "binding cell operation on a number: a captured binding was lowered without its cell"
                 }
-                RuntimeError::JavaScriptExoticAtHostBoundary { .. } => {
-                    "JavaScript Map values cannot cross a lashlang host boundary"
+                RuntimeError::BuiltinObjectAtHostBoundary { .. } => {
+                    "ECMA-262 Map values cannot cross a lashlang host boundary"
                 }
                 RuntimeError::EffectInBuiltinCallback => {
                     "effects are not supported inside builtin callbacks"
@@ -1442,7 +1440,7 @@ mod tests {
                 RuntimeError::InvalidListAssignmentIndex => {
                     "list assignment index must be an integer"
                 }
-                RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported { .. } => {
+                RuntimeError::ArrayNonIndexPropertyUnsupported { .. } => {
                     "TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED: array property `-1` is not representable in the v1 heap"
                 }
                 RuntimeError::PendingTool { .. } => "TS_PENDING_TOOL: test",
@@ -1680,7 +1678,7 @@ mod tests {
     RuntimeError::ClosureCaptureCountMismatch { .. } => "ClosureCaptureCountMismatch",
     RuntimeError::FunctionValueAtHostBoundary => "FunctionValueAtHostBoundary",
     RuntimeError::NotABindingCell { .. } => "NotABindingCell",
-    RuntimeError::JavaScriptExoticAtHostBoundary { .. } => "JavaScriptExoticAtHostBoundary",
+    RuntimeError::BuiltinObjectAtHostBoundary { .. } => "BuiltinObjectAtHostBoundary",
     RuntimeError::EffectInBuiltinCallback => "EffectInBuiltinCallback",
     RuntimeError::GuestCoercionPending => "GuestCoercionPending",
     RuntimeError::InstructionBudgetExceeded { .. } => "InstructionBudgetExceeded",
@@ -1711,7 +1709,7 @@ mod tests {
     RuntimeError::CannotAssignIndex { .. } => "CannotAssignIndex",
     RuntimeError::CannotAssignThroughIndex { .. } => "CannotAssignThroughIndex",
     RuntimeError::InvalidListAssignmentIndex => "InvalidListAssignmentIndex",
-    RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported { .. } => "TypeScriptArrayNonIndexPropertyUnsupported",
+    RuntimeError::ArrayNonIndexPropertyUnsupported { .. } => "ArrayNonIndexPropertyUnsupported",
     RuntimeError::PendingTool { .. } => "PendingTool",
     RuntimeError::InvalidArgumentCount { .. } => "InvalidArgumentCount",
     RuntimeError::EmptyUnsupported => "EmptyUnsupported",

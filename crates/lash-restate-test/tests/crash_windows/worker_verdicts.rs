@@ -364,7 +364,7 @@ pub(super) fn workers_with_cpu(cumulative_cpu: Duration) -> lash::rlm::WorkerSer
 /// }
 /// ```
 async fn burning_request(engine: &Engine) -> lash_core::ProcessStartRequest {
-    use lashlang::JavaScriptBinaryOp::{Add, Less};
+    use lashlang::CoercingBinaryOp::{Add, Less};
     let program = b::module(
         vec![b::process_with_signals(
             PROCESS,

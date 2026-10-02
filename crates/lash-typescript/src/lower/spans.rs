@@ -130,7 +130,7 @@ fn extract(
         else {
             break;
         };
-        let inner = std::mem::replace(expr, Box::new(LashExpr::Undefined));
+        let inner = std::mem::replace(expr, Box::new(LashExpr::Absent));
         *expression = *inner;
         resolved_markers.insert(marker);
         resolved.insert(path.clone(), span);

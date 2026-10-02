@@ -62,7 +62,7 @@ impl Lowerer {
                     // registered deviation, not a new one (ADR 0099 §11
                     // clause 10).
                     _ => Ok(LashExpr::BuiltinCall {
-                        name: "__typescript_await_array".into(),
+                        name: "__lashlang_await_array".into(),
                         args: vec![lowerer.lower_expr(value)?, LashExpr::String(mode.into())],
                     }),
                 });
@@ -79,7 +79,7 @@ impl Lowerer {
             // the tool that parks on the durable wait.
             let array = self.at_top_level_await_depth(|lowerer| lowerer.lower_expr(value))?;
             let aggregate = LashExpr::BuiltinCall {
-                name: "__typescript_await_array".into(),
+                name: "__lashlang_await_array".into(),
                 args: vec![array, LashExpr::String(mode.into())],
             };
             return Ok(if mode == "allSettled" {
@@ -112,7 +112,7 @@ impl Lowerer {
             )))));
         }
         Ok(LashExpr::BuiltinCall {
-            name: "__typescript_await_pending".into(),
+            name: "__lashlang_await_pending".into(),
             args: vec![lowered],
         })
     }

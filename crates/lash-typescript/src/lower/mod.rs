@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lashlang::{
-    AssignPathStep, AssignTarget, CatchClause, Declaration, Expr as LashExpr, FunctionExpr,
-    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, LabelMetadata, MethodKey,
-    ProcessParam, ResourceRefExpr, StructuralRole, TryExpr, TypeExpr, is_javascript_builtin_global,
+    AssignPathStep, AssignTarget, CatchClause, CoercingBinaryOp, CoercingUnaryOp, Declaration,
+    Expr as LashExpr, FunctionExpr, LabelMetadata, MethodKey, OperandLogicalOp, ProcessParam,
+    ResourceRefExpr, StructuralRole, TryExpr, TypeExpr, is_javascript_builtin_global,
 };
 
 use crate::adapter::{
@@ -61,7 +61,7 @@ pub(crate) fn accepted_instance_methods() -> &'static [&'static str] {
 
 /// Every binding the lowerer generates carries this prefix, which the dialect
 /// reserves so a source identifier can never collide with one.
-pub(crate) const GENERATED_BINDING_PREFIX: &str = "__typescript_";
+pub(crate) const LOWERED_BINDING_PREFIX: &str = "__lashlang_";
 
 /// The scope key of a non-arrow function's receiver binding. `this` is a
 /// keyword, so no authored binding can take the key.
@@ -335,7 +335,7 @@ impl Lowerer {
             // A statement with nothing to run has no node to name.
             return lowered;
         };
-        let expression = std::mem::replace(first, LashExpr::Undefined);
+        let expression = std::mem::replace(first, LashExpr::Absent);
         *first = LashExpr::LabelAnnotated {
             label: metadata,
             expr: Box::new(expression),
@@ -439,7 +439,7 @@ impl Lowerer {
                             .as_ref()
                             .map(|expr| self.lower_named_expr(expr, process_name))
                             .transpose()?
-                            .unwrap_or(LashExpr::Undefined)
+                            .unwrap_or(LashExpr::Absent)
                     };
                     if matches!(kind, VarKind::Const | VarKind::Let)
                         && binding::is_pending_tool(&value)
@@ -523,12 +523,12 @@ impl Lowerer {
                         None,
                     ));
                 }
-                vec![LashExpr::Return(Box::new(
+                vec![LashExpr::FunctionReturn(Box::new(
                     value
                         .as_ref()
                         .map(|expr| self.lower_expr(expr))
                         .transpose()?
-                        .unwrap_or(LashExpr::Undefined),
+                        .unwrap_or(LashExpr::Absent),
                 ))]
             }
             Stmt::If {
@@ -543,7 +543,7 @@ impl Lowerer {
                         .as_deref()
                         .map(|stmt| self.lower_stmt_block(stmt))
                         .transpose()?
-                        .unwrap_or_else(|| completion_list(vec![LashExpr::Undefined])),
+                        .unwrap_or_else(|| completion_list(vec![LashExpr::Absent])),
                 ),
             }],
             Stmt::While { test, body } => self.in_loop_statement(|lowerer| {
@@ -567,9 +567,9 @@ impl Lowerer {
                     let condition = lowerer.lower_expr(test)?;
                     let condition = lowerer.span_markers.annotate(*test_span, condition);
                     let epilogue = LashExpr::If {
-                        condition: Box::new(js_unary(JavaScriptUnaryOp::Not, condition)),
+                        condition: Box::new(js_unary(CoercingUnaryOp::Not, condition)),
                         then_block: Box::new(LashExpr::Break),
-                        else_block: Box::new(LashExpr::Undefined),
+                        else_block: Box::new(LashExpr::Absent),
                     };
                     lowerer.continue_epilogues.push(Some(epilogue.clone()));
                     let body = lowerer.lower_stmt_block(body);
@@ -753,7 +753,7 @@ impl Lowerer {
             Stmt::Block(statements) => self.lower_statements(statements, StatementScope::Nested)?,
             _ => self.lower_stmt(stmt)?,
         };
-        expressions.push(LashExpr::Undefined);
+        expressions.push(LashExpr::Absent);
         let body = completion_list(expressions);
         Ok(match span {
             Some(span) => self.span_markers.annotate(span, body),
@@ -959,7 +959,7 @@ impl Lowerer {
         }
         let tail = match &function.body {
             FunctionBody::Expression(expr) => {
-                let lowered = LashExpr::Return(Box::new(self.lower_expr(expr)?));
+                let lowered = LashExpr::FunctionReturn(Box::new(self.lower_expr(expr)?));
                 if let Some(span) = source_span(expr) {
                     self.span_markers.annotate(span, lowered)
                 } else {
@@ -969,7 +969,7 @@ impl Lowerer {
             FunctionBody::Block(statements) => {
                 let mut body = std::mem::take(&mut prologue);
                 body.extend(self.lower_statements(statements, StatementScope::Root)?);
-                body.push(LashExpr::Undefined);
+                body.push(LashExpr::Absent);
                 completion_list(body)
             }
         };
@@ -1000,7 +1000,7 @@ impl Lowerer {
         }));
         if accepts_rest || has_defaults {
             Ok(LashExpr::BuiltinCall {
-                name: "__typescript_closure".into(),
+                name: "__lashlang_closure".into(),
                 args: vec![
                     function,
                     LashExpr::Number(required_count as f64),
@@ -1058,7 +1058,7 @@ impl Lowerer {
             Expr::Number(value) => LashExpr::Number(*value),
             Expr::String(value) => LashExpr::String(value.as_str().into()),
             Expr::RegExp { pattern, flags } => LashExpr::BuiltinCall {
-                name: "__typescript_heap_new".into(),
+                name: "__lashlang_heap_new".into(),
                 args: vec![
                     LashExpr::String("RegExp".into()),
                     LashExpr::String(pattern.as_str().into()),
@@ -1066,7 +1066,7 @@ impl Lowerer {
                 ],
             },
             Expr::Ident(name, _) if name == "undefined" && !self.has_binding(name) => {
-                LashExpr::Undefined
+                LashExpr::Absent
             }
             Expr::Ident(name, _) if name == "NaN" && !self.has_binding(name) => {
                 LashExpr::Number(f64::NAN)
@@ -1133,13 +1133,11 @@ impl Lowerer {
                 object, property, ..
             } => self.lower_member(object, property)?,
             Expr::Unary { op, value } => match op {
-                UnaryOp::Void => {
-                    LashExpr::Block(vec![self.lower_expr(value)?, LashExpr::Undefined])
-                }
-                UnaryOp::Plus => js_unary(JavaScriptUnaryOp::Plus, self.lower_expr(value)?),
-                UnaryOp::Minus => js_unary(JavaScriptUnaryOp::Negate, self.lower_expr(value)?),
-                UnaryOp::Not => js_unary(JavaScriptUnaryOp::Not, self.lower_expr(value)?),
-                UnaryOp::BitNot => js_unary(JavaScriptUnaryOp::BitNot, self.lower_expr(value)?),
+                UnaryOp::Void => LashExpr::Block(vec![self.lower_expr(value)?, LashExpr::Absent]),
+                UnaryOp::Plus => js_unary(CoercingUnaryOp::Plus, self.lower_expr(value)?),
+                UnaryOp::Minus => js_unary(CoercingUnaryOp::Negate, self.lower_expr(value)?),
+                UnaryOp::Not => js_unary(CoercingUnaryOp::Not, self.lower_expr(value)?),
+                UnaryOp::BitNot => js_unary(CoercingUnaryOp::BitNot, self.lower_expr(value)?),
                 // `typeof` on a name nothing binds answers "undefined" without
                 // resolving it — except the reserved value idents, which are
                 // never unbound names: each lowers to a concrete literal below,
@@ -1170,22 +1168,22 @@ impl Lowerer {
                         unreachable!("the guard matched an identifier")
                     };
                     js_unary(
-                        JavaScriptUnaryOp::TypeOf,
+                        CoercingUnaryOp::TypeOf,
                         LashExpr::BuiltinCall {
-                            name: "__typescript_global_get".into(),
+                            name: "__lashlang_global_get".into(),
                             args: vec![LashExpr::String(name.as_str().into())],
                         },
                     )
                 }
-                UnaryOp::TypeOf => js_unary(JavaScriptUnaryOp::TypeOf, self.lower_expr(value)?),
+                UnaryOp::TypeOf => js_unary(CoercingUnaryOp::TypeOf, self.lower_expr(value)?),
             },
             Expr::Binary { left, op, right } => self.lower_binary_expr(left, *op, right)?,
-            Expr::Logical { left, op, right } => LashExpr::JavaScriptLogical {
+            Expr::Logical { left, op, right } => LashExpr::OperandLogical {
                 left: Box::new(self.lower_expr(left)?),
                 op: match op {
-                    LogicalOp::And => JavaScriptLogicalOp::And,
-                    LogicalOp::Or => JavaScriptLogicalOp::Or,
-                    LogicalOp::Nullish => JavaScriptLogicalOp::NullishCoalesce,
+                    LogicalOp::And => OperandLogicalOp::And,
+                    LogicalOp::Or => OperandLogicalOp::Or,
+                    LogicalOp::Nullish => OperandLogicalOp::NullishCoalesce,
                 },
                 right: Box::new(self.lower_expr(right)?),
             },
@@ -1206,7 +1204,7 @@ impl Lowerer {
                 for (index, expression) in expressions.iter().enumerate() {
                     value = js_add(
                         value,
-                        js_unary(JavaScriptUnaryOp::ToString, self.lower_expr(expression)?),
+                        js_unary(CoercingUnaryOp::ToString, self.lower_expr(expression)?),
                     );
                     value = js_add(
                         value,
@@ -1410,27 +1408,27 @@ fn reject_mutual_recursion(
     ))
 }
 
-fn map_binary(op: BinaryOp) -> JavaScriptBinaryOp {
+fn map_binary(op: BinaryOp) -> CoercingBinaryOp {
     match op {
-        BinaryOp::Add => JavaScriptBinaryOp::Add,
-        BinaryOp::Subtract => JavaScriptBinaryOp::Subtract,
-        BinaryOp::Multiply => JavaScriptBinaryOp::Multiply,
-        BinaryOp::Divide => JavaScriptBinaryOp::Divide,
-        BinaryOp::Remainder => JavaScriptBinaryOp::Remainder,
-        BinaryOp::StrictEqual => JavaScriptBinaryOp::StrictEqual,
-        BinaryOp::StrictNotEqual => JavaScriptBinaryOp::StrictNotEqual,
-        BinaryOp::LooseEqual => JavaScriptBinaryOp::LooseEqual,
-        BinaryOp::LooseNotEqual => JavaScriptBinaryOp::LooseNotEqual,
-        BinaryOp::Less => JavaScriptBinaryOp::Less,
-        BinaryOp::LessEqual => JavaScriptBinaryOp::LessEqual,
-        BinaryOp::Greater => JavaScriptBinaryOp::Greater,
-        BinaryOp::GreaterEqual => JavaScriptBinaryOp::GreaterEqual,
-        BinaryOp::BitAnd => JavaScriptBinaryOp::BitAnd,
-        BinaryOp::BitOr => JavaScriptBinaryOp::BitOr,
-        BinaryOp::BitXor => JavaScriptBinaryOp::BitXor,
-        BinaryOp::ShiftLeft => JavaScriptBinaryOp::ShiftLeft,
-        BinaryOp::ShiftRight => JavaScriptBinaryOp::ShiftRight,
-        BinaryOp::ShiftRightUnsigned => JavaScriptBinaryOp::ShiftRightUnsigned,
+        BinaryOp::Add => CoercingBinaryOp::Add,
+        BinaryOp::Subtract => CoercingBinaryOp::Subtract,
+        BinaryOp::Multiply => CoercingBinaryOp::Multiply,
+        BinaryOp::Divide => CoercingBinaryOp::Divide,
+        BinaryOp::Remainder => CoercingBinaryOp::Remainder,
+        BinaryOp::StrictEqual => CoercingBinaryOp::StrictEqual,
+        BinaryOp::StrictNotEqual => CoercingBinaryOp::StrictNotEqual,
+        BinaryOp::LooseEqual => CoercingBinaryOp::LooseEqual,
+        BinaryOp::LooseNotEqual => CoercingBinaryOp::LooseNotEqual,
+        BinaryOp::Less => CoercingBinaryOp::Less,
+        BinaryOp::LessEqual => CoercingBinaryOp::LessEqual,
+        BinaryOp::Greater => CoercingBinaryOp::Greater,
+        BinaryOp::GreaterEqual => CoercingBinaryOp::GreaterEqual,
+        BinaryOp::BitAnd => CoercingBinaryOp::BitAnd,
+        BinaryOp::BitOr => CoercingBinaryOp::BitOr,
+        BinaryOp::BitXor => CoercingBinaryOp::BitXor,
+        BinaryOp::ShiftLeft => CoercingBinaryOp::ShiftLeft,
+        BinaryOp::ShiftRight => CoercingBinaryOp::ShiftRight,
+        BinaryOp::ShiftRightUnsigned => CoercingBinaryOp::ShiftRightUnsigned,
         BinaryOp::Exponent | BinaryOp::In | BinaryOp::InstanceOf => {
             unreachable!("operator has a dedicated lowering")
         }

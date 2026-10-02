@@ -1,5 +1,5 @@
 use super::*;
-use crate::ast::{JavaScriptBinaryOp, JavaScriptUnaryOp};
+use crate::ast::{CoercingBinaryOp, CoercingUnaryOp};
 use crate::runtime::vm::VmContinuation;
 use crate::runtime::{BuiltinFunction, BuiltinPrototype};
 
@@ -8,16 +8,16 @@ use crate::runtime::{BuiltinFunction, BuiltinPrototype};
 // to hold across a suspension exactly as it does in a resident VM.
 
 fn strict_equal(left: Expr, right: Expr) -> Expr {
-    Expr::JavaScriptBinary {
+    Expr::CoercingBinary {
         left: Box::new(left),
-        op: JavaScriptBinaryOp::StrictEqual,
+        op: CoercingBinaryOp::StrictEqual,
         right: Box::new(right),
     }
 }
 
 fn type_of(expr: Expr) -> Expr {
-    Expr::JavaScriptUnary {
-        op: JavaScriptUnaryOp::TypeOf,
+    Expr::CoercingUnary {
+        op: CoercingUnaryOp::TypeOf,
         expr: Box::new(expr),
     }
 }

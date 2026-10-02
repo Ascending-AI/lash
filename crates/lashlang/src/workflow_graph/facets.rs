@@ -7,7 +7,7 @@ use crate::linker::{LinkError, WorkflowLinkAnalysis};
 
 /// Version of the optional, derived workflow type-facet contract. Version 4
 /// (FIG-4038) drops `incompatible_binary_operands`: the retired surface
-/// dialect's operand check has no JavaScript equivalent; v3 facet documents
+/// dialect's operand check has no ECMA-262 equivalent; v3 facet documents
 /// are refused. The pre-1.0 freeze changes this shape in place.
 ///
 /// version_guard(

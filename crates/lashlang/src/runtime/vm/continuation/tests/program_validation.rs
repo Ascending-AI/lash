@@ -38,7 +38,7 @@ fn callback_program() -> CompiledProgram {
         captures: Vec::new(),
         body: Box::new(Expr::Block(vec![
             Expr::Print(Box::new(Expr::Variable("value".into()))),
-            Expr::Return(Box::new(Expr::Variable("value".into()))),
+            Expr::FunctionReturn(Box::new(Expr::Variable("value".into()))),
         ])),
     }));
     crate::runtime::entry_points::compile_ast(&Program::block(vec![
@@ -52,25 +52,25 @@ fn callback_program() -> CompiledProgram {
                 items: Box::new(Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)])),
                 function: Box::new(Expr::Variable("callback".into())),
             }),
-            else_block: Box::new(Expr::Undefined),
+            else_block: Box::new(Expr::Absent),
         },
         Expr::If {
             condition: Box::new(Expr::Bool(false)),
             then_block: Box::new(private_builtin(
-                "__typescript_async_map",
+                "__lashlang_async_map",
                 vec![
                     Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)]),
                     Expr::Variable("callback".into()),
                 ],
             )),
-            else_block: Box::new(Expr::Undefined),
+            else_block: Box::new(Expr::Absent),
         },
         private_builtin(
-            "__typescript_stdlib",
+            "__lashlang_stdlib",
             vec![
                 Expr::String("forEach".into()),
                 private_builtin(
-                    "__typescript_heap_new",
+                    "__lashlang_heap_new",
                     vec![
                         Expr::String("Set".into()),
                         Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)]),
@@ -93,7 +93,7 @@ fn dynamic_call_program() -> CompiledProgram {
         captures: Vec::new(),
         body: Box::new(Expr::Block(vec![
             Expr::Print(Box::new(Expr::Variable("value".into()))),
-            Expr::Return(Box::new(Expr::Variable("value".into()))),
+            Expr::FunctionReturn(Box::new(Expr::Variable("value".into()))),
         ])),
     }));
     crate::runtime::entry_points::compile_ast(&Program::block(vec![
@@ -102,7 +102,7 @@ fn dynamic_call_program() -> CompiledProgram {
             expr: Box::new(callback),
         },
         Expr::Finish(Box::new(private_builtin(
-            "__typescript_call_dynamic",
+            "__lashlang_call_dynamic",
             vec![
                 Expr::Variable("callback".into()),
                 Expr::List(vec![Expr::Number(1.0)]),

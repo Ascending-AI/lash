@@ -44,7 +44,7 @@ code:
   0022: load_name 5:token
   0023: index
   0024: push_number 1
-  0025: javascript_binary Add
+  0025: coercing_binary Add
   0026: heap_path_assign 4:counts [dynamic]
   0027: jump 18
   0028: end_iter

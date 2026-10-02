@@ -84,7 +84,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         // Deliberately schedule one callback body to completion before starting
         // the next. Every effect boundary remains resumable and journaled; WP-A
         // consumes the settled results in input order. This deterministic v1
-        // policy differs from JavaScript's interleaving of async callbacks.
+        // policy differs from ECMA-262's interleaving of async callbacks.
         let calls: Vec<Vec<Value>> = items
             .into_iter()
             .enumerate()
@@ -781,7 +781,7 @@ fn join_json_container(
 /// comma-joins arrays into an equally opaque line, which is exactly the shape a
 /// cell reaches for. Objects and arrays therefore render as JSON — the same
 /// body `JSON.stringify` and the host's print projector produce, so the two
-/// inspect paths agree — and every other value keeps JavaScript's coercion,
+/// inspect paths agree — and every other value keeps ECMA-262's coercion,
 /// which is already the useful answer for numbers (`NaN`, `Infinity`,
 /// exponent form), booleans, `null`, `undefined`, dates, regexps and errors.
 ///
@@ -823,7 +823,7 @@ fn push_console_text(out: &mut String, text: &str) -> Result<(), RuntimeError> {
 /// TypeScript observation and a Lashlang one describe the same value the same
 /// way. Two rules differ from `JSON.stringify`, both because an inspect step
 /// must never fail the cell it is describing: a value with no JSON body of its
-/// own (a `Map`, a `Date`, a function) keeps its JavaScript string instead of
+/// own (a `Map`, a `Date`, a function) keeps its ECMA-262 string instead of
 /// refusing, and a cycle closes with `[Circular]` instead of throwing.
 ///
 /// `depth` counts the way the export walk counts: a reference or an inline
@@ -919,9 +919,9 @@ fn write_console_heap_object(
         }
         HeapObject::Record(record) => write_console_record(heap, record, active, depth, out),
         // Everything else — `Map`, `Set`, `Date`, `RegExp`, `Error`, `URL` — has
-        // no JSON body, so its JavaScript string is the most informative text
+        // no JSON body, so its ECMA-262 string is the most informative text
         // available; it at least names the type the cell has to convert.
-        // A function has no JavaScript string at this boundary at all.
+        // A function has no ECMA-262 string at this boundary at all.
         HeapObject::Closure { .. } => {
             let text = "[Function]";
             if top_level {

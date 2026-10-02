@@ -67,17 +67,17 @@ pub const LASHLANG_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "coexist"
 /// format_outside_manifest = "the ModuleArtifact manifest row is claimed by LASHLANG_SEMANTIC_HASH_VERSION; the envelope is checked by the artifact decoder"
-pub const MODULE_ARTIFACT_ENVELOPE_VERSION: u32 = 1;
+pub const MODULE_ARTIFACT_ENVELOPE_VERSION: u32 = 2;
 
-/// Phase A's synthetic N+1 (ADR 0115 §6) moves the envelope encoding to 2.
-/// Its shape is 1's. The module encoder never sees the fleet epoch, so N+1
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the envelope encoding to 3.
+/// Its shape is 2's. The module encoder never sees the fleet epoch, so N+1
 /// writes N's encoding, as `F` pinned at N's epoch would have it write, and
 /// every module it publishes before finalize is one N verifies after a
 /// rollback.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "coexist"
 /// format_outside_manifest = "the ModuleArtifact manifest row is claimed by LASHLANG_SEMANTIC_HASH_VERSION; the envelope is checked by the artifact decoder"
-pub const MODULE_ARTIFACT_ENVELOPE_VERSION: u32 = 2;
+pub const MODULE_ARTIFACT_ENVELOPE_VERSION: u32 = 3;
 
 /// The envelope encoding this build writes: its own, and for the synthetic
 /// N+1 N's, one back.
@@ -1290,7 +1290,7 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr) {
             write_expr(writer, &literal.body);
         }
         Expr::Null => writer.atom("null"),
-        Expr::Undefined => writer.atom("javascript:undefined"),
+        Expr::Absent => writer.atom("ir:absent"),
         Expr::Bool(value) => {
             writer.atom("bool");
             writer.bool(*value);
@@ -1532,7 +1532,7 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr) {
             }
         }
         Expr::Throw(value) => write_unary_expr(writer, "throw", value),
-        Expr::Return(value) => write_unary_expr(writer, "javascript:return", value),
+        Expr::FunctionReturn(value) => write_unary_expr(writer, "ir:function-return", value),
         Expr::Field { target, field } => {
             writer.atom("field-access");
             write_expr(writer, target);
@@ -1543,19 +1543,19 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr) {
             write_expr(writer, target);
             write_expr(writer, index);
         }
-        Expr::JavaScriptUnary { op, expr } => {
-            writer.atom("javascript:unary");
+        Expr::CoercingUnary { op, expr } => {
+            writer.atom("ir:coercing-unary");
             writer.atom(&format!("{op:?}"));
             write_expr(writer, expr);
         }
-        Expr::JavaScriptBinary { left, op, right } => {
-            writer.atom("javascript:binary");
+        Expr::CoercingBinary { left, op, right } => {
+            writer.atom("ir:coercing-binary");
             writer.atom(&format!("{op:?}"));
             write_expr(writer, left);
             write_expr(writer, right);
         }
-        Expr::JavaScriptLogical { left, op, right } => {
-            writer.atom("javascript:logical");
+        Expr::OperandLogical { left, op, right } => {
+            writer.atom("ir:operand-logical");
             writer.atom(&format!("{op:?}"));
             write_expr(writer, left);
             write_expr(writer, right);

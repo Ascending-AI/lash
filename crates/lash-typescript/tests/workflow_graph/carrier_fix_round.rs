@@ -249,7 +249,7 @@ fn a_lifted_process_body_renders_after_host_text_round_trips_and_moves() {
             .find(|node| matches!(node.kind, WorkflowNodeKind::Terminal { .. }))
             .expect("the body returns");
         if let WorkflowNodeKind::Terminal {
-            expression: lashlang::Expr::Return(value),
+            expression: lashlang::Expr::FunctionReturn(value),
             ..
         } = &mut terminal.kind
         {

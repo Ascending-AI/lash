@@ -22,13 +22,13 @@ use std::collections::BTreeSet;
 
 use lashlang::{AssignTarget, Expr as LashExpr};
 
-use super::{Binding, GENERATED_BINDING_PREFIX, Lowerer};
+use super::{Binding, LOWERED_BINDING_PREFIX, Lowerer};
 
-const CELL_NEW: &str = "__typescript_cell_new";
-const CELL_GET: &str = "__typescript_cell_get";
-const CELL_SET: &str = "__typescript_cell_set";
-const GLOBAL_GET: &str = "__typescript_global_get";
-const GLOBAL_SET: &str = "__typescript_global_set";
+const CELL_NEW: &str = "__lashlang_cell_new";
+const CELL_GET: &str = "__lashlang_cell_get";
+const CELL_SET: &str = "__lashlang_cell_set";
+const GLOBAL_GET: &str = "__lashlang_global_get";
+const GLOBAL_SET: &str = "__lashlang_global_set";
 
 fn builtin(name: &str, args: Vec<LashExpr>) -> LashExpr {
     LashExpr::BuiltinCall {
@@ -68,7 +68,7 @@ impl Lowerer {
     pub(super) fn cell_temporary(&mut self) -> String {
         let id = self.cell_temporaries;
         self.cell_temporaries += 1;
-        let name = format!("{GENERATED_BINDING_PREFIX}cell_{id}");
+        let name = format!("{LOWERED_BINDING_PREFIX}cell_{id}");
         self.private_bindings.insert(name.clone());
         name
     }
@@ -191,7 +191,7 @@ fn rewrite(expr: &mut LashExpr, frame: &Frame<'_>, lowerer: &mut Lowerer) {
             if declaration {
                 return;
             }
-            let value = std::mem::replace(value.as_mut(), LashExpr::Undefined);
+            let value = std::mem::replace(value.as_mut(), LashExpr::Absent);
             if target.steps.is_empty() {
                 *expr = builtin(set, vec![handle, value]);
             } else {

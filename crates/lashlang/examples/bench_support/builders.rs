@@ -13,10 +13,10 @@
 #![allow(dead_code)]
 
 use lashlang::{
-    AssignPathStep, AssignTarget, AstString, CatchClause, Declaration, Expr, FunctionDecl,
-    FunctionExpr, FunctionParam, JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp,
-    LabelMetadata, ProcessDecl, ProcessParam, ProcessSignalDecl, Program, ResourceRefExpr, TryExpr,
-    TypeExpr, TypeField,
+    AssignPathStep, AssignTarget, AstString, CatchClause, CoercingBinaryOp, CoercingUnaryOp,
+    Declaration, Expr, FunctionDecl, FunctionExpr, FunctionParam, LabelMetadata, OperandLogicalOp,
+    ProcessDecl, ProcessParam, ProcessSignalDecl, Program, ResourceRefExpr, TryExpr, TypeExpr,
+    TypeField,
 };
 
 // ---------------------------------------------------------------------------
@@ -328,16 +328,16 @@ pub fn index(target: Expr, index: Expr) -> Expr {
     }
 }
 
-pub fn binary(left: Expr, op: JavaScriptBinaryOp, right: Expr) -> Expr {
-    Expr::JavaScriptBinary {
+pub fn binary(left: Expr, op: CoercingBinaryOp, right: Expr) -> Expr {
+    Expr::CoercingBinary {
         left: Box::new(left),
         op,
         right: Box::new(right),
     }
 }
 
-pub fn unary(op: JavaScriptUnaryOp, expr: Expr) -> Expr {
-    Expr::JavaScriptUnary {
+pub fn unary(op: CoercingUnaryOp, expr: Expr) -> Expr {
+    Expr::CoercingUnary {
         op,
         expr: Box::new(expr),
     }
@@ -379,13 +379,13 @@ pub fn map(items: Expr, function: Expr) -> Expr {
 /// `[...list, ...other]` — list concat under the TypeScript stdlib.
 pub fn concat(list: Expr, other: Expr) -> Expr {
     Expr::BuiltinCall {
-        name: "__typescript_stdlib".into(),
+        name: "__lashlang_stdlib".into(),
         args: vec![Expr::String("concat".into()), list, other],
     }
 }
 
-pub fn logical(left: Expr, op: JavaScriptLogicalOp, right: Expr) -> Expr {
-    Expr::JavaScriptLogical {
+pub fn logical(left: Expr, op: OperandLogicalOp, right: Expr) -> Expr {
+    Expr::OperandLogical {
         left: Box::new(left),
         op,
         right: Box::new(right),
