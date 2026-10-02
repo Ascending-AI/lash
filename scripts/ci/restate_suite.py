@@ -722,6 +722,10 @@ def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
     artifacts = Path(args.artifacts).resolve() / f"{suite.name}-{leg}"
     shutil.rmtree(artifacts, ignore_errors=True)
     artifacts.mkdir(parents=True)
+    # Suite `env` values format against the process environment; publish the
+    # run's artifact directory so a template can name a per-run file under it
+    # (the directory outlives every test process of the run).
+    os.environ["LASH_RESTATE_SUITE_ARTIFACTS"] = str(artifacts)
 
     skips = list(suite.skips)
     every = list_tests(binary, cwd, suite.filters, skips)

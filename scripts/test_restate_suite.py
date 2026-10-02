@@ -161,6 +161,13 @@ class RegistryTests(unittest.TestCase):
             for target in package["targets"]
             if isinstance(target.get("label"), str)
         }
+        # A suite may build a feature lane's test binary (a `__fv_` label):
+        # those live in the inventory's feature-lane units, not the packages.
+        labels.update(
+            unit["label"]
+            for unit in inventory["feature_lane_units"]
+            if isinstance(unit.get("label"), str)
+        )
         for name in MODULE.load_registry():
             with self.subTest(suite=name):
                 suite = MODULE.load_suite(name)

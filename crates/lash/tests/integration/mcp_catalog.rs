@@ -168,7 +168,13 @@ enum Store {
 async fn native_listener() -> tokio::net::TcpListener {
     let registry =
         std::env::var_os("MCP_CATALOG_ENDPOINTS_FILE").expect("managed gate endpoint registry");
-    let used = std::fs::read_to_string(&registry).expect("recorded endpoint addresses");
+    // A managed run names the registry by path alone; until the first append
+    // creates it, the file does not exist and no address is recorded.
+    let used = match std::fs::read_to_string(&registry) {
+        Ok(used) => used,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => panic!("recorded endpoint addresses: {error}"),
+    };
     loop {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -178,6 +184,7 @@ async fn native_listener() -> tokio::net::TcpListener {
             continue;
         }
         std::fs::OpenOptions::new()
+            .create(true)
             .append(true)
             .open(&registry)
             .expect("endpoint registry")
@@ -185,6 +192,39 @@ async fn native_listener() -> tokio::net::TcpListener {
             .expect("record unique endpoint address");
         return listener;
     }
+}
+
+/// Wait out the namespace's open invocations while its endpoint still
+/// serves them: a turn's close and the root's retirement are invocations of
+/// their own, and one still queued when the endpoint dies keeps retrying a
+/// dead address, which the suite runner counts as a leftover.
+async fn settle_native(admin: &lash_restate::RestateAdminClient, namespace: &str) {
+    let prefix = format!("{namespace}.");
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            if admin
+                .unfinished_invocations_for_service_prefixes(&[&prefix])
+                .await
+                .expect("open invocation census")
+                .is_empty()
+            {
+                // A submission can land between polls; only two empty
+                // reads in a row call the namespace drained.
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                if admin
+                    .unfinished_invocations_for_service_prefixes(&[&prefix])
+                    .await
+                    .expect("open invocation census")
+                    .is_empty()
+                {
+                    return;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the namespace's invocations finish before its endpoint does");
 }
 
 async fn make_stores(
@@ -242,9 +282,16 @@ async fn turn_witness(store: Store, native: bool, failure_law: bool) {
     };
     let double;
     let engine;
+    let native_drain;
     let backend = if native {
         double = None;
         let namespace = format!("mcp-catalog-{}", uuid::Uuid::new_v4().simple());
+        native_drain = Some((
+            lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::new(
+                std::env::var("RESTATE_ADMIN_URL").expect("native admin URL"),
+            )),
+            namespace.clone(),
+        ));
         let config = lash_restate::RestateConfig::new(
             lash_restate::RestateConnection::new(
                 std::env::var("RESTATE_INGRESS_URL").expect("native ingress URL"),
@@ -267,6 +314,7 @@ async fn turn_witness(store: Store, native: bool, failure_law: bool) {
         lash_core::Backend::new(engine.as_ref().expect("native engine").clone())
     } else {
         engine = None;
+        native_drain = None;
         double = Some(
             lash_restate_test::backend_with_store_set(
                 4296,
@@ -445,12 +493,6 @@ async fn turn_witness(store: Store, native: bool, failure_law: bool) {
             );
         }
         factory.shutdown().await.expect("MCP shutdown");
-        if let Some(stop) = stop {
-            let _ = stop.send(());
-        }
-        if let Some(endpoint) = endpoint {
-            endpoint.await.expect("endpoint joins");
-        }
         for (record, class, code, kind) in output
             .result
             .tool_calls
@@ -493,6 +535,28 @@ async fn turn_witness(store: Store, native: bool, failure_law: bool) {
             .expect("replayed output");
             assert_eq!(replayed.outcome, record.output.outcome);
         }
+        // The turn's close and the root's retirement are invocations of
+        // their own, and the deployment serves them through the session
+        // driver the core installs: drop the handle that owes them, wait the
+        // namespace out while that driver still answers, and only then
+        // release the core and the endpoint. Stopping sooner leaves them
+        // retrying a dead address or a driverless deployment, which the
+        // suite runner counts as leftovers.
+        drop(session);
+        if let Some((admin, namespace)) = &native_drain {
+            settle_native(admin, namespace).await;
+        }
+        drop(core);
+        drop(engine);
+        if let Some((admin, namespace)) = &native_drain {
+            settle_native(admin, namespace).await;
+        }
+        if let Some(stop) = stop {
+            let _ = stop.send(());
+        }
+        if let Some(endpoint) = endpoint {
+            endpoint.await.expect("endpoint joins");
+        }
         return;
     }
     assert_eq!(output.result.assistant_message(), Some("storm done"));
@@ -524,15 +588,26 @@ async fn turn_witness(store: Store, native: bool, failure_law: bool) {
         matches!(&entry.payload, lash::persistence::ChronologicalPayload::Message(message) if lash::message_text(message).contains("storm done"))
     }), "the completed turn survives a store reload");
     factory.shutdown().await.expect("MCP shutdown");
+    // As in the failure branch: close and retirement are invocations of
+    // their own, served by the driver the core installs — wait them out
+    // before the core and then the endpoint go away.
+    drop(session);
+    drop(reopened);
+    if let Some((admin, namespace)) = &native_drain {
+        settle_native(admin, namespace).await;
+    }
+    drop(core);
+    drop(engine);
+    if let Some((admin, namespace)) = &native_drain {
+        settle_native(admin, namespace).await;
+    }
     if let Some(stop) = stop {
         let _ = stop.send(());
     }
     if let Some(endpoint) = endpoint {
         endpoint.await.expect("native endpoint joins");
     }
-    drop(core);
     drop(double);
-    drop(engine);
     drop(database);
 }
 
