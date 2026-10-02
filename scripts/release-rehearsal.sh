@@ -26,11 +26,21 @@ if [ -n "$(git status --porcelain)" ]; then
   exit 2
 fi
 echo "release rehearsal: resetting $(git rev-parse HEAD)" >&2
-python3 scripts/release_reset.py --apply
+# A red cut-only law leaves a written and checked reset tree; build and
+# check it anyway, so one run reports every red.
+laws=0
+python3 scripts/release_reset.py --apply || laws=$?
+if [ "$laws" -ne 0 ] && [ "$laws" -ne 3 ]; then
+  exit "$laws"
+fi
 if [ "$#" -eq 0 ]; then
   set -- //...
 fi
 kiln build "$@"
 python3 scripts/release_baseline.py check
 python3 scripts/release_baseline.py probe
+if [ "$laws" -ne 0 ]; then
+  echo "release rehearsal: the reset tree of $(git rev-parse HEAD) builds and is at the release baseline, but a cut-only law is red" >&2
+  exit 1
+fi
 echo "release rehearsal: the reset tree of $(git rev-parse HEAD) builds, passes its cut-only laws and is at the release baseline" >&2

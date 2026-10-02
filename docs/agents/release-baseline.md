@@ -87,6 +87,9 @@ cut-only where it is written: a Rust test carries
 from the cut on the law runs with its suite, and runs every Rust law on its
 owning target and its synthetic-next variant by exact name, failing a run that
 executes no case. `release_reset.py --dry-run` lists them under `cut_laws`.
+It runs every law before it reports the red ones and exits 3, leaving the
+reset tree written and checked; the rehearsal then still builds, checks and
+probes it, so one run reports every red.
 The tooling laws run against both the pre-cut and reset trees.
 
 Each store component has one schema version: the PostgreSQL schema and the

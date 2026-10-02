@@ -115,21 +115,31 @@ def unmarked(text: str, suffix: str) -> str:
     return (RUST_LINE if suffix == ".rs" else PYTHON_LINE).sub("", text)
 
 
+class CutLawFailure(baseline.BaselineError):
+    """A cut-only law failed or executed no case on the reset tree."""
+
+
 def run(repo: Path, laws: list[dict]):
-    """Run each unmarked law on each of its targets; fail unless every run
-    executes and passes at least one case."""
+    """Run each unmarked law on each of its targets, every one, then fail
+    unless every run executed and passed at least one case."""
+    failed = []
     for law in laws:
         for target in law["targets"]:
             if law["kind"] == "python":
                 result = subprocess.run([sys.executable, target, law["law"], "-v"], cwd=repo,
                                         capture_output=True, text=True)
                 ran = re.search(r"^Ran (\d+) tests?", result.stderr, re.MULTILINE)
-                if (result.returncode or ran is None or int(ran[1]) == 0
-                        or re.search(r"skipped", result.stderr.splitlines()[-1])):
-                    raise baseline.BaselineError(f"cut law {law['law']} on {target}:\n{result.stderr}")
-                print(f"cut law {law['law']} ({law['ticket']}) on {target}: {ran[1]} passed", file=sys.stderr)
-                continue
-            # A single run refuses a cached verdict and a run of zero cases.
-            subprocess.run(["kiln", "test", target, "--test_arg=--exact", f"--test_arg={law['law']}",
-                            "--runs_per_test=1"], cwd=repo, check=True)
-            print(f"cut law {law['law']} ({law['ticket']}) on {target}: passed", file=sys.stderr)
+                passed = not (result.returncode or ran is None or int(ran[1]) == 0
+                              or "skipped" in result.stderr.strip().splitlines()[-1])
+                if not passed:
+                    print(result.stderr, file=sys.stderr)
+            else:
+                # A single run refuses a cached verdict and a run of zero cases.
+                passed = subprocess.run(["kiln", "test", target, "--test_arg=--exact", f"--test_arg={law['law']}",
+                                         "--runs_per_test=1"], cwd=repo).returncode == 0
+            verdict = "passed" if passed else "FAILED"
+            print(f"cut law {law['law']} ({law['ticket']}) on {target}: {verdict}", file=sys.stderr)
+            if not passed:
+                failed.append(f"{law['law']} on {target}")
+    if failed:
+        raise CutLawFailure("cut-only laws failed on the reset tree:\n" + "\n".join(failed))

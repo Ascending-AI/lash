@@ -148,6 +148,11 @@ def plan(repo: Path):
     return public, edits
 
 
+# `--apply` wrote, regenerated and checked the reset tree, and a cut-only law
+# is red on it.
+CUT_LAWS_FAILED = 3
+
+
 def run(repo: Path, argv: list[str], environment=None):
     subprocess.run(argv, cwd=repo, env={**os.environ, **(environment or {})}, check=True)
 
@@ -241,6 +246,10 @@ def main():
         if not args.source_only:
             cut_laws.run(repo, public["cut_laws"])
         return 0
+    except cut_laws.CutLawFailure as error:
+        # The reset tree is written and checked; only its laws are red.
+        print(f"release reset error: {error}", file=sys.stderr)
+        return CUT_LAWS_FAILED
     except (baseline.BaselineError, OSError, KeyError, subprocess.CalledProcessError) as error:
         print(f"release reset error: {error}", file=sys.stderr)
         return 1

@@ -184,35 +184,6 @@ async fn compat_stamp(url: &str) -> (i32, i32) {
     stamp
 }
 
-/// Provisions a scratch schema from the committed artifact and records it as
-/// provisioned at component `version`: the stamp holds it and the ledger
-/// names its bootstrap.
-async fn record_component(database_url: &str, schema: &str, version: i32) {
-    let mut admin = PgConnection::connect(database_url)
-        .await
-        .expect("connect scratch provisioner");
-    sqlx::query(&format!("SET search_path TO {schema}"))
-        .execute(&mut admin)
-        .await
-        .expect("point the provisioner at the scratch schema");
-    sqlx::raw_sql(PostgresStorage::schema_ddl())
-        .execute(&mut admin)
-        .await
-        .expect("provision the scratch schema from schema.sql");
-    sqlx::query(
-        "INSERT INTO lash_migrations (phase, migration, release, state,
-                                      from_version, to_version, started_at_ms)
-         VALUES ('expand', $1, 'predecessor', 'applied', NULL, $2, 0)",
-    )
-    .bind(format!("bootstrap-{version}"))
-    .bind(version)
-    .execute(&mut admin)
-    .await
-    .expect("record the older component's bootstrap in the ledger");
-    admin.close().await.expect("close scratch provisioner");
-    stamp_component(database_url, schema, version).await;
-}
-
 /// Sets the component stamp of `schema` to `version`, floor included.
 async fn stamp_component(database_url: &str, schema: &str, version: i32) {
     let mut admin = PgConnection::connect(database_url)
@@ -455,100 +426,6 @@ async fn a_dry_run_reports_the_plan_and_changes_nothing() {
     drop(database);
 }
 
-/// The production baseline carries no predecessor expand step. The nearest unsupported predecessor is derived from this
-/// build's baseline and catalog. Missing required relations make worker open
-/// refuse its shape; planning and migrating refuse typed without changing the
-/// catalog, stamp or ledger.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_component_without_an_expand_step_is_refused() {
-    let Some(database) = migrator_database().await else {
-        return;
-    };
-    let database_url = database.url().to_string();
-    let schema = create_scratch_schema(&database_url).await;
-    let url = scratch_url(&database_url, &schema);
-    let baseline = PostgresStorage::schema_version();
-    let mut found = baseline.checked_sub(1).expect("baseline has a predecessor");
-    record_component(&database_url, &schema, found).await;
-    // Find the nearest unsupported predecessor in the active catalog. The cut
-    // empties that catalog, so its immediate predecessor is then unsupported.
-    while PostgresStorage::plan_migrations(&url, MigrationPhase::Expand)
-        .await
-        .is_ok()
-    {
-        found = found
-            .checked_sub(1)
-            .expect("a missing predecessor path exists");
-        stamp_component(&database_url, &schema, found).await;
-    }
-    assert!(
-        found < baseline,
-        "the fixture is an unsupported predecessor"
-    );
-    let mut admin = PgConnection::connect(&database_url)
-        .await
-        .expect("connect scratch provisioner");
-    sqlx::query(&format!(
-        "DROP TABLE {schema}.lash_session_root_inputs, {schema}.lash_session_roots,
-                    {schema}.lash_control_intents CASCADE"
-    ))
-    .execute(&mut admin)
-    .await
-    .expect("remove required relations from the populated predecessor");
-    admin.close().await.expect("close scratch provisioner");
-    let ledger_before = ledger_rows(&url).await;
-    let stamp_before = compat_stamp(&url).await;
-    let catalog_before = catalog_definitions(&url).await;
-
-    assert!(
-        PostgresStorage::connect(&url).await.is_err(),
-        "an unsupported populated predecessor must not open directly"
-    );
-    for (what, refused) in [
-        (
-            "plan",
-            PostgresStorage::plan_migrations(&url, MigrationPhase::Expand)
-                .await
-                .map(|_| ()),
-        ),
-        (
-            "migrate",
-            PostgresStorage::migrate(&url, MigrationPhase::Expand)
-                .await
-                .map(|_| ()),
-        ),
-    ] {
-        let error = refused.expect_err("a catalog with no expand step must refuse");
-        assert!(
-            matches!(
-                &error,
-                MigrateError::Store(lash_core_execution::StoreError::Incompatible {
-                    refusal: lash_core_execution::compat::CompatRefusal::ShapeRefused { component, .. }
-                }) if component == lash_core_execution::compat::ComponentId::POSTGRES.as_str()
-            ),
-            "the {what} refusal stays typed: {error:?}"
-        );
-        let rendered = error.to_string();
-        assert!(
-            rendered.contains(&format!("has version {found}")),
-            "the {what} refusal names the found version: {rendered}"
-        );
-        assert!(
-            rendered.contains("has no applicable migration"),
-            "the {what} refusal names the missing migration path: {rendered}"
-        );
-    }
-    assert_eq!(compat_stamp(&url).await, stamp_before);
-    assert_eq!(catalog_definitions(&url).await, catalog_before);
-    assert_eq!(
-        ledger_rows(&url).await,
-        ledger_before,
-        "a refused migrate records no step"
-    );
-    drop_scratch_schema(&database_url, &schema).await;
-    drop(database);
-}
-
 #[cfg(not(feature = "synthetic-next"))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fresh_release_ledger_has_only_baseline_bootstrap_evidence() {
@@ -605,10 +482,12 @@ async fn a_fresh_1_0_store_records_only_its_version_1_bootstrap_and_opens() {
     drop_scratch_schema(&database_url, &schema).await;
 }
 
-/// FIG-4493: the cut restarts every counter at 1, so a store a pre-1.0 build
-/// populated carries a stamp above every version this build reads and a
-/// release stamp older than this build's. Open, plan and migrate refuse it
-/// as pre-release state, typed, and change no schema, stamp or ledger row.
+/// FIG-4493: the production catalog carries no predecessor step, and the
+/// cut restarts every counter at 1, so no stamp lies below the release
+/// baseline: the unsupported populated predecessor is a store a pre-1.0
+/// build populated. It carries a stamp above every version this build reads
+/// and a release stamp older than this build's. Open, plan and migrate refuse
+/// it as pre-release state, typed, and change no schema, stamp or ledger row.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_store_a_pre_release_build_populated_is_refused_unchanged() {
     let Some(database) = migrator_database().await else {

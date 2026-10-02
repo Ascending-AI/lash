@@ -346,6 +346,14 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
                                    "--runs_per_test=1"], calls)
                 else:
                     self.assertIn([sys.executable, target, row["law"], "-v"], calls)
+        # A red law fails the run only after every other law has run.
+        with patch.object(cut_laws.subprocess, "run") as run:
+            run.side_effect = lambda argv, **_: subprocess.CompletedProcess(
+                argv, 32 if argv[2] == laws[0]["targets"][0] else 0, "", "Ran 1 test in 0.1s\n\nOK\n")
+            with self.assertRaises(cut_laws.CutLawFailure) as raised:
+                cut_laws.run(ROOT, laws)
+        self.assertEqual(run.call_count, len(calls))
+        self.assertIn(f"{laws[0]['law']} on {laws[0]['targets'][0]}", str(raised.exception))
         # A Python law the run skipped or never selected did not pass.
         for stderr in ("Ran 1 test in 0.1s\n\nOK (skipped=1)\n", "Ran 0 tests in 0.0s\n\nOK\n"):
             with patch.object(cut_laws.subprocess, "run") as run, self.assertRaises(baseline.BaselineError):
