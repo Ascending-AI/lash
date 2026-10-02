@@ -110,6 +110,7 @@ fn a_category_stop_carries_the_child_turn_blocking_issue() {
         raw: None,
         retryable: Some(false),
         provider_failure_kind: None,
+        plugin_failures: Vec::new(),
     }];
 
     let failure = failure_from_process_turn(&turn);

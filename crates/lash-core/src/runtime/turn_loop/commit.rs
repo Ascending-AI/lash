@@ -917,27 +917,14 @@ impl LashRuntime {
                 )
             });
         }
-        // The commit's observers write under its shift's fence, a final
-        // commit's included (FIG-4202): they run at the run's boundary, so a
-        // write they make is the owner's own, never one outside the shift
-        // that waits on the shift's settlement and deadlocks it. A later
-        // admission that sealed since refuses such a write typed, with
-        // nothing written.
         match self
-            .emit_turn_persisted_event(
-                &delivery.turn,
-                scoped_effect_controller,
-                &trace_turn_id,
-                shift_fence,
-            )
+            .emit_turn_persisted_event(&delivery.turn, shift_fence)
             .await
         {
             Ok(Some(error)) => {
                 let mut issue = crate::plugin::plugin_lifecycle_hook_issue(error);
                 issue.retryable = Some(false);
                 delivery.turn.errors.push(issue);
-                delivery.post_commit_delivery_failed = true;
-                self.invalidate_resident_session_state();
             }
             Ok(None) => {}
             Err(err) => {

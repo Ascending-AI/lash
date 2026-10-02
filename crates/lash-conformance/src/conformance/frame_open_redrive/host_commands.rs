@@ -93,6 +93,26 @@ const HOST_FRAME_SEED: &str = "the seed of the host's frame";
 /// The reason a host's frame open names.
 const HOST_FRAME_REASON: &str = "host_open";
 
+#[derive(Debug, serde::Serialize, serde::Deserialize, lash_core::facade_support::JsonSchema)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+enum HostNoteFailure {
+    MissingSession,
+    MissingText,
+    Runtime {
+        failure: Box<crate::plugin::PluginOperationFailure>,
+    },
+}
+
+impl std::fmt::Display for HostNoteFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingSession => formatter.write_str("the note names no session"),
+            Self::MissingText => formatter.write_str("the note has no text"),
+            Self::Runtime { failure } => std::fmt::Display::fmt(failure, formatter),
+        }
+    }
+}
+
 /// A plugin command that appends the note its arguments name.
 struct HostNoteCommand;
 
@@ -102,6 +122,15 @@ impl crate::plugin::PluginOperation for HostNoteCommand {
     const SESSION_PARAM: crate::plugin::SessionParam = crate::plugin::SessionParam::Required;
     type Args = serde_json::Value;
     type Output = serde_json::Value;
+    type Error = HostNoteFailure;
+    const ERROR_TYPE: &'static str = Self::NAME;
+    const ERROR_VERSION: lash_core::FormatVersion = lash_core::FormatVersion::ONE;
+    fn error_class(error: &Self::Error) -> lash_sansio::PluginFailureClass {
+        match error {
+            HostNoteFailure::Runtime { failure } => failure.class,
+            _ => lash_sansio::PluginFailureClass::Terminal,
+        }
+    }
 }
 
 impl crate::plugin::PluginCommand for HostNoteCommand {}
@@ -114,6 +143,12 @@ impl crate::plugin::PluginOperation for HostQueueCommand {
     const SESSION_PARAM: crate::plugin::SessionParam = crate::plugin::SessionParam::Required;
     type Args = Vec<Option<String>>;
     type Output = serde_json::Value;
+    type Error = String;
+    const ERROR_TYPE: &'static str = Self::NAME;
+    const ERROR_VERSION: lash_core::FormatVersion = lash_core::FormatVersion::ONE;
+    fn error_class(_: &Self::Error) -> lash_sansio::PluginFailureClass {
+        lash_sansio::PluginFailureClass::Terminal
+    }
 }
 
 impl crate::plugin::PluginCommand for HostQueueCommand {}
@@ -242,6 +277,15 @@ impl crate::plugin::PluginOperation for HostNoteTask {
     const SESSION_PARAM: crate::plugin::SessionParam = crate::plugin::SessionParam::Required;
     type Args = serde_json::Value;
     type Output = serde_json::Value;
+    type Error = HostNoteFailure;
+    const ERROR_TYPE: &'static str = Self::NAME;
+    const ERROR_VERSION: lash_core::FormatVersion = lash_core::FormatVersion::ONE;
+    fn error_class(error: &Self::Error) -> lash_sansio::PluginFailureClass {
+        match error {
+            HostNoteFailure::Runtime { failure } => failure.class,
+            _ => lash_sansio::PluginFailureClass::Terminal,
+        }
+    }
 }
 
 impl crate::plugin::PluginTask for HostNoteTask {}
@@ -257,6 +301,15 @@ impl crate::plugin::PluginOperation for HostCancellableTask {
     const SESSION_PARAM: crate::plugin::SessionParam = crate::plugin::SessionParam::Required;
     type Args = serde_json::Value;
     type Output = serde_json::Value;
+    type Error = HostNoteFailure;
+    const ERROR_TYPE: &'static str = Self::NAME;
+    const ERROR_VERSION: lash_core::FormatVersion = lash_core::FormatVersion::ONE;
+    fn error_class(error: &Self::Error) -> lash_sansio::PluginFailureClass {
+        match error {
+            HostNoteFailure::Runtime { failure } => failure.class,
+            _ => lash_sansio::PluginFailureClass::Terminal,
+        }
+    }
 }
 
 impl crate::plugin::PluginTask for HostCancellableTask {}
@@ -273,6 +326,15 @@ impl crate::plugin::PluginOperation for HostReturnsOnceTask {
     const SESSION_PARAM: crate::plugin::SessionParam = crate::plugin::SessionParam::Required;
     type Args = serde_json::Value;
     type Output = serde_json::Value;
+    type Error = HostNoteFailure;
+    const ERROR_TYPE: &'static str = Self::NAME;
+    const ERROR_VERSION: lash_core::FormatVersion = lash_core::FormatVersion::ONE;
+    fn error_class(error: &Self::Error) -> lash_sansio::PluginFailureClass {
+        match error {
+            HostNoteFailure::Runtime { failure } => failure.class,
+            _ => lash_sansio::PluginFailureClass::Terminal,
+        }
+    }
 }
 
 impl crate::plugin::PluginTask for HostReturnsOnceTask {}
@@ -316,13 +378,12 @@ async fn append_note(
     graph: &Arc<dyn crate::plugin::SessionGraphService>,
     session_id: Option<crate::SessionId>,
     args: &serde_json::Value,
-) -> Result<serde_json::Value, crate::plugin::PluginOperationFailure> {
-    let session_id = session_id
-        .ok_or_else(|| crate::plugin::PluginOperationFailure::new("the note names no session"))?;
+) -> Result<serde_json::Value, HostNoteFailure> {
+    let session_id = session_id.ok_or(HostNoteFailure::MissingSession)?;
     let text = args
         .get("text")
         .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| crate::plugin::PluginOperationFailure::new("the note has no text"))?;
+        .ok_or(HostNoteFailure::MissingText)?;
     let outcome = graph
         .append_session_nodes(
             &session_id,
@@ -335,7 +396,9 @@ async fn append_note(
             },
         )
         .await
-        .map_err(|error| crate::plugin::PluginOperationFailure::new(error.to_string()))?;
+        .map_err(|error| HostNoteFailure::Runtime {
+            failure: Box::new(error.into()),
+        })?;
     Ok(serde_json::json!({
         "text": text,
         "appended": matches!(outcome, crate::AppendSessionNodesOutcome::Appended { .. })
@@ -390,14 +453,11 @@ fn host_plugin(probe: &HostPluginProbe) -> Arc<dyn PluginFactory> {
                     append_note(&ctx.session_graph, ctx.session_id, &args).await
                 }
             })
-            .with_runtime_event(Arc::new(move |event| {
+            .with_after_turn(Arc::new(move |ctx| {
                 let probe = event_probe.clone();
                 Box::pin(async move {
-                    let crate::plugin::PluginLifecycleEvent::TurnPersisted(ctx) = event else {
-                        return Ok(());
-                    };
                     if !probe.terminal_note.load(Ordering::SeqCst) {
-                        return Ok(());
+                        return Ok(Vec::new());
                     }
                     let ordinal = probe
                         .terminal_appends
@@ -427,7 +487,7 @@ fn host_plugin(probe: &HostPluginProbe) -> Arc<dyn PluginFactory> {
                         .lock()
                         .unwrap_or_else(PoisonError::into_inner)
                         .push(appended);
-                    Ok(())
+                    Ok(Vec::new())
                 })
             })),
     ))
@@ -992,9 +1052,9 @@ pub async fn host_frame_open_applies_at_the_boundary(
     assert_eq!(model.turn_calls.load(Ordering::SeqCst), 3);
 }
 
-/// A terminal callback's append never waits on a command settlement: it
-/// writes under the ended run's own fence (FIG-4202), so each run's shift
-/// ends, and each callback's note lands after its turn and before the next.
+/// A terminal execution callback's append rides the turn's draft (FIG-4202),
+/// so it never waits on a command settlement and each note lands after its
+/// turn's messages and before the next turn.
 pub async fn terminal_callback_append_does_not_deadlock(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,

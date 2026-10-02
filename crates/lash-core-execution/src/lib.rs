@@ -243,6 +243,9 @@ pub mod facade_support {
     pub use crate::plugin::TurnResultHookContext;
     pub use crate::plugin::TurnTransformContext;
     pub use crate::plugin::{KeyRejection, PluginStateEdit, PluginStateError, PluginStateStore};
+    pub use crate::plugin::{
+        PluginFailureClass, PluginFailureOrigin, PluginHookFailure, PluginOperationFailure,
+    };
     pub use crate::plugin_stack::PluginStack;
     pub use crate::provider::CacheRetention;
     pub use crate::provider::GenerationRetryGuarantee;

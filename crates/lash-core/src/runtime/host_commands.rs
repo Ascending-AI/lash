@@ -253,12 +253,15 @@ impl LashRuntime {
                 // settlement is written over the durable head.
                 self.invalidate_resident_session_state();
                 self.reload_invalidated_resident_session_state().await?;
+                if !error.is_terminal() {
+                    return Err(error.into_runtime_error());
+                }
                 match error {
                     PluginOperationInvokeError::AdmissionRefused(error) => {
                         crate::runtime::PluginOperationCommandOutcome::Refused { error }
                     }
                     error => crate::runtime::PluginOperationCommandOutcome::Failed {
-                        message: error.to_string(),
+                        failure: Box::new(error.into_failure()),
                     },
                 }
             }
@@ -340,14 +343,16 @@ impl LashRuntime {
                         )) {
                         Ok(Some(controller)) => controller,
                         Ok(None) => {
-                            return Ok(Err(PluginOperationInvokeError::Failed(
+                            return Ok(Err(PluginOperationInvokeError::protocol(
                                 "plugin task execution requires an effect host that can create a \
                              static scope for the command"
                                     .to_string(),
                             )));
                         }
                         Err(error) => {
-                            return Ok(Err(PluginOperationInvokeError::Failed(error.to_string())));
+                            return Ok(Err(PluginOperationInvokeError::Failed(Box::new(
+                                error.into(),
+                            ))));
                         }
                     };
                 let stop = tokio_util::sync::CancellationToken::new();
@@ -411,7 +416,7 @@ impl LashRuntime {
     ) -> Result<crate::runtime::PluginOperationCommandOutcome, PluginOperationInvokeError> {
         draft
             .fold_into_final_state(&mut self.state)
-            .map_err(|error| PluginOperationInvokeError::Failed(error.to_string()))?;
+            .map_err(|error| PluginOperationInvokeError::Failed(Box::new(error.into())))?;
         if !events.is_empty() {
             let nodes = events
                 .iter()
@@ -419,7 +424,7 @@ impl LashRuntime {
                     crate::plugin_runtime_protocol_event(&plugin_id, event.clone())
                         .map(crate::SessionAppendNode::protocol_event)
                         .map_err(|err| {
-                            PluginOperationInvokeError::Failed(format!(
+                            PluginOperationInvokeError::protocol(format!(
                                 "failed to encode plugin runtime event: {err}"
                             ))
                         })
@@ -430,7 +435,7 @@ impl LashRuntime {
                 "append-plugin-runtime-events",
             );
             let draft_namespace = events_operation.storage_key().map_err(|err| {
-                PluginOperationInvokeError::Failed(format!(
+                PluginOperationInvokeError::protocol(format!(
                     "failed to encode plugin runtime event identity: {err}"
                 ))
             })?;
@@ -442,7 +447,7 @@ impl LashRuntime {
             );
         }
         self.stamp_live_plugin_state()
-            .map_err(|error| PluginOperationInvokeError::Failed(error.to_string()))?;
+            .map_err(|error| PluginOperationInvokeError::Failed(Box::new(error.into())))?;
         // A queued turn lands before the settlement names it. A turn with no
         // source key takes one from the command, so a redrive of the
         // unsettled command enqueues the same turn once.
@@ -464,9 +469,7 @@ impl LashRuntime {
                 .as_ref()
                 .and_then(|session| session.history_store())
                 .ok_or_else(|| {
-                    PluginOperationInvokeError::Failed(
-                        "plugin input requires a session store".into(),
-                    )
+                    PluginOperationInvokeError::protocol("plugin input requires a session store")
                 })?;
             super::durable_queue::enqueue_turn_inputs_to_store(
                 self.state.session_id.clone(),

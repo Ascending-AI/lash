@@ -198,11 +198,7 @@ impl LashRuntime {
         if matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. }) {
             self.install_resident_state(next)
                 .map_err(RuntimeError::from)?;
-            self.notify_session_config_changed(previous)
-                .await
-                .map_err(|error| {
-                    RuntimeError::new(RuntimeErrorCode::SessionCommandRun, error.to_string())
-                })?;
+            self.notify_session_config_changed(previous).await;
         }
         Ok(outcome)
     }
@@ -290,11 +286,7 @@ impl LashRuntime {
             )
             .await?;
         if applied && matches!(committed, super::host_commands::CommandCommit::Landed) {
-            self.notify_session_config_changed(previous)
-                .await
-                .map_err(|error| {
-                    RuntimeError::new(RuntimeErrorCode::SessionCommandRun, error.to_string())
-                })?;
+            self.notify_session_config_changed(previous).await;
         }
         Ok(!matches!(
             committed,

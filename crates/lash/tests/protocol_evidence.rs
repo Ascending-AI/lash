@@ -508,10 +508,6 @@ fn drain_area_witnesses() {
     });
     // W0144: lash::plugins::SessionAppendNode::protocol_event [function]
     let _ = lash::plugins::SessionAppendNode::protocol_event;
-    // W0145: lash::plugins::SessionStateChangedContext::direct_completions [field]
-    field_witness(|value: &lash::plugins::SessionStateChangedContext| {
-        let _ = &value.direct_completions;
-    });
     // W0146: lash::plugins::TurnTransformContext::direct_completions [field]
     field_witness(|value: &lash::plugins::TurnTransformContext| {
         let _ = &value.direct_completions;

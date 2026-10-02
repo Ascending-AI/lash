@@ -1565,7 +1565,7 @@ pub(super) fn lane_less_post_commit_from_plain_turn_does_not_affect_next_turn() 
 pub(super) async fn lane_less_post_commit_from_plain_turn_does_not_affect_next_turn_inner()
 -> Result<()> {
     let session_id = "nested-release-turn-latch";
-    let append_count = Arc::new(AtomicUsize::new(0));
+    let observation_count = Arc::new(AtomicUsize::new(0));
     let backend = double_backend().await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend))
         .serve_test_llm_profile(
@@ -1576,9 +1576,9 @@ pub(super) async fn lane_less_post_commit_from_plain_turn_does_not_affect_next_t
             ]),
             mock_llm_profile_spec(),
         )
-        .plugin(Arc::new(TurnPersistedGraphAppendFactory {
-            append_count: Arc::clone(&append_count),
-            max_appends: 1,
+        .plugin(Arc::new(TurnPersistedObserverFactory {
+            observation_count: Arc::clone(&observation_count),
+            max_failures: 1,
         }))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
@@ -1592,7 +1592,7 @@ pub(super) async fn lane_less_post_commit_from_plain_turn_does_not_affect_next_t
         first.final_value(),
         Some(&serde_json::json!("plain turn complete"))
     );
-    assert_eq!(append_count.load(Ordering::SeqCst), 1);
+    assert_eq!(observation_count.load(Ordering::SeqCst), 1);
     let second = session
         .send(TurnInput::text("continue without another nested append"))
         .output()
@@ -1601,23 +1601,22 @@ pub(super) async fn lane_less_post_commit_from_plain_turn_does_not_affect_next_t
         second.final_value(),
         Some(&serde_json::json!("turn two complete"))
     );
-    assert_eq!(append_count.load(Ordering::SeqCst), 1);
+    assert_eq!(observation_count.load(Ordering::SeqCst), 1);
     Ok(())
 }
 
 #[cfg(feature = "rlm")]
 #[test]
-pub(super) fn probe_inprocess_continue_as_survives_post_commit_graph_append() -> Result<()> {
+pub(super) fn probe_inprocess_continue_as_survives_observer_failure() -> Result<()> {
     run_async_test_on_stack_budget("inprocess-continue-as-authority-test", || {
-        probe_inprocess_continue_as_survives_post_commit_graph_append_inner()
+        probe_inprocess_continue_as_survives_observer_failure_inner()
     })
 }
 
 #[cfg(feature = "rlm")]
-pub(super) async fn probe_inprocess_continue_as_survives_post_commit_graph_append_inner()
--> Result<()> {
+pub(super) async fn probe_inprocess_continue_as_survives_observer_failure_inner() -> Result<()> {
     let session_id = "inprocess-continue-as";
-    let append_count = Arc::new(AtomicUsize::new(0));
+    let observation_count = Arc::new(AtomicUsize::new(0));
     let backend = double_backend().await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend))
         .serve_test_llm_profile(
@@ -1627,9 +1626,9 @@ pub(super) async fn probe_inprocess_continue_as_survives_post_commit_graph_appen
             ]),
             mock_llm_profile_spec(),
         )
-        .plugin(Arc::new(TurnPersistedGraphAppendFactory {
-            append_count: Arc::clone(&append_count),
-            max_appends: 1,
+        .plugin(Arc::new(TurnPersistedObserverFactory {
+            observation_count: Arc::clone(&observation_count),
+            max_failures: 1,
         }))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
@@ -1640,11 +1639,11 @@ pub(super) async fn probe_inprocess_continue_as_survives_post_commit_graph_appen
         .output()
         .await?;
 
-    assert_eq!(append_count.load(Ordering::SeqCst), 1);
+    assert_eq!(observation_count.load(Ordering::SeqCst), 1);
     assert_eq!(
         output.final_value(),
         Some(&serde_json::json!("done after in-process handoff")),
-        "post-commit graph writes must not strand the in-process frame handoff: {output:?}"
+        "observer failure must not strand the in-process frame handoff: {output:?}"
     );
     Ok(())
 }
@@ -1653,17 +1652,16 @@ pub(super) async fn probe_inprocess_continue_as_survives_post_commit_graph_appen
 /// append must not strand it (D5: the shift is the only executor).
 #[cfg(feature = "rlm")]
 #[test]
-pub(super) fn engine_driven_continue_as_survives_post_commit_graph_append() -> Result<()> {
+pub(super) fn engine_driven_continue_as_survives_observer_failure() -> Result<()> {
     run_async_test_on_stack_budget("engine-continue-as-authority-test", || {
-        engine_driven_continue_as_survives_post_commit_graph_append_inner()
+        engine_driven_continue_as_survives_observer_failure_inner()
     })
 }
 
 #[cfg(feature = "rlm")]
-pub(super) async fn engine_driven_continue_as_survives_post_commit_graph_append_inner() -> Result<()>
-{
+pub(super) async fn engine_driven_continue_as_survives_observer_failure_inner() -> Result<()> {
     let session_id = "engine-continue-as";
-    let append_count = Arc::new(AtomicUsize::new(0));
+    let observation_count = Arc::new(AtomicUsize::new(0));
     let double = restate_double(0x0036_68c1).await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(double.lash_backend()))
         .serve_test_llm_profile(
@@ -1675,9 +1673,9 @@ pub(super) async fn engine_driven_continue_as_survives_post_commit_graph_append_
             ]),
             mock_llm_profile_spec(),
         )
-        .plugin(Arc::new(TurnPersistedGraphAppendFactory {
-            append_count: Arc::clone(&append_count),
-            max_appends: 1,
+        .plugin(Arc::new(TurnPersistedObserverFactory {
+            observation_count: Arc::clone(&observation_count),
+            max_failures: 1,
         }))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
@@ -1689,11 +1687,11 @@ pub(super) async fn engine_driven_continue_as_survives_post_commit_graph_append_
         .output()
         .await?;
 
-    assert_eq!(append_count.load(Ordering::SeqCst), 1);
+    assert_eq!(observation_count.load(Ordering::SeqCst), 1);
     assert_eq!(
         output.final_value(),
         Some(&serde_json::json!("done after durable handoff")),
-        "post-commit graph writes must not strand the committed frame handoff: {output:?}"
+        "observer failure must not strand the committed frame handoff: {output:?}"
     );
     Ok(())
 }

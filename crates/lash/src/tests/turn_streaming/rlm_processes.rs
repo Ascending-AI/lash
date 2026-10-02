@@ -422,7 +422,7 @@ pub(super) fn engine_driven_chained_continue_as_survives_nested_commit_handoff()
 pub(super) async fn engine_driven_chained_continue_as_survives_nested_commit_handoff_inner()
 -> Result<()> {
     let session_id = "engine-chained-continue-as";
-    let append_count = Arc::new(AtomicUsize::new(0));
+    let observation_count = Arc::new(AtomicUsize::new(0));
     let double = restate_double(0x0036_68c3).await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(double.lash_backend()))
         .serve_test_llm_profile(
@@ -433,9 +433,9 @@ pub(super) async fn engine_driven_chained_continue_as_survives_nested_commit_han
             ]),
             mock_llm_profile_spec(),
         )
-        .plugin(Arc::new(TurnPersistedGraphAppendFactory {
-            append_count: Arc::clone(&append_count),
-            max_appends: 2,
+        .plugin(Arc::new(TurnPersistedObserverFactory {
+            observation_count: Arc::clone(&observation_count),
+            max_failures: 2,
         }))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
@@ -447,7 +447,7 @@ pub(super) async fn engine_driven_chained_continue_as_survives_nested_commit_han
         .output()
         .await?;
 
-    assert_eq!(append_count.load(Ordering::SeqCst), 2);
+    assert_eq!(observation_count.load(Ordering::SeqCst), 2);
     assert_eq!(
         output.final_value(),
         Some(&serde_json::json!("done after chained handoffs"))

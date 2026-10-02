@@ -29,8 +29,7 @@ type PluginOperationHandler = Arc<
         + Send
         + Sync,
 >;
-pub type PluginOperationFuture<T> =
-    Pin<Box<dyn Future<Output = Result<T, PluginOperationFailure>> + Send>>;
+pub type PluginOperationFuture<T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send>>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -76,6 +75,9 @@ pub struct PluginOperationSpec {
     pub session_param: SessionParam,
     pub input_schema: serde_json::Value,
     pub output_schema: serde_json::Value,
+    pub error_type: String,
+    pub error_version: crate::FormatVersion,
+    pub error_schema: serde_json::Value,
 }
 
 /// A registered plugin operation as hosts see it.
@@ -92,6 +94,9 @@ pub struct PluginOperationDef {
     pub input_schema: serde_json::Value,
     #[serde(default)]
     pub output_schema: serde_json::Value,
+    pub error_type: String,
+    pub error_version: crate::FormatVersion,
+    pub error_schema: serde_json::Value,
 }
 
 impl PluginOperationDef {
@@ -109,16 +114,40 @@ impl PluginOperationDef {
             session_param: spec.session_param,
             input_schema: spec.input_schema,
             output_schema: spec.output_schema,
+            error_type: spec.error_type,
+            error_version: spec.error_version,
+            error_schema: spec.error_schema,
         }
     }
 }
 
+/// A query, command or task with declared argument, result and error codecs.
+///
+/// Typed handlers return `Self::Error`; dispatch retains its schema, type,
+/// version and settlement class in [`PluginOperationFailure`]. Hosts recover
+/// that error with [`Self::decode_error`], or keep an unknown envelope intact.
 pub trait PluginOperation: Send + Sync + 'static {
     const NAME: &'static str;
     const DESCRIPTION: &'static str;
     const SESSION_PARAM: SessionParam;
     type Args: Serialize + DeserializeOwned + JsonSchema + Send + 'static;
     type Output: Serialize + DeserializeOwned + JsonSchema + Send + 'static;
+    type Error: Serialize + DeserializeOwned + JsonSchema + std::fmt::Display + Send + 'static;
+    const ERROR_TYPE: &'static str;
+    const ERROR_VERSION: crate::FormatVersion;
+    fn error_class(error: &Self::Error) -> PluginFailureClass;
+
+    /// Decode this operation's error, retaining unrecognized envelopes unchanged.
+    fn decode_error(
+        failure: PluginOperationFailure,
+    ) -> Result<Self::Error, Box<PluginOperationFailure>> {
+        if failure.error_type != Self::ERROR_TYPE
+            || failure.error_version != Self::ERROR_VERSION.into()
+        {
+            return Err(Box::new(failure));
+        }
+        serde_json::from_value(failure.payload.clone()).map_err(|_| Box::new(failure))
+    }
 }
 
 pub trait PluginQuery: PluginOperation {}
@@ -127,35 +156,70 @@ pub trait PluginCommand: PluginOperation {}
 
 pub trait PluginTask: PluginOperation {}
 
-#[derive(Clone, Debug, thiserror::Error)]
-#[error("{message}")]
-pub struct PluginOperationFailure {
+pub use lash_sansio::{
+    PluginFailureClass, PluginFailureOrigin, PluginHookFailure, PluginOperationFailure,
+};
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum OperationFrameworkFailure {
+    Protocol { message: String },
+    Encoding { message: String },
+}
+
+pub(crate) fn operation_protocol_failure(message: impl Into<String>) -> PluginOperationFailure {
+    let message = message.into();
+    operation_framework_failure(
+        OperationFrameworkFailure::Protocol {
+            message: message.clone(),
+        },
+        message,
+    )
+}
+
+fn operation_framework_failure(
+    error: OperationFrameworkFailure,
     message: String,
-}
-
-impl PluginOperationFailure {
-    pub fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
+) -> PluginOperationFailure {
+    let payload = match error {
+        OperationFrameworkFailure::Protocol { message } => {
+            serde_json::json!({"kind": "protocol", "message": message})
         }
+        OperationFrameworkFailure::Encoding { message } => {
+            serde_json::json!({"kind": "encoding", "message": message})
+        }
+    };
+    PluginOperationFailure {
+        error_type: "lash.operation".into(),
+        error_version: std::num::NonZeroU32::MIN,
+        payload,
+        class: PluginFailureClass::Terminal,
+        code: crate::FailureCode::from(&crate::RuntimeErrorCode::Plugin),
+        message,
+        origin: None,
     }
 }
 
-impl From<String> for PluginOperationFailure {
-    fn from(value: String) -> Self {
-        Self::new(value)
-    }
-}
-
-impl From<&str> for PluginOperationFailure {
-    fn from(value: &str) -> Self {
-        Self::new(value)
-    }
-}
-
-impl From<PluginError> for PluginOperationFailure {
-    fn from(value: PluginError) -> Self {
-        Self::new(value.to_string())
+pub(crate) fn declared_operation_failure<Op: PluginOperation>(
+    error: Op::Error,
+) -> PluginOperationFailure {
+    let message = error.to_string();
+    match serde_json::to_value(&error) {
+        Ok(payload) => PluginOperationFailure {
+            error_type: Op::ERROR_TYPE.into(),
+            error_version: Op::ERROR_VERSION.into(),
+            payload,
+            class: Op::error_class(&error),
+            code: crate::FailureCode::from(&crate::RuntimeErrorCode::Plugin),
+            message,
+            origin: None,
+        },
+        Err(error) => operation_framework_failure(
+            OperationFrameworkFailure::Encoding {
+                message: error.to_string(),
+            },
+            error.to_string(),
+        ),
     }
 }
 
@@ -164,10 +228,11 @@ pub(crate) fn plugin_operation_spec<Op: PluginOperation>() -> PluginOperationSpe
         name: Op::NAME.to_string(),
         description: Op::DESCRIPTION.to_string(),
         session_param: Op::SESSION_PARAM,
-        input_schema: serde_json::to_value(schemars::schema_for!(Op::Args))
-            .unwrap_or_else(|_| serde_json::json!({})),
-        output_schema: serde_json::to_value(schemars::schema_for!(Op::Output))
-            .unwrap_or_else(|_| serde_json::json!({})),
+        input_schema: schemars::schema_for!(Op::Args).to_value(),
+        output_schema: schemars::schema_for!(Op::Output).to_value(),
+        error_type: Op::ERROR_TYPE.into(),
+        error_version: Op::ERROR_VERSION,
+        error_schema: schemars::schema_for!(Op::Error).to_value(),
     }
 }
 
@@ -341,7 +406,7 @@ fn mismatched_operation_context(
     actual: PluginOperationKind,
 ) -> ErasedPluginOperationInvokeFuture {
     Box::pin(async move {
-        Err(PluginOperationFailure::new(format!(
+        Err(operation_protocol_failure(format!(
             "{} registration invoked with a {} context",
             expected.label(),
             actual.label()
@@ -428,6 +493,14 @@ impl RegisteredPluginOperation {
 
     pub(crate) fn plugin_id(&self) -> &str {
         &self.identity.owner.plugin
+    }
+
+    pub(crate) fn failure_origin(&self) -> PluginFailureOrigin {
+        PluginFailureOrigin {
+            plugin_id: self.identity.owner.plugin.clone(),
+            behavior_revision: self.identity.owner.behavior_revision.into(),
+            operation: self.def().name.clone(),
+        }
     }
 
     pub(crate) fn def(&self) -> &PluginOperationDef {

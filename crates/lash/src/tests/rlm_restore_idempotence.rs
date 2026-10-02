@@ -1110,8 +1110,8 @@ async fn storeless_runtime(
 }
 
 /// A plugin whose first `TurnPersisted` delivery fails: the turn's commit is
-/// accepted, the observer failure invalidates the resident state, and the next
-/// turn reloads it.
+/// accepted, the observer failure is advisory, and the next turn uses the
+/// accepted resident state.
 struct FailFirstTurnPersisted;
 
 impl PluginFactory for FailFirstTurnPersisted {
@@ -1161,11 +1161,10 @@ impl lash_core::facade_support::SessionPlugin for FailFirstTurnPersisted {
 }
 
 /// (e) Storeless: a turn commits a global, its `TurnPersisted` delivery fails,
-/// and the next ordinary turn reloads the invalidated resident state on the
-/// same frame. No store can rehydrate that commit, so the accepted execution
-/// must stay resident and the reload must rebuild from it.
+/// and the next ordinary turn keeps the accepted execution on the same frame.
+/// No store can rehydrate that commit, so the observer must leave it resident.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_storeless_reload_after_turn_persisted_failure_keeps_the_accepted_global() {
+async fn rlm_storeless_observer_failure_keeps_the_accepted_global() {
     let mut runtime = Box::pin(storeless_runtime(
         vec![
             establish_response(),
@@ -1188,6 +1187,12 @@ async fn rlm_storeless_reload_after_turn_persisted_failure_keeps_the_accepted_gl
         "the observer failure must be reported on the accepted turn: {:?}",
         first.errors
     );
+    assert!(
+        first
+            .errors
+            .iter()
+            .all(|issue| issue.severity == lash_core::facade_support::TurnIssueSeverity::Advisory)
+    );
     let resident = runtime
         .export_persistence_state()
         .execution_state_hydration()
@@ -1198,7 +1203,7 @@ async fn rlm_storeless_reload_after_turn_persisted_failure_keeps_the_accepted_gl
         Some("Some(String(\"COMMITTED\"))")
     );
 
-    let next = turn(&mut runtime, "natural-reload").await;
+    let next = turn(&mut runtime, "ordinary-follow-turn").await;
     assert_final_value("storeless", &next, serde_json::json!("COMMITTED"));
 }
 

@@ -186,6 +186,7 @@ impl PluginDispatchContext<'_> {
                 plugin_config: self.session.admitted_plugin_config(),
                 turn: Arc::new(crate::plugin::TurnHookReport::from_assembled(&turn)),
                 sessions,
+                session_graph: Arc::clone(&session_graph),
             })
             .await?
         };

@@ -343,6 +343,7 @@ impl EmbedError {
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::Runtime(err) => err.is_retryable(),
+            Self::Control(err) => err.is_retryable(),
             Self::Plugin(err) | Self::Session(SessionError::Plugin(err)) => err.is_retryable(),
             Self::Reconfigure(_) => false,
             // A store error is retried here exactly when the engine retries
@@ -379,7 +380,6 @@ impl EmbedError {
             | Self::RemoteProtocol(_)
             | Self::ProtocolTurnOptions(_)
             | Self::DecodeProtocolTurnOptions(_)
-            | Self::Control(_)
             | Self::DrainOwnGeneration { .. }
             | Self::Send(_) => false,
         }
@@ -437,6 +437,7 @@ impl EmbedError {
             Self::Send(_) => false,
             Self::Store(err) => store_error_is_terminal(err),
             Self::Runtime(err) => err.is_terminal(),
+            Self::Control(err) => err.is_terminal(),
             Self::Plugin(err) | Self::Session(SessionError::Plugin(err)) => err.is_terminal(),
             Self::Reconfigure(
                 lash_core::facade_support::ReconfigureError::Validation(_)
@@ -456,7 +457,6 @@ impl EmbedError {
             | Self::RemoteProtocol(_)
             | Self::ProtocolTurnOptions(_)
             | Self::DecodeProtocolTurnOptions(_)
-            | Self::Control(_)
             | Self::WorkCadence(_)
             | Self::Session(_) => false,
         }

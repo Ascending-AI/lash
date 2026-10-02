@@ -5,7 +5,7 @@ use lash_core::testing::TestTurnExecution as _;
 const SEED: u64 = 0x5_f508;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn lifecycle_hook_concurrency_rejection_is_host_observable() {
+async fn observer_failure_is_advisory_and_keeps_committed_state() {
     let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let gate = Arc::new((
@@ -14,51 +14,33 @@ async fn lifecycle_hook_concurrency_rejection_is_host_observable() {
         AtomicBool::new(true),
     ));
     let recorder = RecordingEffectController::default().with_direct_gate(Arc::clone(&gate));
-    let hook_gate = Arc::clone(&gate);
-    let plugin: Arc<dyn lash_core::facade_support::PluginFactory> = Arc::new(
-        RuntimeTestPluginFactory {
+
+    let plugin: Arc<dyn lash_core::facade_support::PluginFactory> =
+        Arc::new(RuntimeTestPluginFactory {
             build: Arc::new(move |_| {
-                let hook_gate = Arc::clone(&hook_gate);
                 Ok(Arc::new(RuntimeTestPlugin {
                     before_turn: None,
                     checkpoint: None,
                     presentation_steps: vec![],
                     runtime_event: Some(Arc::new(move |event| {
-                        let hook_gate = Arc::clone(&hook_gate);
                         Box::pin(async move {
-                            let lash_core::facade_support::PluginLifecycleEvent::TurnPersisted(ctx) =
-                                event
-                            else {
-                                return Ok(());
-                            };
-                            let first = ctx.direct_completions.clone();
-                            let second = ctx.direct_completions.clone();
-                            let (first_result, overlap_result) = tokio::join! {
-                                biased;
-                                first.direct_completion(
-                                    lash_core::facade_support::DirectRequest::text( "first"),
-                                    "same-plugin-hook",
-                                ),
-                                async {
-                                    hook_gate.0.notified().await;
-                                    let result = second.direct_completion(
-                                        lash_core::facade_support::DirectRequest::text( "overlap"),
-                                        "same-plugin-hook",
-                                    ).await;
-                                    hook_gate.1.notify_one();
-                                    result
-                                },
-                            };
-                            first_result?;
-                            overlap_result?;
-                            Ok(())
+                            if let lash_core::facade_support::PluginLifecycleEvent::TurnPersisted(
+                                ctx,
+                            ) = event
+                            {
+                                assert_eq!(ctx.state.session_id(), &ctx.session_id);
+                                let snapshot = ctx.sessions.snapshot_current().await?;
+                                assert_eq!(snapshot.session_id, ctx.session_id);
+                            }
+                            Err(lash_core::PluginError::Session(
+                                "observer sink unavailable".into(),
+                            ))
                         })
                     })),
                     external_registrar: None,
                 }))
             }),
-        },
-    );
+        });
     let mut runtime = runtime_with_plugins_and_tools_and_host(
         vec![plugin],
         Arc::new(EmptyTools),
@@ -107,13 +89,15 @@ async fn lifecycle_hook_concurrency_rejection_is_host_observable() {
         issue.kind == lash_core::TurnFailureKind::Plugin
             && issue.code == Some(lash_core::TurnFailureCode::LifecycleHookFailed.into())
             && issue.retryable == Some(false)
-            && issue.message.contains("explicit replay keys")
+            && issue.message.contains("observer sink unavailable")
+            && issue.severity == lash_core::facade_support::TurnIssueSeverity::Advisory
+            && issue.plugin_failures.len() == 1
     }));
     assert!(
         matches!(
             runtime.resident_session.validity(),
-            ResidentSessionState::Invalidated { .. }
+            ResidentSessionState::Valid
         ),
-        "a failed post-commit hook invalidates resident plugin state"
+        "an observer failure preserves resident plugin state"
     );
 }

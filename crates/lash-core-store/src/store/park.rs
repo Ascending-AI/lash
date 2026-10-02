@@ -397,6 +397,11 @@ pub enum ParkReason {
         refusal: Box<crate::store::plugin_writers::PluginExecutionRefusal>,
         message: String,
     },
+    /// A declared plugin failure needs operator repair before execution can resume.
+    PluginFailure {
+        cause: Box<crate::RuntimeErrorCause>,
+        message: String,
+    },
     /// The deployment must supply the configured worker before redrive can run it.
     WorkerDeployment {
         executable: std::path::PathBuf,
@@ -514,6 +519,8 @@ impl ParkReason {
 #[non_exhaustive]
 pub enum ParkReasonCode {
     PluginRevisionUnavailable,
+    /// See [`ParkReason::PluginFailure`].
+    PluginFailure,
     /// See [`ParkReason::WorkerDeployment`].
     WorkerDeployment,
     /// See [`ParkReason::ReplayDivergence`].
@@ -534,6 +541,7 @@ impl ParkReasonCode {
     /// Every code, in declaration order. Metrics record each one — zero
     /// included — so a cleared reason drops to 0 instead of going stale.
     pub const ALL: &[Self] = &[
+        Self::PluginFailure,
         Self::WorkerDeployment,
         Self::ReplayDivergence,
         Self::RetiredGeneration,
@@ -549,6 +557,7 @@ impl ParkReasonCode {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::PluginFailure => "plugin_failure",
             Self::WorkerDeployment => "worker_deployment",
             Self::ReplayDivergence => "replay_divergence",
             Self::RetiredGeneration => "retired_generation",
@@ -564,6 +573,7 @@ impl ParkReasonCode {
     #[must_use]
     pub fn from_code(code: &str) -> Option<Self> {
         match code {
+            "plugin_failure" => Some(Self::PluginFailure),
             "worker_deployment" => Some(Self::WorkerDeployment),
             "replay_divergence" => Some(Self::ReplayDivergence),
             "retired_generation" => Some(Self::RetiredGeneration),
@@ -661,6 +671,14 @@ impl ParkReason {
     #[must_use]
     pub fn of_error(error: &RuntimeError) -> Option<Self> {
         let message = error.message.clone();
+        if let Some(cause) = &error.cause
+            && cause.plugin_failure_class() == Some(lash_sansio::PluginFailureClass::Parked)
+        {
+            return Some(Self::PluginFailure {
+                cause: Box::new(cause.clone()),
+                message,
+            });
+        }
         if let Some(crate::RuntimeErrorCause::VmWorker { outcome }) = &error.cause
             && let Some((executable, fault)) = outcome.deployment_fault()
         {
@@ -701,6 +719,7 @@ impl ParkReason {
     #[must_use]
     pub fn code(&self) -> ParkReasonCode {
         match self {
+            Self::PluginFailure { .. } => ParkReasonCode::PluginFailure,
             Self::WorkerDeployment { .. } => ParkReasonCode::WorkerDeployment,
             Self::ReplayDivergence { .. } => ParkReasonCode::ReplayDivergence,
             Self::RetiredGeneration { .. } => ParkReasonCode::RetiredGeneration,
@@ -728,7 +747,8 @@ impl ParkReason {
     #[must_use]
     pub fn message(&self) -> &str {
         match self {
-            Self::WorkerDeployment { message, .. }
+            Self::PluginFailure { message, .. }
+            | Self::WorkerDeployment { message, .. }
             | Self::ReplayDivergence { message }
             | Self::RetiredGeneration { message, .. }
             | Self::PluginRevisionUnavailable { message, .. }

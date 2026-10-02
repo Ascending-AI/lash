@@ -173,9 +173,10 @@ impl RuntimeTurnDriver<'_> {
                 {
                     RuntimeEffectControllerError::from(error)
                 }
-                err => RuntimeEffectControllerError::retryable_response_derivation(format!(
-                    "assistant response hook failed: {err}"
-                )),
+                err => RuntimeEffectControllerError::from(crate::PluginError::Operation(Box::new(
+                    err.into(),
+                )))
+                .retryable_uncommitted_derivation(),
             })?;
         let mut current: Option<LlmResponse> = None;
         let mut events = Vec::new();

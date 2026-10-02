@@ -47,7 +47,7 @@ fn plugin_hook_phase_name(hook_kind: &str, plugin_id: &str) -> String {
     format!("plugin_hook.{hook_kind}.{plugin_id}")
 }
 
-fn lifecycle_event_hook_kind(event: &PluginLifecycleEvent<'_>) -> &'static str {
+fn lifecycle_event_hook_kind(event: &PluginLifecycleEvent) -> &'static str {
     match event {
         PluginLifecycleEvent::TurnFinalized(_) => "turn_finalized",
         PluginLifecycleEvent::TurnPersisted(_) => "turn_persisted",
@@ -129,37 +129,30 @@ impl PluginOperationInvocation {
 }
 
 pub fn plugin_lifecycle_hook_issue(error: PluginError) -> crate::runtime::TurnIssue {
-    let error = match error {
-        PluginError::SessionExecutionLeaseLost { session_id } => {
-            return crate::runtime::TurnIssue {
-                severity: crate::runtime::TurnIssueSeverity::Blocking,
-                kind: crate::TurnFailureKind::Runtime,
-                code: Some(
-                    crate::TurnFailureCode::from_wire(
-                        crate::RuntimeErrorCode::SessionExecutionLeaseLost.as_str(),
-                    )
-                    .into(),
-                ),
-                terminal_reason: None,
-                message: format!(
-                    "session execution lease for session `{session_id}` was lost before commit"
-                ),
-                raw: None,
-                retryable: Some(false),
-                provider_failure_kind: None,
-            };
-        }
-        error => error,
+    let failures = match &error {
+        PluginError::HookFailures { causes } => causes
+            .iter()
+            .map(|cause| {
+                let mut failure = cause.failure.clone();
+                failure.error_type = "lash.plugin.hook".into();
+                failure.error_version = std::num::NonZeroU32::MIN;
+                failure.payload = serde_json::json!(cause);
+                failure.origin = Some(cause.origin.clone());
+                failure
+            })
+            .collect(),
+        _ => vec![PluginOperationFailure::from(error.clone())],
     };
     crate::runtime::TurnIssue {
-        severity: crate::runtime::TurnIssueSeverity::Blocking,
+        severity: crate::runtime::TurnIssueSeverity::Advisory,
         kind: crate::TurnFailureKind::Plugin,
         code: Some(crate::TurnFailureCode::LifecycleHookFailed.into()),
         terminal_reason: None,
         message: error.to_string(),
         raw: None,
-        retryable: None,
+        retryable: Some(false),
         provider_failure_kind: None,
+        plugin_failures: failures,
     }
 }
 
@@ -266,16 +259,19 @@ impl PluginDispatchContext<'_> {
         .await
     }
 
-    pub async fn emit_runtime_event(
-        &self,
-        event: PluginLifecycleEvent<'_>,
-    ) -> Result<(), PluginError> {
+    pub async fn emit_runtime_event(&self, event: PluginLifecycleEvent) -> Result<(), PluginError> {
         self.session.validate_recorded_admission()?;
         let hook_kind = lifecycle_event_hook_kind(&event);
         let mut pending = FuturesUnordered::new();
-        for registered in &self.session.contributions.runtime_event_hooks {
+        for (ordinal, registered) in self
+            .session
+            .contributions
+            .runtime_event_hooks
+            .iter()
+            .enumerate()
+        {
             let hook = Arc::clone(&registered.hook);
-            let plugin_id = registered.identity.owner.plugin.clone();
+            let identity = registered.identity.clone();
             let phase_name =
                 plugin_hook_phase_name(hook_kind, registered.identity.owner.plugin.as_str());
             let event = event.clone();
@@ -288,41 +284,31 @@ impl PluginDispatchContext<'_> {
                 if let Some(probe) = phase_probe.as_ref() {
                     probe.end_named(&phase_name);
                 }
-                (plugin_id, result)
+                (ordinal, identity, result)
             });
         }
         let mut failures = Vec::new();
-        while let Some((plugin_id, result)) = pending.next().await {
+        while let Some((ordinal, identity, result)) = pending.next().await {
             if let Err(error) = result {
-                failures.push((plugin_id, error));
+                failures.push((ordinal, identity, error));
             }
         }
         if failures.is_empty() {
             return Ok(());
         }
-        // Execution-lane loss is runtime authority evidence, not an ordinary
-        // plugin hook failure. Preserve it through the fan-out aggregation so
-        // the turn boundary can retain the loud typed failure.
-        if let Some(error @ PluginError::SessionExecutionLeaseLost { .. }) = failures
-            .iter()
-            .map(|(_, error)| error)
-            .find(|error| matches!(error, PluginError::SessionExecutionLeaseLost { .. }))
-        {
-            return Err(error.clone());
+        failures.sort_by_key(|(ordinal, _, _)| *ordinal);
+        let mut causes = Vec::with_capacity(failures.len());
+        for (_, identity, error) in failures {
+            let origin = PluginFailureOrigin {
+                plugin_id: identity.owner.plugin,
+                behavior_revision: identity.owner.behavior_revision.into(),
+                operation: identity.key,
+            };
+            let mut failure = PluginOperationFailure::from(error);
+            failure.origin.get_or_insert_with(|| origin.clone());
+            causes.push(PluginHookFailure { origin, failure });
         }
-        failures.sort_by(|(left_id, left_error), (right_id, right_error)| {
-            left_id
-                .cmp(right_id)
-                .then_with(|| left_error.to_string().cmp(&right_error.to_string()))
-        });
-        let details = failures
-            .into_iter()
-            .map(|(plugin_id, error)| format!("plugin `{plugin_id}`: {error}"))
-            .collect::<Vec<_>>()
-            .join("; ");
-        Err(PluginError::Session(format!(
-            "plugin runtime event hooks failed: {details}"
-        )))
+        Err(PluginError::HookFailures { causes })
     }
 }
 
@@ -1196,7 +1182,10 @@ impl PluginSession {
         let outcome = operation
             .invoke(invocation.into_context(effective_session), args)
             .await
-            .map_err(|err| PluginOperationInvokeError::Failed(err.to_string()))?;
+            .map_err(|mut failure| {
+                failure.origin = Some(operation.failure_origin());
+                PluginOperationInvokeError::Failed(Box::new(failure))
+            })?;
         Ok((operation.plugin_id().to_string(), outcome))
     }
 

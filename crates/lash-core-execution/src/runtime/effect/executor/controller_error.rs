@@ -29,6 +29,21 @@ impl From<PluginError> for RuntimeEffectControllerError {
                     terminal_reason,
                 })
                 .into(),
+            PluginError::Operation(failure) => {
+                let mut error = plugin_failure_error(&failure);
+                error.cause = Some(crate::RuntimeErrorCause::PluginOperation { failure });
+                error
+            }
+            PluginError::HookFailures { causes } => {
+                let mut error = causes
+                    .iter()
+                    .min_by_key(|cause| cause.failure.class.precedence())
+                    .map(|cause| plugin_failure_error(&cause.failure))
+                    .unwrap_or_else(|| Self::new(RuntimeErrorCode::Plugin, "plugin hooks failed"));
+                error.message = "plugin runtime event hooks failed".into();
+                error.cause = Some(crate::RuntimeErrorCause::PluginHooks { causes });
+                error
+            }
             PluginError::Format(refusal) => refusal.into(),
             PluginError::State(crate::PluginStateError::EffectOwnerMismatch) => {
                 let mut error = Self::new(
@@ -164,6 +179,29 @@ impl From<PluginError> for RuntimeEffectControllerError {
                 Self::new(RuntimeErrorCode::Plugin, err.to_string())
             }
         }
+    }
+}
+
+fn plugin_failure_error(
+    failure: &crate::plugin::PluginOperationFailure,
+) -> RuntimeEffectControllerError {
+    if failure.code.namespace().as_str() == "lash" {
+        RuntimeEffectControllerError::new(
+            RuntimeErrorCode::from_wire_code(failure.code.spelling()),
+            failure.message.clone(),
+        )
+    } else {
+        let cause = match failure.class {
+            crate::plugin::PluginFailureClass::Terminal => crate::TurnFailureCause::Outcome,
+            crate::plugin::PluginFailureClass::Parked => crate::TurnFailureCause::Parked,
+            crate::plugin::PluginFailureClass::Retryable
+            | crate::plugin::PluginFailureClass::Redrivable => crate::TurnFailureCause::LiveFault,
+        };
+        RuntimeEffectControllerError::foreign(
+            failure.code.namespaced(),
+            cause,
+            failure.message.clone(),
+        )
     }
 }
 

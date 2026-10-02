@@ -284,7 +284,7 @@ impl PluginOperationRegistrations<'_> {
     where
         Op: PluginQuery,
         F: Fn(PluginQueryContext, Op::Args) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<Op::Output, PluginOperationFailure>> + Send + 'static,
+        Fut: Future<Output = Result<Op::Output, Op::Error>> + Send + 'static,
     {
         self.query(
             plugin_operation_spec::<Op>(),
@@ -294,9 +294,10 @@ impl PluginOperationRegistrations<'_> {
                     Ok(args) => {
                         let fut = handler(ctx, args);
                         Box::pin(async move {
-                            let output = fut.await?;
+                            let output =
+                                fut.await.map_err(super::declared_operation_failure::<Op>)?;
                             serde_json::to_value(output).map_err(|err| {
-                                PluginOperationFailure::new(format!(
+                                super::operation_protocol_failure(format!(
                                     "failed to serialize {} output: {err}",
                                     Op::NAME
                                 ))
@@ -304,7 +305,7 @@ impl PluginOperationRegistrations<'_> {
                         }) as PluginQueryInvokeFuture
                     }
                     Err(err) => Box::pin(async move {
-                        Err(PluginOperationFailure::new(format!(
+                        Err(super::operation_protocol_failure(format!(
                             "invalid {} args: {err}",
                             Op::NAME
                         )))
@@ -318,9 +319,8 @@ impl PluginOperationRegistrations<'_> {
     where
         Op: PluginCommand,
         F: Fn(PluginCommandContext, Op::Args) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<PluginOperationOutcome<Op::Output>, PluginOperationFailure>>
-            + Send
-            + 'static,
+        Fut:
+            Future<Output = Result<PluginOperationOutcome<Op::Output>, Op::Error>> + Send + 'static,
     {
         self.command(
             plugin_operation_spec::<Op>(),
@@ -330,9 +330,10 @@ impl PluginOperationRegistrations<'_> {
                     Ok(args) => {
                         let fut = handler(ctx, args);
                         Box::pin(async move {
-                            let outcome = fut.await?;
+                            let outcome =
+                                fut.await.map_err(super::declared_operation_failure::<Op>)?;
                             let output = serde_json::to_value(outcome.output).map_err(|err| {
-                                PluginOperationFailure::new(format!(
+                                super::operation_protocol_failure(format!(
                                     "failed to serialize {} output: {err}",
                                     Op::NAME
                                 ))
@@ -345,7 +346,7 @@ impl PluginOperationRegistrations<'_> {
                         }) as ErasedPluginOperationInvokeFuture
                     }
                     Err(err) => Box::pin(async move {
-                        Err(PluginOperationFailure::new(format!(
+                        Err(super::operation_protocol_failure(format!(
                             "invalid {} args: {err}",
                             Op::NAME
                         )))
@@ -359,7 +360,7 @@ impl PluginOperationRegistrations<'_> {
     where
         Op: PluginCommand,
         F: Fn(PluginCommandContext, Op::Args) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<Op::Output, PluginOperationFailure>> + Send + 'static,
+        Fut: Future<Output = Result<Op::Output, Op::Error>> + Send + 'static,
     {
         self.typed_command::<Op, _, _>(move |ctx, args| {
             let fut = handler(ctx, args);
@@ -371,9 +372,8 @@ impl PluginOperationRegistrations<'_> {
     where
         Op: PluginTask,
         F: Fn(PluginTaskContext, Op::Args) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<PluginOperationOutcome<Op::Output>, PluginOperationFailure>>
-            + Send
-            + 'static,
+        Fut:
+            Future<Output = Result<PluginOperationOutcome<Op::Output>, Op::Error>> + Send + 'static,
     {
         self.task(
             plugin_operation_spec::<Op>(),
@@ -383,9 +383,10 @@ impl PluginOperationRegistrations<'_> {
                     Ok(args) => {
                         let fut = handler(ctx, args);
                         Box::pin(async move {
-                            let outcome = fut.await?;
+                            let outcome =
+                                fut.await.map_err(super::declared_operation_failure::<Op>)?;
                             let output = serde_json::to_value(outcome.output).map_err(|err| {
-                                PluginOperationFailure::new(format!(
+                                super::operation_protocol_failure(format!(
                                     "failed to serialize {} output: {err}",
                                     Op::NAME
                                 ))
@@ -398,7 +399,7 @@ impl PluginOperationRegistrations<'_> {
                         }) as ErasedPluginOperationInvokeFuture
                     }
                     Err(err) => Box::pin(async move {
-                        Err(PluginOperationFailure::new(format!(
+                        Err(super::operation_protocol_failure(format!(
                             "invalid {} args: {err}",
                             Op::NAME
                         )))
@@ -412,7 +413,7 @@ impl PluginOperationRegistrations<'_> {
     where
         Op: PluginTask,
         F: Fn(PluginTaskContext, Op::Args) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<Op::Output, PluginOperationFailure>> + Send + 'static,
+        Fut: Future<Output = Result<Op::Output, Op::Error>> + Send + 'static,
     {
         self.typed_task::<Op, _, _>(move |ctx, args| {
             let fut = handler(ctx, args);
@@ -724,6 +725,16 @@ impl PluginRegistrar {
         operation: PluginOperationRegistration,
     ) -> Result<(), PluginError> {
         self.ensure_unique_operation_name(&operation.def().name)?;
+        if operation.def().error_type.is_empty() {
+            return Err(PluginError::Registration(
+                "plugin operation error type is empty".into(),
+            ));
+        }
+        crate::JsonSchema::admit(operation.def().error_schema.clone()).map_err(|source| {
+            PluginError::UnusableSchema {
+                source: Box::new(source),
+            }
+        })?;
         let identity = PluginCallbackIdentity {
             owner: self.owner.clone(),
             key: format!(

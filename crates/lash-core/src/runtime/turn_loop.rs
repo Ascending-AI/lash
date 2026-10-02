@@ -129,6 +129,7 @@ pub(super) fn post_commit_delivery_issue(
         raw: None,
         retryable: Some(false),
         provider_failure_kind: None,
+        plugin_failures: Vec::new(),
     }
 }
 

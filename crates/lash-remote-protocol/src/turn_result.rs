@@ -716,6 +716,11 @@ pub struct RemoteToolCancellation {
 pub use lash_sansio::FailureCode as RemoteFailureCode;
 /// Typed origin of a turn failure, as carried to a host.
 pub use lash_sansio::TurnFailureKind as RemoteTurnFailureKind;
+pub use lash_sansio::{
+    PluginFailureClass as RemotePluginFailureClass,
+    PluginFailureOrigin as RemotePluginFailureOrigin, PluginHookFailure as RemotePluginHookFailure,
+    PluginOperationFailure as RemotePluginOperationFailure,
+};
 
 /// Producer-selected effect of an issue on turn completion.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -727,6 +732,8 @@ pub enum RemoteTurnIssueSeverity {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTurnIssue {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plugin_failures: Vec<lash_sansio::PluginOperationFailure>,
     pub severity: RemoteTurnIssueSeverity,
     /// Typed origin of the failure. Serializes as the same snake_case string
     /// the field carried before it was typed; an unrecognized spelling decodes

@@ -6,10 +6,9 @@ use std::sync::Arc;
 use super::*;
 
 pub type PluginFuture<T> = Pin<Box<dyn Future<Output = Result<T, PluginError>> + Send>>;
-pub type PluginLifecycleFuture<'run> =
-    Pin<Box<dyn Future<Output = Result<(), PluginError>> + Send + 'run>>;
+pub type PluginLifecycleFuture = PluginFuture<()>;
 pub type PluginLifecycleEventHook =
-    Arc<dyn for<'run> Fn(PluginLifecycleEvent<'run>) -> PluginLifecycleFuture<'run> + Send + Sync>;
+    Arc<dyn Fn(PluginLifecycleEvent) -> PluginLifecycleFuture + Send + Sync>;
 pub type PluginSessionTask = PluginFuture<()>;
 pub type BeforeTurnHook =
     Arc<dyn Fn(TurnHookContext) -> PluginFuture<Vec<TurnPluginDirective>> + Send + Sync>;
@@ -215,11 +214,11 @@ pub struct SessionConfigChangedContext {
     pub session_id: SessionId,
     pub previous: SessionPolicy,
     pub current: SessionPolicy,
-    pub sessions: Arc<dyn SessionStateService>,
+    pub sessions: Arc<dyn SessionReadService>,
 }
 
 #[derive(Clone)]
-pub struct SessionStateChangedContext<'run> {
+pub struct SessionStateChangedContext {
     pub session_id: SessionId,
     /// The plugin configuration this hook runs under (FIG-4379): the
     /// running run's admitted configuration and its revision, a process's
@@ -227,19 +226,17 @@ pub struct SessionStateChangedContext<'run> {
     /// inside a run.
     pub plugin_config: super::AdmittedPluginConfig,
     pub state: SessionReadView,
-    pub sessions: Arc<dyn SessionStateService>,
-    pub session_graph: Arc<dyn SessionGraphService>,
-    pub direct_completions: crate::DirectCompletionClient<'run>,
+    pub sessions: Arc<dyn SessionReadService>,
 }
 
 #[derive(Clone)]
-pub enum PluginLifecycleEvent<'run> {
+pub enum PluginLifecycleEvent {
     TurnFinalized(Arc<AssembledTurn>),
     /// Best-effort observer hook emitted after durable session state advances.
     ///
     /// Hook failures cannot affect the commit, which has already completed, but
-    /// they are returned to the host as `lifecycle_hook_failed` turn issues.
-    TurnPersisted(Box<SessionStateChangedContext<'run>>),
+    /// they are returned to the host as advisory `lifecycle_hook_failed` turn issues.
+    TurnPersisted(Box<SessionStateChangedContext>),
     SessionRestored(SessionReadView),
     SessionConfigChanged(Box<SessionConfigChangedContext>),
 }
@@ -430,6 +427,7 @@ pub struct TurnResultHookContext {
     pub plugin_config: super::AdmittedPluginConfig,
     pub turn: Arc<TurnHookReport>,
     pub sessions: Arc<dyn SessionStateService>,
+    pub session_graph: Arc<dyn SessionGraphService>,
 }
 
 #[derive(Clone)]

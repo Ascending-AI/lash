@@ -1112,6 +1112,7 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
         )),
         sessions: sessions.clone(),
         plugin_config: Default::default(),
+        session_graph: manager.clone(),
     };
     let directives = overflow_recovery_after_turn(&overflow)
         .await
@@ -1133,6 +1134,7 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
         )),
         sessions,
         plugin_config: Default::default(),
+        session_graph: manager.clone(),
     };
     assert!(
         overflow_recovery_after_turn(&provider_error)
@@ -1153,6 +1155,7 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
         }),
         sessions: Arc::new(MockSessionManager::default()),
         plugin_config: Default::default(),
+        session_graph: manager.clone(),
     };
     assert!(
         overflow_recovery_after_turn(&guided)

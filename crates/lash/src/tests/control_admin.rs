@@ -87,6 +87,12 @@ impl lash_core::facade_support::PluginOperation for NonblockingObservationQuery 
 
     type Args = serde_json::Value;
     type Output = serde_json::Value;
+    type Error = String;
+    const ERROR_TYPE: &'static str = Self::NAME;
+    const ERROR_VERSION: lash_core::FormatVersion = lash_core::FormatVersion::ONE;
+    fn error_class(_: &Self::Error) -> lash_sansio::PluginFailureClass {
+        lash_sansio::PluginFailureClass::Terminal
+    }
 }
 
 impl lash_core::facade_support::PluginQuery for NonblockingObservationQuery {}
@@ -965,11 +971,7 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
             lash_core::plugin::PluginDeclaration::initial("nonblocking-observation-query"),
             lash_core::facade_support::PluginSpec::new()
                 .with_plugin_query_typed::<NonblockingObservationQuery, _, _>(
-                    |_ctx, _args| async move {
-                        Ok::<_, lash_core::test_support::PluginOperationFailure>(
-                            serde_json::json!({ "ok": true }),
-                        )
-                    },
+                    |_ctx, _args| async move { Ok::<_, String>(serde_json::json!({ "ok": true })) },
                 ),
         )))
         .build(crate::testing::runtime_lease_owner())?;

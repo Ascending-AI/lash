@@ -223,12 +223,14 @@ impl SessionAdmin {
                             lash_core::runtime::SessionCommandOutcome::PluginOperation {
                                 outcome:
                                     lash_core::runtime::PluginOperationCommandOutcome::Failed {
-                                        message,
+                                        failure,
                                     },
                             },
                         ..
                     } => {
-                        return Err(EmbedError::Plugin(lash_core::PluginError::Invoke(message)));
+                        return Err(EmbedError::Control(
+                            lash_core::facade_support::PluginOperationInvokeError::Failed(failure),
+                        ));
                     }
                     lash_core::runtime::SessionCommandSettlement::Applied {
                         outcome:

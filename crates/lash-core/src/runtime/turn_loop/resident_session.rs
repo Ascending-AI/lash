@@ -87,7 +87,6 @@ pub(in crate::runtime) enum ResidentReloadStage {
     ToolStateRestore,
     ToolCatalogRefresh,
     ProtocolSessionRestore,
-    SessionRestoredHook,
 }
 
 impl ResidentReloadStage {
@@ -99,7 +98,6 @@ impl ResidentReloadStage {
             Self::ToolStateRestore => "tool_state_restore",
             Self::ToolCatalogRefresh => "tool_catalog_refresh",
             Self::ProtocolSessionRestore => "protocol_session_restore",
-            Self::SessionRestoredHook => "session_restored_hook",
         }
     }
 }
@@ -483,22 +481,16 @@ impl LashRuntime {
         } else {
             durable_state.discard_runtime_snapshots_retaining_accepted_execution();
         }
-        session
+        if let Err(error) = session
             .plugins()
             .dispatch(None)
             .emit_runtime_event(crate::PluginLifecycleEvent::SessionRestored(
                 crate::SessionReadView::from_persisted_state(durable_state),
             ))
             .await
-            .map_err(|err| {
-                (
-                    ResidentReloadStage::SessionRestoredHook,
-                    RuntimeError::new(
-                        RuntimeErrorCode::ResidentSessionReloadFailed,
-                        err.to_string(),
-                    ),
-                )
-            })?;
+        {
+            tracing::warn!(?error, "resident session restore observer failed");
+        }
         Ok(tool_restore)
     }
 

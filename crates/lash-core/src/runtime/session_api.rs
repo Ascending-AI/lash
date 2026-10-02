@@ -610,21 +610,18 @@ impl LashRuntime {
         self.state.effective_policy().clone()
     }
 
-    pub(super) async fn notify_session_config_changed(
-        &self,
-        previous: SessionPolicy,
-    ) -> Result<(), crate::PluginError> {
+    pub(super) async fn notify_session_config_changed(&self, previous: SessionPolicy) {
         let Some(session) = self.session.as_ref() else {
-            return Ok(());
+            return;
         };
         let current = self.session_policy();
         if current == previous {
-            return Ok(());
+            return;
         }
         let Ok(services) = self.runtime_session_services() else {
-            return Ok(());
+            return;
         };
-        session
+        if let Err(error) = session
             .plugins()
             .dispatch(None)
             .emit_runtime_event(crate::PluginLifecycleEvent::SessionConfigChanged(Box::new(
@@ -632,10 +629,13 @@ impl LashRuntime {
                     session_id: self.state.session_id.clone(),
                     previous,
                     current,
-                    sessions: services.state_service(),
+                    sessions: services.read_service(),
                 },
             )))
             .await
+        {
+            tracing::warn!(?error, "session config observer failed");
+        }
     }
 }
 
@@ -782,14 +782,7 @@ impl LashRuntime {
             self.refresh_session_graph_from_store()
                 .await
                 .map_err(runtime_error_from_session_command_refresh)?;
-            self.notify_session_config_changed(previous_policy)
-                .await
-                .map_err(|error| {
-                    RuntimeError::new(
-                        RuntimeErrorCode::SessionCommandPostShiftRefresh,
-                        error.to_string(),
-                    )
-                })?;
+            self.notify_session_config_changed(previous_policy).await;
             // The refresh adopts the durable head, which already carries
             // this command's committed values — or newer ones from a
             // later writer (head-authoritative adoption, FIG-1875). Every

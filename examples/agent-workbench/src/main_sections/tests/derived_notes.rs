@@ -79,8 +79,8 @@ async fn derived_notes_survive_an_advanced_head_and_are_dropped_by_a_rewind_inne
     // The head moves on while the first note is in flight. The note is still
     // true of the prefix it read, so it must be kept.
     run_derived_notes_turn(&session, "second question").await;
-    // The write-back lands after the turn's own commit, so read it back the
-    // way a restarted host would: from durable storage.
+    // The execution hook's write-back lands with the turn's commit, so read
+    // it back the way a restarted host would: from durable storage.
     session.close().await.expect("close the annotated session");
     let session = crate::created_session(&core, "workbench-derived-notes")
         .await
@@ -132,11 +132,16 @@ async fn derived_notes_survive_an_advanced_head_and_are_dropped_by_a_rewind_inne
         "the second turn's nodes must sit between the base and the note, with \
          nothing lost or reordered: {active_path:?}"
     );
-    // The base of the note now in flight: the head the second turn committed.
-    let second_leaf = note
-        .parent_node_id
+    // Hold a derivation of the committed second turn while the host rewinds.
+    let snapshot = session.admin().state().export().await;
+    let second_leaf = snapshot
+        .session_graph
+        .leaf_node_id
         .clone()
-        .expect("the note has a parent leaf");
+        .expect("the second turn's leaf");
+    notes.derive_note(&lash::persistence::SessionReadView::from_snapshot(
+        &snapshot,
+    ));
     session.close().await.expect("close the annotated session");
 
     // An operator rewinds the conversation to the first turn. Under ADR 0047

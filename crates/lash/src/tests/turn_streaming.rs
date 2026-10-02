@@ -47,15 +47,15 @@ impl lash_core::facade_support::SessionPlugin for QueuedWorkHydrationProbePlugin
 }
 
 #[cfg(feature = "rlm")]
-struct TurnPersistedGraphAppendFactory {
-    append_count: Arc<AtomicUsize>,
-    max_appends: usize,
+struct TurnPersistedObserverFactory {
+    observation_count: Arc<AtomicUsize>,
+    max_failures: usize,
 }
 
 #[cfg(feature = "rlm")]
-impl lash_core::facade_support::PluginFactory for TurnPersistedGraphAppendFactory {
+impl lash_core::facade_support::PluginFactory for TurnPersistedObserverFactory {
     fn id(&self) -> &'static str {
-        "turn-persisted-graph-append"
+        "turn-persisted-observer"
     }
 
     fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
@@ -69,17 +69,17 @@ impl lash_core::facade_support::PluginFactory for TurnPersistedGraphAppendFactor
         Arc<dyn lash_core::facade_support::SessionPlugin>,
         lash_core::PluginError,
     > {
-        Ok(Arc::new(TurnPersistedGraphAppendPlugin {
-            append_count: Arc::clone(&self.append_count),
-            max_appends: self.max_appends,
+        Ok(Arc::new(TurnPersistedObserverPlugin {
+            observation_count: Arc::clone(&self.observation_count),
+            max_failures: self.max_failures,
         }))
     }
 }
 
 #[cfg(feature = "rlm")]
-struct TurnPersistedGraphAppendPlugin {
-    append_count: Arc<AtomicUsize>,
-    max_appends: usize,
+struct TurnPersistedObserverPlugin {
+    observation_count: Arc<AtomicUsize>,
+    max_failures: usize,
 }
 
 #[cfg(feature = "rlm")]
@@ -155,46 +155,35 @@ impl lash_core::ToolProvider for FrameStateDeferredTools {
 }
 
 #[cfg(feature = "rlm")]
-impl lash_core::facade_support::SessionPlugin for TurnPersistedGraphAppendPlugin {
+impl lash_core::facade_support::SessionPlugin for TurnPersistedObserverPlugin {
     fn id(&self) -> &'static str {
-        "turn-persisted-graph-append"
+        "turn-persisted-observer"
     }
 
     fn register(
         &self,
         reg: &mut lash_core::facade_support::PluginRegistrar,
     ) -> std::result::Result<(), lash_core::PluginError> {
-        let append_count = Arc::clone(&self.append_count);
-        let max_appends = self.max_appends;
+        let observation_count = Arc::clone(&self.observation_count);
+        let max_failures = self.max_failures;
         reg.session().on_event(Arc::new(move |event| {
-            let append_count = Arc::clone(&append_count);
+            let observation_count = Arc::clone(&observation_count);
             Box::pin(async move {
                 let lash_core::facade_support::PluginLifecycleEvent::TurnPersisted(ctx) = event
                 else {
                     return Ok(());
                 };
-                let Ok(append_index) =
-                    append_count.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
-                        (current < max_appends).then_some(current + 1)
+                let Ok(_observation_index) =
+                    observation_count.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                        (current < max_failures).then_some(current + 1)
                     })
                 else {
                     return Ok(());
                 };
-                let _ = ctx
-                    .session_graph
-                    .append_session_nodes(
-                        &ctx.session_id,
-                        lash_core::AppendSessionNodesRequest {
-                            operation_id: format!("turn-persisted-graph-append-{append_index}"),
-                            nodes: vec![lash_core::SessionAppendNode::plugin(
-                                "test.turn-persisted",
-                                serde_json::json!({ "committed": true }),
-                            )],
-                            requires_ancestor_node_id: None,
-                        },
-                    )
-                    .await;
-                Ok(())
+                assert_eq!(ctx.state.session_id(), &ctx.session_id);
+                Err(lash_core::PluginError::Session(
+                    "observer sink unavailable".into(),
+                ))
             })
         }));
         Ok(())

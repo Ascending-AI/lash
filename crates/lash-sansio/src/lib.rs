@@ -131,7 +131,10 @@ pub use llm::capability::{
     ReasoningCapability, ReasoningEncoding, ReasoningIntent, ReasoningSelection,
 };
 pub use llm::types::{LlmTerminalReason, ProviderFailureKind};
-pub use plugin::{CheckpointKind, PluginMessage, PluginRuntimeEvent};
+pub use plugin::{
+    CheckpointKind, PluginFailureClass, PluginFailureOrigin, PluginHookFailure, PluginMessage,
+    PluginOperationFailure, PluginRuntimeEvent,
+};
 pub use process_cursor::{
     PROCESS_CURSOR_UNROUTED_EPOCH, PROCESS_CURSOR_VERSION, ProcessCursor, ProcessCursorError,
     ProcessCursorReference,

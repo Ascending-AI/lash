@@ -310,14 +310,16 @@ impl LashRuntime {
         } else {
             state.discard_runtime_snapshots_retaining_accepted_execution();
         }
-        session
+        if let Err(error) = session
             .plugins()
             .dispatch(None)
             .emit_runtime_event(crate::PluginLifecycleEvent::SessionRestored(
                 crate::SessionReadView::from_persisted_state(&state),
             ))
             .await
-            .map_err(|err| SessionError::Protocol(err.to_string()))?;
+        {
+            tracing::warn!(?error, "session restore observer failed");
+        }
         let resident_session = ResidentSessionContinuity::fresh();
         Ok(Self {
             session: Some(session),

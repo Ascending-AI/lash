@@ -1426,6 +1426,8 @@ impl RuntimeError {
             | RuntimeErrorCause::PluginStateEffectReplayMismatch { .. }
             | RuntimeErrorCause::PluginExecution { .. }
             | RuntimeErrorCause::PluginFormat { .. }
+            | RuntimeErrorCause::PluginOperation { .. }
+            | RuntimeErrorCause::PluginHooks { .. }
             | RuntimeErrorCause::ProcessParentEnded { .. }
             | RuntimeErrorCause::ProcessStartKeyConflict { .. }
             | RuntimeErrorCause::SchemaRefused { .. }
@@ -1436,6 +1438,13 @@ impl RuntimeError {
 
     /// Whether retrying this exact failure is explicitly safe.
     pub fn is_retryable(&self) -> bool {
+        if let Some(class) = self
+            .cause
+            .as_ref()
+            .and_then(RuntimeErrorCause::plugin_failure_class)
+        {
+            return class == lash_sansio::PluginFailureClass::Retryable;
+        }
         !self.has_terminal_cause() && self.code.is_retryable()
     }
 
@@ -1453,6 +1462,13 @@ impl RuntimeError {
 
     /// Whether retrying cannot succeed without a host-side change.
     pub fn is_terminal(&self) -> bool {
+        if let Some(class) = self
+            .cause
+            .as_ref()
+            .and_then(RuntimeErrorCause::plugin_failure_class)
+        {
+            return class == lash_sansio::PluginFailureClass::Terminal;
+        }
         self.has_terminal_cause()
             || match self.foreign_cause {
                 Some(cause) => cause == TurnFailureCause::Outcome,
@@ -1463,6 +1479,17 @@ impl RuntimeError {
     /// The cause class of a turn this error fails (FIG-3575): an outcome
     /// exactly when the error is terminal.
     pub fn turn_failure_cause(&self) -> TurnFailureCause {
+        if let Some(class) = self
+            .cause
+            .as_ref()
+            .and_then(RuntimeErrorCause::plugin_failure_class)
+        {
+            return match class {
+                lash_sansio::PluginFailureClass::Terminal => TurnFailureCause::Outcome,
+                lash_sansio::PluginFailureClass::Parked => TurnFailureCause::Parked,
+                _ => TurnFailureCause::LiveFault,
+            };
+        }
         if self.is_terminal() {
             TurnFailureCause::Outcome
         } else if self.foreign_cause.is_none() && self.code.parks_turn() {
@@ -1757,6 +1784,13 @@ impl RuntimeEffectControllerError {
     /// cause, a foreign code its host minted as an outcome, or a terminal
     /// code.
     pub fn is_terminal(&self) -> bool {
+        if let Some(class) = self
+            .cause
+            .as_ref()
+            .and_then(RuntimeErrorCause::plugin_failure_class)
+        {
+            return class == lash_sansio::PluginFailureClass::Terminal;
+        }
         self.has_terminal_cause()
             || match self.foreign_cause {
                 Some(cause) => cause == TurnFailureCause::Outcome,
@@ -1773,6 +1807,17 @@ impl RuntimeEffectControllerError {
     pub fn turn_failure_cause(&self) -> TurnFailureCause {
         if self.journaled || self.has_terminal_cause() {
             return TurnFailureCause::Outcome;
+        }
+        if let Some(class) = self
+            .cause
+            .as_ref()
+            .and_then(RuntimeErrorCause::plugin_failure_class)
+        {
+            return match class {
+                lash_sansio::PluginFailureClass::Terminal => TurnFailureCause::Outcome,
+                lash_sansio::PluginFailureClass::Parked => TurnFailureCause::Parked,
+                _ => TurnFailureCause::LiveFault,
+            };
         }
         match self.foreign_cause {
             Some(cause) => cause,

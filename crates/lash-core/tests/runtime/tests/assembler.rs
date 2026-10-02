@@ -573,6 +573,7 @@ fn output_state_recovered_from_error() {
         raw: None,
         retryable: None,
         provider_failure_kind: None,
+        plugin_failures: Vec::new(),
     }];
     assert_eq!(
         classify_output_state("raw", "usable", &issues),
@@ -665,6 +666,7 @@ fn producer_severity_controls_completion_independently_of_issue_code() {
             raw: None,
             retryable: None,
             provider_failure_kind: None,
+            plugin_failures: Vec::new(),
         };
         let out = assembler.finish(
             default_state().to_snapshot(),

@@ -39,14 +39,16 @@ mod trigger_registry;
 pub(crate) use actions::{
     ErasedPluginOperationInvokeFuture, PluginCommandHandler, PluginOperationContext,
     PluginOperationRegistration, PluginQueryHandler, PluginQueryInvokeFuture, PluginTaskHandler,
-    RegisteredPluginOperation, plugin_operation_spec,
+    RegisteredPluginOperation, declared_operation_failure, operation_protocol_failure,
+    plugin_operation_spec,
 };
 pub(crate) use actions::{ErasedPluginOperationOutcome, PluginOperationSpec};
 pub use actions::{
-    PluginCommand, PluginCommandContext, PluginOperation, PluginOperationDef,
-    PluginOperationFailure, PluginOperationFuture, PluginOperationKind, PluginOperationOutcome,
-    PluginOperationReceipt, PluginQuery, PluginQueryContext, PluginRuntimeDirective, PluginTask,
-    PluginTaskContext, ProcessReadService, SessionParam, SessionReadService,
+    PluginCommand, PluginCommandContext, PluginFailureClass, PluginFailureOrigin,
+    PluginHookFailure, PluginOperation, PluginOperationDef, PluginOperationFailure,
+    PluginOperationFuture, PluginOperationKind, PluginOperationOutcome, PluginOperationReceipt,
+    PluginQuery, PluginQueryContext, PluginRuntimeDirective, PluginTask, PluginTaskContext,
+    ProcessReadService, SessionParam, SessionReadService,
 };
 pub use config::{
     AdmittedPluginConfig, CandidateFacts, ConfigCommand, ConfigCommandCatalog,
@@ -176,12 +178,177 @@ mod tests {
 
     struct TypedEchoOp;
 
+    #[tokio::test]
+    async fn plugin_boundary_fanout_keeps_all_typed_causes() {
+        let factories: Vec<Arc<dyn PluginFactory>> = ["first", "second"]
+            .into_iter()
+            .map(|id| {
+                Arc::new(StaticPluginFactory::new(
+                    PluginDeclaration::initial(id),
+                    PluginSpec::new().with_runtime_event(Arc::new(move |_| {
+                        Box::pin(async move {
+                            if id == "first" {
+                                tokio::task::yield_now().await;
+                            }
+                            let error = PluginError::StoredDataCorrupt {
+                                record_kind: id.into(),
+                                message: "broken record".into(),
+                            };
+                            if id == "first" {
+                                let mut failure = PluginOperationFailure::from(error);
+                                failure.origin = Some(PluginFailureOrigin {
+                                    plugin_id: "original-owner".into(),
+                                    behavior_revision: std::num::NonZeroU32::new(7).unwrap(),
+                                    operation: "original-operation".into(),
+                                });
+                                Err(PluginError::Operation(Box::new(failure)))
+                            } else {
+                                Err(error)
+                            }
+                        })
+                    })),
+                )) as Arc<dyn PluginFactory>
+            })
+            .collect();
+        let session = PluginHost::new(factories)
+            .build_session(PluginSessionRequest::creation(
+                "typed-causes",
+                Default::default(),
+            ))
+            .unwrap();
+        let error = session
+            .dispatch(None)
+            .emit_runtime_event(PluginLifecycleEvent::SessionConfigChanged(Box::new(
+                SessionConfigChangedContext {
+                    session_id: "typed-causes".into(),
+                    previous: SessionPolicy::new(
+                        crate::TurnBudget::Unbounded,
+                        crate::MaxToolCalls::new(1024),
+                    ),
+                    current: SessionPolicy::new(
+                        crate::TurnBudget::Unbounded,
+                        crate::MaxToolCalls::new(1024),
+                    ),
+                    sessions: Arc::new(NoopSessionManager),
+                },
+            )))
+            .await
+            .unwrap_err();
+        let encoded = serde_json::to_value(&error).unwrap();
+        assert_eq!(
+            encoded["message"]["causes"].as_array().map(Vec::len),
+            Some(2)
+        );
+        assert_eq!(
+            encoded["message"]["causes"][0]["failure"]["payload"]["message"]["record_kind"],
+            "first"
+        );
+        let replayed: PluginError = serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&replayed).unwrap(), encoded);
+        let durable = ToolIntentCommandFailure::from(&replayed);
+        let durable: ToolIntentCommandFailure =
+            serde_json::from_slice(&serde_json::to_vec(&durable).unwrap()).unwrap();
+        assert_eq!(serde_json::to_value(durable).unwrap(), encoded);
+        let issue = plugin_lifecycle_hook_issue(replayed.clone());
+        let issue: crate::runtime::TurnIssue =
+            serde_json::from_slice(&serde_json::to_vec(&issue).unwrap()).unwrap();
+        assert_eq!(issue.plugin_failures.len(), 2);
+        for (failure, owner) in issue.plugin_failures.iter().zip(["first", "second"]) {
+            assert_eq!(failure.error_type, "lash.plugin.hook");
+            assert_eq!(failure.origin.as_ref().unwrap().plugin_id, owner);
+            let original: PluginHookFailure =
+                serde_json::from_value(failure.payload.clone()).unwrap();
+            assert_eq!(original.origin.plugin_id, owner);
+            if owner == "first" {
+                let origin = original.failure.origin.unwrap();
+                assert_eq!(origin.plugin_id, "original-owner");
+                assert_eq!(origin.behavior_revision.get(), 7);
+                assert_eq!(origin.operation, "original-operation");
+            }
+        }
+        let runtime = replayed.into_turn_failure(crate::RuntimeErrorCode::Plugin);
+        let runtime: crate::RuntimeError =
+            serde_json::from_slice(&serde_json::to_vec(&runtime).unwrap()).unwrap();
+        let Some(crate::RuntimeErrorCause::PluginHooks { causes }) = runtime.cause else {
+            panic!("typed runtime aggregate");
+        };
+        assert_eq!(causes.len(), 2);
+        for (cause, owner) in causes.iter().zip(["first", "second"]) {
+            assert_eq!(cause.origin.plugin_id, owner);
+            assert_eq!(cause.origin.behavior_revision.get(), 1);
+            assert_eq!(cause.origin.operation, "runtime_event:0");
+            assert_eq!(cause.failure.class, PluginFailureClass::Terminal);
+            let original: PluginError =
+                serde_json::from_value(cause.failure.payload.clone()).unwrap();
+            assert!(
+                matches!(original, PluginError::StoredDataCorrupt { record_kind, .. } if record_kind == owner)
+            );
+        }
+    }
+
+    #[test]
+    fn plugin_boundary_operations_declare_error_schema() {
+        let registration = PluginOperationRegistration::query(
+            plugin_operation_spec::<TypedEchoOp>(),
+            Arc::new(|_, args| Box::pin(async move { Ok(args) })),
+        );
+        let encoded = serde_json::to_value(registration.def()).unwrap();
+        assert!(encoded["error_schema"].is_object());
+        assert!(encoded["error_type"].is_string());
+        assert!(encoded["error_version"].as_u64().is_some());
+    }
+
+    #[test]
+    fn plugin_boundary_observer_contexts_only_offer_reads() {
+        let syntax = syn::parse_file(include_str!("hooks.rs")).unwrap();
+        for name in ["SessionStateChangedContext", "SessionConfigChangedContext"] {
+            let fields = syntax
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    syn::Item::Struct(item) if item.ident == name => Some(&item.fields),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(
+                fields.iter().all(|field| {
+                    !matches!(
+                        field.ident.as_ref().map(ToString::to_string).as_deref(),
+                        Some("session_graph" | "direct_completions")
+                    )
+                }),
+                "observer {name} exposes execution services"
+            );
+            let session_field = fields
+                .iter()
+                .find(|field| field.ident.as_ref().is_some_and(|id| id == "sessions"))
+                .unwrap();
+            assert!(
+                matches!(&session_field.ty, syn::Type::Path(path)
+                if path.path.segments.last().is_some_and(|segment| matches!(
+                    &segment.arguments, syn::PathArguments::AngleBracketed(args)
+                    if args.args.iter().any(|arg| matches!(arg,
+                        syn::GenericArgument::Type(syn::Type::TraitObject(object))
+                        if object.bounds.iter().any(|bound| matches!(bound,
+                            syn::TypeParamBound::Trait(trait_bound)
+                            if trait_bound.path.is_ident("SessionReadService")))))))),
+                "observer {name} exposes session mutation"
+            );
+        }
+    }
+
     impl PluginOperation for TypedEchoOp {
         const NAME: &'static str = "mock.typed_echo";
         const DESCRIPTION: &'static str = "typed echo";
         const SESSION_PARAM: SessionParam = SessionParam::Optional;
         type Args = TypedEchoArgs;
         type Output = TypedEchoOutput;
+        type Error = String;
+        const ERROR_TYPE: &'static str = Self::NAME;
+        const ERROR_VERSION: crate::FormatVersion = crate::FormatVersion::ONE;
+        fn error_class(_: &Self::Error) -> lash_sansio::PluginFailureClass {
+            lash_sansio::PluginFailureClass::Terminal
+        }
     }
 
     impl PluginQuery for TypedEchoOp {}
@@ -353,6 +520,9 @@ mod tests {
                     session_param: SessionParam::Optional,
                     input_schema: json!({}),
                     output_schema: json!({}),
+                    error_type: "test.operation".into(),
+                    error_version: crate::FormatVersion::ONE,
+                    error_schema: json!({"type": "object"}),
                 },
                 Arc::new(move |ctx, args| {
                     let session_id = session_id.clone();
@@ -643,6 +813,9 @@ mod tests {
             session_param: SessionParam::Forbidden,
             input_schema: json!({}),
             output_schema: json!({}),
+            error_type: "test.operation".into(),
+            error_version: crate::FormatVersion::ONE,
+            error_schema: json!({"type": "object"}),
         }
     }
 
@@ -718,6 +891,12 @@ mod tests {
             const SESSION_PARAM: SessionParam = SessionParam::Optional;
             type Args = TypedEchoArgs;
             type Output = TypedEchoOutput;
+            type Error = String;
+            const ERROR_TYPE: &'static str = Self::NAME;
+            const ERROR_VERSION: crate::FormatVersion = crate::FormatVersion::ONE;
+            fn error_class(_: &Self::Error) -> lash_sansio::PluginFailureClass {
+                lash_sansio::PluginFailureClass::Terminal
+            }
         }
         impl PluginTask for EchoTaskOp {}
 
@@ -787,6 +966,12 @@ mod tests {
             const SESSION_PARAM: SessionParam = SessionParam::Optional;
             type Args = TypedEchoArgs;
             type Output = TypedEchoOutput;
+            type Error = String;
+            const ERROR_TYPE: &'static str = Self::NAME;
+            const ERROR_VERSION: crate::FormatVersion = crate::FormatVersion::ONE;
+            fn error_class(_: &Self::Error) -> lash_sansio::PluginFailureClass {
+                lash_sansio::PluginFailureClass::Terminal
+            }
         }
         impl PluginQuery for BadOp {}
 

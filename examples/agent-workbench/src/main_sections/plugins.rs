@@ -149,17 +149,37 @@ impl SessionPlugin for WorkbenchSessionPlugin {
         reg.context()
             .prepare_turn(0, Arc::new(self.context_budget.clone()));
         let derived_notes = self.derived_notes.clone();
-        let config_changes = self.config_changes.clone();
-        reg.session().on_event(Arc::new(move |event| {
+        reg.turn().before(Arc::new(move |ctx| {
             let derived_notes = derived_notes.clone();
+            Box::pin(async move {
+                if ctx.state.turn_index() > 0 {
+                    derived_notes.derive_note(&ctx.state);
+                }
+                Ok(Vec::new())
+            })
+        }));
+        let derived_notes = self.derived_notes.clone();
+        reg.turn().after(Arc::new(move |ctx| {
+            let derived_notes = derived_notes.clone();
+            Box::pin(async move {
+                for note in derived_notes.take_pending() {
+                    derived_notes.write_back(&ctx, note).await;
+                }
+                Ok(Vec::new())
+            })
+        }));
+        let config_changes = self.config_changes.clone();
+        let derived_notes = self.derived_notes.clone();
+        reg.session().on_event(Arc::new(move |event| {
             let config_changes = config_changes.clone();
+            let derived_notes = derived_notes.clone();
             Box::pin(async move {
                 match event {
-                    lash::plugins::PluginLifecycleEvent::TurnPersisted(ctx) => {
-                        derived_notes.on_turn_persisted(&ctx).await;
-                    }
                     lash::plugins::PluginLifecycleEvent::SessionConfigChanged(ctx) => {
                         config_changes.observe(&ctx).await?;
+                    }
+                    lash::plugins::PluginLifecycleEvent::TurnPersisted(ctx) => {
+                        derived_notes.observe_committed(&ctx.state);
                     }
                     _ => {}
                 }
@@ -339,28 +359,21 @@ pub(crate) enum WorkbenchSettledNote {
 }
 
 impl WorkbenchDerivedNotes {
-    pub(crate) async fn on_turn_persisted(
-        &self,
-        ctx: &lash::plugins::SessionStateChangedContext<'_>,
-    ) {
-        for note in self.take_pending() {
-            self.write_back(ctx, note).await;
-        }
-        if let Some(base_node_id) = ctx.state.session_graph().leaf_node_id.clone() {
-            let summary = workbench_note_summary(&ctx.state);
-            self.inner
-                .pending
-                .lock_recover()
-                .push(WorkbenchPendingNote {
-                    base_node_id: base_node_id.to_string(),
-                    summary,
-                });
+    pub(crate) fn derive_note(&self, state: &lash::persistence::SessionReadView) {
+        let mut pending = self.inner.pending.lock_recover();
+        if pending.is_empty()
+            && let Some(base_node_id) = state.session_graph().leaf_node_id.clone()
+        {
+            pending.push(WorkbenchPendingNote {
+                base_node_id: base_node_id.to_string(),
+                summary: workbench_note_summary(state),
+            });
         }
     }
 
     pub(crate) async fn write_back(
         &self,
-        ctx: &lash::plugins::SessionStateChangedContext<'_>,
+        ctx: &lash::plugins::TurnResultHookContext,
         note: WorkbenchPendingNote,
     ) {
         let request = lash::plugins::AppendSessionNodesRequest {
@@ -422,6 +435,28 @@ impl WorkbenchDerivedNotes {
         // workbench must not accumulate one entry per turn forever.
         let overflow = log.len().saturating_sub(WORKBENCH_DERIVED_NOTE_LOG_LIMIT);
         log.drain(..overflow);
+    }
+
+    // The decision log observes committed IDs; pending execution never reads it.
+    pub(crate) fn observe_committed(&self, state: &lash::persistence::SessionReadView) {
+        for settled in self.inner.settled.lock_recover().iter_mut() {
+            if let WorkbenchSettledNote::Written {
+                base_node_id,
+                node_id,
+                leaf_node_id,
+            } = settled
+                && let Some(node) = state.session_graph().nodes.iter().find(|node| {
+                    matches!(&node.payload,
+                        lash::persistence::SessionNodePayload::Plugin { plugin_type, body }
+                        if plugin_type == WORKBENCH_DERIVED_NOTE_PLUGIN_TYPE
+                            && body.as_ref().get("derived_from_node_id").and_then(Value::as_str)
+                                == Some(base_node_id.as_str()))
+                })
+            {
+                *node_id = node.node_id.to_string();
+                *leaf_node_id = node.node_id.to_string();
+            }
+        }
     }
 
     pub(crate) fn take_pending(&self) -> Vec<WorkbenchPendingNote> {

@@ -195,7 +195,9 @@ pub enum PluginOperationCommandOutcome {
     },
     /// The operation failed: nothing of it committed, and the command is
     /// settled, so it is never applied again.
-    Failed { message: String },
+    Failed {
+        failure: Box<lash_sansio::PluginOperationFailure>,
+    },
     /// Queued input was refused at admission. The cause is retained for the
     /// submitting host, and none of the operation's inputs were admitted.
     Refused { error: Box<crate::RuntimeError> },

@@ -475,6 +475,7 @@ fn seed_turn_report_full() -> RemoteTurnReport {
         raw: None,
         retryable: Some(false),
         provider_failure_kind: Some(RemoteProviderFailureKind::Timeout),
+        plugin_failures: Vec::new(),
     }];
     report.activities = vec![
         RemoteTurnActivity {

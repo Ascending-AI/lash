@@ -135,6 +135,7 @@ impl RecordedTurnAssembly {
                         },
                         retryable: envelope.retryable,
                         provider_failure_kind: envelope.provider_failure_kind,
+                        plugin_failures: Vec::new(),
                     }
                 } else {
                     TurnIssue {
@@ -146,6 +147,7 @@ impl RecordedTurnAssembly {
                         raw: None,
                         retryable: None,
                         provider_failure_kind: None,
+                        plugin_failures: Vec::new(),
                     }
                 };
                 self.issues.push(issue);
@@ -204,6 +206,7 @@ impl RecordedTurnAssembly {
                     raw: None,
                     retryable: None,
                     provider_failure_kind: None,
+            plugin_failures: Vec::new(),
                 });
             }
             recovered
@@ -231,6 +234,7 @@ impl RecordedTurnAssembly {
                 raw: None,
                 retryable: None,
                 provider_failure_kind: None,
+                plugin_failures: Vec::new(),
             });
             TurnOutcome::Stopped(TurnStop::RuntimeError)
         } else if issues

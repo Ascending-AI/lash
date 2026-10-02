@@ -86,3 +86,55 @@ mod message_body_tests {
         assert!(serde_json::from_value::<PluginMessage>(message).is_err());
     }
 }
+
+/// How a declared plugin failure settles, independent of its display text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginFailureClass {
+    Retryable,
+    Redrivable,
+    Terminal,
+    Parked,
+}
+
+impl PluginFailureClass {
+    /// Authority loss and unavailable code take precedence over application rejection.
+    pub fn precedence(self) -> u8 {
+        match self {
+            Self::Parked => 0,
+            Self::Redrivable => 1,
+            Self::Retryable => 2,
+            Self::Terminal => 3,
+        }
+    }
+}
+
+/// The declared code that produced a failure. Lash stamps this at dispatch.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PluginFailureOrigin {
+    pub plugin_id: String,
+    pub behavior_revision: std::num::NonZeroU32,
+    pub operation: String,
+}
+
+/// A failure whose payload remains intact when its codec is unavailable.
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, thiserror::Error,
+)]
+#[error("{message}")]
+pub struct PluginOperationFailure {
+    pub error_type: String,
+    pub error_version: std::num::NonZeroU32,
+    pub payload: serde_json::Value,
+    pub class: PluginFailureClass,
+    pub code: crate::FailureCode,
+    pub message: String,
+    pub origin: Option<PluginFailureOrigin>,
+}
+
+/// One failed callback in registration order, including its original typed payload.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PluginHookFailure {
+    pub origin: PluginFailureOrigin,
+    pub failure: PluginOperationFailure,
+}

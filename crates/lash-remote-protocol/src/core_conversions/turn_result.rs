@@ -407,6 +407,7 @@ impl From<lash_core::facade_support::TurnIssue> for RemoteTurnIssue {
             raw,
             retryable,
             provider_failure_kind,
+            plugin_failures,
         } = value;
         Self {
             severity: severity.into(),
@@ -417,6 +418,7 @@ impl From<lash_core::facade_support::TurnIssue> for RemoteTurnIssue {
             raw,
             retryable,
             provider_failure_kind: provider_failure_kind.map(Into::into),
+            plugin_failures,
         }
     }
 }

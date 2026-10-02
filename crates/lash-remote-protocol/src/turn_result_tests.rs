@@ -130,6 +130,7 @@ fn issue_severity_is_required_and_has_pinned_wire_values() {
             raw: None,
             retryable: None,
             provider_failure_kind: None,
+            plugin_failures: Vec::new(),
         };
         let mut wire = serde_json::to_value(&issue).unwrap();
         assert_eq!(
@@ -266,6 +267,7 @@ fn turn_issue_failure_vocabulary_is_typed_and_wire_stable() {
             raw: None,
             retryable: None,
             provider_failure_kind: None,
+            plugin_failures: Vec::new(),
         };
         let wire = serde_json::to_value(&issue).expect("serialize issue");
         assert_eq!(wire["kind"], serde_json::json!(kind_wire));

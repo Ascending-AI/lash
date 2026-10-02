@@ -45,6 +45,8 @@ plugin_error_samples! {
         terminal_reason: crate::LlmTerminalReason::ProviderError,
         message: "host spend cap reached".into(),
     },
+    Operation(_) => PluginError::Operation(Box::new(super::operation_protocol_failure("rejected"))),
+    HookFailures { .. } => PluginError::HookFailures { causes: Vec::new() },
     UnusableSchema { .. } => PluginError::UnusableSchema {
         source: Box::new(crate::JsonSchema::admit(serde_json::Value::Null)
             .expect_err("null cannot be admitted as a schema")),
@@ -285,6 +287,26 @@ fn samples() -> Vec<PluginError> {
             actual: 2,
         },
     ));
+    for class in [
+        super::PluginFailureClass::Retryable,
+        super::PluginFailureClass::Redrivable,
+        super::PluginFailureClass::Terminal,
+        super::PluginFailureClass::Parked,
+    ] {
+        let mut failure = super::operation_protocol_failure("same diagnostic");
+        failure.class = class;
+        samples.push(PluginError::Operation(Box::new(failure.clone())));
+        samples.push(PluginError::HookFailures {
+            causes: vec![super::PluginHookFailure {
+                origin: super::PluginFailureOrigin {
+                    plugin_id: "sample".into(),
+                    behavior_revision: std::num::NonZeroU32::MIN,
+                    operation: "hook".into(),
+                },
+                failure,
+            }],
+        });
+    }
     samples.extend(
         crate::StoreError::samples_for_testing()
             .into_iter()
@@ -322,10 +344,46 @@ fn postures(error: &PluginError) -> [(&'static str, (bool, bool)); 4] {
 fn every_plugin_error_has_one_class_on_every_boundary() {
     let mut disagreements = Vec::new();
     for error in samples() {
+        let envelope = super::PluginOperationFailure::from(error.clone());
+        let decoded: super::PluginOperationFailure = serde_json::from_slice(
+            &serde_json::to_vec(&envelope).expect("encode failure envelope"),
+        )
+        .expect("decode failure envelope");
+        assert_eq!(decoded, envelope);
+        if !matches!(error, PluginError::Operation(_)) {
+            assert_eq!(
+                decoded.payload,
+                serde_json::to_value(&error).expect("encode original cause")
+            );
+        }
         let replayed: PluginError =
             serde_json::from_slice(&serde_json::to_vec(&error).expect("encode plugin journal"))
                 .expect("replay plugin journal");
         for error in [error, replayed] {
+            if let PluginError::ProviderFailure {
+                kind,
+                code,
+                retryable,
+                terminal_reason,
+                ..
+            } = &error
+            {
+                let runtime =
+                    RuntimeEffectControllerError::from(error.clone()).into_runtime_error();
+                let recorded: crate::RuntimeError = serde_json::from_slice(
+                    &serde_json::to_vec(&runtime).expect("encode provider cause"),
+                )
+                .expect("replay provider cause");
+                assert_eq!(
+                    recorded.cause,
+                    Some(crate::RuntimeErrorCause::ProviderFailure {
+                        failure_kind: *kind,
+                        code: code.clone(),
+                        retryable: *retryable,
+                        terminal_reason: *terminal_reason,
+                    })
+                );
+            }
             let postures = postures(&error);
             if postures
                 .iter()

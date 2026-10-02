@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::*;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, thiserror::Error, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum PluginOperationInvokeError {
     #[error("unknown plugin operation `{0}`")]
@@ -14,9 +14,65 @@ pub enum PluginOperationInvokeError {
     #[error("plugin operation `{0}` does not accept a session")]
     UnexpectedSession(String),
     #[error("plugin operation failed: {0}")]
-    Failed(String),
+    Failed(Box<PluginOperationFailure>),
+    #[error(transparent)]
+    Runtime(Box<crate::RuntimeError>),
     #[error("plugin input admission refused: {0}")]
     AdmissionRefused(Box<crate::RuntimeError>),
+}
+
+impl PluginOperationInvokeError {
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::Failed(failure) => failure.class == PluginFailureClass::Retryable,
+            Self::Runtime(error) | Self::AdmissionRefused(error) => error.is_retryable(),
+            _ => false,
+        }
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        match self {
+            Self::Failed(failure) => failure.class == PluginFailureClass::Terminal,
+            Self::Runtime(error) | Self::AdmissionRefused(error) => error.is_terminal(),
+            _ => true,
+        }
+    }
+
+    pub fn into_runtime_error(self) -> crate::RuntimeError {
+        match self {
+            Self::Runtime(error) | Self::AdmissionRefused(error) => *error,
+            error => PluginError::Operation(Box::new(error.into_failure()))
+                .into_turn_failure(crate::RuntimeErrorCode::Plugin),
+        }
+    }
+
+    pub fn protocol(message: impl Into<String>) -> Self {
+        Self::Failed(Box::new(super::operation_protocol_failure(message)))
+    }
+
+    pub fn into_failure(self) -> PluginOperationFailure {
+        match self {
+            Self::Failed(failure) => *failure,
+            Self::Runtime(error) | Self::AdmissionRefused(error) => {
+                super::error::runtime_operation_failure(*error)
+            }
+            error => {
+                let message = error.to_string();
+                match serde_json::to_value(&error) {
+                    Ok(payload) => PluginOperationFailure {
+                        error_type: "lash.operation.invoke".into(),
+                        error_version: std::num::NonZeroU32::MIN,
+                        payload,
+                        class: PluginFailureClass::Terminal,
+                        code: crate::FailureCode::from(&crate::RuntimeErrorCode::Plugin),
+                        message,
+                        origin: None,
+                    },
+                    Err(error) => super::operation_protocol_failure(error.to_string()),
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone)]

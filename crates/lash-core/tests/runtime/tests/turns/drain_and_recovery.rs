@@ -409,6 +409,12 @@ impl lash_core::plugin::PluginOperation for TestEmitCommand {
         lash_core::facade_support::SessionParam::Optional;
     type Args = serde_json::Value;
     type Output = serde_json::Value;
+    type Error = String;
+    const ERROR_TYPE: &'static str = Self::NAME;
+    const ERROR_VERSION: lash_core::FormatVersion = lash_core::FormatVersion::ONE;
+    fn error_class(_: &Self::Error) -> lash_core::facade_support::PluginFailureClass {
+        lash_core::facade_support::PluginFailureClass::Terminal
+    }
 }
 
 impl lash_core::plugin::PluginCommand for TestEmitCommand {}

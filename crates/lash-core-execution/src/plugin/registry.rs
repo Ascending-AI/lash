@@ -11,11 +11,10 @@ use super::{
     AfterToolCallHook, AfterTurnHook, AssistantResponseHook, AssistantStreamFinishedHook,
     AssistantStreamHook, BeforeToolCallHook, BeforeTurnHook, CheckpointHook, ContextCompactor,
     ContextPressureHook, ErasedPluginOperationInvokeFuture, PluginCommand, PluginCommandHandler,
-    PluginError, PluginHost, PluginLifecycleEventHook, PluginOperationFailure,
-    PluginOperationOutcome, PluginOperationRegistration, PluginOperationSpec, PluginQuery,
-    PluginQueryHandler, PluginQueryInvokeFuture, PluginRegistrar, PluginTask, PluginTaskHandler,
-    SessionToolAccess, SubagentSessionContext, ToolCatalogContributor, ToolPresentationStep,
-    TurnContextTransform,
+    PluginError, PluginHost, PluginLifecycleEventHook, PluginOperationOutcome,
+    PluginOperationRegistration, PluginOperationSpec, PluginQuery, PluginQueryHandler,
+    PluginQueryInvokeFuture, PluginRegistrar, PluginTask, PluginTaskHandler, SessionToolAccess,
+    SubagentSessionContext, ToolCatalogContributor, ToolPresentationStep, TurnContextTransform,
 };
 use crate::ToolProvider;
 
@@ -195,9 +194,7 @@ impl PluginSpec {
     where
         Op: PluginQuery,
         F: Fn(super::PluginQueryContext, Op::Args) -> Fut + Send + Sync + 'static,
-        Fut: std::future::Future<Output = Result<Op::Output, PluginOperationFailure>>
-            + Send
-            + 'static,
+        Fut: std::future::Future<Output = Result<Op::Output, Op::Error>> + Send + 'static,
     {
         self.with_plugin_query(
             super::plugin_operation_spec::<Op>(),
@@ -207,9 +204,10 @@ impl PluginSpec {
                     Ok(args) => {
                         let fut = handler(ctx, args);
                         Box::pin(async move {
-                            let output = fut.await?;
+                            let output =
+                                fut.await.map_err(super::declared_operation_failure::<Op>)?;
                             serde_json::to_value(output).map_err(|err| {
-                                PluginOperationFailure::new(format!(
+                                super::operation_protocol_failure(format!(
                                     "failed to serialize {} output: {err}",
                                     Op::NAME
                                 ))
@@ -217,7 +215,7 @@ impl PluginSpec {
                         }) as PluginQueryInvokeFuture
                     }
                     Err(err) => Box::pin(async move {
-                        Err(PluginOperationFailure::new(format!(
+                        Err(super::operation_protocol_failure(format!(
                             "invalid {} args: {err}",
                             Op::NAME
                         )))
@@ -241,9 +239,8 @@ impl PluginSpec {
     where
         Op: PluginCommand,
         F: Fn(super::PluginCommandContext, Op::Args) -> Fut + Send + Sync + 'static,
-        Fut: std::future::Future<
-                Output = Result<PluginOperationOutcome<Op::Output>, PluginOperationFailure>,
-            > + Send
+        Fut: std::future::Future<Output = Result<PluginOperationOutcome<Op::Output>, Op::Error>>
+            + Send
             + 'static,
     {
         self.with_plugin_command(
@@ -254,9 +251,10 @@ impl PluginSpec {
                     Ok(args) => {
                         let fut = handler(ctx, args);
                         Box::pin(async move {
-                            let outcome = fut.await?;
+                            let outcome =
+                                fut.await.map_err(super::declared_operation_failure::<Op>)?;
                             let output = serde_json::to_value(outcome.output).map_err(|err| {
-                                PluginOperationFailure::new(format!(
+                                super::operation_protocol_failure(format!(
                                     "failed to serialize {} output: {err}",
                                     Op::NAME
                                 ))
@@ -269,7 +267,7 @@ impl PluginSpec {
                         }) as ErasedPluginOperationInvokeFuture
                     }
                     Err(err) => Box::pin(async move {
-                        Err(PluginOperationFailure::new(format!(
+                        Err(super::operation_protocol_failure(format!(
                             "invalid {} args: {err}",
                             Op::NAME
                         )))
@@ -283,9 +281,7 @@ impl PluginSpec {
     where
         Op: PluginCommand,
         F: Fn(super::PluginCommandContext, Op::Args) -> Fut + Send + Sync + 'static,
-        Fut: std::future::Future<Output = Result<Op::Output, PluginOperationFailure>>
-            + Send
-            + 'static,
+        Fut: std::future::Future<Output = Result<Op::Output, Op::Error>> + Send + 'static,
     {
         self.with_plugin_command_typed::<Op, _, _>(move |ctx, args| {
             let fut = handler(ctx, args);
@@ -307,9 +303,8 @@ impl PluginSpec {
     where
         Op: PluginTask,
         F: Fn(super::PluginTaskContext, Op::Args) -> Fut + Send + Sync + 'static,
-        Fut: std::future::Future<
-                Output = Result<PluginOperationOutcome<Op::Output>, PluginOperationFailure>,
-            > + Send
+        Fut: std::future::Future<Output = Result<PluginOperationOutcome<Op::Output>, Op::Error>>
+            + Send
             + 'static,
     {
         self.with_plugin_task(
@@ -320,9 +315,10 @@ impl PluginSpec {
                     Ok(args) => {
                         let fut = handler(ctx, args);
                         Box::pin(async move {
-                            let outcome = fut.await?;
+                            let outcome =
+                                fut.await.map_err(super::declared_operation_failure::<Op>)?;
                             let output = serde_json::to_value(outcome.output).map_err(|err| {
-                                PluginOperationFailure::new(format!(
+                                super::operation_protocol_failure(format!(
                                     "failed to serialize {} output: {err}",
                                     Op::NAME
                                 ))
@@ -335,7 +331,7 @@ impl PluginSpec {
                         }) as ErasedPluginOperationInvokeFuture
                     }
                     Err(err) => Box::pin(async move {
-                        Err(PluginOperationFailure::new(format!(
+                        Err(super::operation_protocol_failure(format!(
                             "invalid {} args: {err}",
                             Op::NAME
                         )))
@@ -349,9 +345,7 @@ impl PluginSpec {
     where
         Op: PluginTask,
         F: Fn(super::PluginTaskContext, Op::Args) -> Fut + Send + Sync + 'static,
-        Fut: std::future::Future<Output = Result<Op::Output, PluginOperationFailure>>
-            + Send
-            + 'static,
+        Fut: std::future::Future<Output = Result<Op::Output, Op::Error>> + Send + 'static,
     {
         self.with_plugin_task_typed::<Op, _, _>(move |ctx, args| {
             let fut = handler(ctx, args);

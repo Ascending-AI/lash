@@ -285,7 +285,7 @@ impl LashRuntime {
     ) -> Result<(String, serde_json::Value), PluginOperationInvokeError> {
         self.reload_invalidated_resident_session_state()
             .await
-            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+            .map_err(|err| PluginOperationInvokeError::Runtime(Box::new(err)))?;
         let manager = self.runtime_session_services()?;
         let Some(session) = self.session.as_ref() else {
             return Err(PluginOperationInvokeError::Unknown(
@@ -320,7 +320,7 @@ impl LashRuntime {
         session_id: Option<SessionId>,
     ) -> Result<crate::PluginOperationReceipt<serde_json::Value>, PluginOperationInvokeError> {
         self.refuse_store_backed_host_write("run_plugin_command")
-            .map_err(|err| PluginOperationInvokeError::Failed(err.to_string()))?;
+            .map_err(|err| PluginOperationInvokeError::Runtime(Box::new(err)))?;
         let manager = self.runtime_session_services()?;
         let Some(session) = self.session.as_ref() else {
             return Err(PluginOperationInvokeError::Unknown(
@@ -365,7 +365,7 @@ impl LashRuntime {
         cancellation_token: tokio_util::sync::CancellationToken,
     ) -> Result<crate::PluginOperationReceipt<serde_json::Value>, PluginOperationInvokeError> {
         self.refuse_store_backed_host_write("run_plugin_task")
-            .map_err(|err| PluginOperationInvokeError::Failed(err.to_string()))?;
+            .map_err(|err| PluginOperationInvokeError::Runtime(Box::new(err)))?;
         let manager = self.runtime_session_services()?;
         let Some(session) = self.session.as_ref() else {
             return Err(PluginOperationInvokeError::Unknown(
@@ -410,7 +410,7 @@ impl LashRuntime {
     ) -> Result<Vec<crate::PluginOwned<crate::PluginRuntimeEvent>>, PluginOperationInvokeError>
     {
         if !directives.is_empty() {
-            return Err(PluginOperationInvokeError::Failed(
+            return Err(PluginOperationInvokeError::protocol(
                 "a storeless runtime has no durable queue to queue a plugin's turn on".to_string(),
             ));
         }
@@ -428,7 +428,7 @@ impl LashRuntime {
                     crate::plugin_runtime_protocol_event(&owned.plugin_id, owned.value.clone())
                         .map(crate::SessionAppendNode::protocol_event)
                         .map_err(|err| {
-                            PluginOperationInvokeError::Failed(format!(
+                            PluginOperationInvokeError::protocol(format!(
                                 "failed to encode plugin runtime event: {err}"
                             ))
                         })
@@ -440,7 +440,7 @@ impl LashRuntime {
                 "append-plugin-runtime-events",
             );
             let draft_namespace = operation.storage_key().map_err(|err| {
-                PluginOperationInvokeError::Failed(format!(
+                PluginOperationInvokeError::protocol(format!(
                     "failed to encode plugin runtime event identity: {err}"
                 ))
             })?;
@@ -452,7 +452,7 @@ impl LashRuntime {
             );
         }
         self.stamp_live_plugin_state()
-            .map_err(|error| PluginOperationInvokeError::Failed(error.to_string()))?;
+            .map_err(|error| PluginOperationInvokeError::Failed(Box::new(error.into())))?;
         Ok(owned_events)
     }
 }

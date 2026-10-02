@@ -878,11 +878,12 @@ pub mod plugins {
     /// This is authoring surface in full: writing a plugin that carries
     /// operations needs no `lash-core` dependency (ADR 0051).
     pub use lash_core::plugin::{
-        PluginCommand, PluginCommandContext, PluginOperation, PluginOperationDef,
-        PluginOperationFailure, PluginOperationInvokeError, PluginOperationKind,
-        PluginOperationOutcome, PluginOperationReceipt, PluginOwned, PluginQuery,
-        PluginQueryContext, PluginRuntimeDirective, PluginTask, PluginTaskContext,
-        ProcessReadService, SessionParam, SessionReadService,
+        PluginCommand, PluginCommandContext, PluginFailureClass, PluginFailureOrigin,
+        PluginHookFailure, PluginOperation, PluginOperationDef, PluginOperationFailure,
+        PluginOperationInvokeError, PluginOperationKind, PluginOperationOutcome,
+        PluginOperationReceipt, PluginOwned, PluginQuery, PluginQueryContext,
+        PluginRuntimeDirective, PluginTask, PluginTaskContext, ProcessReadService, SessionParam,
+        SessionReadService,
     };
     /// What [`PluginFactory::process_engine_contributions`] is handed: a host
     /// factory that wraps another (the RLM factory, say) forwards it so the

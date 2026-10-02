@@ -2971,6 +2971,96 @@
       ],
       "type": "object"
     },
+    "PluginFailureClass": {
+      "description": "How a declared plugin failure settles, independent of its display text.",
+      "enum": [
+        "retryable",
+        "redrivable",
+        "terminal",
+        "parked"
+      ],
+      "type": "string"
+    },
+    "PluginFailureOrigin": {
+      "description": "The declared code that produced a failure. Lash stamps this at dispatch.",
+      "properties": {
+        "behavior_revision": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "plugin_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "plugin_id",
+        "behavior_revision",
+        "operation"
+      ],
+      "type": "object"
+    },
+    "PluginHookFailure": {
+      "description": "One failed callback in registration order, including its original typed payload.",
+      "properties": {
+        "failure": {
+          "$ref": "#/$defs/PluginOperationFailure"
+        },
+        "origin": {
+          "$ref": "#/$defs/PluginFailureOrigin"
+        }
+      },
+      "required": [
+        "origin",
+        "failure"
+      ],
+      "type": "object"
+    },
+    "PluginOperationFailure": {
+      "description": "A failure whose payload remains intact when its codec is unavailable.",
+      "properties": {
+        "class": {
+          "$ref": "#/$defs/PluginFailureClass"
+        },
+        "code": {
+          "$ref": "#/$defs/FailureCode"
+        },
+        "error_type": {
+          "type": "string"
+        },
+        "error_version": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "message": {
+          "type": "string"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PluginFailureOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "payload": true
+      },
+      "required": [
+        "error_type",
+        "error_version",
+        "payload",
+        "class",
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
     "PluginRevision": {
       "description": "The declared executable owner of a callback or tool admission.",
       "properties": {
@@ -9730,6 +9820,41 @@
           "type": "object"
         },
         {
+          "properties": {
+            "failure": {
+              "$ref": "#/$defs/PluginOperationFailure"
+            },
+            "kind": {
+              "const": "plugin_operation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "failure"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "causes": {
+              "items": {
+                "$ref": "#/$defs/PluginHookFailure"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "plugin_hooks",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "causes"
+          ],
+          "type": "object"
+        },
+        {
           "description": "A typed worker failure retained through protocol and host errors.",
           "properties": {
             "kind": {
@@ -10957,6 +11082,52 @@
             },
             "type": {
               "const": "provider_failure",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "message": {
+              "$ref": "#/$defs/PluginOperationFailure"
+            },
+            "type": {
+              "const": "operation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "message": {
+              "additionalProperties": false,
+              "properties": {
+                "causes": {
+                  "items": {
+                    "$ref": "#/$defs/PluginHookFailure"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "causes"
+              ],
+              "type": "object"
+            },
+            "type": {
+              "const": "hook_failures",
               "type": "string"
             }
           },

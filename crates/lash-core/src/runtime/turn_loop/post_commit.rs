@@ -1,11 +1,9 @@
 //! The post-commit phase: everything a committed turn still owes its host.
 //!
-//! Nothing here may fail the turn. A failure is recorded on the assembled turn
-//! as a blocking issue and invalidates resident state, because the durable
-//! commit already happened and cannot be taken back.
+//! Observer failures are advisory: the committed turn and resident state remain valid.
+//! Required host deliveries keep their own completion and failure handling.
 
 use super::*;
-use crate::TurnId;
 
 pub(super) struct PostCommitDelivery {
     pub(super) turn: AssembledTurn,
@@ -21,8 +19,6 @@ impl LashRuntime {
     pub(super) async fn emit_turn_persisted_event(
         &self,
         returned_turn: &AssembledTurn,
-        scoped_effect_controller: &ScopedEffectController<'_>,
-        trace_turn_id: &TurnId,
         shift_fence: Option<&ShiftFence>,
     ) -> Result<Option<crate::PluginError>, RuntimeError> {
         let Some(session) = self.session.as_ref() else {
@@ -33,11 +29,6 @@ impl LashRuntime {
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;
-        let phase_turn_id = turn_phase_id(trace_turn_id, "turn-persisted");
-        let phase_controller = scoped_effect_controller.clone();
-        let direct_completions =
-            manager.direct_completion_client(phase_controller, Some(phase_turn_id));
-
         let result = session
             .plugins()
             .dispatch(self.turn_phase_probe.as_ref())
@@ -46,9 +37,7 @@ impl LashRuntime {
                     session_id: self.state.session_id.clone(),
                     plugin_config: session.plugins().admitted_plugin_config(),
                     state: crate::SessionReadView::from_snapshot(&returned_turn.state),
-                    sessions: manager.state_service(),
-                    session_graph: manager.graph_service(),
-                    direct_completions,
+                    sessions: manager.read_service(),
                 },
             )))
             .await;

@@ -27,6 +27,12 @@ pub enum RuntimeErrorCause {
         retryable: bool,
         terminal_reason: lash_sansio::llm::types::LlmTerminalReason,
     },
+    PluginOperation {
+        failure: Box<lash_sansio::PluginOperationFailure>,
+    },
+    PluginHooks {
+        causes: Vec<lash_sansio::PluginHookFailure>,
+    },
     /// A typed worker failure retained through protocol and host errors.
     VmWorker {
         outcome: Box<lash_vm_protocol::InfrastructureOutcome>,
@@ -211,5 +217,60 @@ impl RuntimeEffectControllerError {
         let mut error = Self::new(RuntimeErrorCode::RuntimeEffectGroupChildUnroutable, message);
         error.cause = Some(RuntimeErrorCause::EffectGroupChildUnroutable { missing });
         error
+    }
+}
+
+impl RuntimeErrorCause {
+    pub fn plugin_failure_class(&self) -> Option<lash_sansio::PluginFailureClass> {
+        match self {
+            Self::PluginOperation { failure } => Some(failure.class),
+            Self::PluginHooks { causes } => Some(
+                causes
+                    .iter()
+                    .map(|cause| cause.failure.class)
+                    .min_by_key(|class| class.precedence())
+                    .unwrap_or(lash_sansio::PluginFailureClass::Terminal),
+            ),
+            _ => None,
+        }
+    }
+}
+
+impl From<super::RuntimeError> for lash_sansio::PluginOperationFailure {
+    fn from(error: super::RuntimeError) -> Self {
+        if let Some(RuntimeErrorCause::PluginOperation { failure }) = &error.cause {
+            return *failure.clone();
+        }
+        let class = if error.turn_failure_cause() == super::TurnFailureCause::Parked {
+            lash_sansio::PluginFailureClass::Parked
+        } else if error.is_retryable() {
+            lash_sansio::PluginFailureClass::Retryable
+        } else if error.is_terminal() {
+            lash_sansio::PluginFailureClass::Terminal
+        } else {
+            lash_sansio::PluginFailureClass::Redrivable
+        };
+        match serde_json::to_value(&error) {
+            Ok(payload) => Self {
+                error_type: "lash.runtime".into(),
+                error_version: std::num::NonZeroU32::MIN,
+                payload,
+                class,
+                code: lash_sansio::FailureCode::from(&error.code),
+                message: error.message,
+                origin: None,
+            },
+            Err(source) => Self {
+                error_type: "lash.encoding".into(),
+                error_version: std::num::NonZeroU32::MIN,
+                payload: serde_json::json!({"message": source.to_string()}),
+                class: lash_sansio::PluginFailureClass::Terminal,
+                code: lash_sansio::FailureCode::from(
+                    &super::RuntimeErrorCode::RecordEncodingFailed,
+                ),
+                message: source.to_string(),
+                origin: None,
+            },
+        }
     }
 }

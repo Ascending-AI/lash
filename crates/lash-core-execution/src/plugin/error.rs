@@ -135,6 +135,17 @@ pub struct ToolIntentRuntimeFailure {
 
 impl ToolIntentRuntimeFailure {
     fn failure_class(&self) -> crate::ToolFailureClass {
+        if let Some(class) = self
+            .cause
+            .as_ref()
+            .and_then(crate::RuntimeErrorCause::plugin_failure_class)
+        {
+            return if class == super::PluginFailureClass::Terminal {
+                crate::ToolFailureClass::InvalidRequest
+            } else {
+                crate::ToolFailureClass::Unavailable
+            };
+        }
         if self.code.is_terminal()
             || self
                 .cause
@@ -172,6 +183,22 @@ define_plugin_errors! {
         => Self::ProviderFailure { kind, code, retryable, .. }
         => code.as_ref().map(std::string::ToString::to_string).unwrap_or_else(|| kind.code().to_string())
         => if *retryable { crate::ToolFailureClass::Unavailable } else { crate::ToolFailureClass::InvalidRequest };
+    #[error(transparent)]
+    Operation(Box<super::PluginOperationFailure>)
+        => PluginError::Operation(failure)
+        => (Box<super::PluginOperationFailure>)
+        => Self::Operation(failure.clone())
+        => Self::Operation(failure)
+        => failure.code.namespaced()
+        => if failure.class == super::PluginFailureClass::Terminal { crate::ToolFailureClass::InvalidRequest } else { crate::ToolFailureClass::Unavailable };
+    #[error("plugin runtime event hooks failed: {causes:?}")]
+    HookFailures { causes: Vec<super::PluginHookFailure> }
+        => PluginError::HookFailures { causes }
+        => { causes: Vec<super::PluginHookFailure> }
+        => Self::HookFailures { causes: causes.clone() }
+        => Self::HookFailures { causes }
+        => crate::RuntimeErrorCode::Plugin.as_str()
+        => if causes.iter().all(|cause| cause.failure.class == super::PluginFailureClass::Terminal) { crate::ToolFailureClass::InvalidRequest } else { crate::ToolFailureClass::Unavailable };
     #[error(transparent)]
     TriggerOperation(Box<crate::TriggerOperationError>)
         => PluginError::TriggerOperation(source)
@@ -1071,6 +1098,14 @@ impl PluginError {
     pub fn class(&self) -> PluginErrorClass {
         use PluginErrorClass::{Redrivable, Retryable, Terminal};
         match self {
+            Self::Operation(failure) => plugin_error_class(failure.class),
+            Self::HookFailures { causes } => plugin_error_class(
+                causes
+                    .iter()
+                    .map(|cause| cause.failure.class)
+                    .min_by_key(|class| class.precedence())
+                    .unwrap_or(super::PluginFailureClass::Terminal),
+            ),
             // the substrate faulted, or the owning shift releases the head
             // at its boundary.
             Self::StoreUnavailable { .. } | Self::SessionHeadOwned { .. } => Retryable,
@@ -1086,7 +1121,7 @@ impl PluginError {
             Self::RuntimeEffectController(error) => {
                 if error.is_terminal() {
                     Terminal
-                } else if error.code.is_retryable() {
+                } else if error.clone().into_runtime_error().is_retryable() {
                     Retryable
                 } else {
                     Redrivable
@@ -1178,6 +1213,9 @@ impl PluginError {
     /// settled once instead of retried.
     pub fn into_turn_failure(self, refusal: crate::RuntimeErrorCode) -> crate::RuntimeError {
         match self {
+            error @ (Self::Operation(_) | Self::HookFailures { .. }) => {
+                crate::RuntimeEffectControllerError::from(error).into_runtime_error()
+            }
             Self::UnusableSchema { source } => {
                 crate::RuntimeError::new(refusal, source.to_string())
                     .with_cause(crate::RuntimeErrorCause::SchemaRefused { source })
@@ -1228,6 +1266,11 @@ impl PluginError {
             Self::Runtime(error) => crate::store::ParkReason::of_error(error),
             Self::RuntimeEffectController(error) => {
                 crate::store::ParkReason::of_error(&error.clone().into_runtime_error())
+            }
+            error @ (Self::Operation(_) | Self::HookFailures { .. }) => {
+                crate::store::ParkReason::of_error(
+                    &crate::RuntimeEffectControllerError::from(error.clone()).into_runtime_error(),
+                )
             }
             _ => None,
         }
@@ -1283,6 +1326,53 @@ fn keeps_its_code(error: &crate::RuntimeError) -> bool {
                 | crate::RuntimeErrorCode::RecordedTerminationUnavailable
                 | crate::RuntimeErrorCode::MissingRecordedProcessConfig
         )
+}
+
+fn plugin_error_class(class: super::PluginFailureClass) -> PluginErrorClass {
+    match class {
+        super::PluginFailureClass::Retryable => PluginErrorClass::Retryable,
+        super::PluginFailureClass::Terminal => PluginErrorClass::Terminal,
+        super::PluginFailureClass::Redrivable | super::PluginFailureClass::Parked => {
+            PluginErrorClass::Redrivable
+        }
+    }
+}
+
+pub(crate) fn runtime_operation_failure(
+    error: crate::RuntimeError,
+) -> super::PluginOperationFailure {
+    error.into()
+}
+
+impl From<PluginError> for super::PluginOperationFailure {
+    fn from(error: PluginError) -> Self {
+        if let PluginError::Operation(failure) = error {
+            return *failure;
+        }
+        let class = error.class();
+        let payload = match serde_json::to_value(&error) {
+            Ok(payload) => payload,
+            Err(error) => {
+                return runtime_operation_failure(crate::RuntimeError::new(
+                    crate::RuntimeErrorCode::RecordEncodingFailed,
+                    error.to_string(),
+                ));
+            }
+        };
+        let mut failure = runtime_operation_failure(
+            crate::RuntimeEffectControllerError::from(error).into_runtime_error(),
+        );
+        if failure.class != super::PluginFailureClass::Parked {
+            failure.class = match class {
+                PluginErrorClass::Retryable => super::PluginFailureClass::Retryable,
+                PluginErrorClass::Redrivable => super::PluginFailureClass::Redrivable,
+                PluginErrorClass::Terminal => super::PluginFailureClass::Terminal,
+            };
+        }
+        failure.error_type = "lash.plugin".into();
+        failure.payload = payload;
+        failure
+    }
 }
 
 #[cfg(test)]
