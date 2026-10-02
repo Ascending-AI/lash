@@ -488,11 +488,15 @@ impl State {
             },
         };
         let (sender, receiver) = mpsc::unbounded_channel();
+        let probe = Arc::new(InputProbe::default());
+        // Every frame queued is counted on the probe first: the attempt is
+        // starved only once it has read them all.
+        probe.fed();
         let _ = sender.send(Frame::of(MessageType::Start, &start).encode());
         for entry in &invocation.journal {
+            probe.fed();
             let _ = sender.send(entry.frame.encode());
         }
-        let probe = Arc::new(InputProbe::default());
         let invocation = &mut self.invocations[key.0];
         let wake = Arc::clone(&sh.activity);
         let body = AttemptBody::new(

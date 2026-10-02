@@ -146,12 +146,12 @@ impl LiveAttempt {
     }
 
     fn send(&mut self, frame: Bytes) -> bool {
-        // Fed before the frame is queued, never after: the send wakes the
-        // attempt, which can read the frame and block on its input again on
-        // another worker before this returns, and marking it fed then would
-        // overwrite that park for good. Every reader of the probe holds the
-        // server lock this runs under, so none sees the mark without the
-        // frame.
+        // Counted before the frame is queued, never after: the send wakes
+        // the attempt, which can read the frame and block on its input again
+        // on another worker before this returns, and it must never have read
+        // a frame the probe has not counted. Every reader of the probe holds
+        // the server lock this runs under, so none sees the count without
+        // the frame.
         self.probe.fed();
         self.input
             .as_ref()

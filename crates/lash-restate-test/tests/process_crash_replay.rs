@@ -501,9 +501,23 @@ async fn run_process(scenario: Scenario) -> Run {
     let mut journals = Vec::new();
     for view in views {
         if view.status != "completed" {
+            // Where it stopped: its last journal entries, and whether its
+            // attempt waits on the server or on its own work.
+            let journal = server.journal(&view.id).unwrap_or_default();
+            let tail: Vec<_> = journal
+                .iter()
+                .skip(journal.len().saturating_sub(4))
+                .map(|entry| (entry.ty, entry.name.as_deref()))
+                .collect();
             failures.push(format!(
-                "{} {} attempts={} last_failure={:?}",
-                view.target, view.status, view.attempts, view.last_failure
+                "{} {} attempts={} last_failure={:?} blocked_on_server={:?} journal_len={} \
+                 tail={tail:?}",
+                view.target,
+                view.status,
+                view.attempts,
+                view.last_failure,
+                view.blocked_on_server,
+                journal.len(),
             ));
         }
         if !view.target.starts_with(PROCESS_WORKFLOW) {
