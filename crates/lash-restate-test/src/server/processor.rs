@@ -1208,6 +1208,32 @@ impl State {
         );
     }
 
+    /// The attempt was dispatched to a deployment that is down for now
+    /// ([`Refusal::Unavailable`](super::Refusal::Unavailable)): the invoker
+    /// retries after the policy's first interval without counting the
+    /// attempt against the policy, so the invocation outlasts the outage.
+    pub fn deployment_unavailable(
+        &mut self,
+        sh: &Arc<Shared>,
+        key: InvKey,
+        number: u32,
+        detail: String,
+    ) {
+        let policy = sh.config.retry_policy(&self.invocations[key.0].spec);
+        self.attempt_failed(
+            sh,
+            key,
+            number,
+            AttemptFailure {
+                code: 500,
+                message: detail,
+                related_command: None,
+            },
+            Some(duration_ms(policy.delay(1)).max(1)),
+            pb::ErrorBehavior::Retry,
+        );
+    }
+
     /// Operator resume of a paused invocation: a fresh retry loop, pinned
     /// where it was.
     pub fn resume(&mut self, sh: &Arc<Shared>, key: InvKey) -> bool {

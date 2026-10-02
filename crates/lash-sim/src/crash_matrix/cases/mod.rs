@@ -13,7 +13,9 @@ mod definition_carry;
 mod definition_create;
 mod ingress;
 
-pub use ingress::a_waiter_follows_its_input_past_a_lost_ask;
+pub use ingress::{
+    a_turn_outlasts_an_outage_past_its_attempt_budget, a_waiter_follows_its_input_past_a_lost_ask,
+};
 mod intent;
 pub(crate) mod process;
 mod scope;

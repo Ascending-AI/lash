@@ -150,11 +150,16 @@ impl std::fmt::Debug for CrashWorld {
     }
 }
 
+/// A deployment that turns work away while the world's deployment is down.
+/// The outage ends with the next [`restart`](CrashWorld::restart), so its
+/// refusals spend none of a handler's retry attempts: a turn handler pauses
+/// after eight, and the double's compressed retries would spend those in the
+/// wall milliseconds a restart takes (FIG-4784).
 fn deployment_hooks(available: &Arc<AtomicBool>) -> lash_restate_test::DeploymentHooks {
     let available = Arc::clone(available);
     lash_restate_test::DeploymentHooks {
         refuse: Some(Arc::new(move |_| {
-            (!available.load(Ordering::SeqCst)).then_some(lash_restate_test::Refusal::Retryable)
+            (!available.load(Ordering::SeqCst)).then_some(lash_restate_test::Refusal::Unavailable)
         })),
         ..Default::default()
     }

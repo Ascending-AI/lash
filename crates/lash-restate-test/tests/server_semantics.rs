@@ -1032,6 +1032,85 @@ async fn a_build_can_refuse_a_dispatch_while_staying_the_pinned_target() {
     assert_eq!(server.kill(&refused), Some(true));
 }
 
+/// A build that is down for now turns a call away without spending the
+/// handler's retry attempts: the call outlasts an outage of more dispatches
+/// than its policy allows and runs once the build is back. A build that
+/// refuses the same call retryably pauses it at the policy's last attempt.
+#[tokio::test]
+async fn a_build_down_for_now_spends_none_of_the_retry_attempts() {
+    const MAX_ATTEMPTS: u32 = 3;
+    let mut config = ServerConfig::default().time(TimeMode::Manual);
+    config.retry.max_attempts = Some(MAX_ATTEMPTS);
+    let server = RestateTestServer::new(config).unwrap();
+    let verdict = Arc::new(Mutex::new(Some(Refusal::Unavailable)));
+    server
+        .register_with(
+            endpoint(),
+            "n",
+            DeploymentHooks {
+                refuse: Some(Arc::new({
+                    let verdict = Arc::clone(&verdict);
+                    move |_: &AttemptDispatch| {
+                        *verdict
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    }
+                })),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let set = |next: Option<Refusal>| {
+        *verdict
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = next;
+    };
+    let view = |id: &str| {
+        server
+            .invocations()
+            .into_iter()
+            .find(|view| view.id == id)
+            .unwrap()
+    };
+
+    let outlasting = send_invocation(&server, "Counter/outage/add", "2").await;
+    server.settle().await;
+    // The outage lasts three times the dispatches the policy allows.
+    for _ in 0..MAX_ATTEMPTS * 3 {
+        let down = view(&outlasting);
+        assert_eq!(down.status, "backing-off", "{down:?}");
+        assert_eq!(down.retry_count, 0, "an outage spends no retry attempt");
+        assert!(
+            down.last_failure
+                .as_ref()
+                .is_some_and(|(_, message)| message.contains("unavailable")),
+            "{:?}",
+            down.last_failure
+        );
+        assert!(server.fire_next_timer().is_some());
+        server.settle().await;
+    }
+    assert!(view(&outlasting).attempts > MAX_ATTEMPTS);
+    set(None);
+    assert!(server.fire_next_timer().is_some());
+    server.settle().await;
+    assert_eq!(
+        server
+            .outcome(&outlasting)
+            .map(|outcome| outcome.map(|answer| answer.to_vec())),
+        Some(Ok(b"2".to_vec())),
+        "the call ran once the build was back: {:?}",
+        view(&outlasting)
+    );
+
+    // The control: the same build refusing retryably pauses the call.
+    set(Some(Refusal::Retryable));
+    let refused = send_invocation(&server, "Counter/refused/add", "2").await;
+    driven_to_paused(&server, &refused).await;
+    assert_eq!(view(&refused).attempts, MAX_ATTEMPTS);
+}
+
 /// Build N+1 registered while a job is parked in build N: the next new
 /// invocation runs on N+1, and the pinned one — through a crash replay —
 /// finishes on N.

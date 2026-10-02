@@ -83,6 +83,17 @@ pub(super) async fn run(
                 );
                 return;
             }
+            Some(super::Refusal::Unavailable) => {
+                shared.deployment_unavailable(
+                    key,
+                    number,
+                    format!(
+                        "deployment `{}` is unavailable for {service}/{handler}",
+                        deployment.label
+                    ),
+                );
+                return;
+            }
             Some(super::Refusal::Terminal) => {
                 shared.fail_terminally(
                     key,

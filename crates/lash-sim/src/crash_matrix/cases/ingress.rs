@@ -266,3 +266,88 @@ pub async fn a_waiter_follows_its_input_past_a_lost_ask(seed: u64) -> Result<Vec
     world.finish().await;
     Ok(violations)
 }
+
+/// FIG-4784: a turn outlasts its deployment's outage. The deployment dies at
+/// a journal step of the turn and stays down until the engine dispatched the
+/// turn more often than a turn handler's retry policy allows
+/// ([`lash_restate::TURN_HANDLER_MAX_ATTEMPTS`]); the world turns every one
+/// of those dispatches away as an outage, which spends no retry attempt, so
+/// the turn is still retrying when the next deployment comes up and commits
+/// its answer there. A world that refused them retryably would pause the
+/// turn, and no recovery tick resumes a paused invocation. Runs on the server
+/// double only. Answers what the case found wrong.
+pub async fn a_turn_outlasts_an_outage_past_its_attempt_budget(
+    seed: u64,
+) -> Result<Vec<String>, String> {
+    let world = CrashWorld::new(seed, standard_core(), false).await?;
+    world.double()?;
+    world.restart().await?;
+    let session = session_name(Seam::Ingress, seed);
+    let root = "outage";
+    world.crash_on(
+        CrashRule::new(EngineCut::BeforeCommand { index: 3 })
+            .service(TURN_DRIVER_SERVICE)
+            .within_attempts(1),
+    );
+    send(&world, &session, root).await?;
+    if world.trip().wait(super::TRIP_WAIT).await.is_none() {
+        world.finish().await;
+        return Err("the turn's journal cut never fired".to_owned());
+    }
+    world.kill().await;
+    let mut violations = Vec::new();
+    // The crashed attempt, then more refused dispatches than the policy
+    // allows attempts.
+    let outlasted = lash_restate::TURN_HANDLER_MAX_ATTEMPTS + 4;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let turns: Vec<_> = world
+            .invocations()
+            .await
+            .into_iter()
+            .filter(|view| view.target.starts_with(TURN_DRIVER_SERVICE))
+            .collect();
+        if let Some(paused) = turns.iter().find(|view| view.status == "paused") {
+            violations.push(format!(
+                "the outage paused the turn after {} attempt(s): {:?}",
+                paused.attempts, paused.last_failure
+            ));
+            break;
+        }
+        if turns.iter().any(|view| view.attempts > outlasted) {
+            break;
+        }
+        if tokio::time::Instant::now() > deadline {
+            violations.push(format!(
+                "the engine never dispatched the turn {outlasted} time(s) into the outage: \
+                 {turns:?}"
+            ));
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    world.restart().await?;
+    let expected = Expected {
+        live_sessions: vec![session.clone()],
+        inputs: vec![AcceptedInput {
+            session,
+            root: TurnId::from(root),
+        }],
+        ..Expected::default()
+    };
+    let mut last = Vec::new();
+    for _ in 0..4 {
+        world.quiesce().await;
+        last = invariants::check(&world, &expected).await;
+        if last.is_empty() {
+            break;
+        }
+        world.tick().await?;
+    }
+    if !last.is_empty() {
+        last.extend(invariants::diagnose(&world).await);
+    }
+    violations.extend(last);
+    world.finish().await;
+    Ok(violations)
+}

@@ -247,6 +247,13 @@ pub enum Refusal {
     /// deployment would end it: the invoker retries the invocation on the
     /// handler's retry policy, still pinned to the refusing deployment.
     Retryable,
+    /// The deployment is down for now and comes back: the attempt ends as
+    /// [`Retryable`](Self::Retryable) ends it, but the retry spends none of
+    /// the handler's retry attempts. The double compresses retry backoffs
+    /// to wall milliseconds, so an outage a real invoker would wait out in
+    /// one or two backoffs would otherwise exhaust a bounded policy and
+    /// pause the invocation before the deployment is back.
+    Unavailable,
     /// The invocation ends in a terminal failure, as a handler answering a
     /// terminal error ends it.
     Terminal,
@@ -458,6 +465,15 @@ impl Shared {
     fn stream_ended(self: &Arc<Self>, key: InvKey, number: u32, detail: String) {
         let mut state = self.lock();
         state.stream_ended(self, key, number, detail);
+        drop(state);
+    }
+
+    /// End `key`'s attempt `number` on a deployment that is down for now:
+    /// the invocation retries after the policy's first interval, and the
+    /// retry spends none of the policy's attempts.
+    fn deployment_unavailable(self: &Arc<Self>, key: InvKey, number: u32, detail: String) {
+        let mut state = self.lock();
+        state.deployment_unavailable(self, key, number, detail);
         drop(state);
     }
 

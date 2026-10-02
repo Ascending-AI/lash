@@ -170,6 +170,19 @@ async fn a_waiter_follows_its_input_past_a_lost_ask() {
     assert!(violations.is_empty(), "{violations:#?}");
 }
 
+/// FIG-4784: a turn whose deployment stays down for more dispatches than a
+/// turn handler's retry policy allows is still retrying when the next
+/// deployment comes up, and commits its answer there.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_turn_outlasts_an_outage_past_its_attempt_budget() {
+    let violations = Box::pin(
+        crash_matrix::cases::a_turn_outlasts_an_outage_past_its_attempt_budget(0x4784_0001),
+    )
+    .await
+    .expect("stage the outage");
+    assert!(violations.is_empty(), "{violations:#?}");
+}
+
 /// The retry-forever cell uses a settle budget below the live poll interval.
 #[tokio::test]
 #[ignore = "requires an isolated Restate server"]
