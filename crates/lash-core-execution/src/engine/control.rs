@@ -192,11 +192,10 @@ impl EngineRefusal {
     }
 }
 
-/// A store's answer to an engine's control read or write: a fault of the
-/// substrate is retryable, every other variant is the store's refusal.
+/// A store's answer keeps the retry class of its canonical runtime code.
 impl From<StoreError> for EngineRefusal {
     fn from(error: StoreError) -> Self {
-        let disposition = if error.is_transient() {
+        let disposition = if error.runtime_code().is_retryable() {
             RefusalClass::Retryable
         } else {
             RefusalClass::Permanent
@@ -210,20 +209,63 @@ impl From<StoreError> for EngineRefusal {
     }
 }
 
-/// A process registry's answer to an engine's control verb, by the plugin
-/// error's own class: only a terminal one is the registry's refusal.
+/// A plugin's answer keeps its class. A redrive needs fresh authority, so
+/// repeating the identical control request cannot repair it.
 impl From<crate::PluginError> for EngineRefusal {
     fn from(error: crate::PluginError) -> Self {
-        let disposition = if error.is_terminal() {
-            RefusalClass::Permanent
-        } else {
-            RefusalClass::Retryable
+        let disposition = match error.class() {
+            crate::PluginErrorClass::Retryable => RefusalClass::Retryable,
+            crate::PluginErrorClass::Redrivable | crate::PluginErrorClass::Terminal => {
+                RefusalClass::Permanent
+            }
         };
         let message = error.to_string();
         Self {
             disposition,
             code: crate::RuntimeEffectControllerError::from(error).code,
             message,
+        }
+    }
+}
+
+#[cfg(test)]
+mod refusal_classification_tests {
+    use super::*;
+
+    #[test]
+    fn engine_refusal_retries_only_retryable_plugin_operations() {
+        for (error, plugin_error) in StoreError::samples_for_testing()
+            .into_iter()
+            .zip(StoreError::samples_for_testing())
+        {
+            let code = error.runtime_code();
+            let plugin = crate::PluginError::from(plugin_error);
+            let plugin_code = crate::RuntimeEffectControllerError::from(plugin.clone()).code;
+            let through_plugin = EngineRefusal::from(plugin);
+            let refusal = EngineRefusal::from(error);
+            assert_eq!(refusal.code, code);
+            assert_eq!(refusal.is_retryable(), code.is_retryable(), "{refusal:?}");
+            assert_eq!(refusal.disposition, through_plugin.disposition);
+            assert_eq!(through_plugin.code, plugin_code);
+        }
+        for plugin in [
+            crate::PluginError::from(StoreError::Contended),
+            crate::PluginError::from(StoreError::StoredDataCorrupt {
+                record_kind: "process record",
+                message: "invalid JSON".into(),
+            }),
+            crate::PluginError::SessionExecutionLeaseLost {
+                session_id: SessionId::fixture("lost-authority"),
+            },
+            crate::PluginError::ProcessExecutionSuperseded {
+                process_id: crate::process_id_for_test("superseded-process"),
+            },
+        ] {
+            let expected = plugin.class() == crate::PluginErrorClass::Retryable;
+            let code = crate::RuntimeEffectControllerError::from(plugin.clone()).code;
+            let refusal = EngineRefusal::from(plugin);
+            assert_eq!(refusal.code, code);
+            assert_eq!(refusal.is_retryable(), expected, "{refusal:?}");
         }
     }
 }

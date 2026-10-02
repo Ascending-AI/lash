@@ -62,8 +62,8 @@ impl HarnessStoreTier {
                         .await
                         .expect("open the endpoint's SQLite file store set");
                 (
-                    Arc::new(stores),
-                    None,
+                    Arc::new(stores.clone()),
+                    Some(stores),
                     Some(HarnessTierResources {
                         _directory: directory,
                         _database: None,
