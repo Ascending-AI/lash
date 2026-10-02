@@ -657,6 +657,17 @@ pub enum StoreError {
     /// (FIG-3927).
     #[error("a commit of session `{session_id}` settles ingress rows without a drive fence")]
     IngressSettlementUnfenced { session_id: SessionId },
+    /// A commit carries both a root's ingress settlement and a
+    /// session-command run (ADR 0101 §4): a root's turn commit settles the
+    /// rows it admitted, and a command run's applying commit settles its
+    /// command rows — never both in one commit. Nothing was written.
+    #[error(
+        "runtime commit of session `{session_id}` cannot settle root `{root}`'s ingress and a session-command run together"
+    )]
+    IngressAndSessionCommandRun {
+        session_id: SessionId,
+        root: crate::TurnId,
+    },
     /// The command lane's applying commit found one of its command rows
     /// withdrawn or admitted since it read them (design §2.7). Nothing was
     /// written; the lane reads the commands again.
@@ -1079,6 +1090,7 @@ impl StoreError {
             | Self::IngressRowNotAdmitted { .. }
             | Self::IngressSettlementDuplicate { .. }
             | Self::IngressSettlementUnfenced { .. }
+            | Self::IngressAndSessionCommandRun { .. }
             | Self::SessionCommandWithdrawn { .. }
             | Self::SessionHeadOwned { .. }
             | Self::StaleDriveFence { .. }
@@ -1198,6 +1210,7 @@ impl StoreError {
             Self::IngressRowNotAdmitted { .. } => "IngressRowNotAdmitted",
             Self::IngressSettlementDuplicate { .. } => "IngressSettlementDuplicate",
             Self::IngressSettlementUnfenced { .. } => "IngressSettlementUnfenced",
+            Self::IngressAndSessionCommandRun { .. } => "IngressAndSessionCommandRun",
             Self::SessionCommandWithdrawn { .. } => "SessionCommandWithdrawn",
             Self::SessionHeadOwned { .. } => "SessionHeadOwned",
             Self::StaleDriveFence { .. } => "StaleDriveFence",

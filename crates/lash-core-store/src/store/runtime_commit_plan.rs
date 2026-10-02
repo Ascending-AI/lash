@@ -147,6 +147,7 @@ impl RuntimeCommitPlanner {
         fleet_format: super::FleetFormat,
     ) -> Result<Self, StoreError> {
         commit.validate_budget()?;
+        validate_commit_lane(&commit)?;
         validate_interrupted_turn_plan(&commit)?;
         commit.validate_operation_session()?;
 
@@ -515,13 +516,22 @@ fn derive_appended_node_facts(
     Ok((planned, parent.map(|parent| parent.frame_node_id)))
 }
 
-fn validate_interrupted_turn_plan(commit: &RuntimeCommit) -> Result<(), StoreError> {
-    if commit.ingress.is_some() && commit.applied_commands.is_some() {
-        return Err(StoreError::Backend(
-            "runtime commit cannot settle a root's ingress and a session-command run together"
-                .to_string(),
-        ));
+/// A commit settles one lane (ADR 0101 §4): a root's turn commit settles the
+/// ingress rows its admission bound, and a session-command run's applying
+/// commit settles its command rows — never both in one commit.
+fn validate_commit_lane(commit: &RuntimeCommit) -> Result<(), StoreError> {
+    if let Some(ingress) = commit.ingress.as_ref()
+        && commit.applied_commands.is_some()
+    {
+        return Err(StoreError::IngressAndSessionCommandRun {
+            session_id: commit.session_id.clone(),
+            root: ingress.root.clone(),
+        });
     }
+    Ok(())
+}
+
+fn validate_interrupted_turn_plan(commit: &RuntimeCommit) -> Result<(), StoreError> {
     // The closure names its turn and evidence itself; the one fact left to
     // agree is the session it was authorized in.
     if let Some(closure) = commit.interrupted_turn.as_ref()
@@ -545,6 +555,45 @@ fn validate_head_revision(expected: u64, actual: u64) -> Result<(), StoreError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn commit_refuses_ingress_and_a_session_command_run_with_its_typed_cause() {
+        let state = crate::RuntimeSessionState {
+            session_id: SessionId::from("ingress-and-command-run"),
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            ))
+        };
+        let commit = RuntimeCommit::persisted_state_for_test(&state)
+            .settling_ingress(crate::store::IngressSettlement::new(crate::TurnId::from(
+                "root-1",
+            )))
+            .applying_commands(crate::QueuedWorkCompletion {
+                session_id: SessionId::from("ingress-and-command-run"),
+                batch_ids: vec!["batch-1".into()],
+            });
+
+        let error =
+            match RuntimeCommitPlanner::prepare(commit, crate::store::FleetFormat::current()) {
+                Ok(_) => {
+                    panic!("a commit settles a root's ingress or a session-command run, not both")
+                }
+                Err(error) => error,
+            };
+        assert!(
+            matches!(
+                &error,
+                StoreError::IngressAndSessionCommandRun { session_id, root }
+                    if session_id.as_str() == "ingress-and-command-run"
+                        && root.as_str() == "root-1"
+            ),
+            "{error:?}"
+        );
+        // A deterministic refusal, not a substrate fault: the host error is
+        // not retryable the way `Backend` was.
+        assert!(!error.is_transient());
+    }
 
     #[test]
     fn commit_refuses_a_closure_authorized_in_another_session_with_its_typed_cause() {
