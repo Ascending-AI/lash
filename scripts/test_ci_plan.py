@@ -298,6 +298,8 @@ class ClassifyTests(unittest.TestCase):
             # The job runs every test through these.
             ("tools/buck2/driver.py", "true"),
             ("tools/buck2/junit_xml.py", "true"),
+            ("tools/buck2/native-tools-lock.json", "true"),
+            ("tools/buck2/postgres_action_runner.py", "true"),
             ("tools/buck2/postgres_slot_runner.sh", "true"),
             ("tools/buck2/service_policy.py", "true"),
             ("tools/buck2/test_launcher.sh", "true"),
@@ -1488,17 +1490,26 @@ class DependentTestLabelTests(unittest.TestCase):
             "//crates/lash-restate:lash-restate__unit_test",
             "//crates/lash-sim:lash-sim__unit_test",
             "//crates/lash-postgres-store:conformance__test",
+            "//crates/lash-s3-store:lash-s3-store__unit_test",
             "//crates/lash-regress:unicodesets__test",
             # A feature variant and a helper target are not inventory tests.
             "//crates/lash:artifact_referrers_evidence__test__fv_26f56f02",
             "//crates/lash-restate:lash-restate__unit_test__rust_test",
         })
-        self.assertEqual({"//crates/lash-restate:lash-restate__unit_test"}, members)
+        # The PostgreSQL store tests start their own server inside the test
+        # action, so the gate runs them; the S3 store still needs a service.
+        self.assertEqual(
+            {
+                "//crates/lash-restate:lash-restate__unit_test",
+                "//crates/lash-postgres-store:conformance__test",
+            },
+            members,
+        )
         self.assertEqual(["//crates/lash-sim:lash-sim__unit_test"], deferred)
         self.assertEqual(
             [
-                "//crates/lash-postgres-store:conformance__test",
                 "//crates/lash-regress:unicodesets__test",
+                "//crates/lash-s3-store:lash-s3-store__unit_test",
             ],
             skipped,
         )

@@ -991,6 +991,8 @@ POSTGRES_STORE_TOOLING = frozenset(
         "scripts/hermetic-build.sh",
         "tools/buck2/driver.py",
         "tools/buck2/junit_xml.py",
+        "tools/buck2/native-tools-lock.json",
+        "tools/buck2/postgres_action_runner.py",
         "tools/buck2/postgres_slot_runner.sh",
         "tools/buck2/service_policy.py",
         "tools/buck2/target-inventory.json",

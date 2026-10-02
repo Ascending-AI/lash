@@ -86,6 +86,7 @@ UNMEASURED_TEST_RUN = {"cpu_count": 2, "memory_kb": 1048576}
 PACKAGE_POLICY = tomllib.loads((ROOT / "tools/buck2/package-policy.toml").read_text())
 LARGE_TEST_RUNS = PACKAGE_POLICY["test_runs"]["large_suites"]
 CONTENTION_FLOOR = PACKAGE_POLICY["test_runs"]["contention_floor"]
+SERVICE_FLOOR = PACKAGE_POLICY["test_runs"]["service_floor"]
 # Requests pinned per Buck2 label: runs too few times sampled for a measured
 # row, and unmeasured batches the member sum would oversize.
 PINNED_TEST_RUNS = PACKAGE_POLICY["test_runs"].get("pinned", {})
@@ -245,6 +246,9 @@ def test_run_request(
         )
     if floor and package_name in CONTENTION_FLOOR["packages"]:
         request["cpu_count"] = max(request["cpu_count"], CONTENTION_FLOOR["cpu_count"])
+    if package_name in SERVICE_FLOOR["packages"]:
+        for size in ("cpu_count", "memory_kb"):
+            request[size] = max(request[size], SERVICE_FLOOR[size])
     return request
 
 
@@ -864,6 +868,13 @@ def validate_package_policy(metadata: dict) -> None:
     ]
     if unknown_floor:
         raise ValueError(f"package-policy.toml [test_runs.contention_floor] names {unknown_floor}")
+    unknown_service = [
+        name
+        for name in test_runs.get("service_floor", {}).get("packages", [])
+        if name not in members
+    ]
+    if unknown_service:
+        raise ValueError(f"package-policy.toml [test_runs.service_floor] names {unknown_service}")
     for label, request in test_runs.get("pinned", {}).items():
         if set(request) != {"cpu_count", "memory_kb"}:
             raise ValueError(
@@ -1827,6 +1838,11 @@ FEATURE_VARIANT_TAG = "feature-lane"
 # nothing else. `buck2 test //...`, `//:workspace_tests` and `kiln test` keep
 # executing exactly the default-feature partition they executed before.
 FEATURE_VARIANT_TAGS = ("feature-lane", "manual")
+# Tags whose runnable feature-lane variants a service job selects by label
+# (`tools/buck2/<service>_test_labels.txt`) rather than `//:feature_lane_tests`:
+# the live-service gates, and the hermetic PostgreSQL tests, whose variants run
+# in the PostgreSQL job of their lane.
+SERVICE_JOB_TAGS = frozenset({"cargo-service-gate", "hermetic-postgres"})
 
 # The Cargo clippy invocations the Lint job ran on a runner because the feature
 # resolution they lint is outside the default workspace graph. Each is matched
@@ -2735,7 +2751,7 @@ class FeatureLaneGraph:
                 self.test_args[label] = args
             if runnable and not tags:
                 test_labels.append(label)
-            elif runnable and "cargo-service-gate" in tags:
+            elif runnable and SERVICE_JOB_TAGS.intersection(tags):
                 self.service_tests.add(label)
         for target in package["targets"]:
             kind = target["kind"][0]
@@ -2769,7 +2785,7 @@ class FeatureLaneGraph:
                 tags = cargo_test_policy(package_name, kind, target["name"])[0]
                 if not tags:
                     test_labels.append(label)
-                elif "cargo-service-gate" in tags:
+                elif SERVICE_JOB_TAGS.intersection(tags):
                     self.service_tests.add(label)
             if (
                 kind == "bin"

@@ -656,6 +656,28 @@ def check_native_inputs() -> None:
     assert 'p.removeprefix("llvm/")' in bootstrap
     toolchain = (HERE / "toolchains/BUCK").read_text(encoding="utf-8")
     assert '"-resource-dir", "$(location native//:llvm_tree)/lib/clang/22"' in toolchain
+    # The hermetic PostgreSQL tests: the pinned server and the NSS wrapper are
+    # the inputs the wrapper macro prefixes, and only tagged tests carry them.
+    postgres = lock["tools"]["postgres"]
+    assert postgres["version"].startswith("16.") and len(postgres["sha256"]) == 64
+    assert {"bin/initdb", "bin/postgres", "lib/postgresql/pg_stat_statements.so"} <= set(postgres["required"])
+    assert lock["tools"]["nss_wrapper"]["required"] == ["libnss_wrapper.so"]
+    assert 'name = "postgres"' in bootstrap and 'name = "nss_wrapper"' in bootstrap
+    rules = (HERE / "test_rules.bzl").read_text(encoding="utf-8")
+    for label in ("native//:postgres", "native//:nss_wrapper", "//tools/buck2:postgres_action_runner"):
+        assert f'"$(location {label})"' in rules, label
+    inventory = load_json("target-inventory.json")
+    hermetic = {
+        target["label"]: target["tags"]
+        for package in inventory["packages"]
+        for target in package["targets"]
+        if "hermetic-postgres" in target.get("tags", [])
+    }
+    assert set(hermetic) == {
+        label for label in inventory["service_test_targets"]["postgres"] if "__fv_" not in label
+    }, sorted(hermetic)
+    assert all(tags == ["hermetic-postgres"] for tags in hermetic.values()), hermetic
+    assert set(hermetic) <= set(inventory["workspace_dev_test_targets"])
 
 
 def check_dependency_and_profile_projection() -> None:

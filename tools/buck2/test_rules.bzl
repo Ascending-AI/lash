@@ -121,6 +121,20 @@ _sharded_test_suite = rule(
     },
 )
 
+# A test tagged `hermetic-postgres` runs under `postgres_action_runner.py`,
+# inside the launcher's watchdog: its action starts the pinned PostgreSQL 16
+# on loopback, applies the published schema and hands the test the URL. The
+# server, the schema and the runner are declared inputs, so the action runs on
+# the pool and its verdict is cached like any other test's.
+_POSTGRES_TAG = "hermetic-postgres"
+_POSTGRES_PREFIX = [
+    "/usr/bin/python3",
+    "$(location //tools/buck2:postgres_action_runner)",
+    "$(location native//:postgres)",
+    "$(location native//:nss_wrapper)",
+    "$(location //crates/lash-postgres-store:schema.sql)",
+]
+
 def lash_test_wrapper(
         name,
         test,
@@ -148,12 +162,15 @@ def lash_test_wrapper(
     })
     wrappers = []
     count = shard_count if shard_count > 0 else 1
+    service = _POSTGRES_PREFIX if _POSTGRES_TAG in tags else []
     for index in range(count):
         wrapper_name = name if count == 1 else name + "__shard_{}".format(index + 1)
-        prefix = []
+
+        # The launcher drops the libtest marker only when nothing is prefixed.
+        prefix = service + ["--drop-libtest-marker"] if service else []
         wrapper_labels = list(labels)
         if count > 1:
-            prefix = [
+            prefix = service + [
                 "/usr/bin/python3",
                 "$(location //tools/buck2:test_helpers)/test_shard.py",
                 str(count),

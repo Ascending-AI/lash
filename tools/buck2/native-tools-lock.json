@@ -26,6 +26,24 @@
       "sha256": "2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2",
       "archive_prefix": "node-v24.20.0-linux-x64",
       "required": ["bin/node"]
+    },
+    "postgres": {
+      "version": "16.15.0",
+      "url": "https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64/16.15.0/embedded-postgres-binaries-linux-amd64-16.15.0.jar",
+      "sha256": "653abc065c682b85d3da50168fb95dc524bd85426cdec9ce3695a550ef431df2",
+      "inner": "postgres-linux-x86_64.txz",
+      "archive_prefix": "",
+      "exclude": ["lib/*.a", "lib/pkgconfig", "lib/lib*.so"],
+      "required": ["bin/initdb", "bin/postgres", "lib/libicui18n.so.60", "lib/postgresql/pg_stat_statements.so"]
+    },
+    "nss_wrapper": {
+      "version": "1.1.15-2",
+      "url": "https://launchpad.net/ubuntu/+archive/primary/+files/libnss-wrapper_1.1.15-2_amd64.deb",
+      "sha256": "51ed4f32caa32a4b62d59f34cd1aa836b56077f8e0199c5f9a6421abc452e3cb",
+      "inner": "data.tar.zst",
+      "archive_prefix": "./usr/lib/x86_64-linux-gnu",
+      "members": ["./usr/lib/x86_64-linux-gnu/libnss_wrapper.so"],
+      "required": ["libnss_wrapper.so"]
     }
   }
 }

@@ -8,7 +8,15 @@
 # receive cache credentials, so they run exactly the Cargo commands that
 # predate this cutover.
 #
-# Two properties hold for every Buck2 invocation here and must keep holding:
+# The package-wide PostgreSQL suites (`pg-store`, `pg-store-synthetic-next`)
+# are the exception to "against the service the job stood up": each of their
+# test actions starts the pinned PostgreSQL 16 itself
+# (`tools/buck2/postgres_action_runner.py`), so on trusted events they run on
+# the pool and reuse cached verdicts like any other test, and the service this
+# script runs under is not theirs.
+#
+# These properties hold for every other Buck2 invocation here and must keep
+# holding:
 #
 #   * PostgreSQL version and connection settings reach the test only through
 #     `--test_env`, which is part of the test spawn and of nothing else. Every
@@ -50,7 +58,9 @@ selection_python="${LIBTEST_SELECTION_PYTHON:-python3}"
 
 buck2_test_count=0
 buck2_report_root=""
-buck2_test() {
+# One Buck2 test invocation with this suite's numbered reports, then the proof
+# that the reports name every selected case exactly once.
+buck2_reported_test() {
   buck2_test_count=$((buck2_test_count + 1))
   if [[ -z "$buck2_report_root" ]]; then
     local report_base="${RUNNER_TEMP:-.buck2}/store-test-results"
@@ -58,6 +68,25 @@ buck2_test() {
     mkdir -p "$report_base"
     buck2_report_root="$(mktemp -d "$report_base/${report_name}.XXXXXX")"
   fi
+  "${HERMETIC_BUILD:-scripts/hermetic-build.sh}" test \
+    --test_output=all \
+    --build-report "$buck2_report_root/build-${buck2_test_count}.json" \
+    --test-report "$buck2_report_root/test-${buck2_test_count}.json" \
+    --test-output-dir "$buck2_report_root/results-${buck2_test_count}" \
+    --event-log "$buck2_report_root/events-${buck2_test_count}.json-lines" \
+    "$@"
+  "$selection_python" tools/buck2/libtest_selection.py buck2 \
+    "$buck2_report_root/test-${buck2_test_count}.json"
+}
+
+# The hermetic PostgreSQL labels: no service setting, timeout or cache switch
+# is passed, so the test actions are the ones `kiln test` and the workspace
+# partition run, and one cached verdict serves all three.
+postgres_hermetic_test() {
+  buck2_reported_test --jobs "${BUCK2_JOBS:-32}" "$@"
+}
+
+buck2_test() {
   local test_env=()
   local name
   for name in \
@@ -68,20 +97,13 @@ buck2_test() {
       test_env+=(--test_env "$name")
     fi
   done
-  "${HERMETIC_BUILD:-scripts/hermetic-build.sh}" test \
+  buck2_reported_test \
     --jobs "${LASH_POSTGRES_SLOT_COUNT:-32}" \
     --local-test-execution \
     --no-test-cache \
     --test_timeout 1200 \
-    --test_output=all \
-    --build-report "$buck2_report_root/build-${buck2_test_count}.json" \
-    --test-report "$buck2_report_root/test-${buck2_test_count}.json" \
-    --test-output-dir "$buck2_report_root/results-${buck2_test_count}" \
-    --event-log "$buck2_report_root/events-${buck2_test_count}.json-lines" \
     "${test_env[@]}" \
     "$@"
-  "$selection_python" tools/buck2/libtest_selection.py buck2 \
-    "$buck2_report_root/test-${buck2_test_count}.json"
 }
 
 cargo_test() {
@@ -123,11 +145,10 @@ readonly restate_ingress_label=//crates/lash-restate:lash-restate__unit_test
 readonly catalog_shape_label=//crates/lash-postgres-store:lash-postgres-store__unit_test
 readonly catalog_drift_label=//crates/lash-postgres-store:schema_drift__test
 
-# The sharded binaries' shards and the other binaries run in parallel
-# (FIG-3572), each under the generated slot wrapper, which gives every test
-# action a database of its own out of the LASH_POSTGRES_SLOT_COUNT slots
-# `with-service.sh` created; `--jobs` never runs more tests than there are
-# slots.
+# A test that shares the job's server with others running beside it goes
+# through the slot wrapper, which gives every test action a database of its
+# own out of the LASH_POSTGRES_SLOT_COUNT slots `with-service.sh` created
+# (FIG-3572); `--jobs` never runs more tests than there are slots.
 postgres_slot_test() {
   : "${LASH_POSTGRES_SLOT_COUNT:?with-service.sh sets LASH_POSTGRES_SLOT_COUNT}"
   if [ -z "${LASH_POSTGRES_SLOT_DIR:-}" ]; then
@@ -343,11 +364,14 @@ case "${suite}" in
   # this gate, so narrowing to the conformance binary would silently drop them.
   # The suites self-serialize on a per-process guard, and two processes on one
   # database would truncate each other's tables. Cargo runs the binaries one at
-  # a time against the one database; Buck2 gives each test a slot.
+  # a time against the one database; under Buck2 every test action, and so
+  # every shard of the sharded binaries, has a server of its own. The Restate
+  # ingress law is an ignored case of another package's binary and runs
+  # against the job's service.
   pg-store)
     if [ "${trusted}" = true ]; then
       # shellcheck disable=SC2046
-      postgres_slot_test $(labels postgres default)
+      postgres_hermetic_test $(labels postgres default)
       postgres_slot_test \
         --test_arg=postgres_ingress \
         --test_arg=--ignored \
@@ -359,13 +383,12 @@ case "${suite}" in
     ;;
 
   # The synthetic successor's build of the same package (FIG-4262): the
-  # feature-lane variants of every binary `pg-store` runs. It has a suite, a
-  # service and a CI job of its own, so its shards never wait for a slot behind
-  # the default build's.
+  # feature-lane variants of every binary `pg-store` runs. It has a suite and
+  # a CI job of its own; the service is the untrusted Cargo path's.
   pg-store-synthetic-next)
     if [ "${trusted}" = true ]; then
       # shellcheck disable=SC2046
-      postgres_slot_test $(labels postgres synthetic-next)
+      postgres_hermetic_test $(labels postgres synthetic-next)
     else
       cargo_test cargo test -p lash-internal-postgres-store --locked --no-default-features \
         --features synthetic-next

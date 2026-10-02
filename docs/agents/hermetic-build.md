@@ -22,8 +22,10 @@ python3 scripts/dev-test.py
 
 `kiln test` runs `//:dev_tests`, the deterministic developer partition.
 `//:workspace_tests` adds developer-deferred binaries and is the complete PR
-partition. Neither is every correctness gate. PostgreSQL, S3, Restate,
-nested-Cargo tests, release artifacts and named recipes retain their contracts.
+partition. Neither is every correctness gate. The PostgreSQL store package's
+tests are in both: each starts [its own server](#hermetic-postgresql-tests).
+The other PostgreSQL suites, S3, Restate, nested-Cargo tests, release artifacts
+and named recipes retain their contracts.
 
 | Command | Behavior |
 | --- | --- |
@@ -152,7 +154,7 @@ matching prelude. Bootstrap installs a regular executable in ignored
 `tools/buck2/toolchain-lock.json` pins the Rust 1.98.1 archives, including rustc,
 rustdoc, Clippy and the Linux standard library. Toolchain files are declared
 action inputs. `tools/buck2/reindeer-lock.json` pins Reindeer, and
-`native-tools-lock.json` pins the LLVM and Node archives. CI restores the
+`native-tools-lock.json` pins the LLVM, Node and PostgreSQL archives. CI restores the
 materialized tools and dependency sources only under an exact key covering
 the pins, bootstraps, rule overlay, Reindeer inputs and Python ABI. The trusted
 main warmer is the sole writer; credentials, daemons and build outputs are
@@ -628,6 +630,51 @@ The driver accepts these Bazel spellings. `--test_filter=<f>` is
 shards, and a filter selects across the shards' union. Other Bazel flags fail
 and name the replacement where one exists.
 
+## Hermetic PostgreSQL tests
+
+A test tagged `hermetic-postgres` in `tools/buck2/package-policy.toml` runs
+against a PostgreSQL 16 that its own action starts, so it executes on the pool
+and its verdict is cached like any other test's: an unchanged test is a cache
+hit in every fork and in CI. Today that is every test of
+`lash-internal-postgres-store` and its feature-lane variants.
+
+```sh
+kiln test //crates/lash-postgres-store:conformance__test
+```
+
+- **Server.** `native-tools-lock.json` pins a self-contained PostgreSQL 16
+  build (`native//:postgres`: server, `initdb`, ICU and `pg_stat_statements`)
+  and `libnss_wrapper.so` (`native//:nss_wrapper`). Both are declared inputs
+  of the test; the pool image has no PostgreSQL.
+- **Runner.** `tools/buck2/postgres_action_runner.py` is prefixed to the test
+  command inside the launcher's watchdog. It runs `initdb` into the action's
+  temporary directory (ICU `en-US`, trust authentication), starts the server
+  on a free loopback port with the settings of `with-service.sh pg16`
+  (`fsync=off`, `pg_stat_statements` preloaded), creates the `lash` database,
+  applies `crates/lash-postgres-store/schema.sql` and exports
+  `LASH_POSTGRES_DATABASE_URL` to the test. It stops the server and deletes
+  the cluster however the test ends; the server is a child in the test's
+  process group, so a timeout's group kill takes it too. Setup costs about
+  one second.
+- **Sandbox.** A pool action has loopback only, a private `/tmp` and its own
+  PID namespace, which is all the server needs. `initdb` looks its user up in
+  the password database and the action's user is not in the image's;
+  `libnss_wrapper.so` answers that lookup.
+- **Size.** The server shares the test's request. `[test_runs] service_floor`
+  keeps these runs at two CPUs and 1 GiB until measured rows say more; the
+  cluster lives on the action's tmpfs and counts as its memory.
+- **Sharding.** Each shard is an action with a server of its own, so the
+  shards of `conformance` and `integration` need no database slots.
+- **An external server.** A run that is handed `LASH_POSTGRES_DATABASE_URL`
+  (`--test_env`) starts nothing and uses that server, locally and uncached as
+  for any service input. The PostgreSQL 14/18 compatibility lanes run these
+  labels that way.
+
+To convert another package, tag its tests `hermetic-postgres`, add it to
+`service_floor` and run `kiln sync`. A test that needs a second service, a
+PostgreSQL major other than 16, or a server shared with another process stays
+on `with-service.sh`.
+
 ## Service and Cargo-owned gates
 
 `scripts/ci/with-service.sh` starts the same private PostgreSQL/Garage containers
@@ -641,8 +688,10 @@ scripts/ci/with-service.sh all -- bash scripts/ci/store-tests.sh s3-store
 ```
 
 Trusted store jobs compile through the pool and execute locally against the
-private service. Service settings are runtime inputs only; PG 14/16/18 reuse
-compiled artifacts. Those tests are never cached. Driver controls are
+private service; the package-wide `pg-store` suites are the exception and run
+their [hermetic](#hermetic-postgresql-tests) labels on the pool. Service
+settings are runtime inputs only; PG 14/16/18 reuse compiled artifacts. Tests
+run against a service are never cached. Driver controls are
 `--local-test-execution`, `--no-test-cache` and repeated `--test_env KEY=VALUE`.
 Untrusted jobs keep their Cargo commands and receive no pool credentials.
 Local runs list service-shaped contracts they did not exercise, with recipes.

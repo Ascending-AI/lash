@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Materialize pinned Node and LLVM inputs into Buck2's ignored native cell."""
+"""Materialize pinned Node, LLVM and PostgreSQL inputs into Buck2's ignored native cell."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import tempfile
 import urllib.request
+import zipfile
 
 import bootstrap_store
 
@@ -88,6 +89,34 @@ def safe_members(archive: pathlib.Path, zstd: bool) -> list[str]:
     return members
 
 
+def inner_archive(tool: dict, archive: pathlib.Path) -> pathlib.Path:
+    """The tar archive a jar or a Debian package wraps, named by `inner`."""
+    inner = tool.get("inner")
+    if inner is None:
+        return archive
+    if pathlib.PurePosixPath(inner).name != inner:
+        raise SystemExit(f"unsafe inner archive name: {inner}")
+    unpacked = archive.with_name(inner)
+    if archive.suffix == ".deb":
+        # A Debian package is an `ar` archive: an 8-byte magic, then a 60-byte
+        # header and the even-padded bytes of each member.
+        with archive.open("rb") as source:
+            if source.read(8) != b"!<arch>\n":
+                raise SystemExit(f"not a Debian package: {archive}")
+            while header := source.read(60):
+                size = int(header[48:58])
+                if header[:16].decode("ascii").strip().rstrip("/") == inner:
+                    unpacked.write_bytes(source.read(size))
+                    return unpacked
+                source.seek(size + size % 2, os.SEEK_CUR)
+    else:
+        with zipfile.ZipFile(archive) as outer:
+            if inner in outer.namelist():
+                unpacked.write_bytes(outer.read(inner))
+                return unpacked
+    raise SystemExit(f"{archive.name} has no member {inner}")
+
+
 def extract(tool: dict, archive: pathlib.Path, destination: pathlib.Path, zstd: bool) -> None:
     members = safe_members(archive, zstd)
     prefix = tool.get("archive_prefix")
@@ -99,8 +128,33 @@ def extract(tool: dict, archive: pathlib.Path, destination: pathlib.Path, zstd: 
         command.append("--use-compress-program=unzstd")
     command.extend(["-xf", str(archive), "-C", str(destination)])
     if prefix:
-        command.extend(["--strip-components", str(len(pathlib.PurePosixPath(prefix).parts))])
+        command.extend(["--strip-components", str(len(prefix.split("/")))])
+    command.extend(f"--exclude={pattern}" for pattern in tool.get("exclude", []))
+    command.extend(tool.get("members", []))
     subprocess.run(command, check=True)
+    resolve_links(destination)
+
+
+def resolve_links(tree: pathlib.Path) -> None:
+    """Replace each symlink to a file of the tree with that file.
+
+    A versioned shared library ships as `lib.so.N -> lib.so.N.M`, and the
+    loader asks for the link's name. The tree is an action input, so it holds
+    plain files only: the last link to a file takes its place, an earlier one a
+    copy.
+    """
+    links: dict[pathlib.Path, list[pathlib.Path]] = {}
+    for link in sorted(path for path in tree.rglob("*") if path.is_symlink()):
+        target = link.resolve()
+        if not target.is_file() or tree.resolve() not in target.parents:
+            raise SystemExit(f"unsupported link in a native archive: {link}")
+        links.setdefault(target, []).append(link)
+    for target, names in links.items():
+        for link in names[:-1]:
+            link.unlink()
+            shutil.copy2(target, link)
+        names[-1].unlink()
+        target.rename(names[-1])
 
 
 def buck_file() -> str:
@@ -123,17 +177,23 @@ native_tree(
     srcs = {p.removeprefix("kernel_headers/"): p for p in glob(["kernel_headers/**"])},
     visibility = ["PUBLIC"],
 )
+native_tree(
+    name = "postgres",
+    srcs = {p.removeprefix("postgres/"): p for p in glob(["postgres/**"])},
+    visibility = ["PUBLIC"],
+)
+export_file(name = "nss_wrapper", src = "nss_wrapper/libnss_wrapper.so", mode = "reference", visibility = ["PUBLIC"])
 '''
 
 
 def build(name: str, tool: dict, destination: pathlib.Path) -> None:
     destination.mkdir()
-    zstd = tool["url"].endswith(".tar.zst")
     with tempfile.TemporaryDirectory(prefix="lash-native-archive-", dir=destination.parent) as raw:
-        archive = pathlib.Path(raw) / (name + (".tar.zst" if zstd else ".tar.xz"))
+        archive = pathlib.Path(raw) / pathlib.PurePosixPath(tool["url"]).name
         print(f"download {name} {tool['url']}")
         download(tool, archive)
-        extract(tool, archive, destination, zstd)
+        archive = inner_archive(tool, archive)
+        extract(tool, archive, destination, archive.name.endswith(".zst"))
 
 
 def install(output: pathlib.Path, lock: dict) -> None:

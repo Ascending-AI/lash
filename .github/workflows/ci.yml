@@ -780,8 +780,10 @@ jobs:
             scripts/ci/buck2-test.sh affected "${tests[@]}"
           fi
 
-      # Every label is deterministic and service-free; service-backed tests
-      # remain manual and scripts/ci/store-tests.sh runs them fresh. Merge
+      # Every label is deterministic and needs no service of the runner's:
+      # the PostgreSQL store tests start their own server inside the test
+      # action, and the tests that need a live service remain manual and
+      # scripts/ci/store-tests.sh runs them fresh. Merge
       # groups and dispatches run the whole core suite: cached test results
       # already scope a run to what the tree changed, so a reverse-dependency
       # selection saved no pool work and fell back to the full suite on four
@@ -1554,9 +1556,12 @@ jobs:
       # its binaries, so it also covers the parent-end recovery and automatic
       # queued retry scenarios a narrower pull-request step used to filter.
       # Trusted events shard the conformance and integration binaries and run
-      # the shards and the other binaries in parallel, each on a database of
-      # its own (`tools/buck2/postgres_slot_runner.sh`); the step then proves
-      # the shards ran every listed case exactly once.
+      # the shards and the other binaries in parallel on the pool, each test
+      # action against a PostgreSQL 16 of its own
+      # (`tools/buck2/postgres_action_runner.py`), reusing the verdicts the
+      # workspace partition cached; the step then proves the shards ran every
+      # listed case exactly once. The service this step starts serves the
+      # Restate ingress law of the same suite and the untrusted Cargo path.
       - name: Test Postgres store (conformance and attempt atomicity)
         run: |
           bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
@@ -1659,9 +1664,9 @@ jobs:
     needs: plan
     # The synthetic successor's build (FIG-4262) of every binary the package
     # step of `postgres-store` runs, on the primary major: the same package
-    # with `synthetic-next`, on a runner, a PostgreSQL service and slots of its
-    # own. One runner carried both builds until their twelve conformance
-    # shards queued for its four slots and set the wall time of the whole run.
+    # with `synthetic-next`, in a job of its own. Trusted events run its test
+    # actions on the pool, each against its own PostgreSQL 16; the service the
+    # step starts is the untrusted Cargo path's.
     # It runs whenever `postgres-store` does, and `CI conclusion` holds both to
     # one rule (scripts/ci_plan.py `POSTGRES_STORE_JOBS`).
     environment: build-cache

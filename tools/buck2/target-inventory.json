@@ -48814,133 +48814,113 @@
         {
           "build_label": "//crates/lash-postgres-store:lash-postgres-store__unit_test",
           "cargo": "lash_postgres_store",
-          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "check_label": "//crates/lash-postgres-store:lash-postgres-store__unit_test[check]",
           "clippy_label": "//crates/lash-postgres-store:lash-postgres-store__unit_test__clippy[clippy.txt]",
           "kind": "unit-test",
           "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test",
           "tags": [
-            "cargo-service-gate",
-            "manual"
+            "hermetic-postgres"
           ]
         },
         {
           "build_label": "//crates/lash-postgres-store:integration__test",
           "cargo": "integration",
-          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "check_label": "//crates/lash-postgres-store:integration__test[check]",
           "clippy_label": "//crates/lash-postgres-store:integration__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-postgres-store:integration__test",
           "shard_count": 2,
           "tags": [
-            "cargo-service-gate",
-            "manual"
+            "hermetic-postgres"
           ]
         },
         {
           "build_label": "//crates/lash-postgres-store:conformance__test",
           "cargo": "conformance",
-          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "check_label": "//crates/lash-postgres-store:conformance__test[check]",
           "clippy_label": "//crates/lash-postgres-store:conformance__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-postgres-store:conformance__test",
           "shard_count": 6,
           "tags": [
-            "cargo-service-gate",
-            "manual"
+            "hermetic-postgres"
           ]
         },
         {
           "build_label": "//crates/lash-postgres-store:durable_read_fixture__test",
           "cargo": "durable_read_fixture",
-          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "check_label": "//crates/lash-postgres-store:durable_read_fixture__test[check]",
           "clippy_label": "//crates/lash-postgres-store:durable_read_fixture__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-postgres-store:durable_read_fixture__test",
           "tags": [
-            "cargo-service-gate",
-            "manual"
+            "hermetic-postgres"
           ]
         },
         {
           "build_label": "//crates/lash-postgres-store:preflight_durable_walk__test",
           "cargo": "preflight_durable_walk",
-          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "check_label": "//crates/lash-postgres-store:preflight_durable_walk__test[check]",
           "clippy_label": "//crates/lash-postgres-store:preflight_durable_walk__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-postgres-store:preflight_durable_walk__test",
           "tags": [
-            "cargo-service-gate",
-            "manual"
+            "hermetic-postgres"
           ]
         },
         {
           "build_label": "//crates/lash-postgres-store:preflight_schema_status__test",
           "cargo": "preflight_schema_status",
-          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "check_label": "//crates/lash-postgres-store:preflight_schema_status__test[check]",
           "clippy_label": "//crates/lash-postgres-store:preflight_schema_status__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-postgres-store:preflight_schema_status__test",
           "tags": [
-            "cargo-service-gate",
-            "manual"
+            "hermetic-postgres"
           ]
         },
         {
           "build_label": "//crates/lash-postgres-store:schema_drift__test",
           "cargo": "schema_drift",
-          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "check_label": "//crates/lash-postgres-store:schema_drift__test[check]",
           "clippy_label": "//crates/lash-postgres-store:schema_drift__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-postgres-store:schema_drift__test",
           "tags": [
-            "cargo-service-gate",
-            "manual"
+            "hermetic-postgres"
           ]
         },
         {
           "build_label": "//crates/lash-postgres-store:host_provisioned_rollout__test",
           "cargo": "host_provisioned_rollout",
-          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "check_label": "//crates/lash-postgres-store:host_provisioned_rollout__test[check]",
           "clippy_label": "//crates/lash-postgres-store:host_provisioned_rollout__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-postgres-store:host_provisioned_rollout__test",
           "tags": [
-            "cargo-service-gate",
-            "manual"
+            "hermetic-postgres"
           ]
         },
         {
           "build_label": "//crates/lash-postgres-store:migrate__test",
           "cargo": "migrate",
-          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "check_label": "//crates/lash-postgres-store:migrate__test[check]",
           "clippy_label": "//crates/lash-postgres-store:migrate__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-postgres-store:migrate__test",
           "tags": [
-            "cargo-service-gate",
-            "manual"
+            "hermetic-postgres"
           ]
         },
         {
           "build_label": "//crates/lash-postgres-store:schema_constraints__test",
           "cargo": "schema_constraints",
-          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
           "check_label": "//crates/lash-postgres-store:schema_constraints__test[check]",
           "clippy_label": "//crates/lash-postgres-store:schema_constraints__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-postgres-store:schema_constraints__test",
           "tags": [
-            "cargo-service-gate",
-            "manual"
+            "hermetic-postgres"
           ]
         }
       ],
@@ -50046,7 +50026,7 @@
         {
           "build_label": "//crates/lash-s3-store:lash-s3-store__unit_test",
           "cargo": "lash_s3_store",
-          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
+          "cargo_only": "proves nothing without a live S3 server; the service job executes this label uncached against a real service",
           "check_label": "//crates/lash-s3-store:lash-s3-store__unit_test[check]",
           "clippy_label": "//crates/lash-s3-store:lash-s3-store__unit_test__clippy[clippy.txt]",
           "kind": "unit-test",
@@ -54539,6 +54519,16 @@
     "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test",
     "//crates/lash-plugin-process-controls:lash-plugin-process-controls__unit_test",
     "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__unit_test",
+    "//crates/lash-postgres-store:conformance__test",
+    "//crates/lash-postgres-store:durable_read_fixture__test",
+    "//crates/lash-postgres-store:host_provisioned_rollout__test",
+    "//crates/lash-postgres-store:integration__test",
+    "//crates/lash-postgres-store:lash-postgres-store__unit_test",
+    "//crates/lash-postgres-store:migrate__test",
+    "//crates/lash-postgres-store:preflight_durable_walk__test",
+    "//crates/lash-postgres-store:preflight_schema_status__test",
+    "//crates/lash-postgres-store:schema_constraints__test",
+    "//crates/lash-postgres-store:schema_drift__test",
     "//crates/lash-protocol-rlm:frame_open_redrive__test",
     "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
     "//crates/lash-protocol-rlm:protocol_drivers__test",
@@ -54666,6 +54656,16 @@
     "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test",
     "//crates/lash-plugin-process-controls:lash-plugin-process-controls__unit_test",
     "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__unit_test",
+    "//crates/lash-postgres-store:conformance__test",
+    "//crates/lash-postgres-store:durable_read_fixture__test",
+    "//crates/lash-postgres-store:host_provisioned_rollout__test",
+    "//crates/lash-postgres-store:integration__test",
+    "//crates/lash-postgres-store:lash-postgres-store__unit_test",
+    "//crates/lash-postgres-store:migrate__test",
+    "//crates/lash-postgres-store:preflight_durable_walk__test",
+    "//crates/lash-postgres-store:preflight_schema_status__test",
+    "//crates/lash-postgres-store:schema_constraints__test",
+    "//crates/lash-postgres-store:schema_drift__test",
     "//crates/lash-protocol-rlm:frame_open_redrive__test",
     "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
     "//crates/lash-protocol-rlm:protocol_drivers__test",
@@ -54812,6 +54812,16 @@
     "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test",
     "//crates/lash-plugin-process-controls:lash-plugin-process-controls__unit_test",
     "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__unit_test",
+    "//crates/lash-postgres-store:conformance__test",
+    "//crates/lash-postgres-store:durable_read_fixture__test",
+    "//crates/lash-postgres-store:host_provisioned_rollout__test",
+    "//crates/lash-postgres-store:integration__test",
+    "//crates/lash-postgres-store:lash-postgres-store__unit_test",
+    "//crates/lash-postgres-store:migrate__test",
+    "//crates/lash-postgres-store:preflight_durable_walk__test",
+    "//crates/lash-postgres-store:preflight_schema_status__test",
+    "//crates/lash-postgres-store:schema_constraints__test",
+    "//crates/lash-postgres-store:schema_drift__test",
     "//crates/lash-protocol-rlm:frame_open_redrive__test",
     "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
     "//crates/lash-protocol-rlm:protocol_drivers__test",
@@ -55171,6 +55181,16 @@
     "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test",
     "//crates/lash-plugin-process-controls:lash-plugin-process-controls__unit_test",
     "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__unit_test",
+    "//crates/lash-postgres-store:conformance__test",
+    "//crates/lash-postgres-store:durable_read_fixture__test",
+    "//crates/lash-postgres-store:host_provisioned_rollout__test",
+    "//crates/lash-postgres-store:integration__test",
+    "//crates/lash-postgres-store:lash-postgres-store__unit_test",
+    "//crates/lash-postgres-store:migrate__test",
+    "//crates/lash-postgres-store:preflight_durable_walk__test",
+    "//crates/lash-postgres-store:preflight_schema_status__test",
+    "//crates/lash-postgres-store:schema_constraints__test",
+    "//crates/lash-postgres-store:schema_drift__test",
     "//crates/lash-protocol-rlm:frame_open_redrive__test",
     "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
     "//crates/lash-protocol-rlm:protocol_drivers__test",

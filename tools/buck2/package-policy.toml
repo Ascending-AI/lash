@@ -33,10 +33,21 @@
 # --- Test partition policy ---------------------------------------------------
 
 [[rule]]
-packages = ["lash-internal-postgres-store", "lash-internal-s3-store"]
+packages = ["lash-internal-s3-store"]
 kinds = ["unit-test", "bin", "bin-unit-test", "test", "example", "bench"]
 tags = ["manual", "cargo-service-gate"]
-reason = "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service"
+reason = "proves nothing without a live S3 server; the service job executes this label uncached against a real service"
+
+# Each test action of this package starts the pinned PostgreSQL 16
+# (`native//:postgres`) on its own loopback, applies the published schema and
+# runs against it (`tools/buck2/postgres_action_runner.py`). The server is a
+# declared input, so these run on the pool and their verdicts are cached. A
+# run that is handed `LASH_POSTGRES_DATABASE_URL` uses that server instead,
+# locally and uncached: the PostgreSQL 14/18 lanes of `with-service.sh`.
+[[rule]]
+packages = ["lash-internal-postgres-store"]
+kinds = ["unit-test", "bin", "bin-unit-test", "test", "example", "bench"]
+tags = ["hermetic-postgres"]
 
 [[rule]]
 packages = ["lash-restate-postgres-workers-e2e"]
@@ -48,9 +59,9 @@ args = ["--ignored"]
 
 # The PostgreSQL job's long poles (FIG-3572): serially the conformance binary
 # ran 441-578 s and the integration binary 122-140 s of a 610-940 s step.
-# Each shard runs through `//tools/buck2:postgres_slot_runner`, which gives it
-# a database of its own, so shards run in parallel without sharing the tables
-# `reset()` truncates.
+# Each shard's action has a server of its own, so shards run in parallel
+# without sharing the tables `reset()` truncates. Against one external server
+# `tools/buck2/postgres_slot_runner.sh` gives each a database instead.
 [[rule]]
 packages = ["lash-internal-postgres-store"]
 kinds = ["test"]
@@ -438,6 +449,11 @@ env = { LASH_SLACK_TEST_NODE = "$(location native//:node)" }
 # `//crates/lash-sim:stack_policy__test` at one core. A measured p95 of 1.3
 # cores for lash-perf is exactly what such a suite shows while it is healthy.
 contention_floor = { cpu_count = 4, packages = ["lash-perf", "lash-sim"] }
+# A hermetic PostgreSQL run holds the server beside the test binary: its
+# backends, its shared buffers and a cluster on the action's tmpfs, which is
+# charged to the action as memory. A row measured without the server (these
+# labels used to skip on the pool) never sizes the run below this.
+service_floor = { cpu_count = 2, memory_kb = 1048576, packages = ["lash-internal-postgres-store"] }
 
 # Unmeasured runs of these crates keep the larger request they have always had.
 # The same crates are the suites that never join a `:test_batch`.
@@ -475,9 +491,10 @@ contention_floor = { cpu_count = 4, packages = ["lash-perf", "lash-sim"] }
 "//crates/lash:facade_completeness" = { cpu_count = 1, memory_kb = 2621440 }
 # --- Service jobs --------------------------------------------------------------
 
-# The service jobs build these packages' test labels from the shared cache and
-# execute them uncached against the service they stand up
-# (`tools/buck2/<service>_test_labels.txt`).
+# The service jobs select these packages' test labels
+# (`tools/buck2/<service>_test_labels.txt`). The S3 job builds them from the
+# shared cache and executes them uncached against the service it stands up;
+# the PostgreSQL labels are hermetic and run on the pool.
 [service_packages]
 postgres = ["lash-internal-postgres-store"]
 s3 = ["lash-internal-s3-store"]
@@ -517,6 +534,8 @@ session_oracle_corpus = { glob = [
 # artifact itself, materialized at its repository path. A filegroup would hand
 # it a symlinked directory instead.
 [exported_files]
+# The schema `postgres_action_runner.py` applies to a hermetic test's database.
+lash-internal-postgres-store = ["schema.sql"]
 workflow-graph-roundtrip = [
     "scripts/generate-contract-schema.py",
     "frontend/src/generated/error-response.schema.json",
