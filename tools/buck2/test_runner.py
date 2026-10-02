@@ -18,7 +18,7 @@ import threading
 import xml.etree.ElementTree as ET
 
 from junit_xml import libtest_cases
-from libtest_selection import ARGUMENT_MARKER, VALUE_FLAGS
+from libtest_selection import ARGUMENT_MARKER, VALUE_FLAGS, match_name
 from runner_bootstrap import ROOT, activate, safe_directory
 from service_policy import needs_local_uncached
 
@@ -217,9 +217,10 @@ def report_mismatch(xml, stdout, args, complete):
         return name == pattern if exact else pattern in name
 
     for name in sorted(reported):
-        if any(matches(skip, name) for skip in skips):
+        plain = match_name(name)
+        if any(matches(skip, plain) for skip in skips):
             return f'the report names {name}, which the selection skips'
-        if filters and complete and not any(matches(selector, name) for selector in filters):
+        if filters and complete and not any(matches(selector, plain) for selector in filters):
             return f'the report names {name}, which is outside the selection {" ".join(filters)}'
     return None
 

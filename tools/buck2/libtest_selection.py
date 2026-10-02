@@ -17,6 +17,22 @@ LIST_CASE = re.compile(r"^(.+): test$", re.MULTILINE)
 VALUE_FLAGS = {"--skip", "--format", "--color", "--test-threads", "--logfile", "--shuffle-seed", "-Z"}
 ARGUMENT_MARKER = "--lash-libtest-args"
 
+# libtest writes a run record as `test <name> - <mode> ...`, where <mode> is
+# `TestDesc::test_mode` (library/test/src/types.rs): "should panic",
+# "compile fail" or "compile" for a no_run case; an ignored case prints none.
+# The formatters that add it are write_test_name in formatters/pretty.rs and
+# formatters/terse.rs. `--list` and filter/skip matching use the plain name,
+# so a reported name is compared after removing the mode.
+MODE_SUFFIXES = (" - should panic", " - compile fail", " - compile")
+
+
+def match_name(name):
+    """Return the plain test name a reported libtest record of `name` ran."""
+    for suffix in MODE_SUFFIXES:
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
 
 def execution_count(text):
     outcomes = [CASE.match(line) for line in text.splitlines()]
@@ -93,7 +109,10 @@ def check_runner(log_path, command):
 
 def validate_selectors(args, names):
     for selector in selectors(args):
-        matches = any(name == selector if "--exact" in args else selector in name for name in names)
+        matches = any(
+            match_name(name) == selector if "--exact" in args else selector in match_name(name)
+            for name in names
+        )
         if not matches:
             raise ValueError(f"no executable tests matched selector {selector!r}")
 

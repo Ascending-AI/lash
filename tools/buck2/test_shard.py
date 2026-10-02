@@ -27,7 +27,7 @@ import re
 import subprocess
 import sys
 
-from libtest_selection import ARGUMENT_MARKER, VALUE_FLAGS
+from libtest_selection import ARGUMENT_MARKER, VALUE_FLAGS, match_name
 
 # A feature-lane variant of a test shares its ordinary label's weights.
 VARIANT = re.compile(r"__fv_[0-9a-f]+$")
@@ -41,7 +41,9 @@ def shard_assignments(tests: list[str], count: int, weights=None) -> dict[str, i
     starting from the lightest shard. Ties break on the name and the shard
     index, so the result depends on nothing but the arguments.
     """
-    weights = weights or {}
+    # The table's keys are the names libtest reported, mode suffix included;
+    # the listed cases name their tests plainly.
+    weights = {match_name(name): weight for name, weight in (weights or {}).items()}
     names = sorted(set(tests))
     loads = [0] * count
     assignments = {}

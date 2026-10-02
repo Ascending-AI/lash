@@ -456,6 +456,29 @@ class ReportGuardTests(unittest.TestCase):
         self.assertIn('a::two, which the selection skips', self.mismatch(['a::two'], [], ['--skip=two']))
         self.assertIn('which the selection skips', self.mismatch(['a::two'], [], ['--skip', 'a::two', '--exact']))
 
+    def test_a_reported_mode_suffix_still_matches_its_exact_selection(self):
+        # libtest prints `#[should_panic]`, compile_fail and no_run cases with
+        # a ` - <mode>` suffix; the selector names the test plainly.
+        self.assertIsNone(self.mismatch(
+            ['a::panics - should panic'], ['a::panics - should panic'], ['--exact', 'a::panics'],
+        ))
+        self.assertIsNone(self.mismatch(
+            ['src/x.rs - case (line 3) - compile fail'], ['src/x.rs - case (line 3) - compile fail'],
+            ['--exact', 'src/x.rs - case (line 3)'],
+        ))
+        self.assertIsNone(self.mismatch(
+            ['src/x.rs - case (line 3) - compile'], ['src/x.rs - case (line 3) - compile'],
+            ['--exact', 'src/x.rs - case (line 3)'],
+        ))
+
+    def test_a_different_case_with_the_same_suffix_is_still_outside(self):
+        self.assertIn('a::other - should panic, which is outside the selection a::panics', self.mismatch(
+            ['a::other - should panic'], ['a::other - should panic'], ['--exact', 'a::panics'],
+        ))
+        self.assertIn('which the selection skips', self.mismatch(
+            ['a::two - should panic'], ['a::two - should panic'], ['--skip', 'a::two', '--exact'],
+        ))
+
     def test_unreadable_target_arguments_leave_only_filters_unchecked(self):
         self.assertIsNone(self.mismatch(['b::baked'], [], ['a::'], complete=False))
         self.assertIn('skips', self.mismatch(['b::baked'], [], ['--skip', 'baked'], complete=False))
@@ -801,6 +824,16 @@ class ShardTests(unittest.TestCase):
                'matrix_always_replay_part_0_of_4': 70000, 'other::law': 500, 'other::law_needs_service': 1}
         ran = self.shards(4, weights=['--weights', str(self.table({'//pkg:t': row})), '//pkg:t__fv_0873c7ac'])
         self.assertEqual(ran, [['matrix'], ['matrix_always_replay_part_0'], ['matrix_always_replay'], ['matrix_always_replay_part_0_of_4', 'other::law']])
+
+    def test_weights_named_as_reported_still_balance_the_listed_cases(self):
+        # The table's keys carry libtest's ` - <mode>` suffix; the listing does not.
+        row = {'matrix - should panic': 90000, 'matrix_always_replay - compile fail': 80000,
+               'matrix_always_replay_part_0': 85000, 'matrix_always_replay_part_0_of_4 - compile': 70000,
+               'other::law': 500, 'other::law_needs_service': 1}
+        ran = self.shards(4, weights=['--weights', str(self.table({'//pkg:t': row})), '//pkg:t'])
+        self.assertEqual(ran, [['matrix'], ['matrix_always_replay_part_0'], ['matrix_always_replay'], ['matrix_always_replay_part_0_of_4', 'other::law']])
+        weights = {'a - should panic': 50, 'b': 20}
+        self.assertEqual(test_shard.shard_assignments(['a', 'b', 'c'], 2, weights), {'a': 0, 'b': 1, 'c': 1})
 
     def test_unweighted_cases_go_round_robin_in_name_order(self):
         names = ['d', 'b', 'a', 'c', 'e']
