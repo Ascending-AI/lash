@@ -1218,6 +1218,83 @@ async fn created_definition_is_reclaimed_after_session_deletion() {
         };
         let context = lash_core::SessionDeleteContext::from_execution(&execution, session_id)
             .expect("delete context");
+        let services = execution.administration.session_close();
+        // A reconcile pass can outlive its tick and own the close when the
+        // deleting caller arrives. Hold that claim until the law observes it.
+        let intent = execution
+            .administration
+            .store_factory()
+            .begin_session_close(context.session_id(), services.clock.timestamp_ms())
+            .await
+            .expect("record the close before its competing delivery")
+            .expect("the recorded session has a close intent");
+        let claimed = services
+            .intents
+            .claim(
+                intent.obligation.as_ref().expect("close obligation"),
+                &lash_core::store::ClaimToken::mint(),
+                services.clock.timestamp_ms(),
+                services.policy.claim_ttl_ms,
+            )
+            .await
+            .expect("claim the close for its competing delivery")
+            .expect("the close is due");
+        assert_eq!(intent.state, lash_core::store::ControlIntentState::Pending);
+        let closed = lash_core::session_close::close_session(&context)
+            .await
+            .expect("begin the recorded close")
+            .expect("the session is recorded");
+        assert_eq!(
+            closed.applied,
+            lash_core::store::ControlIntentState::Pending
+        );
+
+        let pending = tokio::sync::Notify::new();
+        let acknowledged = async {
+            loop {
+                let stored = execution
+                    .administration
+                    .store_factory()
+                    .load_intent(closed.intent.id)
+                    .await
+                    .expect("read the close intent")
+                    .expect("the close intent is retained");
+                match stored.state {
+                    lash_core::store::ControlIntentState::Acknowledged { .. } => return,
+                    lash_core::store::ControlIntentState::Pending => {
+                        pending.notify_one();
+                        tokio::task::yield_now().await;
+                    }
+                    state => panic!("the close did not acknowledge: {state:?}"),
+                }
+            }
+        };
+        tokio::pin!(acknowledged);
+        tokio::select! {
+            () = pending.notified() => {}
+            () = &mut acknowledged => panic!("the held close was acknowledged prematurely"),
+        }
+        assert!(
+            modules
+                .get_module_artifact(&module_ref)
+                .await
+                .expect("read module while the close is pending")
+                .is_some(),
+            "the pending close still holds the created module"
+        );
+        let relay = lash_core::drive::ControlIntentRelay::new(
+            Arc::clone(&services.intents),
+            Arc::clone(execution.administration.store_factory()),
+            Arc::clone(&services.work),
+            Arc::clone(&services.scopes),
+            Arc::clone(&services.scope_close_obligations),
+            Arc::clone(&services.clock),
+        )
+        .with_policy(services.policy);
+        lash_core::drive::relay::deliver_claimed(&relay, claimed, services.clock.as_ref())
+            .await
+            .expect("deliver the competing close claim");
+        acknowledged.await;
         LashCore::delete_session(context).await
     };
     handler.close().await.expect("close the delete handler");
