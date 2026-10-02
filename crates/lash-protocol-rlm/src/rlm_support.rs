@@ -796,6 +796,19 @@ mod bound_variable_tests {
     use serde_json::json;
 
     #[test]
+    fn shape_names_singularize_plural_segments_without_truncating_other_names() {
+        for (plural, singular) in [
+            ("entries", "entry"),
+            ("items", "item"),
+            ("s", "s"),
+            ("class", "class"),
+            ("value", "value"),
+        ] {
+            assert_eq!(singularize_segment(plural), singular);
+        }
+    }
+
+    #[test]
     fn inferred_typescript_shapes_use_the_tool_schema_spelling() {
         let value = json!({"payload": {
             "two words": "x".repeat(2_000),

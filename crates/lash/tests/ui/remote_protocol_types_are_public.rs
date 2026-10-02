@@ -119,6 +119,7 @@ fn main() {
         observers: Vec::new(),
         event_types: Vec::new(),
         lifetime: lash::remote::processes::RemoteStartLifetime::Detached,
+        trace_cause: Default::default(),
     };
     process_start.validate().unwrap();
 

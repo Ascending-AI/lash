@@ -51,6 +51,8 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+lash-trace = { workspace = true, features = ["otel"] }
+opentelemetry_sdk = { version = "0.33", features = ["metrics", "testing"] }
 # The guarded-surface laws (FIG-3802) this crate runs over its own decoders.
 lash-core-store = { workspace = true, features = ["testing"] }
 lash-conformance.workspace = true

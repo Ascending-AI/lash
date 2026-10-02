@@ -264,6 +264,8 @@ where
         let window = window.map_err(TerminalError::new)?;
         if let SuccessorWindow::Refused { message } = &window {
             lash_core::operational_metrics::record_work_parked(
+                &Default::default(),
+                None,
                 "process",
                 lash_core::store::ParkReasonCode::RetiredGeneration.as_str(),
             );
@@ -351,4 +353,26 @@ async fn park_for_generation(
         .park_process_with_authority(process_id, write, &authority)
         .await
         .map(|_| ())
+}
+
+pub(super) fn observe_refusal_park(
+    metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
+    permit: Option<&lash_trace::EmissionPermit>,
+    process_id: &ProcessId,
+    code: lash_core::store::ParkReasonCode,
+    parked: &lash_core::ProcessRecord,
+) {
+    lash_core::operational_metrics::record_work_parked(metrics, permit, "process", code.as_str());
+    let park = parked.park();
+    tracing::warn!(
+        event = "process.parked",
+        process_id = process_id.as_str(),
+        reason_code = code.as_str(),
+        effect_kind = park
+            .and_then(|park| park.reason.effect_kind())
+            .unwrap_or_default(),
+        attempts = park.map_or(0, |park| park.attempts),
+        park_id = park.map_or(0, |park| park.park_id.feed_sequence()),
+        "process parked on a replay divergence"
+    );
 }

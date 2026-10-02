@@ -15,6 +15,7 @@ mod store_support;
 mod subscription_changes;
 #[cfg(test)]
 mod tests;
+mod trace_scope;
 
 use crate::runtime::process::identity_projection::project_process_payload_leaf;
 pub use mutation::{
@@ -204,6 +205,15 @@ pub struct TriggerOccurrenceRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<SessionId>,
     pub outcome: TriggerOccurrenceOutcome,
+    /// What the fire offers the occurrence's trace scope: its cause and the
+    /// anchor its admission candidate proposed. The ingest that inserts the
+    /// occurrence retains them as the record's
+    /// [`trace`](TriggerOccurrenceRecord::trace); a redelivery under the
+    /// same idempotency key reads the retained scope back and drops the
+    /// offer. It is no part of the occurrence's identity or of what a
+    /// redelivery is matched on.
+    #[serde(default, skip_serializing_if = "lash_trace::TraceScopeOffer::is_empty")]
+    pub trace: lash_trace::TraceScopeOffer,
 }
 
 impl TriggerOccurrenceRequest {
@@ -223,6 +233,7 @@ impl TriggerOccurrenceRequest {
             source: None,
             session_id: None,
             outcome: TriggerOccurrenceOutcome::Fired,
+            trace: lash_trace::TraceScopeOffer::default(),
         }
     }
 
@@ -260,6 +271,12 @@ pub struct TriggerOccurrenceRecord {
     pub session_id: Option<SessionId>,
     pub outcome: TriggerOccurrenceOutcome,
     pub occurred_at_ms: u64,
+    /// The fire's trace scope: the cause and anchor its first ingest
+    /// retained, started at `occurred_at_ms`. Every delivery the occurrence
+    /// reserves carries this record, so each run it starts links the same
+    /// fire. `None` on a record written without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace: Option<lash_trace::DurableTraceScope>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

@@ -174,6 +174,7 @@ fn backstop_wake(session_id: &SessionId) -> lash_core_execution::ProcessWakeDeli
         authority: lash_core_execution::QueuedWorkAuthority::default(),
         input: "task".to_string(),
         created_at_ms: 1,
+        trace_cause: Default::default(),
     }
 }
 

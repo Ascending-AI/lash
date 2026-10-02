@@ -1026,14 +1026,17 @@ pub(crate) async fn build_runtime(
             BenchmarkCore::Standard(builder.build(runtime_perf_owner())?)
         }
         ExecutionMode::Rlm => {
-            let mut factory = benchmark_rlm_protocol_factory(&backend);
+            let factory = benchmark_rlm_protocol_factory(&backend);
+            let mut tracing = lash_core::trace::TraceRuntime::new(backend.clock());
             if let Some(path) = trace_config
                 .as_ref()
                 .and_then(|config| config.lashlang_execution_jsonl_path.clone())
             {
-                factory = factory.with_lashlang_execution_jsonl_path(path);
+                tracing = tracing
+                    .with_product_observer(Arc::new(lash::tracing::JsonlTraceSink::new(path)));
             }
             let mut builder = benchmark_rlm_builder(backend, provider, factory)
+                .trace_runtime(tracing)
                 .with_explicit_ephemeral_facets()
                 .plugins(plugin_stack);
             if let Some(config) = trace_config {

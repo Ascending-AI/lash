@@ -416,6 +416,7 @@ pub(super) fn policy_test_wake(
         authority: crate::QueuedWorkAuthority::default(),
         input: process_id.to_string(),
         created_at_ms: 1,
+        trace_cause: Default::default(),
     }
 }
 

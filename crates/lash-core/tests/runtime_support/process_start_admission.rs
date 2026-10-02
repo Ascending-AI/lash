@@ -164,7 +164,7 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
         .await
         .expect("open the scope's handler");
     // A leaf tool's recorded StartProcess declaration must be refused exactly
-    // as the direct request-shaped start is, before anything is journaled.
+    // as the direct request-shaped start is, in the recorded admission.
     let direct_refusal = service
         .start_from_request(
             &SessionId::from(session_id),
@@ -192,8 +192,9 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
     handler.close().await.expect("close the scope's handler");
     for refusal in [&direct_refusal, &recorded_refusal] {
         assert!(
-            matches!(refusal, lash_core::PluginError::Session(message)
-                if message == &format!("unknown {PAYLOAD_GATED_ENGINE_KIND} program")),
+            matches!(refusal, lash_core::PluginError::RuntimeEffectController(error)
+                if error.code == lash_core::RuntimeErrorCode::Plugin
+                    && error.message == format!("plugin session error: unknown {PAYLOAD_GATED_ENGINE_KIND} program")),
             "both start paths owe the engine's own typed refusal: {refusal}"
         );
     }
@@ -308,8 +309,9 @@ async fn recorded_intent_start_refuses_an_unregistered_engine_kind_like_a_direct
     handler.close().await.expect("close the scope's handler");
     for (route, error) in [("direct", direct_error), ("recorded", recorded_error)] {
         assert!(
-            matches!(&error, lash_core::PluginError::Session(message)
-                if message == "process engine `fig1488-never-registered` is not configured"),
+            matches!(&error, lash_core::PluginError::RuntimeEffectController(cause)
+                if cause.code == lash_core::RuntimeErrorCode::Plugin
+                    && cause.message == "plugin session error: process engine `fig1488-never-registered` is not configured"),
             "{route} start owes the engine registry's typed miss: {error}"
         );
     }
@@ -348,15 +350,8 @@ async fn engine_start_without_an_env_spec_keeps_its_per_route_semantics() {
         ))
         .await
         .expect("open the scope's handler");
-    // The routes deliberately differ, because a recorded start may only be
-    // validated against the env its own record carries. The direct route
-    // captures the live session env before the gate, so dropping the request's
-    // env spec changes nothing; the recorded route has nothing to validate
-    // against and refuses with the pre-existing typed error. That refusal is not
-    // new: before the gate moved ahead of the journal, the same message came out
-    // of `validate_process_registration` downstream — only one wrapping layer
-    // deeper, because it surfaced from registration validation rather than from
-    // the engine gate.
+    // A direct start captures its session environment. A recorded start must
+    // carry its own environment; the recorded registration refuses its absence.
     let direct_no_env = service
         .start_from_request(
             &SessionId::from(session_id),
@@ -388,12 +383,12 @@ async fn engine_start_without_an_env_spec_keeps_its_per_route_semantics() {
         .expect_err("a recorded start carries its own env or none at all");
     handler.close().await.expect("close the scope's handler");
     assert!(
-        matches!(&recorded_no_env, lash_core::PluginError::Session(message)
-        if *message == format!(
-            "process `start {}` requires a captured execution env",
+        matches!(&recorded_no_env, lash_core::PluginError::RuntimeEffectController(error)
+        if error.code == lash_core::RuntimeErrorCode::Plugin && error.message == format!(
+            "plugin session error: process `start {}` requires a captured execution env",
             lash_core::StartKey::for_host("recorded-no-env")
         )),
-        "the no-env recorded refusal keeps the pre-existing typed shape: {recorded_no_env}"
+        "the recorded admission retains the no-env refusal: {recorded_no_env}"
     );
     no_rows_registered(&registry, &["recorded-no-env"]).await;
 }

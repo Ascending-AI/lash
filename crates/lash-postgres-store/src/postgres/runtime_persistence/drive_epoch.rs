@@ -179,7 +179,7 @@ impl DriveEpochStore for PostgresStore {
         root_start: &RootStartNonce,
         hold: Option<&RootHold>,
     ) -> Result<DriveEpochSeal, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = self.begin_seal_tx(&mut connection, session_id).await?;
         // A seal that names its root reads who holds it: the row lock
         // orders the read against another seal and against a root admission,
@@ -240,7 +240,7 @@ impl DriveEpochStore for PostgresStore {
     }
 
     async fn drive_epoch(&self, session_id: &SessionId) -> Result<StoredDriveEpoch, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         let stored = drive_epoch_tx(&mut tx, session_id).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
@@ -253,7 +253,7 @@ impl DriveEpochStore for PostgresStore {
         record: &SessionFaultRecord,
         at_ms: u64,
     ) -> Result<Option<SessionFault>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         sqlx::query(session_sql().meta.record_fault.sql())
             .bind(session_id.as_str())
@@ -271,7 +271,7 @@ impl DriveEpochStore for PostgresStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Option<SessionFault>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         session_fault_conn(&mut connection, session_id).await
     }
 
@@ -297,7 +297,7 @@ impl DriveEpochStore for PostgresStore {
     }
 
     async fn clear_session_fault(&self, session_id: &SessionId) -> Result<bool, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         let changed = sqlx::query(session_sql().meta.clear_fault.sql())
             .bind(session_id.as_str())

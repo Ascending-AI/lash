@@ -195,6 +195,7 @@ mod tests {
             authority: lash_core_execution::QueuedWorkAuthority::default(),
             input: "wake".to_string(),
             created_at_ms: 10,
+            trace_cause: Default::default(),
         }
     }
 

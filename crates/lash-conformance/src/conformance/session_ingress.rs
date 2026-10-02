@@ -261,6 +261,7 @@ fn wake_delivery(process: &str, sequence: u64, text: &str) -> crate::ProcessWake
         authority: crate::QueuedWorkAuthority::default(),
         input: text.to_string(),
         created_at_ms: 1,
+        trace_cause: Default::default(),
     }
 }
 

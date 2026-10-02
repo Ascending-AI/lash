@@ -1148,6 +1148,10 @@
             }
           ]
         },
+        "trace_cause": {
+          "$ref": "#/$defs/TraceCause",
+          "description": "What caused the event, as the append that inserted it retained it."
+        },
         "wake": {
           "anyOf": [
             {
@@ -2167,6 +2171,99 @@
           ]
         }
       },
+      "type": "object"
+    },
+    "TraceCarrier": {
+      "additionalProperties": false,
+      "properties": {
+        "traceparent": {
+          "description": "W3C `traceparent`, version 00.",
+          "type": "string"
+        },
+        "tracestate": {
+          "description": "W3C `tracestate`, absent when empty.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "traceparent"
+      ],
+      "type": "object"
+    },
+    "TraceCause": {
+      "description": "How an admitted operation relates to what caused it.\n\nThe first accepted cause is retained: a retry of the same business\nsubmission under another context reads this one back, and an operation\nfirst admitted as `Root` stays `Root`.",
+      "oneOf": [
+        {
+          "description": "No cause: the operation starts a trace of its own. An adapter starts\nit under an explicit empty context, never the ambient one.",
+          "properties": {
+            "relation": {
+              "const": "root",
+              "type": "string"
+            }
+          },
+          "required": [
+            "relation"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The operation is an owned invocation of this span.",
+          "properties": {
+            "from": {
+              "$ref": "#/$defs/TraceCarrier"
+            },
+            "relation": {
+              "const": "parent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "relation",
+            "from"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The operation is independently admitted work these spans communicated\nwith; it starts its own trace and links them.",
+          "properties": {
+            "from": {
+              "$ref": "#/$defs/TraceLinks"
+            },
+            "relation": {
+              "const": "linked",
+              "type": "string"
+            }
+          },
+          "required": [
+            "relation",
+            "from"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TraceLinks": {
+      "additionalProperties": false,
+      "properties": {
+        "contexts": {
+          "items": {
+            "$ref": "#/$defs/TraceCarrier"
+          },
+          "type": "array"
+        },
+        "omitted": {
+          "description": "Contexts dropped past the retained limit.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "contexts"
+      ],
       "type": "object"
     },
     "ValueMismatch": {

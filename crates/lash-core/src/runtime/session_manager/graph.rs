@@ -86,6 +86,8 @@ impl CurrentOwnerCapability {
             store.clone(),
             commit,
             &session.resident_graph_head_stale,
+            self.host.core.tracing.metrics(),
+            None,
         )
         .await;
         let result = match commit_result {

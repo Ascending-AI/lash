@@ -118,23 +118,25 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),
             ),
-            registry_local_executor(registry.clone())
-                .with_process_env_store(process_env_store)
-                .with_process_engines(
-                    lash_core::ProcessEngineRegistry::new()
-                        .with_artifact_ports(lash_core::ArtifactReferrerPorts::of_backend(
-                            &artifact_backend,
-                        ))
-                        .with_registration(
-                            lash_lashlang_runtime::lashlang_process_engine_registration(
-                                lash_lashlang_runtime::LashlangProcessEngine::new(
-                                    artifact_store,
-                                    lash_lashlang_runtime::LashlangSurface::default(),
-                                    artifact_backend.worker_recovery(),
-                                ),
+            RuntimeEffectLocalExecutor::processes(
+                registry.clone(),
+                Arc::new(lash_core::NoProcessWork::for_registry(registry.clone())),
+                lash_core::ProcessEngineRegistry::new()
+                    .with_artifact_ports(lash_core::ArtifactReferrerPorts::of_backend(
+                        &artifact_backend,
+                    ))
+                    .with_registration(
+                        lash_lashlang_runtime::lashlang_process_engine_registration(
+                            lash_lashlang_runtime::LashlangProcessEngine::new(
+                                artifact_store,
+                                lash_lashlang_runtime::LashlangSurface::default(),
+                                artifact_backend.worker_recovery(),
                             ),
                         ),
-                ),
+                    ),
+                lash_core::runtime::HostStartAdmission::default(),
+            )
+            .with_process_env_store(process_env_store),
         )
         .await
         .expect("start");
@@ -295,7 +297,7 @@ pub(super) async fn restate_controller_awaits_and_signals_through_process_effect
     let sink = Arc::new(RecordingTraceSink::default());
     let sink_dyn: Arc<dyn lash_trace::TraceSink> = sink.clone();
     let host = RestateRuntimeEffectController::new_for_test(context.clone())
-        .with_tracing(lash_core::trace::TraceRuntime::default().with_trace_sink(sink_dyn));
+        .with_tracing(lash_core::facade_support::TraceRuntime::default().with_trace_sink(sink_dyn));
     let registry = process_registry();
     let await_record = registry
         .register_process(external_registration())

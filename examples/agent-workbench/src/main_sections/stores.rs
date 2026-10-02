@@ -23,10 +23,6 @@ impl WorkbenchStores {
     }
 
     pub(crate) async fn open_sqlite(data_dir: &std::path::Path) -> AnyhowResult<Self> {
-        crate::prior_store_layout::refuse_prior_store_layout(
-            data_dir,
-            &["processes.db", "triggers.db", "artifacts.db", "attachments"],
-        )?;
         let stores = lash_sqlite_store::SqliteStoreSet::open(data_dir.join("lash-sessions"))
             .await
             .context("open the SQLite store set")?;

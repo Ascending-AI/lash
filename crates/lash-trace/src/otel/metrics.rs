@@ -7,10 +7,8 @@ pub mod registry;
 mod enabled {
     use super::registry::{AttributeKey, Metric};
     use opentelemetry::KeyValue;
-    use opentelemetry::global;
     use opentelemetry::metrics::{Counter, Gauge, Histogram, Meter};
 
-    const INSTRUMENTATION_NAME: &str = "lash-trace";
     const TOOL_INTENT_KIND_ATTRIBUTE: &str = AttributeKey::ToolIntentKind.definition().key;
     const TOOL_INTENT_REFUSAL_ATTRIBUTE: &str = AttributeKey::ToolIntentRefusal.definition().key;
     const PROVIDER_ATTRIBUTE: &str = AttributeKey::Provider.definition().key;
@@ -44,10 +42,6 @@ mod enabled {
     }
 
     impl RuntimeTuningMetrics {
-        pub fn from_global_provider() -> Self {
-            Self::new(global::meter_provider().meter(INSTRUMENTATION_NAME))
-        }
-
         pub fn new(meter: Meter) -> Self {
             Self {
                 provider_retries: counter(&meter, Metric::ProviderRetries),
@@ -141,10 +135,6 @@ mod enabled {
     }
 
     impl ParkedWorkMetrics {
-        pub fn from_global_provider() -> Self {
-            Self::new(global::meter_provider().meter(INSTRUMENTATION_NAME))
-        }
-
         pub fn new(meter: Meter) -> Self {
             Self {
                 parks: counter(&meter, Metric::Parks),
@@ -192,10 +182,6 @@ mod enabled {
     }
 
     impl ToolIntentMetrics {
-        pub fn from_global_provider() -> Self {
-            Self::new(global::meter_provider().meter(INSTRUMENTATION_NAME))
-        }
-
         pub fn new(meter: Meter) -> Self {
             Self {
                 executed: counter(&meter, Metric::IntentExecuted),
@@ -221,6 +207,7 @@ mod enabled {
 
     #[cfg(test)]
     mod tests {
+        use super::super::registry;
         use super::*;
         use opentelemetry::metrics::MeterProvider;
         use opentelemetry_sdk::metrics::{
@@ -233,7 +220,9 @@ mod enabled {
             let provider = SdkMeterProvider::builder()
                 .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build();
-            let metrics = ToolIntentMetrics::new(provider.meter(INSTRUMENTATION_NAME));
+            let metrics = ToolIntentMetrics::new(
+                provider.meter_with_scope(registry::instrumentation_scope()),
+            );
 
             metrics.record_executed("start_process");
             metrics.record_refused("signal_process", "unsupported_protocol_version");
@@ -266,7 +255,9 @@ mod enabled {
             let provider = SdkMeterProvider::builder()
                 .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build();
-            let metrics = RuntimeTuningMetrics::new(provider.meter(INSTRUMENTATION_NAME));
+            let metrics = RuntimeTuningMetrics::new(
+                provider.meter_with_scope(registry::instrumentation_scope()),
+            );
 
             metrics.record_provider_retry("test", "backoff");
             metrics.record_provider_throttle_wait("test", std::time::Duration::from_millis(10));
@@ -333,10 +324,6 @@ mod enabled {
     }
 
     impl ObligationMetrics {
-        pub fn from_global_provider() -> Self {
-            Self::new(global::meter_provider().meter(INSTRUMENTATION_NAME))
-        }
-
         pub fn new(meter: Meter) -> Self {
             Self {
                 attempts: counter(&meter, Metric::ObligationAttempts),
@@ -379,10 +366,6 @@ mod enabled {
     }
 
     impl GenerationDrainMetrics {
-        pub fn from_global_provider() -> Self {
-            Self::new(global::meter_provider().meter(INSTRUMENTATION_NAME))
-        }
-
         pub fn new(meter: Meter) -> Self {
             Self {
                 work: gauge(&meter, Metric::DrainWork),

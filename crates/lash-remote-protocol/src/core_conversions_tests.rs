@@ -1046,6 +1046,7 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
         signal_name: "ready".to_string(),
         signal_id: "signal:1".to_string(),
         payload: serde_json::json!({ "ok": true }),
+        trace_cause: Default::default(),
     };
     // The conversion keeps the whole identity and derives the append key
     // from it: no caller-selected key survives the crossing (FIG-4299).

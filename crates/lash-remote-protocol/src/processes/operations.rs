@@ -57,6 +57,10 @@ pub struct RemoteProcessSignalRequest {
     pub signal_id: String,
     #[serde(default)]
     pub payload: serde_json::Value,
+    /// What caused the signal: its producer's trace context. No part of the
+    /// signal's identity.
+    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
+    pub trace_cause: lash_trace::TraceCause,
 }
 
 impl RemoteProcessSignalRequest {
@@ -229,6 +233,10 @@ pub struct RemoteProcessStartRequest {
     pub observers: Vec<SessionId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub event_types: Vec<RemoteProcessEventType>,
+    /// What caused the start: the caller's trace context. No part of what
+    /// the start key fences.
+    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
+    pub trace_cause: lash_trace::TraceCause,
 }
 
 impl RemoteProcessStartRequest {

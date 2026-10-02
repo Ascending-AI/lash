@@ -133,7 +133,7 @@ async fn run_one_slot_process_await() {
                     surface.clone(),
                     None,
                     RlmProjectedBindings::default(),
-                    RlmLashlangExecutionTraceConfig::default(),
+                    None,
                     lashlang::ExecutionBounds::unbounded(),
                     crate::plugin::RlmChannel::Cell,
                 ),

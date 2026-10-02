@@ -15,7 +15,7 @@
 //! freshly executed work and newly committed transitions hold; a retained read
 //! or a replayed journal entry has none.
 
-use lash_sansio::{ProcessId, SessionId, TurnId};
+use lash_sansio::{ProcessId, RuntimeOwner, SessionId, TurnId};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -503,6 +503,39 @@ impl TraceCause {
             Self::Linked(links) => links.contexts(),
         }
     }
+
+    pub fn is_root(&self) -> bool {
+        matches!(self, Self::Root)
+    }
+
+    /// The cause of a scope that admits the work `members` caused, in
+    /// admission order.
+    ///
+    /// One member's cause is the scope's. Several are fan-in: an owned
+    /// invocation heading them keeps its parent, and otherwise the scope
+    /// links every producer.
+    pub fn of_admitted<'a>(members: impl IntoIterator<Item = &'a Self>) -> Self {
+        let mut members = members.into_iter();
+        let Some(head) = members.next() else {
+            return Self::Root;
+        };
+        if let Self::Parent(_) = head {
+            return head.clone();
+        }
+        let mut links: TraceLinks = head.linked_contexts();
+        for member in members {
+            links.merge(member.linked_contexts());
+        }
+        Self::linked(links)
+    }
+
+    fn linked_contexts(&self) -> TraceLinks {
+        match self {
+            Self::Root => TraceLinks::new(),
+            Self::Parent(parent) => std::iter::once(parent.clone()).collect(),
+            Self::Linked(links) => links.clone(),
+        }
+    }
 }
 
 /// The durable owner of a trace scope: the admitted thing whose work the
@@ -523,9 +556,10 @@ pub enum TraceScopeOwner {
         turn_id: TurnId,
         call_id: String,
     },
-    /// One host-submitted tool intent, by its replay key.
+    /// One host-submitted tool intent, by its replay key, under the
+    /// runtime whose authority declared it: a session or a process.
     ToolIntent {
-        session_id: SessionId,
+        owner: RuntimeOwner,
         replay_key: String,
     },
     /// A registered process, across all of its segments.
@@ -651,6 +685,123 @@ fn is_untraced(anchor: &TraceAnchor) -> bool {
     matches!(anchor, TraceAnchor::Untraced)
 }
 
+impl DurableTraceScope {
+    /// The context a child of this scope is admitted under: its anchor as
+    /// the owning parent. An untraced scope gives its children no parent.
+    pub fn parent_cause(&self) -> TraceCause {
+        match &self.anchor {
+            TraceAnchor::Untraced => TraceCause::Root,
+            TraceAnchor::Context(context) => TraceCause::Parent(context.clone()),
+        }
+    }
+
+    /// The cause of independent work this scope produced: a link to its
+    /// anchor.
+    pub fn linked_cause(&self) -> TraceCause {
+        TraceCause::linked_to(self.anchor.context().cloned())
+    }
+
+    /// The cause and anchor this scope retains, as an offer: what a typed
+    /// handler input carries for a scope its store already admitted.
+    pub fn offer(&self) -> TraceScopeOffer {
+        TraceScopeOffer::new(self.cause.clone(), self.anchor.clone())
+    }
+}
+
+/// What an admission offers its store for the scope the store may insert:
+/// the cause the caller was given and the anchor its candidate proposed.
+///
+/// The store that inserts the owning row builds the [`DurableTraceScope`]
+/// from it, with the owner id and start time that same write records. A
+/// store that finds the row already admitted ignores the offer and returns
+/// the retained scope. Like every trace field, an offer is no part of any
+/// business identity.
+///
+/// An empty offer (a root cause, no anchor) is one word wide, so the
+/// requests and commands that carry one pay nothing for the common
+/// untraced case.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "TraceScopeOfferWire", into = "TraceScopeOfferWire")]
+pub struct TraceScopeOffer(Option<Box<TraceScopeOfferWire>>);
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(rename = "TraceScopeOffer")]
+struct TraceScopeOfferWire {
+    #[serde(default, skip_serializing_if = "is_root_cause")]
+    cause: TraceCause,
+    #[serde(default, skip_serializing_if = "is_untraced")]
+    anchor: TraceAnchor,
+}
+
+static ROOT_CAUSE: TraceCause = TraceCause::Root;
+static UNTRACED_ANCHOR: TraceAnchor = TraceAnchor::Untraced;
+
+impl TraceScopeOffer {
+    pub fn new(cause: TraceCause, anchor: TraceAnchor) -> Self {
+        if is_root_cause(&cause) && is_untraced(&anchor) {
+            return Self(None);
+        }
+        Self(Some(Box::new(TraceScopeOfferWire { cause, anchor })))
+    }
+
+    /// An offer with no candidate anchor: the cause alone is retained.
+    pub fn caused_by(cause: TraceCause) -> Self {
+        Self::new(cause, TraceAnchor::Untraced)
+    }
+
+    /// The cause the caller was given.
+    pub fn cause(&self) -> &TraceCause {
+        self.0.as_ref().map_or(&ROOT_CAUSE, |offer| &offer.cause)
+    }
+
+    /// The anchor the caller's admission candidate proposed.
+    pub fn anchor(&self) -> &TraceAnchor {
+        self.0
+            .as_ref()
+            .map_or(&UNTRACED_ANCHOR, |offer| &offer.anchor)
+    }
+
+    /// Whether the offer says nothing: a root cause and no anchor.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_none()
+    }
+
+    /// The scope the inserting admission retains for `scope`, started at
+    /// `started_at_ms`.
+    pub fn into_scope(self, scope: TraceScopeId, started_at_ms: u64) -> DurableTraceScope {
+        let TraceScopeOfferWire { cause, anchor } = self.0.map(|offer| *offer).unwrap_or_default();
+        DurableTraceScope {
+            scope,
+            cause,
+            anchor,
+            started_at_ms,
+        }
+    }
+}
+
+impl From<TraceScopeOfferWire> for TraceScopeOffer {
+    fn from(wire: TraceScopeOfferWire) -> Self {
+        Self::new(wire.cause, wire.anchor)
+    }
+}
+
+impl From<TraceScopeOffer> for TraceScopeOfferWire {
+    fn from(offer: TraceScopeOffer) -> Self {
+        offer.0.map(|offer| *offer).unwrap_or_default()
+    }
+}
+
+impl schemars::JsonSchema for TraceScopeOffer {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        TraceScopeOfferWire::schema_name()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        TraceScopeOfferWire::json_schema(generator)
+    }
+}
+
 /// What a store's admission returns for the scope it was offered: the one it
 /// wrote, or the one an earlier admission already retained.
 ///
@@ -663,6 +814,16 @@ pub enum TraceScopeAdmission {
 }
 
 impl TraceScopeAdmission {
+    /// The admission of `scope`: inserted when the caller's store receipt
+    /// says this call wrote the owning row.
+    pub fn of(scope: DurableTraceScope, inserted: bool) -> Self {
+        if inserted {
+            Self::Inserted(scope)
+        } else {
+            Self::Existing(scope)
+        }
+    }
+
     /// The retained scope: dispatch continues under it, never under a losing
     /// candidate.
     pub fn scope(&self) -> &DurableTraceScope {

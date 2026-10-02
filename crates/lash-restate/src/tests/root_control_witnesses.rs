@@ -1,4 +1,6 @@
 //! Control operations against the same handlers on the double and live server.
+mod refusal_classification;
+
 use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
 use lash_core::engine::*;
 use lash_core::store::*;
@@ -315,6 +317,13 @@ impl Fixture {
     }
     async fn build(server: HarnessServer, admission: bool, command_only: bool) -> Self {
         let harness = LiveConformanceHarness::start_on(server).await;
+        Self::from_harness(harness, admission, command_only).await
+    }
+    async fn from_harness(
+        harness: LiveConformanceHarness,
+        admission: bool,
+        command_only: bool,
+    ) -> Self {
         let session = SessionId::fixture(format!("control-witness-{}", harness.run_nonce()));
         let root = TurnId::from("root");
         let factory = harness.law_stores().session_store_factory();

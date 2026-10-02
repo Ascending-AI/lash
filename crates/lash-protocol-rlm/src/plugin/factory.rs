@@ -3,11 +3,11 @@ use lash_sansio::SessionId;
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use std::sync::{Arc, OnceLock};
 
+use lash_core::facade_support::PluginHost;
 use lash_core::plugin::{
     PluginError, PluginFactory, PluginRegistrar, PluginSessionContext,
     ProcessEngineContributionContext, SessionAuthorityContext, SessionPlugin,
 };
-use lash_core::{TraceContext, facade_support::PluginHost, facade_support::TraceSink};
 use lash_lashlang_runtime::{
     LashlangArtifacts, LashlangHostEnvironment, LashlangProcessEngine, LashlangSurface,
     SharedDeferredToolResolver, SharedDeferredTriggerResolver,
@@ -18,7 +18,6 @@ use super::{
     RLM_PROTOCOL_PLUGIN_ID, RlmProtocolPluginConfig, RlmRecordedBehaviour, RlmRecordedConfig,
 };
 use crate::dialect::{Dialect, RlmDialectServices, SessionDialect};
-use crate::executor::RlmLashlangExecutionTraceConfig;
 
 /// Apply the RLM protocol config transformation: enable, when process lifecycle
 /// is available, the process/sleep/signal abilities.
@@ -73,7 +72,6 @@ pub struct RlmProtocolPluginFactory {
     /// The binding identity of the backend `artifact_store` belongs to: a
     /// runtime over any other backend refuses this factory.
     artifact_backend: Arc<str>,
-    lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     /// Whether this deployment has process lifecycle available. Recorded once —
     /// by core installing process-engine contributions (before any session is
     /// built), by [`Self::with_process_lifecycle`] for hosts that assemble a
@@ -118,7 +116,6 @@ impl RlmProtocolPluginFactory {
             deferred_trigger_resolver: None,
             artifact_store: LashlangArtifacts::of_backend(backend),
             artifact_backend: Arc::from(backend.binding_identity().as_str()),
-            lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig::default(),
             process_lifecycle: Arc::new(OnceLock::new()),
         }
     }
@@ -149,33 +146,6 @@ impl RlmProtocolPluginFactory {
         resolver: SharedDeferredTriggerResolver,
     ) -> Self {
         self.deferred_trigger_resolver = Some(resolver);
-        self
-    }
-
-    pub fn with_lashlang_execution_trace(
-        mut self,
-        sink: Option<Arc<dyn TraceSink>>,
-        trace_context: TraceContext,
-    ) -> Self {
-        self.lashlang_execution_trace_config = RlmLashlangExecutionTraceConfig {
-            sink,
-            trace_context,
-        };
-        self
-    }
-
-    pub fn with_lashlang_execution_sink(mut self, sink: Arc<dyn TraceSink>) -> Self {
-        self.lashlang_execution_trace_config.sink = Some(sink);
-        self
-    }
-
-    pub fn with_lashlang_execution_jsonl_path(
-        mut self,
-        path: impl Into<std::path::PathBuf>,
-    ) -> Self {
-        self.lashlang_execution_trace_config.sink = Some(Arc::new(
-            lash_core::facade_support::JsonlTraceSink::new(path.into()),
-        ));
         self
     }
 
@@ -394,20 +364,6 @@ impl PluginFactory for RlmProtocolPluginFactory {
             plugin_host: ctx.plugin_host().clone(),
             process_lifecycle,
         });
-        let execution_sink = match (
-            self.lashlang_execution_trace_config.sink.clone(),
-            ctx.process_observation_sink().cloned(),
-        ) {
-            (Some(configured), Some(runtime)) => {
-                Some(
-                    Arc::new(lash_trace::TeeTraceSink::new([configured, runtime]))
-                        as Arc<dyn TraceSink>,
-                )
-            }
-            (Some(configured), None) => Some(configured),
-            (None, Some(runtime)) => Some(runtime),
-            (None, None) => None,
-        };
         let engine = LashlangProcessEngine::new(
             self.artifact_store.clone(),
             surface,
@@ -415,8 +371,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
         )
         .with_worker_service(self.workers.clone())
         .with_execution_bounds(config.execution_bounds().into_engine())
-        .with_run_settings_recorder(recorder)
-        .with_execution_trace(execution_sink, ctx.trace_context().clone());
+        .with_run_settings_recorder(recorder);
         Ok(vec![
             lash_lashlang_runtime::lashlang_process_engine_registration(engine),
         ])
@@ -451,7 +406,6 @@ impl PluginFactory for RlmProtocolPluginFactory {
             artifact_store: self.artifact_store.clone(),
             deferred_tool_resolver: self.deferred_tool_resolver.clone(),
             deferred_trigger_resolver: self.deferred_trigger_resolver.clone(),
-            execution_trace_config: self.lashlang_execution_trace_config.clone(),
             execution_bounds: config.execution_bounds(),
             channel: config.channel,
         };
@@ -514,6 +468,8 @@ impl lash_lashlang_runtime::LashlangRunSettingsRecorder for RlmProcessSettingsRe
             .with_plugin_extensions(self.plugin_host.extensions())
             .map_err(|error| PluginError::Registration(error.to_string()))?;
         let context = PluginSessionContext {
+            tracing: self.plugin_host.trace_runtime().clone(),
+            trace: None,
             owner: lash_core::RuntimeOwner::Process(lash_core::mint_process_id()),
             tool_access: Default::default(),
             subagent: None,

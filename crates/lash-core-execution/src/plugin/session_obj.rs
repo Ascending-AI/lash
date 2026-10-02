@@ -225,7 +225,117 @@ pub struct PluginSession {
     pub(super) admission:
         Arc<std::sync::Mutex<Option<crate::store::plugin_writers::PluginAdmission>>>,
 }
+/// A plugin dispatch bound to its already-resolved turn instrumentation.
+///
+/// Explicitly unstable internal instrumentation. See
+/// `docs/architecture/turn-phase-probe.md` in the repository.
+#[doc(hidden)]
+pub struct PluginDispatchContext<'a> {
+    session: &'a PluginSession,
+    phase_probe: Option<&'a Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
+}
+
+impl PluginDispatchContext<'_> {
+    pub async fn before_turn(
+        &self,
+        ctx: TurnHookContext,
+    ) -> Result<Vec<PluginOwned<TurnPluginDirective>>, PluginError> {
+        collect_owned_async(
+            &self.session.contributions.before_turn_hooks,
+            ctx,
+            "before_turn",
+            self.phase_probe,
+            |hook, ctx| hook(ctx),
+        )
+        .await
+    }
+
+    pub async fn after_turn(
+        &self,
+        ctx: TurnResultHookContext,
+    ) -> Result<Vec<PluginOwned<AfterTurnPluginDirective>>, PluginError> {
+        collect_owned_async(
+            &self.session.contributions.after_turn_hooks,
+            ctx,
+            "after_turn",
+            self.phase_probe,
+            |hook, ctx| hook(ctx),
+        )
+        .await
+    }
+
+    pub async fn emit_runtime_event(
+        &self,
+        event: PluginLifecycleEvent<'_>,
+    ) -> Result<(), PluginError> {
+        let hook_kind = lifecycle_event_hook_kind(&event);
+        let mut pending = FuturesUnordered::new();
+        for registered in &self.session.contributions.runtime_event_hooks {
+            let hook = Arc::clone(&registered.hook);
+            let plugin_id = registered.plugin_id.clone();
+            let phase_name = plugin_hook_phase_name(hook_kind, registered.plugin_id.as_str());
+            let event = event.clone();
+            let phase_probe = self.phase_probe.cloned();
+            pending.push(async move {
+                if let Some(probe) = phase_probe.as_ref() {
+                    probe.begin_named(&phase_name);
+                }
+                let result = hook(event).await;
+                if let Some(probe) = phase_probe.as_ref() {
+                    probe.end_named(&phase_name);
+                }
+                (plugin_id, result)
+            });
+        }
+        let mut failures = Vec::new();
+        while let Some((plugin_id, result)) = pending.next().await {
+            if let Err(error) = result {
+                failures.push((plugin_id, error));
+            }
+        }
+        if failures.is_empty() {
+            return Ok(());
+        }
+        // Execution-lane loss is runtime authority evidence, not an ordinary
+        // plugin hook failure. Preserve it through the fan-out aggregation so
+        // the turn boundary can retain the loud typed failure.
+        if let Some(error @ PluginError::SessionExecutionLeaseLost { .. }) = failures
+            .iter()
+            .map(|(_, error)| error)
+            .find(|error| matches!(error, PluginError::SessionExecutionLeaseLost { .. }))
+        {
+            return Err(error.clone());
+        }
+        failures.sort_by(|(left_id, left_error), (right_id, right_error)| {
+            left_id
+                .cmp(right_id)
+                .then_with(|| left_error.to_string().cmp(&right_error.to_string()))
+        });
+        let details = failures
+            .into_iter()
+            .map(|(plugin_id, error)| format!("plugin `{plugin_id}`: {error}"))
+            .collect::<Vec<_>>()
+            .join("; ");
+        Err(PluginError::Session(format!(
+            "plugin runtime event hooks failed: {details}"
+        )))
+    }
+}
+
 impl PluginSession {
+    /// Bind the probe once for preparation, finalization and lifecycle delivery.
+    /// This internal instrumentation context has no stability promise.
+    #[doc(hidden)]
+    pub fn dispatch<'a>(
+        &'a self,
+        phase_probe: Option<&'a Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
+    ) -> PluginDispatchContext<'a> {
+        PluginDispatchContext {
+            session: self,
+            phase_probe,
+        }
+    }
+
     /// Adopt `admission` as the one this session's commits write under: the
     /// record of the Run or process segment that runs now. A retry or replay
     /// adopts the same record, so it writes the same formats whatever the
@@ -548,28 +658,6 @@ impl PluginSession {
         Ok(None)
     }
 
-    pub async fn before_turn(
-        &self,
-        ctx: TurnHookContext,
-    ) -> Result<Vec<PluginOwned<TurnPluginDirective>>, PluginError> {
-        self.before_turn_with_phase_probe(ctx, None).await
-    }
-
-    async fn before_turn_with_phase_probe(
-        &self,
-        ctx: TurnHookContext,
-        phase_probe: Option<&Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
-    ) -> Result<Vec<PluginOwned<TurnPluginDirective>>, PluginError> {
-        collect_owned_async(
-            &self.contributions.before_turn_hooks,
-            ctx,
-            "before_turn",
-            phase_probe,
-            |hook, ctx| hook(ctx),
-        )
-        .await
-    }
-
     pub async fn before_tool_call(
         &self,
         mut ctx: ToolCallHookContext,
@@ -658,28 +746,6 @@ impl PluginSession {
             }
         }
         Ok(out)
-    }
-
-    pub async fn after_turn(
-        &self,
-        ctx: TurnResultHookContext,
-    ) -> Result<Vec<PluginOwned<AfterTurnPluginDirective>>, PluginError> {
-        self.after_turn_with_phase_probe(ctx, None).await
-    }
-
-    async fn after_turn_with_phase_probe(
-        &self,
-        ctx: TurnResultHookContext,
-        phase_probe: Option<&Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
-    ) -> Result<Vec<PluginOwned<AfterTurnPluginDirective>>, PluginError> {
-        collect_owned_async(
-            &self.contributions.after_turn_hooks,
-            ctx,
-            "after_turn",
-            phase_probe,
-            |hook, ctx| hook(ctx),
-        )
-        .await
     }
 
     pub async fn at_checkpoint(
@@ -853,71 +919,6 @@ impl PluginSession {
             artifacts: ctx.artifacts.retained(),
             retention,
         })
-    }
-
-    pub async fn emit_runtime_event(
-        &self,
-        event: PluginLifecycleEvent<'_>,
-    ) -> Result<(), PluginError> {
-        self.emit_runtime_event_with_phase_probe(event, None).await
-    }
-
-    pub async fn emit_runtime_event_with_phase_probe(
-        &self,
-        event: PluginLifecycleEvent<'_>,
-        phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
-    ) -> Result<(), PluginError> {
-        let hook_kind = lifecycle_event_hook_kind(&event);
-        let mut pending = FuturesUnordered::new();
-        for registered in &self.contributions.runtime_event_hooks {
-            let hook = Arc::clone(&registered.hook);
-            let plugin_id = registered.plugin_id.clone();
-            let phase_name = plugin_hook_phase_name(hook_kind, registered.plugin_id.as_str());
-            let event = event.clone();
-            let phase_probe = phase_probe.clone();
-            pending.push(async move {
-                if let Some(probe) = phase_probe.as_ref() {
-                    probe.begin_named(&phase_name);
-                }
-                let result = hook(event).await;
-                if let Some(probe) = phase_probe.as_ref() {
-                    probe.end_named(&phase_name);
-                }
-                (plugin_id, result)
-            });
-        }
-        let mut failures = Vec::new();
-        while let Some((plugin_id, result)) = pending.next().await {
-            if let Err(error) = result {
-                failures.push((plugin_id, error));
-            }
-        }
-        if failures.is_empty() {
-            return Ok(());
-        }
-        // Execution-lane loss is runtime authority evidence, not an ordinary
-        // plugin hook failure. Preserve it through the fan-out aggregation so
-        // the turn boundary can retain the loud typed failure.
-        if let Some(error @ PluginError::SessionExecutionLeaseLost { .. }) = failures
-            .iter()
-            .map(|(_, error)| error)
-            .find(|error| matches!(error, PluginError::SessionExecutionLeaseLost { .. }))
-        {
-            return Err(error.clone());
-        }
-        failures.sort_by(|(left_id, left_error), (right_id, right_error)| {
-            left_id
-                .cmp(right_id)
-                .then_with(|| left_error.to_string().cmp(&right_error.to_string()))
-        });
-        let details = failures
-            .into_iter()
-            .map(|(plugin_id, error)| format!("plugin `{plugin_id}`: {error}"))
-            .collect::<Vec<_>>()
-            .join("; ");
-        Err(PluginError::Session(format!(
-            "plugin runtime event hooks failed: {details}"
-        )))
     }
 
     pub fn has_runtime_event_hooks(&self) -> bool {

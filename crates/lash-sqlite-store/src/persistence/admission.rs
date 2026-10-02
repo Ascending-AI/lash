@@ -155,6 +155,14 @@ pub(crate) async fn admit_root_sqlite(
                     session_id,
                     base.checkpoint.as_ref(),
                 )?;
+                let trace = RootAdmission::trace_scope_of(
+                    session_id,
+                    &request.root,
+                    inputs.as_deref(),
+                    queued.as_deref(),
+                    request.trace_anchor.clone(),
+                    now,
+                );
                 let admission = RootAdmission {
                     head: request.head.clone(),
                     inputs,
@@ -164,6 +172,8 @@ pub(crate) async fn admit_root_sqlite(
                     generation: request.generation.clone(),
                     executor: request.executor.clone(),
                     plugins: request.plugins.clone(),
+                    trace: Some(trace),
+                    recorded_by_this_call: true,
                 };
                 crate::session_roots::bind_root_inputs_conn(
                     tx,

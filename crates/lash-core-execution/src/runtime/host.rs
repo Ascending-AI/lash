@@ -1,5 +1,5 @@
 use crate::SessionId;
-use lash_trace::{TraceContext, TraceSink};
+use lash_trace::TraceSink;
 use std::sync::Arc;
 
 use super::process::{
@@ -410,14 +410,6 @@ impl RuntimeHostConfig {
 /// What [`PluginHost::install_process_engine_contributions`](crate::plugin::PluginHost::install_process_engine_contributions)
 /// reads from and writes to the config it installs into.
 impl RuntimeHostConfig {
-    pub(crate) fn process_engine_trace_context(&self) -> &TraceContext {
-        self.tracing.base_context()
-    }
-
-    pub(crate) fn process_observation_sink(&self) -> Option<Arc<dyn TraceSink>> {
-        self.tracing.emitter().product_observer().cloned()
-    }
-
     pub(crate) fn install_contributed_process_engine(
         &mut self,
         registration: crate::ProcessEngineRegistration,

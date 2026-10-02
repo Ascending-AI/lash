@@ -492,6 +492,7 @@ CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
     admitted_by TEXT, -- The recorded step that bound it: `admit` or a checkpoint's replay key.
     terminal_cause TEXT, -- NULL while open or admitted; the tombstone's cause after.
     terminal_at_ms BIGINT,
+    trace_cause_json TEXT, -- The batch's trace cause, written once at enqueue; NULL is a root cause.
     obligation_id TEXT,
     obligation_state TEXT,
     obligation_attempts INTEGER NOT NULL DEFAULT 0,
@@ -549,6 +550,7 @@ CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
     admitted_by TEXT, -- The recorded step that bound it: `admit` or a checkpoint's replay key.
     run_spec_hash TEXT,
     terminal_at_ms BIGINT, -- When the input's tombstone was written; NULL until then.
+    trace_cause_json TEXT, -- The submission's trace cause, written once at acceptance; NULL is a root cause.
     obligation_id TEXT,
     obligation_state TEXT,
     obligation_attempts INTEGER NOT NULL DEFAULT 0,
@@ -1025,7 +1027,7 @@ CREATE TABLE IF NOT EXISTS lash_parent_end_plans (
     parent_id TEXT COLLATE "C" NOT NULL,
     parent_payload TEXT NOT NULL,
     ended_at_ms BIGINT NOT NULL,
-    settled_at_ms BIGINT,
+    settled_at_ms BIGINT CONSTRAINT ck_parent_end_plans_reclaimable CHECK ((settled_at_ms IS NULL OR obligation_state = 'delivered') IS TRUE),
     obligation_id TEXT,
     obligation_state TEXT,
     obligation_attempts INTEGER NOT NULL DEFAULT 0,
@@ -1075,7 +1077,7 @@ INSERT INTO lash_trigger_subscription_change_clock (singleton, current_seq, prun
 CREATE TABLE IF NOT EXISTS lash_trigger_subscription_changes (
     subscription_id TEXT PRIMARY KEY,
     change_seq BIGINT NOT NULL UNIQUE CHECK (change_seq > 0),
-    deleted_at_ms BIGINT,
+    deleted_at_ms BIGINT CONSTRAINT ck_trigger_subscription_changes_reclaimable CHECK ((deleted_at_ms IS NULL OR record_json::jsonb -> 'lifecycle' ->> 'lifecycle' = 'tombstoned') IS TRUE),
     record_json TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_lash_trigger_subscription_changes_deleted

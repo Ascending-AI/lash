@@ -168,6 +168,7 @@ impl DueObligationPeek for PostgresDuePeek {
 pub(crate) fn ingress_ledger(
     pool: &PgPool,
     fence: &crate::guarded_tx::WriterFence,
+    observer: &crate::StoreObserver,
 ) -> Arc<dyn ObligationLedger> {
     let table = |(sql, locking): (ObligationSql<'static>, &'static str),
                  peek: &'static Rendered| IngressTable {
@@ -177,6 +178,7 @@ pub(crate) fn ingress_ledger(
             locking,
             pool.clone(),
             fence.clone(),
+            observer.clone(),
         )),
         peek: Arc::new(PostgresDuePeek {
             sql: peek,

@@ -59,6 +59,7 @@ pub(crate) struct QueuedBatchRow {
     pub(crate) admitted_root: Option<String>,
     pub(crate) terminal_cause: Option<String>,
     pub(crate) terminal_at_ms: Option<u64>,
+    pub(crate) trace_cause_json: Option<String>,
 }
 
 impl QueuedBatchRow {
@@ -86,6 +87,10 @@ impl QueuedBatchRow {
                 "QueuedWorkBatch",
                 self.terminal_cause.as_deref(),
                 self.terminal_at_ms,
+            )?,
+            trace_cause: lash_core_execution::store_backend_support::decode_trace_cause(
+                "QueuedWorkBatch",
+                self.trace_cause_json.as_deref(),
             )?,
         };
         Ok(batch)
@@ -122,6 +127,7 @@ pub(crate) fn queued_batch_row_from_sql(
             .get::<_, Option<i64>>("terminal_at_ms")?
             .map(|at| u64_from_sql("QueuedWorkBatch", "terminal_at_ms", at))
             .transpose()?,
+        trace_cause_json: row.get("trace_cause_json")?,
     })
 }
 
@@ -255,6 +261,7 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
             crate::session_ingress::allocate_sequence(conn, &batch.session_id)?,
             submission_digest.as_str(),
             encode_json(&batch.payload)?,
+            lash_core_execution::store_backend_support::encode_trace_cause(&batch.trace_cause)?,
         ],
     )
     .map_err(sqlite_error)?;

@@ -57,7 +57,7 @@ async fn deferred_outcomes_recover_only_from_journal(
                     LashlangSurface::default(),
                     Some(resolver),
                     RlmProjectedBindings::default(),
-                    RlmLashlangExecutionTraceConfig::default(),
+                    None,
                 )
                 .await;
                 errors

@@ -11,8 +11,9 @@ pub(super) async fn load_turn_cancel_request_pg(
     pool: &sqlx::PgPool,
     session_id: &SessionId,
     turn_id: &TurnId,
+    observer: &crate::StoreObserver,
 ) -> Result<Option<lash_core_execution::TurnCancelRequestRecord>, StoreError> {
-    let mut connection = acquire_runtime_connection(pool).await?;
+    let mut connection = acquire_runtime_connection(pool, observer).await?;
     let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
     let record = load_turn_cancel_request_in_tx(&mut tx, session_id, turn_id, false).await?;
     tx.commit().await.map_err(store_sqlx_error)?;
@@ -42,8 +43,9 @@ pub(super) async fn load_turn_cancel_intent_snapshot_pg(
     pool: &sqlx::PgPool,
     session_id: &SessionId,
     turn_id: &TurnId,
+    observer: &crate::StoreObserver,
 ) -> Result<lash_core_execution::TurnCancelIntentSnapshot, StoreError> {
-    let mut connection = acquire_runtime_connection(pool).await?;
+    let mut connection = acquire_runtime_connection(pool, observer).await?;
     let row = sqlx::query_as(
         crate::turn_ingress::turn_ingress_sql()
             .cancel_requests
@@ -374,6 +376,7 @@ mod tests {
             authority: Default::default(),
             input: "wake payload".into(),
             created_at_ms: 0,
+            trace_cause: Default::default(),
         };
         let affected = lash_core_execution::TurnCancelAffectedWake::deferred("batch".into(), wake);
         append_turn_cancel_wake_tx(&mut tx, &session, &turn, &affected)

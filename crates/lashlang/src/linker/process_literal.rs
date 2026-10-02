@@ -210,3 +210,19 @@ fn expected_type_contains_process(expected: &TypeExpr) -> bool {
         _ => false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_union_process_slot_admits_process_literals() {
+        assert!(expected_type_contains_process(
+            &super::super::type_helpers::union_type(vec![
+                TypeExpr::Null,
+                TypeExpr::Process(crate::ProcessType::unknown())
+            ])
+        ));
+        assert!(!expected_type_contains_process(&TypeExpr::Any));
+    }
+}

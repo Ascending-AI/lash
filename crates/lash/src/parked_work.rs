@@ -36,6 +36,7 @@ pub struct ParkedWork {
     pub(crate) store_factory: Arc<dyn DeploymentStore>,
     pub(crate) process_registry: Arc<dyn ProcessRegistry>,
     pub(crate) clock: Arc<dyn Clock>,
+    pub(crate) metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
     pub(crate) work: Arc<crate::core::CoreWorkSlot>,
     pub(crate) scopes: Arc<dyn lash_core::engine::ScopeCloseSink>,
     /// The `ScopeClose` kind's relay (ADR 0109 §3): a cancelled or forked
@@ -347,7 +348,7 @@ impl ParkedWork {
             },
             processes,
         };
-        record_park_gauges(&report, self.clock.timestamp_ms());
+        record_park_gauges(&self.metrics, &report, self.clock.timestamp_ms());
         Ok(report)
     }
 
@@ -433,17 +434,23 @@ impl ParkedWork {
 
 /// Record the parked-work gauges for both kinds: every reason's count, zero
 /// included, and the oldest park's age.
-pub(crate) fn record_park_gauges(report: &ParkedWorkReport, now_ms: u64) {
+pub(crate) fn record_park_gauges(
+    metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
+    report: &ParkedWorkReport,
+    now_ms: u64,
+) {
     for (kind, parks) in [("turn", &report.turns), ("process", &report.processes)] {
         for reason in ParkReasonCode::ALL {
             let count = parks.by_reason.get(reason).copied().unwrap_or_default();
             lash_core::operational_metrics::record_parked_work_count(
+                metrics,
                 kind,
                 reason.as_str(),
                 u64::try_from(count).unwrap_or(u64::MAX),
             );
         }
         lash_core::operational_metrics::record_parked_work_oldest_age(
+            metrics,
             kind,
             parks
                 .oldest_since_ms

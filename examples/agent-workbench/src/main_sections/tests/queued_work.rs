@@ -19,6 +19,7 @@ pub(crate) fn queued_work_test_draft(
         authority: lash::persistence::QueuedWorkAuthority::default(),
         input: source_key.to_string(),
         created_at_ms: 1,
+        trace_cause: Default::default(),
     })
 }
 

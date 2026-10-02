@@ -127,6 +127,12 @@ pub mod facade_support {
         UnrecordedSessionSources, opener_for_execution_scope, scope_status,
     };
     pub use crate::runtime::{DurableSessionOps, EMPTY_HEAD_REVISION};
+    /// The drive-tracing seam a durable substrate implements against (the trace runtime,
+    /// a step's issue and its standing), public in every feature variant.
+    pub use lash_core_execution::trace::{
+        JournalFrontier, LiveStep, StepIssue, TraceRuntime, TraceStanding, effect_trace_scope,
+    };
+    pub use lash_core_ids::operational_metrics::StoreObserver;
     /// Apply the canonical runtime invocation projection to an existing trace
     /// context. Durable hosts use this instead of maintaining a second
     /// projection with different parent or attribution precedence.
@@ -359,22 +365,16 @@ pub mod facade_support {
     pub use crate::runtime::refuse_unhonored_group_membership;
     pub use crate::runtime::registry_transitions;
     pub use crate::runtime::release_bound_trigger_delivery_pins;
-    pub use crate::runtime::turn_control_binding_id_for_scope;
-    pub use crate::runtime::{ParkRefused, ParkedSession};
-    pub use crate::runtime::{ProcessChangeHub, ProcessChangeSubscription};
-    pub use crate::runtime::{QueuedEffectSource, QueuedTurnOptions, TurnOptions};
-    pub use crate::runtime::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
-    pub use lash_core_store::session_identity::facade_ops::AgentFrameReasonFacadeOps;
-    pub const RUNTIME_TUNING_METRICS_ENABLED: bool = cfg!(feature = "otel-trace");
-    /// Record one first-party PostgreSQL runtime-connection acquisition wait.
-    pub fn record_postgres_pool_acquire_wait(wait: std::time::Duration, outcome: &'static str) {
-        crate::operational_metrics::record_postgres_pool_acquire_wait(wait, outcome);
-    }
     pub use crate::runtime::terminal_append_request;
+    pub use crate::runtime::turn_control_binding_id_for_scope;
     pub use crate::runtime::validate_generic_process_event_append;
     pub use crate::runtime::validate_replayed_effect_envelope;
     pub use crate::runtime::watch_process_registry;
     pub use crate::runtime::watch_process_registry_with_sink;
+    pub use crate::runtime::{ParkRefused, ParkedSession};
+    pub use crate::runtime::{ProcessChangeHub, ProcessChangeSubscription};
+    pub use crate::runtime::{QueuedEffectSource, QueuedTurnOptions, TurnOptions};
+    pub use crate::runtime::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
     pub use crate::session::InjectedTurnInput;
     pub use crate::session::ToolInvocation;
     pub use crate::session::ToolInvocationReply;
@@ -425,6 +425,7 @@ pub mod facade_support {
     pub use lash_core_store::session_graph::facade_ops::{
         SessionGraphFacadeOps, SessionNodeProjection,
     };
+    pub use lash_core_store::session_identity::facade_ops::AgentFrameReasonFacadeOps;
     pub use lash_core_store::session_state::facade_ops::RuntimeSessionStateFacadeOps;
     pub use lash_core_store::tool_state::facade_ops::ToolStateFacadeOps;
     pub use lash_sansio::AcceptedInjectedTurnInput;
@@ -612,7 +613,14 @@ pub use lash_sansio::{
     FailureCode, HostNamespace, InvalidNamespace, Namespace, TurnFailureCode, TurnFailureKind,
 };
 #[cfg(feature = "otel-trace")]
-pub use lash_trace::otel::{OtelTraceOptions, OtelTraceSink};
+pub use lash_trace::otel::{OtelOptions, OtelPayloadExport, OtelSpanEnricher, OtelTelemetry};
+pub use lash_trace::{
+    DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier, InvalidTraceLinks,
+    TraceAdmissionCandidate, TraceAnchor, TraceAttemptId, TraceCandidateOutcome, TraceCarrier,
+    TraceCause, TraceLinks, TraceScopeAdmission, TraceScopeFactory, TraceScopeId, TraceScopeKind,
+    TraceScopeOffer, TraceScopeOwner, UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId,
+    W3cTraceState,
+};
 pub use lash_trace::{
     TraceAttachment, TraceContentBlock, TraceContext, TraceEffectEnvelopeDiffEntry,
     TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue, TraceError, TraceEvent,

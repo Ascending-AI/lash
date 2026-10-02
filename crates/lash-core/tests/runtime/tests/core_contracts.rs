@@ -113,3 +113,91 @@ fn runtime_named_phase_closes_the_named_probe_scope_on_drop() {
 
     let _no_probe_phase = RuntimeNamedPhase::begin(None, "noop");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn plugin_dispatch_preserves_probe_names_pairing_and_uninstrumented_calls() {
+    use lash_core::plugin::{PluginDeclaration, PluginSpec, StaticPluginFactory};
+    use lash_core::testing::TestTurnDrive as _;
+
+    let double = kernel_double(0x1252, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let plugin = Arc::new(StaticPluginFactory::new(
+        PluginDeclaration::initial("probe.fixture"),
+        PluginSpec::new()
+            .with_before_turn(Arc::new(|_| Box::pin(async { Ok(Vec::new()) })))
+            .with_after_turn(Arc::new(|_| Box::pin(async { Ok(Vec::new()) })))
+            .with_runtime_event(Arc::new(|event| {
+                Box::pin(async move {
+                    if matches!(event, PluginLifecycleEvent::TurnPersisted(_)) {
+                        // Observer errors still close their named phase and leave
+                        // the committed turn observable.
+                        Err(PluginError::Session("observer failure".into()))
+                    } else {
+                        Ok(())
+                    }
+                })
+            })),
+    ));
+    let mut runtime = runtime_with_plugins(
+        &backend,
+        vec![plugin],
+        mock_provider(vec![
+            MockCall {
+                stream_events: Vec::new(),
+                response: Ok(LlmResponse::default()),
+            },
+            MockCall {
+                stream_events: Vec::new(),
+                response: Ok(LlmResponse::default()),
+            },
+        ]),
+    )
+    .await;
+    let probe = Arc::new(RecordingPhaseProbe::default());
+    runtime.set_turn_phase_probe(probe.clone());
+    for (turn_id, instrumented) in [("probed", true), ("unprobed", false)] {
+        if !instrumented {
+            runtime.turn_phase_probe = None;
+        }
+        let handler = double
+            .open_handler(AdmittedScope::turn(
+                runtime.state().session_id.clone(),
+                TurnId::from(turn_id),
+            ))
+            .await
+            .expect("open a turn handler");
+        let turn = Box::pin(runtime.drive_turn(
+            TurnInput::text("exercise plugin dispatch"),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
+        ))
+        .await
+        .expect("drive the turn");
+        assert!(
+            turn.errors
+                .iter()
+                .any(|issue| issue.message.contains("observer failure"))
+        );
+    }
+    let named = probe
+        .events()
+        .into_iter()
+        .filter(|event| event.contains("_named:"))
+        .collect::<Vec<_>>();
+    let plugin_named = named
+        .into_iter()
+        .filter(|event| event.contains("plugin_hook."))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        plugin_named,
+        [
+            "begin_named:plugin_hook.before_turn.probe.fixture",
+            "end_named:plugin_hook.before_turn.probe.fixture",
+            "begin_named:plugin_hook.after_turn.probe.fixture",
+            "end_named:plugin_hook.after_turn.probe.fixture",
+            "begin_named:plugin_hook.turn_finalized.probe.fixture",
+            "end_named:plugin_hook.turn_finalized.probe.fixture",
+            "begin_named:plugin_hook.turn_persisted.probe.fixture",
+            "end_named:plugin_hook.turn_persisted.probe.fixture",
+        ]
+    );
+}

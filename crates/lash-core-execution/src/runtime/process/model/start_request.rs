@@ -120,6 +120,9 @@ impl ProcessStartDeclaration {
             wake_session_id: self.wake_session_id,
             observers: self.observers,
             event_types: self.event_types,
+            // A declared start runs under the scope of the intent that
+            // declared it; realization supplies that cause.
+            trace_cause: lash_trace::TraceCause::Root,
         }
     }
 }
@@ -152,6 +155,12 @@ pub struct ProcessStartRequest {
     pub observers: Vec<SessionId>,
     #[serde(default)]
     pub event_types: Vec<ProcessEventType>,
+    /// What caused the start, for telemetry: a detached host start links
+    /// the caller's context. The registration that inserts the process
+    /// retains it; a retry under the start's key reads the retained cause
+    /// back. It is no part of what the key fences.
+    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
+    pub trace_cause: lash_trace::TraceCause,
 }
 
 impl ProcessStartRequest {
@@ -175,7 +184,21 @@ impl ProcessStartRequest {
             wake_session_id: None,
             observers: Vec::new(),
             event_types: default_process_event_types(),
+            trace_cause: lash_trace::TraceCause::Root,
         }
+    }
+
+    /// Links the start to `context`, the caller's trace context. An
+    /// explicit context wins over the one a facade would capture.
+    pub fn with_trace_context(mut self, context: lash_trace::TraceCarrier) -> Self {
+        self.trace_cause = lash_trace::TraceCause::linked_to(Some(context));
+        self
+    }
+
+    /// Sets what caused the start ([`Self::trace_cause`]).
+    pub fn with_trace_cause(mut self, trace_cause: lash_trace::TraceCause) -> Self {
+        self.trace_cause = trace_cause;
+        self
     }
 
     /// External placeholder start: lash never executes an
@@ -318,7 +341,8 @@ impl ProcessStartRequest {
         .with_start_key(self.start_key)
         .with_event_types(self.event_types)
         .with_execution_env_ref(self.env_ref)
-        .with_wake_session_id(self.wake_session_id);
+        .with_wake_session_id(self.wake_session_id)
+        .with_trace(lash_trace::TraceScopeOffer::caused_by(self.trace_cause));
         if let Some(identity) = self.identity {
             registration = registration.with_declared_identity(identity);
         }

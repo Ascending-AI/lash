@@ -784,6 +784,8 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
                 Arc::new(lash_core::NoProcessWork::for_registry(Arc::clone(
                     &fixtures.registry,
                 ))),
+                lash_core::ProcessEngineRegistry::new(),
+                lash_core::runtime::HostStartAdmission::default(),
             ),
         )
         .await
@@ -840,6 +842,8 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
                     lash_core::RuntimeEffectLocalExecutor::processes(
                         Arc::clone(&registry),
                         Arc::new(lash_core::NoProcessWork::for_registry(registry)),
+                        lash_core::ProcessEngineRegistry::new(),
+                        lash_core::runtime::HostStartAdmission::default(),
                     ),
                 )
                 .await?;
@@ -1113,6 +1117,8 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
             lash_core::RuntimeEffectLocalExecutor::processes(
                 registry.clone(),
                 Arc::new(lash_core::NoProcessWork::for_registry(registry.clone())),
+                lash_core::ProcessEngineRegistry::new(),
+                lash_core::runtime::HostStartAdmission::default(),
             ),
         )
         .await
@@ -1139,6 +1145,8 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
             lash_core::RuntimeEffectLocalExecutor::processes(
                 registry.clone(),
                 Arc::new(lash_core::NoProcessWork::for_registry(registry)),
+                lash_core::ProcessEngineRegistry::new(),
+                lash_core::runtime::HostStartAdmission::default(),
             ),
         )
         .await

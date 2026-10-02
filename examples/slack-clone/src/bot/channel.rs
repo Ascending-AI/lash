@@ -8,12 +8,11 @@
 //!
 //! **Ambient traffic is context, not a turn.** Messages that do not mention the
 //! bot are recorded in the ledger and no turn runs. When somebody finally does
-//! mention the bot, the bot folds the route's accumulated ambient text *and*
-//! the mention into one [`lash::LashSession::send`]; the session's engine runs
-//! that turn as soon as it is accepted (FIG-3600), and the bot only waits on
-//! it. The bot has been listening the whole time without saying a word or
-//! spending a token. A thread starts the same way: its first send carries the
-//! parent channel's folded context up to the thread root, labelled.
+//! mention the bot, the bot admits the route's folded context and the mention
+//! atomically with [`lash::DurableSession::send_batch`]. Both share a recorded
+//! run spec and one engine-owned root. Ambient routing reads durable handles
+//! and builds no runtime. A thread's first batch also carries its labelled
+//! parent context up to the thread root.
 //!
 //! **Deduplication is staged, not boolean, and every stage is resumable.** See
 //! [`super::ledger`] for the record and [`ChannelBot::recover`] for what a new
@@ -30,14 +29,14 @@ use std::time::{Duration, Instant};
 use anyhow::{Context as _, Result};
 use lash::messages::{MessageOrigin, MessageRole};
 use lash::persistence::ChronologicalPayload;
-use lash::{LashCore, LashSession, SendHandle, TurnInput, TurnOutcome, TurnStop};
+use lash::{DurableSession, LashCore, SendHandle, TurnInput, TurnOutcome, TurnStop};
 use tokio::sync::RwLock;
 
 use super::ledger::{
     Claim, DeferralReason, EventLedger, EventRecord, FoldReason, IgnoreReason, KIND_APP_MENTION,
     KIND_MESSAGE, ProviderFailure, Stage, StageKind,
 };
-use super::runtime::session_id;
+use super::runtime::{channel_run_spec, session_id};
 use super::slack_api::{ChatPostMessageRequest, SlackApi, find_posted_reply};
 use super::threads;
 use crate::log_err;
@@ -607,7 +606,7 @@ impl ChannelBot {
                 threads::ThreadSessionOpen::Ready {
                     session,
                     inherited_context,
-                } => (session, Some(inherited_context)),
+                } => (*session, Some(inherited_context)),
                 threads::ThreadSessionOpen::Retired => {
                     self.settle(
                         record,
@@ -677,13 +676,9 @@ impl ChannelBot {
                 channel: record.channel_id.clone(),
             });
         }
-        // One send per mention: the route's folded ambient context, then the
-        // mention itself. The ledger binds the folded rows to this mention and
-        // stores the composed text on first use, so a redelivery or a recovery
-        // pass sends the same bytes under the same id and resolves to the
-        // admission Lash already holds. `RunSpec.context` is the folded
-        // block's home once a run definition reads it.
-        let send_text = self
+        // Freeze the burst before admission. Retries keep both members' bytes
+        // and the same spec, even if more ambient messages have arrived.
+        let inputs = self
             .ledger
             .bind_mention_send(
                 record.event_id.clone(),
@@ -692,17 +687,50 @@ impl ChannelBot {
             )
             .await
             .context("fold the route's ambient context into the mention")?;
-        let handle = session
-            .send(TurnInput::text(send_text))
-            .id(lash::TurnId::prefixed(
-                "mention:",
-                format!("{}:{}", record.channel_id, record.message_ts),
-            ))
-            .await
-            .context("send the mention to its session")?;
-        let input_id = handle.input_id().to_string();
+        let run = channel_run_spec(
+            &record.channel_id,
+            record.thread_ts.as_deref(),
+            &record.message_ts,
+        );
+        let mention_id = lash::TurnId::prefixed(
+            "mention:",
+            format!("{}:{}", record.channel_id, record.message_ts),
+        );
+        let (handle, context_input_id) = if inputs.context.is_empty() {
+            (
+                session
+                    .send(TurnInput::text(inputs.mention))
+                    .id(mention_id)
+                    .run(run)
+                    .await
+                    .context("send the mention to its session")?,
+                None,
+            )
+        } else {
+            let mut handles = session
+                .send_batch([
+                    (
+                        lash::TurnId::prefixed(
+                            "ambient:",
+                            format!("{}:{}", record.channel_id, record.message_ts),
+                        ),
+                        TurnInput::text(inputs.context),
+                    ),
+                    (mention_id, TurnInput::text(inputs.mention)),
+                ])
+                .run(run)
+                .await
+                .context("admit the channel context and mention atomically")?;
+            let mention = handles.pop().context("batch omitted the mention")?;
+            let context = handles.pop().context("batch omitted the context")?;
+            (mention, Some(context.input_id().clone()))
+        };
         self.ledger
-            .record_mention_input_id(record.event_id.clone(), input_id)
+            .record_mention_inputs(
+                record.event_id.clone(),
+                handle.input_id().clone(),
+                context_input_id,
+            )
             .await
             .context("record Lash admission identity")?;
         self.run_mention_turn(&session, record, handle, resuming)
@@ -792,7 +820,7 @@ impl ChannelBot {
     /// died, and the retry loop re-attaches to the same input until it settles.
     async fn run_mention_turn(
         &self,
-        session: &LashSession,
+        session: &DurableSession,
         record: &EventRecord,
         handle: SendHandle,
         resuming: bool,
@@ -801,7 +829,6 @@ impl ChannelBot {
         let input_id = input_id.as_str();
         if resuming
             && session
-                .durable()
                 .turn_input_applications()
                 .await
                 .context("read the channel's applied inputs")?
@@ -881,7 +908,7 @@ impl ChannelBot {
     /// running the model again.
     async fn settle_committed_mention(
         &self,
-        session: &LashSession,
+        session: &DurableSession,
         record: &EventRecord,
         input_id: &str,
     ) -> Result<DeliveryOutcome> {
@@ -892,7 +919,6 @@ impl ChannelBot {
         // from the same authority: a handle opened before an engine-driven
         // turn committed legitimately lacks its messages.
         let view = session
-            .durable()
             .read()
             .await
             .context("read the committed view for transcript replay")?
@@ -1077,8 +1103,8 @@ impl ChannelBot {
         Ok(posted.ts)
     }
 
-    /// Open (or resume) the channel's session, creating it on first use.
-    async fn open_session(&self, channel: &str) -> Result<LashSession> {
+    /// Acquire the channel's durable handle, creating it on first use.
+    async fn open_session(&self, channel: &str) -> Result<DurableSession> {
         threads::open_channel_session(&self.core, &self.session_spec, channel).await
     }
 

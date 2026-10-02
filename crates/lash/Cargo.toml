@@ -96,7 +96,7 @@ testing = [
     "lash-vm-worker?/testing",
     "lashlang?/testing",
 ]
-# Exposes the OpenTelemetry trace sink (`lash::tracing::OtelTraceSink`).
+# Exposes the host-installed OpenTelemetry adapter (`lash::tracing::OtelTelemetry`).
 otel-trace = ["lash-core/otel-trace"]
 # Phase A's synthetic N+1 build (ADR 0115 §6): forwarded to every crate
 # whose constants it moves. Optional backends move only when a host enables

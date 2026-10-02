@@ -1338,7 +1338,7 @@ pub(super) async fn durable_trace_is_observed_once_across_a_redrive_and_adds_no_
         RestateEffectControllerOptions::default().segment_effect_budget(1),
     )
     .with_tracing(
-        lash_core::trace::TraceRuntime::default()
+        lash_core::facade_support::TraceRuntime::default()
             .with_trace_sink(sink_dyn)
             .with_base_context(lash_trace::TraceContext {
                 run_id: Some("restate-host-run".to_string()),

@@ -331,7 +331,9 @@ fn registry_local_executor(
     let process_work = Arc::new(lash_core::NoProcessWork::for_registry(Arc::clone(
         &registry,
     )));
-    RuntimeEffectLocalExecutor::processes(registry, process_work).with_process_engines(
+    RuntimeEffectLocalExecutor::processes(
+        registry,
+        process_work,
         lash_core::testing::process_engine_fixture()
             .with_artifact_ports(lash_core::ArtifactReferrerPorts::of_backend(
                 &RECOVERY_ARTIFACT_BACKEND,
@@ -343,6 +345,7 @@ fn registry_local_executor(
                     RECOVERY_ARTIFACT_BACKEND.worker_recovery(),
                 ),
             )),
+        lash_core::runtime::HostStartAdmission::default(),
     )
 }
 

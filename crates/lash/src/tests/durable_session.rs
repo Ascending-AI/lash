@@ -736,6 +736,71 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
     Ok(())
 }
 
+/// FIG-4829: a send's trace context is linked to the input by the
+/// acceptance that first stores it. A retry of the same `id` under another
+/// context is the same submission and keeps the first link.
+#[tokio::test]
+async fn a_send_links_its_input_to_the_context_its_first_acceptance_carried() -> Result<()> {
+    let backend = double_backend().await;
+    let double = latest_double().expect("the backend runs on its held double");
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    crate::tests::create_catalog_session(&core, "traced-send").await?;
+    let durable = core.session("traced-send").durable().await?;
+    // Acceptance does not keep an input pending: hold its engine drive.
+    let _drive = double
+        .hold_session_drive(&SessionId::from("traced-send"))
+        .await;
+    let context = |producer: u8| {
+        lash_core::TraceCarrier::parse_w3c(&format!("00-{producer:032x}-{producer:016x}-01"), None)
+            .expect("a valid trace context")
+    };
+    let send = |producer: u8| {
+        durable
+            .send(TurnInput::text("the same words"))
+            .id("traced-send-input")
+            .trace_context(context(producer))
+            .accepted()
+    };
+    let first = send(1).await?;
+    let retried = send(2).await?;
+    assert_eq!(retried.input_id, first.input_id);
+
+    // With no telemetry adapter there is no ambient context to capture.
+    durable
+        .send(TurnInput::text("words nobody traced"))
+        .id("untraced-send-input")
+        .accepted()
+        .await?;
+
+    let causes = durable
+        .pending_turn_inputs()
+        .await?
+        .into_iter()
+        .map(|read| {
+            (
+                read.input.source_key.clone(),
+                read.input.trace_cause.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        causes,
+        vec![
+            (
+                Some("traced-send-input".to_string()),
+                lash_core::TraceCause::linked_to(Some(context(1))),
+            ),
+            (
+                Some("untraced-send-input".to_string()),
+                lash_core::TraceCause::Root,
+            ),
+        ]
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn a_live_observer_sees_queue_events_from_a_separately_acquired_durable_session() -> Result<()>
 {

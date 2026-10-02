@@ -1,868 +1,823 @@
-//! Unit tests for the OpenTelemetry bridge.
-//!
-//! These live in their own file so `otel.rs` carries only the exporter itself.
-
-use lash_sansio::ProcessId;
-use lash_sansio::TurnId;
-use opentelemetry::trace::noop::NoopTracerProvider;
-
 use super::*;
-use crate::{TraceEvent, TraceLlmRequest, TraceRecord};
+use crate::telemetry::{TraceAttemptId, TraceRecordIdentity, TraceScopeOwner, TraceTransitionKind};
+use crate::{TraceContext, TraceDomainCompletion, TraceLlmAttempt, TraceTurnCompletionReason};
+use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
+use opentelemetry_sdk::trace::{InMemorySpanExporter, Sampler, SdkTracerProvider};
+use registry::{ATTRIBUTES, AttributeType, METRICS, SPANS};
 
-fn attribute_value<'a>(attrs: &'a [KeyValue], key: &str) -> &'a OtelValue {
-    attrs
-        .iter()
-        .find(|attribute| attribute.key.as_str() == key)
-        .map(|attribute| &attribute.value)
-        .unwrap_or_else(|| panic!("missing OTel attribute {key}"))
+fn providers(
+    sampler: Sampler,
+) -> (
+    SdkTracerProvider,
+    SdkMeterProvider,
+    InMemorySpanExporter,
+    InMemoryMetricExporter,
+) {
+    let spans = InMemorySpanExporter::default();
+    let metrics = InMemoryMetricExporter::default();
+    (
+        SdkTracerProvider::builder()
+            .with_sampler(sampler)
+            .with_simple_exporter(spans.clone())
+            .build(),
+        SdkMeterProvider::builder()
+            .with_reader(PeriodicReader::builder(metrics.clone()).build())
+            .build(),
+        spans,
+        metrics,
+    )
 }
-
-#[test]
-fn wait_facts_export_closed_otel_attributes() {
-    let identity = crate::TraceLanguageExecutionIdentity {
-        scope: crate::TraceRuntimeScope::none(),
-        subject: crate::TraceRuntimeSubject::Process {
-            process_id: ProcessId::fixture("process-1"),
-        },
-        source_identity: "source".to_string(),
-        module_ref: "module".to_string(),
-        entry_kind: "process".to_string(),
-        entry_ref: None,
-        entry_name: "main".to_string(),
-        engine_execution_id: None,
-        generation: None,
-    };
-    let record = |payload| {
-        TraceRecord::new(
-            TraceContext::default(),
-            TraceEvent::LanguageExecution {
-                language: "lashlang".to_string(),
-                event: crate::TraceLanguageExecution {
-                    event_key: "event".to_string(),
-                    identity: identity.clone(),
-                    payload,
-                },
-            },
-        )
-    };
-    let waiting = event_attributes(
-        &record(crate::TraceLanguageExecutionPayload::NodeWaiting {
-            node_id: "node".to_string(),
-            node_kind: lash_sansio::ExecutionNodeKind::ResourceOperation,
-            label: "tool".to_string(),
-            occurrence: 2,
-            awaited: crate::TraceNodeAwaited::EffectGroup {
-                group_key: "group-key".to_string(),
-                position: 3,
-                wake: lash_sansio::GroupWakePolicy::FirstSuccess,
-            },
-        }),
-        &OtelTraceOptions::default(),
-    );
-    assert_eq!(
-        attribute_value(&waiting, "lash.language_execution.wait_kind"),
-        &OtelValue::String("effect_group".into())
-    );
-    assert_eq!(
-        attribute_value(&waiting, "lash.language_execution.awaited_group_key"),
-        &OtelValue::String("group-key".into())
-    );
-    assert_eq!(
-        attribute_value(&waiting, "lash.language_execution.awaited_position"),
-        &OtelValue::I64(3)
-    );
-    assert_eq!(
-        attribute_value(&waiting, "lash.language_execution.wake_policy"),
-        &OtelValue::String("first_success".into())
-    );
+fn scope_id() -> TraceScopeId {
+    TraceScopeId::admission(TraceScopeOwner::Turn {
+        session_id: "session".into(),
+        turn_id: "turn".into(),
+    })
 }
-
-#[test]
-fn correlation_fields_are_exported_as_otel_attributes() {
-    let call_id = lash_sansio::ToolCallId::fixture("call-1");
-    let identity = crate::TraceLanguageExecutionIdentity {
-        scope: crate::TraceRuntimeScope::new("session-1"),
-        subject: crate::TraceRuntimeSubject::Process {
-            process_id: ProcessId::fixture("process-1"),
-        },
-        source_identity: "source-1".to_string(),
-        module_ref: "module-1".to_string(),
-        entry_kind: "process".to_string(),
-        entry_ref: Some("component:0".to_string()),
-        entry_name: "main".to_string(),
-        engine_execution_id: Some("invocation-1".to_string()),
-        generation: Some(crate::TraceLanguageExecutionGeneration::new(2)),
-    };
-    let language_record = TraceRecord::new(
-        TraceContext::default(),
-        TraceEvent::LanguageExecution {
-            language: "lashlang".to_string(),
-            event: crate::TraceLanguageExecution {
-                event_key: "process:process-1:node:node-1:1:started".to_string(),
-                identity,
-                payload: crate::TraceLanguageExecutionPayload::NodeStarted {
-                    node_id: "node-1".to_string(),
-                    node_kind: lash_sansio::ExecutionNodeKind::ResourceOperation,
-                    label: "tool".to_string(),
-                    occurrence: 1,
-                    call_id: Some(call_id.clone()),
-                },
-            },
-        },
-    );
-    let language_attrs = event_attributes(&language_record, &OtelTraceOptions::default());
-    assert_eq!(
-        attribute_value(&language_attrs, "lash.language_execution.source_identity"),
-        &OtelValue::String("source-1".into())
-    );
-    assert_eq!(
-        attribute_value(
-            &language_attrs,
-            "lash.language_execution.engine_execution_id"
-        ),
-        &OtelValue::String("invocation-1".into())
-    );
-    assert_eq!(
-        attribute_value(&language_attrs, "lash.language_execution.call_id"),
-        &OtelValue::String(call_id.to_string().into())
-    );
-    assert_eq!(
-        attribute_value(&language_attrs, "lash.language_execution.attempt"),
-        &OtelValue::I64(2)
-    );
-
-    for event in [
-        TraceEvent::ToolCallStarted {
-            call_id: call_id.clone(),
-            provider_call_id: None,
-            name: "search".to_string(),
-            args: serde_json::json!({}),
-            issuing_node_id: Some("node-1".to_string()),
-        },
-        TraceEvent::ToolCallCompleted {
-            call_id: call_id.clone(),
-            provider_call_id: None,
-            name: "search".to_string(),
-            args: serde_json::json!({}),
-            output: crate::TraceToolCallOutput {
-                outcome: crate::TraceToolCallOutcome::Success(serde_json::json!({})),
-                control: None,
-            },
-            duration_ms: 1,
-            issuing_node_id: Some("node-1".to_string()),
-            attempts: None,
-        },
-    ] {
-        let attrs = event_attributes(
-            &TraceRecord::new(TraceContext::default(), event),
-            &OtelTraceOptions::default(),
-        );
-        assert_eq!(
-            attribute_value(&attrs, "lash.tool.issuing_node_id"),
-            &OtelValue::String("node-1".into())
-        );
+fn admit(adapter: &OtelTelemetry, cause: TraceCause) -> DurableTraceScope {
+    let scope = scope_id();
+    let candidate = adapter.propose(&scope, &cause);
+    let anchor = candidate.anchor();
+    candidate.settle(TraceCandidateOutcome::Selected);
+    DurableTraceScope {
+        scope,
+        cause,
+        anchor,
+        started_at_ms: 1000,
     }
 }
-
-#[test]
-fn node_failure_provenance_is_exported_as_typed_attributes() {
-    let identity = crate::TraceLanguageExecutionIdentity {
-        scope: crate::TraceRuntimeScope::new("s1"),
-        subject: crate::TraceRuntimeSubject::Process {
-            process_id: ProcessId::fixture("p1"),
-        },
-        source_identity: "source".into(),
-        module_ref: "module".into(),
-        entry_kind: "process".into(),
-        entry_ref: None,
-        entry_name: "main".into(),
-        engine_execution_id: None,
-        generation: Some(crate::TraceLanguageExecutionGeneration::new(2)),
+fn record(scope: &DurableTraceScope, event: TraceEvent, terminal_ms: u64) -> TraceRecord {
+    let identity = TraceRecordIdentity::Transition {
+        scope: scope.scope.clone(),
+        transition: TraceTransitionKind::Terminal,
+        ordinal: 0,
     };
-    let record = |failure| {
-        TraceRecord::new(
-            TraceContext::default(),
-            TraceEvent::LanguageExecution {
-                language: "lashlang".into(),
-                event: crate::TraceLanguageExecution {
-                    event_key: "node-failed".into(),
-                    identity: identity.clone(),
-                    payload: crate::TraceLanguageExecutionPayload::NodeFailed {
-                        node_id: "node".into(),
-                        node_kind: lash_sansio::ExecutionNodeKind::ResourceOperation,
-                        label: "read".into(),
-                        occurrence: 1,
-                        call_id: Some(lash_sansio::ToolCallId::fixture("effect-1")),
-                        failure,
-                    },
-                },
-            },
-        )
-    };
-    let effect = record(crate::TraceLanguageExecutionFailure::Effect {
-        class: lash_sansio::ToolFailureClass::PermissionDenied,
-        code: "approval_denied".into(),
-        message: "denied".into(),
-        replay_key: "effect-1".into(),
-        source: lash_sansio::ToolFailureSource::Policy,
-        retry: lash_sansio::ToolRetryStatus::Exhausted { attempts: 3 },
-    });
-    let attrs = event_attributes(&effect, &OtelTraceOptions::default());
-    for (key, expected) in [
-        ("lash.language_execution.failure.kind", "effect"),
-        ("lash.language_execution.failure.class", "permission_denied"),
-        ("lash.language_execution.failure.code", "approval_denied"),
-        ("lash.language_execution.failure.message", "denied"),
-        ("lash.language_execution.failure.replay_key", "effect-1"),
-        ("lash.language_execution.failure.source", "policy"),
-        ("lash.language_execution.failure.retry", "exhausted"),
-    ] {
-        assert_eq!(
-            attribute_value(&attrs, key),
-            &OtelValue::String(expected.into())
-        );
-    }
-    assert_eq!(
-        attribute_value(&attrs, "lash.language_execution.failure.retry_attempts"),
-        &OtelValue::I64(3)
-    );
-    assert_eq!(
-        attribute_value(&attrs, "lash.language_execution.attempt"),
-        &OtelValue::I64(2)
-    );
-
-    let runtime = record(crate::TraceLanguageExecutionFailure::Runtime {
-        code: "VmStackUnderflow".into(),
-        message: "vm stack underflow".into(),
-    });
-    let attrs = event_attributes(&runtime, &OtelTraceOptions::default());
-    assert_eq!(
-        attribute_value(&attrs, "lash.language_execution.failure.kind"),
-        &OtelValue::String("runtime".into())
-    );
-    assert_eq!(
-        attribute_value(&attrs, "lash.language_execution.failure.code"),
-        &OtelValue::String("VmStackUnderflow".into())
-    );
-    assert!(
-        !attrs
-            .iter()
-            .any(|attr| attr.key.as_str() == "lash.language_execution.failure.retry")
-    );
-}
-
-#[test]
-fn typed_exec_diagnostics_preserve_the_otel_span_family() {
-    use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider, SimpleSpanProcessor};
-
-    let exporter = InMemorySpanExporter::default();
-    let provider = SdkTracerProvider::builder()
-        .with_span_processor(SimpleSpanProcessor::new(exporter.clone()))
-        .build();
-    let sink = OtelTraceSink::new(provider.tracer("test"));
-
-    let events = [
-        TraceEvent::ExecCodeStarted {
-            code: "print(1)".to_string(),
-            code_chars: 8,
-        },
-        TraceEvent::ExecCodeCompleted {
-            duration_ms: 3,
-            output: "1".to_string(),
-            output_chars: 1,
-            observation_count: 1,
-            observation_projections: Vec::new(),
-            error: None,
-            terminal_finish: None,
-            tool_calls: Vec::new(),
-        },
-        TraceEvent::ExecCodeFailed {
-            reason: crate::ExecCodeFailureReason::RuntimeStopped,
-            error: "boom".to_string(),
-        },
-        TraceEvent::ObservationProjection {
-            projections: Vec::new(),
-        },
-    ];
-    for event in events {
-        sink.append(&TraceRecord::new(TraceContext::default(), event))
-            .unwrap();
-    }
-
-    let spans = exporter.get_finished_spans().unwrap();
-    let names = spans
-        .iter()
-        .map(|span| span.name.as_ref())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        names,
-        [
-            "lash.exec_code",
-            "lash.exec_code",
-            "lash.exec_code",
-            "lash.observation_projection"
-        ]
-    );
-}
-
-#[test]
-fn typed_exec_diagnostic_attributes_keep_the_protocol_otel_contract() {
-    let record = TraceRecord::new(
+    TraceRecord::identified(
+        &identity,
         TraceContext::default(),
-        TraceEvent::ExecCodeCompleted {
-            duration_ms: 3,
-            output: "1".to_string(),
-            output_chars: 1,
-            observation_count: 1,
-            observation_projections: Vec::new(),
-            error: None,
-            terminal_finish: None,
-            tool_calls: Vec::new(),
-        },
-    );
-    let attrs = event_attributes(
-        &record,
-        &OtelTraceOptions {
-            include_payload_json: true,
-            ..OtelTraceOptions::default()
-        },
-    );
-    let value = |key: &str| {
-        attrs
-            .iter()
-            .find(|attribute| attribute.key.as_str() == key)
-            .map(|attribute| attribute.value.to_string())
-            .unwrap_or_else(|| panic!("missing OTel attribute {key}"))
-    };
-
-    assert_eq!(value("lash.protocol.plugin_id"), "runtime");
-    assert_eq!(value("lash.protocol.diagnostic_phase"), record.event.kind());
-    let payload = value("lash.protocol.payload_json");
-    assert!(payload.contains(record.event.kind()));
-    assert!(!payload.contains("tool_call_count"));
-    assert!(!payload.contains("terminal_finish_present"));
+        event,
+        chrono::DateTime::from_timestamp_millis(terminal_ms as i64).unwrap(),
+    )
+    .unwrap()
 }
-
-/// FIG-2362: the closed failure reason survives into the OTel payload beside
-/// the human error text.
-#[test]
-fn exec_code_failed_otel_payload_carries_the_typed_reason() {
-    let record = TraceRecord::new(
-        TraceContext::default(),
-        TraceEvent::ExecCodeFailed {
-            reason: crate::ExecCodeFailureReason::ExecutorUnavailable,
-            error: "code execution is not available in this session".to_string(),
-        },
-    );
-    let attrs = event_attributes(
-        &record,
-        &OtelTraceOptions {
-            include_payload_json: true,
-            ..OtelTraceOptions::default()
-        },
-    );
-    let payload = attrs
-        .iter()
-        .find(|attribute| attribute.key.as_str() == "lash.protocol.payload_json")
-        .map(|attribute| attribute.value.to_string())
-        .expect("missing OTel payload attribute");
-    assert!(payload.contains("\"reason\":\"executor_unavailable\""));
-    assert!(payload.contains("\"error\":\"code execution is not available in this session\""));
-}
-
-#[test]
-fn composition_change_projects_fingerprint_counts_and_opt_in_full_payload() {
-    let record = TraceRecord::new(
-        TraceContext::default().for_session("session-1"),
-        TraceEvent::CompositionChanged {
-            fingerprint: "composition-sha".to_string(),
-            rendered_system_prompt: "system policy".to_string(),
-            tool_schemas: vec![crate::TraceToolSpec {
-                name: "search".to_string(),
-                description: "Search documents".to_string(),
-                input_schema: serde_json::json!({ "type": "object" }),
-                output_schema: serde_json::json!({ "type": "array" }),
-            }],
-        },
-    );
-    let attrs = event_attributes(
-        &record,
-        &OtelTraceOptions {
-            include_payload_json: true,
-            ..OtelTraceOptions::default()
-        },
-    );
-    let attribute = |key: &str| {
-        attrs
-            .iter()
-            .find(|attribute| attribute.key.as_str() == key)
-            .map(|attribute| &attribute.value)
-            .unwrap_or_else(|| panic!("missing OTel attribute {key}"))
-    };
-
-    assert_eq!(
-        attribute("lash.composition.fingerprint"),
-        &OtelValue::String("composition-sha".into())
-    );
-    assert_eq!(
-        attribute("lash.composition.prompt_chars"),
-        &OtelValue::I64(13)
-    );
-    assert_eq!(attribute("lash.composition.tool_count"), &OtelValue::I64(1));
-    assert!(
-        attribute("lash.composition.rendered_system_prompt_json")
-            .to_string()
-            .contains("system policy")
-    );
-    assert!(
-        attribute("lash.composition.tool_schemas_json")
-            .to_string()
-            .contains("search")
-    );
-}
-
-#[test]
-fn otel_sink_accepts_turn_and_llm_lifecycle() {
-    let tracer = NoopTracerProvider::new().tracer("test");
-    let sink = OtelTraceSink::new(tracer);
-    let context = TraceContext::default()
-        .for_session("session-1")
-        .for_llm_call("llm-1");
-    let turn_context = TraceContext {
-        turn_id: Some(TurnId::from("turn-1")),
-        ..context.clone()
-    };
-
-    sink.append(&TraceRecord::new(
-        turn_context.clone(),
-        TraceEvent::TurnStarted {
-            metadata: Default::default(),
-        },
-    ))
-    .unwrap();
-    sink.append(&TraceRecord::new(
-        turn_context.clone(),
-        TraceEvent::LlmCallStarted {
-            request: TraceLlmRequest {
-                model: "gpt-test".to_string(),
-                model_variant: Default::default(),
-                messages: Vec::new(),
-                tools: Vec::new(),
-                tool_choice: "auto".to_string(),
-                output_spec: None,
-                stream: true,
-            },
-        },
-    ))
-    .unwrap();
-    sink.append(&TraceRecord::new(
-        turn_context.clone(),
-        TraceEvent::LlmCallFailed {
-            error: crate::TraceError {
-                retryable: false,
-                terminal_reason: crate::TraceLlmTerminalReason::Unknown,
-                failure_kind: crate::TraceProviderFailureKind::Unknown,
-                code: Some(crate::TraceFailureCode::lash(
-                    lash_sansio::session_model::TurnFailureCode::from_wire("test"),
-                )),
-            },
-            stream_summary: None,
-            attempts: None,
-        },
-    ))
-    .unwrap();
-    sink.append(&TraceRecord::new(
-        turn_context,
+fn completed(scope: &DurableTraceScope) -> TraceRecord {
+    record(
+        scope,
         TraceEvent::TurnCompleted {
-            outcome: crate::TraceTurnOutcome::Failed {
-                done_reason: crate::TraceTurnFailureReason::ProviderError,
+            outcome: TraceTurnOutcome::Completed {
+                done_reason: TraceTurnCompletionReason::AssistantMessage,
             },
         },
-    ))
-    .unwrap();
-
-    assert!(sink.active.lock_recover().is_empty());
+        9000,
+    )
+}
+fn live() -> EmissionSource {
+    EmissionSource::LiveExecution {
+        attempt: TraceAttemptId::new("attempt"),
+    }
+}
+fn context(flags: u8) -> TraceCarrier {
+    TraceCarrier::parse_w3c(
+        &format!("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-{flags:02x}"),
+        Some("vendor=one,other=two"),
+    )
+    .unwrap()
 }
 
-/// FIG-3435: OTel `error.type` carries the failure kind, not the terminal
-/// reason — a timeout exports `timeout` even though its terminal reason is
-/// `provider_error`, and an unknown kind demotes to `_OTHER`. The
-/// `lash.error.code` attribute carries the code's spelling alone.
 #[test]
-fn llm_call_failed_exports_failure_kind_and_spelling_only_code() {
-    use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider, SimpleSpanProcessor};
-
-    let exporter = InMemorySpanExporter::default();
-    let provider = SdkTracerProvider::builder()
-        .with_span_processor(SimpleSpanProcessor::new(exporter.clone()))
-        .build();
-    let sink = OtelTraceSink::new(provider.tracer("test"));
-    let context = TraceContext::default().for_session("session-1");
-
-    sink.append(&TraceRecord::new(
-        context.clone(),
-        TraceEvent::LlmCallFailed {
-            error: crate::TraceError {
-                retryable: true,
-                terminal_reason: crate::TraceLlmTerminalReason::ProviderError,
-                failure_kind: crate::TraceProviderFailureKind::Timeout,
-                code: Some(crate::TraceFailureCode::provider("insufficient_quota")),
-            },
-            stream_summary: None,
-            attempts: None,
-        },
-    ))
-    .unwrap();
-    sink.append(&TraceRecord::new(
-        context,
-        TraceEvent::LlmCallFailed {
-            error: crate::TraceError {
-                retryable: false,
-                terminal_reason: crate::TraceLlmTerminalReason::ProviderError,
-                failure_kind: crate::TraceProviderFailureKind::Unknown,
-                code: None,
-            },
-            stream_summary: None,
-            attempts: None,
-        },
-    ))
-    .unwrap();
-
+fn explicit_root_ignores_ambient_context() {
+    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
+    let host = provider.tracer("host").start("host");
+    let host_id = host.span_context().trace_id();
+    let _guard = Context::new().with_span(host).attach();
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
+    assert_eq!(
+        adapter.capture_current().unwrap().trace_id().to_bytes(),
+        host_id.to_bytes()
+    );
+    admit(&adapter, TraceCause::Root);
     let spans = exporter.get_finished_spans().unwrap();
-    assert_eq!(spans.len(), 2);
-    let attribute = |span: &opentelemetry_sdk::trace::SpanData, key: &str| {
-        span.attributes
-            .iter()
-            .find(|kv| kv.key.as_str() == key)
-            .map(|kv| kv.value.clone())
-            .unwrap_or_else(|| panic!("missing OTel attribute {key}"))
-    };
-    assert_eq!(
-        attribute(&spans[0], "error.type"),
-        OtelValue::String("timeout".into()),
-        "a timeout must export its kind, not the provider_error terminal reason"
+    assert_eq!(spans.len(), 1);
+    assert_ne!(
+        spans[0].span_context.trace_id(),
+        host_id,
+        "a root must not inherit ambient host context"
     );
-    assert_eq!(
-        attribute(&spans[0], "lash.error.code"),
-        OtelValue::String("insufficient_quota".into()),
-        "the code attribute carries the spelling alone, not provider:insufficient_quota"
-    );
-    assert_eq!(
-        attribute(&spans[1], "error.type"),
-        OtelValue::String("_OTHER".into()),
-        "an explicit unknown failure kind demotes to _OTHER"
-    );
+    assert_eq!(spans[0].parent_span_id, SpanId::INVALID);
 }
 
 #[test]
-fn failed_language_execution_yields_error_span() {
-    use crate::{
-        TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload,
-        TraceLanguageExecutionStatus, TraceRuntimeScope, TraceRuntimeSubject,
+fn carrier_sdk_conversion_preserves_unsampled_flags_state_and_remote_provenance() {
+    for flags in [0, 1, 3, 255] {
+        let original = context(flags);
+        let sdk = span_context(&original).unwrap();
+        assert!(sdk.is_remote());
+        assert_eq!(sdk.is_sampled(), flags & 1 != 0);
+        assert_eq!(carrier(&sdk), Some(original));
+    }
+    assert!(carrier(&SpanContext::empty_context()).is_none());
+    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOff);
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
+    let scope = admit(&adapter, TraceCause::Root);
+    let TraceAnchor::Context(anchor) = &scope.anchor else {
+        panic!("unsampled context must be retained");
     };
-    use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider, SimpleSpanProcessor};
+    assert!(!anchor.flags().is_sampled());
+    adapter.project(
+        &scope,
+        None,
+        &EmissionSource::NewTransition,
+        &completed(&scope),
+    );
+    assert!(exporter.get_finished_spans().unwrap().is_empty());
+}
 
-    let exporter = InMemorySpanExporter::default();
-    let provider = SdkTracerProvider::builder()
-        .with_span_processor(SimpleSpanProcessor::new(exporter.clone()))
-        .build();
-    let tracer = provider.tracer("test");
-    let sink = OtelTraceSink::new(tracer);
-
-    let identity = TraceLanguageExecutionIdentity {
-        scope: TraceRuntimeScope::new("s1"),
-        subject: TraceRuntimeSubject::Process {
-            process_id: ProcessId::fixture("p1"),
-        },
-        source_identity: "source".to_string(),
-        module_ref: "module".to_string(),
-        entry_kind: "process".to_string(),
-        entry_ref: Some("component:0".to_string()),
-        entry_name: "main".to_string(),
-        engine_execution_id: None,
-        generation: None,
+#[test]
+fn admission_selection_parent_links_and_dropped_candidates_are_explicit() {
+    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
+    let cause = context(1);
+    let parented = admit(&adapter, TraceCause::Parent(cause.clone()));
+    let TraceAnchor::Context(anchor) = parented.anchor else {
+        panic!("anchor");
     };
-
-    // 1. Failed node execution
-    let failed_node = TraceRecord::new(
-        TraceContext::default().for_session("s1"),
-        TraceEvent::LanguageExecution {
-            language: "lashlang".to_string(),
-            event: TraceLanguageExecution {
-                event_key: "process:p1:node:n1:1:failed".to_string(),
-                identity: identity.clone(),
-                payload: TraceLanguageExecutionPayload::NodeFailed {
-                    node_id: "n1".to_string(),
-                    node_kind: lash_sansio::ExecutionNodeKind::ResourceOperation,
-                    label: "eval".to_string(),
-                    occurrence: 1,
-                    call_id: None,
-                    failure: crate::TraceLanguageExecutionFailure::Runtime {
-                        code: "InvalidJson".to_string(),
-                        message: "syntax error".to_string(),
-                    },
-                },
-            },
-        },
-    );
-    sink.append(&failed_node).unwrap();
-
-    // 2. Failed execution finished
-    let failed_execution = TraceRecord::new(
-        TraceContext::default().for_session("s1"),
-        TraceEvent::LanguageExecution {
-            language: "lashlang".to_string(),
-            event: TraceLanguageExecution {
-                event_key: "process:p1:finished".to_string(),
-                identity,
-                payload: TraceLanguageExecutionPayload::ExecutionFinished {
-                    status: TraceLanguageExecutionStatus::Failed,
-                    error: Some("execution crashed".to_string()),
-                },
-            },
-        },
-    );
-    sink.append(&failed_execution).unwrap();
-
+    assert_eq!(anchor.trace_id(), cause.trace_id());
+    admit(&adapter, TraceCause::linked_to(Some(cause.clone())));
+    adapter
+        .propose(&scope_id(), &TraceCause::Root)
+        .settle(TraceCandidateOutcome::Reused);
+    drop(adapter.propose(&scope_id(), &TraceCause::Root));
     let spans = exporter.get_finished_spans().unwrap();
-    assert_eq!(spans.len(), 2);
-
+    assert_eq!(spans.len(), 4);
     assert_eq!(
-        spans[0].status,
-        opentelemetry::trace::Status::error("syntax error")
+        spans[0].parent_span_id.to_bytes(),
+        cause.span_id().to_bytes()
     );
+    assert_eq!(spans[1].parent_span_id, SpanId::INVALID);
+    assert_ne!(
+        spans[1].span_context.trace_id().to_bytes(),
+        cause.trace_id().to_bytes()
+    );
+    assert_eq!(spans[1].links.len(), 1);
     assert_eq!(
-        spans[1].status,
-        opentelemetry::trace::Status::error("execution crashed")
+        spans[1].links[0].span_context,
+        span_context(&cause).unwrap()
     );
-}
-
-/// FIG-1758: a cancelled turn is a deliberate stop, not a failure. The
-/// exporter's failure predicate matches on the typed outcome, so the turn
-/// span closes `Ok` and carries its cancellation evidence, while a failed
-/// turn on the same path still closes `Error`.
-#[test]
-fn cancelled_turn_is_not_exported_as_failed() {
-    use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider, SimpleSpanProcessor};
-
-    let exporter = InMemorySpanExporter::default();
-    let provider = SdkTracerProvider::builder()
-        .with_span_processor(SimpleSpanProcessor::new(exporter.clone()))
-        .build();
-    let sink = OtelTraceSink::new(provider.tracer("test"));
-
-    let cancelled_outcome = crate::TraceTurnOutcome::Cancelled {
-        evidence: crate::TraceTurnCancellationEvidence {
-            request_id: "cancel-req-1".to_string(),
-            origin: Some("host-console".to_string()),
-            reason: Some("operator stopped the turn".to_string()),
-        },
-    };
+    assert_eq!(spans[2].name, "lash.admission.attempt");
     assert!(
-        !TraceEvent::TurnCompleted {
-            outcome: cancelled_outcome.clone(),
+        spans[2]
+            .attributes
+            .contains(&A::AdmissionOutcome.value("reused"))
+    );
+    assert!(
+        spans[3]
+            .attributes
+            .contains(&A::AdmissionOutcome.value("refused"))
+    );
+}
+
+#[test]
+fn completion_uses_retained_anchor_and_times_after_adapter_recreation() {
+    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
+    let scope = admit(&adapter, TraceCause::Root);
+    let serialized = serde_json::to_string(&scope).unwrap();
+    drop(adapter);
+    let scope: DurableTraceScope = serde_json::from_str(&serialized).unwrap();
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
+    let attempt = AttemptObservation {
+        context: Some(context(1)),
+        invocation_id: Some("delivery-2".into()),
+    };
+    adapter.project(
+        &scope,
+        Some(&attempt),
+        &EmissionSource::NewTransition,
+        &completed(&scope),
+    );
+    let spans = exporter.get_finished_spans().unwrap();
+    assert_eq!(spans.len(), 2);
+    assert_eq!(spans[1].parent_span_id, spans[0].span_context.span_id());
+    assert_eq!(
+        spans[1].span_context.trace_id(),
+        spans[0].span_context.trace_id()
+    );
+    assert_eq!(spans[1].start_time, epoch_ms(1000));
+    assert_eq!(spans[1].end_time, epoch_ms(9000));
+    assert_eq!(
+        spans[1].links[0].span_context,
+        span_context(attempt.context.as_ref().unwrap()).unwrap()
+    );
+    assert!(
+        spans[1]
+            .attributes
+            .contains(&A::AttemptInvocationId.value("delivery-2"))
+    );
+    let mut untraced = scope.clone();
+    untraced.anchor = TraceAnchor::Untraced;
+    adapter.project(
+        &untraced,
+        None,
+        &EmissionSource::NewTransition,
+        &completed(&untraced),
+    );
+    assert_eq!(exporter.get_finished_spans().unwrap().len(), 2);
+}
+
+#[test]
+fn emitted_domain_shape_matches_registry() {
+    for metric in [
+        registry::Metric::PoolAcquireWait,
+        registry::Metric::RecoveryLeader,
+        registry::Metric::RecoveryTerm,
+    ] {
+        assert_eq!(metric.definition().ownership, registry::Ownership::Physical);
+    }
+    let (provider, meter, exporter, metrics) = providers(Sampler::AlwaysOn);
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
+    let scope = admit(&adapter, TraceCause::Root);
+    adapter.project(
+        &scope,
+        None,
+        &EmissionSource::NewTransition,
+        &completed(&scope),
+    );
+    let model = record(
+        &scope,
+        TraceEvent::LlmAttemptCompleted {
+            attempt: TraceLlmAttempt {
+                ordinal: 1,
+                provider: Some("vendor-x".into()),
+                request_model: "model-x".into(),
+                response_model: Some("observed-model".into()),
+                started_at_ms: Some(2500),
+                ended_at_ms: Some(3000),
+                outcome: TraceLlmAttemptOutcome::Completed,
+                error: None,
+                usage: Some(TraceTokenUsage {
+                    input_tokens: 10,
+                    output_tokens: 4,
+                    cache_read_input_tokens: 3,
+                    cache_write_input_tokens: 2,
+                    reasoning_output_tokens: 1,
+                }),
+            },
+        },
+        3000,
+    );
+    adapter.project(&scope, None, &live(), &model);
+    adapter
+        .metrics
+        .runtime_tuning
+        .record_provider_retry("vendor-x", "backoff");
+    adapter
+        .metrics
+        .runtime_tuning
+        .record_provider_throttle_wait("vendor-x", Duration::from_millis(4));
+    adapter
+        .metrics
+        .runtime_tuning
+        .record_session_lane_contention_wait(Duration::from_millis(1), "acquired");
+    adapter
+        .metrics
+        .runtime_tuning
+        .record_session_lane_give_up("busy");
+    adapter
+        .metrics
+        .runtime_tuning
+        .record_queued_work_wake_retry();
+    adapter
+        .metrics
+        .runtime_tuning
+        .record_postgres_pool_acquire_wait(Duration::from_millis(2), "success");
+    adapter
+        .metrics
+        .runtime_tuning
+        .record_runtime_commit_budgeted_size(3, "admitted");
+    adapter.metrics.parked_work.record_park("turn", "budget");
+    adapter
+        .metrics
+        .parked_work
+        .record_count("turn", "budget", 1);
+    adapter.metrics.parked_work.record_oldest_age("turn", 4);
+    adapter.metrics.tool_intent.record_executed("start_process");
+    adapter
+        .metrics
+        .tool_intent
+        .record_refused("start_process", "refused");
+    adapter
+        .metrics
+        .obligations
+        .record_attempt("input", "delivered");
+    adapter.metrics.obligations.record_stalled("input", 0);
+    adapter
+        .metrics
+        .obligations
+        .record_leadership("recovery", true, 1);
+    adapter
+        .metrics
+        .generation_drain
+        .record_work("1", "live_processes", 2);
+    meter.force_flush().unwrap();
+    let spans = exporter.get_finished_spans().unwrap();
+    for span in &spans {
+        assert_eq!(span.instrumentation_scope.name(), "lash");
+        assert_eq!(span.instrumentation_scope.version(), Some("1.0"));
+        assert!(span.instrumentation_scope.schema_url().is_none());
+        assert!(
+            SPANS
+                .iter()
+                .any(|definition| span.name.as_ref() == definition.name
+                    || span.name.starts_with(&format!("{} ", definition.name)))
+        );
+        for attr in &span.attributes {
+            let definition = ATTRIBUTES
+                .iter()
+                .find(|definition| definition.key == attr.key.as_str())
+                .expect("registered attribute");
+            assert!(matches!(
+                (definition.value_type, &attr.value),
+                (AttributeType::String, opentelemetry::Value::String(_))
+                    | (AttributeType::Integer, opentelemetry::Value::I64(_))
+                    | (AttributeType::Boolean, opentelemetry::Value::Bool(_))
+            ));
         }
-        .is_failed(),
-        "a cancelled turn must not satisfy the shared failure predicate"
-    );
-
-    let cancelled_context = TraceContext::default()
-        .for_session("session-cancel")
-        .for_turn("turn-cancel");
-    sink.append(&TraceRecord::new(
-        cancelled_context.clone(),
-        TraceEvent::TurnStarted {
-            metadata: Default::default(),
-        },
-    ))
-    .unwrap();
-    sink.append(&TraceRecord::new(
-        cancelled_context,
-        TraceEvent::TurnCompleted {
-            outcome: cancelled_outcome,
-        },
-    ))
-    .unwrap();
-
-    let failed_context = TraceContext::default()
-        .for_session("session-failed")
-        .for_turn("turn-failed");
-    sink.append(&TraceRecord::new(
-        failed_context.clone(),
-        TraceEvent::TurnStarted {
-            metadata: Default::default(),
-        },
-    ))
-    .unwrap();
-    sink.append(&TraceRecord::new(
-        failed_context,
-        TraceEvent::TurnCompleted {
-            outcome: crate::TraceTurnOutcome::Failed {
-                done_reason: crate::TraceTurnFailureReason::ProviderError,
-            },
-        },
-    ))
-    .unwrap();
-
-    let spans = exporter.get_finished_spans().unwrap();
-    assert_eq!(spans.len(), 2, "one span per completed turn");
-
-    assert_eq!(
-        spans[0].status,
-        opentelemetry::trace::Status::Unset,
-        "cancelled turn span must not be exported with an error status"
+    }
+    assert_eq!(spans[2].name, "chat model-x");
+    assert_eq!(spans[2].span_kind, opentelemetry::trace::SpanKind::Client);
+    assert_eq!(spans[2].start_time, epoch_ms(2500));
+    assert_eq!(spans[2].end_time, epoch_ms(3000));
+    assert!(
+        spans[2]
+            .attributes
+            .contains(&A::ProviderName.value("vendor-x"))
     );
     assert!(
-        !matches!(spans[0].status, opentelemetry::trace::Status::Error { .. }),
-        "cancelled turn span must not carry an error status"
+        spans[2]
+            .attributes
+            .contains(&A::ResponseModel.value("observed-model"))
     );
-    let attribute = |span: &opentelemetry_sdk::trace::SpanData, key: &str| {
-        span.attributes
+    assert!(spans[2].attributes.contains(&A::InputTokens.value(10_i64)));
+    assert!(
+        spans[2]
+            .attributes
+            .contains(&A::CacheReadTokens.value(3_i64))
+    );
+    assert!(
+        spans[2]
+            .attributes
+            .contains(&A::CacheWriteTokens.value(2_i64))
+    );
+    assert!(
+        !spans[2]
+            .attributes
             .iter()
-            .find(|kv| kv.key.as_str() == key)
-            .map(|kv| kv.value.clone())
-            .unwrap_or_else(|| panic!("missing OTel attribute {key}"))
-    };
-    assert_eq!(
-        attribute(&spans[0], "lash.turn.status"),
-        OtelValue::String("cancelled".into())
+            .any(|a| a.key.as_str().starts_with("lash.payload"))
     );
-    assert_eq!(
-        attribute(&spans[0], "lash.turn.cancellation.request_id"),
-        OtelValue::String("cancel-req-1".into())
-    );
-    assert_eq!(
-        attribute(&spans[0], "lash.turn.cancellation.origin"),
-        OtelValue::String("host-console".into())
-    );
+    let exported = metrics.get_finished_metrics().unwrap();
+    let mut definitions = Vec::new();
+    for resource in &exported {
+        for scope in resource.scope_metrics() {
+            assert_eq!(scope.scope().name(), "lash");
+            assert_eq!(scope.scope().version(), Some("1.0"));
+            for metric in scope.metrics() {
+                definitions.push((metric.name(), metric.unit()));
+            }
+        }
+    }
+    let mut expected: Vec<_> = METRICS
+        .iter()
+        .map(|metric| (metric.name, metric.unit))
+        .collect();
+    definitions.sort_unstable();
+    expected.sort_unstable();
+    assert_eq!(definitions, expected);
+    assert!(registry::contract_markdown().contains("cache_write.input_tokens"));
+}
 
+struct EnrichmentSpy(Arc<std::sync::atomic::AtomicUsize>);
+impl OtelSpanEnricher for EnrichmentSpy {
+    fn attributes(&self, _: &TraceRecord, _: &mut Vec<KeyValue>) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+#[test]
+fn disabled_replay_and_unsampled_paths_do_not_serialize_payloads() {
+    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOff);
+    let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let adapter = OtelTelemetry::new(
+        &provider,
+        &meter,
+        OtelOptions {
+            include_context_metadata: true,
+            payloads: OtelPayloadExport::Bounded {
+                max_record_bytes: 32,
+                max_events: 1,
+            },
+            enrich: Some(Arc::new(EnrichmentSpy(count.clone()))),
+        },
+    );
+    let scope = admit(&adapter, TraceCause::Root);
+    let mut event = completed(&scope);
+    event
+        .context
+        .metadata
+        .insert("big".into(), serde_json::Value::String("x".repeat(100_000)));
+    adapter.project(&scope, None, &EmissionSource::NewTransition, &event);
+    assert_eq!(count.load(std::sync::atomic::Ordering::Relaxed), 0);
+    assert!(exporter.get_finished_spans().unwrap().is_empty());
+    struct Huge<'a>(&'a std::sync::atomic::AtomicUsize);
+    impl serde::Serialize for Huge<'_> {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            use serde::ser::SerializeSeq;
+            let mut sequence = serializer.serialize_seq(Some(1_000_000))?;
+            for _ in 0..1_000_000 {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                sequence.serialize_element("payload")?;
+            }
+            sequence.end()
+        }
+    }
+    let serializations = std::sync::atomic::AtomicUsize::new(0);
+    let mut writer = payload::BoundedWriter::new(32);
+    assert!(serde_json::to_writer(&mut writer, &Huge(&serializations)).is_err());
+    assert!(writer.truncated);
+    assert!(writer.len() <= 32);
+    assert!(serializations.load(std::sync::atomic::Ordering::Relaxed) < 10);
+}
+
+#[test]
+fn providers_are_isolated_and_sampling_is_decided_for_the_new_child() {
+    let (first, first_meter, first_export, first_metrics) = providers(Sampler::AlwaysOn);
+    let (second, second_meter, second_export, second_metrics) = providers(Sampler::AlwaysOn);
+    let a = OtelTelemetry::new(&first, &first_meter, OtelOptions::default());
+    let b = OtelTelemetry::new(&second, &second_meter, OtelOptions::default());
+    let (unsampled, unsampled_meter, _, _) = providers(Sampler::AlwaysOff);
+    let original = OtelTelemetry::new(&unsampled, &unsampled_meter, OtelOptions::default());
+    let scope = admit(&original, TraceCause::Parent(context(0)));
+    assert!(!scope.anchor.context().unwrap().flags().is_sampled());
+    a.project(
+        &scope,
+        None,
+        &EmissionSource::NewTransition,
+        &completed(&scope),
+    );
+    a.metrics.tool_intent.record_executed("start_process");
+    first_meter.force_flush().unwrap();
+    second_meter.force_flush().unwrap();
+    let recorded = first_export.get_finished_spans().unwrap();
     assert_eq!(
-        spans[1].status,
-        opentelemetry::trace::Status::error("turn failed: provider_error"),
-        "a genuinely failed turn still exports as an error"
+        recorded.len(),
+        1,
+        "the new child uses the new provider's sampler"
     );
     assert_eq!(
-        attribute(&spans[1], "lash.turn.done_reason"),
-        OtelValue::String("provider_error".into())
+        recorded[0].parent_span_id.to_bytes(),
+        scope.anchor.context().unwrap().span_id().to_bytes()
+    );
+    assert!(second_export.get_finished_spans().unwrap().is_empty());
+    assert!(!first_metrics.get_finished_metrics().unwrap().is_empty());
+    assert!(
+        second_metrics
+            .get_finished_metrics()
+            .unwrap()
+            .iter()
+            .all(|r| r.scope_metrics().all(|s| s.metrics().next().is_none()))
+    );
+    let scope = admit(&b, TraceCause::Root);
+    b.project(
+        &scope,
+        None,
+        &EmissionSource::NewTransition,
+        &completed(&scope),
+    );
+    assert_eq!(second_export.get_finished_spans().unwrap().len(), 2);
+}
+
+#[test]
+fn payload_limits_and_permit_classes_are_enforced() {
+    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
+    let adapter = OtelTelemetry::new(
+        &provider,
+        &meter,
+        OtelOptions {
+            include_context_metadata: true,
+            payloads: OtelPayloadExport::Bounded {
+                max_record_bytes: 13,
+                max_events: 1,
+            },
+            enrich: None,
+        },
+    );
+    let scope = admit(&adapter, TraceCause::Root);
+    let mut event = completed(&scope);
+    event
+        .context
+        .metadata
+        .insert("large".into(), serde_json::Value::String("あ".repeat(1000)));
+    adapter.project(&scope, None, &live(), &event);
+    assert_eq!(
+        exporter.get_finished_spans().unwrap().len(),
+        1,
+        "a live permit does not authorize a logical terminal"
+    );
+    adapter.project(&scope, None, &EmissionSource::NewTransition, &event);
+    let spans = exporter.get_finished_spans().unwrap();
+    let bytes: usize = spans[1]
+        .attributes
+        .iter()
+        .filter(|a| {
+            [
+                A::Payload.definition().key,
+                A::ContextMetadata.definition().key,
+            ]
+            .contains(&a.key.as_str())
+        })
+        .map(|a| match &a.value {
+            opentelemetry::Value::String(v) => v.as_str().len(),
+            _ => 0,
+        })
+        .sum();
+    assert!(bytes <= 13);
+    assert!(
+        spans[1]
+            .attributes
+            .contains(&A::PayloadTruncated.value(true))
     );
 }
 
 #[test]
-fn rlm_step_spans_keep_diagnostics_and_existing_llm_span() {
-    use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider, SimpleSpanProcessor};
-
-    let exporter = InMemorySpanExporter::default();
-    let provider = SdkTracerProvider::builder()
-        .with_span_processor(SimpleSpanProcessor::new(exporter.clone()))
-        .build();
-    // Default options deliberately omit payload JSON: the diagnostic must
-    // remain visible to ordinary production collectors.
-    let sink = OtelTraceSink::new(provider.tracer("test"));
-    let context = TraceContext::default().for_session("s1").for_turn("t1");
-    sink.append(&TraceRecord::new(
-        context.clone(),
-        TraceEvent::TurnStarted {
-            metadata: Default::default(),
-        },
-    ))
-    .unwrap();
-    let llm_context = context.clone().for_llm_call("llm-1");
-    sink.append(&TraceRecord::new(
-        llm_context.clone(),
-        TraceEvent::LlmCallStarted {
-            request: TraceLlmRequest {
-                model: "test-model".into(),
-                model_variant: None,
-                messages: vec![],
-                tools: vec![],
-                tool_choice: "auto".into(),
-                output_spec: None,
-                stream: true,
-            },
-        },
-    ))
-    .unwrap();
-    sink.append(&TraceRecord::new(
-        llm_context,
-        TraceEvent::LlmCallCompleted {
-            response: crate::TraceLlmResponse {
-                text: "inbox.send_item({})".into(),
-                duration_ms: 5,
-                request_model: "test-model".into(),
-                terminal_reason: None,
-                parts: None,
-                generation_disposition: None,
-            },
-            usage: None,
-            provider_usage: None,
-            stream_summary: None,
-            attempts: None,
-        },
-    ))
-    .unwrap();
-    for (step_index, outcome) in [
+fn typed_domain_completions_cover_operations_times_and_permit_classes() {
+    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
+    let scope = admit(&adapter, TraceCause::Root);
+    let operations = [
+        (TraceDomainOperation::Run, DomainSpan::Run, false),
+        (TraceDomainOperation::Process, DomainSpan::Process, false),
         (
-            1,
-            crate::TraceRlmStepOutcome::Failure {
-                diagnostic: "operation send_item expects { body: str }, got {}".into(),
-            },
+            TraceDomainOperation::ProcessSegment,
+            DomainSpan::ProcessSegment,
+            false,
         ),
-        (2, crate::TraceRlmStepOutcome::Ok),
-    ] {
-        sink.append(&TraceRecord::new(
-            context.clone(),
-            TraceEvent::RlmStep {
-                step_index,
-                outcome,
-            },
-        ))
-        .unwrap();
-    }
-    sink.append(&TraceRecord::new(
-        context,
-        TraceEvent::TurnCompleted {
-            outcome: crate::TraceTurnOutcome::Failed {
-                done_reason: crate::TraceTurnFailureReason::MaxTurns,
-            },
-        },
-    ))
-    .unwrap();
-    provider.force_flush().unwrap();
-    let spans = exporter.get_finished_spans().unwrap();
-    let turn = spans.iter().find(|s| s.name == "lash.turn").unwrap();
-    // The current exporter names the existing LLM span `lash.llm`.
-    let llm: Vec<_> = spans.iter().filter(|s| s.name == "lash.llm").collect();
-    assert_eq!(llm.len(), 1);
-    assert_eq!(llm[0].parent_span_id, turn.span_context.span_id());
-    assert!(!matches!(llm[0].status, Status::Error { .. }));
-    let steps: Vec<_> = spans.iter().filter(|s| s.name == "lash.rlm.step").collect();
-    assert_eq!(steps.len(), 2);
-    for (index, step) in steps.iter().enumerate() {
-        assert_eq!(step.parent_span_id, turn.span_context.span_id());
-        let attribute = |key: &str| {
-            &step
+        (TraceDomainOperation::Send, DomainSpan::Send, true),
+        (TraceDomainOperation::ToolIntent, DomainSpan::Intent, true),
+    ];
+    for (operation, span, is_live) in operations {
+        let mut completion = TraceDomainCompletion::new(operation, 4000, TraceDomainStatus::Failed);
+        completion.error_code = Some(crate::TraceFailureCode::provider("refused"));
+        completion.intent_kind = Some("custom_intent".into());
+        completion.tool_call_id = Some("call".into());
+        completion.provider = Some("custom-provider".into());
+        completion.model = Some("custom-model".into());
+        completion.tool_name = Some("custom-tool".into());
+        let event = record(&scope, TraceEvent::DomainCompleted { completion }, 8000);
+        let wrong_source = if is_live {
+            EmissionSource::NewTransition
+        } else {
+            live()
+        };
+        let before = exporter.get_finished_spans().unwrap().len();
+        adapter.project(&scope, None, &wrong_source, &event);
+        assert_eq!(exporter.get_finished_spans().unwrap().len(), before);
+        let source = if is_live {
+            live()
+        } else {
+            EmissionSource::NewTransition
+        };
+        adapter.project(&scope, None, &source, &event);
+        let spans = exporter.get_finished_spans().unwrap();
+        let emitted = spans.last().unwrap();
+        assert_eq!(emitted.name, span.definition().name);
+        assert_eq!(emitted.span_kind, span.definition().kind);
+        assert_eq!(emitted.start_time, epoch_ms(4000));
+        assert_eq!(emitted.end_time, epoch_ms(8000));
+        assert_eq!(emitted.parent_span_id, spans[0].span_context.span_id());
+        assert!(matches!(emitted.status, Status::Error { .. }));
+        assert!(
+            emitted
+                .attributes
+                .contains(&A::ErrorType.value("provider:refused"))
+        );
+        assert!(
+            emitted
+                .attributes
+                .contains(&A::ProviderName.value("custom-provider"))
+        );
+        assert!(emitted.attributes.contains(&A::ToolCallId.value("call")));
+        assert!(
+            !emitted
                 .attributes
                 .iter()
-                .find(|a| a.key.as_str() == key)
-                .unwrap()
-                .value
-        };
-        assert_eq!(
-            attribute("lash.rlm.step.index"),
-            &OtelValue::I64(index as i64 + 1)
+                .any(|attr| attr.key.as_str().starts_with("gen_ai.usage."))
         );
-        assert_eq!(
-            attribute("lash.rlm.step.outcome").to_string(),
-            if index == 0 { "failure" } else { "ok" }
-        );
-        if index == 0 {
-            assert_eq!(
-                attribute("error.message").to_string(),
-                "operation send_item expects { body: str }, got {}"
-            );
-            assert!(matches!(step.status, Status::Error { .. }));
-        } else {
-            assert!(!matches!(step.status, Status::Error { .. }));
-        }
     }
+    assert_eq!(exporter.get_finished_spans().unwrap().len(), 6);
+}
+
+#[test]
+fn provider_attempts_use_reported_identity_and_never_project_aggregate_calls() {
+    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
+    let scope = admit(&adapter, TraceCause::Root);
+    for (ordinal, served_by, outcome) in [
+        (1, Some("provider-a"), TraceLlmAttemptOutcome::Failed),
+        (2, Some("provider-b"), TraceLlmAttemptOutcome::Completed),
+        (3, None, TraceLlmAttemptOutcome::Interrupted),
+    ] {
+        let event = record(
+            &scope,
+            TraceEvent::LlmAttemptCompleted {
+                attempt: TraceLlmAttempt {
+                    ordinal,
+                    provider: served_by.map(str::to_owned),
+                    request_model: "same-alias".into(),
+                    response_model: None,
+                    started_at_ms: None,
+                    ended_at_ms: None,
+                    outcome,
+                    error: None,
+                    usage: None,
+                },
+            },
+            9000,
+        );
+        adapter.project(&scope, None, &EmissionSource::NewTransition, &event);
+        assert_eq!(
+            exporter.get_finished_spans().unwrap().len(),
+            ordinal as usize
+        );
+        adapter.project(&scope, None, &live(), &event);
+        let spans = exporter.get_finished_spans().unwrap();
+        let span = spans.last().unwrap();
+        assert_eq!(span.name, "chat same-alias");
+        assert_eq!(span.start_time, span.end_time);
+        assert_eq!(span.start_time, epoch_ms(9000));
+        assert_eq!(
+            matches!(span.status, Status::Error { .. }),
+            outcome == TraceLlmAttemptOutcome::Failed
+        );
+        let reported = span
+            .attributes
+            .iter()
+            .find(|a| a.key.as_str() == A::ProviderName.definition().key);
+        assert_eq!(
+            reported.map(|a| &a.value),
+            served_by
+                .map(|v| opentelemetry::Value::String(v.into()))
+                .as_ref()
+        );
+        assert!(
+            !span
+                .attributes
+                .iter()
+                .any(|a| a.key.as_str().starts_with("gen_ai.usage."))
+        );
+    }
+    let aggregate = record(
+        &scope,
+        TraceEvent::LlmCallFailed {
+            error: crate::TraceError {
+                code: None,
+                retryable: false,
+                terminal_reason: crate::TraceLlmTerminalReason::ProviderError,
+                failure_kind: crate::TraceProviderFailureKind::Unknown,
+            },
+            stream_summary: None,
+            attempts: None,
+        },
+        9000,
+    );
+    adapter.project(&scope, None, &live(), &aggregate);
+    assert_eq!(exporter.get_finished_spans().unwrap().len(), 4);
+}
+
+#[test]
+fn every_admission_kind_has_registered_name_kind_and_first_writer_outcome() {
+    use crate::telemetry::TraceScopeOwner;
+    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
+    let owners = [
+        TraceScopeOwner::Run {
+            session_id: "s".into(),
+            root: "r".into(),
+        },
+        TraceScopeOwner::Turn {
+            session_id: "s".into(),
+            turn_id: "t".into(),
+        },
+        TraceScopeOwner::Tool {
+            session_id: "s".into(),
+            turn_id: "t".into(),
+            call_id: "c".into(),
+        },
+        TraceScopeOwner::ToolIntent {
+            owner: lash_sansio::RuntimeOwner::Session("s".into()),
+            replay_key: "key".into(),
+        },
+        TraceScopeOwner::Process {
+            process_id: lash_sansio::ProcessId::fixture("p"),
+        },
+        TraceScopeOwner::TriggerOccurrence {
+            occurrence_id: "fire".into(),
+        },
+    ];
+    for owner in owners {
+        let id = TraceScopeId::admission(owner);
+        let selected = adapter.propose(&id, &TraceCause::Root);
+        let retained = selected.anchor();
+        selected.settle(TraceCandidateOutcome::Selected);
+        let losing = adapter.propose(&id, &TraceCause::Root);
+        assert_ne!(retained, losing.anchor());
+        losing.settle(TraceCandidateOutcome::Reused);
+        let spans = exporter.get_finished_spans().unwrap();
+        let pair = &spans[spans.len() - 2..];
+        assert_eq!(pair[0].name, admitted(id.kind()).definition().name);
+        assert_eq!(pair[0].span_kind, admitted(id.kind()).definition().kind);
+        assert_eq!(pair[1].name, "lash.admission.attempt");
+        assert!(
+            pair[1]
+                .attributes
+                .contains(&A::AdmissionOutcome.value("reused"))
+        );
+    }
+    assert_eq!(exporter.get_finished_spans().unwrap().len(), 12);
+}
+
+#[test]
+fn tool_wait_and_code_completions_use_explicit_scope_and_local_leaf_durations() {
+    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
+    let scope = admit(&adapter, TraceCause::Root);
+    let events = [
+        (
+            TraceEvent::ToolCallCompleted {
+                call_id: lash_sansio::ToolCallId::fixture("call"),
+                provider_call_id: None,
+                name: "unfamiliar-tool".into(),
+                args: serde_json::json!({"secret":"hidden"}),
+                output: crate::TraceToolCallOutput {
+                    outcome: crate::TraceToolCallOutcome::Failure(serde_json::Value::Null),
+                    control: None,
+                },
+                duration_ms: 55,
+                issuing_node_id: None,
+                attempts: None,
+            },
+            EmissionSource::NewTransition,
+            "execute_tool unfamiliar-tool",
+            1000,
+        ),
+        (
+            TraceEvent::DurableWaitResolved {
+                wait_kind: "custom-wait".into(),
+                resolution: crate::TraceDurableWaitResolution::Failed,
+            },
+            EmissionSource::NewTransition,
+            "lash.wait",
+            1000,
+        ),
+        (
+            TraceEvent::DurableTimerResolved {
+                duration_ms: 200,
+                status: crate::TraceDurableTimerStatus::Failed,
+            },
+            EmissionSource::NewTransition,
+            "lash.wait",
+            8800,
+        ),
+        (
+            TraceEvent::ExecCodeCompleted {
+                duration_ms: 300,
+                output: "secret".into(),
+                output_chars: 6,
+                observation_count: 0,
+                observation_projections: Vec::new(),
+                error: None,
+                terminal_finish: None,
+                tool_calls: Vec::new(),
+            },
+            live(),
+            "lash.exec_code",
+            8700,
+        ),
+    ];
+    for (event, source, name, start) in events {
+        let event = record(&scope, event, 9000);
+        adapter.project(&scope, None, &source, &event);
+        let spans = exporter.get_finished_spans().unwrap();
+        let span = spans.last().unwrap();
+        assert_eq!(span.name, name);
+        assert_eq!(span.start_time, epoch_ms(start));
+        assert_eq!(span.end_time, epoch_ms(9000));
+        assert_eq!(
+            matches!(span.status, Status::Error { .. }),
+            event.event.is_failed()
+        );
+        assert!(
+            !span
+                .attributes
+                .iter()
+                .any(|a| a.key.as_str() == A::Payload.definition().key)
+        );
+    }
+    assert_eq!(exporter.get_finished_spans().unwrap().len(), 5);
 }

@@ -830,17 +830,7 @@ impl TriggerStore for PostgresTriggerStore {
                     &occurrence_id,
                 ));
             }
-            let occurrence = TriggerOccurrenceRecord {
-                occurrence_id,
-                source_type: request.source_type,
-                source_key: request.source_key,
-                payload: request.payload,
-                idempotency_key: request.idempotency_key,
-                source: request.source,
-                session_id: request.session_id,
-                outcome: request.outcome,
-                occurred_at_ms: self.clock.timestamp_ms(),
-            };
+            let occurrence = request.into_record(occurrence_id, self.clock.timestamp_ms());
             sqlx::query(sql.occurrence.insert.sql())
                 .bind(&occurrence.occurrence_id)
                 .bind(&occurrence.idempotency_key)

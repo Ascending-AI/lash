@@ -301,6 +301,7 @@ pub(crate) fn process_wake_work(
         authority: crate::QueuedWorkAuthority::default(),
         input: text.to_string(),
         created_at_ms: 1,
+        trace_cause: Default::default(),
     };
     crate::QueuedWorkBatchDraft::new(
         session_id,

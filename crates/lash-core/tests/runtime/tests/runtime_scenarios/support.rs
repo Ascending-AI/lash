@@ -624,6 +624,7 @@ impl RuntimeQueueIngress {
                         authority: lash_core::QueuedWorkAuthority::default(),
                         input: (*text).to_string(),
                         created_at_ms: 1,
+                        trace_cause: Default::default(),
                     },
                 )
             }

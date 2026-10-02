@@ -346,11 +346,9 @@ impl<E: ControlFailure + std::fmt::Display> ControlFailure for RecoveryRequestEr
     }
 }
 
-/// Usage retirement answers only text (its own boundary): a request that
-/// did not complete, asked again by the next attempt.
-impl ControlFailure for String {
+impl ControlFailure for EngineRefusal {
     fn into_refusal(self) -> EngineRefusal {
-        EngineRefusal::retryable(lash_core::RuntimeErrorCode::EngineControlRequest, self)
+        self
     }
 }
 

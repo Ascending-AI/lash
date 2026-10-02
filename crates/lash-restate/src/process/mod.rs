@@ -460,7 +460,7 @@ pub(crate) trait RestateProcessRunner: Send + Sync + 'static {
     /// The trace handle segment controllers observe through: the runtime's
     /// own, when the runner's worker has one. A workflow given its own uses
     /// that instead.
-    fn tracing(&self) -> Option<lash_core::trace::TraceRuntime> {
+    fn tracing(&self) -> Option<lash_core::facade_support::TraceRuntime> {
         None
     }
 }
@@ -530,7 +530,7 @@ impl RestateProcessRunner for RestateCoreProcessRunner {
             .await
     }
 
-    fn tracing(&self) -> Option<lash_core::trace::TraceRuntime> {
+    fn tracing(&self) -> Option<lash_core::facade_support::TraceRuntime> {
         let worker = self.worker().ok()?;
         Some(worker.config().runtime_host.tracing.clone())
     }
@@ -747,6 +747,13 @@ fn submitted_registration(record: &ProcessRecord) -> ProcessRegistration {
         consumer_hold: None,
         trigger_delivery_pin: None,
         engine_config: record.engine_config.clone(),
+        // The retained scope's cause and anchor ride the typed input: the
+        // segment reads its ancestry from them, never from a header.
+        trace: record
+            .trace
+            .as_ref()
+            .map(lash_core::DurableTraceScope::offer)
+            .unwrap_or_default(),
     }
 }
 

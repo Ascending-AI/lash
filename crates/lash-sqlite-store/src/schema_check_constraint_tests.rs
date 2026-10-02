@@ -462,3 +462,153 @@ fn the_tombstone_check_derives_from_the_retired_process_statuses() {
         "the SQLite DDL must carry `{constraint}`"
     );
 }
+
+#[test]
+fn reclaim_markers_require_terminal_owners() {
+    let process = Connection::open_in_memory().expect("open parent-end fixture");
+    process
+        .execute_batch(PROCESS_SCHEMA)
+        .expect("create process schema");
+    for (state, fields) in [
+        ("NULL", "NULL, NULL, NULL, NULL, NULL"),
+        ("'due'", "'due-id', 1, NULL, NULL, NULL"),
+        ("'claimed'", "'claim-id', 1, 'token', NULL, NULL"),
+        ("'stalled'", "'stall-id', NULL, NULL, 'refused', 1"),
+    ] {
+        process
+            .execute_batch(&format!(
+                "DELETE FROM parent_end_plans;
+             INSERT INTO parent_end_plans (parent_kind, parent_id, parent_payload,
+                 ended_at_ms, obligation_state, obligation_id, obligation_due_at_ms,
+                 obligation_claim_token, obligation_stall_reason, obligation_settled_at_ms)
+             VALUES ('session', 'parent', '{{}}', 0, {state}, {fields})"
+            ))
+            .expect("retain an unreclaimable plan");
+        assert_check_rejects(
+            &process,
+            "UPDATE parent_end_plans SET settled_at_ms = 1",
+            "ck_parent_end_plans_reclaimable",
+        );
+    }
+    process
+        .execute_batch(
+            "DELETE FROM parent_end_plans;
+        INSERT INTO parent_end_plans (parent_kind, parent_id, parent_payload,
+            ended_at_ms, settled_at_ms, obligation_id, obligation_state, obligation_settled_at_ms)
+        VALUES ('session', 'parent', '{}', 0, 1, 'delivered-id', 'delivered', 1)",
+        )
+        .expect("a delivered plan may be reclaimed");
+
+    let triggers = Connection::open_in_memory().expect("open change-feed fixture");
+    triggers
+        .execute_batch(TRIGGER_SCHEMA)
+        .expect("create trigger schema");
+    for lifecycle in [
+        serde_json::json!({}),
+        serde_json::json!({"lifecycle":"enabled"}),
+        serde_json::json!({"lifecycle":"disabled"}),
+        serde_json::json!({"lifecycle":"unknown"}),
+    ] {
+        let json = serde_json::json!({"lifecycle": lifecycle}).to_string();
+        triggers
+            .execute("DELETE FROM trigger_subscription_changes", [])
+            .expect("clear fixture");
+        triggers
+            .execute(
+                "INSERT INTO trigger_subscription_changes VALUES ('subscription', 1, NULL, ?1)",
+                [&json],
+            )
+            .expect("a live change is retained");
+        assert_check_rejects(
+            &triggers,
+            "UPDATE trigger_subscription_changes SET deleted_at_ms = 1",
+            "ck_trigger_subscription_changes_reclaimable",
+        );
+    }
+    triggers
+        .execute("DELETE FROM trigger_subscription_changes", [])
+        .expect("clear fixture");
+    let json = serde_json::json!({"lifecycle": lash_core_execution::triggers::TriggerSubscriptionLifecycle::Tombstoned(1)}).to_string();
+    triggers
+        .execute(
+            "INSERT INTO trigger_subscription_changes VALUES ('subscription', 1, 1, ?1)",
+            [&json],
+        )
+        .expect("a tombstoned change may be reclaimed");
+}
+
+#[test]
+fn parent_end_delivery_atomically_arms_reclaim() {
+    use lash_store_sql::process::parent_end_plans::{
+        ParentEndPlanObligationStatements, ParentEndPlanStatements,
+    };
+    let process = Connection::open_in_memory().expect("open parent-end fixture");
+    process
+        .execute_batch(PROCESS_SCHEMA)
+        .expect("create process schema");
+    let dialect = lash_store_sql::Dialect::sqlite_unqualified();
+    let plan = ParentEndPlanStatements::render(dialect);
+    let obligation = ParentEndPlanObligationStatements::render(dialect);
+    process
+        .execute_batch(
+            "INSERT INTO parent_end_plans (parent_kind, parent_id, parent_payload, ended_at_ms,
+        obligation_id, obligation_state, obligation_due_at_ms)
+        VALUES ('session', 'parent', '{}', 0, 'id', 'due', 0)",
+        )
+        .expect("arm plan");
+    process
+        .execute(plan.settle.sql(), rusqlite::params!["session", "parent", 7])
+        .expect("apply due plan");
+    let stamps = || {
+        process
+            .query_row(
+                "SELECT obligation_state, settled_at_ms FROM parent_end_plans",
+                [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?)),
+            )
+            .expect("read stamps")
+    };
+    assert_eq!(stamps(), ("delivered".into(), Some(7)));
+    process
+        .execute(plan.settle.sql(), rusqlite::params!["session", "parent", 8])
+        .expect("repeat delivery");
+    assert_eq!(stamps(), ("delivered".into(), Some(7)));
+    process
+        .execute_batch(
+            "UPDATE parent_end_plans SET settled_at_ms = NULL,
+        obligation_state = 'claimed', obligation_due_at_ms = 1, obligation_claim_token = 'token',
+        obligation_settled_at_ms = NULL",
+        )
+        .expect("claim another application");
+    process
+        .execute(plan.settle.sql(), rusqlite::params!["session", "parent", 9])
+        .expect("apply claimed plan");
+    assert_eq!(stamps(), ("claimed".into(), None));
+    process
+        .execute(
+            obligation.obligation_settle_delivered.sql(),
+            rusqlite::params!["id", "wrong-token", 11],
+        )
+        .expect("stale settlement");
+    assert_eq!(stamps(), ("claimed".into(), None));
+    process
+        .execute(
+            obligation.obligation_settle_delivered.sql(),
+            rusqlite::params!["id", "token", 13],
+        )
+        .expect("fenced settlement");
+    assert_eq!(stamps(), ("delivered".into(), Some(13)));
+    process
+        .execute_batch(
+            "UPDATE parent_end_plans SET settled_at_ms = NULL,
+        obligation_state = 'stalled', obligation_stall_reason = 'refused'",
+        )
+        .expect("retain a stalled application");
+    process
+        .execute(
+            plan.settle.sql(),
+            rusqlite::params!["session", "parent", 15],
+        )
+        .expect("apply stalled plan");
+    assert_eq!(stamps(), ("stalled".into(), None));
+}

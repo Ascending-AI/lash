@@ -84,7 +84,7 @@ fn attempt(
                 LashlangSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
-                RlmLashlangExecutionTraceConfig::default(),
+                None,
             )
             .await;
             responses

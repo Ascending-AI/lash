@@ -13543,28 +13543,28 @@ third_party_rust_library(
 
 alias(
     name = "p0235",
-    actual = ":opentelemetry-0.31",
+    actual = ":opentelemetry-0.33",
     visibility = ["PUBLIC"],
 )
 
 third_party_http_archive(
-    name = "opentelemetry-0.31.0.crate",
-    sha256 = "b84bcd6ae87133e903af7ef497404dda70c60d0ea14895fc8a5e6722754fc2a0",
-    strip_prefix = "opentelemetry-0.31.0",
-    urls = ["https://static.crates.io/crates/opentelemetry/0.31.0/download"],
+    name = "opentelemetry-0.33.0.crate",
+    sha256 = "6cdb0b1b267eb9db3331b434ed9ddab10d50e280a9adf9d13e5233e2002b61b5",
+    strip_prefix = "opentelemetry-0.33.0",
+    urls = ["https://static.crates.io/crates/opentelemetry/0.33.0/download"],
     visibility = [],
 )
 
 third_party_rust_library(
-    name = "opentelemetry-0.31",
-    srcs = [":opentelemetry-0.31.0.crate"],
+    name = "opentelemetry-0.33",
+    srcs = [":opentelemetry-0.33.0.crate"],
     crate = "opentelemetry",
-    crate_root = "opentelemetry-0.31.0.crate/src/lib.rs",
+    crate_root = "opentelemetry-0.33.0.crate/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_BIN_NAME": "opentelemetry",
         "CARGO_CRATE_NAME": "opentelemetry",
-        "CARGO_MANIFEST_DIR": "opentelemetry-0.31.0.crate",
+        "CARGO_MANIFEST_DIR": "opentelemetry-0.33.0.crate",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "OpenTelemetry API for Rust",
         "CARGO_PKG_HOMEPAGE": "https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry",
@@ -13572,13 +13572,14 @@ third_party_rust_library(
         "CARGO_PKG_README": "README.md",
         "CARGO_PKG_REPOSITORY": "https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry",
         "CARGO_PKG_RUST_VERSION": "1.75.0",
-        "CARGO_PKG_VERSION": "0.31.0",
+        "CARGO_PKG_VERSION": "0.33.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "31",
+        "CARGO_PKG_VERSION_MINOR": "33",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
+        "default",
         "futures",
         "futures-core",
         "futures-sink",
@@ -13606,28 +13607,28 @@ third_party_rust_library(
 
 alias(
     name = "p0236",
-    actual = ":opentelemetry_sdk-0.31",
+    actual = ":opentelemetry_sdk-0.33",
     visibility = ["PUBLIC"],
 )
 
 third_party_http_archive(
-    name = "opentelemetry_sdk-0.31.0.crate",
-    sha256 = "e14ae4f5991976fd48df6d843de219ca6d31b01daaab2dad5af2badeded372bd",
-    strip_prefix = "opentelemetry_sdk-0.31.0",
-    urls = ["https://static.crates.io/crates/opentelemetry_sdk/0.31.0/download"],
+    name = "opentelemetry_sdk-0.33.0.crate",
+    sha256 = "cb39533d9d1c912123efd7d41d7e0c29d16917b60ce15b4c8d87cb1af7f67520",
+    strip_prefix = "opentelemetry_sdk-0.33.0",
+    urls = ["https://static.crates.io/crates/opentelemetry_sdk/0.33.0/download"],
     visibility = [],
 )
 
 third_party_rust_library(
-    name = "opentelemetry_sdk-0.31",
-    srcs = [":opentelemetry_sdk-0.31.0.crate"],
+    name = "opentelemetry_sdk-0.33",
+    srcs = [":opentelemetry_sdk-0.33.0.crate"],
     crate = "opentelemetry_sdk",
-    crate_root = "opentelemetry_sdk-0.31.0.crate/src/lib.rs",
+    crate_root = "opentelemetry_sdk-0.33.0.crate/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_BIN_NAME": "opentelemetry_sdk",
         "CARGO_CRATE_NAME": "opentelemetry_sdk",
-        "CARGO_MANIFEST_DIR": "opentelemetry_sdk-0.31.0.crate",
+        "CARGO_MANIFEST_DIR": "opentelemetry_sdk-0.33.0.crate",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "The SDK for the OpenTelemetry metrics collection and distributed tracing framework",
         "CARGO_PKG_HOMEPAGE": "https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry-sdk",
@@ -13635,25 +13636,21 @@ third_party_rust_library(
         "CARGO_PKG_README": "README.md",
         "CARGO_PKG_REPOSITORY": "https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry-sdk",
         "CARGO_PKG_RUST_VERSION": "1.75.0",
-        "CARGO_PKG_VERSION": "0.31.0",
+        "CARGO_PKG_VERSION": "0.33.0",
         "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "31",
+        "CARGO_PKG_VERSION_MINOR": "33",
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
         "default",
-        "experimental_async_runtime",
         "internal-logs",
         "logs",
         "metrics",
         "percent-encoding",
         "rand",
-        "rt-tokio",
-        "rt-tokio-current-thread",
         "testing",
         "tokio",
-        "tokio-stream",
         "trace",
     ],
     platform = {
@@ -13664,12 +13661,11 @@ third_party_rust_library(
         ":futures-channel-0.3",
         ":futures-executor-0.3",
         ":futures-util-0.3",
-        ":opentelemetry-0.31",
+        ":opentelemetry-0.33",
         ":percent-encoding-2",
         ":rand-0.9",
         ":thiserror-2",
         ":tokio-1",
-        ":tokio-stream-0.1",
     ],
 )
 
@@ -14594,7 +14590,10 @@ third_party_rust_library(
         "CARGO_PKG_VERSION_PRE": "",
         "OUT_DIR": "$(location :portable-atomic-1-build-script-run[out_dir])",
     },
-    features = ["require-cas"],
+    features = [
+        "fallback",
+        "require-cas",
+    ],
     platform = {
         "linux-x86_64": dict(),
     },
@@ -14625,7 +14624,10 @@ third_party_rust_binary(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = ["require-cas"],
+    features = [
+        "fallback",
+        "require-cas",
+    ],
     platform = {
         "linux-x86_64": dict(),
     },
@@ -14648,7 +14650,10 @@ third_party_buildscript_run(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = ["require-cas"],
+    features = [
+        "fallback",
+        "require-cas",
+    ],
     platform = {
         "linux-x86_64": dict(),
     },

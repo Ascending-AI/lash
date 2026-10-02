@@ -86,6 +86,7 @@ pub(super) fn process_event(process_id: &ProcessId) -> lash_core::ProcessEvent {
                 input: "wake".to_string(),
             }),
             signal_wait: None,
+            trace_cause: Default::default(),
         },
         occurred_at: 12,
     }

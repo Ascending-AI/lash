@@ -14,6 +14,7 @@ pub(super) fn journaled_drive_inputs(live_generation: u64) -> lash_core::Admitte
             enqueued_at_ms: live_generation,
             input: lash_core::TurnInput::text("deploy staging"),
             run_spec: None,
+            trace_cause: Default::default(),
         }],
         applications: Vec::new(),
     }
@@ -71,6 +72,8 @@ pub(super) async fn execute_drive(
                                 executor: lash_core::store::RootExecutor::Root,
                                 plugins: lash_core::store::plugin_writers::PluginAdmission::default(
                                 ),
+                                trace: None,
+                                recorded_by_this_call: false,
                             }),
                         },
                     })

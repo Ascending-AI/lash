@@ -148,7 +148,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
             .await
             .map_err(plugin_store_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
-        let now = process_registry_now_epoch_ms_tx(&mut tx).await?;
+        let now = self.clock.timestamp_ms();
         validate_process_execution_authority(process_id, &record, authority, Some(&started))?;
         match lash_core_execution::runtime::prepare_process_start(&record, &started)? {
             ProcessStartPlan::AlreadyApplied => {
@@ -331,7 +331,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
             .await
             .map_err(plugin_store_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
-        let now = process_registry_now_epoch_ms_tx(&mut tx).await?;
+        let now = self.clock.timestamp_ms();
         validate_process_execution_authority(process_id, &record, authority, None)?;
         // The run's pending prelude commits ahead of the transition, in its
         // transaction (FIG-3571).
@@ -378,7 +378,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
             .await
             .map_err(plugin_store_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
-        let now = process_registry_now_epoch_ms_tx(&mut tx).await?;
+        let now = self.clock.timestamp_ms();
         validate_process_execution_authority(process_id, &record, authority, None)?;
         let request = match lash_core_execution::runtime::prepare_process_transition(
             &record,
@@ -412,7 +412,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
             .await
             .map_err(plugin_store_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
-        let now = process_registry_now_epoch_ms_tx(&mut tx).await?;
+        let now = self.clock.timestamp_ms();
         validate_process_execution_authority(process_id, &record, authority, None)?;
         let request = match lash_core_execution::runtime::prepare_process_transition(
             &record,

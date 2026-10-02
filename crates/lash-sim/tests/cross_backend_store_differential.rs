@@ -878,6 +878,7 @@ fn admission_observability_wake(session_id: &SessionId) -> lash_core::runtime::P
         authority: lash_core::runtime::QueuedWorkAuthority::default(),
         input: "exercise queued-work admission state".to_string(),
         created_at_ms: 1,
+        trace_cause: Default::default(),
     }
 }
 

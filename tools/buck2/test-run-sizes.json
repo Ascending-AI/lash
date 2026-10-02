@@ -1071,7 +1071,7 @@
     "peak_bytes": 2147483648,
     "samples": 3953
   },
-  "//crates/lash-restate:lash-restate__unit_test__fv_10158c7a": {
+  "//crates/lash-restate:lash-restate__unit_test__fv_74137c42": {
     "cpu_count": 3,
     "memory_kb": 2359296,
     "p95_cores": 2.89,

@@ -1420,15 +1420,15 @@ features = []
 
 [dependencies.p0235]
 package = "opentelemetry"
-version = "=0.31.0"
+version = "=0.33.0"
 default-features = false
-features = ["futures", "futures-core", "futures-sink", "internal-logs", "logs", "metrics", "pin-project-lite", "testing", "thiserror", "trace", "tracing"]
+features = ["default", "futures", "futures-core", "futures-sink", "internal-logs", "logs", "metrics", "pin-project-lite", "testing", "thiserror", "trace", "tracing"]
 
 [dependencies.p0236]
 package = "opentelemetry_sdk"
-version = "=0.31.0"
+version = "=0.33.0"
 default-features = false
-features = ["default", "experimental_async_runtime", "internal-logs", "logs", "metrics", "percent-encoding", "rand", "rt-tokio", "rt-tokio-current-thread", "testing", "tokio", "tokio-stream", "trace"]
+features = ["default", "internal-logs", "logs", "metrics", "percent-encoding", "rand", "testing", "tokio", "trace"]
 
 [dependencies.p0237]
 package = "outref"
@@ -1542,7 +1542,7 @@ features = []
 package = "portable-atomic"
 version = "=1.15.0"
 default-features = false
-features = ["require-cas"]
+features = ["fallback", "require-cas"]
 
 [dependencies.p0256]
 package = "portable-atomic-util"

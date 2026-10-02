@@ -1215,8 +1215,6 @@ pub struct LashlangProcessEngine {
     worker_recovery: Arc<dyn lash_core::store::worker_recovery::WorkerRecoveryStore>,
     workers: lash_vm_client::service::Service,
     surface: LashlangSurface,
-    execution_sink: Option<Arc<dyn lash_trace::TraceSink>>,
-    trace_context: lash_trace::TraceContext,
     execution_bounds: lashlang::ExecutionBounds,
     run_settings_recorder: Option<Arc<dyn LashlangRunSettingsRecorder>>,
 }
@@ -1233,8 +1231,6 @@ impl LashlangProcessEngine {
                 .with_recovery_store(worker_recovery.clone()),
             worker_recovery,
             surface,
-            execution_sink: None,
-            trace_context: lash_trace::TraceContext::default(),
             execution_bounds: lashlang::ExecutionBounds::unbounded(),
             run_settings_recorder: None,
         }
@@ -1247,16 +1243,6 @@ impl LashlangProcessEngine {
 
     pub fn worker_service(&self) -> &lash_vm_client::service::Service {
         &self.workers
-    }
-
-    pub fn with_execution_trace(
-        mut self,
-        sink: Option<Arc<dyn lash_trace::TraceSink>>,
-        trace_context: lash_trace::TraceContext,
-    ) -> Self {
-        self.execution_sink = sink;
-        self.trace_context = trace_context;
-        self
     }
 
     /// Sets bounds for newly created processes. Existing processes keep

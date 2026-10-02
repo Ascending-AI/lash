@@ -65,8 +65,7 @@ cross-surface identity, not the quality of the model's image description.
 5. **The attachment facet is the same in both session modes; the bytes' home is not.** The
    backend the workbench boots owns blob storage: SQLite keeps attachment bytes in the
    `attachment_blobs` table of the session catalog
-   (`<data-dir>/lash-sessions/durable-core.db`) and refuses a leftover
-   `<data-dir>/attachments/` directory as a prior store layout, while Postgres still wires
+   (`<data-dir>/lash-sessions/durable-core.db`), while Postgres wires
    `FileAttachmentStore` under `<data-dir>/attachments`. The deterministic companion gate
    reopens the backend's attachment store and separately runs the usage restart assertion
    against the SQLite session-store backend.

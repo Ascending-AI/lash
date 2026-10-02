@@ -1036,6 +1036,9 @@ fn enqueue_pending_turn_inputs_conn(
                         submission_digest.as_str(),
                         now as i64,
                         run_spec.column(),
+                        lash_core_execution::store_backend_support::encode_trace_cause(
+                            &draft.trace_cause,
+                        )?,
                     ],
                 )
                 .map_err(|err| {

@@ -36,6 +36,7 @@ pub(crate) struct PendingTurnInputRow {
     pub(crate) run_spec_hash: Option<String>,
     /// When the row's tombstone was written; `None` until it is terminal.
     pub(crate) terminal_at_ms: Option<u64>,
+    pub(crate) trace_cause_json: Option<String>,
 }
 
 pub(crate) fn pending_turn_input_row_from_sql(
@@ -56,6 +57,7 @@ pub(crate) fn pending_turn_input_row_from_sql(
             .get::<_, Option<i64>>(11)?
             .map(|at| u64_from_sql("PendingTurnInput", "terminal_at_ms", at))
             .transpose()?,
+        trace_cause_json: row.get(12)?,
     })
 }
 
@@ -74,6 +76,10 @@ pub(crate) fn pending_turn_input_from_row(
         run_spec: row
             .run_spec_hash
             .map(lash_core_execution::RunSpecHash::from_stored),
+        trace_cause: lash_core_execution::store_backend_support::decode_trace_cause(
+            "PendingTurnInput",
+            row.trace_cause_json.as_deref(),
+        )?,
     })
 }
 

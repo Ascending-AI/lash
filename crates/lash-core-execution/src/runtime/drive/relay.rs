@@ -382,7 +382,12 @@ async fn attempt(
     if consumer_settles && result.is_ok() {
         let verdict = RelayVerdict::Requested;
         if let Some(outcome) = outcome_label(&verdict) {
-            crate::operational_metrics::record_obligation_attempt(kind.label(), outcome);
+            crate::operational_metrics::record_obligation_attempt(
+                &Default::default(),
+                None,
+                kind.label(),
+                outcome,
+            );
         }
         return Ok(verdict);
     }
@@ -427,7 +432,12 @@ async fn attempt(
             .await;
     }
     if let Some(outcome) = outcome_label(&verdict) {
-        crate::operational_metrics::record_obligation_attempt(kind.label(), outcome);
+        crate::operational_metrics::record_obligation_attempt(
+            &Default::default(),
+            None,
+            kind.label(),
+            outcome,
+        );
     }
     Ok(verdict)
 }

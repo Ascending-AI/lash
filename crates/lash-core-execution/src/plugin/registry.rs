@@ -393,8 +393,62 @@ pub enum PluginSessionMaterialization {
     Rematerialization,
 }
 
+/// The telemetry capability of one engine execution, shared with plugin observers.
+/// Clones retain the engine's scope and permission to emit.
+#[derive(Clone)]
+pub struct PluginExecutionTrace {
+    standing: crate::trace::TraceStanding,
+}
+
+impl PluginExecutionTrace {
+    pub fn new(standing: crate::trace::TraceStanding) -> Self {
+        Self { standing }
+    }
+
+    pub fn into_standing(self) -> crate::trace::TraceStanding {
+        self.standing
+    }
+
+    pub fn trace_runtime(&self) -> &crate::trace::TraceRuntime {
+        self.standing.runtime()
+    }
+
+    pub fn trace_scope(&self) -> Option<&lash_trace::DurableTraceScope> {
+        self.standing.scope()
+    }
+
+    pub fn observes_language(&self) -> bool {
+        self.trace_runtime().emitter().product_observer().is_some() || self.standing.is_observed()
+    }
+
+    pub fn emit(&self, record: impl FnOnce() -> (crate::TraceContext, crate::TraceEvent)) {
+        self.standing.observe(record);
+    }
+
+    /// Reconstruct the product graph on replay, independently of external telemetry.
+    pub fn observe_language(
+        &self,
+        event_key: &str,
+        record: impl Fn() -> (crate::TraceContext, crate::TraceEvent),
+    ) {
+        self.trace_runtime().emitter().observe_product(|| {
+            let (context, event) = record();
+            lash_trace::TraceRecord {
+                schema_version: lash_trace::TRACE_SCHEMA_VERSION,
+                id: event_key.to_string(),
+                timestamp: self.trace_runtime().clock().timestamp_datetime(),
+                context,
+                event,
+            }
+        });
+        self.emit(record);
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct PluginSessionContext {
+    pub tracing: crate::trace::TraceRuntime,
+    pub trace: Option<lash_trace::DurableTraceScope>,
     /// Who the plugin session is built for: a session, or a process runtime
     /// built from its captured execution environment.
     pub owner: crate::RuntimeOwner,
@@ -418,6 +472,14 @@ pub struct PluginSessionContext {
 }
 
 impl PluginSessionContext {
+    pub fn trace_runtime(&self) -> &crate::trace::TraceRuntime {
+        &self.tracing
+    }
+
+    pub fn trace_scope(&self) -> Option<&lash_trace::DurableTraceScope> {
+        self.trace.as_ref()
+    }
+
     /// Plugins that should only surface in user-facing top-level turns check this in their
     /// `build`.
     pub fn is_root_session(&self) -> bool {
@@ -427,9 +489,21 @@ impl PluginSessionContext {
 
 #[derive(Clone)]
 pub struct SessionReadyContext {
+    pub tracing: crate::trace::TraceRuntime,
+    pub trace: Option<lash_trace::DurableTraceScope>,
     pub state: super::PluginStateStore,
     pub owner: crate::RuntimeOwner,
     pub host: PluginHost,
+}
+
+impl SessionReadyContext {
+    pub fn trace_runtime(&self) -> &crate::trace::TraceRuntime {
+        &self.tracing
+    }
+
+    pub fn trace_scope(&self) -> Option<&lash_trace::DurableTraceScope> {
+        self.trace.as_ref()
+    }
 }
 
 pub use lash_core_ids::{BehaviorRevision, FormatVersion, PluginId};
@@ -772,21 +846,19 @@ pub trait PluginFactory: Send + Sync {
 /// `lash::plugins::ProcessEngineContributionContext` (FIG-4373).
 pub struct ProcessEngineContributionContext<'a> {
     plugin_host: &'a super::PluginHost,
-    trace_context: &'a crate::TraceContext,
-    process_observation_sink: Option<Arc<dyn lash_trace::TraceSink>>,
+    trace_runtime: &'a crate::trace::TraceRuntime,
     process_lifecycle_available: bool,
 }
 
 impl<'a> ProcessEngineContributionContext<'a> {
     pub fn new(
         plugin_host: &'a super::PluginHost,
-        trace_context: &'a crate::TraceContext,
+        trace_runtime: &'a crate::trace::TraceRuntime,
         process_lifecycle_available: bool,
     ) -> Self {
         Self {
             plugin_host,
-            trace_context,
-            process_observation_sink: None,
+            trace_runtime,
             process_lifecycle_available,
         }
     }
@@ -800,20 +872,12 @@ impl<'a> ProcessEngineContributionContext<'a> {
         self.plugin_host
     }
 
-    pub fn trace_context(&self) -> &crate::TraceContext {
-        self.trace_context
+    pub fn trace_runtime(&self) -> &crate::trace::TraceRuntime {
+        self.trace_runtime
     }
 
-    pub fn with_process_observation_sink(
-        mut self,
-        sink: Option<Arc<dyn lash_trace::TraceSink>>,
-    ) -> Self {
-        self.process_observation_sink = sink;
-        self
-    }
-
-    pub fn process_observation_sink(&self) -> Option<&Arc<dyn lash_trace::TraceSink>> {
-        self.process_observation_sink.as_ref()
+    pub fn trace_scope(&self) -> Option<&lash_trace::DurableTraceScope> {
+        None
     }
 
     /// Tells plugin factories whether the host supplied the lifecycle services required to

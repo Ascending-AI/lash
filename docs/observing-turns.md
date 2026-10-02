@@ -39,3 +39,10 @@ checkpoint, and never feeds it back
   (the `Done` a cancel records, an `Error`, `TurnOutcome { Stopped }` and the
   final `Done`) reaches you only once the turn's commit is accepted. A commit
   that fails publishes none of it.
+
+## Internal phase instrumentation
+
+Workspace measurement and fault-injection tools use the hidden turn-phase
+probe. Its vocabulary is explicitly unstable. See the
+[turn-phase instrumentation contract](architecture/turn-phase-probe.md) for
+callback, registration and naming rules.

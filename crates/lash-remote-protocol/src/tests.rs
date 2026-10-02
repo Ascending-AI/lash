@@ -1277,6 +1277,7 @@ fn remote_process_dtos_json_round_trip() {
         lifetime: crate::RemoteStartLifetime::UntilSession {
             session_id: SessionId::from("session"),
         },
+        trace_cause: Default::default(),
     };
     start.validate().expect("valid process start request");
     let mut missing_lifetime =
@@ -1409,6 +1410,7 @@ fn remote_process_dtos_json_round_trip() {
         signal_name: "ready".to_string(),
         signal_id: "signal:1".to_string(),
         payload: serde_json::json!({ "ready": true }),
+        trace_cause: Default::default(),
     };
     signal.validate().expect("valid signal request");
     let signal_result = RemoteProcessSignalReceipt {
@@ -2277,6 +2279,7 @@ fn remote_process_record() -> RemoteProcessRecord {
     lifetime: crate::RemoteLifetimeDecision::Detached,
     ancestry: Vec::new(),
     session_capability: None,
+    trace: None,
 }
 }
 
@@ -2342,6 +2345,7 @@ fn remote_process_event() -> RemoteProcessEvent {
                 input: "wake".to_string(),
             }),
             signal_wait: None,
+            trace_cause: Default::default(),
         },
         occurred_at_ms: 3,
     }

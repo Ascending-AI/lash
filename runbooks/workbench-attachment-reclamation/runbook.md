@@ -125,8 +125,8 @@ Upload a small PNG and record its byte length and SHA-256. Do **not** send a tur
 yet. The backend creates the session catalog
 (`$work/data/lash-sessions/durable-core.db`) at boot, and the upload's bytes land
 in its `attachment_blobs` table beside the manifest the mark phase reads — there
-is no `attachments/` directory, and the workbench refuses one as a prior store
-layout. The blind-root arm is therefore staged: move the catalog aside, run the
+is no `attachments/` directory. The blind-root arm is therefore staged: move the
+catalog aside, run the
 sweep, then put the same files back. While the catalog is aside, nothing else
 may touch the stack — a write against the absent path would create a fresh empty
 catalog beside the moved one.

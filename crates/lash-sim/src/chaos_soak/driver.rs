@@ -1182,6 +1182,7 @@ impl Driver {
                 ..soak_lease_timings()
             },
             backend.clock(),
+            lash_core::operational_metrics::StoreObserver::default(),
         );
         let taken = matches!(
             rival.step().await,

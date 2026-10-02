@@ -88,6 +88,7 @@ fn write_wake(fleet: FleetFormat) -> Vec<u8> {
         authority: crate::QueuedWorkAuthority::default(),
         input: "wake".to_owned(),
         created_at_ms: 123,
+        trace_cause: Default::default(),
     })
     .expect("encode the wake")
 }

@@ -219,11 +219,19 @@ impl LashCore {
             },
             processes,
         };
-        crate::parked_work::record_park_gauges(&parked, checked_at);
+        crate::parked_work::record_park_gauges(
+            self.env.core.tracing.metrics(),
+            &parked,
+            checked_at,
+        );
         let mut stalled_obligations = std::collections::BTreeMap::new();
         for kind in lash_core::store::ObligationKind::ALL {
             let count = self.backend.obligation_ledger(kind).count_stalled().await?;
-            lash_core::operational_metrics::record_obligations_stalled(kind.label(), count);
+            lash_core::operational_metrics::record_obligations_stalled(
+                self.env.core.tracing.metrics(),
+                kind.label(),
+                count,
+            );
             stalled_obligations.insert(kind, count);
         }
         Ok(DeploymentDrainStatus {
@@ -293,8 +301,8 @@ impl LashCore {
     /// (FIG-4076).
     ///
     /// Reading the status is also the metrics refresh: the per-generation
-    /// work gauges and each obligation kind's stalled gauge record inside
-    /// [`GenerationDrainStatus::collect`].
+    /// work gauges and each obligation kind's stalled gauge use the core's
+    /// injected telemetry instruments.
     pub async fn generation_drain_status(
         &self,
         generation: &lash_core::engine::BuildGeneration,
@@ -303,7 +311,7 @@ impl LashCore {
         let session_delete = self.backend.session_delete_ledger();
         let registry = self.backend.deployment_registry();
         let backend = self.backend.clone();
-        Ok(GenerationDrainStatus::collect(
+        let status = GenerationDrainStatus::collect(
             drain.as_ref(),
             session_delete.as_ref(),
             move |kind| backend.obligation_ledger(kind),
@@ -311,7 +319,30 @@ impl LashCore {
             generation,
             self.env.core.clock.timestamp_ms(),
         )
-        .await?)
+        .await?;
+        let metrics = self.env.core.tracing.metrics();
+        for (kind, count) in [
+            ("live_processes", status.live_processes),
+            ("parked_processes", status.parked_processes),
+            ("parked_turns", status.parked_turns),
+            ("in_flight_turns", status.in_flight_turns),
+            ("undrained_group_children", status.undrained_group_children),
+        ] {
+            lash_core::operational_metrics::record_generation_drain_work(
+                metrics,
+                generation.as_str(),
+                kind,
+                count,
+            );
+        }
+        for (kind, count) in &status.stalled_obligations {
+            lash_core::operational_metrics::record_obligations_stalled(
+                metrics,
+                kind.label(),
+                *count,
+            );
+        }
+        Ok(status)
     }
 
     /// The stalled obligations of `kind` after `after`, in id order, at most
@@ -391,6 +422,7 @@ impl LashCore {
             store_factory: Arc::clone(&self.store_factory),
             process_registry: Arc::clone(&self.process_registry),
             clock: Arc::clone(&self.env.core.clock),
+            metrics: self.env.core.tracing.metrics().clone(),
             relay_policy: self.env.core.control.relay_policy(),
         }
     }
@@ -521,6 +553,7 @@ impl LashCore {
         let plugin_host = build_plugin_host(
             self.protocol_factory.as_ref(),
             self.plugin_factories.as_ref(),
+            &self.env.core.tracing,
         )?;
         let mut env = binding.apply_owner(self.env.clone());
         env.core = plugin_host.install_process_engine_contributions(
@@ -767,6 +800,7 @@ impl LashCore {
         let plugin_host = build_plugin_host(
             self.protocol_factory.as_ref(),
             self.plugin_factories.as_ref(),
+            &self.env.core.tracing,
         )?;
         let runtime_host = plugin_host.install_process_engine_contributions(
             self.env.core.clone(),
@@ -798,7 +832,12 @@ pub struct LashCoreBuilder {
     output_retention: Option<lash_core::OutputRetentionPolicy>,
     process_wake_delivery_policy: Option<lash_core::DeliveryPolicy>,
     // Core fields applied over the config the backend's ports assemble.
-    trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
+    trace_runtime: Option<lash_core::runtime::TraceRuntime>,
+    trace_sinks: Vec<Arc<dyn lash_trace::TraceSink>>,
+    #[cfg(feature = "otel-trace")]
+    telemetry: Option<lash_trace::otel::OtelTelemetry>,
+    #[cfg(feature = "otel-trace")]
+    duplicate_telemetry: bool,
     trace_level: Option<lash_trace::TraceLevel>,
     trace_context: Option<lash_trace::TraceContext>,
     termination: Option<TerminationPolicy>,
@@ -828,7 +867,12 @@ impl LashCoreBuilder {
             attachment_upload_expiry: None,
             output_retention: None,
             process_wake_delivery_policy: None,
-            trace_sink: None,
+            trace_runtime: None,
+            trace_sinks: Vec::new(),
+            #[cfg(feature = "otel-trace")]
+            telemetry: None,
+            #[cfg(feature = "otel-trace")]
+            duplicate_telemetry: false,
             trace_level: None,
             trace_context: None,
             termination: None,
@@ -985,13 +1029,30 @@ impl LashCoreBuilder {
         self
     }
 
+    /// Install the shared tracing runtime used by the engine and every plugin.
+    pub fn trace_runtime(mut self, runtime: lash_core::runtime::TraceRuntime) -> Self {
+        self.trace_runtime = Some(runtime);
+        self
+    }
+
+    /// Installs the runtime's single admission, projection and metrics adapter.
+    /// A second installation is refused when the core is built.
+    #[cfg(feature = "otel-trace")]
+    pub fn telemetry(mut self, telemetry: lash_trace::otel::OtelTelemetry) -> Self {
+        if self.telemetry.replace(telemetry).is_some() {
+            self.duplicate_telemetry = true;
+        }
+        self
+    }
+
     pub fn trace_sink(mut self, trace_sink: Arc<dyn lash_trace::TraceSink>) -> Self {
-        self.trace_sink = Some(trace_sink);
+        self.trace_sinks.push(trace_sink);
         self
     }
 
     pub fn trace_jsonl_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
-        self.trace_sink = Some(Arc::new(lash_trace::JsonlTraceSink::new(path.into())));
+        self.trace_sinks
+            .push(Arc::new(lash_trace::JsonlTraceSink::new(path.into())));
         self
     }
 
@@ -1079,6 +1140,10 @@ impl LashCoreBuilder {
     /// The owner id is stable for the worker or process and never scoped to a
     /// turn. The incarnation id changes once per process boot.
     pub fn build(mut self, drive_owner: lash_core::LeaseOwnerIdentity) -> Result<LashCore> {
+        #[cfg(feature = "otel-trace")]
+        if self.duplicate_telemetry {
+            return Err(EmbedError::DuplicateTelemetry);
+        }
         let protocol_factory = self.protocol_factory.clone();
         if protocol_factory.is_none() {
             return Err(EmbedError::MissingProtocolPlugin);
@@ -1090,6 +1155,13 @@ impl LashCoreBuilder {
             crate::process_observation::ProcessObservationHub::new(self.process_observation_config),
         );
         let observation_sink: Arc<dyn lash_trace::TraceSink> = process_observation_hub.clone();
+        let observation_sink = match core.tracing.emitter().product_observer() {
+            Some(configured) => Arc::new(lash_trace::TeeTraceSink::new([
+                Arc::clone(configured),
+                observation_sink,
+            ])) as Arc<dyn lash_trace::TraceSink>,
+            None => observation_sink,
+        };
         let core = core.with_process_observation_sink(observation_sink);
         let live_replay_store = self.live_replay_store.take().unwrap_or_else(|| {
             Arc::new(InMemoryLiveReplayStore::with_clock(
@@ -1128,6 +1200,7 @@ impl LashCoreBuilder {
         let default_plugin_host = Arc::new(build_plugin_host(
             protocol_factory.as_ref(),
             &plugin_factories,
+            &core.tracing,
         )?);
         // The generation exists only now that the plugins are registered:
         // it folds in their declarations in hook order, and the engine runs
@@ -1315,6 +1388,7 @@ fn refuse_foreign_backend_factories<'a>(
 pub(crate) fn build_plugin_host(
     protocol_factory: Option<&Arc<dyn PluginFactory>>,
     plugin_factories: &[Arc<dyn PluginFactory>],
+    tracing: &lash_core::runtime::TraceRuntime,
 ) -> Result<PluginHost> {
     let mut factories =
         Vec::with_capacity(usize::from(protocol_factory.is_some()) + plugin_factories.len());
@@ -1322,7 +1396,7 @@ pub(crate) fn build_plugin_host(
         factories.push(Arc::clone(protocol_factory));
     }
     factories.extend(plugin_factories.iter().cloned());
-    Ok(PluginHost::new(factories))
+    Ok(PluginHost::new(factories).with_trace_runtime(tracing.clone()))
 }
 
 impl LashCore {

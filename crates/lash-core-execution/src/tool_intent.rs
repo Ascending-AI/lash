@@ -149,6 +149,14 @@ pub struct ToolIntentSubmissionRecord {
     /// First typed realization outcome, absent while admission is pending.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<crate::ToolIntentExecutionOutcome>,
+    /// The submission's trace scope: the cause and anchor its first
+    /// submission offered and when it was made. The ledger's first writer
+    /// retains it with the row; a later submission of the identity reads it
+    /// back. It is beside the intent, never inside it, so the payload hash
+    /// does not cover it. `None` for a runtime-minted intent, which runs
+    /// under its tool call's scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace: Option<lash_trace::DurableTraceScope>,
 }
 
 impl ToolIntentSubmissionRecord {
@@ -159,9 +167,14 @@ impl ToolIntentSubmissionRecord {
         intent: ToolIntent,
     ) -> Result<Self, serde_json::Error> {
         let kind = intent.kind();
+        // The hash is the intent's business identity: an occurrence an
+        // emission carries is hashed without the trace offer beside it.
         let payload_hash = crate::stable_hash::blake3_hex(
             LASH_TOOL_INTENT_PAYLOAD_DOMAIN_VERSION,
-            &serde_json::to_vec(&intent)?,
+            &match intent.without_trace_provenance() {
+                Some(business) => serde_json::to_vec(&business)?,
+                None => serde_json::to_vec(&intent)?,
+            },
         );
         Ok(Self {
             protocol_version: TOOL_INTENT_PROTOCOL_V3,
@@ -170,7 +183,44 @@ impl ToolIntentSubmissionRecord {
             payload_hash,
             intent,
             outcome: None,
+            trace: None,
         })
+    }
+
+    /// The scope id of this submission's trace scope: its owning runtime
+    /// and replay key.
+    pub fn trace_scope_id(&self) -> lash_trace::TraceScopeId {
+        lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::ToolIntent {
+            owner: self.identity.owner.clone(),
+            replay_key: self.identity.replay_key.clone(),
+        })
+    }
+
+    /// Offers `offer` as a host submission's trace scope, started at
+    /// `submitted_at_ms`. The ledger keeps it only when this record is the
+    /// identity's first writer.
+    pub fn with_trace_offer(
+        mut self,
+        offer: lash_trace::TraceScopeOffer,
+        submitted_at_ms: u64,
+    ) -> Self {
+        self.trace = Some(offer.into_scope(self.trace_scope_id(), submitted_at_ms));
+        self
+    }
+}
+
+impl ToolIntent {
+    /// This intent without the trace offer it carries, when it carries one:
+    /// what its payload hash covers.
+    pub fn without_trace_provenance(&self) -> Option<Self> {
+        match self {
+            Self::EmitTrigger(emit) if !emit.request.trace.is_empty() => {
+                let mut emit = emit.clone();
+                emit.request.trace = lash_trace::TraceScopeOffer::default();
+                Some(Self::EmitTrigger(emit))
+            }
+            _ => None,
+        }
     }
 }
 

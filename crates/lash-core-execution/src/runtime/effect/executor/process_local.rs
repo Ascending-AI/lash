@@ -81,23 +81,6 @@ async fn delivered_output(
 }
 
 impl RuntimeEffectLocalExecutor<'_> {
-    /// Binds a host start's validation and environment publication to its
-    /// recorded admission, before any staging or registration writes.
-    pub fn with_session_turn_admission(
-        mut self,
-        admission: Option<crate::runtime::SessionTurnAdmission>,
-    ) -> Self {
-        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
-            &mut self.state
-        {
-            execution
-                .host_start
-                .get_or_insert_default()
-                .session_turn_admission = admission;
-        }
-        self
-    }
-
     /// Binds the attachment referrers a delivered process terminal is
     /// acquired through before its receiver records it (ADR 0124).
     pub fn with_process_attachments(
@@ -152,15 +135,9 @@ impl ProcessLocalExecution {
                     &crate::runtime::ProcessStartStores {
                         registry: registry.as_ref(),
                         env_store: process_env_store.as_ref(),
-                        engines: process_engines.as_ref(),
-                        engines_required: false,
-                        session_catalog: crate::runtime::HostStartAdmission::catalog(
-                            host_start.as_deref(),
-                        ),
-                        session_turn_admission:
-                            crate::runtime::HostStartAdmission::session_turn_admission(
-                                host_start.as_deref(),
-                            ),
+                        engines: &process_engines,
+                        session_catalog: host_start.session_catalog.as_deref(),
+                        session_turn_admission: host_start.session_turn_admission.as_ref(),
                         executor: "process start on the local executor",
                         starter: &starter,
                         trigger_route: trigger_route.as_ref(),

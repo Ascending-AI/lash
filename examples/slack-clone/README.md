@@ -128,7 +128,8 @@ screenshot, and DOM dump. Set
 | Thread as a forked child session | `bot/threads.rs`, `bot/runtime.rs::thread_session_id` |
 | Bounded thread-root admission deferral | `bot/threads.rs::open_thread_session` |
 | Ambient context folded in the ledger, with no turn | `bot/channel.rs::ingest`, `bot/ledger.rs::bind_mention_send` |
-| One send per mention, carrying the folded context | `bot/channel.rs::run_mention_turn` |
+| Atomic context and mention admission | `bot/channel.rs`, `DurableSession::send_batch` |
+| Named, recorded channel run definitions | `bot/runtime.rs::channel_run_spec`, `LashCoreBuilder::run_definition` |
 | Standard-mode native tool loop | `bot/tools.rs` |
 | MCP tools in that same standard tool loop | `mcp_server.rs`, `bot/runtime.rs` |
 | Idempotent event consumption | `bot/ledger.rs` |
@@ -386,24 +387,28 @@ them, or its first answer of the day is context-free.
 
 - **Ambient** (`message` events with no mention) → recorded in the event ledger
   with the text the model will see. **No turn runs, no token is spent, nothing is
-  posted**, and nothing is sent to Lash.
+  posted**. Routing and fork reads use `core.session(id).durable()`, which
+  builds no runtime, plugin session or tool catalog.
 - **Mention** (`app_mention`) → the ledger binds every ambient line still waiting
-  on the mention's route to it and composes one text — the folded room context,
-  then the mention — and the bot sends that with
-  `session.send(TurnInput::text(...)).id(...)`. The session's engine runs the turn
-  as soon as the send is accepted; the bot waits on the handle's outcome and posts
-  the answer.
+  on the route and freezes two inputs, the folded context followed by the mention.
+  `send_batch(...).run(...)` accepts both in one transaction. The bot's
+  `DrainMode::All` policy takes them in one engine-owned root. With no context,
+  the bot uses `send(...).id(...).run(...)`. It waits on the mention's handle and
+  posts the answer.
 
 So a room can be busy for an hour and cost nothing, and the answer when it comes
 has the hour in it. A host never runs a turn itself (FIG-3600): every Lash input
-starts a turn on the engine, which is why ambient traffic is folded by the host
-rather than sent. `RunSpec.context` is the folded block's home once a run
-definition reads it.
+starts work on the engine, so the host retains ambient traffic until a mention.
+The registered `slack-clone-channel@1` definition validates the immutable route
+in `RunSpec.context` and uses the channel's recorded session configuration.
+The context includes the mention's message timestamp, so independent mentions have
+different specs and cannot share a root. Replay reads the first root's recorded
+shape without resolving the definition again.
 
-The composed text is stored with the mention the first time it is bound, and the
-send's id is derived from the mention's `ts` (`mention:<channel>:<ts>`), and `ts`
-*is* message identity. A redelivered or recovered mention therefore sends the same
-bytes under the same id and resolves to the admission Lash already holds instead
+The batch's members are stored with the mention the first time it is bound.
+Their ids derive from the mention's `ts`, with `ambient:` and `mention:` prefixes.
+A redelivered or recovered mention sends the same bytes under the same ids and
+spec, and resolves to the admission Lash already holds instead
 of running a second turn — idempotence at the runtime layer, independent of the
 bot's own stages. An ambient line that arrives after a mention was bound waits for
 the route's next mention.
@@ -424,9 +429,10 @@ folded on the thread's route in the ledger, cost no model call, and the thread's
 first mention sends them to the child. No thread event is ever sent to
 `channel:<C…>`.
 
-The thread starts with its parent's folded context: its first send leads with the
+The thread starts with its parent's folded context: its first batch carries the
 channel messages up to the root that the fork boundary does not carry, the root
-among them labelled, then the thread's own folded replies and the mention.
+among them labelled, then the thread's own folded replies in the context member.
+The mention is the second member.
 
 ### Labelling the thread root
 
@@ -438,12 +444,12 @@ answer too. A child asked "what did the root say?" would then have three
 equally-committed candidates and answer about the wrong one.
 
 The distinction is host domain knowledge, so the host writes it down: the
-thread's first send carries one labelled line naming the root message
+thread's first batch carries one labelled line naming the root message
 (`THREAD_ROOT_SEED_PREFIX` in `bot/threads.rs`). Every forking host with a
 similar notion of an anchor message pays the same few lines — the price of hosts,
 not the substrate, owning their own semantics. The label starts and ends its own
-line, so it names the root and not the copied line ahead of it. The composed
-first send is stored in the ledger, so a redelivery or a second open sends the
+line, so it names the root and not the copied line ahead of it. The frozen
+first batch is stored in the ledger, so a redelivery or a second open sends the
 same bytes.
 
 ### Locating the fork boundary
@@ -451,7 +457,7 @@ same bytes.
 The name of a session state is its head revision, and the ledger records two
 different revisions because they mean different things. A folded top-level
 message pins and records the channel's head revision observed while it held the
-channel lock; the folded root is copied into the first send of a child forked
+channel lock; the folded root is copied into the first batch of a child forked
 there. A channel that has never run a turn is forkable too: its creation
 revision is an ordinary retained revision. After a channel turn commits, the bot
 instead reads `turn_input_applications`, finds the application for the root's
@@ -468,7 +474,7 @@ Thread-open chooses only from evidence durably tied to the root:
 | --- | --- |
 | Recorded `fork_revision` | Fork at that pinned turn revision. |
 | `input_id` with a committed application, but no `fork_revision` | Pin the input, resolve the revision its root published, repair the ledger row, then fork there. |
-| Folded root with a recorded admission revision | Fork at that pinned pre-root revision; the thread's first send copies the pre-root top-level messages that are not already in the child graph, with the root labelled. The ledger row is the root's durability, even if the process died before advancing it to Folded. |
+| Folded root with a recorded admission revision | Fork at that pinned pre-root revision; the thread's first batch copies the pre-root top-level messages that are not already in the child graph, with the root labelled. The ledger row is the root's durability, even if the process died before advancing it to Folded. |
 | Non-terminal root without an authoritative boundary yet | Poll from 250ms with exponential backoff capped at 8s, for at most 45s. |
 | Terminal ignored root with no admission evidence | Fail immediately; this ledger state proves the bot will never route it. |
 | No root row | Keep the bounded wait because delivery may be racing; record `thread_root_not_available` on exhaustion. |
@@ -481,7 +487,7 @@ remains at the non-terminal FIG-1008 state. The bot continues under the remainin
 wait can recover without a new mention or restart. The error notification has its
 own metadata identity, preventing it from being mistaken for the eventual answer
 or posted twice. The copied context waits in the ledger and leads the thread's
-first send.
+first batch.
 
 A no-row exhaustion is distinct from a known, still-processing root. Boot recovery
 handles `thread_root_not_available` with one zero-budget probe and does not start
@@ -592,7 +598,7 @@ What the bot uses today:
   drives it in the handlers of the Restate endpoint the bot serves, and the bot
   only sends. Both survive a restart together. This is the load-bearing choice.
 - **A durable event ledger** (its own SQLite database), recording the folded
-  ambient text, the text each mention sent, and the reply owed, so a new boot can
+  ambient text, each mention's frozen batch, and the reply owed, so a new boot can
   replay any of them.
 - **A durable, transactional outbox on the platform side** — the message and the
   events it implies commit together, so the retries the bot's design assumes
@@ -604,7 +610,7 @@ What the bot uses today:
 ### What a crash costs, stage by stage
 
 Every stage is resumable because every step is idempotent: the fold by the
-ledger's stored send text, the send and its turn by the send's id, and the post by
+ledger's stored batch, each input by its id and spec, and the post by
 the `event_id` its `metadata` carries. `ChannelBot::recover` walks the unfinished rows at boot and
 finishes each one:
 

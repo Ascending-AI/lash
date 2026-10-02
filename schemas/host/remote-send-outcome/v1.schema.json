@@ -1635,6 +1635,32 @@
       "description": "A diagnostic beside a typed cause, cut to [`Self::MAX_BYTES`]. The variant\nthat carries it decides the class; the bound keeps a refusal within any\nframe whatever its text.",
       "type": "string"
     },
+    "DurableTraceScope": {
+      "additionalProperties": false,
+      "description": "The retained telemetry of one admitted scope: what caused it, the anchor\nits children hang under, and when it started.\n\nIt is written once, by the admission that inserts its owner, in the same\nwrite. Every later admission of that owner reads it back unchanged.",
+      "properties": {
+        "anchor": {
+          "$ref": "#/$defs/TraceAnchor"
+        },
+        "cause": {
+          "$ref": "#/$defs/TraceCause"
+        },
+        "scope": {
+          "$ref": "#/$defs/TraceScopeId"
+        },
+        "started_at_ms": {
+          "description": "Wall-clock epoch milliseconds of the first admission.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "scope",
+        "started_at_ms"
+      ],
+      "type": "object"
+    },
     "EffectAddress": {
       "description": "Canonical address of one admitted runtime effect.",
       "properties": {
@@ -4961,6 +4987,10 @@
             }
           ]
         },
+        "trace_cause": {
+          "$ref": "#/$defs/TraceCause",
+          "description": "What caused the event, as the append that inserted it retained it."
+        },
         "wake": {
           "anyOf": [
             {
@@ -5489,6 +5519,17 @@
             "string",
             "null"
           ]
+        },
+        "trace": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DurableTraceScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The process's retained trace scope."
         },
         "updated_at_ms": {
           "format": "uint64",
@@ -13005,6 +13046,291 @@
         }
       },
       "type": "object"
+    },
+    "TraceAnchor": {
+      "description": "The span context a scope's first admission selected for its children.",
+      "oneOf": [
+        {
+          "description": "No adapter was installed when the scope was admitted. Nothing invents\nan anchor for it later; its cause is still retained for record\nconsumers.",
+          "properties": {
+            "state": {
+              "const": "untraced",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The admission span's context. It may be unsampled: an unsampled\ncontext is retained and propagated, which is not the same as no\ntelemetry.",
+          "properties": {
+            "context": {
+              "$ref": "#/$defs/TraceCarrier"
+            },
+            "state": {
+              "const": "context",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "context"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TraceCarrier": {
+      "additionalProperties": false,
+      "properties": {
+        "traceparent": {
+          "description": "W3C `traceparent`, version 00.",
+          "type": "string"
+        },
+        "tracestate": {
+          "description": "W3C `tracestate`, absent when empty.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "traceparent"
+      ],
+      "type": "object"
+    },
+    "TraceCause": {
+      "description": "How an admitted operation relates to what caused it.\n\nThe first accepted cause is retained: a retry of the same business\nsubmission under another context reads this one back, and an operation\nfirst admitted as `Root` stays `Root`.",
+      "oneOf": [
+        {
+          "description": "No cause: the operation starts a trace of its own. An adapter starts\nit under an explicit empty context, never the ambient one.",
+          "properties": {
+            "relation": {
+              "const": "root",
+              "type": "string"
+            }
+          },
+          "required": [
+            "relation"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The operation is an owned invocation of this span.",
+          "properties": {
+            "from": {
+              "$ref": "#/$defs/TraceCarrier"
+            },
+            "relation": {
+              "const": "parent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "relation",
+            "from"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The operation is independently admitted work these spans communicated\nwith; it starts its own trace and links them.",
+          "properties": {
+            "from": {
+              "$ref": "#/$defs/TraceLinks"
+            },
+            "relation": {
+              "const": "linked",
+              "type": "string"
+            }
+          },
+          "required": [
+            "relation",
+            "from"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TraceLinks": {
+      "additionalProperties": false,
+      "properties": {
+        "contexts": {
+          "items": {
+            "$ref": "#/$defs/TraceCarrier"
+          },
+          "type": "array"
+        },
+        "omitted": {
+          "description": "Contexts dropped past the retained limit.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "contexts"
+      ],
+      "type": "object"
+    },
+    "TraceScopeId": {
+      "additionalProperties": false,
+      "description": "A trace scope's identity: its owner and the owner's boundary ordinal.\n\nBoundary 0 is the owner's admission. A later boundary of the same owner\n(a process segment, a checkpoint that consumed new input) takes the next\nordinal the owner's own records already count. The id is separate from\nevery business identity preimage.",
+      "properties": {
+        "boundary": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "owner": {
+          "$ref": "#/$defs/TraceScopeOwner"
+        }
+      },
+      "required": [
+        "owner"
+      ],
+      "type": "object"
+    },
+    "TraceScopeOwner": {
+      "description": "The durable owner of a trace scope: the admitted thing whose work the\nscope parents.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "An admitted root and the run it drives.",
+          "properties": {
+            "kind": {
+              "const": "run",
+              "type": "string"
+            },
+            "root": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "session_id": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "session_id",
+            "root"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One logical agent turn.",
+          "properties": {
+            "kind": {
+              "const": "turn",
+              "type": "string"
+            },
+            "session_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "turn_id": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "session_id",
+            "turn_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One tool call of a turn.",
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "tool",
+              "type": "string"
+            },
+            "session_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "turn_id": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "session_id",
+            "turn_id",
+            "call_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One host-submitted tool intent, by its replay key, under the\nruntime whose authority declared it: a session or a process.",
+          "properties": {
+            "kind": {
+              "const": "tool_intent",
+              "type": "string"
+            },
+            "owner": {
+              "$ref": "#/$defs/RuntimeOwner"
+            },
+            "replay_key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "owner",
+            "replay_key"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A registered process, across all of its segments.",
+          "properties": {
+            "kind": {
+              "const": "process",
+              "type": "string"
+            },
+            "process_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "process_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One accepted trigger occurrence.",
+          "properties": {
+            "kind": {
+              "const": "trigger_occurrence",
+              "type": "string"
+            },
+            "occurrence_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "occurrence_id"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "TransportSequence": {
       "description": "The transport sequence: each direction numbers its messages from zero,\none apart, so a dropped, duplicated or reordered message is refused.",

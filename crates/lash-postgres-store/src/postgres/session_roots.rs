@@ -1160,7 +1160,7 @@ impl RootStore for PostgresStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Option<UnfinishedRoot>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         unfinished_root_conn(&mut connection, session_id).await
     }
 
@@ -1183,7 +1183,7 @@ impl RootStore for PostgresStore {
         session_id: &SessionId,
         root: &TurnId,
     ) -> Result<Option<RootTerminal>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         root_terminal_conn(&mut connection, session_id, root).await
     }
 
@@ -1195,7 +1195,7 @@ impl RootStore for PostgresStore {
         at_ms: u64,
     ) -> Result<RootEnd, StoreError> {
         lash_core_execution::store::validate_session_id(fence.session())?;
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = crate::begin_guarded(&mut *connection, &self.fence).await?;
         let end = end_refused_root_tx(&mut tx, fence, root, refusal, at_ms).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
@@ -1209,7 +1209,7 @@ impl RootStore for PostgresStore {
         at_ms: u64,
     ) -> Result<RootEnd, StoreError> {
         lash_core_execution::store::validate_session_id(fence.session())?;
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = crate::begin_guarded(&mut *connection, &self.fence).await?;
         let end = end_command_root_tx(&mut tx, fence, root, at_ms).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
@@ -1232,7 +1232,7 @@ impl RootStore for PostgresStore {
         session_id: &SessionId,
         input: &InputId,
     ) -> Result<Option<TurnId>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         root_binding_conn(&mut connection, session_id, input).await
     }
 
@@ -1260,7 +1260,7 @@ impl RootStore for PostgresStore {
         root: &TurnId,
         inputs: &[InputId],
     ) -> Result<(), StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = crate::begin_guarded(&mut *connection, &self.fence).await?;
         crate::runtime_persistence::ensure_session_not_deleted_tx(&mut tx, session_id).await?;
         bind_root_inputs_conn(&mut tx, session_id, root, inputs).await?;

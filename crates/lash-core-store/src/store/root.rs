@@ -639,6 +639,66 @@ pub struct RootAdmission {
     /// writes plugin namespaces in these formats, whatever the fleet record
     /// permits by then.
     pub plugins: super::plugin_writers::PluginAdmission,
+    /// The run's trace scope: what caused the rows it admitted, the anchor
+    /// its first admission selected and when it was admitted. Written with
+    /// the admission and read back unchanged by every later one, whatever
+    /// anchor that one offers. `None` on an admission recorded without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace: Option<lash_trace::DurableTraceScope>,
+    /// Whether this call recorded the admission. It is the call's receipt,
+    /// never stored or journaled: an admission read back from the root's row
+    /// or from a journal is one an earlier call recorded.
+    #[serde(skip)]
+    pub recorded_by_this_call: bool,
+}
+
+impl RootAdmission {
+    /// The cause of a run that admits these rows: what caused them, in the
+    /// order it drives them.
+    pub fn trace_cause_of(
+        inputs: Option<&crate::AdmittedTurnInputs>,
+        queued: Option<&crate::AdmittedQueuedWork>,
+    ) -> lash_trace::TraceCause {
+        lash_trace::TraceCause::of_admitted(
+            inputs
+                .into_iter()
+                .flat_map(|inputs| inputs.inputs.iter().map(|input| &input.trace_cause))
+                .chain(
+                    queued
+                        .into_iter()
+                        .flat_map(|queued| queued.batches.iter().map(|batch| &batch.trace_cause)),
+                ),
+        )
+    }
+
+    /// The run scope the admission inserting `root`'s record retains for
+    /// the rows it admitted, under the anchor its caller offered.
+    pub fn trace_scope_of(
+        session_id: &SessionId,
+        root: &TurnId,
+        inputs: Option<&crate::AdmittedTurnInputs>,
+        queued: Option<&crate::AdmittedQueuedWork>,
+        anchor: lash_trace::TraceAnchor,
+        admitted_at_ms: u64,
+    ) -> lash_trace::DurableTraceScope {
+        lash_trace::DurableTraceScope {
+            scope: lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Run {
+                session_id: session_id.clone(),
+                root: root.clone(),
+            }),
+            cause: Self::trace_cause_of(inputs, queued),
+            anchor,
+            started_at_ms: admitted_at_ms,
+        }
+    }
+
+    /// The trace admission this call's receipt reports: the retained scope,
+    /// inserted when this call recorded it.
+    pub fn trace_admission(&self) -> Option<lash_trace::TraceScopeAdmission> {
+        self.trace
+            .clone()
+            .map(|scope| lash_trace::TraceScopeAdmission::of(scope, self.recorded_by_this_call))
+    }
 }
 
 /// The execution that runs an admitted root, recorded with its admission
@@ -837,6 +897,10 @@ pub struct AdmitRootRequest {
     /// The admitting build's plugin composition and the writer chosen for
     /// each plugin, recorded as given by the first admission.
     pub plugins: super::plugin_writers::PluginAdmission,
+    /// The anchor this admission's candidate offers the run's trace scope.
+    /// The admission that records the root retains it; one that finds the
+    /// root already recorded reads the retained scope back and drops this.
+    pub trace_anchor: lash_trace::TraceAnchor,
 }
 
 impl AdmitRootRequest {

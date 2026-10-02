@@ -69,6 +69,7 @@ impl TryFrom<RemoteTriggerOccurrenceRequest> for lash_core::TriggerOccurrenceReq
             source,
             session_id,
             outcome,
+            trace,
         } = value;
         let mut request = lash_core::TriggerOccurrenceRequest::new(
             source_type,
@@ -79,6 +80,7 @@ impl TryFrom<RemoteTriggerOccurrenceRequest> for lash_core::TriggerOccurrenceReq
         request.source = source;
         request.session_id = session_id;
         request.outcome = outcome.into();
+        request.trace = trace;
         Ok(request)
     }
 }
@@ -93,6 +95,7 @@ impl From<lash_core::TriggerOccurrenceRequest> for RemoteTriggerOccurrenceReques
             source,
             session_id,
             outcome,
+            trace,
         } = value;
         Self {
             source_type,
@@ -102,6 +105,7 @@ impl From<lash_core::TriggerOccurrenceRequest> for RemoteTriggerOccurrenceReques
             source,
             session_id,
             outcome: outcome.into(),
+            trace,
         }
     }
 }
@@ -118,6 +122,7 @@ impl From<lash_core::TriggerOccurrenceRecord> for RemoteTriggerOccurrenceRecord 
             session_id,
             outcome,
             occurred_at_ms,
+            trace,
         } = value;
         Self {
             occurrence_id,
@@ -129,6 +134,7 @@ impl From<lash_core::TriggerOccurrenceRecord> for RemoteTriggerOccurrenceRecord 
             session_id,
             outcome: outcome.into(),
             occurred_at_ms,
+            trace,
         }
     }
 }
@@ -145,6 +151,7 @@ impl From<RemoteTriggerOccurrenceRecord> for lash_core::TriggerOccurrenceRecord 
             session_id,
             outcome,
             occurred_at_ms,
+            trace,
         } = value;
         Self {
             occurrence_id,
@@ -156,6 +163,7 @@ impl From<RemoteTriggerOccurrenceRecord> for lash_core::TriggerOccurrenceRecord 
             session_id,
             outcome: outcome.into(),
             occurred_at_ms,
+            trace,
         }
     }
 }

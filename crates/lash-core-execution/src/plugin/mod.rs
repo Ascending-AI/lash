@@ -89,9 +89,10 @@ pub use registrar::{
 pub(crate) use registrar::{PluginContributions, RegisteredHook};
 pub use registry::{
     BehaviorRevision, FormatVersion, PluginComposition, PluginDeclaration, PluginDeclarationError,
-    PluginExtensionContribution, PluginExtensions, PluginFactory, PluginId, PluginSessionContext,
-    PluginSessionMaterialization, PluginSpec, PluginSpecBuilder, PluginSpecFactory,
-    ProcessEngineContributionContext, SessionPlugin, SessionReadyContext, StaticPluginFactory,
+    PluginExecutionTrace, PluginExtensionContribution, PluginExtensions, PluginFactory, PluginId,
+    PluginSessionContext, PluginSessionMaterialization, PluginSpec, PluginSpecBuilder,
+    PluginSpecFactory, ProcessEngineContributionContext, SessionPlugin, SessionReadyContext,
+    StaticPluginFactory,
 };
 pub use runtime_host::{
     AppendSessionNodesOutcome, AppendSessionNodesRequest, DirectCompletion, DirectLlmCompletion,

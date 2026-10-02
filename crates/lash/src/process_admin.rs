@@ -391,21 +391,26 @@ impl Processes {
                     invocation,
                     lash_core::RuntimeEffectCommand::process(command),
                 ),
-                lash_core::RuntimeEffectLocalExecutor::processes(registry, process_work)
-                    .with_process_attachments(self.core.backend.attachment_referrers())
-                    .with_process_starts(
-                        self.core
-                            .backend
-                            .obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
-                        Arc::clone(&self.core.env.core.clock),
-                        self.core.env.core.control.relay_policy(),
-                    )
-                    .with_process_env_store(Arc::clone(
-                        &self.core.env.core.durability.process_env_store,
-                    ))
-                    .with_process_session_catalog(Arc::clone(&self.core.store_factory) as _)
-                    .with_session_turn_admission(session_turn_admission)
-                    .with_process_engines(self.core.host_process_engines.clone()),
+                lash_core::RuntimeEffectLocalExecutor::processes(
+                    registry,
+                    process_work,
+                    self.core.host_process_engines.clone(),
+                    lash_core::runtime::HostStartAdmission {
+                        session_catalog: Some(Arc::clone(&self.core.store_factory) as _),
+                        session_turn_admission,
+                    },
+                )
+                .with_process_attachments(self.core.backend.attachment_referrers())
+                .with_process_starts(
+                    self.core
+                        .backend
+                        .obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
+                    Arc::clone(&self.core.env.core.clock),
+                    self.core.env.core.control.relay_policy(),
+                )
+                .with_process_env_store(Arc::clone(
+                    &self.core.env.core.durability.process_env_store,
+                )),
             )
             .await?;
         match outcome {
@@ -418,12 +423,6 @@ impl Processes {
         }
     }
 
-    /// Engine-admission ruling (FIG-1488): this route deliberately stays outside
-    /// the gate. It is an operator seam — the host names the registration
-    /// itself, on its own authority, exactly as a host calling the process
-    /// registry directly does. The gate exists to stop a *model or leaf* payload
-    /// from becoming a committed start; it is not a guard against the operator's
-    /// own request. `ProcessEngine::run` still refuses an unrunnable row.
     /// The scope a host start may live until: `session_id`, looked up now.
     ///
     /// A host start is a root: it has no starter, so its lifetime is
@@ -489,6 +488,7 @@ impl Processes {
         crate::support::build_plugin_host(
             self.core.protocol_factory.as_ref(),
             self.core.plugin_factories.as_ref(),
+            &self.core.env.core.tracing,
         )?
         .resolve_creation_plugin_config(
             self.core
@@ -607,6 +607,15 @@ impl Processes {
         request: lash_core::ProcessStartRequest,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessStartReceipt> {
+        // The caller's context is snapshotted here, before the first await,
+        // unless the request states its own: a detached host start links
+        // whoever started it.
+        let request = if request.trace_cause.is_root() {
+            let captured = self.core.env.core.tracing.scopes().capture_current();
+            request.with_trace_cause(lash_core::TraceCause::linked_to(captured))
+        } else {
+            request
+        };
         // The registrar mints the id; the key only makes the start idempotent.
         // A host mints only host keys: a key of a family lash derives for its
         // own start paths is refused, never adopted (ADR 0107).
@@ -865,6 +874,14 @@ impl Processes {
         signal: lash_core::ProcessSignal,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessEvent> {
+        // The producer's context is snapshotted here, before the first
+        // await, unless the signal states its own.
+        let signal = if signal.trace_cause.is_root() {
+            let captured = self.core.env.core.tracing.scopes().capture_current();
+            signal.with_trace_cause(lash_core::TraceCause::linked_to(captured))
+        } else {
+            signal
+        };
         let command = lash_core::ProcessCommand::Signal { signal };
         let outcome = self
             .run_command(command, scoped_effect_controller.clone())

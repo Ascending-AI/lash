@@ -35,18 +35,17 @@ crate::statements! {
              FROM parent_end_plans
              WHERE parent_kind = ?1 AND parent_id = ?2";
 
-        /// Settle scope `?1` / `?2` at `?3`, once.
-        settle = "UPDATE parent_end_plans SET settled_at_ms = ?3
-             WHERE parent_kind = ?1 AND parent_id = ?2 AND settled_at_ms IS NULL";
-
-        /// The settle that applied the plan also delivers a `due` obligation
-        /// the row owes (ADR 0109): its delivery is the application itself.
-        /// A `claimed` row's claim owns its settle, and a `stalled` row keeps
-        /// its stall for the operator.
-        obligation_apply_delivered = "UPDATE parent_end_plans
-             SET obligation_state = 'delivered', obligation_due_at_ms = NULL,
-                 obligation_last_error = NULL, obligation_last_error_code = NULL, obligation_settled_at_ms = ?3
-             WHERE parent_kind = ?1 AND parent_id = ?2 AND obligation_state = 'due'";
+        /// Applying a due plan delivers it and arms reclaim in one write.
+        /// A claimed plan waits for its token-fenced delivery settlement;
+        /// a stalled plan keeps its operator-owned stall and is not reclaimable.
+        /// Repetition preserves the first delivered timestamp.
+        settle = "UPDATE parent_end_plans
+             SET settled_at_ms = COALESCE(settled_at_ms, ?3),
+                 obligation_state = 'delivered', obligation_due_at_ms = NULL,
+                 obligation_last_error = NULL, obligation_last_error_code = NULL,
+                 obligation_settled_at_ms = COALESCE(obligation_settled_at_ms, ?3)
+             WHERE parent_kind = ?1 AND parent_id = ?2
+               AND obligation_state IN ('due', 'delivered')";
     }
 }
 
@@ -96,10 +95,10 @@ crate::statements! {
                   OR (obligation_state = 'claimed' AND obligation_claim_token = ?2))
              RETURNING obligation_id, obligation_attempts, parent_kind, parent_id";
 
-        /// Settle claim `?2` on obligation `?1` delivered at `?3`.
+        /// Settle claim `?2` on obligation `?1` delivered at `?3`, arming reclaim.
         obligation_settle_delivered = "UPDATE parent_end_plans
              SET obligation_state = 'delivered', obligation_claim_token = NULL,
-                 obligation_due_at_ms = NULL, obligation_last_error = NULL, obligation_last_error_code = NULL,
+                 settled_at_ms = COALESCE(settled_at_ms, ?3), obligation_due_at_ms = NULL, obligation_last_error = NULL, obligation_last_error_code = NULL,
                  obligation_settled_at_ms = ?3
              WHERE obligation_id = ?1 AND obligation_state = 'claimed'
                AND obligation_claim_token = ?2";

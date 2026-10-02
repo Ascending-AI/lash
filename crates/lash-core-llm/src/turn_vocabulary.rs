@@ -10,6 +10,9 @@ use std::sync::Arc;
 
 macro_rules! define_runtime_turn_phases {
     ($($phase:ident),+ $(,)?) => {
+        /// Fixed lifecycle phases of the current turn loop.
+        /// Explicitly unstable internal instrumentation; no SemVer promise.
+        #[doc(hidden)]
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
         pub enum RuntimeTurnPhase {
             $($phase),+
@@ -32,6 +35,13 @@ define_runtime_turn_phases!(
     PostCommitDelivery,
 );
 
+/// Synchronous internal turn instrumentation, with typed and named phases.
+///
+/// Explicitly unstable, including its phase vocabulary. Callbacks can overlap
+/// across async work. See `docs/architecture/turn-phase-probe.md` for pairing,
+/// cancellation and naming rules. Production probes must be short and must
+/// not panic or drive a turn.
+#[doc(hidden)]
 pub trait RuntimeTurnPhaseProbe: Send + Sync {
     fn begin(&self, phase: RuntimeTurnPhase);
     fn end(&self, phase: RuntimeTurnPhase);
@@ -39,6 +49,9 @@ pub trait RuntimeTurnPhaseProbe: Send + Sync {
     fn end_named(&self, _phase: &str) {}
 }
 
+/// A named instrumentation span that closes on drop, including cancellation.
+/// Explicitly unstable; see `docs/architecture/turn-phase-probe.md`.
+#[doc(hidden)]
 pub struct RuntimeNamedPhase {
     probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
     phase: &'static str,

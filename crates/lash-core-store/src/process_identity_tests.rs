@@ -76,6 +76,7 @@ fn process_wake(
         authority: crate::QueuedWorkAuthority::default(),
         input: "wake".to_string(),
         created_at_ms: 10,
+        trace_cause: Default::default(),
     }
 }
 

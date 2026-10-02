@@ -279,6 +279,7 @@ impl RuntimeTurnDriver<'_> {
         // The provider task holds the call's dispatch gate; the body keeps
         // the call and seals it with whatever record this body settles on,
         // the synthetic one of a cancellation included.
+        let trace = self.trace.clone();
         let mut llm_task = crate::task::spawn(async move {
             crate::provider::complete_prepared(
                 &mut call_provider,
@@ -286,6 +287,8 @@ impl RuntimeTurnDriver<'_> {
                 task_sideband,
                 charge_safety,
                 &usage_call,
+                trace.runtime().metrics(),
+                trace.body_permit(),
             )
             .await
         });

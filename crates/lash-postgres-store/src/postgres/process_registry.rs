@@ -1,3 +1,8 @@
+//! Process-event `occurred_at_ms` stamps use the injected registry clock on
+//! every write. Lifecycle transitions and event batches sample it once for
+//! their events. Database-clock admission and delivery decisions
+//! retain their separate clock contract.
+
 use crate::*;
 use lash_core_execution::ProcessQuery as _;
 use lash_core_execution::facade_support;
@@ -824,10 +829,6 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
             .map_err(plugin_store_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
         validate_process_execution_authority(process_id, &record, authority, None)?;
-        // `occurred_at_ms` provenance is inconsistent in this backend: four
-        // mutating paths stamp it from the server clock while the others (like
-        // this one) use the injected clock. Decision-inert today — no fence or
-        // retention predicate reads it — tracked as FIG-971.
         let occurred_at_ms = self.clock.timestamp_ms();
         let receipts = append_process_event_batch_tx(
             &mut tx,

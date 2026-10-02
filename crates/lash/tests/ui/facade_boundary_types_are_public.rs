@@ -304,7 +304,7 @@ async fn verified_commit_chokepoint_is_nameable(
     store: &dyn SessionCommitStore,
     commit: RuntimeCommit,
 ) -> Result<RuntimeCommitReceipt, StoreError> {
-    commit_runtime_state_verified(store, commit).await
+    commit_runtime_state_verified(store, commit, &Default::default(), None).await
 }
 
 fn wrapped_session_store_refusal_is_nameable(error: lash::EmbedError) -> bool {
@@ -412,4 +412,26 @@ fn main() {
     let _ = cancellation_token_is_at_root;
     let _ = pending_turn_input_cancel_facade_is_nameable;
     let _ = leaked_signature_types_are_homed;
+}
+
+#[cfg(feature = "otel-trace")]
+fn telemetry_types_are_nameable(
+    telemetry: lash::tracing::OtelTelemetry,
+    builder: lash::LashCoreBuilder,
+) -> lash::LashCoreBuilder {
+    use lash::tracing::{
+        GEN_AI_SEMCONV_SNAPSHOT, LASH_INSTRUMENTATION_CONTRACT, LASH_INSTRUMENTATION_NAME,
+        OtelOptions, OtelPayloadExport, OtelSpanEnricher, TelemetryMetrics, contract_markdown,
+        otel,
+    };
+    let _: &OtelOptions = telemetry.options();
+    let _: &TelemetryMetrics = telemetry.metrics();
+    let _: OtelPayloadExport = OtelPayloadExport::Off;
+    let _: Option<Arc<dyn OtelSpanEnricher>> = None;
+    let _: Option<otel::trace::SpanContext> = None;
+    let _: fn() -> String = contract_markdown;
+    let _: &str = LASH_INSTRUMENTATION_NAME;
+    let _: &str = LASH_INSTRUMENTATION_CONTRACT;
+    let _: &str = GEN_AI_SEMCONV_SNAPSHOT;
+    builder.telemetry(telemetry)
 }

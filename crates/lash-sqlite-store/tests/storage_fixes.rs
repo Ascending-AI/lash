@@ -303,6 +303,7 @@ fn exclusive_draft(session_id: &SessionId, text: &str) -> QueuedWorkBatchDraft {
         authority: lash_core_execution::QueuedWorkAuthority::default(),
         input: text.to_string(),
         created_at_ms: 0,
+        trace_cause: Default::default(),
     };
     lash_core_execution::runtime::process_wake_batch_draft(wake)
 }

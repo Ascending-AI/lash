@@ -71,6 +71,13 @@ retention bound and relevant projection acknowledgement constrain execution
 of reclaim after eligibility exists. No automatic age rule may delete a live
 owner's continuation.
 
+Both SQL backends guard reclaim markers with named CHECK constraints.
+A parent-end plan's `settled_at_ms` requires delivered cancellation work;
+claimed or stalled work remains retained. Delivery settlement arms the marker
+atomically and honors its claim token. A subscription change's `deleted_at_ms`
+requires the tombstoned lifecycle in its retained JSON record. Missing lifecycle
+tags cannot satisfy that guard under SQL NULL semantics.
+
 A fired trigger occurrence belongs to its committed delivery fan-out. A
 zero-match fan-out is complete at ingest; a matched fan-out waits until its
 last delivery ends and the retained delivery rows can be removed. The absence

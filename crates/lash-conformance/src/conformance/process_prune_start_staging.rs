@@ -204,8 +204,8 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
     let stores = |starter| crate::ProcessStartStores {
         registry: &faults,
         env_store: Some(&env_store),
-        engines: Some(&engines),
-        engines_required: false,
+        engines: &engines,
+
         session_catalog: None,
         session_turn_admission: None,
         executor: "conformance process start",
@@ -403,8 +403,8 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
     let stores_a = crate::ProcessStartStores {
         registry: &faults_a,
         env_store: Some(&env_store),
-        engines: Some(&engines_a),
-        engines_required: true,
+        engines: &engines_a,
+
         session_catalog: None,
         session_turn_admission: None,
         executor: "conformance process start",
@@ -414,8 +414,8 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
     let stores_b = crate::ProcessStartStores {
         registry: registry.as_ref(),
         env_store: Some(&env_store),
-        engines: Some(&engines_b),
-        engines_required: true,
+        engines: &engines_b,
+
         session_catalog: None,
         session_turn_admission: None,
         executor: "conformance process start",
@@ -798,11 +798,12 @@ pub async fn two_starts_share_one_captured_environment(
         crate::AdmittedPluginConfig::new(plugin_config, 0),
         crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
     );
+    let engines = crate::testing::process_engine_fixture();
     let stores = crate::ProcessStartStores {
         registry: registry.as_ref(),
         env_store: Some(&env_store),
-        engines: None,
-        engines_required: false,
+        engines: &engines,
+
         executor: "shared environment law",
         starter: &starter,
         session_catalog: None,
@@ -819,7 +820,7 @@ pub async fn two_starts_share_one_captured_environment(
             &stores,
             crate::ProcessRegistration::new(
                 crate::ProcessInput::Engine {
-                    kind: "test-engine".to_owned(),
+                    kind: "testing-fixture".to_owned(),
                     payload: serde_json::Value::Null,
                 },
                 crate::ProcessProvenance::host(),

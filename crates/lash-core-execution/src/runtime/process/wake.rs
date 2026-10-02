@@ -22,6 +22,8 @@ pub struct ProcessWakeDeliveryRequest {
     pub process_caused_by: Option<crate::CausalRef>,
     pub authority: crate::QueuedWorkAuthority,
     pub wake: ProcessWake,
+    /// What caused the wake ([`ProcessWakeDelivery::trace_cause`]).
+    pub trace_cause: lash_trace::TraceCause,
     pub occurred_at_ms: u64,
     /// `F` the persisting store recorded: the delivery row's `version` stamps
     /// through `writer_version`, never the bare build constant (FIG-3796).
@@ -39,6 +41,7 @@ pub fn process_wake_delivery(
         process_caused_by,
         authority,
         wake,
+        trace_cause,
         occurred_at_ms,
         fleet_format,
     } = request;
@@ -54,5 +57,6 @@ pub fn process_wake_delivery(
         authority,
         input: wake.input,
         created_at_ms: occurred_at_ms,
+        trace_cause,
     })
 }

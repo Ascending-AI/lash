@@ -57,6 +57,7 @@ mod tests {
                 authority: crate::QueuedWorkAuthority::default(),
                 input: "wake".to_string(),
                 created_at_ms: 0,
+                trace_cause: Default::default(),
             })
             .expect("inject the pruned process's wake");
 

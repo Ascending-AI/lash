@@ -423,9 +423,12 @@ async fn fig3463_a_crashed_segment_replays_its_journaled_effect_under_one_attemp
         artifact_store.clone(),
         LashlangSurface::default(),
         harness.backend().worker_recovery(),
-    )
-    .with_execution_trace(Some(crash), lash_trace::TraceContext::default());
-    harness.install_lashlang_worker(engine, vec![tool_factory]);
+    );
+    harness.install_lashlang_worker_with_runtime(
+        engine,
+        vec![tool_factory],
+        lash_core::trace::TraceRuntime::new(harness.backend().clock()).with_product_observer(crash),
+    );
     let process_id = harness
         .admit(
             ProcessRegistration::new(
@@ -552,8 +555,7 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
         artifact_store,
         LashlangSurface::default(),
         backend.worker_recovery(),
-    )
-    .with_execution_trace(Some(graphs.clone()), lash_trace::TraceContext::default());
+    );
     let tool_factory: Arc<dyn lash_core::facade_support::PluginFactory> =
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("fig3463-failure-tool"),
@@ -561,7 +563,12 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
                 executions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             })),
         ));
-    harness.install_lashlang_worker(engine, vec![tool_factory]);
+    harness.install_lashlang_worker_with_runtime(
+        engine,
+        vec![tool_factory],
+        lash_core::trace::TraceRuntime::new(harness.backend().clock())
+            .with_product_observer(graphs.clone()),
+    );
     let mut process_ids = std::collections::BTreeMap::new();
     for name in ["scalar", "batch"] {
         let input = LashlangProcessInput {

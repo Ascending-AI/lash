@@ -107,7 +107,7 @@ async fn control_round_trip(storage: &str, access: &str, suspension: &str) {
         surface.clone(),
         None,
         RlmProjectedBindings::default(),
-        RlmLashlangExecutionTraceConfig::default(),
+        None,
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
     )
@@ -201,7 +201,7 @@ async fn control_round_trip(storage: &str, access: &str, suspension: &str) {
         surface,
         None,
         RlmProjectedBindings::default(),
-        RlmLashlangExecutionTraceConfig::default(),
+        None,
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
     )

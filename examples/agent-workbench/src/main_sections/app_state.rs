@@ -1585,29 +1585,12 @@ impl IntoResponse for AppError {
 }
 
 pub(crate) fn workbench_attachment_acceptance() -> lash::provider::AttachmentCapabilitySnapshot {
-    use lash::provider::{
-        AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
-        AttachmentMimeSource,
-    };
-    // This example host owns its model catalogue and revision. Existing sessions
-    // retain the opening snapshot when this catalogue changes.
-    AttachmentCapabilitySnapshot {
-        revision: "workbench-attachments-1".into(),
-        acceptors: ["OpenAI Chat Completions"]
-            .into_iter()
-            .map(|provider| AttachmentAcceptor {
-                provider: provider.into(),
-                rules: [AttachmentMimeSource::Inline, AttachmentMimeSource::Stored]
-                    .into_iter()
-                    .map(|source| AttachmentAcceptanceRule::Mime {
-                        source,
-                        media_types: ["image/png"].into_iter().map(String::from).collect(),
-                        media_families: Vec::new(),
-                    })
-                    .collect(),
-            })
-            .collect(),
-    }
+    use lash::provider::AttachmentMimeSource;
+    crate::attachment_acceptance::snapshot(
+        "workbench-attachments-1",
+        &[AttachmentMimeSource::Inline, AttachmentMimeSource::Stored],
+        &["image/png"],
+    )
 }
 
 #[cfg(test)]

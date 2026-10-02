@@ -877,6 +877,12 @@ pub struct ProcessWakeDelivery {
     pub authority: crate::QueuedWorkAuthority,
     pub input: String,
     pub created_at_ms: u64,
+    /// What caused the wake, for telemetry: the producer of the event that
+    /// woke the session, or the process itself. Retained with the delivery
+    /// and carried onto the queued work it becomes; no part of the wake's
+    /// identity or submission digest.
+    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
+    pub trace_cause: lash_trace::TraceCause,
 }
 
 impl ProcessWakeDelivery {

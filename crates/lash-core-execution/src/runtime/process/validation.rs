@@ -815,6 +815,7 @@ pub fn prepare_process_event_append(
                 existing.event_type.clone(),
                 existing.occurred_at,
                 existing.semantics.wake.clone(),
+                &existing.semantics.trace_cause,
                 wake_session_id,
                 wake_suppressed,
                 fleet_format,
@@ -896,6 +897,7 @@ pub fn prepare_process_event_append(
             status: record.status(),
         });
     }
+    semantics.trace_cause = request.trace_cause;
     semantics.signal_wait = super::events::process_signal_name_from_event_type(&request.event_type)
         .map(|signal_name| {
             select_process_signal_wait(
@@ -929,6 +931,7 @@ pub fn prepare_process_event_append(
         event.event_type.clone(),
         event.occurred_at,
         semantics.wake.clone(),
+        &semantics.trace_cause,
         wake_session_id,
         wake_suppressed,
         fleet_format,
@@ -1000,6 +1003,7 @@ fn prepare_wake_delivery(
     event_type: String,
     occurred_at: u64,
     wake: Option<super::events::ProcessWake>,
+    event_trace_cause: &lash_trace::TraceCause,
     wake_session_id: Option<&SessionId>,
     wake_suppressed: bool,
     fleet_format: crate::FleetFormat,
@@ -1040,6 +1044,17 @@ fn prepare_wake_delivery(
             }
         },
         wake,
+        // The wake's producer is whoever caused the event that woke the
+        // session; an event no one outside caused is the process's own.
+        trace_cause: if event_trace_cause.is_root() {
+            record
+                .trace
+                .as_ref()
+                .map(lash_trace::DurableTraceScope::linked_cause)
+                .unwrap_or_default()
+        } else {
+            event_trace_cause.clone()
+        },
         occurred_at_ms: occurred_at,
         fleet_format,
     })

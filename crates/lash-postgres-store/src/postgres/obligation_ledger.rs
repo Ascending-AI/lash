@@ -337,6 +337,7 @@ pub(crate) struct PostgresObligationLedger {
     sql: ObligationSql<'static>,
     locking: &'static str,
     pool: PgPool,
+    observer: crate::StoreObserver,
     fence: crate::guarded_tx::WriterFence,
 }
 
@@ -345,9 +346,10 @@ impl PostgresObligationLedger {
         kind: ObligationKind,
         pool: PgPool,
         fence: crate::guarded_tx::WriterFence,
+        observer: crate::StoreObserver,
     ) -> Self {
         let (sql, locking) = obligation_sql(kind);
-        Self::over_table(kind, sql, locking, pool, fence)
+        Self::over_table(kind, sql, locking, pool, fence, observer)
     }
 
     /// The ledger of one table of `kind`, through that table's statements
@@ -358,12 +360,14 @@ impl PostgresObligationLedger {
         locking: &'static str,
         pool: PgPool,
         fence: crate::guarded_tx::WriterFence,
+        observer: crate::StoreObserver,
     ) -> Self {
         Self {
             kind,
             sql,
             locking,
             pool,
+            observer,
             fence,
         }
     }
@@ -387,7 +391,7 @@ impl ObligationLedger for PostgresObligationLedger {
                 self.kind
             )));
         }
-        let mut conn = crate::acquire_runtime_connection(&self.pool).await?;
+        let mut conn = crate::acquire_runtime_connection(&self.pool, &self.observer).await?;
         arm_obligation_tx(&mut conn, key, now_ms).await
     }
 

@@ -495,7 +495,9 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
         )
         .into_components(),
     );
-    let mut factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+    let host_backend = lash::Backend::new(config.backend.clone());
+    let mut tracing = lash::runtime::TraceRuntime::new(host_backend.clock());
+    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         RlmProtocolPluginConfig::builder()
             .channel(RlmChannel::Cell)
             .instruction_limit(InstructionBound::instructions(1_000_000))
@@ -503,18 +505,16 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
             .build()
             .with_lashlang_abilities(LashlangAbilities::default().with_sleep()),
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
-        &config.backend.clone().into(),
+        &host_backend,
     )
     .with_worker_service(config.workers);
     if let Some(trace_dir) = config.trace_dir.as_ref() {
-        factory = factory.with_lashlang_execution_jsonl_path(
+        tracing = tracing.with_product_observer(Arc::new(lash::tracing::JsonlTraceSink::new(
             trace_dir.join(format!("{}.lashlang.jsonl", config.worker_id)),
-        );
+        )));
     }
-    let mut builder = lash::LashCore::rlm_builder(
-        lash::Backend::new(config.backend.clone()),
-        factory,
-    )
+    let mut builder = lash::LashCore::rlm_builder(host_backend, factory)
+        .trace_runtime(tracing)
         .llm_profiles(Arc::new(lash::LlmProfileRegistry::new().register(
             E2E_PROFILE_KEY,
             lash::RegisteredLlmProfile::new(e2e_llm_profile_metadata()?, provider),

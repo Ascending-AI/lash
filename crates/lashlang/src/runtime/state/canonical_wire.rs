@@ -295,3 +295,97 @@ pub(super) fn validate_unsigned(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_integer_widths_preserve_signed_values_and_refuse_wider_forms() {
+        for value in [
+            -2_147_483_649i64,
+            -2_147_483_648,
+            -32_769,
+            -32_768,
+            -129,
+            -128,
+            -33,
+            -32,
+            -1,
+            0,
+            127,
+            128,
+        ] {
+            let bytes = rmp_serde::to_vec(&value).expect("encode integer");
+            let mut cursor = 1;
+            assert_eq!(
+                take_canonical_integer(&bytes, &mut cursor, "value", bytes[0])
+                    .expect("minimal integer"),
+                i128::from(value)
+            );
+            assert_eq!(cursor, bytes.len());
+        }
+        for bytes in [
+            vec![0xd0, 0xe0],
+            vec![0xd1, 0xff, 0x80],
+            vec![0xd2, 0xff, 0xff, 0x80, 0x00],
+            vec![0xd3, 0xff, 0xff, 0xff, 0xff, 0x80, 0x00, 0x00, 0x00],
+        ] {
+            assert!(matches!(
+                take_canonical_integer(&bytes, &mut 1, "value", bytes[0]),
+                Err(SnapshotDecodeError::NonCanonicalEncoding { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn canonical_strings_accept_minimal_large_widths_and_refuse_small_wide_strings() {
+        for length in [0, 31, 32, 255, 256, 65_535, 65_536] {
+            let text = "x".repeat(length);
+            let bytes = rmp_serde::to_vec(&text).expect("encode string");
+            let mut cursor = 0;
+            assert_eq!(
+                take_canonical_string(&bytes, &mut cursor, "text").expect("minimal string"),
+                text
+            );
+            assert_eq!(cursor, bytes.len());
+        }
+        for bytes in [vec![0xda, 0, 1, b'x'], vec![0xdb, 0, 0, 0, 1, b'x']] {
+            assert!(matches!(
+                take_canonical_string(&bytes, &mut 0, "text"),
+                Err(SnapshotDecodeError::NonCanonicalEncoding { .. })
+            ));
+        }
+        assert_eq!(usize_from_u32(65_536).expect("length fits"), 65_536);
+    }
+
+    #[test]
+    fn numeric_validation_preserves_f64_and_unsigned_range_boundaries() {
+        for value in [0.0, -1.5, f64::INFINITY, f64::from_bits(CANONICAL_NAN_BITS)] {
+            let bytes = rmp_serde::to_vec(&value).expect("encode f64");
+            assert_eq!(validate_f64(&bytes, &mut 0, "number"), Ok(()));
+            assert_eq!(
+                validate_json_number(&bytes, &mut 0, "number").is_ok(),
+                value.is_finite()
+            );
+        }
+        assert!(matches!(
+            validate_f64(&[0xc0], &mut 0, "number"),
+            Err(SnapshotDecodeError::InvalidEncoding(_))
+        ));
+        for (value, valid) in [
+            (-1i64, false),
+            (0, true),
+            (1, true),
+            (255, true),
+            (256, false),
+        ] {
+            let bytes = rmp_serde::to_vec(&value).expect("encode integer");
+            assert_eq!(
+                validate_unsigned(&bytes, &mut 0, "byte", 255).is_ok(),
+                valid,
+                "{value}"
+            );
+        }
+    }
+}

@@ -656,6 +656,15 @@ pub struct ProcessRegistration<I = ProcessInput> {
     /// never the start's author, and a retained row keeps its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine_config: Option<serde_json::Value>,
+    /// What the start offers the process's trace scope: its cause and the
+    /// anchor its admission candidate proposed. The registration that
+    /// inserts the row retains them as the record's
+    /// [`trace`](ProcessRecord::trace); one that finds the process already
+    /// retained under its key reads the retained scope back and drops the
+    /// offer. It is no part of the start: the retained-start check and the
+    /// start's effect identity never cover it.
+    #[serde(default, skip_serializing_if = "lash_trace::TraceScopeOffer::is_empty")]
+    pub trace: lash_trace::TraceScopeOffer,
 }
 
 /// A start as its command carries it, before realization: its target may
@@ -678,6 +687,7 @@ impl<I> Clone for ProcessRegistration<I> {
             consumer_hold: self.consumer_hold.clone(),
             trigger_delivery_pin: self.trigger_delivery_pin.clone(),
             engine_config: self.engine_config.clone(),
+            trace: self.trace.clone(),
         }
     }
 }
@@ -834,6 +844,7 @@ impl<I> ProcessRegistration<I> {
             consumer_hold: None,
             trigger_delivery_pin: None,
             engine_config: None,
+            trace: lash_trace::TraceScopeOffer::default(),
         }
     }
 
@@ -883,7 +894,15 @@ impl<I> ProcessRegistration<I> {
             consumer_hold: self.consumer_hold,
             trigger_delivery_pin: self.trigger_delivery_pin,
             engine_config: self.engine_config,
+            trace: self.trace,
         }
+    }
+
+    /// Sets what the start offers the process's trace scope
+    /// ([`Self::trace`]).
+    pub fn with_trace(mut self, trace: lash_trace::TraceScopeOffer) -> Self {
+        self.trace = trace;
+        self
     }
 
     /// Records the admitted start context a runtime start was made in: its
@@ -1574,6 +1593,13 @@ pub struct ProcessRecord {
     /// updated after registration (FIG-4527).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine_config: Option<serde_json::Value>,
+    /// The process's trace scope: the cause and anchor its first
+    /// registration retained, started when the row was created. Never
+    /// updated after registration; a start that finds the process retained
+    /// reads it back whatever it offered. `None` on a record written
+    /// without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace: Option<lash_trace::DurableTraceScope>,
     #[serde(default)]
     pub created_at_ms: u64,
     #[serde(default)]
@@ -1789,6 +1815,12 @@ impl ProcessRecord {
         id: ProcessId,
         now_ms: u64,
     ) -> Self {
+        let trace = registration.trace.into_scope(
+            lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Process {
+                process_id: id.clone(),
+            }),
+            now_ms,
+        );
         Self {
             id,
             start_key: registration.start_key,
@@ -1802,6 +1834,7 @@ impl ProcessRecord {
             provenance: registration.provenance,
             env_ref: registration.env_ref,
             engine_config: registration.engine_config,
+            trace: Some(trace),
             created_at_ms: now_ms,
             updated_at_ms: now_ms,
             external_ref: None,

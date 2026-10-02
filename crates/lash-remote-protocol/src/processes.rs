@@ -627,6 +627,9 @@ pub struct RemoteProcessRecord {
     /// The engine behaviour recorded at process creation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine_config: Option<serde_json::Value>,
+    /// The process's retained trace scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace: Option<lash_trace::DurableTraceScope>,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1036,6 +1039,9 @@ pub struct RemoteProcessEventSemantics {
     /// admitted the signal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signal_wait: Option<RemoteProcessSignalWaitBinding>,
+    /// What caused the event, as the append that inserted it retained it.
+    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
+    pub trace_cause: lash_trace::TraceCause,
 }
 
 /// Wire mirror of the wait one signal event resolves: the ordinal of the

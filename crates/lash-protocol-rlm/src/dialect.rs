@@ -209,7 +209,6 @@ pub(crate) struct RlmDialectServices {
     pub(crate) artifact_store: LashlangArtifacts,
     pub(crate) deferred_tool_resolver: Option<SharedDeferredToolResolver>,
     pub(crate) deferred_trigger_resolver: Option<SharedDeferredTriggerResolver>,
-    pub(crate) execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig,
     pub(crate) execution_bounds: crate::plugin::ExecutionBounds,
     /// The session-pinned transport programs arrive on. Carried with the
     /// services because the executor needs it to decide whether cell-delimiter
@@ -269,7 +268,7 @@ impl SessionDialect {
                 artifact_store: lashlang::LashlangArtifacts::new(Arc::new(PromptOnlyArtifactStore)),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
-                execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
@@ -722,7 +721,6 @@ impl DialectSession {
             self.services.deferred_tool_resolver.clone(),
             self.services.deferred_trigger_resolver.clone(),
             session_projected_bindings,
-            self.services.execution_trace_config.clone(),
             self.services.execution_bounds.into_engine(),
             self.services.channel,
             self.services.code_renderer.clone(),
@@ -1108,7 +1106,7 @@ pub(crate) fn test_dialect_services() -> RlmDialectServices {
         artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
         deferred_tool_resolver: None,
         deferred_trigger_resolver: None,
-        execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+
         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
         code_renderer: Default::default(),
         channel: crate::plugin::RlmChannel::Cell,

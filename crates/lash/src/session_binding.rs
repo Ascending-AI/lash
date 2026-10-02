@@ -31,6 +31,9 @@ pub(crate) struct BoundSession {
     relay_policy: lash_core::drive::relay::RelayPolicy,
     clock: Arc<dyn lash_core::Clock>,
     models: Arc<dyn lash_core::LlmProfiles>,
+    /// The owner core's telemetry adapter: what a send through this
+    /// binding captures the caller's trace context from.
+    trace_scopes: Arc<dyn lash_core::TraceScopeFactory>,
     /// The core's tool-child context source (FIG-3712), held for as long as
     /// the session is: the backend's host holds it weakly, and a session
     /// whose core was dropped still has children to rebuild.
@@ -63,6 +66,7 @@ impl BoundSession {
             relay_policy: env.core.control.relay_policy(),
             clock: Arc::clone(&env.core.clock),
             models: Arc::clone(&env.core.providers.models),
+            trace_scopes: Arc::clone(env.core.tracing.scopes()),
             tool_child_context_source: None,
         }
     }
@@ -144,6 +148,10 @@ impl BoundSession {
 
     pub(crate) fn llm_profiles(&self) -> Arc<dyn lash_core::LlmProfiles> {
         Arc::clone(&self.models)
+    }
+
+    pub(crate) fn trace_scopes(&self) -> Arc<dyn lash_core::TraceScopeFactory> {
+        Arc::clone(&self.trace_scopes)
     }
 
     pub(crate) fn administration(&self) -> lash_core::SessionAdministration {

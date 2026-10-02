@@ -139,20 +139,19 @@ fn nesting_at_the_durable_ceiling_still_exports() {
     });
 }
 
-/// The coercion walk has its own ceiling, one reference level below the export
-/// walk's: it charges a level for the scalar leaf it recurses onto, where the
-/// export walk and the durable measure both count reference levels only. That
-/// costs nothing in determinism — the walk has no cache, so it refuses the same
-/// value live and resumed — so it is pinned here as it stands rather than moved
-/// under this ticket.
+/// The coercion walk's ceiling is the export walk's: both measure reference
+/// levels, so a value at exactly the durable ceiling coerces, and only a level
+/// past it refuses.
 #[test]
 fn nesting_at_the_coercion_ceiling_still_coerces() {
     on_stack_budget("value-depth-accepted-coercion", || {
-        let outcome = execute(&nested_array_source(62, "finish(String(deep).length > 0);"))
-            .expect("coercion at its ceiling must execute");
+        // 63 wraps is 64 reference levels — `MAX_SNAPSHOT_VALUE_DEPTH` — the
+        // deepest graph the export walk and the durable boundary accept.
+        let outcome = execute(&nested_array_source(63, "finish(String(deep).length > 0);"))
+            .expect("coercion at the export ceiling must execute");
         assert_eq!(outcome, ExecutionOutcome::Finished(Value::Bool(true)));
-        let error = execute(&nested_array_source(63, "finish(String(deep));"))
-            .expect_err("one level past the coercion ceiling must refuse");
+        let error = execute(&nested_array_source(64, "finish(String(deep));"))
+            .expect_err("one level past the export ceiling must refuse coercion");
         assert!(
             matches!(error, RuntimeError::ValueDepthLimitExceeded { .. }),
             "{error}"

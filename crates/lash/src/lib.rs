@@ -794,10 +794,6 @@ pub mod plugins {
         BeforeToolCallPluginDirective, EnqueueMessagesDirective, PluginDirective,
         ReplaceToolArgsDirective, ShortCircuitToolDirective, TurnPluginDirective,
     };
-    /// What [`PluginFactory::process_engine_contributions`] is handed: a host
-    /// factory that wraps another (the RLM factory, say) forwards it so the
-    /// wrapped factory's process engines are still contributed (FIG-4373).
-    pub use lash_core::plugin::ProcessEngineContributionContext;
     /// Hook contracts and reports used by plugin authors.
     pub use lash_core::plugin::{
         AfterToolCallHook, AfterTurnHook, AssistantResponseHook, AssistantResponseHookContext,
@@ -864,6 +860,10 @@ pub mod plugins {
         PluginQueryContext, PluginRuntimeDirective, PluginTask, PluginTaskContext,
         ProcessReadService, SessionParam, SessionReadService,
     };
+    /// What [`PluginFactory::process_engine_contributions`] is handed: a host
+    /// factory that wraps another (the RLM factory, say) forwards it so the
+    /// wrapped factory's process engines are still contributed (FIG-4373).
+    pub use lash_core::plugin::{PluginExecutionTrace, ProcessEngineContributionContext};
     /// Engine registry and narrowed execution contexts used to host custom process engines.
     pub use lash_core::runtime::{
         ProcessEngineProcessContext, ProcessEngineRegistry, ProcessEngineRunGuard,
@@ -1406,10 +1406,15 @@ pub mod runtime {
         RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
         RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
         RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeInvocation,
-        RuntimeNamedPhase, RuntimeProviderConfig, RuntimeTurnPhase, RuntimeTurnPhaseProbe,
-        RuntimeTurnPhaseProbeSlot, ScopedEffectController, SessionWorkEngine, SleepSpec,
-        TraceEmitter, TraceRuntime, TurnCancelWait, TurnContext, TurnControlBinding,
-        WorkCadenceError, WorkCadencePolicy, effect_groups_unsupported,
+        RuntimeProviderConfig, ScopedEffectController, SessionWorkEngine, SleepSpec, TraceEmitter,
+        TraceRuntime, TurnCancelWait, TurnContext, TurnControlBinding, WorkCadenceError,
+        WorkCadencePolicy, effect_groups_unsupported,
+    };
+    /// Explicitly unstable internal instrumentation. Phase names may change
+    /// with the turn loop. See `docs/architecture/turn-phase-probe.md`.
+    #[doc(hidden)]
+    pub use lash_core::runtime::{
+        RuntimeNamedPhase, RuntimeTurnPhase, RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot,
     };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the
@@ -1426,9 +1431,10 @@ pub mod runtime {
 /// Trace context, events, and sink configuration.
 pub mod tracing {
     // The vocabulary this module's signatures name (the facade-completeness rule).
+    pub use lash_core::facade_support::StoreObserver;
     /// Where engine code stands when it observes, and the journaled-step
     /// boundary that grants the right to.
-    pub use lash_core::trace::{JournalFrontier, LiveStep, StepIssue, TraceStanding};
+    pub use lash_core::facade_support::{JournalFrontier, LiveStep, StepIssue, TraceStanding};
     pub use lash_sansio::{AttachmentMaterializationReason, AttachmentMaterializationSource};
     /// The scope, cause, permit and identity vocabulary the trace runtime's
     /// signatures name.
@@ -1442,16 +1448,14 @@ pub mod tracing {
         TraceCandidateOutcome, TraceCarrier, TraceCause, TraceDomainCompletion,
         TraceDomainOperation, TraceDomainProjector, TraceDomainStatus, TraceLinks, TraceLlmAttempt,
         TraceRecordIdentity, TraceScopeAdmission, TraceScopeFactory, TraceScopeId, TraceScopeKind,
-        TraceScopeOwner, TraceTransitionKind, UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId,
-        W3cTraceState,
+        TraceScopeOffer, TraceScopeOwner, TraceTransitionKind, UntracedScopes, W3cSpanId,
+        W3cTraceFlags, W3cTraceId, W3cTraceState,
     };
     pub use lash_trace::{
         TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT,
         TraceLashlangNodeRetention,
     };
 
-    #[cfg(feature = "otel-trace")]
-    pub use lash_core::{OtelTraceOptions, OtelTraceSink};
     pub use lash_core::{
         TraceAttachment, TraceContentBlock, TraceEffectEnvelopeDiffEntry,
         TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue, TraceError, TraceEvent,
@@ -1466,6 +1470,15 @@ pub mod tracing {
         facade_support::parse_jsonl_records,
     };
     pub use lash_sansio::ExecutionNodeKind;
+    #[cfg(feature = "otel-trace")]
+    pub use lash_trace::otel::api as otel;
+    #[cfg(feature = "otel-trace")]
+    pub use lash_trace::otel::registry::{
+        GEN_AI_SEMCONV_SNAPSHOT, LASH_INSTRUMENTATION_CONTRACT, LASH_INSTRUMENTATION_NAME,
+        contract_markdown,
+    };
+    #[cfg(feature = "otel-trace")]
+    pub use lash_trace::otel::{OtelOptions, OtelPayloadExport, OtelSpanEnricher, OtelTelemetry};
     /// Every type reachable from a [`TraceEvent`] payload, so a facade consumer
     /// can name — match on, take in a signature, or build in a test — what a
     /// `TurnCompleted` or tool-call variant carries. The `LanguageExecution`

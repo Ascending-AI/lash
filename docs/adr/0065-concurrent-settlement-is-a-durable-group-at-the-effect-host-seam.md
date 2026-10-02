@@ -42,6 +42,16 @@ bodies. A controller implements them or explicitly refuses all three with
 `EffectGroupUnsupported`. Resolver registration is wiring, not a second
 durability or capability flag.
 
+Every process executor requires its engine registry and `HostStartAdmission`
+at construction. `register_process_start` owns engine admission and identity
+stamping for every start, including group children, host intents and trigger
+deliveries. The local executor calls it directly; Restate calls it inside the
+start's recorded registration step. Replay serves that recorded outcome,
+including a refusal, without consulting the live engine registry again.
+An empty registry refuses engine starts. A host admission without a session
+catalog refuses host session grants. Callers do not validate or stamp engine
+starts before issuing their commands.
+
 ### Open, await and close
 
 `open_effect_group(RuntimeEffectGroup)` accepts envelopes, not caller closures.

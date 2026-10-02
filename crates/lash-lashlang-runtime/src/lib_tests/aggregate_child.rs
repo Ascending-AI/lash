@@ -1,5 +1,21 @@
 use super::*;
 
+fn product_record(event: lash_trace::TraceEvent) -> lash_trace::TraceRecord {
+    let lash_trace::TraceEvent::LanguageExecution {
+        event: language, ..
+    } = &event
+    else {
+        panic!("language observation fixture");
+    };
+    lash_trace::TraceRecord {
+        schema_version: lash_trace::TRACE_SCHEMA_VERSION,
+        id: language.event_key.clone(),
+        timestamp: lash_core::Clock::timestamp_datetime(&lash_core::testing::TestClock::new(0)),
+        context: lash_trace::TraceContext::default(),
+        event,
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn real_aggregate_child_await_names_both_without_fold_conflict() {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -88,13 +104,10 @@ async fn real_aggregate_child_await_names_both_without_fold_conflict() {
         };
         lash_trace::TraceSink::append(
             &*observer_store,
-            &lash_trace::TraceRecord::new(
-                lash_trace::TraceContext::default(),
-                lash_trace::TraceEvent::LanguageExecution {
-                    language: "lashlang".to_string(),
-                    event,
-                },
-            ),
+            &product_record(lash_trace::TraceEvent::LanguageExecution {
+                language: "lashlang".to_string(),
+                event,
+            }),
         )
         .expect("trace append");
     });
@@ -211,17 +224,14 @@ async fn public_trace_host_reports_a_parked_await_cancelled_after_partial_comple
             observed.lock().expect("payload log").push(payload.clone());
             lash_trace::TraceSink::append(
                 &*observer_store,
-                &lash_trace::TraceRecord::new(
-                    lash_trace::TraceContext::default(),
-                    lash_trace::TraceEvent::LanguageExecution {
-                        language: "lashlang".to_string(),
-                        event: TraceLanguageExecution {
-                            event_key: "public-cancel".to_string(),
-                            identity: identity.clone(),
-                            payload,
-                        },
+                &product_record(lash_trace::TraceEvent::LanguageExecution {
+                    language: "lashlang".to_string(),
+                    event: TraceLanguageExecution {
+                        event_key: "public-cancel".to_string(),
+                        identity: identity.clone(),
+                        payload,
                     },
-                ),
+                }),
             )
             .expect("trace append");
         },
@@ -372,18 +382,19 @@ async fn real_loop_branch_skips_the_untaken_arm_in_each_iteration() {
         engine_execution_id: None,
         generation: None,
     };
+    let clock = lash_core::testing::TestClock::new(0);
     let record = |payload: TraceLanguageExecutionPayload| {
-        lash_trace::TraceRecord::new(
-            lash_trace::TraceContext::default(),
-            lash_trace::TraceEvent::LanguageExecution {
-                language: "lashlang".to_string(),
-                event: TraceLanguageExecution {
-                    event_key: "loop-branch".to_string(),
-                    identity: identity.clone(),
-                    payload,
-                },
+        clock.advance(1);
+        let mut record = product_record(lash_trace::TraceEvent::LanguageExecution {
+            language: "lashlang".to_string(),
+            event: TraceLanguageExecution {
+                event_key: "loop-branch".to_string(),
+                identity: identity.clone(),
+                payload,
             },
-        )
+        });
+        record.timestamp = lash_core::Clock::timestamp_datetime(&clock);
+        record
     };
     let records = Arc::new(std::sync::Mutex::new(vec![record(
         TraceLanguageExecutionPayload::ExecutionStarted {

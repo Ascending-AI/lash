@@ -24,7 +24,12 @@ impl DurableProcessWorker {
             .process_registry()
             .park_process_with_authority(process_id, reason.into(), park_authority)
             .await?;
-        lash_core_ids::operational_metrics::record_work_parked("process", code.as_str());
+        lash_core_ids::operational_metrics::record_work_parked(
+            self.config.runtime_host.tracing.metrics(),
+            None,
+            "process",
+            code.as_str(),
+        );
         tracing::warn!(
             event = "process.parked",
             process_id = process_id.as_str(),

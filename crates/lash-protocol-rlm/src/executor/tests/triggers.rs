@@ -193,7 +193,7 @@ async fn execute_with_deferred_trigger(
         None,
         Some(resolver),
         RlmProjectedBindings::default(),
-        RlmLashlangExecutionTraceConfig::default(),
+        None,
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
         crate::render::CodeRendererSlot::default(),
@@ -423,7 +423,7 @@ fn mixed_deferred_trigger_and_tool_links_keep_provider_records_separate() {
             Some(Arc::new(MixedToolResolver)),
             Some(Arc::new(MixedTriggerResolver)),
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
             lashlang::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
             crate::render::CodeRendererSlot::default(),
@@ -605,7 +605,7 @@ pub(super) async fn execute_with_capturing_trigger_effects(
         surface,
         None,
         RlmProjectedBindings::default(),
-        RlmLashlangExecutionTraceConfig::default(),
+        None,
     )
     .await;
     handler.close().await.expect("close the cell's handler");
@@ -803,7 +803,7 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
             surface,
             None,
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
         )
         .await;
         handler.close().await.expect("close the cell's handler");
@@ -1002,7 +1002,7 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
             surface.clone(),
             None,
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
         )
         .await;
         handler.close().await.expect("close the cell's handler");
@@ -1045,7 +1045,7 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
             surface,
             None,
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
         )
         .await;
         handler.close().await.expect("close the cell's handler");
@@ -1124,7 +1124,7 @@ pub(super) fn triggerless_execution_requires_no_trigger_namespace() {
             ),
             None,
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
         )
         .await;
         handler.close().await.expect("close the cell's handler");
@@ -1459,7 +1459,7 @@ async fn execute_trigger_process_with_originator(
         surface,
         None,
         RlmProjectedBindings::default(),
-        RlmLashlangExecutionTraceConfig::default(),
+        None,
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
     )
@@ -2272,7 +2272,7 @@ async fn execute_typescript_with_capturing_trigger_effects(
         ),
         None,
         RlmProjectedBindings::default(),
-        RlmLashlangExecutionTraceConfig::default(),
+        None,
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
     )

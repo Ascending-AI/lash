@@ -62,11 +62,106 @@ fn mask_run_variant(value: &mut serde_json::Value) {
     }
 }
 
+fn value_digest(value: &serde_json::Value) -> String {
+    let bytes = serde_json::to_vec(value).expect("a masked commit serializes");
+    lash_core::stable_hash::sha256_hex(&bytes)
+}
+
 pub(crate) fn commit_digest(commit: &lash_core::RuntimeCommit) -> String {
     let mut value = serde_json::to_value(commit).expect("a runtime commit serializes");
     mask_run_variant(&mut value);
-    let bytes = serde_json::to_vec(&value).expect("a masked commit serializes");
-    lash_core::stable_hash::sha256_hex(&bytes)
+    value_digest(&value)
+}
+
+struct ShapeChange {
+    name: &'static str,
+    restore: fn(&mut serde_json::Value),
+}
+
+// Each reversal touches only the named fixture delta. Add a reversal when an
+// in-place serialized shape changes; the whole old digest remains the oracle.
+const SHAPE_CHANGES: &[ShapeChange] = &[
+    ShapeChange {
+        name: "FIG-2002: remove SessionPolicy.session_id",
+        restore: restore_policy_session_id,
+    },
+    ShapeChange {
+        name: "FIG-4655: group output-token limits",
+        restore: restore_output_token_limits,
+    },
+];
+
+fn frame_policies(value: &mut serde_json::Value) -> impl Iterator<Item = &mut serde_json::Value> {
+    value
+        .pointer_mut("/graph/Extend/nodes")
+        .and_then(serde_json::Value::as_array_mut)
+        .into_iter()
+        .flatten()
+        .filter(|node| node["kind"] == "frame_open")
+        .filter_map(|node| node.pointer_mut("/assignment/policy"))
+}
+
+fn restore_policy_session_id(value: &mut serde_json::Value) {
+    for policy in frame_policies(value) {
+        policy
+            .as_object_mut()
+            .expect("a frame policy is an object")
+            .entry("session_id")
+            .or_insert(serde_json::Value::Null);
+    }
+}
+
+fn restore_output_token_limits(value: &mut serde_json::Value) {
+    fn restore_model(model: &mut serde_json::Value) {
+        if let Some(limits) = model
+            .pointer_mut("/model/metadata/limits")
+            .and_then(serde_json::Value::as_object_mut)
+            && limits.get("output_tokens")
+                == Some(&serde_json::json!({"capacity": null, "default_cap": null}))
+        {
+            // These pins record no output cap. Do not erase non-default facts.
+            limits.remove("output_tokens");
+        }
+    }
+    if let Some(model) = value.pointer_mut("/config/model") {
+        restore_model(model);
+    }
+    for policy in frame_policies(value) {
+        if let Some(model) = policy.get_mut("model") {
+            restore_model(model);
+        }
+    }
+}
+
+#[derive(serde::Serialize)]
+struct PinProof {
+    restored_digest: String,
+    shape_changes: Vec<&'static str>,
+}
+
+fn prove_pin_delta(
+    value: &serde_json::Value,
+    expected: &str,
+    changes: &[ShapeChange],
+) -> Option<PinProof> {
+    let digest = value_digest(value);
+    if digest == expected {
+        return Some(PinProof {
+            restored_digest: digest,
+            shape_changes: Vec::new(),
+        });
+    }
+    for (index, change) in changes.iter().enumerate() {
+        let mut restored = value.clone();
+        (change.restore)(&mut restored);
+        if restored != *value
+            && let Some(mut proof) = prove_pin_delta(&restored, expected, &changes[index + 1..])
+        {
+            proof.shape_changes.insert(0, change.name);
+            return Some(proof);
+        }
+    }
+    None
 }
 
 /// Assert `commits` digest to `expected`; a failure prints the digests the
@@ -83,32 +178,27 @@ pub(crate) fn assert_commit_pins(
     )]
     let capture_directory = std::env::var_os("LASH_RUNTIME_COMMIT_PIN_CAPTURE_DIR");
     if let Some(directory) = capture_directory {
-        let restored_frame_digests = commits
+        assert_eq!(
+            commits.len(),
+            expected.len(),
+            "{scenario}: commit count changed"
+        );
+        let proofs = commits
             .iter()
-            .map(|commit| {
-                let frame =
-                    commit.graph.nodes().iter().rev().find_map(|node| {
-                        node.frame_open().map(|_| node.node_id.as_str().to_owned())
-                    });
+            .zip(expected)
+            .map(|(commit, expected)| {
                 let mut value = serde_json::to_value(commit).expect("a commit serializes");
-                value
-                    .as_object_mut()
-                    .expect("a commit is an object")
-                    .insert(
-                        "current_frame_node_id".to_owned(),
-                        serde_json::to_value(frame).expect("a frame id serializes"),
-                    );
                 mask_run_variant(&mut value);
-                lash_core::stable_hash::sha256_hex(
-                    &serde_json::to_vec(&value).expect("a masked commit serializes"),
-                )
+                prove_pin_delta(&value, expected, SHAPE_CHANGES).unwrap_or_else(|| {
+                    panic!("{scenario}: named serialized-shape reversals do not reproduce pin {expected}; current digest {}", value_digest(&value))
+                })
             })
             .collect::<Vec<_>>();
         let capture = serde_json::json!({
             "scenario": scenario,
             "expected": expected,
             "digests": digests,
-            "restored_frame_digests": restored_frame_digests,
+            "proofs": proofs,
         });
         #[expect(
             clippy::disallowed_methods,
@@ -119,12 +209,6 @@ pub(crate) fn assert_commit_pins(
             serde_json::to_vec_pretty(&capture).expect("a pin capture serializes"),
         );
         capture_written.expect("write the captured pin");
-        if digests != expected {
-            assert_eq!(
-                restored_frame_digests, expected,
-                "{scenario}: restoring only the removed frame claim must reproduce the old pin"
-            );
-        }
         return;
     }
     assert_eq!(digests, expected, "{scenario}: the committed bytes changed");
@@ -151,4 +235,45 @@ pub(crate) async fn pinned_runtime(
         .with_session_id(lash_core::SessionId::fixture(session_id))
         .build()
         .await
+}
+
+#[test]
+fn capture_proof_requires_all_named_deltas_and_refuses_unrelated_bytes() {
+    let current = serde_json::json!({
+        "config": {"model": {"model": {"metadata": {"limits": {
+            "context_window_tokens": 200_000,
+            "output_tokens": {"capacity": null, "default_cap": null}
+        }}}}},
+        "graph": {"Extend": {"nodes": [{
+            "kind": "frame_open",
+            "assignment": {"policy": {"autonomous": false}}
+        }]}},
+        "outcome": "completed"
+    });
+    let previous = serde_json::json!({
+        "config": {"model": {"model": {"metadata": {"limits": {
+            "context_window_tokens": 200_000
+        }}}}},
+        "graph": {"Extend": {"nodes": [{
+            "kind": "frame_open",
+            "assignment": {"policy": {"autonomous": false, "session_id": null}}
+        }]}},
+        "outcome": "completed"
+    });
+    let expected = value_digest(&previous);
+    assert!(prove_pin_delta(&current, &expected, &SHAPE_CHANGES[..1]).is_none());
+    assert!(prove_pin_delta(&current, &expected, &SHAPE_CHANGES[1..]).is_none());
+    let proof = prove_pin_delta(&current, &expected, SHAPE_CHANGES).expect("both named deltas");
+    assert_eq!(proof.shape_changes.len(), 2);
+    assert_eq!(proof.restored_digest, expected);
+    let unchanged = prove_pin_delta(&previous, &expected, SHAPE_CHANGES).expect("unchanged pin");
+    assert!(unchanged.shape_changes.is_empty());
+
+    let mut unrelated = current.clone();
+    unrelated["outcome"] = serde_json::json!("cancelled");
+    assert!(prove_pin_delta(&unrelated, &expected, SHAPE_CHANGES).is_none());
+    let mut output_fact = current;
+    output_fact["config"]["model"]["model"]["metadata"]["limits"]["output_tokens"]["capacity"] =
+        serde_json::json!(100);
+    assert!(prove_pin_delta(&output_fact, &expected, SHAPE_CHANGES).is_none());
 }

@@ -675,3 +675,57 @@ pub(super) fn is_trigger_event_placeholder_expr(expr: &Expr) -> bool {
             && entries[0].1 == Expr::Bool(true)
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scopes_restore_shadowed_names_and_preserve_non_value_branch_bindings() {
+        let mut scope = Scope::new(false, None);
+        let original = Binding::Function {
+            output: TypeExpr::Str,
+        };
+        scope.bind("name", original.clone());
+        let previous = scope.bind("name", Binding::Value(TypeExpr::Int));
+        scope.restore("name", previous);
+        assert_eq!(scope.get_str("name"), Some(original.clone()));
+        let previous = scope.bind("temporary", any_binding());
+        scope.restore("temporary", previous);
+        assert_eq!(scope.get_str("temporary"), None);
+        assert_eq!(
+            join_optional_bindings(Some(&original), Some(&original)),
+            original
+        );
+    }
+
+    #[test]
+    fn field_and_literal_types_keep_unknown_and_union_cases() {
+        for ty in [
+            TypeExpr::Any,
+            TypeExpr::Dict,
+            union_type(vec![TypeExpr::Int, TypeExpr::Dict]),
+        ] {
+            assert!(type_has_field(&ty, "field"));
+        }
+        assert!(!type_has_field(&TypeExpr::Int, "field"));
+        for (expr, expected) in [
+            (Expr::Null, TypeExpr::Null),
+            (Expr::Undefined, TypeExpr::Any),
+            (Expr::Break, TypeExpr::Null),
+            (Expr::Continue, TypeExpr::Null),
+            (
+                Expr::LabelAnnotated {
+                    label: crate::LabelMetadata {
+                        title: "test".into(),
+                        description: None,
+                    },
+                    expr: Box::new(Expr::Null),
+                },
+                TypeExpr::Null,
+            ),
+        ] {
+            assert_eq!(literal_type(&expr), expected);
+        }
+    }
+}

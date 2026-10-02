@@ -135,6 +135,7 @@ pub(crate) enum WorkbenchAuthorizationAction {
     /// Deployment-wide operator policy. Approval decisions are deliberately
     /// separate from chat/session participation.
     ManageApprovals,
+    OperateDeployment,
     /// Destructive, deployment-wide maintenance. It is deliberately not
     /// session-scoped: no chat participant should ever be able to reach it.
     PruneTriggerMutationReceipts,
@@ -183,6 +184,7 @@ impl WorkbenchAuthorizer for AllowAllWorkbenchAuthorizer {
                 let _ = session_id;
             }
             WorkbenchAuthorizationAction::ManageApprovals => {}
+            WorkbenchAuthorizationAction::OperateDeployment => {}
             WorkbenchAuthorizationAction::PruneTriggerMutationReceipts => {}
             WorkbenchAuthorizationAction::RunStoreMaintenance => {}
         }

@@ -25,6 +25,8 @@
 //! See `README.md` for the Slack-fidelity statement, the session-mapping
 //! doctrine, and the migration notes for pointing the bot at real Slack.
 
+#[path = "../../shared/attachment_acceptance.rs"]
+mod attachment_acceptance;
 pub mod bot;
 pub mod ids;
 #[cfg(feature = "live-e2e")]
@@ -35,8 +37,6 @@ pub mod log;
 pub mod mcp_http_server;
 pub mod mcp_server;
 pub mod platform;
-#[path = "../../shared/prior_store_layout.rs"]
-mod prior_store_layout;
 pub mod secrets;
 pub mod store;
 pub mod wire;

@@ -445,6 +445,10 @@ pub struct BotHost {
 }
 
 impl BotHost {
+    pub fn server(&self) -> &lash_restate_test::RestateTestServer {
+        self.double.server()
+    }
+
     /// The host over `bot_dir`'s stores, created if absent.
     pub async fn open(bot_dir: &Path) -> Self {
         let stores: Arc<dyn lash::StoreSet> = Arc::new(

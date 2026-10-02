@@ -1465,6 +1465,10 @@ impl AdmitRootRunner {
             admitted_generation: self.admitted_generation.clone(),
             executor: self.executor.clone(),
             plugins,
+            // No admission candidate is proposed here, so the run is
+            // admitted unanchored. The store still retains the run's scope:
+            // the cause of the rows it admits and its start.
+            trace_anchor: lash_trace::TraceAnchor::Untraced,
         };
         let admission = match self.store.admit_root(&request).await {
             // The record decides (FIG-4765): the root is run by the executor

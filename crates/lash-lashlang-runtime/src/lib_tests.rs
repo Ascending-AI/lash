@@ -172,18 +172,32 @@ impl DoubleProcessHarness {
         engine: LashlangProcessEngine,
         extra_factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
     ) {
+        self.install_lashlang_worker_with_runtime(
+            engine,
+            extra_factories,
+            lash_core::trace::TraceRuntime::new(self.backend.clock()),
+        );
+    }
+
+    pub(crate) fn install_lashlang_worker_with_runtime(
+        &self,
+        engine: LashlangProcessEngine,
+        extra_factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
+        tracing: lash_core::trace::TraceRuntime,
+    ) {
         *self.engine.lock().unwrap() = Some(engine.clone());
-        let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
+        let mut runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
             self.backend.clone(),
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
         )
         .with_process_engine_registration(lashlang_process_engine_registration(engine));
+        runtime_host.tracing = tracing;
         let mut factories = lash_core::testing::test_code_protocol_factories();
         factories.extend(extra_factories);
         let worker = lash_core_worker::DurableProcessWorker::new(
-            lash_core_worker::DurableProcessWorkerConfig::new(
-                Arc::new(lash_core::facade_support::PluginHost::new(factories)),
+            lash_core_worker::DurableProcessWorkerConfig::from_plugin_factories(
+                factories,
                 runtime_host,
                 self.wiring.clone(),
                 Arc::new(lash_core::NoSessionWork::new()),
@@ -191,6 +205,10 @@ impl DoubleProcessHarness {
             ),
         )
         .expect("valid double process worker");
+        assert!(Arc::ptr_eq(
+            worker.config().plugin_host.trace_runtime().clock(),
+            worker.config().runtime_host.tracing.clock(),
+        ));
         self.double.install_process_worker(worker);
     }
 
@@ -400,14 +418,14 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
         graph: Arc::clone(&graph),
         waiting,
     });
-    harness.install_lashlang_worker(
+    harness.install_lashlang_worker_with_runtime(
         LashlangProcessEngine::new(
             store,
             LashlangSurface::default(),
             harness.backend().worker_recovery(),
-        )
-        .with_execution_trace(Some(sink), lash_trace::TraceContext::default()),
+        ),
         Vec::new(),
+        lash_core::trace::TraceRuntime::new(harness.backend().clock()).with_product_observer(sink),
     );
     let process_id = harness.admit(registration).await;
     let effect_host = harness.backend().effect_host();
@@ -547,19 +565,19 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
     ));
     let graph_store = Arc::new(TraceLashlangGraphStore::default());
     let sink: Arc<dyn lash_trace::TraceSink> = graph_store.clone();
-    harness.install_lashlang_worker(
+    harness.install_lashlang_worker_with_runtime(
         LashlangProcessEngine::new(
             store,
             LashlangSurface::default(),
             harness.backend().worker_recovery(),
-        )
-        .with_execution_trace(Some(sink), lash_trace::TraceContext::default()),
+        ),
         vec![Arc::new(lash_core::plugin::StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("fixture-tools"),
             lash_core::facade_support::PluginSpec::new().with_tool_provider(Arc::new(
                 BoundFixtureTools(lash_core::testing::FixtureTools::new()),
             )),
         ))],
+        lash_core::trace::TraceRuntime::new(harness.backend().clock()).with_product_observer(sink),
     );
     let process_id = harness
         .admit(registration.with_execution_env_ref(Some(harness.env_ref().clone())))

@@ -57,13 +57,38 @@ pub(super) fn journaled_envelope_json(
         RuntimeEffectCommand::LlmCall { request } => JournaledLlmCommand::LlmCall {
             request: journaled_request!(request),
         },
-        _ => return crate::stable_hash::stable_json_string(envelope),
+        // Trace provenance rides the command beside its business payload
+        // and takes no part in the envelope's identity: a command that
+        // carries some is journaled and hashed without it, so a retry under
+        // another context reconstructs the same envelope.
+        command => {
+            return match command.without_trace_provenance() {
+                Some(command) => {
+                    crate::stable_hash::stable_json_string(&JournaledBusinessEnvelope {
+                        invocation: &envelope.invocation,
+                        command: &command,
+                        group: envelope.group.as_deref(),
+                    })
+                }
+                None => crate::stable_hash::stable_json_string(envelope),
+            };
+        }
     };
     crate::stable_hash::stable_json_string(&JournaledEnvelope {
         invocation: &envelope.invocation,
         command,
         group: envelope.group.as_deref(),
     })
+}
+
+/// [`RuntimeEffectEnvelope`]'s field order and names, over a command with
+/// its trace provenance projected out.
+#[derive(Serialize)]
+struct JournaledBusinessEnvelope<'a> {
+    invocation: &'a RuntimeEffectInvocation,
+    command: &'a RuntimeEffectCommand,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    group: Option<&'a EffectGroupMembership>,
 }
 
 /// [`RuntimeEffectEnvelope`]'s field order and names, over the journaled
@@ -391,6 +416,156 @@ mod tests {
                 journaled["command"]["request"]
                     .get("extra_headers")
                     .is_none()
+            );
+        }
+    }
+
+    /// The context of one producer: a sampled span of its own trace.
+    fn producer(id: u8) -> lash_trace::TraceCarrier {
+        lash_trace::TraceCarrier::parse_w3c(&format!("00-{id:032x}-{id:016x}-01"), None)
+            .expect("a valid trace context")
+    }
+
+    fn process_effect(command: crate::ProcessCommand) -> RuntimeEffectEnvelope {
+        RuntimeEffectEnvelope::new(
+            RuntimeEffectInvocation::new(
+                crate::EffectAddress::new(
+                    crate::ExecutionScope::session_operation("session", "host-op"),
+                    "process:provenance",
+                )
+                .expect("valid address"),
+                crate::RuntimeAttribution::for_session(crate::SessionId::from("session")),
+                "process:provenance",
+            ),
+            RuntimeEffectCommand::Process {
+                command: Box::new(command),
+            },
+        )
+    }
+
+    /// Trace provenance rides a command beside its payload and is no part
+    /// of the envelope's identity (FIG-4829): the same start, signal,
+    /// occurrence or accepted input under another trace context, or under
+    /// none, journals the same bytes and hashes the same, so a retry replays
+    /// its recorded effect instead of diverging from it.
+    #[test]
+    fn trace_provenance_is_no_part_of_an_envelopes_identity() {
+        let linked = |id| lash_trace::TraceCause::linked_to(Some(producer(id)));
+        let offer = |id| {
+            lash_trace::TraceScopeOffer::new(
+                linked(id),
+                lash_trace::TraceAnchor::Context(producer(id + 100)),
+            )
+        };
+        let start = |trace: lash_trace::TraceScopeOffer| {
+            process_effect(crate::ProcessCommand::Start {
+                registration: crate::ProcessStartRegistration::of_target(
+                    crate::ProcessInput::External {
+                        metadata: serde_json::json!({"report": "nightly"}),
+                    },
+                    crate::ProcessProvenance::host(),
+                    crate::Lifetime::Detached,
+                )
+                .with_start_key(Some(crate::StartKey::for_host("provenance-start")))
+                .with_trace(trace),
+                observers: Vec::new(),
+                execution_context: Box::default(),
+            })
+        };
+        let signal = |cause: lash_trace::TraceCause| {
+            process_effect(crate::ProcessCommand::Signal {
+                signal: crate::ProcessSignal::new(
+                    crate::ProcessSignalIdentity::new(
+                        crate::ProcessId::fixture("provenance-target"),
+                        "ready",
+                        "one",
+                    )
+                    .expect("valid signal identity"),
+                    serde_json::json!(1),
+                )
+                .with_trace_cause(cause),
+            })
+        };
+        let fire = |trace: lash_trace::TraceScopeOffer| {
+            let mut envelope = process_effect(crate::ProcessCommand::List {
+                selection: crate::ProcessListSelection::HostRunning,
+            });
+            envelope.command = RuntimeEffectCommand::IngestTriggerOccurrence {
+                request: Box::new(
+                    crate::TriggerOccurrenceRequest::new(
+                        "ui.button.pressed",
+                        "provenance-source",
+                        serde_json::json!({"button": "Blue"}),
+                        "provenance-fire",
+                    )
+                    .with_trace(trace),
+                ),
+            };
+            envelope
+        };
+        let accept = |cause: lash_trace::TraceCause| {
+            let mut envelope = process_effect(crate::ProcessCommand::List {
+                selection: crate::ProcessListSelection::HostRunning,
+            });
+            envelope.command = RuntimeEffectCommand::AcceptTurnInput {
+                draft: Box::new(
+                    crate::PendingTurnInputDraft::new(
+                        "session",
+                        crate::TurnInputIngress::next_turn(),
+                        crate::TurnInput::text("the accepted words"),
+                    )
+                    .with_source_key("provenance-input")
+                    .with_trace_cause(cause),
+                ),
+            };
+            envelope
+        };
+        for (what, untraced, first, second) in [
+            (
+                "start",
+                start(lash_trace::TraceScopeOffer::default()),
+                start(offer(1)),
+                start(offer(2)),
+            ),
+            (
+                "signal",
+                signal(lash_trace::TraceCause::Root),
+                signal(linked(1)),
+                signal(linked(2)),
+            ),
+            (
+                "occurrence",
+                fire(lash_trace::TraceScopeOffer::default()),
+                fire(offer(1)),
+                fire(offer(2)),
+            ),
+            (
+                "input",
+                accept(lash_trace::TraceCause::Root),
+                accept(linked(1)),
+                accept(linked(2)),
+            ),
+        ] {
+            let recorded = untraced.canonical_form().expect("canonical");
+            for traced in [first, second] {
+                assert!(
+                    traced.command.without_trace_provenance().is_some(),
+                    "{what}: the traced command carries provenance"
+                );
+                let retried = traced.canonical_form().expect("canonical");
+                assert_eq!(retried.json(), recorded.json(), "{what}");
+                assert_eq!(retried.hash(), recorded.hash(), "{what}");
+                validate_replayed_effect_envelope(
+                    &recorded,
+                    &retried,
+                    crate::RuntimeErrorCode::EffectReplayDivergence,
+                    None,
+                )
+                .unwrap_or_else(|error| panic!("{what}: a retry replays: {error:?}"));
+            }
+            assert!(
+                !recorded.json().contains("traceparent"),
+                "{what}: no context is journaled"
             );
         }
     }

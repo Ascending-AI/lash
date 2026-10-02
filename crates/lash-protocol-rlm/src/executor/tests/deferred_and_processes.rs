@@ -143,7 +143,7 @@ fn cell_attempt(
                 LashlangSurface::default(),
                 run.resolver,
                 RlmProjectedBindings::default(),
-                RlmLashlangExecutionTraceConfig::default(),
+                None,
             )
             .await;
             let counts = counters
@@ -504,7 +504,7 @@ pub(super) fn deferred_link_is_scoped_to_the_exec_code_link() {
             LashlangSurface::default(),
             Some(resolver.clone()),
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
         )
         .await;
         assert!(first.error.is_some(), "mystery.x must remain unresolved");
@@ -569,7 +569,7 @@ pub(super) fn deferred_link_is_scoped_to_the_exec_code_link() {
             LashlangSurface::default(),
             Some(resolver.clone()),
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
         )
         .await;
         assert!(second_link.error.is_some());
@@ -598,7 +598,7 @@ pub(super) fn deferred_link_is_scoped_to_the_exec_code_link() {
             LashlangSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
         )
         .await;
         assert!(next_turn.error.is_some());
@@ -678,7 +678,7 @@ pub(super) fn deferred_call_executes_through_grant_without_mutating_catalog() {
             LashlangSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
         )
         .await;
 
@@ -782,7 +782,7 @@ pub(super) fn deferred_journal_failure_prevents_dependent_tool_execution() {
             LashlangSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
         )
         .await;
         handler.close().await.expect("close the cell's handler");
@@ -1314,7 +1314,7 @@ pub(super) fn typescript_deferred_call_executes_through_the_same_grant_path() {
                 LashlangSurface::default(),
                 Some(resolver),
                 RlmProjectedBindings::default(),
-                RlmLashlangExecutionTraceConfig::default(),
+                None,
                 lashlang::ExecutionBounds::unbounded(),
                 crate::plugin::RlmChannel::Cell,
             )
@@ -1410,7 +1410,7 @@ pub(super) fn runtime_failure_after_prints_and_tool_calls_retains_collected_outp
             LashlangSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
         )
         .await;
         handler.close().await.expect("close the cell's handler");
@@ -1517,7 +1517,7 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
             surface(),
             None,
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
         )
         .await;
         handler.close().await.expect("close the cell's handler");
@@ -1538,7 +1538,7 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
             surface(),
             None,
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
         )
         .await;
         handler.close().await.expect("close the cell's handler");
@@ -1589,7 +1589,7 @@ pub(super) fn typescript_executor_stores_a_typescript_process_artifact() {
             ),
             None,
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
             lashlang::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
         )
@@ -1984,8 +1984,8 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
                     &lash_core::runtime::ProcessStartStores {
                         registry: self.registry.as_ref(),
                         env_store: Some(&self.env_store),
-                        engines: Some(&self.engines),
-                        engines_required: true,
+                        engines: &self.engines,
+
                         session_catalog: None,
                         session_turn_admission: None,
                         executor: "the signal fixture",
@@ -2272,7 +2272,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         surface.clone(),
         None,
         RlmProjectedBindings::default(),
-        RlmLashlangExecutionTraceConfig::default(),
+        None,
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
     )
@@ -2413,7 +2413,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         surface.clone(),
         None,
         RlmProjectedBindings::default(),
-        RlmLashlangExecutionTraceConfig::default(),
+        None,
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
     )
@@ -2444,7 +2444,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
                     surface,
                     None,
                     RlmProjectedBindings::default(),
-                    RlmLashlangExecutionTraceConfig::default(),
+                    None,
                     lashlang::ExecutionBounds::unbounded(),
                     crate::plugin::RlmChannel::Cell,
                 ),
@@ -2540,7 +2540,7 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         surface,
         None,
         RlmProjectedBindings::default(),
-        RlmLashlangExecutionTraceConfig::default(),
+        None,
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
     )

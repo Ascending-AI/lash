@@ -175,6 +175,7 @@ fn fixture_wake() -> lash_core::runtime::ProcessWakeDelivery {
         authority: lash_core::runtime::QueuedWorkAuthority::default(),
         input: "durable read queued task".to_string(),
         created_at_ms: FIXTURE_WRITE_MS,
+        trace_cause: Default::default(),
     }
 }
 const INPUT_SOURCE_KEY: &str = "durable-read-input-source";

@@ -152,10 +152,6 @@ impl GenerationDrainStatus {
     /// sessions, the stalled counts of the ledgers `obligation_ledger` hands
     /// out and the engine's undrained group children `registry` reports,
     /// stamped `now_ms`.
-    ///
-    /// Reporting is part of the read: the per-generation work gauges and
-    /// each kind's stalled count record here, so polling this status is also
-    /// the metrics refresh (FIG-3884).
     pub async fn collect(
         drain: &dyn GenerationDrainStore,
         session_delete: &dyn SessionDeleteLedger,
@@ -171,27 +167,6 @@ impl GenerationDrainStatus {
             .find(|marked| &marked.generation == generation)
             .map(|marked| marked.marked_at_ms);
         let work = drain.generation_work(generation).await?;
-        let label = generation.as_str();
-        crate::operational_metrics::record_generation_drain_work(
-            label,
-            "live_processes",
-            work.live_processes,
-        );
-        crate::operational_metrics::record_generation_drain_work(
-            label,
-            "parked_processes",
-            work.parked_processes,
-        );
-        crate::operational_metrics::record_generation_drain_work(
-            label,
-            "parked_turns",
-            work.parked_turns,
-        );
-        crate::operational_metrics::record_generation_drain_work(
-            label,
-            "in_flight_turns",
-            work.in_flight_turns,
-        );
         let closing_sessions = session_delete.count_closing().await?;
         let undrained_group_children = registry
             .undrained_group_children(generation)
@@ -200,15 +175,9 @@ impl GenerationDrainStatus {
                 backend: "engine deployment registry",
                 message: error.to_string(),
             })?;
-        crate::operational_metrics::record_generation_drain_work(
-            label,
-            "undrained_group_children",
-            undrained_group_children,
-        );
         let mut stalled_obligations = BTreeMap::new();
         for kind in ObligationKind::ALL {
             let count = obligation_ledger(kind).count_stalled().await?;
-            crate::operational_metrics::record_obligations_stalled(kind.label(), count);
             stalled_obligations.insert(kind, count);
         }
         Ok(Self {

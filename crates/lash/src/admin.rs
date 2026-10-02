@@ -91,6 +91,16 @@ impl CoreTriggerAdmin {
         request: lash_core::TriggerOccurrenceRequest,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::facade_support::TriggerEmitReport> {
+        // The producer's context is snapshotted here, before the first
+        // await, unless the request states its own: the fire links it.
+        let request = if request.trace.is_empty() {
+            let captured = self.core.env.core.tracing.scopes().capture_current();
+            request.with_trace(lash_core::TraceScopeOffer::caused_by(
+                lash_core::TraceCause::linked_to(captured),
+            ))
+        } else {
+            request
+        };
         let store = self.store()?;
         let ports = self.core.substrate_slot.ports().await;
         let process_work = ports.process;

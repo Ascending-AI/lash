@@ -207,6 +207,7 @@ async fn enqueue_checkpoint_row(
                 authority: crate::QueuedWorkAuthority::default(),
                 input: words.to_string(),
                 created_at_ms: 1,
+                trace_cause: Default::default(),
             };
             store
                 .enqueue_queued_work(crate::process_wake_batch_draft(wake))

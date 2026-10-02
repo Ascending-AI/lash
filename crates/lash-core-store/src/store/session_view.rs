@@ -61,9 +61,17 @@ impl SessionStore {
     pub async fn commit_runtime_state_verified(
         &self,
         commit: RuntimeCommit,
+        metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
+        permit: Option<&lash_trace::EmissionPermit>,
     ) -> Result<RuntimeCommitReceipt, StoreError> {
         self.check_request(&commit)?;
-        Box::pin(commit_runtime_state_verified(self.store.as_ref(), commit)).await
+        Box::pin(commit_runtime_state_verified(
+            self.store.as_ref(),
+            commit,
+            metrics,
+            permit,
+        ))
+        .await
     }
 
     fn check_request(&self, request: &(impl CarriesSession + ?Sized)) -> Result<(), StoreError> {

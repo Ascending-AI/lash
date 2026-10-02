@@ -72,7 +72,7 @@ pub use context::{
 
 /// How a controller observes its own handling of the effects it executes.
 struct RestateTraceObserver {
-    tracing: lash_core::trace::TraceRuntime,
+    tracing: lash_core::facade_support::TraceRuntime,
     /// The effect this controller was handed last: what a decision it makes
     /// between effects (a segment boundary) is attributed to.
     current: Mutex<Option<CurrentEffectTrace>>,
@@ -82,16 +82,16 @@ struct RestateTraceObserver {
 struct CurrentEffectTrace {
     /// What the drive that issued the effect lent it: the controller's own
     /// records stand where that drive stands.
-    issue: lash_core::trace::StepIssue,
-    standing: lash_core::trace::TraceStanding,
+    issue: lash_core::facade_support::StepIssue,
+    standing: lash_core::facade_support::TraceStanding,
     context: lash_trace::TraceContext,
 }
 
 /// The records a journaled run makes of itself. They are made inside its
 /// recorded body, so a replay that serves the run's entry makes none.
 pub(super) struct JournaledRunTrace {
-    tracing: lash_core::trace::TraceRuntime,
-    issue: lash_core::trace::StepIssue,
+    tracing: lash_core::facade_support::TraceRuntime,
+    issue: lash_core::facade_support::StepIssue,
     scope: Option<lash_trace::DurableTraceScope>,
     context: lash_trace::TraceContext,
     effect_name: String,
@@ -100,7 +100,7 @@ pub(super) struct JournaledRunTrace {
 
 /// A journaled run whose body has started.
 pub(super) struct StartedRunTrace {
-    standing: lash_core::trace::TraceStanding,
+    standing: lash_core::facade_support::TraceStanding,
     context: lash_trace::TraceContext,
     effect_name: String,
     effect_kind: String,
@@ -336,6 +336,7 @@ where
 /// This type is intentionally handler-scoped.
 pub struct RestateRuntimeEffectController<'ctx, C> {
     context: C,
+    attempt: Option<lash_trace::AttemptObservation>,
     authority_id: RestateAuthorityId,
     options: RestateEffectControllerOptions,
     trace: Option<RestateTraceObserver>,
@@ -398,6 +399,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
     ) -> Self {
         Self {
             context,
+            attempt: crate::serve::current_attempt_observation(),
             authority_id,
             options,
             trace: None,
@@ -452,7 +454,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
     /// seam: the journal remains truth. A step this controller serves from
     /// its journal is not observed again; its records are made by the
     /// attempt that really ran it.
-    pub fn with_tracing(mut self, tracing: lash_core::trace::TraceRuntime) -> Self {
+    pub fn with_tracing(mut self, tracing: lash_core::facade_support::TraceRuntime) -> Self {
         self.trace = Some(RestateTraceObserver {
             tracing,
             current: Mutex::new(None),
@@ -478,7 +480,10 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
         trace: &RestateTraceObserver,
         invocation: &RuntimeEffectInvocation,
     ) -> Option<lash_trace::DurableTraceScope> {
-        lash_core::trace::effect_trace_scope(invocation, trace.tracing.clock().timestamp_ms())
+        lash_core::facade_support::effect_trace_scope(
+            invocation,
+            trace.tracing.clock().timestamp_ms(),
+        )
     }
 
     /// Observes this controller's handling of `invocation`, or, with none, a
@@ -521,7 +526,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
     fn remember_trace_invocation(
         &self,
         invocation: &RuntimeEffectInvocation,
-        issue: &lash_core::trace::StepIssue,
+        issue: &lash_core::facade_support::StepIssue,
     ) {
         let Some(trace) = self.observer() else {
             return;
@@ -547,7 +552,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
         &self,
         invocation: &RuntimeEffectInvocation,
         effect_kind: lash_core::RuntimeEffectKind,
-        issue: &lash_core::trace::StepIssue,
+        issue: &lash_core::facade_support::StepIssue,
     ) -> Option<JournaledRunTrace> {
         let trace = self.observer()?;
         Some(JournaledRunTrace {
@@ -997,6 +1002,10 @@ impl<'ctx, C> RuntimeEffectController for RestateRuntimeEffectController<'ctx, C
 where
     C: RestateControllerContext<'ctx>,
 {
+    fn attempt_observation(&self) -> Option<lash_trace::AttemptObservation> {
+        self.attempt.clone()
+    }
+
     fn owns_commit_backpressure(&self) -> bool {
         true
     }

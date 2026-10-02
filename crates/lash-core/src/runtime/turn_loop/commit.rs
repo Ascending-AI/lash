@@ -292,7 +292,8 @@ impl LashRuntime {
             Arc::clone(&self.host.core.clock),
             self.state.turn_scope(&root),
             self.host.core.durability.commit_budget,
-        );
+        )
+        .with_metrics(self.host.core.tracing.metrics().clone());
         self.finish_turn(TurnCommitContext {
             finish: TurnFinishInput {
                 segment_boundary: None,
@@ -599,11 +600,11 @@ impl LashRuntime {
 
         self.mark_phase_begin(PreparedTurn::RUNTIME_PHASE);
         let finalized = match plugins
-            .finalize_turn_with_phase_probe(
+            .dispatch(self.turn_phase_probe.as_ref())
+            .finalize_turn(
                 assembled,
                 manager.state_service(),
                 manager.graph_service(),
-                self.turn_phase_probe.clone(),
                 &trace_turn_id,
                 self.services.clock.as_ref(),
             )
@@ -994,7 +995,8 @@ impl LashRuntime {
             self.state.turn_scope(&trace_turn_id),
             self.host.core.durability.commit_budget,
         )
-        .with_definition_engines(self.host.core.process_engines.clone());
+        .with_definition_engines(self.host.core.process_engines.clone())
+        .with_metrics(self.host.core.tracing.metrics().clone());
         turn_pipeline.apply_prepared_messages(&messages);
         Box::pin(self.finish_turn(TurnCommitContext {
             finish: TurnFinishInput {

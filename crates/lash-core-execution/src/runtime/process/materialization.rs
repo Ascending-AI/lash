@@ -38,6 +38,7 @@ pub(super) fn materialize_event_semantics(
         terminal,
         wake,
         signal_wait: None,
+        trace_cause: lash_trace::TraceCause::Root,
     })
 }
 

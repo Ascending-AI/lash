@@ -9,7 +9,7 @@
 //!
 //! The thread starts with its parent's folded context: the channel messages up
 //! to the root that the fork boundary does not carry, with the root labelled,
-//! lead the thread's first send, ahead of the thread's own folded ambient
+//! lead the thread's first batch, ahead of the thread's own folded ambient
 //! replies and its first mention.
 
 use std::collections::HashSet;
@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
 use lash::persistence::{ChronologicalPayload, StoreError};
-use lash::{LashCore, LashSession, Target};
+use lash::{DurableSession, LashCore, Target};
 
 use super::ledger::{EventLedger, EventRecord, IgnoreReason, Stage};
 use super::runtime::{session_id, thread_session_id};
@@ -84,9 +84,9 @@ impl RootWaitObserver {
 
 /// Result of opening the deterministic child behind a Slack thread.
 pub enum ThreadSessionOpen {
-    /// The thread's session, and the parent context its first send carries.
+    /// The thread's durable handle and the parent context its first batch carries.
     Ready {
-        session: LashSession,
+        session: Box<DurableSession>,
         inherited_context: String,
     },
     /// Another writer holds the lane, so the contended admission must retry.
@@ -237,7 +237,7 @@ pub async fn open_thread_session(
 
     let session = match core
         .session(lash::SessionId::fixture(&thread_id))
-        .open()
+        .durable()
         .await
     {
         Ok(session) => session,
@@ -252,7 +252,7 @@ pub async fn open_thread_session(
     let inherited_context =
         inherited_thread_context(ledger, &channel, &session, record, thread_ts).await?;
     Ok(ThreadSessionOpen::Ready {
-        session,
+        session: Box::new(session),
         inherited_context,
     })
 }
@@ -295,10 +295,8 @@ async fn root_route(
         // A turn application is durable even if the process died after pinning
         // its input and before projecting the revision into the Slack ledger.
         //
-        // The repair reads through a session opened now, not through the
-        // caller's handle: that handle was opened when this thread reply
-        // started waiting, and it predates the root turn this repair is
-        // about.
+        // The durable repair reads the current store, including a root that
+        // committed while this thread reply was waiting.
         let repair_view = match open_channel_session(core, session_spec, &record.channel_id).await {
             Ok(session) => session,
             Err(error) if anyhow_session_admission_contended(&error) => {
@@ -366,7 +364,7 @@ async fn root_route(
 /// answer and calls [`try_retain_applied_turn_boundary`].
 pub async fn retain_applied_turn_boundary(
     ledger: &EventLedger,
-    session: &LashSession,
+    session: &DurableSession,
     input_id: &str,
 ) -> Result<()> {
     retain_boundary(ledger, session, input_id, Derivation::Required)
@@ -383,7 +381,7 @@ pub async fn retain_applied_turn_boundary(
 /// of the commit that applies it.
 pub async fn try_retain_applied_turn_boundary(
     ledger: &EventLedger,
-    session: &LashSession,
+    session: &DurableSession,
     input_id: &str,
 ) -> Result<bool> {
     retain_boundary(ledger, session, input_id, Derivation::MayBePending).await
@@ -398,11 +396,11 @@ enum Derivation {
 
 async fn retain_boundary(
     ledger: &EventLedger,
-    session: &LashSession,
+    session: &DurableSession,
     input_id: &str,
     derivation: Derivation,
 ) -> Result<bool> {
-    let durable = session.durable();
+    let durable = session;
     let applications = durable
         .turn_input_applications()
         .await
@@ -444,7 +442,7 @@ async fn retain_boundary(
     Ok(true)
 }
 
-/// Open (or resume) the channel's session, creating it on the channel's
+/// Acquire the channel's durable handle, creating it on the channel's
 /// first event. The bot owns its channel session ids and means create-or-use:
 /// only `create` creates (FIG-4112), so an existing channel session — the
 /// common case — is the arm where `session_spec`, the bot's default, does not
@@ -453,7 +451,7 @@ pub(crate) async fn open_channel_session(
     core: &LashCore,
     session_spec: &lash::SessionSpec,
     channel_id: &str,
-) -> Result<LashSession> {
+) -> Result<DurableSession> {
     match core
         .session(session_id(channel_id))
         .create(lash::SessionCreation::root(session_spec.clone()))
@@ -465,7 +463,7 @@ pub(crate) async fn open_channel_session(
         }
     }
     core.session(session_id(channel_id))
-        .open()
+        .durable()
         .await
         .with_context(|| format!("open session for channel {channel_id}"))
 }
@@ -475,7 +473,7 @@ pub(crate) async fn open_channel_session(
 /// an ordinary retained revision.
 pub async fn retain_admission_boundary(
     ledger: &EventLedger,
-    session: &LashSession,
+    session: &DurableSession,
     event_id: &str,
 ) -> Result<()> {
     let head = session
@@ -496,7 +494,7 @@ pub async fn retain_admission_boundary(
         .context("record channel admission boundary")
 }
 
-/// The parent context a thread's first send carries: the thread root, labelled,
+/// The parent context a thread's first batch carries: the thread root, labelled,
 /// and the channel context the fork boundary did not already carry.
 ///
 /// Two problems, one pass over the same ledger rows.
@@ -516,17 +514,19 @@ pub async fn retain_admission_boundary(
 /// here; the root among them arrives as the same labelled line.
 ///
 /// The text is a pure function of the ledger and the two graphs, and the
-/// ledger stores the first send's composed text, so a redelivery, a second
+/// ledger stores the first batch's members, so a redelivery, a second
 /// open, or a boot recovery sends the same bytes.
 async fn inherited_thread_context(
     ledger: &EventLedger,
-    channel: &LashSession,
-    thread: &LashSession,
+    channel: &DurableSession,
+    thread: &DurableSession,
     record: &EventRecord,
     thread_ts: &str,
 ) -> Result<String> {
     let committed_in_thread: HashSet<String> = thread
-        .read_view()
+        .read()
+        .await?
+        .context("thread session has no committed view")?
         .chronological_projection()
         .into_entries()
         .into_iter()
@@ -536,7 +536,6 @@ async fn inherited_thread_context(
         })
         .collect();
     let applications = channel
-        .durable()
         .turn_input_applications()
         .await
         .context("read channel applications for thread inheritance")?;

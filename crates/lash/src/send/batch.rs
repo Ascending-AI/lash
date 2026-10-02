@@ -100,6 +100,9 @@ impl SendBatchBuilder {
         if inputs.is_empty() {
             return Ok(Vec::new());
         }
+        // One request, one cause: the caller's context, snapshotted on the
+        // first poll and before the first await.
+        let trace_cause = lash_core::TraceCause::linked_to(target.capture_trace_context());
         let mut submissions = Vec::with_capacity(inputs.len());
         for BatchInput { mut input, id } in inputs {
             // As for one send: the host id names the root, and an input sent
@@ -121,6 +124,7 @@ impl SendBatchBuilder {
                 TurnInputIngress::NextTurn,
                 run_spec,
                 false,
+                trace_cause,
             )
             .await?;
         Ok(enqueued

@@ -105,7 +105,7 @@ async fn run_cell(
         lash_lashlang_runtime::LashlangSurface::default(),
         None,
         crate::projection::RlmProjectedBindings::default(),
-        crate::executor::RlmLashlangExecutionTraceConfig::default(),
+        None,
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
         crate::render::CodeRendererSlot::default(),

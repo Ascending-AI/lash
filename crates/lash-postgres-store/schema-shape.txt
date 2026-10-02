@@ -211,6 +211,7 @@ table lash_pending_turn_inputs
   column state text not-null
   column submission_digest text not-null
   column terminal_at_ms bigint nullable
+  column trace_cause_json text nullable
   unique (input_id)
   unique (obligation_id)
   unique (session_id, source_key)
@@ -359,6 +360,7 @@ table lash_queued_work_batches
   column submission_digest text not-null
   column terminal_at_ms bigint nullable
   column terminal_cause text nullable
+  column trace_cause_json text nullable
   column work_kind text not-null
   unique (batch_id)
   unique (obligation_id)

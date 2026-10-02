@@ -826,13 +826,14 @@ fn push_console_text(out: &mut String, text: &str) -> Result<(), RuntimeError> {
 /// own (a `Map`, a `Date`, a function) keeps its JavaScript string instead of
 /// refusing, and a cycle closes with `[Circular]` instead of throwing.
 ///
-/// `depth` is the nesting level of `value` itself, bounded exactly as every
-/// other coercion in this file is: the `active` set beside it only closes
-/// cycles, and a finite but deeply nested container would otherwise recurse
-/// until the thread stack is gone. The bound is the durable boundary's, so a
-/// value this refuses could never have been persisted either. The output size
-/// is bounded independently, inside the walk, by `push_console_text`: depth
-/// alone does not bound a shared graph.
+/// `depth` counts the way the export walk counts: a reference or an inline
+/// container is one level, a scalar leaf is none, so this walk refuses at the
+/// same ceiling the export and coercion walks do. The `active` set beside it
+/// only closes cycles, and a finite but deeply nested container would
+/// otherwise recurse until the thread stack is gone. The bound is the durable
+/// boundary's, so a value this refuses could never have been persisted either.
+/// The output size is bounded independently, inside the walk, by
+/// `push_console_text`: depth alone does not bound a shared graph.
 fn write_console_value(
     heap: &Heap,
     value: &Value,
@@ -841,7 +842,6 @@ fn write_console_value(
     top_level: bool,
     out: &mut String,
 ) -> Result<(), RuntimeError> {
-    ensure_value_depth(depth)?;
     match value {
         Value::Null => push_console_text(out, "null")?,
         // Only a bare `console.log(undefined)` can say `undefined`: inside a
@@ -880,10 +880,15 @@ fn write_console_value(
             )?;
         }
         Value::List(values) | Value::Tuple(values) => {
+            ensure_value_depth(depth)?;
             write_console_sequence(heap, values, active, depth, out)?;
         }
-        Value::Record(record) => write_console_record(heap, record, active, depth, out)?,
+        Value::Record(record) => {
+            ensure_value_depth(depth)?;
+            write_console_record(heap, record, active, depth, out)?;
+        }
         Value::Ref(id) => {
+            ensure_value_depth(depth)?;
             if !active.insert(*id) {
                 push_console_text(out, "\"[Circular]\"")?;
                 return Ok(());

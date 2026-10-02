@@ -1,189 +1,272 @@
+//! Operational observations use the runtime's injected instruments.
+//! Live work requires a body permit, transition counters require a committed
+//! transition permit, gauges report current state, and physical resource
+//! observations use a construction-time store observer without a permit.
+
+use lash_trace::telemetry::metrics::TelemetryMetrics;
+use lash_trace::{EmissionPermit, EmissionSource};
 use std::time::Duration;
 
-#[cfg(feature = "otel-trace")]
-fn runtime_tuning_metrics() -> &'static lash_trace::otel::RuntimeTuningMetrics {
-    static METRICS: std::sync::LazyLock<lash_trace::otel::RuntimeTuningMetrics> =
-        std::sync::LazyLock::new(lash_trace::otel::RuntimeTuningMetrics::from_global_provider);
-    &METRICS
+/// Instruments for physical store-resource observations, injected at construction.
+#[derive(Clone, Default)]
+pub struct StoreObserver {
+    metrics: Option<TelemetryMetrics>,
 }
 
-#[cfg(feature = "otel-trace")]
-fn with_runtime_tuning_metrics(record: impl Fn(&lash_trace::otel::RuntimeTuningMetrics)) {
-    record(runtime_tuning_metrics());
+impl std::fmt::Debug for StoreObserver {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("StoreObserver")
+            .field("observed", &self.is_observed())
+            .finish()
+    }
 }
 
-#[cfg(feature = "otel-trace")]
-fn parked_work_metrics() -> &'static lash_trace::otel::ParkedWorkMetrics {
-    static METRICS: std::sync::LazyLock<lash_trace::otel::ParkedWorkMetrics> =
-        std::sync::LazyLock::new(lash_trace::otel::ParkedWorkMetrics::from_global_provider);
-    &METRICS
+impl StoreObserver {
+    pub fn new(metrics: TelemetryMetrics) -> Self {
+        Self {
+            metrics: Some(metrics),
+        }
+    }
+
+    pub fn is_observed(&self) -> bool {
+        self.metrics.is_some()
+    }
+
+    pub fn pool_acquire_wait(&self, wait: Duration, outcome: &'static str) {
+        if let Some(metrics) = &self.metrics {
+            record_postgres_pool_acquire_wait(metrics, wait, outcome);
+        }
+    }
+
+    pub fn recovery_leadership(&self, name: &str, leading: bool, term: u64) {
+        if let Some(metrics) = &self.metrics {
+            record_recovery_leadership(metrics, name, leading, term);
+        }
+    }
 }
 
-#[cfg(feature = "otel-trace")]
-fn obligation_metrics() -> &'static lash_trace::otel::ObligationMetrics {
-    static METRICS: std::sync::LazyLock<lash_trace::otel::ObligationMetrics> =
-        std::sync::LazyLock::new(lash_trace::otel::ObligationMetrics::from_global_provider);
-    &METRICS
-}
-
-#[cfg(feature = "otel-trace")]
-fn generation_drain_metrics() -> &'static lash_trace::otel::GenerationDrainMetrics {
-    static METRICS: std::sync::LazyLock<lash_trace::otel::GenerationDrainMetrics> =
-        std::sync::LazyLock::new(lash_trace::otel::GenerationDrainMetrics::from_global_provider);
-    &METRICS
-}
-
-#[cfg(feature = "otel-trace")]
-fn with_parked_work_metrics(record: impl Fn(&lash_trace::otel::ParkedWorkMetrics)) {
-    record(parked_work_metrics());
-}
-
-pub fn record_provider_retry(provider: &str, kind: &'static str) {
-    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+/// Live observation for `lash.provider.retries`.
+pub fn record_provider_retry(
+    metrics: &TelemetryMetrics,
+    permit: Option<&EmissionPermit>,
+    provider: &str,
+    kind: &'static str,
+) {
+    if !permit.is_some_and(|permit| matches!(permit.source(), EmissionSource::LiveExecution { .. }))
+    {
+        return;
+    }
+    #[cfg(any(test, feature = "testing"))]
     observe_test_metric("lash.provider.retries");
-    #[cfg(feature = "otel-trace")]
-    with_runtime_tuning_metrics(|metrics| metrics.record_provider_retry(provider, kind));
-    #[cfg(not(feature = "otel-trace"))]
-    let _ = (provider, kind);
+    metrics.runtime_tuning.record_provider_retry(provider, kind);
 }
 
-pub fn record_provider_throttle_wait(provider: &str, wait: Duration) {
-    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+/// Live observation for `lash.provider.throttle_wait.duration`.
+pub fn record_provider_throttle_wait(
+    metrics: &TelemetryMetrics,
+    permit: Option<&EmissionPermit>,
+    provider: &str,
+    wait: Duration,
+) {
+    if !permit.is_some_and(|permit| matches!(permit.source(), EmissionSource::LiveExecution { .. }))
+    {
+        return;
+    }
+    #[cfg(any(test, feature = "testing"))]
     observe_test_metric("lash.provider.throttle_wait.duration");
-    #[cfg(feature = "otel-trace")]
-    with_runtime_tuning_metrics(|metrics| metrics.record_provider_throttle_wait(provider, wait));
-    #[cfg(not(feature = "otel-trace"))]
-    let _ = (provider, wait);
+    metrics
+        .runtime_tuning
+        .record_provider_throttle_wait(provider, wait);
 }
 
-#[cfg(feature = "otel-trace")]
-pub fn record_session_lane_contention_wait(wait: Duration, outcome: &'static str) {
-    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+/// Live observation for `lash.session_execution_lane.contention_wait.duration`.
+pub fn record_session_lane_contention_wait(
+    metrics: &TelemetryMetrics,
+    permit: Option<&EmissionPermit>,
+    wait: Duration,
+    outcome: &'static str,
+) {
+    if !permit.is_some_and(|permit| matches!(permit.source(), EmissionSource::LiveExecution { .. }))
+    {
+        return;
+    }
+    #[cfg(any(test, feature = "testing"))]
     observe_test_metric("lash.session_execution_lane.contention_wait.duration");
-    with_runtime_tuning_metrics(|metrics| {
-        metrics.record_session_lane_contention_wait(wait, outcome);
-    });
+    metrics
+        .runtime_tuning
+        .record_session_lane_contention_wait(wait, outcome);
 }
 
-pub fn record_session_lane_give_up(reason: &'static str) {
-    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+/// Live observation for `lash.session_execution_lane.give_ups`.
+pub fn record_session_lane_give_up(
+    metrics: &TelemetryMetrics,
+    permit: Option<&EmissionPermit>,
+    reason: &'static str,
+) {
+    if !permit.is_some_and(|permit| matches!(permit.source(), EmissionSource::LiveExecution { .. }))
+    {
+        return;
+    }
+    #[cfg(any(test, feature = "testing"))]
     observe_test_metric("lash.session_execution_lane.give_ups");
-    #[cfg(feature = "otel-trace")]
-    with_runtime_tuning_metrics(|metrics| metrics.record_session_lane_give_up(reason));
-    #[cfg(not(feature = "otel-trace"))]
-    let _ = reason;
+    metrics.runtime_tuning.record_session_lane_give_up(reason);
 }
 
-pub fn record_queued_work_wake_retry() {
-    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+/// Live observation for `lash.queued_work.wake_retries`.
+pub fn record_queued_work_wake_retry(metrics: &TelemetryMetrics, permit: Option<&EmissionPermit>) {
+    if !permit.is_some_and(|permit| matches!(permit.source(), EmissionSource::LiveExecution { .. }))
+    {
+        return;
+    }
+    #[cfg(any(test, feature = "testing"))]
     observe_test_metric("lash.queued_work.wake_retries");
-    #[cfg(feature = "otel-trace")]
-    with_runtime_tuning_metrics(
-        lash_trace::otel::RuntimeTuningMetrics::record_queued_work_wake_retry,
-    );
+    metrics.runtime_tuning.record_queued_work_wake_retry();
 }
 
-pub fn record_postgres_pool_acquire_wait(wait: Duration, outcome: &'static str) {
-    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+/// Physical resource observation for `lash.postgres.pool.acquire_wait.duration`.
+pub fn record_postgres_pool_acquire_wait(
+    metrics: &TelemetryMetrics,
+    wait: Duration,
+    outcome: &'static str,
+) {
+    #[cfg(any(test, feature = "testing"))]
     observe_test_metric("lash.postgres.pool.acquire_wait.duration");
-    #[cfg(feature = "otel-trace")]
-    with_runtime_tuning_metrics(|metrics| {
-        metrics.record_postgres_pool_acquire_wait(wait, outcome);
-    });
-    #[cfg(not(feature = "otel-trace"))]
-    let _ = (wait, outcome);
+    metrics
+        .runtime_tuning
+        .record_postgres_pool_acquire_wait(wait, outcome);
 }
 
-/// Count a successful park write — first park or same-turn re-park alike
-/// (FIG-3659). Emitted only after the store durably records the park.
-pub fn record_work_parked(kind: &'static str, reason: &'static str) {
-    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+/// Transition observation for `lash.parked_work.parks`.
+pub fn record_work_parked(
+    metrics: &TelemetryMetrics,
+    permit: Option<&EmissionPermit>,
+    kind: &'static str,
+    reason: &'static str,
+) {
+    if !permit.is_some_and(|permit| matches!(permit.source(), EmissionSource::NewTransition)) {
+        return;
+    }
+    #[cfg(any(test, feature = "testing"))]
     observe_test_metric("lash.parked_work.parks");
-    #[cfg(feature = "otel-trace")]
-    with_parked_work_metrics(|metrics| metrics.record_park(kind, reason));
-    #[cfg(not(feature = "otel-trace"))]
-    let _ = (kind, reason);
+    metrics.parked_work.record_park(kind, reason);
 }
 
-/// Report the live parked count for one (kind, reason) cell, including zero
-/// so a cleared reason does not go stale (FIG-3659).
-pub fn record_parked_work_count(kind: &'static str, reason: &'static str, count: u64) {
-    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+/// Gauge observation for `lash.parked_work.count`.
+pub fn record_parked_work_count(
+    metrics: &TelemetryMetrics,
+    kind: &'static str,
+    reason: &'static str,
+    count: u64,
+) {
+    #[cfg(any(test, feature = "testing"))]
     observe_test_metric("lash.parked_work.count");
-    #[cfg(feature = "otel-trace")]
-    with_parked_work_metrics(|metrics| metrics.record_count(kind, reason, count));
-    #[cfg(not(feature = "otel-trace"))]
-    let _ = (kind, reason, count);
+    metrics.parked_work.record_count(kind, reason, count);
 }
 
-/// Report the oldest live park's age in milliseconds; zero when nothing is
-/// parked (FIG-3659).
-pub fn record_parked_work_oldest_age(kind: &'static str, age_ms: u64) {
-    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+/// Gauge observation for `lash.parked_work.oldest_age`.
+pub fn record_parked_work_oldest_age(metrics: &TelemetryMetrics, kind: &'static str, age_ms: u64) {
+    #[cfg(any(test, feature = "testing"))]
     observe_test_metric("lash.parked_work.oldest_age");
-    #[cfg(feature = "otel-trace")]
-    with_parked_work_metrics(|metrics| metrics.record_oldest_age(kind, age_ms));
-    #[cfg(not(feature = "otel-trace"))]
-    let _ = (kind, age_ms);
+    metrics.parked_work.record_oldest_age(kind, age_ms);
 }
 
-/// Count one settled obligation delivery attempt (ADR 0109 §1.5): `outcome`
-/// is `delivered`, `retried`, `stalled` or `claim_lost`.
-pub fn record_obligation_attempt(kind: &'static str, outcome: &'static str) {
-    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+/// Transition observation for `lash.obligation.attempts`.
+pub fn record_obligation_attempt(
+    metrics: &TelemetryMetrics,
+    permit: Option<&EmissionPermit>,
+    kind: &'static str,
+    outcome: &'static str,
+) {
+    if !permit.is_some_and(|permit| matches!(permit.source(), EmissionSource::NewTransition)) {
+        return;
+    }
+    #[cfg(any(test, feature = "testing"))]
     observe_test_metric("lash.obligation.attempts");
-    #[cfg(feature = "otel-trace")]
-    obligation_metrics().record_attempt(kind, outcome);
-    #[cfg(not(feature = "otel-trace"))]
-    let _ = (kind, outcome);
+    metrics.obligations.record_attempt(kind, outcome);
 }
 
-/// Report one obligation kind's stalled count, including zero so a re-armed
-/// kind drops back (ADR 0109 §1.5).
-pub fn record_obligations_stalled(kind: &'static str, count: u64) {
-    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+/// Gauge observation for `lash.obligations.stalled`.
+pub fn record_obligations_stalled(metrics: &TelemetryMetrics, kind: &'static str, count: u64) {
+    #[cfg(any(test, feature = "testing"))]
     observe_test_metric("lash.obligations.stalled");
-    #[cfg(feature = "otel-trace")]
-    obligation_metrics().record_stalled(kind, count);
-    #[cfg(not(feature = "otel-trace"))]
-    let _ = (kind, count);
+    metrics.obligations.record_stalled(kind, count);
 }
 
-/// Report one (generation, kind) cell of a build generation's drain status,
-/// including zero so a drained cell drops back (FIG-3884). `kind` is one of
-/// `live_processes`, `parked_processes`, `parked_turns`, `in_flight_turns`,
-/// `undrained_group_children`.
-pub fn record_generation_drain_work(generation: &str, kind: &'static str, count: u64) {
-    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+/// Gauge observation for `lash.generation_drain.work`.
+pub fn record_generation_drain_work(
+    metrics: &TelemetryMetrics,
+    generation: &str,
+    kind: &'static str,
+    count: u64,
+) {
+    #[cfg(any(test, feature = "testing"))]
     observe_test_metric("lash.generation_drain.work");
-    #[cfg(feature = "otel-trace")]
-    generation_drain_metrics().record_work(generation, kind, count);
-    #[cfg(not(feature = "otel-trace"))]
-    let _ = (generation, kind, count);
+    metrics
+        .generation_drain
+        .record_work(generation, kind, count);
 }
 
-/// Report whether this process leads recovery lease `name`, and its term.
-pub fn record_recovery_leadership(name: &str, leading: bool, term: u64) {
-    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+/// Physical lease observation for `lash.recovery_leader`.
+pub fn record_recovery_leadership(
+    metrics: &TelemetryMetrics,
+    name: &str,
+    leading: bool,
+    term: u64,
+) {
+    #[cfg(any(test, feature = "testing"))]
     observe_test_metric("lash.recovery_leader");
-    #[cfg(feature = "otel-trace")]
-    obligation_metrics().record_leadership(name, leading, term);
-    #[cfg(not(feature = "otel-trace"))]
-    let _ = (name, leading, term);
+    metrics.obligations.record_leadership(name, leading, term);
 }
 
-pub fn record_runtime_commit_budgeted_size(bytes: usize, outcome: &'static str) {
-    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+/// Live observation for `lash.runtime_commit.budgeted_size`.
+pub fn record_runtime_commit_budgeted_size(
+    metrics: &TelemetryMetrics,
+    permit: Option<&EmissionPermit>,
+    bytes: usize,
+    outcome: &'static str,
+) {
+    if !permit.is_some_and(|permit| matches!(permit.source(), EmissionSource::LiveExecution { .. }))
+    {
+        return;
+    }
+    #[cfg(any(test, feature = "testing"))]
     observe_test_metric("lash.runtime_commit.budgeted_size");
-    #[cfg(feature = "otel-trace")]
-    with_runtime_tuning_metrics(|metrics| {
-        metrics.record_runtime_commit_budgeted_size(bytes, outcome);
-    });
-    #[cfg(not(feature = "otel-trace"))]
-    let _ = (bytes, outcome);
+    metrics
+        .runtime_tuning
+        .record_runtime_commit_budgeted_size(bytes, outcome);
 }
 
-#[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+/// Transition observation for one newly committed tool-intent execution.
+pub fn record_tool_intent_executed(
+    metrics: &TelemetryMetrics,
+    permit: Option<&EmissionPermit>,
+    kind: &'static str,
+) {
+    if !permit.is_some_and(|permit| matches!(permit.source(), EmissionSource::NewTransition)) {
+        return;
+    }
+    #[cfg(any(test, feature = "testing"))]
+    observe_test_metric("lash.tool_intent.executed");
+    metrics.tool_intent.record_executed(kind);
+}
+
+/// Transition observation for one newly committed tool-intent refusal.
+pub fn record_tool_intent_refused(
+    metrics: &TelemetryMetrics,
+    permit: Option<&EmissionPermit>,
+    kind: &'static str,
+    reason: &str,
+) {
+    if !permit.is_some_and(|permit| matches!(permit.source(), EmissionSource::NewTransition)) {
+        return;
+    }
+    #[cfg(any(test, feature = "testing"))]
+    observe_test_metric("lash.tool_intent.refused");
+    metrics.tool_intent.record_refused(kind, reason);
+}
+
+#[cfg(any(test, feature = "testing"))]
 fn observe_test_metric(name: &'static str) {
     TEST_OBSERVATIONS.with(|slot| {
         if let Some(observations) = slot.borrow_mut().as_mut() {
@@ -192,16 +275,16 @@ fn observe_test_metric(name: &'static str) {
     });
 }
 
-#[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+#[cfg(any(test, feature = "testing"))]
 thread_local! {
     static TEST_OBSERVATIONS: std::cell::RefCell<Option<Vec<&'static str>>> =
         const { std::cell::RefCell::new(None) };
 }
 
-#[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+#[cfg(any(test, feature = "testing"))]
 pub struct TestMetrics;
 
-#[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+#[cfg(any(test, feature = "testing"))]
 impl TestMetrics {
     pub fn install() -> Self {
         TEST_OBSERVATIONS.with(|slot| {
@@ -233,7 +316,7 @@ impl TestMetrics {
     }
 }
 
-#[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+#[cfg(any(test, feature = "testing"))]
 impl Drop for TestMetrics {
     fn drop(&mut self) {
         TEST_OBSERVATIONS.with(|slot| {
@@ -242,29 +325,75 @@ impl Drop for TestMetrics {
     }
 }
 
-#[cfg(all(test, feature = "otel-trace"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn parked_work_shims_emit_the_fig_3659_metric_names() {
-        let metrics = TestMetrics::install();
-
-        record_work_parked("turn", "replay_divergence");
-        record_parked_work_count("turn", "replay_divergence", 3);
-        record_parked_work_oldest_age("turn", 42);
-
-        assert_eq!(metrics.counter_value("lash.parked_work.parks"), 1);
-        assert_eq!(metrics.counter_value("lash.parked_work.count"), 1);
-        assert_eq!(metrics.counter_value("lash.parked_work.oldest_age"), 1);
+    fn replay_and_wrong_ownership_do_not_increment_operational_counters() {
+        let observed = TestMetrics::install();
+        let metrics = TelemetryMetrics::default();
+        let live = EmissionPermit::live_execution(lash_trace::TraceAttemptId::new("body"));
+        let transition = EmissionPermit::new_transition();
+        record_provider_retry(&metrics, Some(&live), "provider", "throttle");
+        record_provider_retry(&metrics, None, "provider", "throttle");
+        record_provider_retry(&metrics, Some(&transition), "provider", "throttle");
+        record_work_parked(&metrics, Some(&transition), "turn", "replay_divergence");
+        record_work_parked(&metrics, None, "turn", "replay_divergence");
+        record_work_parked(&metrics, Some(&live), "turn", "replay_divergence");
+        record_obligation_attempt(&metrics, Some(&transition), "process_start", "delivered");
+        record_obligation_attempt(&metrics, None, "process_start", "delivered");
+        record_tool_intent_executed(&metrics, Some(&transition), "start_process");
+        record_tool_intent_executed(&metrics, None, "start_process");
+        record_tool_intent_executed(&metrics, Some(&live), "start_process");
+        record_tool_intent_refused(
+            &metrics,
+            Some(&transition),
+            "start_process",
+            "command_failed",
+        );
+        record_tool_intent_refused(&metrics, None, "start_process", "command_failed");
+        assert_eq!(observed.counter_value("lash.tool_intent.executed"), 1);
+        assert_eq!(observed.counter_value("lash.tool_intent.refused"), 1);
+        assert_eq!(observed.counter_value("lash.provider.retries"), 1);
+        assert_eq!(observed.counter_value("lash.parked_work.parks"), 1);
+        assert_eq!(observed.counter_value("lash.obligation.attempts"), 1);
     }
 
     #[test]
-    fn generation_drain_shim_emits_the_fig_3884_metric_name() {
-        let metrics = TestMetrics::install();
+    fn physical_store_observations_use_only_the_injected_instruments() {
+        let observed = TestMetrics::install();
+        let disabled = StoreObserver::default();
+        assert!(!disabled.is_observed());
+        disabled.pool_acquire_wait(Duration::from_millis(1), "success");
+        disabled.recovery_leadership("recovery:fixture", false, 0);
+        assert_eq!(
+            observed.histogram_count("lash.postgres.pool.acquire_wait.duration"),
+            0
+        );
+        assert_eq!(observed.counter_value("lash.recovery_leader"), 0);
+        let observer = StoreObserver::new(TelemetryMetrics::default());
+        observer.pool_acquire_wait(Duration::from_millis(2), "success");
+        observer.pool_acquire_wait(Duration::from_millis(3), "error");
+        observer.recovery_leadership("recovery:fixture", true, 1);
+        observer.recovery_leadership("recovery:fixture", false, 0);
+        assert_eq!(
+            observed.histogram_count("lash.postgres.pool.acquire_wait.duration"),
+            2
+        );
+        assert_eq!(observed.counter_value("lash.recovery_leader"), 2);
+    }
 
-        record_generation_drain_work("012345abcdef", "in_flight_turns", 2);
-
-        assert_eq!(metrics.counter_value("lash.generation_drain.work"), 1);
+    #[test]
+    fn current_state_gauges_observe_cleared_values() {
+        let observed = TestMetrics::install();
+        let metrics = TelemetryMetrics::default();
+        record_parked_work_count(&metrics, "turn", "replay_divergence", 3);
+        record_parked_work_count(&metrics, "turn", "replay_divergence", 0);
+        record_parked_work_oldest_age(&metrics, "turn", 0);
+        record_generation_drain_work(&metrics, "012345abcdef", "in_flight_turns", 0);
+        assert_eq!(observed.counter_value("lash.parked_work.count"), 2);
+        assert_eq!(observed.counter_value("lash.parked_work.oldest_age"), 1);
+        assert_eq!(observed.counter_value("lash.generation_drain.work"), 1);
     }
 }

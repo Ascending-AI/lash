@@ -124,6 +124,7 @@ impl AdmittedRoot {
                 admitted_generation: stamp.clone(),
                 executor: crate::store::RootExecutor::Root,
                 plugins: Default::default(),
+                trace_anchor: Default::default(),
             })
             .await
             .expect("admit the root")

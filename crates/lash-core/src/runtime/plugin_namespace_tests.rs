@@ -218,6 +218,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
     assert_eq!(restores.load(std::sync::atomic::Ordering::SeqCst), 1);
     drop(runtime);
     parent
+        .dispatch(None)
         .before_turn(crate::plugin::TurnHookContext {
             session_id: "private-parent".into(),
             state: crate::plugin::SessionReadView::from_persisted_state(&runtime_state),

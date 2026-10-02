@@ -10,6 +10,8 @@ use lash::{
 };
 use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 
+#[path = "../../shared/attachment_acceptance.rs"]
+mod attachment_acceptance;
 mod board;
 mod chat_discard;
 mod db;
@@ -19,8 +21,6 @@ mod effect_groups;
 mod fork_compensation_tests;
 #[cfg(test)]
 mod fork_rewind_contract;
-#[path = "../../shared/prior_store_layout.rs"]
-mod prior_store_layout;
 mod raw_activities;
 mod remote_protocol;
 mod restate;
@@ -268,17 +268,6 @@ async fn async_main() -> anyhow_like::Result<()> {
     let session_owner =
         lash::persistence::LeaseOwnerIdentity::opaque(worker_id, worker_incarnation);
     let session_store_root = data_dir.join("lash-sessions");
-    prior_store_layout::refuse_prior_store_layout(
-        &data_dir,
-        &[
-            "processes.db",
-            "triggers.db",
-            "artifacts.db",
-            "process-env.db",
-            "attachments",
-        ],
-    )
-    .map_err(|refusal| refusal.to_string())?;
     preflight_or_exit(&session_store_root).await?;
     std::fs::create_dir_all(&session_store_root)
         .map_err(|err| format!("create session store root: {err}"))?;
@@ -564,34 +553,14 @@ async fn drain(core: &lash::LashCore, provider: &ProviderHandle) -> anyhow_like:
 }
 
 fn service_attachment_acceptance() -> lash::provider::AttachmentCapabilitySnapshot {
-    use lash::provider::{
-        AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
-        AttachmentMimeSource,
-    };
-    // This example host owns its model catalogue and revision. Existing sessions
-    // retain the opening snapshot when this catalogue changes.
-    AttachmentCapabilitySnapshot {
-        revision: "service-attachments-1".into(),
-        acceptors: ["OpenAI Chat Completions"]
-            .into_iter()
-            .map(|provider| AttachmentAcceptor {
-                provider: provider.into(),
-                rules: [
-                    AttachmentMimeSource::Inline,
-                    AttachmentMimeSource::Stored,
-                    AttachmentMimeSource::ExternalUrl,
-                ]
-                .into_iter()
-                .map(|source| AttachmentAcceptanceRule::Mime {
-                    source,
-                    media_types: ["image/jpeg", "image/png", "image/gif", "image/webp"]
-                        .into_iter()
-                        .map(String::from)
-                        .collect(),
-                    media_families: Vec::new(),
-                })
-                .collect(),
-            })
-            .collect(),
-    }
+    use lash::provider::AttachmentMimeSource;
+    attachment_acceptance::snapshot(
+        "service-attachments-1",
+        &[
+            AttachmentMimeSource::Inline,
+            AttachmentMimeSource::Stored,
+            AttachmentMimeSource::ExternalUrl,
+        ],
+        &["image/jpeg", "image/png", "image/gif", "image/webp"],
+    )
 }

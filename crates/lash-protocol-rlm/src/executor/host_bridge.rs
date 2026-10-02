@@ -4,10 +4,10 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 
 use lash_core::{
-    AttachmentRef, Observation, RuntimeExecutionContext, ToolExecutionGrant, TraceContext,
-    TraceEvent, facade_support::ToolChildExecutionTraceHook, facade_support::ToolInvocation,
+    AttachmentRef, Observation, RuntimeExecutionContext, ToolExecutionGrant, TraceEvent,
+    facade_support::ToolChildExecutionTraceHook, facade_support::ToolInvocation,
     facade_support::ToolInvocationReply, facade_support::TraceBranchSelection,
-    facade_support::TraceRecord, facade_support::TraceRuntimeSubject, facade_support::TraceSink,
+    facade_support::TraceRuntimeSubject,
 };
 use lash_lashlang_runtime::{
     CommandShape, ExecutionCancellation, TraceLanguageChildExecution, TraceLanguageExecution,
@@ -304,11 +304,10 @@ impl<'run> HostBridge<'run> {
 
 #[derive(Clone)]
 pub(super) struct LashlangExecutionTrace {
-    sink: std::sync::Arc<dyn TraceSink>,
+    tracing: lash_core::plugin::PluginExecutionTrace,
     /// The dialect of the *source* that ran. The substrate is the Lashlang VM
     /// under both, which is why the event and the file keep their names.
     language: &'static str,
-    base_context: TraceContext,
     identity: TraceLanguageExecutionIdentity,
     resource_call_ids: std::sync::Arc<Mutex<BTreeMap<(String, u64), lash_core::ToolCallId>>>,
     pending_resource_starts:
@@ -319,15 +318,13 @@ pub(super) struct LashlangExecutionTrace {
 
 impl LashlangExecutionTrace {
     pub(super) fn new(
-        sink: std::sync::Arc<dyn TraceSink>,
+        tracing: lash_core::plugin::PluginExecutionTrace,
         language: &'static str,
-        base_context: TraceContext,
         identity: TraceLanguageExecutionIdentity,
     ) -> Self {
         Self {
-            sink,
+            tracing,
             language,
-            base_context,
             identity,
             resource_call_ids: std::sync::Arc::default(),
             pending_resource_starts: std::sync::Arc::default(),
@@ -382,22 +379,24 @@ impl LashlangExecutionTrace {
     }
 
     pub(super) fn emit(&self, event: TraceLanguageExecution) {
-        let mut context = self.base_context.clone();
-        context.session_id = self.identity.scope.session_id.clone();
-        context.turn_id = self.identity.scope.turn_id.clone();
-        context.turn_index = self.identity.scope.turn_index;
-        context.protocol_iteration = self.identity.scope.protocol_iteration;
-        if let TraceRuntimeSubject::Effect { effect_id, .. } = &self.identity.subject {
-            context.effect_id = Some(effect_id.clone());
-        }
-        context.graph_node_id = language_event_node_id(&event.payload).map(str::to_string);
-        let _ = self.sink.append(&TraceRecord::new(
-            context,
-            TraceEvent::LanguageExecution {
-                language: self.language.to_string(),
-                event,
-            },
-        ));
+        self.tracing.observe_language(&event.event_key, || {
+            let mut context = self.tracing.trace_runtime().base_context().clone();
+            context.session_id = self.identity.scope.session_id.clone();
+            context.turn_id = self.identity.scope.turn_id.clone();
+            context.turn_index = self.identity.scope.turn_index;
+            context.protocol_iteration = self.identity.scope.protocol_iteration;
+            if let TraceRuntimeSubject::Effect { effect_id, .. } = &self.identity.subject {
+                context.effect_id = Some(effect_id.clone());
+            }
+            context.graph_node_id = language_event_node_id(&event.payload).map(str::to_string);
+            (
+                context,
+                TraceEvent::LanguageExecution {
+                    language: self.language.to_string(),
+                    event: event.clone(),
+                },
+            )
+        });
     }
 
     fn emit_waiting(

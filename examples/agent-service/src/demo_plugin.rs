@@ -339,6 +339,7 @@ mod tests {
             authority: Default::default(),
             input: "observe the board".to_string(),
             created_at_ms: 1,
+            trace_cause: Default::default(),
         };
         double
             .stores()

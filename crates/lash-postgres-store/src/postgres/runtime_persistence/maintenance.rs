@@ -30,7 +30,7 @@ impl StoreMaintenance for PostgresStore {
 
 impl PostgresStore {
     async fn vacuum_tombstones(&self, session_id: &SessionId) -> Result<VacuumReport, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         // `lash_deleted_sessions` is deliberately exempt: it is permanent
         // identity evidence and must survive every retention-pruning pass (FIG-754 / FIG-748).
@@ -82,7 +82,7 @@ impl PostgresStore {
         })
     }
     async fn gc_unreachable_blobs(&self) -> Result<GcReport, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         // A host collection is what ends `until_gc`'s hold: release every
         // revision no head, pin or retention window keeps, in a transaction
         // of its own. It takes revision and node locks, which a commit takes

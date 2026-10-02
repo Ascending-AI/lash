@@ -636,7 +636,7 @@ where
                 })
             })
             .await?;
-            if recorded_signal != signal {
+            if !recorded_signal.same_signal(&signal) {
                 return Err(RuntimeEffectControllerError::new(
                     RuntimeErrorCode::EffectReplayDivergence,
                     format!(
@@ -825,17 +825,11 @@ where
             let stores = lash_core::runtime::ProcessStartStores {
                 registry: registry.as_ref(),
                 env_store: process_env_store.as_ref(),
-                engines: process_engines.as_ref(),
-                engines_required: true,
+                engines: &process_engines,
                 executor: "Restate process start",
                 starter: &starter,
-                session_catalog: lash_core::runtime::HostStartAdmission::catalog(
-                    host_start.as_deref(),
-                ),
-                session_turn_admission:
-                    lash_core::runtime::HostStartAdmission::session_turn_admission(
-                        host_start.as_deref(),
-                    ),
+                session_catalog: host_start.session_catalog.as_deref(),
+                session_turn_admission: host_start.session_turn_admission.as_ref(),
                 trigger_route: trigger_route.as_ref(),
             };
             match lash_core::runtime::register_process_start(

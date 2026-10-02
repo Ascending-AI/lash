@@ -920,17 +920,7 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                                 &occurrence_id,
                             ));
                         }
-                        let record = lash_core_execution::TriggerOccurrenceRecord {
-                            occurrence_id: occurrence_id.clone(),
-                            source_type: request.source_type,
-                            source_key: request.source_key,
-                            payload: request.payload,
-                            idempotency_key: request.idempotency_key,
-                            source: request.source,
-                            session_id: request.session_id,
-                            outcome: request.outcome,
-                            occurred_at_ms,
-                        };
+                        let record = request.into_record(occurrence_id.clone(), occurred_at_ms);
                         crate::conn::cached_execute(tx,
                             sql.occurrence.insert.sql(),
                             params![

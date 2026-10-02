@@ -17,6 +17,32 @@ use lash_core_execution::testing::store_fixtures::RuntimeStoreTestDriveExt as _;
 use lash_core_execution::{LeaseOwnerIdentity, TurnId};
 use lash_core_execution::{SessionCatalogStore as _, SessionHistoryStore as _};
 
+#[tokio::test(flavor = "current_thread")]
+async fn runtime_pool_failures_observe_the_injected_store_instruments() {
+    let observed = lash_core::operational_metrics::TestMetrics::install();
+    let runtime =
+        lash_core::trace::TraceRuntime::new(Arc::new(lash_core::facade_support::SystemClock));
+    let observer = StoreObserver::new(runtime.metrics().clone());
+    let pool = PgPoolOptions::new()
+        .connect_lazy("postgres://fixture:fixture@127.0.0.1:1/fixture")
+        .expect("a lazy fixture pool");
+    pool.close().await;
+    assert!(acquire_runtime_connection(&pool, &observer).await.is_err());
+    assert_eq!(
+        observed.histogram_count("lash.postgres.pool.acquire_wait.duration"),
+        1
+    );
+    assert!(
+        acquire_runtime_connection(&pool, &StoreObserver::default())
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        observed.histogram_count("lash.postgres.pool.acquire_wait.duration"),
+        1
+    );
+}
+
 async fn persisted_record_decode_store(
     storage: &PostgresStorage,
     label: &str,

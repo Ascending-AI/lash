@@ -236,7 +236,7 @@ pub(crate) struct LashProcessWorkflowImpl<R> {
     /// completes it on the stable root, and a generation lane admits only
     /// its own generation's inputs.
     route: ServiceRoute,
-    tracing: Option<lash_core::trace::TraceRuntime>,
+    tracing: Option<lash_core::facade_support::TraceRuntime>,
 }
 
 /// The parent-end delivery of a test workflow with no ingress: the registry
@@ -398,7 +398,7 @@ impl<R> LashProcessWorkflowImpl<R> {
     /// Attach the host's trace handle to every process-segment controller
     /// created by this workflow.
     #[cfg(test)]
-    pub(crate) fn with_tracing(mut self, tracing: lash_core::trace::TraceRuntime) -> Self {
+    pub(crate) fn with_tracing(mut self, tracing: lash_core::facade_support::TraceRuntime) -> Self {
         self.tracing = Some(tracing);
         self
     }
@@ -945,19 +945,7 @@ where
         };
         match parked {
             Ok(parked) => {
-                lash_core::operational_metrics::record_work_parked("process", code.as_str());
-                let park = parked.park();
-                tracing::warn!(
-                    event = "process.parked",
-                    process_id = process_id.as_str(),
-                    reason_code = code.as_str(),
-                    effect_kind = park
-                        .and_then(|park| park.reason.effect_kind())
-                        .unwrap_or_default(),
-                    attempts = park.map_or(0, |park| park.attempts),
-                    park_id = park.map_or(0, |park| park.park_id.feed_sequence()),
-                    "process parked on a replay divergence"
-                );
+                lanes::observe_refusal_park(&Default::default(), None, process_id, code, &parked);
             }
             Err(error) => tracing::error!(
                 event = "process.park_record_failed",

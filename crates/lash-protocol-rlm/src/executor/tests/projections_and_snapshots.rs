@@ -467,7 +467,7 @@ pub(super) fn a_placeholder_errors_by_name_at_touch_and_a_resupplied_binding_ser
             RlmProjectedBindings::new()
                 .bind_json("healthy", serde_json::json!("materialized tool text"))
                 .expect("bind resupplied projection"),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
         )
         .await;
         handler.close().await.expect("close the cell's handler");
@@ -1166,7 +1166,7 @@ pub(super) fn bound_variables_prompt_renders_live_globals_after_execution() {
             ),
             None,
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
         )
         .await;
         handler.close().await.expect("close the cell's handler");
@@ -1227,7 +1227,7 @@ pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
             ),
             None,
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
         )
         .await;
         handler.close().await.expect("close the cell's handler");

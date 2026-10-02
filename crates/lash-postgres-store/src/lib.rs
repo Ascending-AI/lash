@@ -33,6 +33,7 @@ use lash_sansio::SessionId;
 mod namespace;
 mod turn_cancel_closure;
 
+use lash_core_execution::facade_support::StoreObserver;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -87,14 +88,16 @@ pub(crate) fn stored_process_id(
     })
 }
 
-async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Postgres>, StoreError> {
+async fn acquire_runtime_connection(
+    pool: &PgPool,
+    observer: &StoreObserver,
+) -> Result<PoolConnection<Postgres>, StoreError> {
     #[cfg(feature = "perf-witness")]
     let perf_started_at = std::time::Instant::now();
-    let metrics_started_at = lash_core_execution::facade_support::RUNTIME_TUNING_METRICS_ENABLED
-        .then(std::time::Instant::now);
+    let metrics_started_at = observer.is_observed().then(std::time::Instant::now);
     let connection = pool.acquire().await;
     if let Some(started_at) = metrics_started_at {
-        lash_core_execution::facade_support::record_postgres_pool_acquire_wait(
+        observer.pool_acquire_wait(
             started_at.elapsed(),
             if connection.is_ok() {
                 "success"
@@ -682,6 +685,7 @@ pub struct FinalizeReport {
 #[derive(Clone)]
 pub struct PostgresStorage {
     pool: PgPool,
+    observer: StoreObserver,
     /// The random identity of the catalog this storage opened, from
     /// `lash_catalog_identity`: what a session catalog registers under with
     /// its turn-cancel-closure owner.
@@ -697,6 +701,7 @@ pub struct PostgresStore {
     #[cfg(any(test, feature = "testing"))]
     lease_clock_for_testing: Option<Arc<dyn lash_core_execution::Clock>>,
     pool: PgPool,
+    observer: StoreObserver,
     catalog_id: Arc<str>,
     fence: guarded_tx::WriterFence,
     clock: Arc<dyn lash_core_execution::Clock>,
@@ -784,6 +789,8 @@ pub struct PostgresLashlangArtifactStore {
 /// fence. `lock_timeout` caps lock waits before surfacing retryable contention.
 #[derive(Clone, Debug)]
 pub struct PostgresStoreConfig {
+    /// Physical resource observations, using the same handle as every store backend.
+    pub observer: StoreObserver,
     /// Maximum connections across every store component using this pool.
     /// Open one storage per process and clone it for its components.
     pub max_connections: u32,
@@ -812,6 +819,7 @@ pub struct PostgresStoreConfig {
 impl Default for PostgresStoreConfig {
     fn default() -> Self {
         Self {
+            observer: StoreObserver::default(),
             max_connections: 16,
             min_connections: 0,
             acquire_timeout: Duration::from_secs(30),
@@ -879,6 +887,7 @@ impl PostgresStorage {
             ensure_schema(&pool, config.schema_check, writable).await?;
         Ok(Self {
             pool,
+            observer: config.observer,
             catalog_id: catalog_id.into(),
             fence: guarded_tx::WriterFence::new(writable, fleet_format),
         })
@@ -1044,9 +1053,8 @@ impl PostgresStorage {
     /// Build storage over an already-constructed pool, choosing how a structural
     /// mismatch is handled.
     ///
-    /// Only [`PostgresStoreConfig::schema_check`] is read: the pool already
-    /// exists, so its sizing and per-connection timeouts were fixed by whoever
-    /// built it.
+    /// Schema policy and the neutral resource observer come from `config`.
+    /// The existing pool keeps its sizing and connection timeouts.
     pub async fn from_pool_with(
         pool: PgPool,
         config: PostgresStoreConfig,
@@ -1056,6 +1064,7 @@ impl PostgresStorage {
             ensure_schema(&pool, config.schema_check, writable).await?;
         Ok(Self {
             pool,
+            observer: config.observer,
             catalog_id: catalog_id.into(),
             fence: guarded_tx::WriterFence::new(writable, fleet_format),
         })
@@ -1080,6 +1089,7 @@ impl PostgresStorage {
             ensure_schema(&pool, config.schema_check, writable).await?;
         Ok(Self {
             pool,
+            observer: config.observer,
             catalog_id: catalog_id.into(),
             fence: guarded_tx::WriterFence::new(writable, fleet_format),
         })
@@ -1116,6 +1126,7 @@ impl PostgresStorage {
         };
         Ok(Self {
             pool,
+            observer: StoreObserver::default(),
             catalog_id: catalog_id.into(),
             fence: guarded_tx::WriterFence::new(
                 lash_core_execution::FleetFormat::writable(),
@@ -1322,6 +1333,7 @@ impl PostgresStorage {
     pub fn store(&self) -> PostgresStore {
         PostgresStore {
             pool: self.pool.clone(),
+            observer: self.observer.clone(),
             catalog_id: Arc::clone(&self.catalog_id),
             fence: self.fence.clone(),
             #[cfg(any(test, feature = "testing"))]
@@ -1416,12 +1428,17 @@ impl PostgresStorage {
     ) -> Arc<dyn lash_core_execution::store::ObligationLedger> {
         // Ingress spans two tables (ADR 0109 §3).
         if kind == lash_core_execution::store::ObligationKind::Ingress {
-            return crate::ingress_obligation::ingress_ledger(&self.pool, &self.fence);
+            return crate::ingress_obligation::ingress_ledger(
+                &self.pool,
+                &self.fence,
+                &self.observer,
+            );
         }
         Arc::new(crate::obligation_ledger::PostgresObligationLedger::new(
             kind,
             self.pool.clone(),
             self.fence.clone(),
+            self.observer.clone(),
         ))
     }
 
@@ -1430,6 +1447,7 @@ impl PostgresStorage {
             lash_core_execution::store::ObligationKind::ArtifactCleanup,
             self.pool.clone(),
             self.fence.clone(),
+            self.observer.clone(),
         ))
     }
 

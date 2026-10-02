@@ -312,6 +312,7 @@ impl LashRuntime {
         }
         session
             .plugins()
+            .dispatch(None)
             .emit_runtime_event(crate::PluginLifecycleEvent::SessionRestored(
                 crate::SessionReadView::from_persisted_state(&state),
             ))
@@ -690,7 +691,7 @@ impl LashRuntime {
         // A write outside every drive: the store refuses it while a drive
         // owns the head (FIG-4202).
         let result = store
-            .commit_runtime_state_verified(commit)
+            .commit_runtime_state_verified(commit, self.host.core.tracing.metrics(), None)
             .await
             .map_err(|source| session_commit_error("failed to persist runtime state", source))?;
         flushed.apply_persisted_commit_result(result);

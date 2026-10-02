@@ -577,3 +577,31 @@ fn pending_operation_law_has_a_tagged_site_and_operands() {
         assert!(serde_json::from_value::<VmContinuation>(corrupted).is_err());
     }
 }
+
+#[test]
+fn execution_nonces_follow_the_recorded_splitmix64_identity() {
+    for (seed, expected) in [(0, 0xe220_a839_7b1d_cdafu64), (1, 0x910a_2dec_8902_5cc1)] {
+        assert_eq!(mint_execution_nonce(seed), expected);
+    }
+    let nonces = (0..4096)
+        .map(mint_execution_nonce)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(nonces.len(), 4096);
+}
+
+#[test]
+fn frame_depth_counts_parked_callers() {
+    let mut continuation = empty_continuation(Heap::default());
+    for depth in 0..=2 {
+        assert_eq!(continuation.frame_depth(), depth);
+        continuation.frame_stack.push(VmFrameContinuation {
+            return_instruction_pointer: 0,
+            function: None,
+            operand_stack_base: 0,
+            slots: Vec::new(),
+            globals: Record::new(),
+            iterator_stack: Vec::new(),
+            return_target: VmFrameReturnContinuation::Direct,
+        });
+    }
+}

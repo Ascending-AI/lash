@@ -252,7 +252,8 @@ pub(super) fn turn_effect_executor(
             driver.turn_pipeline.state().turn_scope(&driver.turn_id),
             driver.host.core.durability.commit_budget,
         )
-        .with_definition_engines(driver.host.core.process_engines.clone()),
+        .with_definition_engines(driver.host.core.process_engines.clone())
+        .with_metrics(driver.host.core.tracing.metrics().clone()),
         latest_prompt_usage: driver.latest_prompt_usage.clone(),
         llm_calls: Vec::new(),
         failure_evidence: Vec::new(),

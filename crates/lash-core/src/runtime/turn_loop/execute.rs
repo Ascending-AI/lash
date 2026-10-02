@@ -214,7 +214,8 @@ impl LashRuntime {
             turn_scope_id,
         } = context;
         self.mark_phase_begin(RuntimeTurnPhase::BeforeTurnHooks);
-        let prepare_turn = plugins.prepare_turn_with_phase_probe(
+        let dispatch = plugins.dispatch(self.turn_phase_probe.as_ref());
+        let prepare_turn = dispatch.prepare_turn(
             PrepareTurnRequest {
                 session_id: self.state.session_id.clone(),
                 state: crate::SessionReadView::from_runtime_state(
@@ -227,7 +228,6 @@ impl LashRuntime {
                 session_graph: manager.graph_service(),
                 turn_context: turn_context.clone(),
             },
-            self.turn_phase_probe.clone(),
             turn_scope_id,
         );
         let prepared = Box::pin(prepare_turn)
@@ -267,7 +267,8 @@ impl LashRuntime {
             self.host.core.durability.commit_budget,
             turn_graph_appends,
         )
-        .with_definition_engines(self.host.core.process_engines.clone());
+        .with_definition_engines(self.host.core.process_engines.clone())
+        .with_metrics(self.host.core.tracing.metrics().clone());
         turn_pipeline.apply_prepared_messages(&prepared.messages);
         hold_terminal_sequence(
             &mut recorded_assembly,
@@ -423,7 +424,8 @@ impl LashRuntime {
             self.host.core.durability.commit_budget,
             turn_graph_appends.clone(),
         )
-        .with_definition_engines(self.host.core.process_engines.clone());
+        .with_definition_engines(self.host.core.process_engines.clone())
+        .with_metrics(self.host.core.tracing.metrics().clone());
         if let Err(error) = turn_pipeline
             .prepared_checkpoint(
                 turn_policy.clone(),

@@ -213,6 +213,7 @@ impl SessionBuilder {
             live_replay_store,
             Arc::clone(&self.core.env.core.providers.models),
             self.core.backend.usage_accounting(),
+            Arc::clone(self.core.env.core.tracing.scopes()),
         )
     }
 
@@ -280,6 +281,7 @@ impl SessionBuilder {
         let plugin_host = build_plugin_host(
             self.core.protocol_factory.as_ref(),
             self.core.plugin_factories.as_ref(),
+            &self.core.env.core.tracing,
         )?;
         // Creation is an adoption point of its own (FIG-4747): the created
         // head's namespaces are written in the formats the fleet record
@@ -351,6 +353,7 @@ impl SessionBuilder {
             catalog,
             Arc::clone(&self.core.env.core.providers.models),
             self.core.backend.usage_accounting(),
+            Arc::clone(self.core.env.core.tracing.scopes()),
         ))
     }
 
@@ -486,6 +489,7 @@ impl SessionBuilder {
         let plugin_host = build_plugin_host(
             self.core.protocol_factory.as_ref(),
             self.core.plugin_factories.as_ref(),
+            &self.core.env.core.tracing,
         )?;
         env.core = plugin_host.install_process_engine_contributions(
             env.core.clone(),
@@ -1101,6 +1105,7 @@ impl LashSession {
             self.binding.catalog(),
             self.binding.llm_profiles(),
             self.binding.usage_accounting(),
+            self.binding.trace_scopes(),
         )
     }
 
@@ -1153,6 +1158,8 @@ impl LashSession {
         Ok(runtime.reconcile_unreported_usage().await?)
     }
 
+    /// Install explicitly unstable internal instrumentation for this runtime.
+    #[doc(hidden)]
     pub async fn set_turn_phase_probe(
         &self,
         probe: Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe>,

@@ -407,7 +407,7 @@ pub(crate) fn recorded_test_render() -> lash_core::RecordedRender {
 
 // The executor's TypeScript entry points for cell-level tests: each runs one
 // cell under the TypeScript dialect a host would select.
-use crate::executor::{RlmExecutionState, RlmLashlangExecutionTraceConfig};
+use crate::executor::RlmExecutionState;
 use crate::projection::RlmProjectedBindings;
 use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext};
 use lash_lashlang_runtime::LashlangSurface;
@@ -421,7 +421,7 @@ pub(crate) async fn execute_code_unbounded_for_tests(
     lashlang_surface: LashlangSurface,
     deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
     session_projected_bindings: RlmProjectedBindings,
-    lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
+    execution_trace: Option<lash_core::plugin::PluginExecutionTrace>,
 ) -> ExecResponse {
     Box::pin(execute_code_with_bounds(
         state,
@@ -431,7 +431,7 @@ pub(crate) async fn execute_code_unbounded_for_tests(
         lashlang_surface,
         deferred_tool_resolver,
         session_projected_bindings,
-        lashlang_execution_trace_config,
+        execution_trace,
         lashlang::ExecutionBounds::unbounded(),
     ))
     .await
@@ -446,7 +446,7 @@ pub(crate) async fn execute_code_with_bounds(
     lashlang_surface: LashlangSurface,
     deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
     session_projected_bindings: RlmProjectedBindings,
-    lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
+    execution_trace: Option<lash_core::plugin::PluginExecutionTrace>,
     execution_bounds: lashlang::ExecutionBounds,
 ) -> ExecResponse {
     Box::pin(execute_code_with_channel_and_bounds(
@@ -457,7 +457,7 @@ pub(crate) async fn execute_code_with_bounds(
         lashlang_surface,
         deferred_tool_resolver,
         session_projected_bindings,
-        lashlang_execution_trace_config,
+        execution_trace,
         execution_bounds,
         crate::plugin::RlmChannel::Cell,
         crate::render::CodeRendererSlot::default(),
@@ -474,11 +474,15 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
     lashlang_surface: LashlangSurface,
     deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
     session_projected_bindings: RlmProjectedBindings,
-    lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
+    execution_trace: Option<lash_core::plugin::PluginExecutionTrace>,
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
     code_renderer: crate::render::CodeRendererSlot,
 ) -> ExecResponse {
+    let ctx = match execution_trace {
+        Some(trace) => ctx.with_trace_standing(trace.into_standing()),
+        None => ctx,
+    };
     Box::pin(
         crate::executor::execute_code_with_channel_and_bounds_with_trigger_resolver(
             &crate::dialect::TypescriptDialect,
@@ -490,7 +494,6 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
             deferred_tool_resolver,
             None,
             session_projected_bindings,
-            lashlang_execution_trace_config,
             execution_bounds,
             channel,
             code_renderer,

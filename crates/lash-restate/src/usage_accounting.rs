@@ -340,9 +340,11 @@ pub(crate) async fn retire_root_usage(
     namespace: &crate::RestateNamespace,
     session: &lash_core::SessionId,
     root: &lash_core::TurnId,
-) -> Result<u64, String> {
+) -> Result<u64, lash_core::engine::EngineRefusal> {
     let scope = lash_core::ExecutionScope::turn(session.clone(), root.clone());
-    let key = execution_scope_key(&scope).map_err(|error| error.to_string())?;
+    let key = execution_scope_key(&scope).map_err(|error| {
+        lash_core::engine::EngineRefusal::from(lash_core::PluginError::Runtime(error))
+    })?;
     retire_usage_execution(
         ingress,
         namespace,
@@ -350,7 +352,7 @@ pub(crate) async fn retire_root_usage(
         &key,
     )
     .await
-    .map_err(|error| error.to_string())
+    .map_err(crate::session_control::refusal)
 }
 
 /// Resolve the open runs of a process's lost execution under its process
@@ -360,9 +362,11 @@ pub(crate) async fn retire_process_usage(
     ingress: &crate::RestateIngressClient,
     namespace: &crate::RestateNamespace,
     process_id: &lash_core::ProcessId,
-) -> Result<u64, String> {
+) -> Result<u64, lash_core::engine::EngineRefusal> {
     let scope = lash_core::ExecutionScope::process(process_id.clone());
-    let key = execution_scope_key(&scope).map_err(|error| error.to_string())?;
+    let key = execution_scope_key(&scope).map_err(|error| {
+        lash_core::engine::EngineRefusal::from(lash_core::PluginError::Runtime(error))
+    })?;
     retire_usage_execution(
         ingress,
         namespace,
@@ -370,5 +374,5 @@ pub(crate) async fn retire_process_usage(
         &key,
     )
     .await
-    .map_err(|error| error.to_string())
+    .map_err(crate::session_control::refusal)
 }

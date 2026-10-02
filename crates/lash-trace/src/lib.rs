@@ -11,8 +11,8 @@
 //!
 //! [`JsonlTraceSink`] writes one JSON line per record at schema
 //! [`TRACE_SCHEMA_VERSION`]; [`TeeTraceSink`] fans out to several sinks; and the
-//! optional `otel` feature adds an `OtelTraceSink` that converts each record to
-//! an OpenTelemetry span. This is the *durable diagnostics* reporting channel —
+//! optional `otel` feature adds `otel::OtelTelemetry`, which projects permitted
+//! domain completions under retained admission anchors. This is the *durable diagnostics* reporting channel —
 //! distinct from the app-facing `TurnActivity` stream and the low-level
 //! `SessionStreamEvent` stream that the runtime crates expose.
 //!
@@ -74,8 +74,8 @@ pub use telemetry::{
     InvalidTraceLinks, TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT,
     TraceAdmissionCandidate, TraceAnchor, TraceAttemptId, TraceCandidateOutcome, TraceCarrier,
     TraceCause, TraceDomainProjector, TraceLinks, TraceRecordIdentity, TraceScopeAdmission,
-    TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOwner, TraceTransitionKind,
-    UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
+    TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOffer, TraceScopeOwner,
+    TraceTransitionKind, UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
 };
 
 /// Version of the durable trace JSONL schema, written to
