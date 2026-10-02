@@ -30,7 +30,7 @@ const CATALOG = [
     id: 'effect.sleep',
     label: 'Sleep',
     nodeKind: 'effect',
-    effect: 'sleep',
+    effect: 'sleep_for',
     fields: [{ name: 'duration', type: 'number', default: { kind: 'number', value: 5 } }],
   },
 ];
@@ -79,7 +79,7 @@ describe('operationSwitchPatch', () => {
 
   it('rebuilds an effect and clears any seeded expression', () => {
     const patch = operationSwitchPatch('effect', CATALOG[2]);
-    expect(patch.effect).toBe('sleep');
+    expect(patch.effect).toBe('sleep_for');
     expect(patch.clearExpression).toBe(true);
     expect(patch.operation).toBeUndefined();
     expect(patch.fields).toEqual({ duration: { kind: 'number', value: 5 } });
@@ -98,7 +98,7 @@ describe('operationsForKind / currentOperationId', () => {
   it('matches the entry a node currently uses', () => {
     const callNode = { data: { kind: 'call', operation: 'record' } };
     expect(currentOperationId(CATALOG, callNode)).toBe('call.record');
-    const effectNode = { data: { kind: 'effect', effect: 'sleep' } };
+    const effectNode = { data: { kind: 'effect', effect: 'sleep_for' } };
     expect(currentOperationId(CATALOG, effectNode)).toBe('effect.sleep');
     const unknown = { data: { kind: 'call', operation: 'nope' } };
     expect(currentOperationId(CATALOG, unknown)).toBeNull();

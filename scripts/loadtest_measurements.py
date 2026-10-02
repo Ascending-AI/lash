@@ -9,13 +9,7 @@ from pathlib import Path
 import re
 
 TERMINAL = {'answered', 'failed', 'cancelled', 'completed'}
-WITNESS_CLASSES = ('turns', 'cells', 'provider-retries', 'tools', 'child-processes', 'host-processes',
-                   'host-signals', 'host-cancels', 'queued-inputs', 'queued-cancels', 'turn-cancels',
-                   'deletes', 'attachment-puts', 'attachment-reads', 'shared-attachments', 'peer-reads',
-                   'cron-setup', 'cron-ticks', 'cron-closed-after-delete',
-                   'provider-streams', 'history-prefill', 'admin-compaction', 'context-pressure',
-                   'auxiliary-requests', 'external-occurrences', 'trigger-edits', 'promotion-reads')
-FAULT_CLASSES = ('fault-campaign', 'worker-kill', 'restate-restart', 'rolling-deploy')
+from loadtest_ledger import WITNESS_CLASSES, FAULT_CLASSES, require_pair
 OUTCOMES = TERMINAL | {'parked', 'stalled', 'unrecognized', 'timeout', 'client_error'}
 LEDGERS = {'witness_load_events', 'witness_provider_receipts', 'witness_effect_attempts',
            'witness_effect_commits', 'witness_effect_replies', 'witness_load_faults'}
@@ -274,9 +268,10 @@ def normalize_fault_rows(rows, anchors, run):
     normalized = []
     seen = set()
     for row in rows:
+        require_pair('faults', row['kind'], row['phase'])
         require(row['fault_event_id'] not in seen, 'duplicate fault event')
         seen.add(row['fault_event_id'])
-        identity = f"{row['fault_id']}/{row['phase']}/{row['fault_event_id']}"
+        identity = f"{row['kind']}/{row['phase']}/{row['fault_event_id']}"
         require(row['run_id'] == run, 'mixed fault run identities')
         anchor = index.get(str(row['fault_event_id']))
         if anchor is None:
@@ -300,8 +295,7 @@ def normalize_fault_rows(rows, anchors, run):
             errors.append(identity + ': normalization precedes driver origin within its bound')
             continue
         detail = json.loads(row['detail_json'])
-        result = dict(schema_version=1, run=run, id=identity, fault_id=row['fault_id'],
-                      kind=row['kind'], phase=row['phase'], clock='driver_monotonic_ns',
+        result = dict(schema_version=1, run=run, id=identity, kind=row['kind'], phase=row['phase'], clock='driver_monotonic_ns',
                       anchor_id=anchor['id'], monotonic_ns=instant, clock_bounds_ns=bounds,
                       clock_uncertainty_ns=uncertainty, detail=detail)
         if row['phase'] == 'recovered':
@@ -336,7 +330,7 @@ def recovery_inputs(rows, anchors, run, operations, verdict):
     by_fault = defaultdict(dict)
     for row in normalized:
         if row['kind'] != 'campaign':
-            by_fault[row['fault_id']][row['phase']] = row
+            by_fault[row['kind']][row['phase']] = row
     faults = []
     for key, phases in by_fault.items():
         if not {'injected', 'recovered'} <= phases.keys():
@@ -474,9 +468,9 @@ def collection_gaps(run, sample_errors, normalized_faults):
     phases = defaultdict(dict)
     for row in normalized_faults:
         if row['kind'] != 'campaign':
-            phases[row['fault_id']][row['phase']] = row
+            phases[row['kind']][row['phase']] = row
     windows = []
-    for fault_id, rows in phases.items():
+    for kind, rows in phases.items():
         if not {'injected', 'recovered'} <= rows.keys():
             continue
         injection, recovery = rows['injected'], rows['recovered']
@@ -488,7 +482,7 @@ def collection_gaps(run, sample_errors, normalized_faults):
         targets = injection['detail'].get('collection_targets', [])
         targets = [target for target in targets if target.get('component') == component]
         if start <= end and component is not None:
-            windows.append(dict(fault_id=fault_id, window_ns=[start, end], targets=targets,
+            windows.append(dict(kind=kind, window_ns=[start, end], targets=targets,
                                 anchor_ids=[injection['anchor_id'], recovery['anchor_id']]))
     gaps = []
     for row in sample_errors:

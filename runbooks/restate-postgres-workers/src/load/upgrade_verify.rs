@@ -24,13 +24,18 @@
 //!   and N's operator refused it.
 
 use super::fault_verify::{Timeline, campaign_outcome, moved_to, timelines, verify_injection};
+use super::ledger::{FaultFamily, FaultKind};
 use super::verify::WitnessSnapshot;
 use lash_perf::workload::OperationId;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
 /// The steps, in the order the campaign must run them.
-const UPGRADE_STEPS: [&str; 5] = ["half-roll", "rollback", "roll", "finalize", "fence"];
+fn upgrade_steps() -> Vec<&'static str> {
+    FaultKind::steps(FaultFamily::Upgrade)
+        .map(FaultKind::as_str)
+        .collect()
+}
 
 /// The sessions (load actors) that sent a turn before `at`.
 fn sessions_before(timelines: &[Timeline<'_>], at: i64) -> BTreeSet<u64> {
@@ -75,12 +80,15 @@ pub(super) fn verify_upgrade(
     let timelines = timelines(snapshot);
     note("upgrade-campaign", campaign_outcome(snapshot));
     for row in &snapshot.faults {
-        if row.kind != "campaign" && !UPGRADE_STEPS.contains(&row.kind.as_str()) {
+        if row.evidence.kind().as_str() != "campaign"
+            && !upgrade_steps().contains(&row.evidence.kind().as_str())
+        {
             note(
                 "upgrade-campaign",
                 Err(format!(
                     "step `{}` has unknown kind `{}`",
-                    row.fault_id, row.kind
+                    row.evidence.kind().as_str(),
+                    row.evidence.kind().as_str()
                 )),
             );
         }
@@ -88,10 +96,9 @@ pub(super) fn verify_upgrade(
     // Each build's drain generation, as the half roll recorded them.
     let mut generations: Option<(Value, Value)> = None;
     let mut previous: Option<(&str, i64)> = None;
-    for step in UPGRADE_STEPS {
-        let Some((injected, recovered)) =
-            verify_injection(step, step, step, snapshot, &timelines, note)
-        else {
+    for kind in super::ledger::FaultKind::steps(super::ledger::FaultFamily::Upgrade) {
+        let step = kind.as_str();
+        let Some((injected, recovered)) = verify_injection(kind, snapshot, &timelines, note) else {
             continue;
         };
         let at = injected.recorded_at_us;
@@ -211,17 +218,15 @@ pub(super) fn verify_upgrade(
 #[cfg(test)]
 mod tests {
     use super::super::verify::tests::{ideal, smoke, verdict, violated};
-    use super::super::verify::{CLASSES, FaultRow, UPGRADE_CLASSES, WitnessSnapshot};
-    use super::UPGRADE_STEPS;
+    use super::super::verify::{CLASSES, FaultLedgerRow, WitnessSnapshot, upgrade_classes};
+    use super::upgrade_steps;
     use crate::load::LoadContext;
     use lash_perf::workload::OperationId;
     use serde_json::{Value, json};
 
-    fn row(fault_id: &str, kind: &str, phase: &str, detail: Value, at: i64) -> FaultRow {
-        FaultRow {
-            fault_id: fault_id.to_owned(),
-            kind: kind.to_owned(),
-            phase: phase.to_owned(),
+    fn row(kind: &str, phase: &str, detail: Value, at: i64) -> FaultLedgerRow {
+        FaultLedgerRow {
+            evidence: format!("{kind}:{phase}").parse().expect("valid fault pair"),
             target: format!("{kind}-target"),
             detail,
             recorded_at_us: at,
@@ -278,18 +283,20 @@ mod tests {
         let mut keys = vec![(u64::MAX, u64::MAX); snapshot.events.len()];
         let mut previous = None;
         for (index, event) in snapshot.events.iter().enumerate() {
-            if event.operation == "turn" {
+            if event.evidence.operation() == "turn" {
                 previous = Some(turn_key(&event.subject));
             }
-            if event.operation == "turn" || event.operation == "delete-session" {
+            if event.evidence.operation() == "turn"
+                || event.evidence.operation() == "delete-session"
+            {
                 keys[index] = previous.expect("a turn precedes its delete");
             }
         }
         let mut next = None;
         for (index, event) in snapshot.events.iter().enumerate().rev() {
-            if event.operation == "turn" {
+            if event.evidence.operation() == "turn" {
                 next = Some(turn_key(&event.subject));
-            } else if event.operation == "attachment" {
+            } else if event.evidence.operation() == "attachment" {
                 keys[index] = next.expect("a turn follows its attachments");
             }
         }
@@ -313,37 +320,32 @@ mod tests {
         let workers: Vec<&str> = workers.iter().map(String::as_str).collect();
         snapshot.faults.push(row(
             "campaign",
-            "campaign",
             "started",
             json!({ "campaign": "rolling-upgrade" }),
             -1,
         ));
-        for (round, step) in UPGRADE_STEPS.iter().enumerate() {
+        for (round, step) in upgrade_steps().iter().enumerate() {
             let sent = snapshot
                 .events
                 .iter()
                 .find(|event| {
-                    event.operation == "turn"
-                        && event.phase == "sent"
+                    event.evidence.operation() == "turn"
+                        && event.evidence.phase() == "sent"
                         && turn_key(&event.subject) == (round as u64, 0)
                 })
                 .expect("session 0's turn of the round")
                 .recorded_at_us;
             let at = sent + 5;
             let (injected, recovered) = details(step, &workers);
+            snapshot.faults.push(row(step, "intent", json!({}), at - 1));
+            snapshot.faults.push(row(step, "injected", injected, at));
             snapshot
                 .faults
-                .push(row(step, step, "intent", json!({}), at - 1));
-            snapshot
-                .faults
-                .push(row(step, step, "injected", injected, at));
-            snapshot
-                .faults
-                .push(row(step, step, "recovered", recovered, at + 1));
+                .push(row(step, "recovered", recovered, at + 1));
         }
         snapshot
             .faults
-            .push(row("campaign", "campaign", "complete", json!({}), end));
+            .push(row("campaign", "complete", json!({}), end));
         snapshot
     }
 
@@ -351,7 +353,7 @@ mod tests {
         snapshot
             .faults
             .iter()
-            .position(|row| row.kind == kind && row.phase == phase)
+            .position(|row| row.evidence.kind().as_str() == kind && row.evidence.phase() == phase)
             .expect("a step row")
     }
 
@@ -359,8 +361,11 @@ mod tests {
     fn a_correct_rolling_upgrade_witnesses_every_upgrade_class() {
         let correct = verdict(&campaign(&smoke()));
         assert!(correct.passed(), "{:?}", correct.lines());
-        assert_eq!(correct.classes.len(), CLASSES.len() + UPGRADE_CLASSES.len());
-        for class in UPGRADE_CLASSES {
+        assert_eq!(
+            correct.classes.len(),
+            CLASSES.len() + upgrade_classes().len()
+        );
+        for class in upgrade_classes() {
             assert!(correct.classes[class].witnessed > 0, "{class}");
         }
 
@@ -443,8 +448,8 @@ mod tests {
             .events
             .iter()
             .filter(|event| {
-                event.operation == "turn"
-                    && event.phase == "sent"
+                event.evidence.operation() == "turn"
+                    && event.evidence.phase() == "sent"
                     && event.recorded_at_us > at
                     && OperationId::parse(&event.subject).is_ok_and(|(id, _)| id.actor == 0)
             })
@@ -452,8 +457,8 @@ mod tests {
             .collect();
         assert!(!quiet.is_empty(), "session 0 sends after the roll");
         for event in &mut silent.events {
-            if event.operation == "turn"
-                && event.phase == "terminal"
+            if event.evidence.operation() == "turn"
+                && event.evidence.phase() == "terminal"
                 && quiet.contains(&event.subject)
             {
                 event.detail = json!({ "error": "HTTP 503" });
@@ -475,7 +480,9 @@ mod tests {
 
         // A step the campaign skipped has no evidence.
         let mut skipped = base.clone();
-        skipped.faults.retain(|row| row.kind != "fence");
+        skipped
+            .faults
+            .retain(|row| row.evidence.kind().as_str() != "fence");
         let skipped = verdict(&skipped);
         assert!(!skipped.passed());
         assert_eq!(skipped.classes["fence"].witnessed, 0);
@@ -483,7 +490,6 @@ mod tests {
         // The controller gave up on a step.
         let mut failed = base.clone();
         failed.faults.push(row(
-            "roll",
             "roll",
             "failed",
             json!({ "reason": "drain watchdog" }),

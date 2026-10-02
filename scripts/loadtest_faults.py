@@ -39,6 +39,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Callable
+from loadtest_ledger import require_pair
 
 # How long a fault may wait for a busy target, and for its recovery. The
 # recovery watchdog is the workload's drain timeout: a test timeout, not a
@@ -275,7 +276,7 @@ class Campaign:
         raise RuntimeError(f'no Restate node answered `{query}`: {last}')
 
     def restart_in_place(self, pod: str, container: str, process: str, signal: str,
-                         fault_id: str, delay_s: int) -> None:
+                         kind: str, delay_s: int) -> None:
         """Leave the restart hold, then signal the container's main process.
         The exec dies with the container, so its exit status is not checked:
         the pod's container status is the evidence."""
@@ -284,22 +285,23 @@ class Campaign:
                   'if [ "$(cat "$entry/comm" 2>/dev/null)" = "$3" ]; then kill -"$4" "${entry#/proc/}"; fi; '
                   'done')
         self.cluster.kubectl('exec', pod, '-c', container, '--', 'sh', '-c', script, 'fault',
-                             fault_id, str(delay_s), process, signal, check=False)
+                             kind, str(delay_s), process, signal, check=False)
 
-    def held(self, pod: str, container: str, fault_id: str) -> bool:
+    def held(self, pod: str, container: str, kind: str) -> bool:
         return self.cluster.kubectl('exec', pod, '-c', container, '--', 'test', '-e',
-                                    f'/fault/held-{fault_id}', check=False).returncode == 0
+                                    f'/fault/held-{kind}', check=False).returncode == 0
 
     # -- the witness --
 
-    def record(self, fault_id: str, kind: str, phase: str, target: str, detail: dict[str, Any]) -> int:
+    def record(self, kind: str, phase: str, target: str, detail: dict[str, Any]) -> int:
+        require_pair('faults', kind, phase)
         rows = self.sql(
-            "INSERT INTO witness_load_faults (run_id, fault_id, kind, phase, target, detail_json) "
-            "VALUES (:'run', :'fault', :'kind', :'phase', :'target', :'detail') RETURNING recorded_at_us",
-            run=self.args.run, fault=fault_id, kind=kind, phase=phase, target=target,
+            "INSERT INTO witness_load_faults (run_id, kind, phase, target, detail_json) "
+            "VALUES (:'run', :'kind', :'phase', :'target', :'detail') RETURNING recorded_at_us",
+            run=self.args.run, kind=kind, phase=phase, target=target,
             detail=json.dumps(detail, sort_keys=True))
         at = int(rows[0][0])
-        row = {'fault_id': fault_id, 'kind': kind, 'phase': phase, 'target': target,
+        row = {'kind': kind, 'phase': phase, 'target': target,
                'recorded_at_us': at, 'detail': detail}
         with self.ledger.open('a') as ledger:
             ledger.write(json.dumps(row, sort_keys=True) + '\n')
@@ -397,14 +399,14 @@ class Campaign:
                 raise FaultFailed(f'{what} within {watchdog_s:.0f} s')
             time.sleep(POLL_S)
 
-    def recover(self, fault_id: str, injected_at: int, target_recovered: Callable[[], dict | None],
+    def recover(self, kind: str, injected_at: int, target_recovered: Callable[[], dict | None],
                 workers: list[str] | None = None) -> dict[str, Any]:
         """Wait until service and the target recovered, then hold the stable
         window; answer the recovery evidence."""
         pre_fault_max = self.backlog.pre_fault_max()
         hit = self.in_flight(injected_at)
         if not hit:
-            raise FaultFailed(f'{fault_id} missed active work: nothing was in flight at the injection')
+            raise FaultFailed(f'{kind} missed active work: nothing was in flight at the injection')
         backlog_recovered_s = None
         target_evidence: dict[str, Any] | None = None
 
@@ -414,7 +416,7 @@ class Campaign:
             flights = self.in_flight(injected_at)
             unanswered = [flight for flight in flights if flight['ended_at'] is not None and not flight['answered']]
             if unanswered:
-                raise FaultFailed(f'{fault_id} lost answers: {unanswered[:5]}')
+                raise FaultFailed(f'{kind} lost answers: {unanswered[:5]}')
             backlog = self.backlog_now()
             if backlog <= pre_fault_max and backlog_recovered_s is None:
                 backlog_recovered_s = round((now - injected_at) / 1e6, 3)
@@ -440,7 +442,7 @@ class Campaign:
                     'backlog_recovered_at_us': self.clock_us(),
                     'recovered_s': round((now - injected_at) / 1e6, 3)}
 
-        evidence = self.poll(f'{fault_id} did not recover', self.settle_s, attempt)
+        evidence = self.poll(f'{kind} did not recover', self.settle_s, attempt)
         # Stay recovered for the stable window, and record the service rate
         # and latency around the fault beside it.
         stable_from = self.clock_us()
@@ -466,18 +468,18 @@ class Campaign:
         return running[0]
 
     def worker_kill(self) -> None:
-        fault_id, kind = 'worker-kill', 'worker-kill'
+        kind = 'worker-kill'
         delay = int(self.faults['worker_restart_delay_s'])
         generation = self.targets['generation']
-        self.record(fault_id, kind, 'intent', generation,
+        self.record(kind, 'intent', generation,
                     {'due_s': self.faults['worker_kill_s'], 'restart_delay_s': delay})
         busy = self.poll('no worker ran load work', BUSY_WATCHDOG_S,
                          lambda: choose_worker(self.worker_activity(generation)))
         before = self.worker_pod(busy['index'], generation)
         pod = before['metadata']['name']
         not_before = self.clock_us()
-        self.restart_in_place(pod, 'worker', WORKER_PROCESS, 'KILL', fault_id, delay)
-        at = self.record(fault_id, kind, 'injected', pod, {
+        self.restart_in_place(pod, 'worker', WORKER_PROCESS, 'KILL', kind, delay)
+        at = self.record(kind, 'injected', pod, {
             'signal_not_before_us': not_before,
             'pod': pod, 'worker_id': busy['worker_id'], 'active': busy['active'], 'signal': 'KILL',
             'collection_targets': [{'component': 'worker',
@@ -492,18 +494,18 @@ class Campaign:
                 return None
             if not restart['same_pod']:
                 raise FaultFailed(f'worker pod {pod} was replaced instead of restarted')
-            return {**restart, 'held': self.held(pod, 'worker', fault_id)}
+            return {**restart, 'held': self.held(pod, 'worker', kind)}
 
-        evidence = self.recover(fault_id, at, target)
+        evidence = self.recover(kind, at, target)
         if not evidence['held']:
             raise FaultFailed(f'{pod} restarted without its {delay} s hold')
-        self.record(fault_id, kind, 'recovered', pod, evidence)
+        self.record(kind, 'recovered', pod, evidence)
 
     def restate_restart(self) -> None:
-        fault_id, kind = 'restate-restart', 'restate-restart'
+        kind = 'restate-restart'
         delay = int(self.faults['restate_restart_delay_s'])
         partitions = int(self.targets['partitions'])
-        self.record(fault_id, kind, 'intent', 'restate',
+        self.record(kind, 'intent', 'restate',
                     {'due_s': self.faults['restate_restart_s'], 'restart_delay_s': delay})
         state_query = ('SELECT partition_id, plain_node_id, gen_node_id, effective_mode, '
                        'leader_epoch, applied_log_lsn FROM partition_state')
@@ -517,8 +519,8 @@ class Campaign:
         chosen = self.poll('no Restate leader was processing work', BUSY_WATCHDOG_S, busy)
         before = self.cluster.json('pod', chosen.pod)
         not_before = self.clock_us()
-        self.restart_in_place(chosen.pod, 'restate', RESTATE_PROCESS, 'TERM', fault_id, delay)
-        at = self.record(fault_id, kind, 'injected', chosen.pod, {
+        self.restart_in_place(chosen.pod, 'restate', RESTATE_PROCESS, 'TERM', kind, delay)
+        at = self.record(kind, 'injected', chosen.pod, {
             'signal_not_before_us': not_before,
             'pod': chosen.pod, 'node': chosen.node, 'generation_before': chosen.generation,
             'collection_targets': [
@@ -540,12 +542,12 @@ class Campaign:
                                        self.restate(node_query, avoid=chosen.pod))
             if cluster is None:
                 return None
-            return {**restart, **cluster, 'held': self.held(chosen.pod, 'restate', fault_id)}
+            return {**restart, **cluster, 'held': self.held(chosen.pod, 'restate', kind)}
 
-        evidence = self.recover(fault_id, at, target)
+        evidence = self.recover(kind, at, target)
         if not evidence['held']:
             raise FaultFailed(f'{chosen.pod} restarted without its {delay} s hold')
-        self.record(fault_id, kind, 'recovered', chosen.pod, evidence)
+        self.record(kind, 'recovered', chosen.pod, evidence)
 
     def helm(self, overlay: dict[str, Any], label: str) -> None:
         path = self.run_dir / f'{label}-values.yaml'
@@ -570,12 +572,12 @@ class Campaign:
         return matches[0]
 
     def rolling_deploy(self) -> None:
-        fault_id, kind = 'rolling-deploy', 'rolling-deploy'
+        kind = 'rolling-deploy'
         old, new = self.targets['generation'], self.targets['rollingGeneration']
         if old == new:
             raise FaultFailed(f'the rolling generation `{new}` already serves')
         pause = int(self.faults['rolling_worker_pause_s'])
-        self.record(fault_id, kind, 'intent', new, {'due_s': self.faults['rolling_deploy_s'],
+        self.record(kind, 'intent', new, {'due_s': self.faults['rolling_deploy_s'],
                                                      'old': old, 'new': new, 'pause_s': pause})
         old_uri = f'http://{self.name}-workers-{old}:18100'
         new_uri = f'http://{self.name}-workers-{new}:18100'
@@ -606,7 +608,7 @@ class Campaign:
         if not work['active']:
             raise FaultFailed('the old generation finished its work before admission moved')
         new_workers = [activity['worker_id'] for activity in new_activity]
-        at = self.record(fault_id, kind, 'injected', new_uri, {
+        at = self.record(kind, 'injected', new_uri, {
             'old_generation': old_generation, 'new_generation': new_generation,
             'collection_targets': [{'component': 'worker',
                                     'endpoint': f"http://{self.name}-worker-{activity['index']}-control:18101"}
@@ -629,7 +631,7 @@ class Campaign:
             return {'drained': True, 'drain': status, 'marked': marked, 'pinned_unfinished': pinned,
                     'stalled_total': status['stalled_total']}
 
-        evidence = self.recover(fault_id, at, target, workers=new_workers)
+        evidence = self.recover(kind, at, target, workers=new_workers)
         # Retire the drained generation: its endpoints stop only now.
         self.helm({'workers': {'generation': new, 'retainedGenerations': [],
                                'generationImages': {new: self.args.next_tag}}}, 'retired')
@@ -640,7 +642,7 @@ class Campaign:
         evidence['pinned_after_retirement'] = self.pinned_unfinished(old_deployment)
         if evidence['pinned_after_retirement']:
             raise FaultFailed(f'{old} gained pinned work after retirement')
-        self.record(fault_id, kind, 'recovered', new_uri, evidence)
+        self.record(kind, 'recovered', new_uri, evidence)
 
     def start(self) -> int:
         """The fault phase starts with the driver's first send."""
@@ -654,7 +656,7 @@ class Campaign:
         # Faults land in steady load: the fault phase follows the workload's
         # warm-up from the driver's first send.
         steady_from = self.start() + int(self.workload['warmup_s']) * 1_000_000
-        self.record('campaign', 'campaign', 'started', self.args.run, {
+        self.record('campaign', 'started', self.args.run, {
             'campaign': 'faults', 'workload': self.args.workload_name, 'faults': self.faults,
             'phase_start_us': steady_from,
             'warmup_s': self.workload['warmup_s'],
@@ -672,10 +674,10 @@ class Campaign:
             kind = {'worker-kill': 'worker-kill', 'restate-restart': 'restate-restart',
                     'rolling-deploy': 'rolling-deploy'}.get(current, 'campaign')
             reason = f'{type(error).__name__}: {error}'
-            self.record(current, kind, 'failed', current, {'reason': reason})
-            self.record('campaign', 'campaign', 'failed', self.args.run, {'reason': reason, 'fault': current})
+            self.record(kind, 'failed', current, {'reason': reason})
+            self.record('campaign', 'failed', self.args.run, {'reason': reason, 'fault': current})
             raise
-        self.record('campaign', 'campaign', 'complete', self.args.run, {'faults': len(schedule)})
+        self.record('campaign', 'complete', self.args.run, {'faults': len(schedule)})
 
 
 def main() -> int:

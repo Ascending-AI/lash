@@ -31,7 +31,7 @@ use lash_restate_postgres_workers_e2e::load::worker::{
     E2eLoadWorkflow as _, LoadWorker, LoadWorkerConfig,
 };
 use lash_restate_postgres_workers_e2e::load::{
-    ActiveOperations, LoadContext, LoadEvent, WitnessedOperation, WitnessedPhase, record_load_event,
+    ActiveOperations, LoadContext, LoadEvent, LoadEvidence, record_load_event,
 };
 use lash_restate_postgres_workers_e2e::{
     BUTTON_SOURCE_TYPE, DEFAULT_SESSION_ID, DirectDurableWaitAwaitRequest,
@@ -933,8 +933,7 @@ async fn load_attachment(
             LoadEvent {
                 run: &read.run,
                 subject: &read.blob_key,
-                operation: WitnessedOperation::Attachment,
-                phase: WitnessedPhase::Read,
+                evidence: LoadEvidence::AttachmentRead,
                 observer: &state.worker_id,
                 detail: &serde_json::json!({
                     "session_id": session_id,

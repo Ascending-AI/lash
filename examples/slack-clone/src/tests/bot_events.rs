@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use crate::bot::channel::{DeliveryOutcome, ReplySource};
-use crate::bot::ledger::{DetailWrite, ProviderFailure, Stage};
+use crate::bot::ledger::{ProviderFailure, Stage, StageKind};
 use crate::bot::runtime::{session_id, thread_session_id};
 use crate::bot::tools::{CHANNEL_HISTORY, LIST_CHANNELS};
 
@@ -111,7 +111,7 @@ async fn the_same_event_id_delivered_twice_runs_one_turn_and_posts_one_reply() {
         let DeliveryOutcome::Duplicate { stage, .. } = redelivery else {
             panic!("a redelivery must not act: {redelivery:?}");
         };
-        assert_eq!(*stage, Stage::Replied);
+        assert_eq!(*stage, StageKind::Replied);
     }
     assert_eq!(script.calls(), 1, "exactly one turn for three deliveries");
     assert_eq!(platform.bot_messages(&channel).await.len(), 1);
@@ -123,7 +123,7 @@ async fn the_same_event_id_delivered_twice_runs_one_turn_and_posts_one_reply() {
         .expect("read ledger")
         .expect("ledger row");
     assert_eq!(record.deliveries, 3, "every delivery is counted");
-    assert_eq!(record.stage, Stage::Replied);
+    assert_eq!(record.stage.kind(), StageKind::Replied);
 }
 
 #[tokio::test]
@@ -528,10 +528,10 @@ async fn a_permanently_missing_root_fails_loudly_then_root_arrival_and_retry_rec
         .await
         .expect("read recoverable failure")
         .expect("recoverable failure row");
-    assert_eq!(failed_record.stage, Stage::Accepted);
+    assert_eq!(failed_record.stage.kind(), StageKind::Accepted);
     assert!(!failed_record.stage.is_terminal());
     assert_eq!(
-        failed_record.detail.as_deref(),
+        failed_record.stage.detail().as_deref(),
         Some("thread_root_not_available")
     );
     let replies = platform.thread_messages(&channel, root).await;
@@ -593,7 +593,7 @@ async fn a_permanently_missing_root_fails_loudly_then_root_arrival_and_retry_rec
         .await
         .expect("read recovered row")
         .expect("recovered row");
-    assert_eq!(recovered_record.stage, Stage::Replied);
+    assert_eq!(recovered_record.stage.kind(), StageKind::Replied);
     assert_eq!(
         platform
             .thread_messages(&channel, root)
@@ -947,10 +947,8 @@ async fn recovery_records_the_applied_turns_boundary_after_a_later_turn_commits(
     bot.ledger()
         .advance(
             older_mention.event_id.clone(),
-            Stage::Replied,
-            Stage::Accepted,
-            None,
-            DetailWrite::Keep,
+            StageKind::Replied,
+            Stage::Accepted { deferral: None },
         )
         .await
         .expect("rewind older event to the crash window");
@@ -1223,7 +1221,7 @@ async fn a_thread_event_is_deduplicated_in_the_shared_ledger() {
     assert!(matches!(
         bot.ingest(event, Some(1)).await.expect("redelivery"),
         DeliveryOutcome::Duplicate {
-            stage: Stage::Replied,
+            stage: StageKind::Replied,
             ..
         }
     ));
@@ -1478,8 +1476,8 @@ async fn a_provider_rejection_surfaces_as_typed_provider_error() {
         .await
         .expect("read provider failure")
         .expect("provider failure row");
-    assert_eq!(record.stage, Stage::ProviderError);
-    assert_eq!(record.provider_failure, Some(failure));
+    assert_eq!(record.stage.kind(), StageKind::ProviderError);
+    assert_eq!(record.stage.provider_failure().cloned(), Some(failure));
     assert!(platform.bot_messages(&channel).await.is_empty());
 
     let duplicate = bot
@@ -1490,8 +1488,52 @@ async fn a_provider_rejection_surfaces_as_typed_provider_error() {
         duplicate,
         DeliveryOutcome::Duplicate {
             event_id: record.event_id,
-            stage: Stage::ProviderError,
+            stage: StageKind::ProviderError,
             reply_ts: None,
         }
     );
+}
+
+#[tokio::test]
+async fn a_deferred_ambient_thread_reply_folds_without_stale_deferral() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let directory = bot_dir(scratch.path());
+    let host = BotHost::open(&directory).await;
+    let script = Script::prose("unused");
+    let bot = host.start(&platform, &script).await;
+    bot.set_thread_root_wait_budget(std::time::Duration::ZERO);
+    let channel = platform.channel("deferred-ambient").await;
+    let ada = platform.identify("ada").await;
+    let root = platform.say(&channel, &ada, "late root").await;
+    let root_event = only_event(&platform.drain_envelopes().await, "message");
+    platform
+        .say_thread(&channel, &ada, root, "ambient detail")
+        .await;
+    let ambient = only_event(&platform.drain_envelopes().await, "message");
+    assert!(matches!(
+        bot.ingest(ambient.clone(), None).await.expect("defer"),
+        DeliveryOutcome::RecoverableFailure { .. }
+    ));
+    bot.ingest(root_event, None)
+        .await
+        .expect("late root arrives");
+    assert!(matches!(
+        bot.ingest(ambient.clone(), Some(1)).await.expect("retry"),
+        DeliveryOutcome::Folded { .. }
+    ));
+    let connection = rusqlite::Connection::open(directory.join("events.db")).expect("event ledger");
+    let (stage, detail): (String, Option<String>) = connection
+        .query_row(
+            "SELECT stage, detail FROM handled_events WHERE event_id = ?1",
+            [&ambient.event_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("settled ambient row");
+    assert_eq!(stage, "folded");
+    assert!(
+        detail.is_none(),
+        "folded ambient event retained its deferral: {detail:?}"
+    );
+    assert_eq!(script.calls(), 0);
 }

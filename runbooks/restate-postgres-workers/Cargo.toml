@@ -48,6 +48,11 @@ name = "lash-loadtest-driver"
 path = "src/bin/loadtest_driver.rs"
 test = false
 
+[[bin]]
+name = "lash-loadtest-ledger-contract"
+path = "src/bin/loadtest_ledger_contract.rs"
+test = false
+
 [lib]
 doctest = false
 

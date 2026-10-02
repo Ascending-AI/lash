@@ -1,14 +1,14 @@
 #[path = "support/catalog_span_oracles.rs"]
 mod catalog_span_oracles;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 use catalog_span_oracles::{expected_catalog_node_slices, expected_catalog_process_slice};
-use serde_json::Value;
+use serde_json::{Value, json};
 use workflow_graph_roundtrip::{
-    AppState, ChildGroup, EditableProcessField, EditableValue, FlowNode, NodeData, NodeName,
-    RunEvent, RunStatus, RunTiming, SaveWorkflowResponse, WorkflowCatalogEntry, WorkflowDocument,
+    AppState, ChildGroup, EditableProcessField, EditableValue, FlowNode, NodeName, RunEvent,
+    RunStatus, RunTiming, SaveWorkflowResponse, WorkflowCatalogEntry, WorkflowDocument,
 };
 
 /// The names a `counter-loop` fragment may reach. The lens parses editable
@@ -117,7 +117,7 @@ async fn operation_catalog_and_fragment_validation_match_the_editor_contract() {
             "id": "effect.sleep",
             "label": "Sleep",
             "nodeKind": "effect",
-            "effect": "sleep",
+            "effect": "sleep_for",
             "fields": [{ "name": "duration", "type": "expression", "default": { "kind": "expr", "value": "\"1s\"" } }]
         }),
     ] {
@@ -219,7 +219,7 @@ async fn catalog_process_shape_adds_a_seeded_top_level_process_that_reprojects_a
 
     let mut document = select_workflow(&client, &base, "blank").await;
     let process = new_flow_node_from_catalog(process_entry, "new:process");
-    assert_eq!(process.data.process_name.as_deref(), Some("my_process"));
+    assert_eq!(process.data.process_name().as_deref(), Some("my_process"));
     document.roots.processes.insert(0, process.id.clone());
     document.nodes.push(process);
 
@@ -247,11 +247,11 @@ async fn catalog_process_shape_adds_a_seeded_top_level_process_that_reprojects_a
         .document
         .nodes
         .iter()
-        .find(|node| node.data.binding.as_deref() == Some("my_process"))
+        .find(|node| node.data.binding().as_deref() == Some("my_process"))
         .expect("reprojected added process binding");
     // In the admitted view the binding holds the reference to its lifted
     // process, which is pure data (FIG-3571).
-    assert_eq!(added.data.kind, "data");
+    assert_eq!(added.data.kind(), "data");
     let container_id = &saved.document.roots.processes[0];
     let added = saved
         .document
@@ -259,27 +259,27 @@ async fn catalog_process_shape_adds_a_seeded_top_level_process_that_reprojects_a
         .iter()
         .find(|node| &node.id == container_id)
         .expect("reprojected added process container");
-    assert_eq!(added.data.kind, "process");
+    assert_eq!(added.data.kind(), "process");
     assert!(
         added
             .data
-            .process_name
+            .process_name()
             .as_deref()
             .is_some_and(|name| name.starts_with(lash::rlm::lang::LIFTED_PROCESS_NAME_PREFIX))
     );
-    assert!(added.data.params.is_empty());
-    assert!(added.data.signals.is_empty());
+    assert!(added.data.params().is_empty());
+    assert!(added.data.signals().is_empty());
     let body = added
         .data
-        .children
+        .children()
         .iter()
         .find(|child| child.slot == "body")
         .expect("seeded process body");
     assert_eq!(body.node_ids.len(), 1);
     assert!(saved.document.nodes.iter().any(|node| {
         node.id == body.node_ids[0]
-            && node.data.terminal_kind.as_deref() == Some("finish")
-            && node.data.expression.as_deref() == Some("0")
+            && node.data.terminal_kind() == Some(&lash::rlm::lang::WorkflowTerminalKind::Finish)
+            && node.data.expression().as_deref() == Some("0")
     }));
     let graph =
         lash::typescript::workflow_graph::workflow_graph_from_source(&saved.document.source)
@@ -324,16 +324,16 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
     let process = document
         .nodes
         .iter_mut()
-        .find(|node| node.data.kind == "process")
+        .find(|node| node.data.kind() == "process")
         .expect("blank process");
     let derived_name = process
         .data
-        .process_name
+        .process_name()
         .clone()
         .expect("projected process name");
     assert!(derived_name.starts_with(lash::rlm::lang::LIFTED_PROCESS_NAME_PREFIX));
-    process.data.process_name = Some("renamed".to_string());
-    process.data.params = vec![
+    *process.data.process_name_mut().expect("process_name node") = Some("renamed".to_string());
+    *process.data.params_mut().expect("params node") = vec![
         EditableProcessField {
             name: "input".to_string(),
             field_type: "float".to_string(),
@@ -343,16 +343,16 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
             field_type: "bool".to_string(),
         },
     ];
-    process.data.signals = vec![EditableProcessField {
+    *process.data.signals_mut().expect("signals node") = vec![EditableProcessField {
         name: "continue".to_string(),
         field_type: "any".to_string(),
     }];
     let statement = document
         .nodes
         .iter_mut()
-        .find(|node| node.data.binding.as_deref() == Some("blank"))
+        .find(|node| node.data.binding().as_deref() == Some("blank"))
         .expect("the statement that binds the process");
-    statement.data.binding = Some("renamed".to_string());
+    *statement.data.binding_mut().expect("binding node") = Some("renamed".to_string());
 
     let response = client
         .post(format!("{base}/workflow"))
@@ -380,23 +380,23 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
         .document
         .nodes
         .iter_mut()
-        .find(|node| node.data.kind == "process")
+        .find(|node| node.data.kind() == "process")
         .expect("reprojected process");
     assert!(
         process
             .data
-            .process_name
+            .process_name()
             .as_deref()
             .is_some_and(|name| name.starts_with(lash::rlm::lang::LIFTED_PROCESS_NAME_PREFIX)),
         "a lifted process keeps its derived name: {:?}",
-        process.data.process_name
+        process.data.process_name()
     );
     assert!(
-        process.data.signals.is_empty(),
+        process.data.signals().is_empty(),
         "signals are read out of the body, not carried on the container: {:?}",
-        process.data.signals
+        process.data.signals()
     );
-    process.data.params.pop();
+    process.data.params_mut().expect("process node").pop();
 
     let response = client
         .post(format!("{base}/workflow"))
@@ -414,13 +414,13 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
         .document
         .nodes
         .iter()
-        .find(|node| node.data.kind == "process")
+        .find(|node| node.data.kind() == "process")
         .expect("reprojected reduced process");
     // FIG-3571: a canonical process arrow prints each parameter's type as
     // the annotation that lowers to it, so an authored parameter type
     // survives the round trip along with the parameter and its position.
     assert_eq!(
-        process.data.params,
+        process.data.params().as_slice(),
         [EditableProcessField {
             name: "input".to_string(),
             field_type: "float".to_string(),
@@ -485,10 +485,10 @@ async fn newly_catalogued_nodes_save_reproject_and_run_from_their_catalog_shapes
     // `fail(...)` terminal, so neither shape can be rendered back to source.
     assert!(saved.id_map.contains_key("new:opaque"));
     assert!(saved.document.nodes.iter().any(|node| {
-        node.data.operation.as_deref() == Some("show_message")
+        node.data.operation().as_deref() == Some("show_message")
             && node
                 .data
-                .fields
+                .fields()
                 .get("text")
                 .is_some_and(|value| value == &EditableValue::String("raw".to_string()))
     }));
@@ -558,14 +558,14 @@ async fn source_projection_is_a_stateless_canonical_fixpoint_with_typed_errors()
         graph
     );
     assert!(document.nodes.iter().any(|node| {
-        node.data.kind == "terminal"
-            && node.data.terminal_kind.as_deref() == Some("finish")
-            && node.data.expression.as_deref() == Some("value")
+        node.data.kind() == "terminal"
+            && node.data.terminal_kind() == Some(&lash::rlm::lang::WorkflowTerminalKind::Finish)
+            && node.data.expression().as_deref() == Some("value")
     }));
     let process = document
         .nodes
         .iter()
-        .find(|node| node.data.kind == "process")
+        .find(|node| node.data.kind() == "process")
         .expect("projected process");
     assert_eq!(process.data.available_vars, ["input"]);
 
@@ -638,26 +638,26 @@ async fn projected_available_vars_follow_ssa_and_nested_lexical_scope() {
     let state = document
         .nodes
         .iter()
-        .find(|node| node.data.binding.as_deref() == Some("state"))
+        .find(|node| node.data.binding().as_deref() == Some("state"))
         .expect("state binding");
     assert_eq!(state.data.available_vars, ["record"]);
     assert_eq!(state.data.available_vars[0].variable_type, "any");
     let first = document
         .nodes
         .iter()
-        .find(|node| node.data.binding.as_deref() == Some("first"))
+        .find(|node| node.data.binding().as_deref() == Some("first"))
         .expect("first binding");
     assert_eq!(first.data.available_vars, ["record", "state"]);
     let for_node = document
         .nodes
         .iter()
-        .find(|node| node.data.subkind.as_deref() == Some("for"))
+        .find(|node| node.data.subkind() == Some("for"))
         .expect("for node");
     assert_eq!(for_node.data.available_vars, ["first", "record", "state"]);
     let nested = document
         .nodes
         .iter()
-        .find(|node| node.data.binding.as_deref() == Some("nested"))
+        .find(|node| node.data.binding().as_deref() == Some("nested"))
         .expect("nested binding");
     assert_eq!(
         nested.data.available_vars,
@@ -682,7 +682,7 @@ async fn projected_available_vars_follow_ssa_and_nested_lexical_scope() {
     let terminal = document
         .nodes
         .iter()
-        .find(|node| node.data.kind == "terminal")
+        .find(|node| node.data.kind() == "terminal")
         .expect("terminal");
     assert_eq!(
         terminal.data.available_vars,
@@ -707,26 +707,26 @@ async fn data_terminal_call_and_effect_edits_round_trip_without_raw_constructor_
     let mut document = select_workflow(&client, &base, "blank").await;
 
     let mut data = new_flow_node("new:data", "data", None, "value");
-    data.data.binding = Some("value".to_string());
-    data.data.expression = Some("1 + 1".to_string());
+    *data.data.binding_mut().expect("binding node") = Some("value".to_string());
+    *data.data.expression_mut().expect("expression node") = Some("1 + 1".to_string());
     append_process_node(&mut document, data);
     let mut computation = new_flow_node("new:computation", "computation", None, "Compute");
-    computation.data.expression = Some("1 + 1".to_string());
+    *computation.data.expression_mut().expect("expression node") = Some("1 + 1".to_string());
     append_process_node(&mut document, computation);
     let mut call = new_flow_node("new:call-from-catalog", "call", None, "Set status");
-    call.data.operation = Some("set_status".to_string());
-    call.data.fields.insert(
+    *call.data.operation_mut().expect("operation node") = Some("set_status".to_string());
+    call.data.fields_mut().expect("fields node").insert(
         "key".to_string(),
         EditableValue::String("phase".to_string()),
     );
-    call.data.fields.insert(
+    call.data.fields_mut().expect("fields node").insert(
         "value".to_string(),
         EditableValue::String("ready".to_string()),
     );
     append_process_node(&mut document, call);
     let mut effect = new_flow_node("new:effect-from-catalog", "effect", None, "Sleep");
-    effect.data.effect = Some("sleep".to_string());
-    effect.data.fields.insert(
+    *effect.data.effect_mut().expect("effect node") = lash::rlm::lang::WorkflowEffectKind::SleepFor;
+    effect.data.fields_mut().expect("fields node").insert(
         "duration".to_string(),
         EditableValue::String("1ms".to_string()),
     );
@@ -742,7 +742,7 @@ async fn data_terminal_call_and_effect_edits_round_trip_without_raw_constructor_
     let mut saved: WorkflowDocument = response.json().await.expect("first edited document");
     assert!(saved.source.contains("value = (1 + 1)"));
     assert!(saved.nodes.iter().any(|node| {
-        node.data.kind == "computation" && node.data.expression.as_deref() == Some("(1 + 1)")
+        node.data.kind() == "computation" && node.data.expression().as_deref() == Some("(1 + 1)")
     }));
     assert!(
         saved
@@ -754,44 +754,48 @@ async fn data_terminal_call_and_effect_edits_round_trip_without_raw_constructor_
     let data = saved
         .nodes
         .iter_mut()
-        .find(|node| node.data.binding.as_deref() == Some("value"))
+        .find(|node| node.data.binding().as_deref() == Some("value"))
         .expect("saved data node");
-    assert_eq!(data.data.expression.as_deref(), Some("(1 + 1)"));
-    data.data.expression = Some("40 + 2".to_string());
+    assert_eq!(data.data.expression().as_deref(), Some("(1 + 1)"));
+    *data.data.expression_mut().expect("expression node") = Some("40 + 2".to_string());
     let terminal = saved
         .nodes
         .iter_mut()
-        .find(|node| node.data.kind == "terminal")
+        .find(|node| node.data.kind() == "terminal")
         .expect("saved terminal");
-    assert_eq!(terminal.data.terminal_kind.as_deref(), Some("finish"));
-    assert_eq!(terminal.data.expression.as_deref(), Some("0"));
+    assert_eq!(
+        terminal.data.terminal_kind(),
+        Some(&lash::rlm::lang::WorkflowTerminalKind::Finish)
+    );
+    assert_eq!(terminal.data.expression().as_deref(), Some("0"));
     // FIG-3033: a process ends with `return` in TypeScript and the dialect has
     // no authorable `fail(...)` terminal, so the terminal's editable value is
     // switched here instead of its kind.
-    terminal.data.expression = Some("\"stopped\"".to_string());
+    *terminal.data.expression_mut().expect("expression node") = Some("\"stopped\"".to_string());
     let call = saved
         .nodes
         .iter_mut()
-        .find(|node| node.data.operation.as_deref() == Some("set_status"))
+        .find(|node| node.data.operation().as_deref() == Some("set_status"))
         .expect("saved call");
-    call.data.operation = Some("show_message".to_string());
-    call.data.fields.clear();
-    call.data.fields.insert(
+    *call.data.operation_mut().expect("operation node") = Some("show_message".to_string());
+    call.data.fields_mut().expect("fields node").clear();
+    call.data.fields_mut().expect("fields node").insert(
         "text".to_string(),
         EditableValue::String("switched".to_string()),
     );
-    call.data.fields.insert(
+    call.data.fields_mut().expect("fields node").insert(
         "tone".to_string(),
         EditableValue::String("warm".to_string()),
     );
     let effect = saved
         .nodes
         .iter_mut()
-        .find(|node| node.data.effect.as_deref() == Some("sleep"))
+        .find(|node| node.data.effect() == Some(lash::rlm::lang::WorkflowEffectKind::SleepFor))
         .expect("saved effect");
-    effect.data.effect = Some("wait_signal".to_string());
-    effect.data.fields.clear();
-    effect.data.fields.insert(
+    *effect.data.effect_mut().expect("effect node") =
+        lash::rlm::lang::WorkflowEffectKind::WaitSignal;
+    effect.data.fields_mut().expect("fields node").clear();
+    effect.data.fields_mut().expect("fields node").insert(
         "signal".to_string(),
         EditableValue::String("continue".to_string()),
     );
@@ -818,15 +822,15 @@ async fn data_terminal_call_and_effect_edits_round_trip_without_raw_constructor_
     let call = switched
         .nodes
         .iter_mut()
-        .find(|node| node.data.operation.as_deref() == Some("show_message"))
+        .find(|node| node.data.operation().as_deref() == Some("show_message"))
         .expect("switched call");
-    call.data.fields.remove("tone");
+    call.data.fields_mut().expect("fields node").remove("tone");
     let terminal = switched
         .nodes
         .iter_mut()
-        .find(|node| node.data.kind == "terminal")
+        .find(|node| node.data.kind() == "terminal")
         .expect("switched terminal");
-    terminal.data.expression = Some("value".to_string());
+    *terminal.data.expression_mut().expect("expression node") = Some("value".to_string());
 
     let response = client
         .post(format!("{base}/workflow"))
@@ -844,9 +848,9 @@ async fn data_terminal_call_and_effect_edits_round_trip_without_raw_constructor_
     );
     assert!(!restored.source.contains("tone:"));
     assert!(restored.nodes.iter().any(|node| {
-        node.data.kind == "terminal"
-            && node.data.terminal_kind.as_deref() == Some("finish")
-            && node.data.expression.as_deref() == Some("value")
+        node.data.kind() == "terminal"
+            && node.data.terminal_kind() == Some(&lash::rlm::lang::WorkflowTerminalKind::Finish)
+            && node.data.expression().as_deref() == Some("value")
     }));
 
     server.abort();
@@ -1014,11 +1018,15 @@ async fn lists_selects_projects_and_runs_built_in_workflows() {
             );
             assert!(document.nodes.iter().any(|node| {
                 node.node_type == "container"
-                    && node.data.subkind.as_deref() == Some("while")
-                    && node.data.children.iter().any(|child| child.slot == "body")
+                    && node.data.subkind() == Some("while")
+                    && node
+                        .data
+                        .children()
+                        .iter()
+                        .any(|child| child.slot == "body")
             }));
             assert!(document.nodes.iter().any(|node| {
-                node.node_type == "container" && node.data.subkind.as_deref() == Some("for")
+                node.node_type == "container" && node.data.subkind() == Some("for")
             }));
             assert!(projected.nodes().any(|node| {
                 matches!(
@@ -1154,14 +1162,14 @@ async fn project_mutate_save_and_run_streams_correlated_events() {
     let message = document
         .nodes
         .iter_mut()
-        .find(|node| node.data.operation.as_deref() == Some("show_message"))
+        .find(|node| node.data.operation().as_deref() == Some("show_message"))
         .expect("show_message node");
     assert!(
         matches!(message.data.name, NodeName::Derived { .. }),
         "unlabelled node projected as {:?}",
         message.data.name
     );
-    message.data.fields.insert(
+    message.data.fields_mut().expect("fields node").insert(
         "text".to_string(),
         EditableValue::String("Edited through the graph API".to_string()),
     );
@@ -1180,7 +1188,7 @@ async fn project_mutate_save_and_run_streams_correlated_events() {
         .nodes
         .iter()
         .find(|node| {
-            node.data.fields.get("text")
+            node.data.fields().get("text")
                 == Some(&EditableValue::String(
                     "Edited through the graph API".to_string(),
                 ))
@@ -1251,13 +1259,14 @@ async fn edited_counter_loop_condition_saves_reprojects_and_runs() {
     let while_node = document
         .nodes
         .iter_mut()
-        .find(|node| node.node_type == "container" && node.data.subkind.as_deref() == Some("while"))
+        .find(|node| node.node_type == "container" && node.data.subkind() == Some("while"))
         .expect("counter-loop while node");
     assert_eq!(
-        while_node.data.condition.as_deref(),
+        while_node.data.condition().as_deref(),
         Some("(state.count < 3)")
     );
-    while_node.data.condition = Some("(state.count < 1)".to_string());
+    *while_node.data.condition_mut().expect("condition node") =
+        Some("(state.count < 1)".to_string());
 
     let response = client
         .post(format!("{base}/workflow"))
@@ -1269,7 +1278,8 @@ async fn edited_counter_loop_condition_saves_reprojects_and_runs() {
     let saved: WorkflowDocument = response.json().await.expect("saved counter-loop");
     assert!(saved.source.contains("while ((state.count < 1))"));
     assert!(saved.nodes.iter().any(|node| {
-        node.node_type == "container" && node.data.condition.as_deref() == Some("(state.count < 1)")
+        node.node_type == "container"
+            && node.data.condition().as_deref() == Some("(state.count < 1)")
     }));
 
     let events = run_workflow(&client, &base).await;
@@ -1304,9 +1314,9 @@ async fn bare_counter_loop_condition_rewraps_canonically_and_runs() {
     let while_node = document
         .nodes
         .iter_mut()
-        .find(|node| node.node_type == "container" && node.data.subkind.as_deref() == Some("while"))
+        .find(|node| node.node_type == "container" && node.data.subkind() == Some("while"))
         .expect("counter-loop while node");
-    while_node.data.condition = Some("state.count < 1".to_string());
+    *while_node.data.condition_mut().expect("condition node") = Some("state.count < 1".to_string());
 
     let response = client
         .post(format!("{base}/workflow"))
@@ -1348,19 +1358,19 @@ async fn expression_valued_call_fields_save_reproject_and_reject_malformed_edits
     let expected_progress = canonical_expression("state.count * 20 + 20");
     let expected_item = canonical_expression("state.count");
     assert!(document.nodes.iter().any(|node| {
-        node.data.operation.as_deref() == Some("add_item")
-            && node.data.fields.get("item") == Some(&EditableValue::Expr(expected_item.clone()))
+        node.data.operation().as_deref() == Some("add_item")
+            && node.data.fields().get("item") == Some(&EditableValue::Expr(expected_item.clone()))
     }));
     let progress = document
         .nodes
         .iter_mut()
         .find(|node| {
-            node.data.operation.as_deref() == Some("set_progress")
-                && node.data.fields.get("pct")
+            node.data.operation().as_deref() == Some("set_progress")
+                && node.data.fields().get("pct")
                     == Some(&EditableValue::Expr(expected_progress.clone()))
         })
         .expect("expression-valued progress node");
-    progress.data.fields.insert(
+    progress.data.fields_mut().expect("fields node").insert(
         "pct".to_string(),
         EditableValue::Expr("state.count * 10 + 10".to_string()),
     );
@@ -1375,8 +1385,8 @@ async fn expression_valued_call_fields_save_reproject_and_reject_malformed_edits
     let mut saved: WorkflowDocument = response.json().await.expect("saved workflow");
     let edited_progress = canonical_expression("state.count * 10 + 10");
     assert!(saved.nodes.iter().any(|node| {
-        node.data.operation.as_deref() == Some("set_progress")
-            && node.data.fields.get("pct") == Some(&EditableValue::Expr(edited_progress.clone()))
+        node.data.operation().as_deref() == Some("set_progress")
+            && node.data.fields().get("pct") == Some(&EditableValue::Expr(edited_progress.clone()))
     }));
     assert!(saved.source.contains(&edited_progress));
 
@@ -1384,12 +1394,12 @@ async fn expression_valued_call_fields_save_reproject_and_reject_malformed_edits
         .nodes
         .iter_mut()
         .find(|node| {
-            node.data.operation.as_deref() == Some("set_progress")
-                && node.data.fields.get("pct")
+            node.data.operation().as_deref() == Some("set_progress")
+                && node.data.fields().get("pct")
                     == Some(&EditableValue::Expr(edited_progress.clone()))
         })
         .expect("edited progress node");
-    malformed.data.fields.insert(
+    malformed.data.fields_mut().expect("fields node").insert(
         "pct".to_string(),
         EditableValue::Expr("state.count +".to_string()),
     );
@@ -1435,10 +1445,10 @@ async fn edited_if_condition_and_for_iterable_save_reproject_and_run() {
         .nodes
         .iter_mut()
         .find(|node| {
-            node.node_type == "container" && node.data.condition.as_deref() == Some("true")
+            node.node_type == "container" && node.data.condition().as_deref() == Some("true")
         })
         .expect("branching-approval literal if node");
-    if_node.data.condition = Some("false".to_string());
+    *if_node.data.condition_mut().expect("condition node") = Some("false".to_string());
 
     let response = client
         .post(format!("{base}/workflow"))
@@ -1450,7 +1460,7 @@ async fn edited_if_condition_and_for_iterable_save_reproject_and_run() {
     let saved_if: WorkflowDocument = response.json().await.expect("saved branching-approval");
     assert!(saved_if.source.contains("if (false)"));
     assert!(saved_if.nodes.iter().any(|node| {
-        node.node_type == "container" && node.data.condition.as_deref() == Some("false")
+        node.node_type == "container" && node.data.condition().as_deref() == Some("false")
     }));
     let projected_if =
         lash::typescript::workflow_graph::workflow_graph_from_source(&saved_if.source)
@@ -1500,10 +1510,10 @@ async fn edited_if_condition_and_for_iterable_save_reproject_and_run() {
     let for_node = for_document
         .nodes
         .iter_mut()
-        .find(|node| node.node_type == "container" && node.data.iterable.is_some())
+        .find(|node| node.node_type == "container" && node.data.iterable().is_some())
         .expect("counter-loop for node");
-    assert_eq!(for_node.data.iterable.as_deref(), Some("[70, 85, 100]"));
-    for_node.data.iterable = Some("[15]".to_string());
+    assert_eq!(for_node.data.iterable().as_deref(), Some("[70, 85, 100]"));
+    *for_node.data.iterable_mut().expect("iterable node") = Some("[15]".to_string());
 
     let response = client
         .post(format!("{base}/workflow"))
@@ -1518,7 +1528,7 @@ async fn edited_if_condition_and_for_iterable_save_reproject_and_run() {
         .expect("saved counter-loop for iterable");
     assert!(saved_for.source.contains("for (const pct of [15])"));
     assert!(saved_for.nodes.iter().any(|node| {
-        node.node_type == "container" && node.data.iterable.as_deref() == Some("[15]")
+        node.node_type == "container" && node.data.iterable().as_deref() == Some("[15]")
     }));
     let projected_for =
         lash::typescript::workflow_graph::workflow_graph_from_source(&saved_for.source)
@@ -1591,8 +1601,8 @@ async fn delete_node_edit_round_trips_and_runs_the_saved_graph() {
         .nodes
         .iter()
         .find(|node| {
-            node.data.operation.as_deref() == Some("set_light")
-                && node.data.fields.get("name")
+            node.data.operation().as_deref() == Some("set_light")
+                && node.data.fields().get("name")
                     == Some(&EditableValue::String("complete".to_string()))
         })
         .expect("complete light node")
@@ -1608,7 +1618,7 @@ async fn delete_node_edit_round_trips_and_runs_the_saved_graph() {
         .processes
         .retain(|node_id| node_id != &deleted_id);
     for node in &mut document.nodes {
-        for child in &mut node.data.children {
+        for child in node.data.children_mut().into_iter().flatten() {
             child.node_ids.retain(|node_id| node_id != &deleted_id);
         }
     }
@@ -1666,7 +1676,7 @@ async fn new_call_node_saves_reprojects_and_runs_with_canonical_correlation() {
 
     let mut document = select_workflow(&client, &base, "blank").await;
     let mut call = new_flow_node("new:call", "call", None, "Set status");
-    call.data.expression =
+    *call.data.expression_mut().expect("expression node") =
         Some("await display.set_status({ key: \"k\", value: \"v\" })".to_string());
     append_process_node(&mut document, call);
     let posted_ids = document
@@ -1698,7 +1708,7 @@ async fn new_call_node_saves_reprojects_and_runs_with_canonical_correlation() {
             .is_some_and(|reprojected_id| {
                 saved.nodes.iter().any(|node| {
                     &node.id == reprojected_id
-                        && node.data.operation.as_deref() == Some("set_status")
+                        && node.data.operation().as_deref() == Some("set_status")
                 })
             })
     );
@@ -1710,7 +1720,7 @@ async fn new_call_node_saves_reprojects_and_runs_with_canonical_correlation() {
     let call_id = saved
         .nodes
         .iter()
-        .find(|node| node.data.operation.as_deref() == Some("set_status"))
+        .find(|node| node.data.operation().as_deref() == Some("set_status"))
         .expect("reprojected call node")
         .id
         .clone();
@@ -1751,11 +1761,11 @@ async fn new_if_while_and_for_containers_save_reproject_and_run() {
 
     let mut if_child = new_flow_node("new:if-call", "call", None, "If message");
     if_child.parent_id = Some("new:if".to_string());
-    if_child.data.expression =
+    *if_child.data.expression_mut().expect("expression node") =
         Some("await display.show_message({ text: \"Created if body\" })".to_string());
     let mut if_node = new_flow_node("new:if", "container", Some("if"), "if");
-    if_node.data.condition = Some("true".to_string());
-    if_node.data.children = vec![
+    *if_node.data.condition_mut().expect("condition node") = Some("true".to_string());
+    *if_node.data.children_mut().expect("children node") = vec![
         ChildGroup {
             slot: "then".to_string(),
             scope: "container:new-if:then".to_string(),
@@ -1772,11 +1782,11 @@ async fn new_if_while_and_for_containers_save_reproject_and_run() {
 
     let mut while_child = new_flow_node("new:while-call", "call", None, "While message");
     while_child.parent_id = Some("new:while".to_string());
-    while_child.data.expression =
+    *while_child.data.expression_mut().expect("expression node") =
         Some("await display.show_message({ text: \"Created while body\" })".to_string());
     let mut while_node = new_flow_node("new:while", "container", Some("while"), "while");
-    while_node.data.condition = Some("false".to_string());
-    while_node.data.children = vec![ChildGroup {
+    *while_node.data.condition_mut().expect("condition node") = Some("false".to_string());
+    *while_node.data.children_mut().expect("children node") = vec![ChildGroup {
         slot: "body".to_string(),
         scope: "container:new-while:body".to_string(),
         node_ids: vec![while_child.id.clone()],
@@ -1786,12 +1796,12 @@ async fn new_if_while_and_for_containers_save_reproject_and_run() {
 
     let mut for_child = new_flow_node("new:for-call", "call", None, "For status");
     for_child.parent_id = Some("new:for".to_string());
-    for_child.data.expression =
+    *for_child.data.expression_mut().expect("expression node") =
         Some("await display.set_status({ key: \"loop\", value: \"ran\" })".to_string());
     let mut for_node = new_flow_node("new:for", "container", Some("for"), "for item");
-    for_node.data.binding = Some("item".to_string());
-    for_node.data.iterable = Some("[1]".to_string());
-    for_node.data.children = vec![ChildGroup {
+    *for_node.data.binding_mut().expect("binding node") = Some("item".to_string());
+    *for_node.data.iterable_mut().expect("iterable node") = Some("[1]".to_string());
+    *for_node.data.children_mut().expect("children node") = vec![ChildGroup {
         slot: "body".to_string(),
         scope: "container:new-for:body".to_string(),
         node_ids: vec![for_child.id.clone()],
@@ -1812,7 +1822,7 @@ async fn new_if_while_and_for_containers_save_reproject_and_run() {
     assert!(saved.source.contains("for (const item of [1])"));
     for subkind in ["if", "while", "for"] {
         assert!(saved.nodes.iter().any(|node| {
-            node.data.kind == "container" && node.data.subkind.as_deref() == Some(subkind)
+            node.data.kind() == "container" && node.data.subkind() == Some(subkind)
         }));
     }
 
@@ -1848,14 +1858,14 @@ async fn new_statement_containers_allow_empty_bodies() {
 
     let mut document = select_workflow(&client, &base, "blank").await;
     let mut if_node = new_flow_node("new:empty-if", "container", Some("if"), "if");
-    if_node.data.condition = Some("true".to_string());
+    *if_node.data.condition_mut().expect("condition node") = Some("true".to_string());
     append_process_node(&mut document, if_node);
     let mut while_node = new_flow_node("new:empty-while", "container", Some("while"), "while");
-    while_node.data.condition = Some("false".to_string());
+    *while_node.data.condition_mut().expect("condition node") = Some("false".to_string());
     append_process_node(&mut document, while_node);
     let mut for_node = new_flow_node("new:empty-for", "container", Some("for"), "for item");
-    for_node.data.binding = Some("item".to_string());
-    for_node.data.iterable = Some("[]".to_string());
+    *for_node.data.binding_mut().expect("binding node") = Some("item".to_string());
+    *for_node.data.iterable_mut().expect("iterable node") = Some("[]".to_string());
     append_process_node(&mut document, for_node);
 
     let response = client
@@ -1901,11 +1911,11 @@ async fn blank_workflow_grows_by_two_nodes_then_saves_and_runs() {
     );
 
     let mut status = new_flow_node("new:blank-status", "call", None, "Blank status");
-    status.data.expression =
+    *status.data.expression_mut().expect("expression node") =
         Some("await display.set_status({ key: \"blank\", value: \"built\" })".to_string());
     append_process_node(&mut document, status);
     let mut message = new_flow_node("new:blank-message", "call", None, "Blank message");
-    message.data.expression =
+    *message.data.expression_mut().expect("expression node") =
         Some("await display.show_message({ text: \"Built from blank\" })".to_string());
     append_process_node(&mut document, message);
 
@@ -1959,10 +1969,12 @@ async fn reordered_process_statements_save_reproject_and_run_in_node_id_order() 
 
     let mut document = select_workflow(&client, &base, "blank").await;
     let mut first = new_flow_node("new:first", "call", None, "First message");
-    first.data.expression = Some("await display.show_message({ text: \"First\" })".to_string());
+    *first.data.expression_mut().expect("expression node") =
+        Some("await display.show_message({ text: \"First\" })".to_string());
     append_process_node(&mut document, first);
     let mut second = new_flow_node("new:second", "call", None, "Second message");
-    second.data.expression = Some("await display.show_message({ text: \"Second\" })".to_string());
+    *second.data.expression_mut().expect("expression node") =
+        Some("await display.show_message({ text: \"Second\" })".to_string());
     append_process_node(&mut document, second);
 
     let process = document
@@ -1972,7 +1984,8 @@ async fn reordered_process_statements_save_reproject_and_run_in_node_id_order() 
         .expect("process container");
     let body = process
         .data
-        .children
+        .children_mut()
+        .expect("children node")
         .iter_mut()
         .find(|child| child.slot == "body")
         .expect("process body");
@@ -2045,7 +2058,7 @@ async fn moved_statement_between_scopes_saves_reprojects_and_runs_in_new_scope()
         .nodes
         .iter()
         .find(|node| {
-            node.data.fields.get("text")
+            node.data.fields().get("text")
                 == Some(&EditableValue::String("Approval needs review".to_string()))
         })
         .expect("inner else-branch message")
@@ -2060,7 +2073,7 @@ async fn moved_statement_between_scopes_saves_reprojects_and_runs_in_new_scope()
     assert_ne!(original_parent, process_id);
 
     for node in &mut document.nodes {
-        for child in &mut node.data.children {
+        for child in node.data.children_mut().into_iter().flatten() {
             child.node_ids.retain(|id| id != &moved_id);
         }
     }
@@ -2078,7 +2091,8 @@ async fn moved_statement_between_scopes_saves_reprojects_and_runs_in_new_scope()
         .expect("process container");
     let body = process
         .data
-        .children
+        .children_mut()
+        .expect("children node")
         .iter_mut()
         .find(|child| child.slot == "body")
         .expect("process body");
@@ -2122,7 +2136,7 @@ async fn moved_statement_between_scopes_saves_reprojects_and_runs_in_new_scope()
             .and_then(|node| node.parent_id.as_ref()),
         Some(&canonical_process.id)
     );
-    assert!(canonical_process.data.children.iter().any(|child| {
+    assert!(canonical_process.data.children().iter().any(|child| {
         child.slot == "body" && child.node_ids.iter().any(|id| id == canonical_moved_id)
     }));
     let highlight_index = saved
@@ -2165,7 +2179,7 @@ async fn new_call_without_receiver_expression_returns_typed_error() {
 
     let mut document = select_workflow(&client, &base, "blank").await;
     let mut call = new_flow_node("new:invalid-call", "call", None, "Invalid call");
-    call.data.expression = Some("1 + 2".to_string());
+    *call.data.expression_mut().expect("expression node") = Some("1 + 2".to_string());
     append_process_node(&mut document, call);
 
     let response = client
@@ -2236,10 +2250,10 @@ async fn invalid_graph_post_returns_typed_unprocessable_entity() {
     let while_node = document
         .nodes
         .iter_mut()
-        .find(|node| node.node_type == "container" && node.data.subkind.as_deref() == Some("while"))
+        .find(|node| node.node_type == "container" && node.data.subkind() == Some("while"))
         .expect("default workflow while container");
-    let original_condition = while_node.data.condition.clone();
-    while_node.data.condition = Some("count <".to_string());
+    let original_condition = while_node.data.condition().clone();
+    *while_node.data.condition_mut().expect("condition node") = Some("count <".to_string());
     let response = client
         .post(format!("{base}/workflow"))
         .json(&document)
@@ -2254,12 +2268,13 @@ async fn invalid_graph_post_returns_typed_unprocessable_entity() {
     let while_node = document
         .nodes
         .iter_mut()
-        .find(|node| node.node_type == "container" && node.data.subkind.as_deref() == Some("while"))
+        .find(|node| node.node_type == "container" && node.data.subkind() == Some("while"))
         .expect("default workflow while container");
-    while_node.data.condition = original_condition;
+    *while_node.data.condition_mut().expect("condition node") = original_condition;
     while_node
         .data
-        .children
+        .children_mut()
+        .expect("children node")
         .retain(|child| child.slot != "body");
     let response = client
         .post(format!("{base}/workflow"))
@@ -2296,7 +2311,7 @@ async fn invalid_graph_post_returns_typed_unprocessable_entity() {
         .iter_mut()
         .find(|node| node.node_type == "state_update")
         .expect("counter-loop state update");
-    state_update.data.target = Some(invalid_target.to_string());
+    *state_update.data.target_mut().expect("target node") = Some(invalid_target.to_string());
     let response = client
         .post(format!("{base}/workflow"))
         .json(&document)
@@ -2359,36 +2374,30 @@ async fn select_workflow(client: &reqwest::Client, base: &str, id: &str) -> Work
     response.json().await.expect("selected workflow document")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test callers supply valid node kinds and their required discriminants"
+)]
 fn new_flow_node(id: &str, kind: &str, subkind: Option<&str>, title: &str) -> FlowNode {
     FlowNode {
         id: id.to_string(),
         node_type: kind.to_string(),
         parent_id: None,
-        data: NodeData {
-            kind: kind.to_string(),
-            subkind: subkind.map(str::to_string),
-            name: NodeName::Derived {
-                title: title.to_string(),
-            },
-            process_name: None,
-            params: Vec::new(),
-            signals: Vec::new(),
-            operation: None,
-            receiver: None,
-            effect: None,
-            terminal_kind: None,
-            fields: BTreeMap::new(),
-            binding: None,
-            target: None,
-            expression: None,
-            condition: None,
-            iterable: None,
-            source: None,
-            children: Vec::new(),
-            available_vars: Vec::new(),
-            expected_arg_types: Vec::new(),
-            diagnostics: Vec::new(),
-        },
+        data: serde_json::from_value({
+            let mut data =
+                serde_json::json!({"kind": kind, "title": title, "nameSource": "derived"});
+            if let Some(subkind) = subkind {
+                data["subkind"] = serde_json::json!(subkind);
+            }
+            if kind == "effect" {
+                data["effect"] = serde_json::json!("print");
+            }
+            if kind == "terminal" {
+                data["terminalKind"] = serde_json::json!("finish");
+            }
+            data
+        })
+        .expect("typed node body"),
     }
 }
 
@@ -2406,9 +2415,21 @@ fn new_flow_node_from_catalog(entry: &Value, id: &str) -> FlowNode {
         text("subkind"),
         text("label").expect("catalog label"),
     );
-    node.data.operation = text("operation").map(str::to_string);
-    node.data.effect = text("effect").map(str::to_string);
-    node.data.terminal_kind = text("terminalKind").map(str::to_string);
+    if let Some(operation) = node.data.operation_mut() {
+        *operation = text("operation").map(str::to_string);
+    }
+    if let Some(effect) = text("effect")
+        && let workflow_graph_roundtrip::NodeBody::Effect { effect: value, .. } =
+            &mut node.data.body
+    {
+        *value = serde_json::from_value(json!(effect)).expect("effect kind");
+    }
+    if let Some(kind) = text("terminalKind")
+        && let workflow_graph_roundtrip::NodeBody::Terminal { terminal_kind, .. } =
+            &mut node.data.body
+    {
+        *terminal_kind = serde_json::from_value(json!(kind)).expect("terminal kind");
+    }
     for field in entry["fields"].as_array().expect("catalog fields") {
         let name = field["name"].as_str().expect("catalog field name");
         let default = field["default"]["value"]
@@ -2416,15 +2437,15 @@ fn new_flow_node_from_catalog(entry: &Value, id: &str) -> FlowNode {
             .unwrap_or_else(|| panic!("catalog field {name} string default"))
             .to_string();
         match name {
-            "name" => node.data.process_name = Some(default),
-            "binding" => node.data.binding = Some(default),
-            "target" => node.data.target = Some(default),
-            "expression" => node.data.expression = Some(default),
-            "condition" => node.data.condition = Some(default),
-            "iterable" => node.data.iterable = Some(default),
-            "source" => node.data.source = Some(default),
+            "name" => *node.data.process_name_mut().expect("process_name node") = Some(default),
+            "binding" => *node.data.binding_mut().expect("binding node") = Some(default),
+            "target" => *node.data.target_mut().expect("target node") = Some(default),
+            "expression" => *node.data.expression_mut().expect("expression node") = Some(default),
+            "condition" => *node.data.condition_mut().expect("condition node") = Some(default),
+            "iterable" => *node.data.iterable_mut().expect("iterable node") = Some(default),
+            "source" => *node.data.source_mut().expect("source node") = Some(default),
             _ => {
-                node.data.fields.insert(
+                node.data.fields_mut().expect("fields node").insert(
                     name.to_string(),
                     serde_json::from_value(field["default"].clone())
                         .expect("editable catalog default"),
@@ -2452,7 +2473,8 @@ fn append_process_node(document: &mut WorkflowDocument, mut node: FlowNode) {
         .find_map(|candidate| (candidate.node_type == "terminal").then(|| candidate.id.clone()));
     let body = document.nodes[process_index]
         .data
-        .children
+        .children_mut()
+        .expect("children node")
         .iter_mut()
         .find(|child| child.slot == "body")
         .expect("process body");

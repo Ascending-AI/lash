@@ -23,33 +23,52 @@
       "type": "object"
     },
     "EdgeData": {
-      "properties": {
-        "kind": {
-          "type": "string"
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "data_dependency",
+              "type": "string"
+            },
+            "scope": {
+              "type": "string"
+            },
+            "variable": {
+              "type": "string"
+            },
+            "version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "scope",
+            "kind",
+            "variable",
+            "version"
+          ],
+          "type": "object"
         },
-        "scope": {
-          "type": "string"
-        },
-        "variable": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "version": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "sequence",
+              "type": "string"
+            },
+            "scope": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "scope",
+            "kind"
+          ],
+          "type": "object"
         }
-      },
-      "required": [
-        "kind",
-        "scope"
-      ],
-      "type": "object"
+      ]
     },
     "EditableProcessField": {
       "properties": {
@@ -282,16 +301,130 @@
       "type": "object"
     },
     "NodeData": {
-      "description": "A node's display name together with the one fact that decides whether the\nhost may throw it away: who chose it.\n\nRendering emits an `@label` annotation only for an authored name, so a\npayload that carries a title without saying where the name came from is a\nrename waiting to evaporate. The tag is therefore mandatory and carries the\ntitle inside the variant: \"title present, tag absent\" is unrepresentable,\nand an unknown tag is a decode error rather than a silent `derived`. The\nwire values (`label`, `derived`) mirror `WorkflowNodeNameSource`, which the\nbrowser client already writes on every node.",
       "oneOf": [
         {
+          "additionalProperties": false,
           "description": "The author named this node: the title and its optional description are\ntheirs, and the save path renders them back as an `@label` annotation.",
           "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "children": {
+              "items": {
+                "$ref": "#/$defs/ChildGroup"
+              },
+              "type": "array"
+            },
             "description": {
               "type": [
                 "string",
                 "null"
               ]
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "process",
+              "type": "string"
+            },
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "nameSource": {
+              "const": "label",
+              "type": "string"
+            },
+            "params": {
+              "items": {
+                "$ref": "#/$defs/EditableProcessField"
+              },
+              "type": "array"
+            },
+            "signals": {
+              "items": {
+                "$ref": "#/$defs/EditableProcessField"
+              },
+              "type": "array"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The author named this node: the title and its optional description are\ntheirs, and the save path renders them back as an `@label` annotation.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "binding": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "expression": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fields": {
+              "additionalProperties": {
+                "$ref": "#/$defs/EditableValue"
+              },
+              "default": {},
+              "type": "object"
+            },
+            "kind": {
+              "const": "data",
+              "type": "string"
             },
             "nameSource": {
               "const": "label",
@@ -303,13 +436,726 @@
           },
           "required": [
             "nameSource",
-            "title"
+            "title",
+            "kind"
           ],
           "type": "object"
         },
         {
+          "additionalProperties": false,
+          "description": "The author named this node: the title and its optional description are\ntheirs, and the save path renders them back as an `@label` annotation.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "binding": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "expression": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fields": {
+              "additionalProperties": {
+                "$ref": "#/$defs/EditableValue"
+              },
+              "default": {},
+              "type": "object"
+            },
+            "kind": {
+              "const": "call",
+              "type": "string"
+            },
+            "nameSource": {
+              "const": "label",
+              "type": "string"
+            },
+            "operation": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "receiver": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The author named this node: the title and its optional description are\ntheirs, and the save path renders them back as an `@label` annotation.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "binding": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "effect": {
+              "$ref": "#/$defs/WorkflowEffectKind"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "expression": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fields": {
+              "additionalProperties": {
+                "$ref": "#/$defs/EditableValue"
+              },
+              "default": {},
+              "type": "object"
+            },
+            "kind": {
+              "const": "effect",
+              "type": "string"
+            },
+            "nameSource": {
+              "const": "label",
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind",
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The author named this node: the title and its optional description are\ntheirs, and the save path renders them back as an `@label` annotation.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "expression": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fields": {
+              "additionalProperties": {
+                "$ref": "#/$defs/EditableValue"
+              },
+              "default": {},
+              "type": "object"
+            },
+            "kind": {
+              "const": "state_update",
+              "type": "string"
+            },
+            "nameSource": {
+              "const": "label",
+              "type": "string"
+            },
+            "target": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The author named this node: the title and its optional description are\ntheirs, and the save path renders them back as an `@label` annotation.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "binding": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "expression": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fields": {
+              "additionalProperties": {
+                "$ref": "#/$defs/EditableValue"
+              },
+              "default": {},
+              "type": "object"
+            },
+            "kind": {
+              "const": "computation",
+              "type": "string"
+            },
+            "nameSource": {
+              "const": "label",
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The author named this node: the title and its optional description are\ntheirs, and the save path renders them back as an `@label` annotation.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "expression": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "terminal",
+              "type": "string"
+            },
+            "nameSource": {
+              "const": "label",
+              "type": "string"
+            },
+            "terminalKind": {
+              "$ref": "#/$defs/WorkflowTerminalKind"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind",
+            "terminalKind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The author named this node: the title and its optional description are\ntheirs, and the save path renders them back as an `@label` annotation.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "opaque",
+              "type": "string"
+            },
+            "nameSource": {
+              "const": "label",
+              "type": "string"
+            },
+            "source": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The author named this node: the title and its optional description are\ntheirs, and the save path renders them back as an `@label` annotation.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "binding": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "children": {
+              "items": {
+                "$ref": "#/$defs/ChildGroup"
+              },
+              "type": "array"
+            },
+            "condition": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "container",
+              "type": "string"
+            },
+            "nameSource": {
+              "const": "label",
+              "type": "string"
+            },
+            "subkind": {
+              "const": "if",
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind",
+            "subkind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The author named this node: the title and its optional description are\ntheirs, and the save path renders them back as an `@label` annotation.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "children": {
+              "items": {
+                "$ref": "#/$defs/ChildGroup"
+              },
+              "type": "array"
+            },
+            "condition": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "container",
+              "type": "string"
+            },
+            "nameSource": {
+              "const": "label",
+              "type": "string"
+            },
+            "subkind": {
+              "const": "while",
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind",
+            "subkind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The author named this node: the title and its optional description are\ntheirs, and the save path renders them back as an `@label` annotation.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "binding": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "children": {
+              "items": {
+                "$ref": "#/$defs/ChildGroup"
+              },
+              "type": "array"
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "iterable": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "container",
+              "type": "string"
+            },
+            "nameSource": {
+              "const": "label",
+              "type": "string"
+            },
+            "subkind": {
+              "const": "for",
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind",
+            "subkind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "The name is a rendering of the node's own expression. The title is\noutput, not input: the save path recomputes it and it carries no\ndescription.",
           "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "children": {
+              "items": {
+                "$ref": "#/$defs/ChildGroup"
+              },
+              "type": "array"
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "process",
+              "type": "string"
+            },
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "nameSource": {
+              "const": "derived",
+              "type": "string"
+            },
+            "params": {
+              "items": {
+                "$ref": "#/$defs/EditableProcessField"
+              },
+              "type": "array"
+            },
+            "signals": {
+              "items": {
+                "$ref": "#/$defs/EditableProcessField"
+              },
+              "type": "array"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The name is a rendering of the node's own expression. The title is\noutput, not input: the save path recomputes it and it carries no\ndescription.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "binding": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "expression": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fields": {
+              "additionalProperties": {
+                "$ref": "#/$defs/EditableValue"
+              },
+              "default": {},
+              "type": "object"
+            },
+            "kind": {
+              "const": "data",
+              "type": "string"
+            },
             "nameSource": {
               "const": "derived",
               "type": "string"
@@ -320,137 +1166,561 @@
           },
           "required": [
             "nameSource",
-            "title"
+            "title",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The name is a rendering of the node's own expression. The title is\noutput, not input: the save path recomputes it and it carries no\ndescription.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "binding": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "expression": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fields": {
+              "additionalProperties": {
+                "$ref": "#/$defs/EditableValue"
+              },
+              "default": {},
+              "type": "object"
+            },
+            "kind": {
+              "const": "call",
+              "type": "string"
+            },
+            "nameSource": {
+              "const": "derived",
+              "type": "string"
+            },
+            "operation": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "receiver": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The name is a rendering of the node's own expression. The title is\noutput, not input: the save path recomputes it and it carries no\ndescription.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "binding": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "effect": {
+              "$ref": "#/$defs/WorkflowEffectKind"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "expression": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fields": {
+              "additionalProperties": {
+                "$ref": "#/$defs/EditableValue"
+              },
+              "default": {},
+              "type": "object"
+            },
+            "kind": {
+              "const": "effect",
+              "type": "string"
+            },
+            "nameSource": {
+              "const": "derived",
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind",
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The name is a rendering of the node's own expression. The title is\noutput, not input: the save path recomputes it and it carries no\ndescription.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "expression": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fields": {
+              "additionalProperties": {
+                "$ref": "#/$defs/EditableValue"
+              },
+              "default": {},
+              "type": "object"
+            },
+            "kind": {
+              "const": "state_update",
+              "type": "string"
+            },
+            "nameSource": {
+              "const": "derived",
+              "type": "string"
+            },
+            "target": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The name is a rendering of the node's own expression. The title is\noutput, not input: the save path recomputes it and it carries no\ndescription.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "binding": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "expression": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fields": {
+              "additionalProperties": {
+                "$ref": "#/$defs/EditableValue"
+              },
+              "default": {},
+              "type": "object"
+            },
+            "kind": {
+              "const": "computation",
+              "type": "string"
+            },
+            "nameSource": {
+              "const": "derived",
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The name is a rendering of the node's own expression. The title is\noutput, not input: the save path recomputes it and it carries no\ndescription.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "expression": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "terminal",
+              "type": "string"
+            },
+            "nameSource": {
+              "const": "derived",
+              "type": "string"
+            },
+            "terminalKind": {
+              "$ref": "#/$defs/WorkflowTerminalKind"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind",
+            "terminalKind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The name is a rendering of the node's own expression. The title is\noutput, not input: the save path recomputes it and it carries no\ndescription.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "opaque",
+              "type": "string"
+            },
+            "nameSource": {
+              "const": "derived",
+              "type": "string"
+            },
+            "source": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The name is a rendering of the node's own expression. The title is\noutput, not input: the save path recomputes it and it carries no\ndescription.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "binding": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "children": {
+              "items": {
+                "$ref": "#/$defs/ChildGroup"
+              },
+              "type": "array"
+            },
+            "condition": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "container",
+              "type": "string"
+            },
+            "nameSource": {
+              "const": "derived",
+              "type": "string"
+            },
+            "subkind": {
+              "const": "if",
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind",
+            "subkind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The name is a rendering of the node's own expression. The title is\noutput, not input: the save path recomputes it and it carries no\ndescription.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "children": {
+              "items": {
+                "$ref": "#/$defs/ChildGroup"
+              },
+              "type": "array"
+            },
+            "condition": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "container",
+              "type": "string"
+            },
+            "nameSource": {
+              "const": "derived",
+              "type": "string"
+            },
+            "subkind": {
+              "const": "while",
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind",
+            "subkind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The name is a rendering of the node's own expression. The title is\noutput, not input: the save path recomputes it and it carries no\ndescription.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "binding": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "children": {
+              "items": {
+                "$ref": "#/$defs/ChildGroup"
+              },
+              "type": "array"
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "iterable": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "container",
+              "type": "string"
+            },
+            "nameSource": {
+              "const": "derived",
+              "type": "string"
+            },
+            "subkind": {
+              "const": "for",
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind",
+            "subkind"
           ],
           "type": "object"
         }
-      ],
-      "properties": {
-        "availableVars": {
-          "default": [],
-          "items": {
-            "$ref": "#/$defs/TypedVariable"
-          },
-          "type": "array"
-        },
-        "binding": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "children": {
-          "items": {
-            "$ref": "#/$defs/ChildGroup"
-          },
-          "type": "array"
-        },
-        "condition": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "diagnostics": {
-          "items": {
-            "$ref": "#/$defs/TypeDiagnostic"
-          },
-          "type": "array"
-        },
-        "effect": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "expectedArgTypes": {
-          "items": {
-            "$ref": "#/$defs/ExpectedArgumentType"
-          },
-          "type": "array"
-        },
-        "expression": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "fields": {
-          "additionalProperties": {
-            "$ref": "#/$defs/EditableValue"
-          },
-          "default": {},
-          "type": "object"
-        },
-        "iterable": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "kind": {
-          "type": "string"
-        },
-        "name": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "operation": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "params": {
-          "items": {
-            "$ref": "#/$defs/EditableProcessField"
-          },
-          "type": "array"
-        },
-        "receiver": {
-          "description": "The receiver the catalog entry this node came from belongs to, carried\nso a call node posted with no `expression` can be synthesized against\nthe receiver it actually names (FIG-3178).",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "signals": {
-          "items": {
-            "$ref": "#/$defs/EditableProcessField"
-          },
-          "type": "array"
-        },
-        "source": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "subkind": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "target": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "terminalKind": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "kind"
-      ],
-      "type": "object"
+      ]
     },
     "Span": {
       "properties": {
@@ -530,6 +1800,24 @@
       "enum": [
         "definite",
         "advisory"
+      ],
+      "type": "string"
+    },
+    "WorkflowEffectKind": {
+      "enum": [
+        "await_join",
+        "wait_signal",
+        "sleep_for",
+        "print",
+        "break",
+        "continue"
+      ],
+      "type": "string"
+    },
+    "WorkflowTerminalKind": {
+      "enum": [
+        "finish",
+        "fail"
       ],
       "type": "string"
     }

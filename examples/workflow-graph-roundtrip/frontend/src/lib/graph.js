@@ -79,7 +79,7 @@ export function buildFlow(doc, storedPositions, handlers = {}) {
   const readsByNode = new Map();
   const flowEdges = [];
   for (const edge of doc.edges) {
-    const isData = edge.data?.kind === 'data';
+    const isData = edge.data?.kind === 'data_dependency';
     if (isData && parentOf.get(edge.source) !== parentOf.get(edge.target)) {
       const variable = edge.data?.variable;
       if (variable) {
@@ -173,7 +173,7 @@ function seedFields(fields) {
 // parse made `effect.sleep` and `effect.wait_signal` unsaveable straight out
 // of the palette (FIG-3179).
 function synthEffectExpression(op, byName) {
-  if (op.effect === 'sleep') return `await sleep(${slotText(byName.duration) || '"1s"'})`;
+  if (op.effect === 'sleep_for') return `await sleep(${slotText(byName.duration) || '"1s"'})`;
   if (op.effect === 'wait_signal') {
     return `await waitSignal(${JSON.stringify(slotText(byName.signal) || 'continue')})`;
   }

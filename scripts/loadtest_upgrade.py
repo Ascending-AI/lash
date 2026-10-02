@@ -61,7 +61,7 @@ from typing import Any
 from loadtest_faults import BUSY_WATCHDOG_S, Campaign, FaultFailed
 
 CAMPAIGN = 'rolling-upgrade'
-STEPS = ('half-roll', 'rollback', 'roll', 'finalize', 'fence')
+from loadtest_ledger import UPGRADE_STEPS as STEPS
 # The worker generations, and which build each runs.
 GENERATIONS = {'initial': 'n', 'next': 'n+1', 'rollback': 'n', 'final': 'n+1'}
 # lashctl's pinned exit codes (docs/operations/deploying-and-upgrading.md).
@@ -272,7 +272,7 @@ class UpgradeCampaign(Campaign):
 
     def half_roll(self) -> None:
         step, old, new = 'half-roll', 'initial', 'next'
-        self.record(step, step, 'intent', new, {'old': old, 'new': new})
+        self.record(step, 'intent', new, {'old': old, 'new': new})
         old_deployment = self.deployment_id(self.uri(old))
         self.deploy(new, [old], step, migrate=True)
         migrate = self.migrate_hook(new)
@@ -286,7 +286,7 @@ class UpgradeCampaign(Campaign):
         _, drain = self.lashctl(new, 'drain', self.g['n'])
         new_workers = [activity['worker_id'] for activity in self.worker_activity(new)]
         actors = self.actors()
-        at = self.record(step, step, 'injected', self.uri(new), {
+        at = self.record(step, 'injected', self.uri(new), {
             'old_generation': self.g['n'], 'new_generation': self.g['n+1'], 'old_uri': self.uri(old),
             'new_uri': self.uri(new), 'old_deployment_id': old_deployment,
             'new_deployment_id': self.deployment_id(self.uri(new)), 'registration': registration,
@@ -295,12 +295,12 @@ class UpgradeCampaign(Campaign):
             'drain': drain['result'], 'sessions': sorted(actors),
         })
         evidence = self.recover(step, at, lambda: self.sessions_evidence(at, actors), workers=new_workers)
-        self.record(step, step, 'recovered', self.uri(new), {**evidence, 'migrated_by': 'n+1',
+        self.record(step, 'recovered', self.uri(new), {**evidence, 'migrated_by': 'n+1',
                                                               'forward_drain': self.g['n']})
 
     def rollback(self) -> None:
         step, old, new = 'rollback', 'next', 'rollback'
-        self.record(step, step, 'intent', new, {'old': old, 'new': new})
+        self.record(step, 'intent', new, {'old': old, 'new': new})
         # The forward drain ends: N comes back before anything finalized.
         _, ended = self.lashctl(old, 'end-drain', self.g['n'])
         self.deploy(new, ['initial', old], step, migrate=False)
@@ -315,7 +315,7 @@ class UpgradeCampaign(Campaign):
         _, drain = self.lashctl(new, 'drain', self.g['n+1'])
         new_workers = [activity['worker_id'] for activity in self.worker_activity(new)]
         actors = self.actors()
-        at = self.record(step, step, 'injected', self.uri(new), {
+        at = self.record(step, 'injected', self.uri(new), {
             'old_generation': self.g['n+1'], 'new_generation': restored, 'restored_generation': restored,
             'n_generation': self.g['n'], 'old_uri': self.uri(old), 'new_uri': self.uri(new),
             'old_deployment_id': old_deployment, 'new_deployment_id': self.deployment_id(self.uri(new)),
@@ -350,11 +350,11 @@ class UpgradeCampaign(Campaign):
         _, reverse_ended = self.lashctl(new, 'end-drain', self.g['n+1'])
         evidence['reverse_drain_ended'] = reverse_ended['result']
         evidence['retired'] = old
-        self.record(step, step, 'recovered', self.uri(new), evidence)
+        self.record(step, 'recovered', self.uri(new), evidence)
 
     def roll(self) -> None:
         step, new = 'roll', 'final'
-        self.record(step, step, 'intent', new, {'old': ['initial', 'rollback'], 'new': new})
+        self.record(step, 'intent', new, {'old': ['initial', 'rollback'], 'new': new})
         deployments = {generation: self.deployment_id(self.uri(generation)) for generation in ('initial', 'rollback')}
         self.deploy(new, ['initial', 'rollback'], step, migrate=True)
         migrate = self.migrate_hook(new)
@@ -366,7 +366,7 @@ class UpgradeCampaign(Campaign):
         _, drain = self.lashctl(new, 'drain', self.g['n'])
         new_workers = [activity['worker_id'] for activity in self.worker_activity(new)]
         actors = self.actors()
-        at = self.record(step, step, 'injected', self.uri(new), {
+        at = self.record(step, 'injected', self.uri(new), {
             'old_generation': self.g['n'], 'new_generation': self.g['n+1'], 'old_uri': self.uri('rollback'),
             'new_uri': self.uri(new), 'old_deployment_ids': deployments,
             'new_deployment_id': self.deployment_id(self.uri(new)), 'registration': registration,
@@ -391,11 +391,11 @@ class UpgradeCampaign(Campaign):
         # up, and is unregistered at finalize, to be step 5's stale writer.
         self.deploy(new, ['rollback'], 'roll-retired', migrate=False)
         evidence['retired'] = 'initial'
-        self.record(step, step, 'recovered', self.uri(new), evidence)
+        self.record(step, 'recovered', self.uri(new), evidence)
 
     def finalize(self) -> None:
         step, operator = 'finalize', 'final'
-        self.record(step, step, 'intent', operator, {'retired_generation': self.g['n']})
+        self.record(step, 'intent', operator, {'retired_generation': self.g['n']})
         finalize = ['finalize', self.g['n'], '--restate-admin-url', self.admin]
         # Retirement is read from the engine: N's stopped deployments are
         # still registered, so finalize refuses and moves nothing.
@@ -406,7 +406,7 @@ class UpgradeCampaign(Campaign):
         actors = self.actors()
         self.in_flight_now()
         attempts, flip = self.finalize_when_drained(operator, finalize, EXIT_DONE)
-        at = self.record(step, step, 'injected', operator, {
+        at = self.record(step, 'injected', operator, {
             'retired_generation': self.g['n'], 'refused': refusal(retained), 'removed_deployment_ids': removed,
             'finalize': flip['result'], 'not_yet_attempts': attempts,
             'sessions': sorted(actors), 'active': [],
@@ -423,7 +423,7 @@ class UpgradeCampaign(Campaign):
         _, sweep = self.lashctl(operator, 'objects-sweep', *restate, '--restate-ingress-url', self.ingress)
         _, after = self.lashctl(operator, 'objects-preflight', *restate)
         evidence = self.recover(step, at, lambda: self.sessions_evidence(at, actors))
-        self.record(step, step, 'recovered', operator, {
+        self.record(step, 'recovered', operator, {
             **evidence, 'finalized': True, 'flip': flip['result']['flip'],
             'backfills': flip['result']['backfills'], 'forward_drain_ended': ended['result'],
             'contract': contract['result'], 'objects_before': objects_summary(before['result']),
@@ -459,13 +459,13 @@ class UpgradeCampaign(Campaign):
 
     def fence(self) -> None:
         step, stale = 'fence', 'rollback'
-        self.record(step, step, 'intent', stale, {'stale_generation': self.g['n']})
+        self.record(step, 'intent', stale, {'stale_generation': self.g['n']})
         actors = self.actors()
         self.in_flight_now()
         # The live N worker is still up and still holds its store: its next
         # durable write, a drain mark, is fenced and writes nothing.
         status, body = self.answer('POST', self.control(stale, f"/generations/{self.g['n+1']}/drain"))
-        at = self.record(step, step, 'injected', stale, {
+        at = self.record(step, 'injected', stale, {
             'stale_generation': self.g['n'], 'live_write': {'status': status, 'body': body[-2000:]},
             'sessions': sorted(actors), 'active': [],
         })
@@ -485,7 +485,7 @@ class UpgradeCampaign(Campaign):
         code, preflight = self.lashctl(stale, 'preflight', expect=(EXIT_REFUSED, EXIT_INCOMPATIBLE))
         evidence = self.recover(step, at, lambda: self.sessions_evidence(at, actors))
         self.deploy('final', [], 'fence-retired', migrate=False)
-        self.record(step, step, 'recovered', stale, {
+        self.record(step, 'recovered', stale, {
             **evidence, 'live_writer_fenced': True, 'drain_mark_written': False,
             'fresh_open': {'exit': fresh.returncode, 'output': fresh.stdout[-2000:]},
             'fresh_open_refused': True, 'operator_preflight': {'exit': code, 'body': preflight},
@@ -494,7 +494,7 @@ class UpgradeCampaign(Campaign):
 
     def run(self) -> None:
         self.steady_from = self.start() + int(self.workload['warmup_s']) * 1_000_000
-        self.record('campaign', 'campaign', 'started', self.args.run, {
+        self.record('campaign', 'started', self.args.run, {
             'campaign': CAMPAIGN, 'workload': self.args.workload_name, 'steps': list(STEPS),
             'generations': GENERATIONS, 'phase_start_us': self.steady_from,
             'warmup_s': self.workload['warmup_s'], 'recovery_stable_s': self.stable_s, 'settle_s': self.settle_s,
@@ -507,10 +507,10 @@ class UpgradeCampaign(Campaign):
                 step()
         except Exception as error:
             reason = f'{type(error).__name__}: {error}'
-            self.record(current, current, 'failed', current, {'reason': reason})
-            self.record('campaign', 'campaign', 'failed', self.args.run, {'reason': reason, 'step': current})
+            self.record(current, 'failed', current, {'reason': reason})
+            self.record('campaign', 'failed', self.args.run, {'reason': reason, 'step': current})
             raise
-        self.record('campaign', 'campaign', 'complete', self.args.run, {'steps': len(STEPS)})
+        self.record('campaign', 'complete', self.args.run, {'steps': len(STEPS)})
 
 
 def main() -> int:

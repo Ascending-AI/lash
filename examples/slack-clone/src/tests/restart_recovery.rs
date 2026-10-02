@@ -13,7 +13,7 @@ use axum::response::IntoResponse as _;
 use axum::routing::post;
 
 use crate::bot::channel::{DeliveryOutcome, ReplySource};
-use crate::bot::ledger::{DetailWrite, EventLedger, KIND_APP_MENTION, KIND_MESSAGE, Stage};
+use crate::bot::ledger::{EventLedger, KIND_APP_MENTION, KIND_MESSAGE, Stage, StageKind};
 use crate::bot::runtime::session_id;
 use crate::bot::{ledger, webhook};
 use crate::store::SqliteHandle;
@@ -81,7 +81,7 @@ async fn a_restarted_bot_keeps_the_channel_transcript_and_does_not_reply_twice()
         .await
         .expect("read ledger")
         .expect("the ledger row survived the restart");
-    assert_eq!(record.stage, Stage::Replied);
+    assert_eq!(record.stage.kind(), StageKind::Replied);
     let disposition = bot
         .ingest(first_mention.clone(), Some(1))
         .await
@@ -90,7 +90,7 @@ async fn a_restarted_bot_keeps_the_channel_transcript_and_does_not_reply_twice()
         matches!(
             disposition,
             DeliveryOutcome::Duplicate {
-                stage: Stage::Replied,
+                stage: StageKind::Replied,
                 ..
             }
         ),
@@ -157,7 +157,7 @@ async fn a_reply_owed_at_crash_time_is_posted_by_the_next_boots_recovery_pass() 
     // owed, with the text on record and nothing posted. This is the state the bot
     // writes immediately before calling `chat.postMessage`.
     let ledger_database =
-        SqliteHandle::open(&bot_dir.join("events.db"), ledger::SCHEMA).expect("open ledger");
+        SqliteHandle::open(&bot_dir.join("events.db"), &ledger::SCHEMA).expect("open ledger");
     let ledger = EventLedger::new(ledger_database);
     ledger
         .claim(
@@ -173,10 +173,10 @@ async fn a_reply_owed_at_crash_time_is_posted_by_the_next_boots_recovery_pass() 
     ledger
         .advance(
             app_mention.event_id.clone(),
-            Stage::Accepted,
-            Stage::ReplyPending,
-            None,
-            DetailWrite::Set("Recovered answer.".to_string()),
+            StageKind::Accepted,
+            Stage::ReplyPending {
+                reply: "Recovered answer.".to_string(),
+            },
         )
         .await
         .expect("record the owed reply");
@@ -210,7 +210,7 @@ async fn a_reply_owed_at_crash_time_is_posted_by_the_next_boots_recovery_pass() 
         matches!(
             disposition,
             DeliveryOutcome::Duplicate {
-                stage: Stage::Replied,
+                stage: StageKind::Replied,
                 ..
             }
         ),
@@ -248,10 +248,10 @@ async fn a_crash_between_posting_and_recording_does_not_produce_a_second_reply()
     bot.ledger()
         .advance(
             app_mention.event_id.clone(),
-            Stage::Replied,
-            Stage::ReplyPending,
-            None,
-            DetailWrite::Set("Posted once.".to_string()),
+            StageKind::Replied,
+            Stage::ReplyPending {
+                reply: "Posted once.".to_string(),
+            },
         )
         .await
         .expect("rewind the ledger");
@@ -262,7 +262,7 @@ async fn a_crash_between_posting_and_recording_does_not_produce_a_second_reply()
         matches!(
             recovered[0],
             DeliveryOutcome::Duplicate {
-                stage: Stage::Replied,
+                stage: StageKind::Replied,
                 ..
             }
         ),
@@ -455,7 +455,7 @@ async fn an_event_accepted_before_a_crash_is_answered_by_the_next_boots_recovery
     // process dies before doing any of the work. This is what `ingest` writes
     // before it opens a session.
     let ledger_database =
-        SqliteHandle::open(&bot_dir.join("events.db"), ledger::SCHEMA).expect("open ledger");
+        SqliteHandle::open(&bot_dir.join("events.db"), &ledger::SCHEMA).expect("open ledger");
     let ledger = EventLedger::new(ledger_database);
     for (envelope, kind, text) in [
         (&ambient, KIND_MESSAGE, "ada: the cache is cold again"),
@@ -472,7 +472,7 @@ async fn an_event_accepted_before_a_crash_is_answered_by_the_next_boots_recovery
             )
             .await
             .expect("claim event");
-        assert_eq!(claim.record().stage, Stage::Accepted);
+        assert_eq!(claim.record().stage.kind(), StageKind::Accepted);
     }
 
     // The next boot.
@@ -566,10 +566,8 @@ async fn a_reply_lost_with_its_process_is_recovered_from_the_committed_transcrip
     bot.ledger()
         .advance(
             app_mention.event_id.clone(),
-            Stage::Replied,
-            Stage::Accepted,
-            None,
-            DetailWrite::Keep,
+            StageKind::Replied,
+            Stage::Accepted { deferral: None },
         )
         .await
         .expect("rewind the ledger");
@@ -803,9 +801,9 @@ async fn a_mention_interrupted_mid_turn_is_deferred_and_never_terminalized() {
         !record.stage.is_terminal(),
         "a deferred event must stay resumable, found stage {} detail {:?}",
         record.stage.as_str(),
-        record.detail
+        record.stage.detail()
     );
-    assert_eq!(record.stage, Stage::Accepted);
+    assert_eq!(record.stage.kind(), StageKind::Accepted);
     assert_eq!(script.calls(), 0, "no turn ran on the new boot yet");
     assert!(platform.bot_messages(&channel).await.is_empty());
 
@@ -884,7 +882,7 @@ async fn a_mention_interrupted_by_a_dead_boot_is_answered_once_by_the_next_boot(
         matches!(
             disposition,
             DeliveryOutcome::Duplicate {
-                stage: Stage::Replied,
+                stage: StageKind::Replied,
                 ..
             }
         ),
@@ -936,7 +934,7 @@ async fn a_thread_mention_interrupted_by_a_dead_boot_uses_the_same_recovery() {
         .await
         .expect("read ledger")
         .expect("thread ledger row");
-    assert_eq!(record.stage, Stage::Accepted);
+    assert_eq!(record.stage.kind(), StageKind::Accepted);
     let root_ts = root.to_string();
     assert_eq!(record.thread_ts.as_deref(), Some(root_ts.as_str()));
 
@@ -1025,7 +1023,7 @@ async fn webhook_retry_answers_after_the_root_outlives_the_initial_wait_without_
                 .get(reply.event_id.clone())
                 .await
                 .expect("read waiting reply")
-                .and_then(|record| record.detail);
+                .and_then(|record| record.stage.detail());
             if detail.as_deref() == Some("thread_root_not_processed") {
                 break;
             }
@@ -1050,7 +1048,7 @@ async fn webhook_retry_answers_after_the_root_outlives_the_initial_wait_without_
                 .await
                 .expect("read reply ledger")
                 .expect("reply row");
-            if record.stage == Stage::Replied {
+            if record.stage.kind() == StageKind::Replied {
                 break;
             }
             tokio::task::yield_now().await;
@@ -1128,7 +1126,7 @@ async fn recovery_folds_a_late_root_before_re_driving_its_unavailable_reply() {
         )
         .await
         .expect("stage root accepted as if the process stopped before admission");
-    assert_eq!(claimed.record().stage, Stage::Accepted);
+    assert_eq!(claimed.record().stage.kind(), StageKind::Accepted);
 
     // Restore a production-sized budget so recovery's own `Duration::ZERO` for
     // thread records is what keeps the serial pass moving, rather than a test
@@ -1166,7 +1164,7 @@ async fn recovery_folds_a_late_root_before_re_driving_its_unavailable_reply() {
         .await
         .expect("read recovered reply")
         .expect("reply row");
-    assert_eq!(record.stage, Stage::Replied);
+    assert_eq!(record.stage.kind(), StageKind::Replied);
 }
 
 #[tokio::test]
@@ -1201,10 +1199,8 @@ async fn reply_lost_still_reports_a_committed_turn_that_produced_no_text() {
     bot.ledger()
         .advance(
             app_mention.event_id.clone(),
-            Stage::Folded,
-            Stage::Accepted,
-            None,
-            DetailWrite::Keep,
+            StageKind::Folded,
+            Stage::Accepted { deferral: None },
         )
         .await
         .expect("rewind the ledger");

@@ -63,7 +63,7 @@ pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
             "effect",
             None,
             None,
-            Some("sleep"),
+            Some("sleep_for"),
             None,
             vec![field("duration", "expression", "\"1s\"")],
         ),

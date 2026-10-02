@@ -35,7 +35,7 @@ const SLEEP = {
   id: 'effect.sleep',
   label: 'Sleep',
   nodeKind: 'effect',
-  effect: 'sleep',
+  effect: 'sleep_for',
   fields: [{ name: 'duration', type: 'expression', default: { kind: 'expr', value: '"1s"' } }],
 };
 

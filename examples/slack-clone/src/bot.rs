@@ -118,7 +118,7 @@ pub async fn run(config: BotConfig) -> Result<()> {
         identity.team_id
     );
 
-    let ledger_database = SqliteHandle::open(&config.data_dir.join("events.db"), ledger::SCHEMA)
+    let ledger_database = SqliteHandle::open(&config.data_dir.join("events.db"), &ledger::SCHEMA)
         .context("open bot event ledger")?;
     let ledger = EventLedger::new(ledger_database);
 

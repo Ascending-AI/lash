@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 2,
   "cargo_package_count": 55,
-  "cargo_target_count": 219,
+  "cargo_target_count": 220,
   "feature_lane_build_targets": [
     "//crates/lash-conformance:lash-conformance__fv_0f5f2ec4[static]",
     "//crates/lash-conformance:lash-conformance__fv_110ca6ce[static]",
@@ -940,6 +940,8 @@
     "//runbooks/restate-postgres-workers:lash-e2e-worker__bin__fv_eab4da00",
     "//runbooks/restate-postgres-workers:lash-loadtest-driver__bin__fv_054def2f",
     "//runbooks/restate-postgres-workers:lash-loadtest-driver__bin__fv_eab4da00",
+    "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin__fv_054def2f",
+    "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin__fv_eab4da00",
     "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin__fv_054def2f",
     "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin__fv_eab4da00",
     "//runbooks/restate-postgres-workers:provider_stream_bounds__test__fv_054def2f",
@@ -1887,6 +1889,8 @@
     "//runbooks/restate-postgres-workers:lash-e2e-worker__bin__fv_eab4da00[check]",
     "//runbooks/restate-postgres-workers:lash-loadtest-driver__bin__fv_054def2f[check]",
     "//runbooks/restate-postgres-workers:lash-loadtest-driver__bin__fv_eab4da00[check]",
+    "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin__fv_054def2f[check]",
+    "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin__fv_eab4da00[check]",
     "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin__fv_054def2f[check]",
     "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin__fv_eab4da00[check]",
     "//runbooks/restate-postgres-workers:provider_stream_bounds__test__fv_054def2f[check]",
@@ -2852,6 +2856,8 @@
     "//runbooks/restate-postgres-workers:lash-e2e-worker__bin__fv_eab4da00",
     "//runbooks/restate-postgres-workers:lash-loadtest-driver__bin__fv_054def2f",
     "//runbooks/restate-postgres-workers:lash-loadtest-driver__bin__fv_eab4da00",
+    "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin__fv_054def2f",
+    "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin__fv_eab4da00",
     "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin__fv_054def2f",
     "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin__fv_eab4da00",
     "//runbooks/restate-postgres-workers:provider_stream_bounds__test__fv_054def2f",
@@ -44943,6 +44949,26 @@
       "package": "lash-restate-postgres-workers-e2e"
     },
     {
+      "build_label": "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin__fv_054def2f",
+      "check_label": "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin__fv_054def2f[check]",
+      "clippy_label": "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin__fv_054def2f__clippy[clippy.txt]",
+      "features": [],
+      "kind": "bin",
+      "label": "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin__fv_054def2f",
+      "package": "lash-restate-postgres-workers-e2e"
+    },
+    {
+      "build_label": "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin__fv_eab4da00",
+      "check_label": "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin__fv_eab4da00[check]",
+      "clippy_label": "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin__fv_eab4da00__clippy[clippy.txt]",
+      "features": [
+        "synthetic-next"
+      ],
+      "kind": "bin",
+      "label": "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin__fv_eab4da00",
+      "package": "lash-restate-postgres-workers-e2e"
+    },
+    {
       "build_label": "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin__fv_054def2f",
       "check_label": "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin__fv_054def2f[check]",
       "clippy_label": "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin__fv_054def2f__clippy[clippy.txt]",
@@ -45441,6 +45467,8 @@
       "//runbooks/restate-postgres-workers:lash-e2e-worker__bin__fv_eab4da00",
       "//runbooks/restate-postgres-workers:lash-loadtest-driver__bin__fv_054def2f",
       "//runbooks/restate-postgres-workers:lash-loadtest-driver__bin__fv_eab4da00",
+      "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin__fv_054def2f",
+      "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin__fv_eab4da00",
       "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin__fv_054def2f",
       "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin__fv_eab4da00",
       "//runbooks/restate-postgres-workers:provider_stream_bounds__test__fv_054def2f",
@@ -46511,7 +46539,7 @@
       "//crates/lashlang:lashlang__unit_test__fv_41763c4b"
     ]
   },
-  "generated_label_count": 285,
+  "generated_label_count": 286,
   "packages": [
     {
       "declared_features": [
@@ -51193,6 +51221,15 @@
           "tags": []
         },
         {
+          "build_label": "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin",
+          "cargo": "lash-loadtest-ledger-contract",
+          "check_label": "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin[check]",
+          "clippy_label": "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin__clippy[clippy.txt]",
+          "kind": "bin",
+          "label": "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin",
+          "tags": []
+        },
+        {
           "build_label": "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin",
           "cargo": "lash-loadtest-smoke",
           "check_label": "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin[check]",
@@ -52197,6 +52234,7 @@
     "//runbooks/restate-postgres-workers:lash-e2e-session-operator__bin",
     "//runbooks/restate-postgres-workers:lash-e2e-worker__bin",
     "//runbooks/restate-postgres-workers:lash-loadtest-driver__bin",
+    "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin",
     "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin",
     "//runbooks/restate-postgres-workers:provider_stream_bounds__test",
     "//runbooks/restate-postgres-workers:restate-postgres-workers[static]",
@@ -52483,6 +52521,7 @@
     "//runbooks/restate-postgres-workers:lash-e2e-session-operator__bin[check]",
     "//runbooks/restate-postgres-workers:lash-e2e-worker__bin[check]",
     "//runbooks/restate-postgres-workers:lash-loadtest-driver__bin[check]",
+    "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin[check]",
     "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin[check]",
     "//runbooks/restate-postgres-workers:provider_stream_bounds__test[check]",
     "//runbooks/restate-postgres-workers:restate-postgres-workers[check]",
@@ -52769,6 +52808,7 @@
     "//runbooks/restate-postgres-workers:lash-e2e-session-operator__bin__clippy[clippy.txt]",
     "//runbooks/restate-postgres-workers:lash-e2e-worker__bin__clippy[clippy.txt]",
     "//runbooks/restate-postgres-workers:lash-loadtest-driver__bin__clippy[clippy.txt]",
+    "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin__clippy[clippy.txt]",
     "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin__clippy[clippy.txt]",
     "//runbooks/restate-postgres-workers:provider_stream_bounds__test__clippy[clippy.txt]",
     "//runbooks/restate-postgres-workers:restate-postgres-workers__clippy[clippy.txt]",
@@ -53055,6 +53095,7 @@
     "//runbooks/restate-postgres-workers:lash-e2e-session-operator__bin",
     "//runbooks/restate-postgres-workers:lash-e2e-worker__bin",
     "//runbooks/restate-postgres-workers:lash-loadtest-driver__bin",
+    "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin",
     "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin",
     "//runbooks/restate-postgres-workers:provider_stream_bounds__test",
     "//runbooks/restate-postgres-workers:restate-postgres-workers",
@@ -53342,6 +53383,7 @@
     "//runbooks/restate-postgres-workers:lash-e2e-session-operator__bin",
     "//runbooks/restate-postgres-workers:lash-e2e-worker__bin",
     "//runbooks/restate-postgres-workers:lash-loadtest-driver__bin",
+    "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin",
     "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin",
     "//runbooks/restate-postgres-workers:provider_stream_bounds__test",
     "//runbooks/restate-postgres-workers:restate-postgres-workers",

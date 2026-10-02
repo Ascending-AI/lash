@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 use workflow_graph_roundtrip::{
-    AppState, EditableValue, FlowNode, NodeData, NodeName, RunEvent, RunStatus, RunTiming,
+    AppState, EditableValue, FlowNode, NodeName, RunEvent, RunStatus, RunTiming,
     SaveWorkflowResponse, WorkflowDocument,
 };
 
@@ -48,7 +48,7 @@ async fn blank_workflow_full_authoring_round_trip_rejects_malformed_then_runs() 
     // The Steps rail adds a catalog-shaped literal action directly to the
     // process body.
     let mut message = catalog_node(operation("display.show_message"), "new:steps-message");
-    message.data.fields.insert(
+    message.data.fields_mut().expect("fields node").insert(
         "text".to_string(),
         EditableValue::String("Built from blank".to_string()),
     );
@@ -59,7 +59,8 @@ async fn blank_workflow_full_authoring_round_trip_rejects_malformed_then_runs() 
     let mut progress = catalog_node(operation("display.set_progress"), "new:canvas-progress");
     progress
         .data
-        .fields
+        .fields_mut()
+        .expect("fields node")
         .insert("pct".to_string(), EditableValue::Number(73.0));
     document.roots.main.push(progress.id.clone());
     document.nodes.push(progress);
@@ -79,7 +80,8 @@ async fn blank_workflow_full_authoring_round_trip_rejects_malformed_then_runs() 
     let process_id = document.nodes[process_index].id.clone();
     let body = document.nodes[process_index]
         .data
-        .children
+        .children_mut()
+        .expect("children node")
         .iter_mut()
         .find(|child| child.slot == "body")
         .expect("blank process body");
@@ -102,9 +104,11 @@ async fn blank_workflow_full_authoring_round_trip_rejects_malformed_then_runs() 
     let terminal = document
         .nodes
         .iter_mut()
-        .find(|node| node.data.terminal_kind.as_deref() == Some("finish"))
+        .find(|node| {
+            node.data.terminal_kind() == Some(&lash::rlm::lang::WorkflowTerminalKind::Finish)
+        })
         .expect("blank terminal");
-    terminal.data.expression = Some("1 +".to_string());
+    *terminal.data.expression_mut().expect("expression node") = Some("1 +".to_string());
     let terminal_id = terminal.id.clone();
 
     let response = client
@@ -136,7 +140,9 @@ async fn blank_workflow_full_authoring_round_trip_rejects_malformed_then_runs() 
         .find(|node| node.id == terminal_id)
         .expect("draft terminal retained")
         .data
-        .expression = Some("\"done\"".to_string());
+        .expression_mut()
+        .expect("expression node")
+        .replace("\"done\"".to_string());
     let posted_ids = document
         .nodes
         .iter()
@@ -265,7 +271,9 @@ async fn renaming_a_node_keeps_the_authored_title_through_save_and_reprojection(
     let terminal = document
         .nodes
         .iter_mut()
-        .find(|node| node.data.terminal_kind.as_deref() == Some("finish"))
+        .find(|node| {
+            node.data.terminal_kind() == Some(&lash::rlm::lang::WorkflowTerminalKind::Finish)
+        })
         .expect("blank terminal");
     assert_eq!(
         terminal.data.name,
@@ -301,7 +309,9 @@ async fn renaming_a_node_keeps_the_authored_title_through_save_and_reprojection(
         .document
         .nodes
         .iter()
-        .find(|node| node.data.terminal_kind.as_deref() == Some("finish"))
+        .find(|node| {
+            node.data.terminal_kind() == Some(&lash::rlm::lang::WorkflowTerminalKind::Finish)
+        })
         .expect("renamed terminal reprojected");
     assert_eq!(
         saved_terminal.data.name,
@@ -317,7 +327,9 @@ async fn renaming_a_node_keeps_the_authored_title_through_save_and_reprojection(
     document
         .nodes
         .iter_mut()
-        .find(|node| node.data.terminal_kind.as_deref() == Some("finish"))
+        .find(|node| {
+            node.data.terminal_kind() == Some(&lash::rlm::lang::WorkflowTerminalKind::Finish)
+        })
         .expect("renamed terminal")
         .data
         .name = NodeName::Derived {
@@ -341,7 +353,8 @@ async fn renaming_a_node_keeps_the_authored_title_through_save_and_reprojection(
             .document
             .nodes
             .iter()
-            .find(|node| node.data.terminal_kind.as_deref() == Some("finish"))
+            .find(|node| node.data.terminal_kind()
+                == Some(&lash::rlm::lang::WorkflowTerminalKind::Finish))
             .expect("terminal reprojected")
             .data
             .name,
@@ -411,7 +424,7 @@ async fn an_authored_action_saves_only_with_the_awaited_receiver_call_the_editor
         .find(|entry| entry["id"] == "display.show_message")
         .expect("catalog entry display.show_message");
 
-    // The literal the browser puts in `data.expression` for a zero-edit
+    // The literal the browser puts in `data.expression()` for a zero-edit
     // palette insertion of Show message, pinned so the helper above cannot
     // drift away from `synthCallExpression` unnoticed.
     let authored = synth_call_expression(entry);
@@ -423,7 +436,7 @@ async fn an_authored_action_saves_only_with_the_awaited_receiver_call_the_editor
     // names the node that carries it.
     let mut rejected = baseline.clone();
     let mut bare = catalog_node(entry, "new:bare-call");
-    bare.data.expression = Some(authored.replace("await ", ""));
+    *bare.data.expression_mut().expect("expression node") = Some(authored.replace("await ", ""));
     append_process_node(&mut rejected, bare);
     let response = client
         .post(format!("{base}/workflow"))
@@ -452,11 +465,14 @@ async fn an_authored_action_saves_only_with_the_awaited_receiver_call_the_editor
     // authored call into the canonical source.
     let mut accepted = baseline;
     let mut awaited = catalog_node(entry, "new:awaited-call");
-    awaited.data.fields.insert(
+    awaited.data.fields_mut().expect("fields node").insert(
         "text".to_string(),
         EditableValue::String("Authored".to_string()),
     );
-    assert_eq!(awaited.data.expression.as_deref(), Some(authored.as_str()));
+    assert_eq!(
+        awaited.data.expression().as_deref(),
+        Some(authored.as_str())
+    );
     append_process_node(&mut accepted, awaited);
     let response = client
         .post(format!("{base}/workflow"))
@@ -538,8 +554,8 @@ async fn a_non_display_action_saves_against_its_own_receiver_and_expression_defa
     let baseline = select_workflow(&client, &base, "blank").await;
     let mut document = baseline;
     let mut node = catalog_node(entry, "new:gmail-list-recent");
-    node.data.expression = None;
-    assert_eq!(node.data.receiver.as_deref(), Some("gmail"));
+    *node.data.expression_mut().expect("expression node") = None;
+    assert_eq!(node.data.receiver().as_deref(), Some("gmail"));
     append_process_node(&mut document, node);
     let response = client
         .post(format!("{base}/workflow"))
@@ -570,9 +586,9 @@ async fn a_non_display_action_saves_against_its_own_receiver_and_expression_defa
         .document
         .nodes
         .iter()
-        .find(|candidate| candidate.data.operation.as_deref() == Some("list_recent"))
+        .find(|candidate| candidate.data.operation().as_deref() == Some("list_recent"))
         .expect("projected gmail.list_recent call node");
-    assert_eq!(projected.data.kind, "call");
+    assert_eq!(projected.data.kind(), "call");
 
     server.abort();
 }
@@ -627,49 +643,30 @@ fn catalog_node(entry: &Value, id: &str) -> FlowNode {
         id: id.to_string(),
         node_type: kind.to_string(),
         parent_id: None,
-        data: NodeData {
-            kind: kind.to_string(),
-            subkind: text("subkind").map(str::to_string),
-            name: NodeName::Derived {
-                title: text("label").expect("catalog label").to_string(),
-            },
-            process_name: None,
-            params: Vec::new(),
-            signals: Vec::new(),
-            operation: None,
-            receiver: text("receiver").map(str::to_string),
-            effect: None,
-            terminal_kind: None,
-            fields: BTreeMap::new(),
-            binding: None,
-            target: None,
-            expression: None,
-            condition: None,
-            iterable: None,
-            source: None,
-            children: Vec::new(),
-            available_vars: Vec::new(),
-            expected_arg_types: Vec::new(),
-            diagnostics: Vec::new(),
-        },
+        data: serde_json::from_value({
+            let mut data = serde_json::json!({"kind":kind,"nameSource":"derived","title":text("label").expect("catalog label")});
+            for key in ["subkind", "receiver", "operation", "effect", "terminalKind"] {
+                if let Some(value) = text(key) { data[key] = serde_json::json!(value); }
+            }
+            data
+        }).expect("typed catalog node"),
     };
-    node.data.operation = text("operation").map(str::to_string);
-    node.data.effect = text("effect").map(str::to_string);
-    node.data.terminal_kind = text("terminalKind").map(str::to_string);
     for field in entry["fields"].as_array().expect("catalog fields") {
         let name = field["name"].as_str().expect("catalog field name");
-        node.data.fields.insert(
-            name.to_string(),
-            serde_json::from_value(field["default"].clone())
-                .unwrap_or_else(|error| panic!("catalog field {name} default: {error}")),
-        );
+        if let Some(fields) = node.data.fields_mut() {
+            fields.insert(
+                name.to_string(),
+                serde_json::from_value(field["default"].clone())
+                    .unwrap_or_else(|error| panic!("catalog field {name} default: {error}")),
+            );
+        }
     }
     // A palette insertion is not a bare `operation`: the editor seeds the
-    // receiver call it will post in `data.expression`, so these tests post it
+    // receiver call it will post in `data.expression()`, so these tests post it
     // too (FIG-3177). Leaving it `None` exercised the backend's own fallback
     // and hid the frontend's unawaited call from every save test.
     if kind == "call" {
-        node.data.expression = Some(synth_call_expression(entry));
+        *node.data.expression_mut().expect("expression node") = Some(synth_call_expression(entry));
     }
     node
 }
@@ -737,7 +734,8 @@ fn append_process_node(document: &mut WorkflowDocument, mut node: FlowNode) {
         .find_map(|candidate| (candidate.node_type == "terminal").then(|| candidate.id.clone()));
     let body = document.nodes[process_index]
         .data
-        .children
+        .children_mut()
+        .expect("children node")
         .iter_mut()
         .find(|child| child.slot == "body")
         .expect("process body");
@@ -797,10 +795,13 @@ async fn switching_a_call_to_another_receivers_operation_re_synthesizes_the_rece
         .iter_mut()
         .find(|node| node.id == switched_id)
         .expect("saved call node");
-    node.data.operation = list_recent["operation"].as_str().map(str::to_string);
-    node.data.receiver = list_recent["receiver"].as_str().map(str::to_string);
-    node.data.expression = Some(synth_call_expression(list_recent));
-    node.data.fields = catalog_fields(list_recent);
+    *node.data.operation_mut().expect("operation node") =
+        list_recent["operation"].as_str().map(str::to_string);
+    *node.data.receiver_mut().expect("receiver node") =
+        list_recent["receiver"].as_str().map(str::to_string);
+    *node.data.expression_mut().expect("expression node") =
+        Some(synth_call_expression(list_recent));
+    *node.data.fields_mut().expect("fields node") = catalog_fields(list_recent);
 
     let response = client
         .post(format!("{base}/workflow"))
@@ -835,20 +836,22 @@ async fn switching_a_call_to_another_receivers_operation_re_synthesizes_the_rece
         .document
         .nodes
         .iter()
-        .find(|node| node.data.operation.as_deref() == Some("list_recent"))
+        .find(|node| node.data.operation().as_deref() == Some("list_recent"))
         .expect("projected gmail.list_recent call node");
-    assert_eq!(projected.data.kind, "call");
+    assert_eq!(projected.data.kind(), "call");
 
     // The same switch from a client that leaves the old text in
-    // `data.expression`: the node's own receiver still decides, so the save
+    // `data.expression()`: the node's own receiver still decides, so the save
     // cannot smuggle the previous receiver's call through.
     let mut document = select_workflow(&client, &base, "blank").await;
     let mut stale = catalog_node(show_message, "new:stale-expression");
-    stale.data.operation = list_recent["operation"].as_str().map(str::to_string);
-    stale.data.receiver = list_recent["receiver"].as_str().map(str::to_string);
-    stale.data.fields = catalog_fields(list_recent);
+    *stale.data.operation_mut().expect("operation node") =
+        list_recent["operation"].as_str().map(str::to_string);
+    *stale.data.receiver_mut().expect("receiver node") =
+        list_recent["receiver"].as_str().map(str::to_string);
+    *stale.data.fields_mut().expect("fields node") = catalog_fields(list_recent);
     assert_eq!(
-        stale.data.expression.as_deref(),
+        stale.data.expression().as_deref(),
         Some(synth_call_expression(show_message).as_str())
     );
     append_process_node(&mut document, stale);
@@ -951,7 +954,7 @@ async fn catalog(client: &reqwest::Client, base: &str) -> Vec<Value> {
         .expect("operation catalog JSON")
 }
 
-/// `catalogFieldsMap` in `frontend/src/lib/operations.js`: the seed `data.fields`
+/// `catalogFieldsMap` in `frontend/src/lib/operations.js`: the seed `data.fields()`
 /// map an entry's typed defaults produce.
 #[expect(
     clippy::expect_used,
@@ -1021,30 +1024,38 @@ fn insert_palette_entry(document: &mut WorkflowDocument, entry: &Value, catalog:
 
     let mut node = catalog_node(entry, &id);
     match kind {
-        "opaque" => node.data.source = Some(slot_text(by_name("source"))),
-        "terminal" => node.data.expression = Some(or_else(slot_text(by_name("expression")), "0")),
+        "opaque" => {
+            *node.data.source_mut().expect("source node") = Some(slot_text(by_name("source")))
+        }
+        "terminal" => {
+            *node.data.expression_mut().expect("expression node") =
+                Some(or_else(slot_text(by_name("expression")), "0"))
+        }
         "effect" => {
-            node.data.expression = Some(match entry["effect"].as_str() {
-                Some("sleep") => format!(
-                    "await sleep({})",
-                    or_else(slot_text(by_name("duration")), "\"1s\"")
-                ),
-                Some("wait_signal") => format!(
-                    "await waitSignal({})",
-                    serde_json::to_string(
-                        by_name("signal")
-                            .and_then(|field| field["default"]["value"].as_str())
-                            .unwrap_or("continue")
-                    )
-                    .expect("JSON string literal")
-                ),
-                _ => or_else(slot_text(by_name("expression")), "await sleep(\"1s\")"),
-            });
+            *node.data.expression_mut().expect("expression node") =
+                Some(match entry["effect"].as_str() {
+                    Some("sleep_for") => format!(
+                        "await sleep({})",
+                        or_else(slot_text(by_name("duration")), "\"1s\"")
+                    ),
+                    Some("wait_signal") => format!(
+                        "await waitSignal({})",
+                        serde_json::to_string(
+                            by_name("signal")
+                                .and_then(|field| field["default"]["value"].as_str())
+                                .unwrap_or("continue")
+                        )
+                        .expect("JSON string literal")
+                    ),
+                    _ => or_else(slot_text(by_name("expression")), "await sleep(\"1s\")"),
+                });
         }
         "data" | "computation" => {
             let binding = slot_text(by_name("binding"));
-            node.data.binding = (!binding.is_empty()).then_some(binding);
-            node.data.expression = Some(or_else(slot_text(by_name("expression")), "0"));
+            *node.data.binding_mut().expect("binding node") =
+                (!binding.is_empty()).then_some(binding);
+            *node.data.expression_mut().expect("expression node") =
+                Some(or_else(slot_text(by_name("expression")), "0"));
         }
         "state_update" => {
             // An assignment target is a reference by nature: the catalog's
@@ -1060,12 +1071,15 @@ fn insert_palette_entry(document: &mut WorkflowDocument, entry: &Value, catalog:
                     .expect("a data entry to declare the assignment target with"),
                 &format!("{id}:state"),
             );
-            state.data.binding = Some("state".to_string());
-            state.data.expression = Some("{ count: 0 }".to_string());
-            state.data.fields = BTreeMap::new();
+            *state.data.binding_mut().expect("binding node") = Some("state".to_string());
+            *state.data.expression_mut().expect("expression node") =
+                Some("{ count: 0 }".to_string());
+            *state.data.fields_mut().expect("fields node") = BTreeMap::new();
             append_process_node(document, state);
-            node.data.target = Some(or_else(slot_text(by_name("target")), "state.count"));
-            node.data.expression = Some(or_else(slot_text(by_name("expression")), "0"));
+            *node.data.target_mut().expect("target node") =
+                Some(or_else(slot_text(by_name("target")), "state.count"));
+            *node.data.expression_mut().expect("expression node") =
+                Some(or_else(slot_text(by_name("expression")), "0"));
         }
         "container" => {
             let subkind = entry["subkind"].as_str().unwrap_or_default();
@@ -1075,27 +1089,29 @@ fn insert_palette_entry(document: &mut WorkflowDocument, entry: &Value, catalog:
             };
             match subkind {
                 "if" | "while" => {
-                    node.data.condition = Some(or_else(
+                    *node.data.condition_mut().expect("condition node") = Some(or_else(
                         slot_text(by_name("condition")),
                         if subkind == "while" { "false" } else { "true" },
                     ));
                 }
                 "for" => {
-                    node.data.binding = Some(or_else(slot_text(by_name("binding")), "item"));
-                    node.data.iterable = Some(or_else(slot_text(by_name("iterable")), "[1, 2, 3]"));
+                    *node.data.binding_mut().expect("binding node") =
+                        Some(or_else(slot_text(by_name("binding")), "item"));
+                    *node.data.iterable_mut().expect("iterable node") =
+                        Some(or_else(slot_text(by_name("iterable")), "[1, 2, 3]"));
                 }
                 _ => {}
             }
             let child_id = format!("{id}:child");
             let mut child = seed_child(&child_id);
             child.parent_id = Some(id.clone());
-            node.data
-                .children
-                .push(workflow_graph_roundtrip::ChildGroup {
+            node.data.children_mut().expect("children node").push(
+                workflow_graph_roundtrip::ChildGroup {
                     slot: slot.to_string(),
                     scope: format!("container:{id}:{slot}"),
                     node_ids: vec![child_id],
-                });
+                },
+            );
             document.nodes.push(child);
         }
         "process" => {
@@ -1103,17 +1119,17 @@ fn insert_palette_entry(document: &mut WorkflowDocument, entry: &Value, catalog:
             node.data.name = NodeName::Derived {
                 title: name.clone(),
             };
-            node.data.process_name = Some(name);
+            *node.data.process_name_mut().expect("process_name node") = Some(name);
             let child_id = format!("{id}:child");
             let mut child = seed_child(&child_id);
             child.parent_id = Some(id.clone());
-            node.data
-                .children
-                .push(workflow_graph_roundtrip::ChildGroup {
+            node.data.children_mut().expect("children node").push(
+                workflow_graph_roundtrip::ChildGroup {
                     slot: "body".to_string(),
                     scope: format!("process:{id}"),
                     node_ids: vec![child_id],
-                });
+                },
+            );
             document.nodes.push(child);
             document.roots.processes.push(id.clone());
             document.nodes.push(node);
@@ -1121,7 +1137,9 @@ fn insert_palette_entry(document: &mut WorkflowDocument, entry: &Value, catalog:
         }
         _ => {}
     }
-    node.data.fields = catalog_fields(entry);
+    if let Some(fields) = node.data.fields_mut() {
+        *fields = catalog_fields(entry);
+    }
     append_process_node(document, node);
 }
 
@@ -1163,10 +1181,10 @@ async fn literal_expression_members_survive_projection_json_and_save() {
         let field = document
             .nodes
             .iter()
-            .find(|node| node.data.operation.as_deref() == Some("query"))
+            .find(|node| node.data.operation().as_deref() == Some("query"))
             .expect("query node")
             .data
-            .fields
+            .fields()
             .get("inputs")
             .expect("inputs");
         if inputs.starts_with('{') {
@@ -1198,10 +1216,10 @@ async fn literal_expression_members_survive_projection_json_and_save() {
         let saved_field = saved
             .nodes
             .iter()
-            .find(|node| node.data.operation.as_deref() == Some("query"))
+            .find(|node| node.data.operation().as_deref() == Some("query"))
             .expect("saved query")
             .data
-            .fields
+            .fields()
             .get("inputs")
             .expect("saved inputs");
         assert_eq!(saved_field, field);

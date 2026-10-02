@@ -7,7 +7,7 @@
 //! * `attach` puts blob `index` of its turn into the calling session and
 //!   witnesses the exact bytes it put.
 
-use super::{LoadContext, LoadEvent, WitnessedOperation, WitnessedPhase, record_load_event};
+use super::{LoadContext, LoadEvent, LoadEvidence, record_load_event};
 use crate::witness;
 use anyhow::{Context, Result};
 use lash::tools::{ToolBinding, ToolCall, ToolDefinition, ToolDefinitionBindingExt, ToolOutcome};
@@ -180,8 +180,7 @@ impl LoadTools {
             LoadEvent {
                 run: &operation.run,
                 subject: &blob.blob_key,
-                operation: WitnessedOperation::Attachment,
-                phase: WitnessedPhase::Put,
+                evidence: LoadEvidence::AttachmentPut,
                 observer: &self.worker_id,
                 detail: &json!({
                     "operation": operation_key,

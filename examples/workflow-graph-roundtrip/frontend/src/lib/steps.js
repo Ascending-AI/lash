@@ -28,7 +28,7 @@ export function buildSteps(doc) {
   const nodeMap = new Map((doc?.nodes ?? []).map((n) => [n.id, n]));
   const inputsByTarget = new Map();
   for (const edge of doc?.edges ?? []) {
-    if (edge.data?.kind !== 'data' || !edge.data.variable) continue;
+    if (edge.data?.kind !== 'data_dependency' || !edge.data.variable) continue;
     const inputs = inputsByTarget.get(edge.target) ?? [];
     if (!inputs.includes(edge.data.variable)) inputs.push(edge.data.variable);
     inputsByTarget.set(edge.target, inputs);
@@ -219,7 +219,7 @@ function effectLabel(node) {
       return { category: 'await', glyph: '⏳', lead: 'Wait for', name: effectSubject(d), tail: 'to finish' };
     case 'wait_signal':
       return { category: 'waitSignal', glyph: '⏳', lead: 'Wait for', name: signalName(d) };
-    case 'sleep':
+    case 'sleep_for':
       return { category: 'sleep', glyph: '⏸', lead: 'Wait for', name: durationName(d) };
     case 'signal_run':
       return { category: 'effect', glyph: '◆', lead: 'Notify', name: effectSubject(d) };

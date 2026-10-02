@@ -15,7 +15,7 @@ pub(super) fn process_from_data(
     let mut process = baseline.unwrap_or_else(|| WorkflowProcess {
         id: workflow_node_id(id),
         name: data
-            .process_name
+            .process_name()
             .clone()
             .unwrap_or_else(|| data.name.title().to_string()),
         display_name: data.name.title().to_string(),
@@ -38,19 +38,19 @@ pub(super) fn process_from_data(
     // module with a second declaration nothing binds.
     let derived = process.origin.is_lifted();
     if !derived {
-        let name = data.process_name.as_deref().unwrap_or(data.name.title());
+        let name = data.process_name().as_deref().unwrap_or(data.name.title());
         process.name = editable_identifier(&process_id, "name", name)?;
         process.display_name = data.name.title().to_string();
         process.description = data.name.description().map(str::to_string);
         process.name_source = data.name.name_source();
         process.signals = data
-            .signals
+            .signals()
             .iter()
             .map(|field| process_signal_from_data(&process_id, field))
             .collect::<Result<_, _>>()?;
     }
     process.params = data
-        .params
+        .params()
         .iter()
         .map(|field| process_param_from_data(&process_id, field))
         .collect::<Result<_, _>>()?;
@@ -121,14 +121,14 @@ fn editable_signal_name(node_id: &str, value: &str) -> Result<String, RenderErro
     let reject = || {
         RenderErrorResponse::invalid_node_payload(
             node_id,
-            "`data.signals.name` must be a single property name",
+            "`data.signals().name` must be a single property name",
         )
     };
     let record = parse_fragment(&format!("({{ {value}: null }})"), &FragmentScope::default())
         .map_err(|message| {
             RenderErrorResponse::invalid_node_payload(
                 node_id,
-                format!("`data.signals.name` must be a property name: {message}"),
+                format!("`data.signals().name` must be a property name: {message}"),
             )
         })?;
     let lash::rlm::lang::Expr::Record(entries) = record else {

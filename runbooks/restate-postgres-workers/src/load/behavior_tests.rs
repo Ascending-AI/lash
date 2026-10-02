@@ -21,8 +21,9 @@ pub(crate) fn report() -> Value {
 pub(crate) fn add(snapshot: &mut WitnessSnapshot) {
     snapshot.events.push(LoadEventRow {
         subject: format!("{RUN}/behaviors"),
-        operation: "behaviors".into(),
-        phase: "sent".into(),
+        evidence: crate::load::ledger::LoadEvidence::Sent(
+            crate::load::ledger::WitnessedOperation::Behaviors,
+        ),
         observer: "driver".into(),
         detail: json!({}),
         content_digest: None,
@@ -30,8 +31,9 @@ pub(crate) fn add(snapshot: &mut WitnessSnapshot) {
     });
     snapshot.events.push(LoadEventRow {
         subject: format!("{RUN}/behaviors"),
-        operation: "behaviors".into(),
-        phase: "terminal".into(),
+        evidence: crate::load::ledger::LoadEvidence::Terminal(
+            crate::load::ledger::WitnessedOperation::Behaviors,
+        ),
         observer: "driver".into(),
         detail: json!({"response":report()}),
         content_digest: None,
@@ -71,7 +73,7 @@ fn planted(class: &str, field: &str, broken: Value) {
         let event = snapshot
             .events
             .iter_mut()
-            .find(|e| e.operation == "behaviors" && e.phase == "terminal")
+            .find(|e| e.evidence.operation() == "behaviors" && e.evidence.phase() == "terminal")
             .unwrap();
         event.detail["response"][field] = broken;
     }
@@ -178,7 +180,7 @@ fn a_batched_turn_keeps_full_tool_coverage_and_zero_violations() {
         &queued.idempotency_key,
     );
     for event in &mut snapshot.events {
-        if event.phase != "terminal" || event.operation != "turn" {
+        if event.evidence.phase() != "terminal" || event.evidence.operation() != "turn" {
             continue;
         }
         if event.detail["response"]["operation"] == key {
@@ -248,7 +250,7 @@ fn promotion_verdict(evidence: &crate::load::behavior::PromotionEvidence) -> sup
     let event = snapshot
         .events
         .iter_mut()
-        .find(|e| e.operation == "behaviors" && e.phase == "terminal")
+        .find(|e| e.evidence.operation() == "behaviors" && e.evidence.phase() == "terminal")
         .unwrap();
     event.detail["response"]["promotion"] = serde_json::to_value(evidence).unwrap();
     verdict(&snapshot)

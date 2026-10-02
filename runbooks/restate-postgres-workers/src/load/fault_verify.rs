@@ -5,12 +5,14 @@
 //! on after the fault. The rolling-upgrade campaign (FIG-3805,
 //! `upgrade_verify`) places its steps with the same checks.
 
-use super::verify::{FaultRow, WitnessSnapshot, sent_request};
+use super::ledger::{FaultFamily, FaultKind, LoadEvidence};
+use super::verify::{FaultLedgerRow, WitnessSnapshot, sent_request};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Which controller campaign a run ran under, from its `campaign` start row.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub(super) enum CampaignKind {
     /// The FIG-4169 fault campaign: a worker kill, a Restate restart and a
     /// rolling deploy.
@@ -20,23 +22,22 @@ pub(super) enum CampaignKind {
     RollingUpgrade,
 }
 
-/// The campaign `snapshot`'s ledger started, or `None` without a campaign.
-/// A start row that names no known campaign is judged as the fault
-/// campaign, whose classes it then fails.
-pub(super) fn campaign_kind(snapshot: &WitnessSnapshot) -> Option<CampaignKind> {
+/// The campaign named by the start row. The fault controller omits the name;
+/// an explicit name must belong to the closed campaign vocabulary.
+pub(super) fn campaign_kind(
+    snapshot: &WitnessSnapshot,
+) -> Result<Option<CampaignKind>, serde_json::Error> {
     if snapshot.faults.is_empty() {
-        return None;
+        return Ok(None);
     }
-    let started = snapshot
-        .faults
-        .iter()
-        .find(|row| row.kind == "campaign" && row.phase == "started");
-    Some(
-        match started.and_then(|row| row.detail["campaign"].as_str()) {
-            Some("rolling-upgrade") => CampaignKind::RollingUpgrade,
-            _ => CampaignKind::Faults,
-        },
-    )
+    let started = snapshot.faults.iter().find(|row| {
+        row.evidence.kind() == FaultKind::Campaign && row.evidence.phase() == "started"
+    });
+    let kind = match started.and_then(|row| row.detail.get("campaign")) {
+        Some(value) => serde_json::from_value(value.clone())?,
+        None => CampaignKind::Faults,
+    };
+    Ok(Some(kind))
 }
 
 /// One operation's witnessed life on the witness clock: when the driver
@@ -68,12 +69,12 @@ impl Timeline<'_> {
 pub(super) fn timelines(snapshot: &WitnessSnapshot) -> Vec<Timeline<'_>> {
     let mut index: BTreeMap<(&str, &str), Timeline<'_>> = BTreeMap::new();
     for event in &snapshot.events {
-        if event.operation == "attachment" {
+        if event.evidence.operation() == "attachment" {
             continue;
         }
-        let key = (event.operation.as_str(), event.subject.as_str());
-        match event.phase.as_str() {
-            "sent" => {
+        let key = (event.evidence.operation(), event.subject.as_str());
+        match event.evidence {
+            LoadEvidence::Sent(_) => {
                 index.entry(key).or_insert(Timeline {
                     operation: key.0,
                     subject: key.1,
@@ -82,44 +83,53 @@ pub(super) fn timelines(snapshot: &WitnessSnapshot) -> Vec<Timeline<'_>> {
                     terminal: None,
                 });
             }
-            "terminal" => {
+            LoadEvidence::Terminal(_) => {
                 if let Some(timeline) = index.get_mut(&key) {
                     timeline.terminal = Some((event.recorded_at_us, &event.detail));
                 }
             }
-            _ => {}
+            LoadEvidence::AttachmentPut | LoadEvidence::AttachmentRead => {}
         }
     }
     index.into_values().collect()
 }
 
-/// The first row of `fault_id` in `phase`.
+/// The first row of `kind` in `phase`.
 pub(super) fn fault_row<'a>(
     snapshot: &'a WitnessSnapshot,
-    fault_id: &str,
+    kind: FaultKind,
     phase: &str,
-) -> Option<&'a FaultRow> {
+) -> Option<&'a FaultLedgerRow> {
     snapshot
         .faults
         .iter()
-        .find(|row| row.fault_id == fault_id && row.phase == phase)
+        .find(|row| row.evidence.kind() == kind && row.evidence.phase() == phase)
 }
 
 /// The campaign started and completed, and no fault or step failed.
 pub(super) fn campaign_outcome(snapshot: &WitnessSnapshot) -> Result<(), String> {
-    let campaign: Vec<&FaultRow> = snapshot
+    let campaign: Vec<&FaultLedgerRow> = snapshot
         .faults
         .iter()
-        .filter(|row| row.kind == "campaign")
+        .filter(|row| row.evidence.kind().as_str() == "campaign")
         .collect();
     match (
-        campaign.iter().find(|row| row.phase == "started"),
-        campaign.iter().find(|row| row.phase == "complete"),
-        snapshot.faults.iter().find(|row| row.phase == "failed"),
+        campaign
+            .iter()
+            .find(|row| row.evidence.phase() == "started"),
+        campaign
+            .iter()
+            .find(|row| row.evidence.phase() == "complete"),
+        snapshot
+            .faults
+            .iter()
+            .find(|row| row.evidence.phase() == "failed"),
     ) {
         (_, _, Some(failed)) => Err(format!(
             "{} `{}` failed: {}",
-            failed.kind, failed.fault_id, failed.detail
+            failed.evidence.kind().as_str(),
+            failed.evidence.kind().as_str(),
+            failed.detail
         )),
         (Some(_), Some(_), None) => Ok(()),
         (started, complete, None) => Err(format!(
@@ -169,22 +179,19 @@ pub(super) fn moved_to(timelines: &[Timeline<'_>], at: i64, workers: &Value) -> 
 /// cron emission). Violations go to `class`. Answers the injected and
 /// recovered rows once both were placed.
 pub(super) fn verify_injection<'a>(
-    class: &'static str,
-    kind: &str,
-    fault_id: &str,
+    fault: FaultKind,
     snapshot: &'a WitnessSnapshot,
     timelines: &[Timeline<'_>],
     note: &mut impl FnMut(&'static str, Result<(), String>),
-) -> Option<(&'a FaultRow, &'a FaultRow)> {
+) -> Option<(&'a FaultLedgerRow, &'a FaultLedgerRow)> {
+    let class = fault.as_str();
     let (Some(injected), Some(recovered)) = (
-        fault_row(snapshot, fault_id, "injected"),
-        fault_row(snapshot, fault_id, "recovered"),
+        fault_row(snapshot, fault, "injected"),
+        fault_row(snapshot, fault, "recovered"),
     ) else {
         note(
             class,
-            Err(format!(
-                "{kind} `{fault_id}` was not both injected and recovered"
-            )),
+            Err(format!("`{class}` was not both injected and recovered")),
         );
         return None;
     };
@@ -192,9 +199,7 @@ pub(super) fn verify_injection<'a>(
     if recovered.recorded_at_us < at {
         note(
             class,
-            Err(format!(
-                "{kind} `{fault_id}` recovered before it was injected"
-            )),
+            Err(format!("`{class}` recovered before it was injected")),
         );
         return None;
     }
@@ -206,7 +211,7 @@ pub(super) fn verify_injection<'a>(
         class,
         if hit.is_empty() {
             Err(format!(
-                "{kind} `{fault_id}` missed active work: no load operation was in flight"
+                "`{class}` missed active work: no load operation was in flight"
             ))
         } else {
             Ok(())
@@ -217,7 +222,7 @@ pub(super) fn verify_injection<'a>(
             note(
                 class,
                 Err(format!(
-                    "{} `{}` in flight at {kind} `{fault_id}` never reached a durable answer: {:?}",
+                    "{} `{}` in flight at `{class}` never reached a durable answer: {:?}",
                     timeline.operation,
                     timeline.subject,
                     timeline.terminal.map(|(_, detail)| detail)
@@ -244,7 +249,7 @@ pub(super) fn verify_injection<'a>(
             note(
                 class,
                 Err(format!(
-                    "{kind} `{fault_id}` named busy work `{key}` that the witness did not see sent before it and answered"
+                    "`{class}` named busy work `{key}` that the witness did not see sent before it and answered"
                 )),
             );
         }
@@ -268,7 +273,7 @@ pub(super) fn verify_injection<'a>(
         note(
             class,
             Err(format!(
-                "service did not progress after {kind} `{fault_id}`: turn={turn_answered} queued={queued_answered} cron={cron_ticked}"
+                "service did not progress after `{class}`: turn={turn_answered} queued={queued_answered} cron={cron_ticked}"
             )),
         );
     }
@@ -285,39 +290,33 @@ pub(super) fn verify_faults(
 ) {
     let timelines = timelines(snapshot);
     note("fault-campaign", campaign_outcome(snapshot));
-    let mut faults: Vec<(&str, &str)> = Vec::new();
     for row in &snapshot.faults {
-        if row.kind != "campaign" && !faults.contains(&(row.kind.as_str(), row.fault_id.as_str())) {
-            faults.push((row.kind.as_str(), row.fault_id.as_str()));
+        if row.evidence.kind().family() == FaultFamily::Upgrade {
+            note(
+                "fault-campaign",
+                Err(format!(
+                    "upgrade step {} in fault campaign",
+                    row.evidence.kind().as_str()
+                )),
+            );
         }
     }
-    for (kind, fault_id) in faults {
-        let class = match kind {
-            "worker-kill" => "worker-kill",
-            "restate-restart" => "restate-restart",
-            "rolling-deploy" => "rolling-deploy",
-            _ => {
-                note(
-                    "fault-campaign",
-                    Err(format!("fault `{fault_id}` has unknown kind `{kind}`")),
-                );
-                continue;
-            }
-        };
-        let Some((injected, recovered)) =
-            verify_injection(class, kind, fault_id, snapshot, &timelines, note)
+    for fault in FaultKind::steps(FaultFamily::Fault) {
+        let kind = fault.as_str();
+        let class = kind;
+        let Some((injected, recovered)) = verify_injection(fault, snapshot, &timelines, note)
         else {
             continue;
         };
         let at = injected.recorded_at_us;
         let recovery = &recovered.detail;
-        let held = match kind {
-            "worker-kill" => {
+        let held = match fault {
+            FaultKind::WorkerKill => {
                 recovery["same_pod"] == true
                     && recovery["restarts_after"].as_u64() > recovery["restarts_before"].as_u64()
                     && injected.detail["signal"] == "KILL"
             }
-            "restate-restart" => {
+            FaultKind::RestateRestart => {
                 recovery["same_node_id"] == true
                     && recovery["leaders"] == recovery["partitions"]
                     && recovery["generation_after"] != injected.detail["generation_before"]
@@ -325,13 +324,19 @@ pub(super) fn verify_faults(
                         .as_array()
                         .is_some_and(|partitions| !partitions.is_empty())
             }
-            _ => {
+            FaultKind::RollingDeploy => {
                 recovery["drained"] == true
                     && recovery["pinned_unfinished"] == 0
                     && recovery["stalled_total"] == 0
                     && injected.detail["old_generation"] != injected.detail["new_generation"]
                     && moved_to(&timelines, at, &injected.detail["new_workers"])
             }
+            FaultKind::Campaign
+            | FaultKind::HalfRoll
+            | FaultKind::Rollback
+            | FaultKind::Roll
+            | FaultKind::Finalize
+            | FaultKind::Fence => unreachable!("only fault-family kinds are selected"),
         };
         note(
             class,
@@ -339,7 +344,7 @@ pub(super) fn verify_faults(
                 Ok(())
             } else {
                 Err(format!(
-                    "{kind} `{fault_id}` recovery evidence does not hold: injected {} recovered {recovery}",
+                    "`{class}` recovery evidence does not hold: injected {} recovered {recovery}",
                     injected.detail
                 ))
             },
@@ -350,15 +355,28 @@ pub(super) fn verify_faults(
 #[cfg(test)]
 mod tests {
     use super::super::verify::tests::{ideal, smoke, verdict, violated};
-    use super::super::verify::{CLASSES, FAULT_CLASSES, FaultRow, WitnessSnapshot, sent_request};
+    use super::super::verify::{
+        CLASSES, FaultLedgerRow, WitnessSnapshot, fault_classes, sent_request,
+    };
     use crate::load::LoadContext;
     use serde_json::{Value, json};
 
-    fn fault(fault_id: &str, kind: &str, phase: &str, detail: Value, at: i64) -> FaultRow {
-        FaultRow {
-            fault_id: fault_id.to_owned(),
-            kind: kind.to_owned(),
-            phase: phase.to_owned(),
+    #[test]
+    fn an_unknown_campaign_is_rejected_instead_of_classified_as_faults() {
+        let load = smoke();
+        let mut snapshot = campaign(&load);
+        snapshot.faults[0].detail["campaign"] = json!("rolling-upgrad");
+        let error =
+            super::super::verify::verify(&load, super::super::verify::tests::RUN, &snapshot)
+                .expect_err("unknown campaign must fail decoding");
+        assert!(
+            error.is::<serde_json::Error>(),
+            "campaign decode cause must stay typed: {error:?}"
+        );
+    }
+    fn fault(kind: &str, phase: &str, detail: Value, at: i64) -> FaultLedgerRow {
+        FaultLedgerRow {
+            evidence: format!("{kind}:{phase}").parse().expect("valid fault pair"),
             target: format!("{kind}-target"),
             detail,
             recorded_at_us: at,
@@ -377,9 +395,9 @@ mod tests {
             .events
             .windows(2)
             .filter(|pair| {
-                pair[0].operation == "turn"
-                    && pair[0].phase == "sent"
-                    && pair[1].phase == "terminal"
+                pair[0].evidence.operation() == "turn"
+                    && pair[0].evidence.phase() == "sent"
+                    && pair[1].evidence.phase() == "terminal"
                     && pair[1].detail["response"]["outcome"]["status"] == "answered"
             })
             .take(3)
@@ -394,7 +412,7 @@ mod tests {
         let end = snapshot.events.len() as i64 * 10;
         snapshot
             .faults
-            .push(fault("campaign", "campaign", "started", json!({}), -1));
+            .push(fault("campaign", "started", json!({}), -1));
         let details = [
             (
                 "worker-kill",
@@ -416,17 +434,15 @@ mod tests {
             injected["active"] = json!([key]);
             snapshot
                 .faults
-                .push(fault(kind, kind, "intent", json!({}), at - 1));
+                .push(fault(kind, "intent", json!({}), at - 1));
+            snapshot.faults.push(fault(kind, "injected", injected, at));
             snapshot
                 .faults
-                .push(fault(kind, kind, "injected", injected, at));
-            snapshot
-                .faults
-                .push(fault(kind, kind, "recovered", recovered, at + 2));
+                .push(fault(kind, "recovered", recovered, at + 2));
         }
         snapshot
             .faults
-            .push(fault("campaign", "campaign", "complete", json!({}), end));
+            .push(fault("campaign", "complete", json!({}), end));
         snapshot
     }
 
@@ -434,8 +450,8 @@ mod tests {
     fn a_correct_campaign_witnesses_every_fault_class() {
         let verdict = verdict(&campaign(&smoke()));
         assert!(verdict.passed(), "{:?}", verdict.lines());
-        assert_eq!(verdict.classes.len(), CLASSES.len() + FAULT_CLASSES.len());
-        for class in FAULT_CLASSES {
+        assert_eq!(verdict.classes.len(), CLASSES.len() + fault_classes().len());
+        for class in fault_classes() {
             assert!(verdict.classes[class].witnessed > 0, "{class}");
         }
     }
@@ -447,7 +463,9 @@ mod tests {
             snapshot
                 .faults
                 .iter()
-                .position(|row| row.kind == kind && row.phase == phase)
+                .position(|row| {
+                    row.evidence.kind().as_str() == kind && row.evidence.phase() == phase
+                })
                 .expect("a fault row")
         };
 
@@ -474,7 +492,9 @@ mod tests {
             .events
             .iter()
             .position(|event| {
-                event.operation == "turn" && event.phase == "terminal" && event.recorded_at_us > at
+                event.evidence.operation() == "turn"
+                    && event.evidence.phase() == "terminal"
+                    && event.recorded_at_us > at
             })
             .expect("the hit turn's terminal");
         lost.events[terminal].detail = json!({ "error": "HTTP 503" });
@@ -510,13 +530,12 @@ mod tests {
         let mut stalled = base.clone();
         stalled
             .events
-            .retain(|event| event.operation != "cron-tick");
+            .retain(|event| event.evidence.operation() != "cron-tick");
         assert!(violated(&verdict(&stalled), "worker-kill"));
 
         // The controller gave up on a fault.
         let mut failed = base.clone();
         failed.faults.push(fault(
-            "rolling-deploy",
             "rolling-deploy",
             "failed",
             json!({ "reason": "drain watchdog" }),
@@ -526,7 +545,9 @@ mod tests {
 
         // A campaign that never restarted Restate has no evidence there.
         let mut skipped = base.clone();
-        skipped.faults.retain(|row| row.kind != "restate-restart");
+        skipped
+            .faults
+            .retain(|row| row.evidence.kind().as_str() != "restate-restart");
         let skipped = verdict(&skipped);
         assert!(!skipped.passed());
         assert_eq!(skipped.classes["restate-restart"].witnessed, 0);

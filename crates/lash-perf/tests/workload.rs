@@ -33,7 +33,7 @@ fn workload_schema_is_current_and_every_field_has_provenance() {
     assert!(workload.provenance("/sessions").unwrap().starts_with("I:"));
     assert!(
         workload
-            .provenance("/topology/worker_cpu")
+            .provenance("/queued/maximum_drain_batch")
             .unwrap()
             .starts_with("V:")
     );
@@ -129,7 +129,6 @@ fn workload_rejects_versions_probabilities_limits_and_inconsistent_settings() {
         ("/inventory/figments_sha", json!("bad")),
         ("/saturation_rates_per_session_s", json!([0.1, 0.05])),
         ("/saturation_rates_per_session_s", json!([0.0, 0.1])),
-        ("/topology/replication", json!(4)),
         ("/faults/rolling_deploy_s", json!(1199)),
         ("/attachments/count", json!([[1000, 1.0]])),
         ("/provider/chunks", json!(100000)),

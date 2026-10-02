@@ -193,7 +193,7 @@ async fn every_table_the_driver_reads_is_one_the_bot_creates() {
         "the store set's session catalog keeps no attachment_blobs table"
     );
     created.extend(schema_tables(crate::platform::db::SCHEMA));
-    created.extend(schema_tables(crate::bot::ledger::SCHEMA));
+    created.extend(schema_tables(&crate::bot::ledger::SCHEMA));
 
     let read = driver_tables();
     assert!(

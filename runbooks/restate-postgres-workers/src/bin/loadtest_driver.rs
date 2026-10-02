@@ -24,9 +24,8 @@
 
 use anyhow::{Context, Result, ensure};
 use lash_restate_postgres_workers_e2e::load::{
-    FAULT_CAMPAIGN_ENV, LOAD_WORKFLOW, LoadContext, LoadEvent, LoadRequest, LoadResponse,
-    WitnessedOperation, WitnessedPhase, actor_session_id, cron_session_id, record_load_event,
-    verify,
+    FAULT_CAMPAIGN_ENV, LOAD_WORKFLOW, LoadContext, LoadEvent, LoadEvidence, LoadRequest,
+    LoadResponse, WitnessedOperation, actor_session_id, cron_session_id, record_load_event, verify,
 };
 use lash_restate_postgres_workers_e2e::{env, required_env, witness};
 use serde_json::{Value, json};
@@ -275,8 +274,7 @@ impl Driver {
             LoadEvent {
                 run: &self.run,
                 subject: &subject,
-                operation,
-                phase: WitnessedPhase::Sent,
+                evidence: LoadEvidence::Sent(operation),
                 observer: "driver",
                 detail: &json!({
                     "request": request,
@@ -360,8 +358,7 @@ impl Driver {
             LoadEvent {
                 run: &self.run,
                 subject: &subject,
-                operation,
-                phase: WitnessedPhase::Terminal,
+                evidence: LoadEvidence::Terminal(operation),
                 observer: "driver",
                 detail: &detail,
                 content: None,
@@ -938,8 +935,8 @@ async fn main() -> Result<()> {
     lash_restate_postgres_workers_e2e::load::measurements::emit(&json!({
         "schema_version": 1, "record": "witness", "run": run, "verdict": verdict,
         "fault_rows": snapshot.faults.len(),
-        "sent": snapshot.events.iter().filter(|event| event.phase == "sent").count(),
-        "terminal": snapshot.events.iter().filter(|event| event.phase == "terminal").count(),
+        "sent": snapshot.events.iter().filter(|event| matches!(event.evidence, LoadEvidence::Sent(_))).count(),
+        "terminal": snapshot.events.iter().filter(|event| matches!(event.evidence, LoadEvidence::Terminal(_))).count(),
         "provider_calls": snapshot.receipts.len(), "effect_attempts": snapshot.attempts.len(),
         "provider_retryable_failures": snapshot.receipts.iter().filter(|(_, scenario)| scenario == "load_retryable").count(),
         "effect_commits": snapshot.commits.len(),

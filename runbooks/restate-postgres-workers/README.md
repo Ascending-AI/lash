@@ -253,3 +253,21 @@ not hand-roll `docker run` with a fixed host port here — a fixed port collides
 with a concurrent lane and an unlabelled container is invisible to the leftover
 check. Each invocation gets a fresh database, which is what registry persistence
 semantics need.
+
+## Load witness contracts
+
+`src/load/ledger.rs` owns the operation/phase and fault/phase unions. Witness
+readers reject unknown and crossed discriminants; the database pair CHECKs
+reject the same states. Fault rows carry one `kind`, with no redundant identity.
+Python controllers and measurements import the generated vocabulary through
+`scripts/loadtest_ledger.py`.
+
+After changing the unions, regenerate their JSON vocabulary and SQL CHECKs:
+
+```sh
+just loadtest-ledger
+just loadtest-ledger check
+```
+
+Topology and resource limits belong to the chart values. The portable definition
+records those values alongside the workload; the workload describes traffic.

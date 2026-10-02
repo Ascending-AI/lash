@@ -1,47 +1,296 @@
 /* Generated from the example Rust HTTP DTOs by npm run generate:types. Do not edit directly. */
 
-/**
- * A node's display name together with the one fact that decides whether the
- * host may throw it away: who chose it.
- *
- * Rendering emits an `@label` annotation only for an authored name, so a
- * payload that carries a title without saying where the name came from is a
- * rename waiting to evaporate. The tag is therefore mandatory and carries the
- * title inside the variant: "title present, tag absent" is unrepresentable,
- * and an unknown tag is a decode error rather than a silent `derived`. The
- * wire values (`label`, `derived`) mirror `WorkflowNodeNameSource`, which the
- * browser client already writes on every node.
- */
-export type NodeData = {
-  availableVars?: TypedVariable[];
-  binding?: string | null;
-  children?: ChildGroup[];
-  condition?: string | null;
-  diagnostics?: TypeDiagnostic[];
-  effect?: string | null;
-  expectedArgTypes?: ExpectedArgumentType[];
-  expression?: string | null;
-  fields?: {
-    [k: string]: EditableValue;
-  };
-  iterable?: string | null;
-  kind: string;
-  name?: string | null;
-  operation?: string | null;
-  params?: EditableProcessField[];
-  /**
-   * The receiver the catalog entry this node came from belongs to, carried
-   * so a call node posted with no `expression` can be synthesized against
-   * the receiver it actually names (FIG-3178).
-   */
-  receiver?: string | null;
-  signals?: EditableProcessField[];
-  source?: string | null;
-  subkind?: string | null;
-  target?: string | null;
-  terminalKind?: string | null;
-  [k: string]: unknown;
-} & NodeData1;
+export type EdgeData =
+  | {
+      kind: 'data_dependency';
+      scope: string;
+      variable: string;
+      version: number;
+    }
+  | {
+      kind: 'sequence';
+      scope: string;
+    };
+export type NodeData =
+  | {
+      availableVars?: TypedVariable[];
+      children?: ChildGroup[];
+      description?: string | null;
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      kind: 'process';
+      name?: string | null;
+      nameSource: 'label';
+      params?: EditableProcessField[];
+      signals?: EditableProcessField[];
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      binding?: string | null;
+      description?: string | null;
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      expression?: string | null;
+      fields?: {
+        [k: string]: EditableValue;
+      };
+      kind: 'data';
+      nameSource: 'label';
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      binding?: string | null;
+      description?: string | null;
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      expression?: string | null;
+      fields?: {
+        [k: string]: EditableValue;
+      };
+      kind: 'call';
+      nameSource: 'label';
+      operation?: string | null;
+      receiver?: string | null;
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      binding?: string | null;
+      description?: string | null;
+      diagnostics?: TypeDiagnostic[];
+      effect: WorkflowEffectKind;
+      expectedArgTypes?: ExpectedArgumentType[];
+      expression?: string | null;
+      fields?: {
+        [k: string]: EditableValue;
+      };
+      kind: 'effect';
+      nameSource: 'label';
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      description?: string | null;
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      expression?: string | null;
+      fields?: {
+        [k: string]: EditableValue;
+      };
+      kind: 'state_update';
+      nameSource: 'label';
+      target?: string | null;
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      binding?: string | null;
+      description?: string | null;
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      expression?: string | null;
+      fields?: {
+        [k: string]: EditableValue;
+      };
+      kind: 'computation';
+      nameSource: 'label';
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      description?: string | null;
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      expression?: string | null;
+      kind: 'terminal';
+      nameSource: 'label';
+      terminalKind: WorkflowTerminalKind;
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      description?: string | null;
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      kind: 'opaque';
+      nameSource: 'label';
+      source?: string | null;
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      binding?: string | null;
+      children?: ChildGroup[];
+      condition?: string | null;
+      description?: string | null;
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      kind: 'container';
+      nameSource: 'label';
+      subkind: 'if';
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      children?: ChildGroup[];
+      condition?: string | null;
+      description?: string | null;
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      kind: 'container';
+      nameSource: 'label';
+      subkind: 'while';
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      binding?: string | null;
+      children?: ChildGroup[];
+      description?: string | null;
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      iterable?: string | null;
+      kind: 'container';
+      nameSource: 'label';
+      subkind: 'for';
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      children?: ChildGroup[];
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      kind: 'process';
+      name?: string | null;
+      nameSource: 'derived';
+      params?: EditableProcessField[];
+      signals?: EditableProcessField[];
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      binding?: string | null;
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      expression?: string | null;
+      fields?: {
+        [k: string]: EditableValue;
+      };
+      kind: 'data';
+      nameSource: 'derived';
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      binding?: string | null;
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      expression?: string | null;
+      fields?: {
+        [k: string]: EditableValue;
+      };
+      kind: 'call';
+      nameSource: 'derived';
+      operation?: string | null;
+      receiver?: string | null;
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      binding?: string | null;
+      diagnostics?: TypeDiagnostic[];
+      effect: WorkflowEffectKind;
+      expectedArgTypes?: ExpectedArgumentType[];
+      expression?: string | null;
+      fields?: {
+        [k: string]: EditableValue;
+      };
+      kind: 'effect';
+      nameSource: 'derived';
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      expression?: string | null;
+      fields?: {
+        [k: string]: EditableValue;
+      };
+      kind: 'state_update';
+      nameSource: 'derived';
+      target?: string | null;
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      binding?: string | null;
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      expression?: string | null;
+      fields?: {
+        [k: string]: EditableValue;
+      };
+      kind: 'computation';
+      nameSource: 'derived';
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      expression?: string | null;
+      kind: 'terminal';
+      nameSource: 'derived';
+      terminalKind: WorkflowTerminalKind;
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      kind: 'opaque';
+      nameSource: 'derived';
+      source?: string | null;
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      binding?: string | null;
+      children?: ChildGroup[];
+      condition?: string | null;
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      kind: 'container';
+      nameSource: 'derived';
+      subkind: 'if';
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      children?: ChildGroup[];
+      condition?: string | null;
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      kind: 'container';
+      nameSource: 'derived';
+      subkind: 'while';
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      binding?: string | null;
+      children?: ChildGroup[];
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      iterable?: string | null;
+      kind: 'container';
+      nameSource: 'derived';
+      subkind: 'for';
+      title: string;
+    };
 /**
  * Whether a diagnostic establishes an admission failure for the analyzed
  * program and host environment or gives advice without establishing a failure.
@@ -82,18 +331,8 @@ export type EditableValue =
         [k: string]: EditableValue;
       };
     };
-export type NodeData1 =
-  | {
-      description?: string | null;
-      nameSource: 'label';
-      title: string;
-      [k: string]: unknown;
-    }
-  | {
-      nameSource: 'derived';
-      title: string;
-      [k: string]: unknown;
-    };
+export type WorkflowEffectKind = 'await_join' | 'wait_signal' | 'sleep_for' | 'print' | 'break' | 'continue';
+export type WorkflowTerminalKind = 'finish' | 'fail';
 
 export interface WorkflowDocument {
   /**
@@ -116,13 +355,6 @@ export interface FlowEdge {
   id: string;
   source: string;
   target: string;
-  [k: string]: unknown;
-}
-export interface EdgeData {
-  kind: string;
-  scope: string;
-  variable?: string | null;
-  version?: number | null;
   [k: string]: unknown;
 }
 export interface FlowNode {

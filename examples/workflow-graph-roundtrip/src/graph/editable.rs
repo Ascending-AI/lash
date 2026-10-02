@@ -16,7 +16,7 @@ use lash::typescript::workflow_graph::{
     typescript_expression_source,
 };
 
-use super::{effect_name, required_text};
+use super::required_text;
 use crate::{EditableValue, NodeData, RenderErrorResponse, WorkflowDocument};
 
 pub(super) fn editable_expression(
@@ -33,11 +33,11 @@ pub(super) fn editable_parsed_expression(
     graph_scope: &GraphScope,
 ) -> Result<(String, Expr), RenderErrorResponse> {
     let scope = FragmentScope::of_data(data, graph_scope);
-    let source = required_text(id, data.expression.as_ref(), "expression")?;
+    let source = required_text(id, data.expression().as_ref(), "expression")?;
     let mut expression = parse_fragment(&source, &scope).map_err(|error| {
         RenderErrorResponse::invalid_expression(id, "expression", error.to_string())
     })?;
-    apply_fields(id, &mut expression, &data.fields, &scope)?;
+    apply_fields(id, &mut expression, data.fields(), &scope)?;
     let source = typescript_expression_source(&expression).map_err(|error| {
         RenderErrorResponse::invalid_expression(id, "expression", error.to_string())
     })?;
@@ -50,13 +50,13 @@ pub(super) fn editable_call_expression(
     graph_scope: &GraphScope,
 ) -> Result<(String, Expr), RenderErrorResponse> {
     let scope = FragmentScope::of_data(data, graph_scope);
-    let mut has_authored_expression = data.expression.is_some();
-    let mut expression = match &data.expression {
+    let mut has_authored_expression = data.expression().is_some();
+    let mut expression = match data.expression() {
         Some(source) => parse_fragment(source, &scope).map_err(|error| {
             RenderErrorResponse::invalid_expression(id, "expression", error.to_string())
         })?,
         None => {
-            let operation = required_text(id, data.operation.as_ref(), "operation")?;
+            let operation = required_text(id, data.operation().as_ref(), "operation")?;
             synthesize_receiver_call(id, data, &operation, &scope)?
         }
     };
@@ -68,14 +68,14 @@ pub(super) fn editable_call_expression(
     // A node whose expression is not a receiver call at all is left alone, so
     // the authored-expression guard below still refuses it rather than having
     // it quietly replaced by a synthesized call (FIG-3177).
-    if let Some(receiver) = data.receiver.as_deref()
+    if let Some(receiver) = data.receiver().as_deref()
         && receiver_call_receiver(&expression).is_some_and(|current| current != receiver)
     {
-        let operation = required_text(id, data.operation.as_ref(), "operation")?;
+        let operation = required_text(id, data.operation().as_ref(), "operation")?;
         expression = synthesize_receiver_call(id, data, &operation, &scope)?;
         has_authored_expression = false;
     }
-    if let Some(operation) = &data.operation {
+    if let Some(operation) = data.operation() {
         *receiver_operation_mut(&mut expression).ok_or_else(|| {
             RenderErrorResponse::invalid_expression(
                 id,
@@ -91,8 +91,8 @@ pub(super) fn editable_call_expression(
             "a call node needs a receiver call expression",
         ));
     }
-    if !has_authored_expression || !data.fields.is_empty() {
-        apply_fields(id, &mut expression, &data.fields, &scope)?;
+    if !has_authored_expression || !data.fields().is_empty() {
+        apply_fields(id, &mut expression, data.fields(), &scope)?;
     }
     let source = typescript_expression_source(&expression).map_err(|error| {
         RenderErrorResponse::invalid_expression(id, "expression", error.to_string())
@@ -106,15 +106,17 @@ pub(super) fn editable_effect_expression(
     graph_scope: &GraphScope,
 ) -> Result<(String, Expr), RenderErrorResponse> {
     let scope = FragmentScope::of_data(data, graph_scope);
-    let requested_effect = data.effect.as_deref();
-    let mut expression = match &data.expression {
+    let requested_effect = data.effect();
+    let mut expression = match data.expression() {
         Some(source) => parse_fragment(source, &scope).map_err(|error| {
             RenderErrorResponse::invalid_expression(id, "expression", error.to_string())
         })?,
         None => synthesize_effect_expression(
             id,
             data,
-            &required_text(id, data.effect.as_ref(), "effect")?,
+            data.effect().ok_or_else(|| {
+                RenderErrorResponse::invalid_node_payload(id, "effect node requires an effect")
+            })?,
             &scope,
         )?,
     };
@@ -127,13 +129,13 @@ pub(super) fn editable_effect_expression(
                     "an effect node needs a recognized effect expression",
                 )
             })?;
-        if effect_name(&current_effect) != requested_effect {
+        if current_effect != requested_effect {
             expression = synthesize_effect_expression(id, data, requested_effect, &scope)?;
         } else {
-            apply_fields(id, &mut expression, &data.fields, &scope)?;
+            apply_fields(id, &mut expression, data.fields(), &scope)?;
         }
     } else {
-        apply_fields(id, &mut expression, &data.fields, &scope)?;
+        apply_fields(id, &mut expression, data.fields(), &scope)?;
     }
     let source = typescript_expression_source(&expression).map_err(|error| {
         RenderErrorResponse::invalid_expression(id, "expression", error.to_string())
@@ -144,20 +146,20 @@ pub(super) fn editable_effect_expression(
 fn synthesize_effect_expression(
     id: &str,
     data: &NodeData,
-    effect: &str,
+    effect: WorkflowEffectKind,
     scope: &FragmentScope,
 ) -> Result<Expr, RenderErrorResponse> {
     let expression = match effect {
-        "sleep" => Expr::SleepFor(Box::new(
-            data.fields
+        WorkflowEffectKind::SleepFor => Expr::SleepFor(Box::new(
+            data.fields()
                 .get("duration")
                 .ok_or_else(|| {
                     RenderErrorResponse::invalid_node_payload(id, "sleep needs a `duration` field")
                 })?
                 .to_expr(id, "fields.duration", scope)?,
         )),
-        "wait_signal" => {
-            let Some(EditableValue::String(signal)) = data.fields.get("signal") else {
+        WorkflowEffectKind::WaitSignal => {
+            let Some(EditableValue::String(signal)) = data.fields().get("signal") else {
                 return Err(RenderErrorResponse::invalid_node_payload(
                     id,
                     "wait_signal needs a string `signal` field",
@@ -170,7 +172,7 @@ fn synthesize_effect_expression(
         _ => {
             return Err(RenderErrorResponse::invalid_node_payload(
                 id,
-                format!("new effect `{effect}` needs an expression"),
+                format!("new effect `{effect:?}` needs an expression"),
             ));
         }
     };
@@ -340,22 +342,13 @@ impl EditableValue {
     }
 }
 
-pub(super) fn parse_terminal_kind(
+pub(super) fn required_terminal_kind(
     id: &str,
-    terminal_kind: Option<&str>,
+    kind: Option<&WorkflowTerminalKind>,
 ) -> Result<WorkflowTerminalKind, RenderErrorResponse> {
-    match terminal_kind {
-        Some("finish") => Ok(WorkflowTerminalKind::Finish),
-        Some("fail") => Ok(WorkflowTerminalKind::Fail),
-        Some(kind) => Err(RenderErrorResponse::invalid_node_payload(
-            id,
-            format!("unknown terminal kind `{kind}`"),
-        )),
-        None => Err(RenderErrorResponse::invalid_node_payload(
-            id,
-            "a terminal node needs `data.terminalKind`",
-        )),
-    }
+    kind.cloned().ok_or_else(|| {
+        RenderErrorResponse::invalid_node_payload(id, "a terminal node needs data.terminalKind")
+    })
 }
 
 pub(super) fn terminal_expression(
@@ -485,8 +478,8 @@ pub(super) fn document_process_bindings(
         document
             .nodes
             .iter()
-            .filter(|node| node.data.kind == "process")
-            .filter_map(|node| node.data.process_name.clone()),
+            .filter(|node| node.data.kind() == "process")
+            .filter_map(|node| node.data.process_name().clone()),
     );
     names
 }
@@ -532,7 +525,10 @@ pub(super) fn synthesize_receiver_call(
     operation: &str,
     scope: &FragmentScope,
 ) -> Result<Expr, RenderErrorResponse> {
-    let receiver = data.receiver.as_deref().unwrap_or(crate::display::RECEIVER);
+    let receiver = data
+        .receiver()
+        .as_deref()
+        .unwrap_or(crate::display::RECEIVER);
     parse_fragment(&format!("await {receiver}.{operation}({{}})"), scope).map_err(|error| {
         RenderErrorResponse::invalid_expression(id, "operation", error.to_string())
     })
@@ -577,24 +573,5 @@ pub(super) fn receiver_operation_mut(expression: &mut Expr) -> Option<&mut AstSt
         Expr::ReceiverCall { operation, .. } => Some(operation),
         Expr::Await(inner) | Expr::ResultUnwrap(inner) => receiver_operation_mut(inner),
         _ => None,
-    }
-}
-
-pub(super) fn parse_effect_kind(
-    id: &str,
-    effect: &str,
-) -> Result<WorkflowEffectKind, RenderErrorResponse> {
-    match effect {
-        "await_join" => Ok(WorkflowEffectKind::AwaitJoin),
-        "wait_signal" => Ok(WorkflowEffectKind::WaitSignal),
-        "sleep" => Ok(WorkflowEffectKind::SleepFor),
-        "print" => Ok(WorkflowEffectKind::Print),
-
-        "break" => Ok(WorkflowEffectKind::Break),
-        "continue" => Ok(WorkflowEffectKind::Continue),
-        _ => Err(RenderErrorResponse::invalid_node_payload(
-            id,
-            format!("unknown effect kind `{effect}`"),
-        )),
     }
 }

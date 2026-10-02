@@ -1,7 +1,9 @@
 # Synthetic multi-node workload
 
 `figments-v1.json` implements FIG-3790 design sections 2 and 3 for lane L1.
-Its traffic mix, rates, byte buckets and topology settings are synthetic defaults.
+Its traffic mix, rates and byte buckets are synthetic defaults.
+Topology and resource limits live in `deploy/helm/lash-loadtest/values.yaml`,
+which the portable definition records alongside the workload.
 The first measurements may justify revised defaults before baseline extraction.
 The `inventory` object pins the Lash and Figments source snapshots used by the
 design. This directory contains no production data and needs no Figments checkout.

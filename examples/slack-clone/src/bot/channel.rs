@@ -34,8 +34,8 @@ use lash::{LashCore, LashSession, SendHandle, TurnInput, TurnOutcome, TurnStop};
 use tokio::sync::RwLock;
 
 use super::ledger::{
-    Claim, DetailWrite, EventLedger, EventReason, EventRecord, KIND_APP_MENTION, KIND_MESSAGE,
-    ProviderFailure, Stage,
+    Claim, DeferralReason, EventLedger, EventRecord, FoldReason, IgnoreReason, KIND_APP_MENTION,
+    KIND_MESSAGE, ProviderFailure, Stage, StageKind,
 };
 use super::runtime::session_id;
 use super::slack_api::{ChatPostMessageRequest, SlackApi, find_posted_reply};
@@ -94,7 +94,7 @@ pub enum DeliveryOutcome {
     /// Already handled to completion; nothing was done.
     Duplicate {
         event_id: String,
-        stage: Stage,
+        stage: StageKind,
         reply_ts: Option<String>,
     },
     /// Deliberately not acted on.
@@ -309,10 +309,10 @@ impl ChannelBot {
         for record in unfinished {
             let guard = self.session_lock(&record);
             let _held = guard.lock().await;
-            let outcome = match record.stage {
+            let outcome = match record.stage.kind() {
                 // The turn is done and its text is on record: only the post is
                 // owed.
-                Stage::ReplyPending => self.settle_reply_debt(&record).await?,
+                StageKind::ReplyPending => self.settle_reply_debt(&record).await?,
                 // Accepted and then abandoned. The work is genuinely unfinished,
                 // and every step of it is idempotent, so re-run it rather than
                 // writing it off.
@@ -342,7 +342,7 @@ impl ChannelBot {
                 }
                 DeliveryOutcome::RecoverableFailure {
                     event_id, reason, ..
-                } if *reason == EventReason::ThreadRootNotProcessed.as_str() => {
+                } if *reason == DeferralReason::ThreadRootNotProcessed.as_str() => {
                     report.deferred.push(event_id.clone());
                 }
                 _ => {}
@@ -384,25 +384,28 @@ impl ChannelBot {
             if record.stage.is_terminal() {
                 return Ok(DeliveryOutcome::Duplicate {
                     event_id,
-                    stage: record.stage,
-                    reply_ts: record.reply_ts,
+                    stage: record.stage.kind(),
+                    reply_ts: record.stage.reply_ts().map(str::to_owned),
                 });
             }
             let attempt = {
                 let guard = self.session_lock(&record);
                 let _held = guard.lock().await;
-                match record.stage {
-                    Stage::ReplyPending => self.settle_reply_debt(&record).await,
+                match record.stage.kind() {
+                    StageKind::ReplyPending => self.settle_reply_debt(&record).await,
                     _ => {
                         let remaining = deadline.saturating_sub(started.elapsed());
-                        let root_wait_budget =
-                            if record.detail.as_deref().and_then(EventReason::parse)
-                                == Some(EventReason::ThreadRootNotAvailable)
-                            {
-                                Duration::ZERO
-                            } else {
-                                self.thread_root_wait_budget().min(remaining)
-                            };
+                        let root_wait_budget = if record
+                            .stage
+                            .detail()
+                            .as_deref()
+                            .and_then(DeferralReason::parse)
+                            == Some(DeferralReason::ThreadRootNotAvailable)
+                        {
+                            Duration::ZERO
+                        } else {
+                            self.thread_root_wait_budget().min(remaining)
+                        };
                         self.drive_accepted_with_root_budget(&record, true, root_wait_budget)
                             .await
                     }
@@ -494,19 +497,14 @@ impl ChannelBot {
         if let Claim::Settled(record) = &claim {
             return Ok(DeliveryOutcome::Duplicate {
                 event_id: record.event_id.clone(),
-                stage: record.stage,
-                reply_ts: record.reply_ts.clone(),
+                stage: record.stage.kind(),
+                reply_ts: record.stage.reply_ts().map(str::to_owned),
             });
         }
 
         if let Intent::Ignore(reason) = intent {
-            self.settle(
-                claim.record(),
-                Stage::Ignored,
-                None,
-                DetailWrite::Set(reason.as_str().to_string()),
-            )
-            .await?;
+            self.settle(claim.record(), Stage::Ignored { reason })
+                .await?;
             return Ok(DeliveryOutcome::Ignored {
                 event_id: envelope.event_id,
                 reason: reason.as_str(),
@@ -521,7 +519,7 @@ impl ChannelBot {
         // A redelivery of an event that already owes a reply must not run the
         // model again: the text is on record and the only open question is
         // whether it reached the channel.
-        if resuming && record.stage == Stage::ReplyPending {
+        if resuming && record.stage.kind() == StageKind::ReplyPending {
             return self.settle_reply_debt(record).await;
         }
         self.drive_accepted(record, resuming).await
@@ -554,14 +552,14 @@ impl ChannelBot {
             // admission text is unrecoverable, so say so instead of guessing.
             self.settle(
                 record,
-                Stage::Ignored,
-                None,
-                DetailWrite::Set(EventReason::AdmissionTextUnavailable.as_str().to_string()),
+                Stage::Ignored {
+                    reason: IgnoreReason::AdmissionTextUnavailable,
+                },
             )
             .await?;
             return Ok(DeliveryOutcome::Ignored {
                 event_id: record.event_id.clone(),
-                reason: EventReason::AdmissionTextUnavailable.as_str(),
+                reason: IgnoreReason::AdmissionTextUnavailable.as_str(),
             });
         };
         let is_mention = record.kind == KIND_APP_MENTION;
@@ -572,14 +570,14 @@ impl ChannelBot {
         {
             self.settle(
                 record,
-                Stage::Replied,
-                Some(reply_ts.clone()),
-                DetailWrite::Clear,
+                Stage::Replied {
+                    reply_ts: reply_ts.clone(),
+                },
             )
             .await?;
             return Ok(DeliveryOutcome::Duplicate {
                 event_id: record.event_id.clone(),
-                stage: Stage::Replied,
+                stage: StageKind::Replied,
                 reply_ts: Some(reply_ts),
             });
         }
@@ -602,14 +600,14 @@ impl ChannelBot {
                 threads::ThreadSessionOpen::Retired => {
                     self.settle(
                         record,
-                        Stage::Ignored,
-                        None,
-                        DetailWrite::Set(EventReason::ThreadSessionRetired.as_str().to_string()),
+                        Stage::Ignored {
+                            reason: IgnoreReason::ThreadSessionRetired,
+                        },
                     )
                     .await?;
                     return Ok(DeliveryOutcome::Ignored {
                         event_id: record.event_id.clone(),
-                        reason: EventReason::ThreadSessionRetired.as_str(),
+                        reason: IgnoreReason::ThreadSessionRetired.as_str(),
                     });
                 }
                 threads::ThreadSessionOpen::AdmissionContended => {
@@ -625,7 +623,7 @@ impl ChannelBot {
                         .fail_missing_thread_root(
                             record,
                             is_mention,
-                            EventReason::ThreadRootNotProcessed,
+                            DeferralReason::ThreadRootNotProcessed,
                         )
                         .await;
                 }
@@ -634,7 +632,7 @@ impl ChannelBot {
                         .fail_missing_thread_root(
                             record,
                             is_mention,
-                            EventReason::ThreadRootNotAvailable,
+                            DeferralReason::ThreadRootNotAvailable,
                         )
                         .await;
                 }
@@ -667,8 +665,7 @@ impl ChannelBot {
                 )
                 .await?;
             }
-            self.settle(record, Stage::Folded, None, DetailWrite::Keep)
-                .await?;
+            self.settle(record, Stage::Folded { reason: None }).await?;
             return Ok(DeliveryOutcome::Folded {
                 event_id: record.event_id.clone(),
                 channel: record.channel_id.clone(),
@@ -712,9 +709,9 @@ impl ChannelBot {
         &self,
         record: &EventRecord,
         notify_user: bool,
-        detail: EventReason,
+        detail: DeferralReason,
     ) -> Result<DeliveryOutcome> {
-        let copy: &str = if detail == EventReason::ThreadRootNotAvailable {
+        let copy: &str = if detail == DeferralReason::ThreadRootNotAvailable {
             "I can’t find the message this thread started from, so I can’t answer right \
              now. If it reaches me later, I’ll follow up here."
         } else {
@@ -726,10 +723,10 @@ impl ChannelBot {
             .ledger
             .advance(
                 record.event_id.clone(),
-                record.stage,
-                record.stage,
-                None,
-                DetailWrite::Set(detail.as_str().to_string()),
+                record.stage.kind(),
+                Stage::Accepted {
+                    deferral: Some(detail),
+                },
             )
             .await?
         {
@@ -838,7 +835,11 @@ impl ChannelBot {
         ) && let Some(failure) = provider_failure(&output.result)
         {
             self.ledger
-                .advance_provider_error(record.event_id.clone(), record.stage, failure.clone())
+                .advance(
+                    record.event_id.clone(),
+                    record.stage.kind(),
+                    Stage::ProviderError(failure.clone()),
+                )
                 .await?;
             return Ok(DeliveryOutcome::ProviderError {
                 event_id: record.event_id.clone(),
@@ -856,15 +857,15 @@ impl ChannelBot {
         else {
             self.settle(
                 record,
-                Stage::Folded,
-                None,
-                DetailWrite::Set(EventReason::EmptyModelReply.as_str().to_string()),
+                Stage::Folded {
+                    reason: Some(FoldReason::EmptyModelReply),
+                },
             )
             .await?;
             return Ok(DeliveryOutcome::Silent {
                 event_id: record.event_id.clone(),
                 channel: record.channel_id.clone(),
-                reason: EventReason::EmptyModelReply.as_str(),
+                reason: FoldReason::EmptyModelReply.as_str(),
             });
         };
         self.owe_and_post(record, reply, ReplySource::Turn).await
@@ -902,9 +903,9 @@ impl ChannelBot {
                 // This is the only route to `ReplyLost`.
                 self.settle(
                     record,
-                    Stage::Ignored,
-                    None,
-                    DetailWrite::Set(EventReason::ReplyLostAfterCommit.as_str().to_string()),
+                    Stage::Ignored {
+                        reason: IgnoreReason::ReplyLostAfterCommit,
+                    },
                 )
                 .await?;
                 Ok(DeliveryOutcome::ReplyLost {
@@ -945,10 +946,10 @@ impl ChannelBot {
             .ledger
             .advance(
                 record.event_id.clone(),
-                record.stage,
-                Stage::ReplyPending,
-                None,
-                DetailWrite::Set(reply.clone()),
+                record.stage.kind(),
+                Stage::ReplyPending {
+                    reply: reply.clone(),
+                },
             )
             .await?
         {
@@ -958,10 +959,10 @@ impl ChannelBot {
         self.ledger
             .advance(
                 record.event_id.clone(),
-                Stage::ReplyPending,
-                Stage::Replied,
-                Some(reply_ts.clone()),
-                DetailWrite::Clear,
+                StageKind::ReplyPending,
+                Stage::Replied {
+                    reply_ts: reply_ts.clone(),
+                },
             )
             .await?;
         Ok(DeliveryOutcome::Replied {
@@ -977,36 +978,26 @@ impl ChannelBot {
         if let Some(reply_ts) = self.already_posted(record).await? {
             self.settle(
                 record,
-                Stage::Replied,
-                Some(reply_ts.clone()),
-                DetailWrite::Clear,
+                Stage::Replied {
+                    reply_ts: reply_ts.clone(),
+                },
             )
             .await?;
             return Ok(DeliveryOutcome::Duplicate {
                 event_id: record.event_id.clone(),
-                stage: Stage::Replied,
+                stage: StageKind::Replied,
                 reply_ts: Some(reply_ts),
             });
         }
-        let Some(reply) = record.detail.clone().filter(|text| !text.trim().is_empty()) else {
-            self.settle(
-                record,
-                Stage::Ignored,
-                None,
-                DetailWrite::Set(EventReason::ReplyLostAfterCommit.as_str().to_string()),
-            )
-            .await?;
-            return Ok(DeliveryOutcome::ReplyLost {
-                event_id: record.event_id.clone(),
-                channel: record.channel_id.clone(),
-            });
+        let Stage::ReplyPending { reply } = &record.stage else {
+            anyhow::bail!("reply-debt handler received {}", record.stage.as_str());
         };
-        let reply_ts = self.post_reply(record, &reply).await?;
+        let reply_ts = self.post_reply(record, reply).await?;
         self.settle(
             record,
-            Stage::Replied,
-            Some(reply_ts.clone()),
-            DetailWrite::Clear,
+            Stage::Replied {
+                reply_ts: reply_ts.clone(),
+            },
         )
         .await?;
         Ok(DeliveryOutcome::Replied {
@@ -1039,16 +1030,10 @@ impl ChannelBot {
     }
 
     /// Advance a row to a terminal stage, tolerating a concurrent winner.
-    async fn settle(
-        &self,
-        record: &EventRecord,
-        to: Stage,
-        reply_ts: Option<String>,
-        detail: DetailWrite,
-    ) -> Result<()> {
+    async fn settle(&self, record: &EventRecord, to: Stage) -> Result<()> {
         if !self
             .ledger
-            .advance(record.event_id.clone(), record.stage, to, reply_ts, detail)
+            .advance(record.event_id.clone(), record.stage.kind(), to)
             .await?
         {
             log_err!(
@@ -1063,8 +1048,10 @@ impl ChannelBot {
         let current = self.ledger.get(record.event_id.clone()).await?;
         Ok(DeliveryOutcome::Duplicate {
             event_id: record.event_id.clone(),
-            stage: current.as_ref().map_or(record.stage, |row| row.stage),
-            reply_ts: current.and_then(|row| row.reply_ts),
+            stage: current
+                .as_ref()
+                .map_or(record.stage.kind(), |row| row.stage.kind()),
+            reply_ts: current.and_then(|row| row.stage.reply_ts().map(str::to_owned)),
         })
     }
 
@@ -1100,11 +1087,11 @@ impl ChannelBot {
                     // bot answers itself, forever.
                     return (
                         KIND_MESSAGE,
-                        Intent::Ignore(EventReason::AppAuthoredMessage),
+                        Intent::Ignore(IgnoreReason::AppAuthoredMessage),
                     );
                 }
                 if message.user.is_none() {
-                    return (KIND_MESSAGE, Intent::Ignore(EventReason::NoAuthor));
+                    return (KIND_MESSAGE, Intent::Ignore(IgnoreReason::NoAuthor));
                 }
                 if events::mentions(&message.text, &self.identity.bot_user_id) {
                     // Slack sends both a `message` and an `app_mention` for a
@@ -1113,7 +1100,7 @@ impl ChannelBot {
                     // event whose meaning is unambiguous and drops the other.
                     return (
                         KIND_MESSAGE,
-                        Intent::Ignore(EventReason::SupersededByAppMention),
+                        Intent::Ignore(IgnoreReason::SupersededByAppMention),
                     );
                 }
                 (KIND_MESSAGE, Intent::Ambient)
@@ -1289,5 +1276,5 @@ fn reply_from_transcript(
 enum Intent {
     Mention,
     Ambient,
-    Ignore(EventReason),
+    Ignore(IgnoreReason),
 }

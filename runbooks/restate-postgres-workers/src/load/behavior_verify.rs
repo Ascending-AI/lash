@@ -18,13 +18,17 @@ pub(super) fn verify(
     };
     let subject = format!("{run}/behaviors");
     let sent = snapshot.events.iter().any(|event| {
-        event.operation == "behaviors" && event.phase == "sent" && event.subject == subject
+        event.evidence.operation() == "behaviors"
+            && event.evidence.phase() == "sent"
+            && event.subject == subject
     });
     let report = snapshot
         .events
         .iter()
         .rfind(|event| {
-            event.operation == "behaviors" && event.phase == "terminal" && event.subject == subject
+            event.evidence.operation() == "behaviors"
+                && event.evidence.phase() == "terminal"
+                && event.subject == subject
         })
         .and_then(|event| {
             serde_json::from_value::<super::LoadResponse>(event.detail["response"].clone()).ok()

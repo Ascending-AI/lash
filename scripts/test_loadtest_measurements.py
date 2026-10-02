@@ -116,7 +116,7 @@ class MeasurementsTests(unittest.TestCase):
         anchor = dict(schema_version=1, record='clock_anchor', run='r', id='7',
                       clock='witness_postgres_us', witness_us=9000000000000,
                       monotonic_ns=10000, round_trip_ns=2000)
-        row = dict(fault_event_id=7, run_id='r', fault_id='worker-kill', kind='worker-kill',
+        row = dict(fault_event_id=7, run_id='r', kind='worker-kill',
                    phase='injected', recorded_at_us=9000000000003, detail_json='{}')
         normalized, errors = m.normalize_fault_rows([row], [anchor], 'r')
         self.assertEqual(errors, [])
@@ -127,7 +127,7 @@ class MeasurementsTests(unittest.TestCase):
 
     def test_fault_without_anchor_names_row_and_stays_incomplete(self):
         run, operations, samples, witness = self.campaign_evidence()
-        row = dict(fault_event_id=7, run_id='r', fault_id='worker-kill', kind='worker-kill',
+        row = dict(fault_event_id=7, run_id='r', kind='worker-kill',
                    phase='injected', recorded_at_us=9000000000003, detail_json='{}')
         result = m.summarize(run, operations, samples, witness, faults=[row])
         self.assertEqual(result['qualification']['status'], 'INCOMPLETE')
@@ -638,7 +638,7 @@ class MeasurementsTests(unittest.TestCase):
                         clock='witness_postgres_us', witness_us=950, monotonic_ns=0, round_trip_ns=2000)]
         for event, phase, at in [(1, 'injected', 50), (2, 'recovered', 110)]:
             detail = dict(service_progress_at_us=1010, backlog_recovered_at_us=1060) if phase == 'recovered' else {}
-            rows.append(dict(fault_event_id=event, run_id='r', fault_id='worker-kill', kind='worker-kill',
+            rows.append(dict(fault_event_id=event, run_id='r', kind='worker-kill',
                              phase=phase, recorded_at_us=950 + at, detail_json=json.dumps(detail)))
             anchors.append(dict(schema_version=1, record='clock_anchor', run='r', id=str(event),
                                 clock='witness_postgres_us', witness_us=950 + at, monotonic_ns=at * 1000,
@@ -677,7 +677,7 @@ class MeasurementsTests(unittest.TestCase):
         gap = result['collection_gaps'][0]
         self.assertEqual(gap['error'], 'request timed out')
         self.assertEqual(gap['attribution']['status'], 'FAULT_ATTRIBUTED')
-        self.assertEqual(gap['attribution']['fault_id'], 'worker-kill')
+        self.assertEqual(gap['attribution']['kind'], 'worker-kill')
         self.assertEqual(gap['attribution']['anchor_ids'], ['1', '2'])
         self.assertEqual(gap['attribution']['window_ns'], [52000, 108000])
         self.assertEqual(gap['target'], fixture[-1]['target'])
@@ -719,7 +719,7 @@ class MeasurementsTests(unittest.TestCase):
         samples, faults, gap = fixture[2], fixture[4], fixture[6]
         target = {'component': 'restate', 'endpoint': 'node-0'}
         for row in faults:
-            row.update(fault_id='restate-restart', kind='restate-restart')
+            row.update(kind='restate-restart')
         faults[0]['detail_json'] = json.dumps({'collection_targets': [target]})
         gap['target'] = dict(target)
         scraped = copy.deepcopy(samples[0])
@@ -741,7 +741,7 @@ class MeasurementsTests(unittest.TestCase):
         gap, = self.exporter_gaps(result)
         self.assertEqual((gap['record'], gap['sample_kind'], gap['monotonic_ns']), ('sample_error', 'periodic', 82000))
         self.assertEqual(gap['target'], {'component': 'restate', 'endpoint': 'node-0'})
-        self.assertEqual((gap['attribution']['status'], gap['attribution']['fault_id']),
+        self.assertEqual((gap['attribution']['status'], gap['attribution']['kind']),
                          ('FAULT_ATTRIBUTED', 'restate-restart'))
         # The scrape contributes nothing; the node's counter keeps its epoch.
         self.assertEqual(result['counters']['restate_task_started']['observed_delta'], 2)
@@ -804,11 +804,11 @@ class MeasurementsTests(unittest.TestCase):
                 fixture[-1]['target'] = {'component': 'restate', 'endpoint': 'admin'}
                 for row in fixture[-3]:
                     row['kind'] = 'restate-restart'
-                    row['fault_id'] = 'restate-restart'
+                    row['kind'] = 'restate-restart'
                 fixture[-3][0]['detail_json'] = json.dumps({'collection_targets': [fixture[-1]['target']]})
                 result = self.gap_summary(fixture)
                 self.assertEqual(result['qualification']['status'], 'PASSED')
-                self.assertEqual(result['collection_gaps'][0]['attribution']['fault_id'], 'restate-restart')
+                self.assertEqual(result['collection_gaps'][0]['attribution']['kind'], 'restate-restart')
 
     def test_archive_keeps_gap_attribution_and_unattributed_failure(self):
         for attributed, epochs in [(True, False), (False, False), (True, True), (False, True)]:
@@ -886,7 +886,7 @@ class MeasurementsTests(unittest.TestCase):
         self.assertEqual(gap['target'], {'component': 'worker', 'endpoint': 'worker'})
         self.assertEqual((gap['before']['epoch']['parent_epoch'], gap['after']['epoch']['parent_epoch']), ('1', '2'))
         self.assertEqual(gap['attribution']['status'], 'FAULT_ATTRIBUTED')
-        self.assertEqual(gap['attribution']['fault_id'], 'worker-kill')
+        self.assertEqual(gap['attribution']['kind'], 'worker-kill')
         self.assertIsNone(gap['unobserved_delta'])
         self.assertFalse(gap['complete'])
 
@@ -912,7 +912,7 @@ class MeasurementsTests(unittest.TestCase):
         self.assertEqual(result['qualification']['status'], 'PASSED')
         gap, = self.pool_gaps(result['collection_gaps'])
         self.assertEqual((gap['before']['epoch']['pool_epoch'], gap['after']['epoch']['pool_epoch']), (1, 2))
-        self.assertEqual(gap['attribution']['fault_id'], 'worker-kill')
+        self.assertEqual(gap['attribution']['kind'], 'worker-kill')
         self.assertEqual(self.counter_gaps(result['collection_gaps']), [])
 
     def test_a_pool_restart_no_fault_explains_leaves_qualification_incomplete(self):
@@ -955,7 +955,7 @@ class MeasurementsTests(unittest.TestCase):
 
     def test_a_pool_restart_two_faults_could_explain_is_not_attributed(self):
         def fault(fault_id, phase, anchor, at):
-            return dict(fault_id=fault_id, kind='worker-kill' if fault_id == 'worker-kill' else 'rolling-deploy',
+            return dict(kind='worker-kill' if fault_id == 'worker-kill' else 'rolling-deploy',
                         phase=phase, anchor_id=anchor, clock_bounds_ns=[at, at],
                         detail={'collection_targets': [{'component': 'worker', 'endpoint': 'worker'}]})
         faults = [fault('worker-kill', 'injected', '1', 50000), fault('worker-kill', 'recovered', '2', 60000),
@@ -966,7 +966,7 @@ class MeasurementsTests(unittest.TestCase):
         both, = m.collection_gaps(run, [gap], faults)
         self.assertEqual(both['attribution'], {'status': 'UNATTRIBUTED'})
         one, = m.collection_gaps(run, [{**gap, 'monotonic_ns': 65000}], faults)
-        self.assertEqual((one['attribution']['status'], one['attribution']['fault_id']), ('FAULT_ATTRIBUTED', 'worker-kill'))
+        self.assertEqual((one['attribution']['status'], one['attribution']['kind']), ('FAULT_ATTRIBUTED', 'worker-kill'))
 
     def test_faulted_counter_epoch_gap_keeps_unknown_delta_and_values(self):
         result = self.gap_summary(self.epoch_campaign())
@@ -980,7 +980,7 @@ class MeasurementsTests(unittest.TestCase):
         self.assertIsNone(gap['unobserved_delta'])
         self.assertFalse(gap['complete'])
         self.assertEqual(gap['attribution']['status'], 'FAULT_ATTRIBUTED')
-        self.assertEqual(gap['attribution']['fault_id'], 'worker-kill')
+        self.assertEqual(gap['attribution']['kind'], 'worker-kill')
         self.assertEqual(result['counters']['worker_usage_usec']['observed_delta'], 2)
         self.assertFalse(result['counters']['worker_usage_usec']['complete'])
         self.assertEqual(result['counters']['worker_usage_usec']['epoch_gaps'], 1)
@@ -1002,7 +1002,7 @@ class MeasurementsTests(unittest.TestCase):
         for gap in gaps:
             self.assertEqual((gap['previous_observed_ns'], gap['monotonic_ns']), (5000, 108001))
             self.assertEqual(gap['attribution']['status'], 'FAULT_ATTRIBUTED')
-            self.assertEqual(gap['attribution']['fault_id'], 'worker-kill')
+            self.assertEqual(gap['attribution']['kind'], 'worker-kill')
             self.assertEqual(gap['attribution']['window_ns'], [52000, 108000])
             self.assertIsNone(gap['unobserved_delta'])
             self.assertFalse(gap['complete'])

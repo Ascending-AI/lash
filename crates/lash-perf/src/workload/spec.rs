@@ -69,8 +69,6 @@ pub struct WorkloadSpec {
     pub observation: Observation,
     pub provider: Provider,
     pub faults: Faults,
-    pub topology: Topology,
-    pub model_code_pool: ModelCodePool,
     pub collection: Collection,
     pub provenance: Provenance,
     pub inventory: Inventory,
@@ -204,54 +202,6 @@ pub struct Faults {
     pub rolling_deploy_s: u32,
     #[schemars(range(min = 1))]
     pub rolling_worker_pause_s: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Topology {
-    #[schemars(range(min = 1))]
-    pub workers: u32,
-    #[schemars(range(min = 1))]
-    pub worker_cpu: u32,
-    #[schemars(range(min = 1))]
-    pub worker_memory_mib: u32,
-    #[schemars(range(min = 1))]
-    pub pg_connections_per_worker: u32,
-    #[schemars(range(min = 1))]
-    pub restate_nodes: u32,
-    #[schemars(range(min = 1))]
-    pub restate_partitions: u32,
-    #[schemars(range(min = 1))]
-    pub replication: u32,
-    #[schemars(range(min = 1))]
-    pub restate_cpu: u32,
-    #[schemars(range(min = 1))]
-    pub restate_memory_mib: u32,
-    #[schemars(range(min = 1))]
-    pub pg_cpu: u32,
-    #[schemars(range(min = 1))]
-    pub pg_memory_mib: u32,
-    #[schemars(range(min = 1))]
-    pub garage_cpu: u32,
-    #[schemars(range(min = 1))]
-    pub garage_memory_mib: u32,
-    #[schemars(range(min = 0))]
-    pub one_way_delay_ms: f64,
-    #[schemars(range(min = 0))]
-    pub network_jitter_ms: f64,
-    #[schemars(range(min = 1))]
-    pub bandwidth_mbps: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ModelCodePool {
-    #[schemars(range(min = 1))]
-    pub workers_per_lash_worker: u32,
-    #[schemars(range(min = 1))]
-    pub queue_limit: u32,
-    #[schemars(range(min = 1))]
-    pub execution_memory_mib: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

@@ -129,7 +129,7 @@ export function layoutDocument(doc) {
     }
     for (const edge of doc.edges) {
       if (idSet.has(edge.source) && idSet.has(edge.target)) {
-        g.setEdge(edge.source, edge.target, { weight: edge.data?.kind === 'data' ? 1 : 3 });
+        g.setEdge(edge.source, edge.target, { weight: edge.data?.kind === 'data_dependency' ? 1 : 3 });
       }
     }
     dagre.layout(g);

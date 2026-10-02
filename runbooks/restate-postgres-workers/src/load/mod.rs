@@ -19,7 +19,9 @@ pub mod behavior;
 mod behavior_verify;
 pub mod control;
 mod fault_verify;
+pub mod ledger;
 pub mod measurements;
+pub use ledger::{LoadEvidence, WitnessedOperation};
 pub mod red_side;
 pub mod tools;
 mod upgrade_verify;
@@ -381,66 +383,11 @@ pub enum LoadResponse {
     DeleteSession(DeleteReport),
 }
 
-/// The operation a witness row describes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WitnessedOperation {
-    Behaviors,
-    Turn,
-    DeleteSession,
-    CronSetup,
-    CronTick,
-    Attachment,
-}
-
-impl WitnessedOperation {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Behaviors => "behaviors",
-            Self::Turn => "turn",
-            Self::DeleteSession => "delete-session",
-            Self::CronSetup => "cron-setup",
-            Self::CronTick => "cron-tick",
-            Self::Attachment => "attachment",
-        }
-    }
-
-    pub fn of(request: &LoadRequest) -> Self {
-        match request {
-            LoadRequest::Behaviors { .. } => Self::Behaviors,
-            LoadRequest::Turn { .. } => Self::Turn,
-            LoadRequest::CronSetup { .. } => Self::CronSetup,
-            LoadRequest::CronTick { .. } => Self::CronTick,
-            LoadRequest::DeleteSession { .. } => Self::DeleteSession,
-        }
-    }
-}
-
-/// The phase of an operation a witness row records.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WitnessedPhase {
-    Sent,
-    Terminal,
-    Put,
-    Read,
-}
-
-impl WitnessedPhase {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Sent => "sent",
-            Self::Terminal => "terminal",
-            Self::Put => "put",
-            Self::Read => "read",
-        }
-    }
-}
-
 /// One `witness_load_events` row.
 pub struct LoadEvent<'a> {
     pub run: &'a str,
     pub subject: &'a str,
-    pub operation: WitnessedOperation,
-    pub phase: WitnessedPhase,
+    pub evidence: LoadEvidence,
     pub observer: &'a str,
     pub detail: &'a Value,
     /// Exact bytes the observer handled; the witness digests them.
@@ -456,8 +403,8 @@ pub async fn record_load_event(pool: &PgPool, event: LoadEvent<'_>) -> Result<()
     )
     .bind(event.run)
     .bind(event.subject)
-    .bind(event.operation.as_str())
-    .bind(event.phase.as_str())
+    .bind(event.evidence.operation())
+    .bind(event.evidence.phase())
     .bind(event.observer)
     .bind(event.detail.to_string())
     .bind(event.content)
@@ -466,8 +413,8 @@ pub async fn record_load_event(pool: &PgPool, event: LoadEvent<'_>) -> Result<()
     .with_context(|| {
         format!(
             "witness {} {} of `{}`",
-            event.operation.as_str(),
-            event.phase.as_str(),
+            event.evidence.operation(),
+            event.evidence.phase(),
             event.subject
         )
     })?;

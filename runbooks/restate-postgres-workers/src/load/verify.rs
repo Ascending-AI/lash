@@ -52,33 +52,13 @@ pub const CLASSES: [&str; 27] = [
     "promotion-reads",
 ];
 
-/// The classes a run under a fault campaign must also witness: the campaign
-/// itself, and each fault kind the controller injects.
-pub const FAULT_CLASSES: [&str; 4] = [
-    "fault-campaign",
-    "worker-kill",
-    "restate-restart",
-    "rolling-deploy",
-];
-
-/// The classes a run under the rolling-upgrade campaign (FIG-3805 phase B)
-/// must also witness: the campaign, each ADR 0106 §6 step it runs, and
-/// every session answering after every step.
-pub const UPGRADE_CLASSES: [&str; 7] = [
-    "upgrade-campaign",
-    "half-roll",
-    "rollback",
-    "roll",
-    "finalize",
-    "fence",
-    "sessions-through-roll",
-];
+use super::ledger::{FaultEvidence, LoadEvidence};
+pub use super::ledger::{fault_classes, upgrade_classes};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LoadEventRow {
     pub subject: String,
-    pub operation: String,
-    pub phase: String,
+    pub evidence: LoadEvidence,
     pub observer: String,
     pub detail: Value,
     pub content_digest: Option<String>,
@@ -88,10 +68,8 @@ pub struct LoadEventRow {
 
 /// One `witness_load_faults` row.
 #[derive(Clone, Debug, PartialEq)]
-pub struct FaultRow {
-    pub fault_id: String,
-    pub kind: String,
-    pub phase: String,
+pub struct FaultLedgerRow {
+    pub evidence: FaultEvidence,
     pub target: String,
     pub detail: Value,
     pub recorded_at_us: i64,
@@ -101,7 +79,7 @@ pub struct FaultRow {
 pub struct WitnessSnapshot {
     pub events: Vec<LoadEventRow>,
     /// The fault controller's rows, in order; empty without a campaign.
-    pub faults: Vec<FaultRow>,
+    pub faults: Vec<FaultLedgerRow>,
     /// `(workflow_id, scenario)` of every provider receipt under the run.
     pub receipts: Vec<(String, String)>,
     /// `(logical_key, response_digest)` of every committed effect under the run.
@@ -126,8 +104,7 @@ pub async fn load_snapshot(pool: &PgPool, run: &str) -> Result<WitnessSnapshot> 
         |(subject, operation, phase, observer, detail, content_digest, recorded_at_us)| {
             Ok(LoadEventRow {
                 subject,
-                operation,
-                phase,
+                evidence: format!("{operation}:{phase}").parse()?,
                 observer,
                 detail: serde_json::from_str(&detail).context("decode a load event's detail")?,
                 content_digest,
@@ -136,8 +113,8 @@ pub async fn load_snapshot(pool: &PgPool, run: &str) -> Result<WitnessSnapshot> 
         },
     )
     .collect::<Result<Vec<_>>>()?;
-    let faults = sqlx::query_as::<_, (String, String, String, String, String, i64)>(
-        "SELECT fault_id, kind, phase, target, detail_json, recorded_at_us
+    let faults = sqlx::query_as::<_, (String, String, String, String, i64)>(
+        "SELECT kind, phase, target, detail_json, recorded_at_us
          FROM witness_load_faults WHERE run_id = $1 ORDER BY fault_event_id",
     )
     .bind(run)
@@ -145,11 +122,9 @@ pub async fn load_snapshot(pool: &PgPool, run: &str) -> Result<WitnessSnapshot> 
     .await
     .context("read the fault ledger")?
     .into_iter()
-    .map(|(fault_id, kind, phase, target, detail, recorded_at_us)| {
-        Ok(FaultRow {
-            fault_id,
-            kind,
-            phase,
+    .map(|(kind, phase, target, detail, recorded_at_us)| {
+        Ok(FaultLedgerRow {
+            evidence: format!("{kind}:{phase}").parse()?,
             target,
             detail: serde_json::from_str(&detail).context("decode a fault row's detail")?,
             recorded_at_us,
@@ -279,25 +254,24 @@ impl<'a> Evidence<'a> {
             commits: BTreeMap::new(),
         };
         for event in &snapshot.events {
-            let key = (event.operation.as_str(), event.subject.as_str());
-            match event.phase.as_str() {
-                "sent" => evidence.sent.entry(key).or_default().push(&event.detail),
-                "terminal" => evidence
+            let key = (event.evidence.operation(), event.subject.as_str());
+            match event.evidence {
+                LoadEvidence::Sent(_) => evidence.sent.entry(key).or_default().push(&event.detail),
+                LoadEvidence::Terminal(_) => evidence
                     .terminal
                     .entry(key)
                     .or_default()
                     .push(&event.detail),
-                "put" => evidence
+                LoadEvidence::AttachmentPut => evidence
                     .puts
                     .entry(event.subject.as_str())
                     .or_default()
                     .push(event),
-                "read" => evidence
+                LoadEvidence::AttachmentRead => evidence
                     .reads
                     .entry(event.subject.as_str())
                     .or_default()
                     .push(event),
-                _ => {}
             }
         }
         for (key, scenario) in &snapshot.receipts {
@@ -365,11 +339,11 @@ fn mentions(value: &Value, needle: &str) -> bool {
 pub fn verify(load: &LoadContext, run: &str, snapshot: &WitnessSnapshot) -> Result<Verdict> {
     let generator = load.generator(run)?;
     let evidence = Evidence::index(snapshot);
-    let campaign = campaign_kind(snapshot);
+    let campaign = campaign_kind(snapshot)?;
     let campaign_classes: &[&'static str] = match campaign {
         None => &[],
-        Some(CampaignKind::Faults) => &FAULT_CLASSES,
-        Some(CampaignKind::RollingUpgrade) => &UPGRADE_CLASSES,
+        Some(CampaignKind::Faults) => &fault_classes(),
+        Some(CampaignKind::RollingUpgrade) => &upgrade_classes(),
     };
     let mut classes: BTreeMap<&'static str, Tally> = CLASSES
         .iter()
@@ -971,6 +945,132 @@ pub(super) mod tests {
     };
     use serde_json::json;
 
+    #[tokio::test]
+    #[ignore = "requires isolated PostgreSQL and witness SQL"]
+    async fn witness_sql_rejects_illegal_event_and_fault_pairs() {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&std::env::var("LASH_POSTGRES_DATABASE_URL").expect("PostgreSQL service"))
+            .await
+            .expect("connect");
+        let sql = std::fs::read_to_string(
+            std::env::var("LASH_LOAD_WITNESS_SQL").expect("witness SQL path"),
+        )
+        .expect("witness SQL");
+        sqlx::raw_sql("CREATE OR REPLACE FUNCTION pg_temp.witness_clock_us() RETURNS BIGINT LANGUAGE sql AS 'SELECT 0::BIGINT'; SET search_path = pg_temp, public;").execute(&pool).await.expect("clock");
+        for table in ["witness_load_events", "witness_load_faults"] {
+            let start = sql.find(&format!("CREATE TABLE {table} (")).expect("table");
+            let end = sql[start..].find("\n);").expect("table end") + start + 3;
+            sqlx::raw_sql(
+                &sql[start..end]
+                    .replace("CREATE TABLE", "CREATE TEMP TABLE")
+                    .replace(
+                        "DEFAULT witness_clock_us()",
+                        "DEFAULT pg_temp.witness_clock_us()",
+                    ),
+            )
+            .execute(&pool)
+            .await
+            .expect("witness table");
+        }
+        let mut accepted = Vec::new();
+        for (operation, phase) in [("turn", "put"), ("attachment", "sent"), ("turn", "snet")] {
+            let inserted = sqlx::query("INSERT INTO witness_load_events (run_id, subject, operation, phase, observer, detail_json) VALUES ('law', 'subject', $1, $2, 'law', '{}')").bind(operation).bind(phase).execute(&pool).await;
+            if inserted.is_ok() {
+                accepted.push(format!("event {operation}:{phase}"));
+            }
+        }
+        for (kind, phase) in [
+            ("campaign", "injected"),
+            ("worker-kill", "started"),
+            ("roll", "complete"),
+        ] {
+            let query = "INSERT INTO witness_load_faults (run_id, kind, phase, target, detail_json) VALUES ('law', $1, $2, 'law', '{}')";
+            if sqlx::query(query)
+                .bind(kind)
+                .bind(phase)
+                .execute(&pool)
+                .await
+                .is_ok()
+            {
+                accepted.push(format!("fault {kind}:{phase}"));
+            }
+        }
+        assert!(
+            accepted.is_empty(),
+            "invalid pairs were accepted: {accepted:?}"
+        );
+        let events = LoadEvidence::pairs();
+        let event_operations: BTreeSet<_> = events.iter().map(|pair| pair.0).collect();
+        let event_phases: BTreeSet<_> = events.iter().map(|pair| pair.1).collect();
+        let mut refused = 0;
+        for operation in event_operations {
+            for phase in &event_phases {
+                let inserted = sqlx::query("INSERT INTO witness_load_events (run_id, subject, operation, phase, observer, detail_json) VALUES ('law', 'subject', $1, $2, 'law', '{}')").bind(operation).bind(*phase).execute(&pool).await;
+                assert_eq!(
+                    inserted.is_ok(),
+                    events.contains(&(operation, *phase)),
+                    "event {operation}:{phase}: {inserted:?}"
+                );
+                refused += usize::from(inserted.is_err());
+            }
+        }
+        assert_eq!(refused, 12);
+        let faults = FaultEvidence::pairs();
+        let kinds: BTreeSet<_> = faults.iter().map(|pair| pair.0).collect();
+        let phases: BTreeSet<_> = faults.iter().map(|pair| pair.1).collect();
+        let mut refused = 0;
+        for kind in kinds {
+            for phase in &phases {
+                let inserted = sqlx::query("INSERT INTO witness_load_faults (run_id, kind, phase, target, detail_json) VALUES ('law', $1, $2, 'law', '{}')").bind(kind).bind(*phase).execute(&pool).await;
+                assert_eq!(
+                    inserted.is_ok(),
+                    faults.contains(&(kind, *phase)),
+                    "fault {kind}:{phase}: {inserted:?}"
+                );
+                refused += usize::from(inserted.is_err());
+            }
+        }
+        assert_eq!(refused, 19);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires isolated PostgreSQL"]
+    async fn witness_reader_rejects_unknown_event_and_fault_pairs() {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&std::env::var("LASH_POSTGRES_DATABASE_URL").expect("PostgreSQL service"))
+            .await
+            .expect("connect");
+        sqlx::raw_sql("CREATE TEMP TABLE witness_load_events (event_id BIGSERIAL, run_id TEXT, subject TEXT, operation TEXT, phase TEXT, observer TEXT, detail_json TEXT, content_digest TEXT, recorded_at_us BIGINT); CREATE TEMP TABLE witness_load_faults (fault_event_id BIGSERIAL, run_id TEXT, kind TEXT, phase TEXT, target TEXT, detail_json TEXT, recorded_at_us BIGINT); CREATE TEMP TABLE witness_provider_receipts (receipt_id BIGSERIAL, workflow_id TEXT, scenario TEXT); CREATE TEMP TABLE witness_effect_commits (logical_key TEXT, response_digest TEXT); CREATE TEMP TABLE witness_effect_attempts (logical_key TEXT);").execute(&pool).await.expect("permissive corruption fixture");
+        for (operation, phase) in [("turn", "snet"), ("turn", "put"), ("attachment", "sent")] {
+            sqlx::query("INSERT INTO witness_load_events (run_id, subject, operation, phase, observer, detail_json, recorded_at_us) VALUES ('law', 'subject', $1, $2, 'law', '{}', 0)").bind(operation).bind(phase).execute(&pool).await.expect("corrupt event");
+            assert!(
+                load_snapshot(&pool, "law").await.is_err(),
+                "corrupt event {operation}:{phase} was silently read"
+            );
+            sqlx::query("DELETE FROM witness_load_events")
+                .execute(&pool)
+                .await
+                .expect("reset");
+        }
+        for (kind, phase) in [
+            ("campaign", "injected"),
+            ("worker-kill", "started"),
+            ("rol", "complete"),
+        ] {
+            sqlx::query("INSERT INTO witness_load_faults (run_id, kind, phase, target, detail_json, recorded_at_us) VALUES ('law', $1, $2, 'law', '{}', 0)").bind(kind).bind(phase).execute(&pool).await.expect("corrupt fault");
+            assert!(
+                load_snapshot(&pool, "law").await.is_err(),
+                "corrupt fault {kind}:{phase} was silently read"
+            );
+            sqlx::query("DELETE FROM witness_load_faults")
+                .execute(&pool)
+                .await
+                .expect("reset");
+        }
+    }
+
     pub(crate) const RUN: &str = "verify";
 
     fn event(
@@ -983,8 +1083,9 @@ pub(super) mod tests {
     ) -> LoadEventRow {
         LoadEventRow {
             subject: subject.to_owned(),
-            operation: operation.to_owned(),
-            phase: phase.to_owned(),
+            evidence: format!("{operation}:{phase}")
+                .parse()
+                .expect("valid event pair"),
             observer: observer.to_owned(),
             detail,
             content_digest,
@@ -1297,7 +1398,7 @@ pub(super) mod tests {
         if let Some(read) = corrupted
             .events
             .iter_mut()
-            .find(|event| event.phase == "read")
+            .find(|event| event.evidence.phase() == "read")
         {
             read.content_digest = Some("0".repeat(64));
         }
@@ -1307,19 +1408,19 @@ pub(super) mod tests {
         let shared = unshared
             .events
             .iter()
-            .filter(|event| event.phase == "put")
+            .filter(|event| event.evidence.phase() == "put")
             .map(|event| event.subject.clone())
             .find(|subject| {
                 base.events
                     .iter()
-                    .filter(|event| event.phase == "put" && &event.subject == subject)
+                    .filter(|event| event.evidence.phase() == "put" && &event.subject == subject)
                     .count()
                     == 2
             })
             .expect("a shared blob");
         let mut dropped = false;
         unshared.events.retain(|event| {
-            let drop = !dropped && event.phase == "put" && event.subject == shared;
+            let drop = !dropped && event.evidence.phase() == "put" && event.subject == shared;
             dropped |= drop;
             !drop
         });
@@ -1328,8 +1429,8 @@ pub(super) mod tests {
 
         let mut unsubscribed = base.clone();
         for event in &mut unsubscribed.events {
-            if event.operation == "cron-tick"
-                && event.phase == "terminal"
+            if event.evidence.operation() == "cron-tick"
+                && event.evidence.phase() == "terminal"
                 && event.subject.ends_with("/tick/1")
             {
                 event.detail["response"]["started_process_ids"] = json!(["process-late"]);
@@ -1344,7 +1445,9 @@ pub(super) mod tests {
         let first_turn = unanswered
             .events
             .iter()
-            .position(|event| event.operation == "turn" && event.phase == "terminal")
+            .position(|event| {
+                event.evidence.operation() == "turn" && event.evidence.phase() == "terminal"
+            })
             .expect("a turn terminal");
         unanswered.events[first_turn].detail = json!({ "error": "HTTP 500" });
         assert!(violated(&verdict(&unanswered), "turns"));
@@ -1389,7 +1492,7 @@ pub(super) mod tests {
     pub(crate) fn answer(snapshot: &mut WitnessSnapshot, key: &str, root: &str, operation: &str) {
         let answered = json!({ "operation": operation, "synthetic": true });
         for event in &mut snapshot.events {
-            if event.operation != "turn" || event.phase != "terminal" {
+            if event.evidence.operation() != "turn" || event.evidence.phase() != "terminal" {
                 continue;
             }
             let response = &mut event.detail["response"];

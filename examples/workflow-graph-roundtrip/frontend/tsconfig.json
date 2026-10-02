@@ -9,5 +9,5 @@
     "strict": true,
     "target": "ES2022"
   },
-  "include": ["src/lib/api.js"]
+  "include": ["src/lib/api.js", "src/contract-types.fixture.ts"]
 }

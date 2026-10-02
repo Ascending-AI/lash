@@ -44,7 +44,7 @@ export const CONTAINER_SUBKINDS = {
 };
 
 // Effect verbs that render as a "waiting"-capable node (sleeps / signal waits).
-export const WAITING_EFFECTS = new Set(['sleep', 'wait_signal', 'await_join']);
+export const WAITING_EFFECTS = new Set(['sleep_for', 'wait_signal', 'await_join']);
 
 // The "+ Add node" palette and per-node operation labels are fed by the
 // operation catalog (lib/operations.js) served from GET /operations — the

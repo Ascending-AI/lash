@@ -548,7 +548,7 @@ impl BotHost {
             handle: auth.user,
             team_id: auth.team_id,
         };
-        let ledger_database = SqliteHandle::open(&data_dir.join("events.db"), ledger::SCHEMA)
+        let ledger_database = SqliteHandle::open(&data_dir.join("events.db"), &ledger::SCHEMA)
             .expect("open test ledger");
         let mut runtime_config = RuntimeConfig::new(data_dir.join("lash"));
         runtime_config.trace_to_stderr = false;

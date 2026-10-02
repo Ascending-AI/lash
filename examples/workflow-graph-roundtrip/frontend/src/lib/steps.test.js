@@ -32,7 +32,7 @@ describe('stepLabel — plain-language, never leaks jargon', () => {
     [{ kind: 'effect', effect: 'start_process', fields: { name: { kind: 'string', value: 'w' } } }, 'start', 'Start'],
     [{ kind: 'effect', effect: 'await_join', fields: { name: { kind: 'string', value: 'w' } } }, 'await', 'Wait for'],
     [{ kind: 'effect', effect: 'wait_signal', fields: { signal: { kind: 'string', value: 'go' } } }, 'waitSignal', 'Wait for'],
-    [{ kind: 'effect', effect: 'sleep', fields: { duration: { kind: 'string', value: '400ms' } } }, 'sleep', 'Wait for'],
+    [{ kind: 'effect', effect: 'sleep_for', fields: { duration: { kind: 'string', value: '400ms' } } }, 'sleep', 'Wait for'],
   ];
   for (const [data, category, lead] of cases) {
     it(`${data.kind}/${data.effect ?? ''} → ${category}`, () => {
@@ -292,8 +292,8 @@ describe('buildSteps — nesting builder (item 1)', () => {
         }),
       ],
       edges: [
-        { source: 'messages', target: 'agent', data: { kind: 'data', variable: 'messages' } },
-        { source: 'activity', target: 'agent', data: { kind: 'data', variable: 'activity' } },
+        { source: 'messages', target: 'agent', data: { kind: 'data_dependency', variable: 'messages' } },
+        { source: 'activity', target: 'agent', data: { kind: 'data_dependency', variable: 'activity' } },
       ],
       roots: { processes: [], main: ['messages', 'activity', 'agent'] },
     });

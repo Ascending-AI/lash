@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
 
 use axum::http::StatusCode;
-use lash::rlm::lang::{Span, WorkflowDiagnosticClassification, WorkflowNodeNameSource};
+use lash::rlm::lang::{
+    Span, WorkflowDiagnosticClassification, WorkflowEdgeKind, WorkflowEffectKind,
+    WorkflowNodeNameSource, WorkflowTerminalKind,
+};
 use lash::typescript::workflow_graph::{GraphRenderError, WorkflowGraphBuildError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -195,53 +198,410 @@ pub struct FlowNode {
     pub data: NodeData,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = close_flattened_union)]
 pub struct NodeData {
-    pub kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subkind: Option<String>,
     #[serde(flatten)]
     pub name: NodeName,
-    #[serde(rename = "name", default, skip_serializing_if = "Option::is_none")]
-    pub process_name: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub params: Vec<EditableProcessField>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub signals: Vec<EditableProcessField>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub operation: Option<String>,
-    /// The receiver the catalog entry this node came from belongs to, carried
-    /// so a call node posted with no `expression` can be synthesized against
-    /// the receiver it actually names (FIG-3178).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub receiver: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effect: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub terminal_kind: Option<String>,
-    #[serde(default)]
-    pub fields: BTreeMap<String, EditableValue>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub binding: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expression: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub condition: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub iterable: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub children: Vec<ChildGroup>,
     #[serde(default)]
     pub available_vars: Vec<TypedVariable>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub expected_arg_types: Vec<ExpectedArgumentType>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub diagnostics: Vec<TypeDiagnostic>,
+    #[serde(flatten)]
+    pub body: NodeBody,
+}
+
+impl<'de> Deserialize<'de> for NodeData {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Envelope {
+            #[serde(default)]
+            available_vars: Vec<TypedVariable>,
+            #[serde(default)]
+            expected_arg_types: Vec<ExpectedArgumentType>,
+            #[serde(default)]
+            diagnostics: Vec<TypeDiagnostic>,
+            #[serde(flatten)]
+            body: BTreeMap<String, Value>,
+        }
+        let mut payload = BTreeMap::<String, Value>::deserialize(deserializer)?;
+        let name = Value::Object(
+            ["nameSource", "title", "description"]
+                .into_iter()
+                .filter_map(|field| payload.remove(field).map(|value| (field.to_owned(), value)))
+                .collect(),
+        );
+        let name = serde_json::from_value(name).map_err(serde::de::Error::custom)?;
+        let envelope: Envelope =
+            serde_json::from_value(Value::Object(payload.into_iter().collect()))
+                .map_err(serde::de::Error::custom)?;
+        let body = serde_json::from_value(Value::Object(envelope.body.into_iter().collect()))
+            .map_err(serde::de::Error::custom)?;
+        Ok(Self {
+            name,
+            available_vars: envelope.available_vars,
+            expected_arg_types: envelope.expected_arg_types,
+            diagnostics: envelope.diagnostics,
+            body,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum NodeBody {
+    Process {
+        #[serde(rename = "name")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        process_name: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        params: Vec<EditableProcessField>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        signals: Vec<EditableProcessField>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        children: Vec<ChildGroup>,
+    },
+    Data {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binding: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expression: Option<String>,
+        #[serde(default)]
+        fields: BTreeMap<String, EditableValue>,
+    },
+    Call {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binding: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        operation: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        receiver: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expression: Option<String>,
+        #[serde(default)]
+        fields: BTreeMap<String, EditableValue>,
+    },
+    Effect {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binding: Option<String>,
+        effect: WorkflowEffectKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expression: Option<String>,
+        #[serde(default)]
+        fields: BTreeMap<String, EditableValue>,
+    },
+    StateUpdate {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expression: Option<String>,
+        #[serde(default)]
+        fields: BTreeMap<String, EditableValue>,
+    },
+    Computation {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binding: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expression: Option<String>,
+        #[serde(default)]
+        fields: BTreeMap<String, EditableValue>,
+    },
+    Terminal {
+        terminal_kind: WorkflowTerminalKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expression: Option<String>,
+    },
+    Opaque {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+    },
+    Container(NodeContainer),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "subkind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum NodeContainer {
+    If {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binding: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        condition: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        children: Vec<ChildGroup>,
+    },
+    While {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        condition: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        children: Vec<ChildGroup>,
+    },
+    For {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binding: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        iterable: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        children: Vec<ChildGroup>,
+    },
+}
+
+impl NodeData {
+    pub fn kind(&self) -> &'static str {
+        match &self.body {
+            NodeBody::Process { .. } => "process",
+            NodeBody::Data { .. } => "data",
+            NodeBody::Call { .. } => "call",
+            NodeBody::Effect { .. } => "effect",
+            NodeBody::StateUpdate { .. } => "state_update",
+            NodeBody::Computation { .. } => "computation",
+            NodeBody::Terminal { .. } => "terminal",
+            NodeBody::Opaque { .. } => "opaque",
+            NodeBody::Container(_) => "container",
+        }
+    }
+    pub fn subkind(&self) -> Option<&'static str> {
+        match &self.body {
+            NodeBody::Container(NodeContainer::If { .. }) => Some("if"),
+            NodeBody::Container(NodeContainer::While { .. }) => Some("while"),
+            NodeBody::Container(NodeContainer::For { .. }) => Some("for"),
+            _ => None,
+        }
+    }
+    pub fn process_name(&self) -> &Option<String> {
+        match &self.body {
+            NodeBody::Process { process_name, .. } => process_name,
+            _ => &None,
+        }
+    }
+    pub fn process_name_mut(&mut self) -> Option<&mut Option<String>> {
+        match &mut self.body {
+            NodeBody::Process { process_name, .. } => Some(process_name),
+            _ => None,
+        }
+    }
+    pub fn params(&self) -> &Vec<EditableProcessField> {
+        match &self.body {
+            NodeBody::Process { params, .. } => params,
+            _ => {
+                static EMPTY: std::sync::LazyLock<Vec<EditableProcessField>> =
+                    std::sync::LazyLock::new(Vec::new);
+                &EMPTY
+            }
+        }
+    }
+    pub fn params_mut(&mut self) -> Option<&mut Vec<EditableProcessField>> {
+        match &mut self.body {
+            NodeBody::Process { params, .. } => Some(params),
+            _ => None,
+        }
+    }
+    pub fn signals(&self) -> &Vec<EditableProcessField> {
+        match &self.body {
+            NodeBody::Process { signals, .. } => signals,
+            _ => {
+                static EMPTY: std::sync::LazyLock<Vec<EditableProcessField>> =
+                    std::sync::LazyLock::new(Vec::new);
+                &EMPTY
+            }
+        }
+    }
+    pub fn signals_mut(&mut self) -> Option<&mut Vec<EditableProcessField>> {
+        match &mut self.body {
+            NodeBody::Process { signals, .. } => Some(signals),
+            _ => None,
+        }
+    }
+    pub fn children(&self) -> &Vec<ChildGroup> {
+        match &self.body {
+            NodeBody::Process { children, .. } => children,
+            NodeBody::Container(NodeContainer::If { children, .. }) => children,
+            NodeBody::Container(NodeContainer::While { children, .. }) => children,
+            NodeBody::Container(NodeContainer::For { children, .. }) => children,
+            _ => {
+                static EMPTY: std::sync::LazyLock<Vec<ChildGroup>> =
+                    std::sync::LazyLock::new(Vec::new);
+                &EMPTY
+            }
+        }
+    }
+    pub fn children_mut(&mut self) -> Option<&mut Vec<ChildGroup>> {
+        match &mut self.body {
+            NodeBody::Process { children, .. } => Some(children),
+            NodeBody::Container(NodeContainer::If { children, .. }) => Some(children),
+            NodeBody::Container(NodeContainer::While { children, .. }) => Some(children),
+            NodeBody::Container(NodeContainer::For { children, .. }) => Some(children),
+            _ => None,
+        }
+    }
+    pub fn binding(&self) -> &Option<String> {
+        match &self.body {
+            NodeBody::Data { binding, .. } => binding,
+            NodeBody::Call { binding, .. } => binding,
+            NodeBody::Effect { binding, .. } => binding,
+            NodeBody::Computation { binding, .. } => binding,
+            NodeBody::Container(NodeContainer::If { binding, .. }) => binding,
+            NodeBody::Container(NodeContainer::For { binding, .. }) => binding,
+            _ => &None,
+        }
+    }
+    pub fn binding_mut(&mut self) -> Option<&mut Option<String>> {
+        match &mut self.body {
+            NodeBody::Data { binding, .. } => Some(binding),
+            NodeBody::Call { binding, .. } => Some(binding),
+            NodeBody::Effect { binding, .. } => Some(binding),
+            NodeBody::Computation { binding, .. } => Some(binding),
+            NodeBody::Container(NodeContainer::If { binding, .. }) => Some(binding),
+            NodeBody::Container(NodeContainer::For { binding, .. }) => Some(binding),
+            _ => None,
+        }
+    }
+    pub fn expression(&self) -> &Option<String> {
+        match &self.body {
+            NodeBody::Data { expression, .. } => expression,
+            NodeBody::Call { expression, .. } => expression,
+            NodeBody::Effect { expression, .. } => expression,
+            NodeBody::StateUpdate { expression, .. } => expression,
+            NodeBody::Computation { expression, .. } => expression,
+            NodeBody::Terminal { expression, .. } => expression,
+            _ => &None,
+        }
+    }
+    pub fn expression_mut(&mut self) -> Option<&mut Option<String>> {
+        match &mut self.body {
+            NodeBody::Data { expression, .. } => Some(expression),
+            NodeBody::Call { expression, .. } => Some(expression),
+            NodeBody::Effect { expression, .. } => Some(expression),
+            NodeBody::StateUpdate { expression, .. } => Some(expression),
+            NodeBody::Computation { expression, .. } => Some(expression),
+            NodeBody::Terminal { expression, .. } => Some(expression),
+            _ => None,
+        }
+    }
+    pub fn fields(&self) -> &BTreeMap<String, EditableValue> {
+        match &self.body {
+            NodeBody::Data { fields, .. } => fields,
+            NodeBody::Call { fields, .. } => fields,
+            NodeBody::Effect { fields, .. } => fields,
+            NodeBody::StateUpdate { fields, .. } => fields,
+            NodeBody::Computation { fields, .. } => fields,
+            _ => {
+                static EMPTY: std::sync::LazyLock<BTreeMap<String, EditableValue>> =
+                    std::sync::LazyLock::new(BTreeMap::new);
+                &EMPTY
+            }
+        }
+    }
+    pub fn fields_mut(&mut self) -> Option<&mut BTreeMap<String, EditableValue>> {
+        match &mut self.body {
+            NodeBody::Data { fields, .. } => Some(fields),
+            NodeBody::Call { fields, .. } => Some(fields),
+            NodeBody::Effect { fields, .. } => Some(fields),
+            NodeBody::StateUpdate { fields, .. } => Some(fields),
+            NodeBody::Computation { fields, .. } => Some(fields),
+            _ => None,
+        }
+    }
+    pub fn operation(&self) -> &Option<String> {
+        match &self.body {
+            NodeBody::Call { operation, .. } => operation,
+            _ => &None,
+        }
+    }
+    pub fn operation_mut(&mut self) -> Option<&mut Option<String>> {
+        match &mut self.body {
+            NodeBody::Call { operation, .. } => Some(operation),
+            _ => None,
+        }
+    }
+    pub fn receiver(&self) -> &Option<String> {
+        match &self.body {
+            NodeBody::Call { receiver, .. } => receiver,
+            _ => &None,
+        }
+    }
+    pub fn receiver_mut(&mut self) -> Option<&mut Option<String>> {
+        match &mut self.body {
+            NodeBody::Call { receiver, .. } => Some(receiver),
+            _ => None,
+        }
+    }
+    pub fn target(&self) -> &Option<String> {
+        match &self.body {
+            NodeBody::StateUpdate { target, .. } => target,
+            _ => &None,
+        }
+    }
+    pub fn target_mut(&mut self) -> Option<&mut Option<String>> {
+        match &mut self.body {
+            NodeBody::StateUpdate { target, .. } => Some(target),
+            _ => None,
+        }
+    }
+    pub fn source(&self) -> &Option<String> {
+        match &self.body {
+            NodeBody::Opaque { source, .. } => source,
+            _ => &None,
+        }
+    }
+    pub fn source_mut(&mut self) -> Option<&mut Option<String>> {
+        match &mut self.body {
+            NodeBody::Opaque { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+    pub fn condition(&self) -> &Option<String> {
+        match &self.body {
+            NodeBody::Container(NodeContainer::If { condition, .. }) => condition,
+            NodeBody::Container(NodeContainer::While { condition, .. }) => condition,
+            _ => &None,
+        }
+    }
+    pub fn condition_mut(&mut self) -> Option<&mut Option<String>> {
+        match &mut self.body {
+            NodeBody::Container(NodeContainer::If { condition, .. }) => Some(condition),
+            NodeBody::Container(NodeContainer::While { condition, .. }) => Some(condition),
+            _ => None,
+        }
+    }
+    pub fn iterable(&self) -> &Option<String> {
+        match &self.body {
+            NodeBody::Container(NodeContainer::For { iterable, .. }) => iterable,
+            _ => &None,
+        }
+    }
+    pub fn iterable_mut(&mut self) -> Option<&mut Option<String>> {
+        match &mut self.body {
+            NodeBody::Container(NodeContainer::For { iterable, .. }) => Some(iterable),
+            _ => None,
+        }
+    }
+    pub fn effect(&self) -> Option<WorkflowEffectKind> {
+        match self.body {
+            NodeBody::Effect { effect, .. } => Some(effect),
+            _ => None,
+        }
+    }
+    pub fn effect_mut(&mut self) -> Option<&mut WorkflowEffectKind> {
+        match &mut self.body {
+            NodeBody::Effect { effect, .. } => Some(effect),
+            _ => None,
+        }
+    }
+    pub fn terminal_kind(&self) -> Option<&WorkflowTerminalKind> {
+        match &self.body {
+            NodeBody::Terminal { terminal_kind, .. } => Some(terminal_kind),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -295,7 +655,7 @@ pub struct EditableProcessField {
 /// wire values (`label`, `derived`) mirror `WorkflowNodeNameSource`, which the
 /// browser client already writes on every node.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "nameSource", rename_all = "camelCase")]
+#[serde(tag = "nameSource", rename_all = "camelCase", deny_unknown_fields)]
 pub enum NodeName {
     /// The author named this node: the title and its optional description are
     /// theirs, and the save path renders them back as an `@label` annotation.
@@ -496,6 +856,71 @@ mod editable_value_tests {
 mod node_name_tests {
     use super::*;
 
+    #[test]
+    fn node_kinds_reject_foreign_payloads_and_unknown_discriminants() {
+        for body in [
+            json!({"kind":"process"}),
+            json!({"kind":"data"}),
+            json!({"kind":"call"}),
+            json!({"kind":"effect","effect":"sleep_for"}),
+            json!({"kind":"state_update"}),
+            json!({"kind":"computation"}),
+            json!({"kind":"terminal","terminalKind":"finish"}),
+            json!({"kind":"opaque"}),
+            json!({"kind":"container","subkind":"if"}),
+            json!({"kind":"container","subkind":"while"}),
+            json!({"kind":"container","subkind":"for"}),
+        ] {
+            let mut payload = body;
+            payload["title"] = json!("node");
+            payload["nameSource"] = json!("derived");
+            let decoded: NodeData = serde_json::from_value(payload.clone()).expect("valid node");
+            let round: NodeData =
+                serde_json::from_value(serde_json::to_value(&decoded).expect("encode node"))
+                    .expect("round trip");
+            assert_eq!(round.kind(), payload["kind"].as_str().expect("kind"));
+        }
+        for body in [
+            json!({"kind": "cal", "operation": "greet"}),
+            json!({"kind": "call", "operation": "greet", "condition": "true"}),
+            json!({"kind": "data", "expression": "1", "effect": "print"}),
+            json!({"kind": "terminal", "expression": "1", "terminalKind": "finsh"}),
+            json!({"kind": "effect", "effect": "sleep"}),
+            json!({"kind": "container", "subkind": "whlie"}),
+        ] {
+            let mut payload = body;
+            payload["title"] = json!("node");
+            payload["nameSource"] = json!("derived");
+            assert!(
+                serde_json::from_value::<NodeData>(payload.clone()).is_err(),
+                "invalid node decoded: {payload}"
+            );
+        }
+    }
+
+    #[test]
+    fn edge_kinds_reject_control_data_and_incomplete_versions() {
+        for payload in [
+            json!({"kind":"sequence","scope":"main"}),
+            json!({"kind":"data_dependency","scope":"main","variable":"x","version":1}),
+        ] {
+            let decoded: EdgeData = serde_json::from_value(payload.clone()).expect("valid edge");
+            assert_eq!(serde_json::to_value(decoded).expect("encode edge"), payload);
+        }
+        for payload in [
+            json!({"kind": "sequence", "scope": "main", "variable":"x", "version":1}),
+            json!({"kind": "data_dependency", "scope":"main", "variable":"x"}),
+            json!({"kind": "contrl", "scope": "main"}),
+            json!({"kind": "control", "scope": "main", "variable": "x", "version": 1}),
+            json!({"kind": "data", "scope": "main", "variable": "x"}),
+        ] {
+            assert!(
+                serde_json::from_value::<EdgeData>(payload.clone()).is_err(),
+                "invalid edge decoded: {payload}"
+            );
+        }
+    }
+
     fn node_data(name: Value) -> Result<NodeData, serde_json::Error> {
         let mut payload = json!({ "kind": "call" });
         let object = payload.as_object_mut().expect("node data object");
@@ -572,15 +997,120 @@ pub struct FlowEdge {
     pub data: EdgeData,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(transform = close_flattened_union)]
 pub struct EdgeData {
-    pub kind: String,
+    #[serde(flatten)]
+    pub body: WorkflowEdgeKind,
     pub scope: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub variable: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub version: Option<u32>,
+}
+
+impl<'de> Deserialize<'de> for EdgeData {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut payload = BTreeMap::<String, Value>::deserialize(deserializer)?;
+        let scope = payload
+            .remove("scope")
+            .ok_or_else(|| serde::de::Error::missing_field("scope"))?;
+        let scope = serde_json::from_value(scope).map_err(serde::de::Error::custom)?;
+        let body: WorkflowEdgeKind =
+            serde_json::from_value(Value::Object(payload.clone().into_iter().collect()))
+                .map_err(serde::de::Error::custom)?;
+        let canonical = serde_json::to_value(&body).map_err(serde::de::Error::custom)?;
+        if let Some(field) = payload.keys().find(|field| canonical.get(*field).is_none()) {
+            return Err(serde::de::Error::custom(format!(
+                "unknown edge field `{field}`"
+            )));
+        }
+        Ok(Self { body, scope })
+    }
+}
+
+/// Flatten the generated intersections into closed object variants, so schema
+/// validators and the TypeScript compiler enforce the same owned payloads.
+#[expect(
+    clippy::expect_used,
+    reason = "the derive emits inline object branches for these flattened tagged unions"
+)]
+fn close_flattened_union(schema: &mut schemars::Schema) {
+    fn merge(
+        mut left: serde_json::Map<String, Value>,
+        right: serde_json::Map<String, Value>,
+    ) -> serde_json::Map<String, Value> {
+        for (key, value) in right {
+            match (key.as_str(), left.get_mut(&key), value) {
+                ("properties", Some(Value::Object(current)), Value::Object(properties)) => {
+                    current.extend(properties)
+                }
+                ("required", Some(Value::Array(current)), Value::Array(required)) => {
+                    current.extend(required)
+                }
+                (_, _, value) => {
+                    left.insert(key, value);
+                }
+            }
+        }
+        left
+    }
+    fn variants(mut object: serde_json::Map<String, Value>) -> Vec<serde_json::Map<String, Value>> {
+        let alternatives = object.remove("oneOf");
+        let intersections = object.remove("allOf");
+        object.remove("additionalProperties");
+        object.remove("unevaluatedProperties");
+        let mut result = vec![object];
+        if let Some(Value::Array(alternatives)) = alternatives {
+            result = result
+                .into_iter()
+                .flat_map(|base| {
+                    alternatives.iter().flat_map(move |alternative| {
+                        variants(
+                            alternative
+                                .as_object()
+                                .expect("object union variant")
+                                .clone(),
+                        )
+                        .into_iter()
+                        .map({
+                            let base = base.clone();
+                            move |variant| merge(base.clone(), variant)
+                        })
+                    })
+                })
+                .collect();
+        }
+        if let Some(Value::Array(intersections)) = intersections {
+            for intersection in intersections {
+                let members = variants(
+                    intersection
+                        .as_object()
+                        .expect("object intersection")
+                        .clone(),
+                );
+                result = result
+                    .into_iter()
+                    .flat_map(|base| {
+                        members
+                            .iter()
+                            .cloned()
+                            .map(move |member| merge(base.clone(), member))
+                    })
+                    .collect();
+            }
+        }
+        result
+    }
+    let object = schema.as_object().expect("flattened object schema").clone();
+    let variants = variants(object)
+        .into_iter()
+        .map(|mut variant| {
+            variant.insert("additionalProperties".into(), Value::Bool(false));
+            Value::Object(variant)
+        })
+        .collect::<Vec<_>>();
+    *schema = schemars::Schema::from(serde_json::Map::from_iter([(
+        "oneOf".into(),
+        Value::Array(variants),
+    )]));
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -770,20 +1300,6 @@ impl RenderErrorResponse {
         });
         response.body.error.message = host_message;
         response
-    }
-
-    pub(crate) fn unknown_node_kind(node_id: &str, kind: &str, subkind: Option<&str>) -> Self {
-        Self::new(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "unknown_node_kind",
-            match subkind {
-                Some(subkind) => {
-                    format!("flow node `{node_id}` has unknown kind `{kind}:{subkind}`")
-                }
-                None => format!("flow node `{node_id}` has unknown kind `{kind}`"),
-            },
-            json!({ "nodeId": node_id, "kind": kind, "subkind": subkind }),
-        )
     }
 
     pub(crate) fn run_preparation(message: impl ToString) -> Self {

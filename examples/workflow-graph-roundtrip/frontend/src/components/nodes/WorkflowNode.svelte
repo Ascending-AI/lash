@@ -488,7 +488,7 @@
 
   {#if isWaitEffect}
     <div class="wf-wait-note">
-      {node.data.effect === 'sleep' ? 'pauses the run' : 'waits for a signal'}
+      {node.data.effect === 'sleep_for' ? 'pauses the run' : 'waits for a signal'}
     </div>
   {/if}
 

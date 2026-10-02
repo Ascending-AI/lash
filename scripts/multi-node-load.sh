@@ -51,9 +51,6 @@ def merge(target, overlay):
 overlay = yaml.safe_load(open(profile)) or {}
 target_values(overlay)
 merge(values, overlay)
-if (values['restate']['replicas'] != 3 or values['restate']['partitions'] != 24
-        or values['restate']['replication'] != 2):
-    raise SystemExit('the v1 topology proof requires three Restate nodes, 24 partitions and replication two')
 if values['s3']['mode'] != 'garage':
     raise SystemExit('the local proof uses run-owned Garage storage')
 if campaign == 'rolling-upgrade':

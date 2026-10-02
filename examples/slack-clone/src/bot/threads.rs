@@ -19,7 +19,7 @@ use anyhow::{Context as _, Result, bail};
 use lash::persistence::{ChronologicalPayload, HistoryAnchor, HistoryBudget, StoreError};
 use lash::{LashCore, LashSession};
 
-use super::ledger::{EventLedger, EventReason, EventRecord};
+use super::ledger::{EventLedger, EventRecord, IgnoreReason, Stage};
 use super::runtime::{session_id, thread_session_id};
 
 /// Root admission normally takes well under a second. Forty-five seconds leaves
@@ -329,8 +329,12 @@ async fn root_route(
         root.input_id.is_some() || root.admission_node_id.is_some() || root.fork_node_id.is_some();
     // `superseded_by_app_mention` does not prove permanent unavailability: the
     // paired app_mention delivery for the same Slack message may still be racing.
-    let paired_mention_may_arrive = root.detail.as_deref().and_then(EventReason::parse)
-        == Some(EventReason::SupersededByAppMention);
+    let paired_mention_may_arrive = matches!(
+        root.stage,
+        Stage::Ignored {
+            reason: IgnoreReason::SupersededByAppMention
+        }
+    );
     if root.stage.is_terminal() && !has_route_evidence && !paired_mention_may_arrive {
         Ok(RootRoute::PermanentlyUnavailable)
     } else {

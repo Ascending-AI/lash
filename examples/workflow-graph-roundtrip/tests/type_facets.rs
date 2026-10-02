@@ -76,7 +76,7 @@ async fn type_facets_are_projected_and_client_echoes_are_ignored_on_save() {
     let call = document
         .nodes
         .iter()
-        .find(|node| node.data.operation.as_deref() == Some("show_message"))
+        .find(|node| node.data.operation().as_deref() == Some("show_message"))
         .expect("typed display call");
     assert!(call.data.expected_arg_types.iter().any(|argument| {
         argument.slot == "arg[0][\"text\"]" && argument.expected_type == "str"
@@ -84,7 +84,7 @@ async fn type_facets_are_projected_and_client_echoes_are_ignored_on_save() {
     let loop_node = document
         .nodes
         .iter()
-        .find(|node| node.data.subkind.as_deref() == Some("for"))
+        .find(|node| node.data.subkind() == Some("for"))
         .expect("non-list loop");
     assert!(
         loop_node
@@ -334,7 +334,7 @@ fn call_with_field<'a>(
     document
         .nodes
         .iter()
-        .find(|node| node.data.kind == "call" && node.data.fields.contains_key(field))
+        .find(|node| node.data.kind() == "call" && node.data.fields().contains_key(field))
         .unwrap_or_else(|| panic!("call with `{field}` field"))
 }
 
@@ -345,7 +345,9 @@ fn call_with_operation<'a>(
     document
         .nodes
         .iter()
-        .find(|node| node.data.kind == "call" && node.data.operation.as_deref() == Some(operation))
+        .find(|node| {
+            node.data.kind() == "call" && node.data.operation().as_deref() == Some(operation)
+        })
         .unwrap_or_else(|| panic!("call to `{operation}`"))
 }
 
@@ -357,10 +359,10 @@ fn call_with_task<'a>(
         .nodes
         .iter()
         .find(|node| {
-            node.data.kind == "call"
+            node.data.kind() == "call"
                 && node
                     .data
-                    .fields
+                    .fields()
                     .get("task")
                     .is_some_and(|value| {
                         matches!(value, EditableValue::String(task) if task.starts_with(task_prefix))

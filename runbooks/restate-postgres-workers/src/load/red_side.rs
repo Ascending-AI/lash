@@ -26,7 +26,10 @@ pub fn checks(
                 .events
                 .iter_mut()
                 .rev()
-                .find(|event| event.operation == "behaviors" && event.phase == "terminal")
+                .find(|event| {
+                    event.evidence.operation() == "behaviors"
+                        && event.evidence.phase() == "terminal"
+                })
                 .ok_or_else(|| anyhow::anyhow!("no bounded behavior terminal to mutate"))?;
             let report = &mut event.detail["response"];
             match class {

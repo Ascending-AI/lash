@@ -121,6 +121,23 @@ workflow-schema-generate:
 workflow-schema-check:
   python3 scripts/generate-workflow-schemas.py --check
 
+loadtest-ledger mode='generate':
+  #!/usr/bin/env bash
+  set -euo pipefail
+  cd "{{repo}}"
+  source ./env.sh
+  ledger_args=()
+  case "$1" in
+    generate) ;;
+    check) ledger_args=(--check) ;;
+    *) printf 'usage: just loadtest-ledger [generate|check]\n' >&2; exit 2 ;;
+  esac
+  kiln build //runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin \
+    --materializations final --build-report .buck2/ledger-build.json
+  ledger_generator="$(python3 tools/buck2/outputs.py --report .buck2/ledger-build.json \
+    --label //runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin --single)"
+  python3 scripts/generate_loadtest_ledger.py --generator "$ledger_generator" "${ledger_args[@]}"
+
 agent-service-restate-e2e:
   #!/usr/bin/env bash
   set -euo pipefail

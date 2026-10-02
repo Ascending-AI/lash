@@ -80,6 +80,14 @@ def fixture(root):
 
 
 class ManifestTests(unittest.TestCase):
+    def test_workload_has_no_second_topology_or_unused_model_pool(self):
+        for name in ('figments-v1', 'smoke-v1'):
+            workload = json.loads((ROOT / 'crates/lash-perf/workloads' / f'{name}.json').read_text())
+            self.assertNotIn('topology', workload)
+            self.assertNotIn('model_code_pool', workload)
+            self.assertFalse(any(path.startswith(('/topology', '/model_code_pool'))
+                                 for path in workload['provenance']['fields']))
+
     def build(self, root, target='local'):
         run_dir, results, workload = fixture(root)
         return m.build(run_dir, results, 'smoke-v1-1', target, workload), results

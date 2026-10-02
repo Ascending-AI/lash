@@ -135,15 +135,27 @@ CREATE TABLE witness_load_events (
     event_id BIGSERIAL PRIMARY KEY,
     run_id TEXT NOT NULL,
     subject TEXT NOT NULL,
-    operation TEXT NOT NULL CHECK (
-        operation IN ('turn', 'delete-session', 'cron-setup', 'cron-tick', 'attachment', 'behaviors')
-    ),
-    phase TEXT NOT NULL CHECK (phase IN ('sent', 'terminal', 'put', 'read')),
+    operation TEXT NOT NULL,
+    phase TEXT NOT NULL,
     observer TEXT NOT NULL,
     detail_json TEXT NOT NULL,
     content_bytes BYTEA,
     content_digest TEXT GENERATED ALWAYS AS (encode(sha256(content_bytes), 'hex')) STORED,
-    recorded_at_us BIGINT NOT NULL DEFAULT witness_clock_us()
+    recorded_at_us BIGINT NOT NULL DEFAULT witness_clock_us(),
+    CONSTRAINT load_operation_pair CHECK (
+        (operation = 'behaviors' AND phase = 'sent') OR
+        (operation = 'behaviors' AND phase = 'terminal') OR
+        (operation = 'turn' AND phase = 'sent') OR
+        (operation = 'turn' AND phase = 'terminal') OR
+        (operation = 'delete-session' AND phase = 'sent') OR
+        (operation = 'delete-session' AND phase = 'terminal') OR
+        (operation = 'cron-setup' AND phase = 'sent') OR
+        (operation = 'cron-setup' AND phase = 'terminal') OR
+        (operation = 'cron-tick' AND phase = 'sent') OR
+        (operation = 'cron-tick' AND phase = 'terminal') OR
+        (operation = 'attachment' AND phase = 'put') OR
+        (operation = 'attachment' AND phase = 'read')
+    )
 );
 CREATE INDEX witness_load_events_by_run ON witness_load_events (run_id, operation, phase);
 GRANT INSERT (run_id, subject, operation, phase, observer, detail_json, content_bytes)
@@ -159,20 +171,51 @@ GRANT INSERT (run_id, subject, operation, phase, observer, detail_json, content_
 CREATE TABLE witness_load_faults (
     fault_event_id BIGSERIAL PRIMARY KEY,
     run_id TEXT NOT NULL,
-    fault_id TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK (
-        kind IN ('campaign', 'worker-kill', 'restate-restart', 'rolling-deploy',
-                 'half-roll', 'rollback', 'roll', 'finalize', 'fence')
-    ),
-    phase TEXT NOT NULL CHECK (
-        phase IN ('started', 'intent', 'injected', 'recovered', 'failed', 'complete')
-    ),
+    kind TEXT NOT NULL,
+    phase TEXT NOT NULL,
     target TEXT NOT NULL,
     detail_json TEXT NOT NULL,
-    recorded_at_us BIGINT NOT NULL DEFAULT witness_clock_us()
+    recorded_at_us BIGINT NOT NULL DEFAULT witness_clock_us(),
+    CONSTRAINT load_kind_pair CHECK (
+        (kind = 'campaign' AND phase = 'started') OR
+        (kind = 'campaign' AND phase = 'complete') OR
+        (kind = 'campaign' AND phase = 'failed') OR
+        (kind = 'worker-kill' AND phase = 'intent') OR
+        (kind = 'worker-kill' AND phase = 'injected') OR
+        (kind = 'worker-kill' AND phase = 'recovered') OR
+        (kind = 'worker-kill' AND phase = 'failed') OR
+        (kind = 'restate-restart' AND phase = 'intent') OR
+        (kind = 'restate-restart' AND phase = 'injected') OR
+        (kind = 'restate-restart' AND phase = 'recovered') OR
+        (kind = 'restate-restart' AND phase = 'failed') OR
+        (kind = 'rolling-deploy' AND phase = 'intent') OR
+        (kind = 'rolling-deploy' AND phase = 'injected') OR
+        (kind = 'rolling-deploy' AND phase = 'recovered') OR
+        (kind = 'rolling-deploy' AND phase = 'failed') OR
+        (kind = 'half-roll' AND phase = 'intent') OR
+        (kind = 'half-roll' AND phase = 'injected') OR
+        (kind = 'half-roll' AND phase = 'recovered') OR
+        (kind = 'half-roll' AND phase = 'failed') OR
+        (kind = 'rollback' AND phase = 'intent') OR
+        (kind = 'rollback' AND phase = 'injected') OR
+        (kind = 'rollback' AND phase = 'recovered') OR
+        (kind = 'rollback' AND phase = 'failed') OR
+        (kind = 'roll' AND phase = 'intent') OR
+        (kind = 'roll' AND phase = 'injected') OR
+        (kind = 'roll' AND phase = 'recovered') OR
+        (kind = 'roll' AND phase = 'failed') OR
+        (kind = 'finalize' AND phase = 'intent') OR
+        (kind = 'finalize' AND phase = 'injected') OR
+        (kind = 'finalize' AND phase = 'recovered') OR
+        (kind = 'finalize' AND phase = 'failed') OR
+        (kind = 'fence' AND phase = 'intent') OR
+        (kind = 'fence' AND phase = 'injected') OR
+        (kind = 'fence' AND phase = 'recovered') OR
+        (kind = 'fence' AND phase = 'failed')
+    )
 );
 CREATE INDEX witness_load_faults_by_run ON witness_load_faults (run_id, fault_event_id);
-GRANT INSERT (run_id, fault_id, kind, phase, target, detail_json)
+GRANT INSERT (run_id, kind, phase, target, detail_json)
     ON witness_load_faults TO lash_witness;
 
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO lash_witness;

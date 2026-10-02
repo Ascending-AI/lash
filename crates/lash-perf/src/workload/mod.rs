@@ -21,8 +21,8 @@ pub use payload::{
 };
 pub use provider::{CallCounts, CallKind, ProviderChunk, ProviderResponse};
 pub use spec::{
-    Attachments, Collection, Cron, Faults, GeneratorVersion, Inventory, ModelCodePool, Observation,
-    Processes, Provenance, Provider, Queued, Tools, Topology, WorkloadSpec,
+    Attachments, Collection, Cron, Faults, GeneratorVersion, Inventory, Observation, Processes,
+    Provenance, Provider, Queued, Tools, WorkloadSpec,
 };
 
 use anyhow::{Context, Result, ensure};
@@ -158,10 +158,6 @@ impl Workload {
         ensure!(
             smallest_aggregate / largest_count >= 128,
             "attachment split cannot fit a valid PNG"
-        );
-        ensure!(
-            spec.topology.replication <= spec.topology.restate_nodes,
-            "replication exceeds node count"
         );
         ensure!(
             u64::from(spec.faults.worker_kill_s) + u64::from(spec.faults.worker_restart_delay_s)

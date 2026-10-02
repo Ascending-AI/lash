@@ -25,8 +25,70 @@ use rusqlite::{Connection, OptionalExtension as _, params};
 
 use crate::store::SqliteHandle;
 
+// Serde supplies the core enum's wire names when it refuses an unknown tag.
+// Capture that metadata so the SQL vocabulary has no second spelling table.
+fn provider_kind_names() -> &'static [&'static str] {
+    #[derive(Debug)]
+    struct Vocabulary(&'static [&'static str]);
+    impl std::fmt::Display for Vocabulary {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("provider kind vocabulary")
+        }
+    }
+    impl std::error::Error for Vocabulary {}
+    impl serde::de::Error for Vocabulary {
+        fn custom<T: std::fmt::Display>(_: T) -> Self {
+            Self(&[])
+        }
+        fn unknown_variant(_: &str, variants: &'static [&'static str]) -> Self {
+            Self(variants)
+        }
+    }
+    let names = match <ProviderFailureKind as serde::Deserialize<'_>>::deserialize(
+        serde::de::value::StrDeserializer::<Vocabulary>::new(""),
+    ) {
+        Err(Vocabulary(names)) => names,
+        Ok(_) => &[],
+    };
+    assert!(
+        !names.is_empty(),
+        "the core provider kind has a closed serde vocabulary"
+    );
+    names
+}
+
 /// Idempotent schema, applied on every boot.
-pub const SCHEMA: &str = "
+pub static SCHEMA: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    fn names<T: Copy>(all: &[T], name: impl Fn(T) -> &'static str) -> String {
+        all.iter()
+            .copied()
+            .map(|value| format!("'{}'", name(value)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+    let deferrals = names(DeferralReason::ALL, DeferralReason::as_str);
+    let folds = names(FoldReason::ALL, FoldReason::as_str);
+    let ignores = names(IgnoreReason::ALL, IgnoreReason::as_str);
+    let stages = names(StageKind::ALL, StageKind::as_str);
+    let provider_kinds = provider_kind_names()
+        .iter()
+        .map(|kind| format!("'{kind}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let checks = format!("CHECK (stage IN ({stages})), CHECK (
+        (stage = 'accepted' AND reply_ts IS NULL AND (detail IS NULL OR detail IN ({deferrals}))) OR
+        (stage = 'reply_pending' AND reply_ts IS NULL AND detail IS NOT NULL AND length(trim(detail)) > 0) OR
+        (stage = 'folded' AND reply_ts IS NULL AND (detail IS NULL OR detail IN ({folds}))) OR
+        (stage = 'replied' AND reply_ts IS NOT NULL AND length(reply_ts) > 0 AND detail IS NULL) OR
+        (stage = 'provider_error' AND reply_ts IS NULL AND detail IS NULL) OR
+        (stage = 'ignored' AND reply_ts IS NULL AND detail IS NOT NULL AND detail IN ({ignores}))
+    ), CHECK (
+        (stage = 'provider_error' AND provider_kind IS NOT NULL AND provider_kind IN ({provider_kinds}) AND provider_message IS NOT NULL
+          AND provider_retryable IS NOT NULL AND provider_retryable IN (0, 1)) OR
+        (stage != 'provider_error' AND provider_kind IS NULL AND provider_code IS NULL
+          AND provider_message IS NULL AND provider_retryable IS NULL)
+    )");
+    "
 CREATE TABLE IF NOT EXISTS handled_events (
     event_id      TEXT PRIMARY KEY,
     channel_id    TEXT NOT NULL,
@@ -43,12 +105,16 @@ CREATE TABLE IF NOT EXISTS handled_events (
     detail        TEXT,
     deliveries    INTEGER NOT NULL DEFAULT 0,
     first_seen_at INTEGER NOT NULL,
-    updated_at    INTEGER NOT NULL
+    updated_at    INTEGER NOT NULL,
+    provider_kind TEXT,
+    provider_code TEXT,
+    provider_message TEXT,
+    provider_retryable INTEGER,
+    __STAGE_CHECKS__
 );
 CREATE INDEX IF NOT EXISTS idx_handled_events_stage ON handled_events(stage);
 
--- Routing and Lash correlation are kept in an additive companion table so an
--- existing FIG-1008 ledger upgrades without rewriting its settled rows.
+-- Routing and Lash correlation are independent of event stage payloads.
 CREATE TABLE IF NOT EXISTS event_routes (
     event_id     TEXT PRIMARY KEY REFERENCES handled_events(event_id) ON DELETE CASCADE,
     thread_ts    TEXT,
@@ -82,152 +148,108 @@ CREATE TABLE IF NOT EXISTS mention_sends (
     send_text TEXT NOT NULL
 );
 
--- Provider failures are terminal operator evidence, not free-form ledger detail.
--- Keep them in an additive companion table so existing FIG-1008 rows upgrade
--- without rewriting their settled state.
-CREATE TABLE IF NOT EXISTS event_provider_failures (
-    event_id   TEXT PRIMARY KEY REFERENCES handled_events(event_id) ON DELETE CASCADE,
-    kind       TEXT NOT NULL,
-    code       TEXT,
-    message    TEXT NOT NULL,
-    retryable  INTEGER NOT NULL
-);
-";
+"
+    .replace("__STAGE_CHECKS__", &checks)
+});
 
 /// Columns every read projects, in the order [`read_row`] expects.
-const BASE_COLUMNS: &str =
-    "event_id, channel_id, message_ts, kind, stage, input_text, reply_ts, detail, deliveries";
-const COLUMNS: &str = "handled_events.event_id, handled_events.channel_id, handled_events.message_ts, \
-     handled_events.kind, handled_events.stage, handled_events.input_text, handled_events.reply_ts, \
-     handled_events.detail, handled_events.deliveries, event_routes.thread_ts, event_routes.input_id, \
-     event_routes.fork_node_id, event_admission_boundaries.node_id, \
-     event_provider_failures.kind, event_provider_failures.code, \
-     event_provider_failures.message, event_provider_failures.retryable";
-const ROUTE_JOINS: &str = "LEFT JOIN event_routes USING(event_id) \
-     LEFT JOIN event_admission_boundaries USING(event_id) \
-     LEFT JOIN event_provider_failures USING(event_id)";
+const BASE_COLUMNS: &str = "event_id, channel_id, message_ts, kind, stage, input_text, reply_ts, detail, deliveries, provider_kind, provider_code, provider_message, provider_retryable";
+const COLUMNS: &str = "handled_events.event_id, handled_events.channel_id, handled_events.message_ts, handled_events.kind, handled_events.stage, handled_events.input_text, handled_events.reply_ts, handled_events.detail, handled_events.deliveries, handled_events.provider_kind, handled_events.provider_code, handled_events.provider_message, handled_events.provider_retryable, event_routes.thread_ts, event_routes.input_id, event_routes.fork_node_id, event_admission_boundaries.node_id";
+const ROUTE_JOINS: &str =
+    "LEFT JOIN event_routes USING(event_id) LEFT JOIN event_admission_boundaries USING(event_id)";
 
 /// Event kind for a message that mentions the bot.
 pub const KIND_APP_MENTION: &str = "app_mention";
 /// Event kind for ordinary channel traffic.
 pub const KIND_MESSAGE: &str = "message";
 
-/// How far the bot got with one event.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+macro_rules! reasons {
+    ($name:ident { $($variant:ident => $wire:literal),+ $(,)? }) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum $name { $($variant),+ }
+        impl $name {
+            pub const ALL: &'static [Self] = &[$(Self::$variant),+];
+            pub const fn as_str(self) -> &'static str { match self { $(Self::$variant => $wire),+ } }
+            pub fn parse(raw: &str) -> Option<Self> { match raw { $($wire => Some(Self::$variant)),+, _ => None } }
+        }
+    };
+}
+
+reasons!(DeferralReason {
+    ThreadRootNotProcessed => "thread_root_not_processed",
+    ThreadRootNotAvailable => "thread_root_not_available",
+});
+reasons!(FoldReason { EmptyModelReply => "empty_model_reply" });
+reasons!(IgnoreReason {
+    AppAuthoredMessage => "app_authored_message",
+    NoAuthor => "no_author",
+    SupersededByAppMention => "superseded_by_app_mention",
+    AdmissionTextUnavailable => "admission_text_unavailable",
+    ThreadSessionRetired => "thread_session_retired",
+    ReplyLostAfterCommit => "reply_lost_after_commit",
+});
+reasons!(StageKind {
+    Accepted => "accepted",
+    ReplyPending => "reply_pending",
+    Folded => "folded",
+    Replied => "replied",
+    ProviderError => "provider_error",
+    Ignored => "ignored",
+});
+
+/// A stage owns exactly the payload that recovery may use at that stage.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Stage {
-    /// Recorded, nothing done yet. Not terminal: a redelivery resumes.
-    Accepted,
-    /// The turn is committed and a reply is owed, with its text in `detail`.
-    /// Not terminal.
-    ReplyPending,
-    /// Ambient context folded into the channel session.
-    Folded,
-    /// Reply posted; `reply_ts` names it.
-    Replied,
-    /// A turn reached a terminal provider failure. Terminal, with the typed
-    /// failure in [`EventRecord::provider_failure`].
-    ProviderError,
-    /// Deliberately not acted on.
-    Ignored,
+    Accepted { deferral: Option<DeferralReason> },
+    ReplyPending { reply: String },
+    Folded { reason: Option<FoldReason> },
+    Replied { reply_ts: String },
+    ProviderError(ProviderFailure),
+    Ignored { reason: IgnoreReason },
 }
 
 impl Stage {
-    pub fn is_terminal(self) -> bool {
-        matches!(
-            self,
-            Stage::Folded | Stage::Replied | Stage::ProviderError | Stage::Ignored
-        )
-    }
-
-    /// Wire/storage name.
-    pub fn as_str(self) -> &'static str {
+    pub fn kind(&self) -> StageKind {
         match self {
-            Stage::Accepted => "accepted",
-            Stage::ReplyPending => "reply_pending",
-            Stage::Folded => "folded",
-            Stage::Replied => "replied",
-            Stage::ProviderError => "provider_error",
-            Stage::Ignored => "ignored",
+            Self::Accepted { .. } => StageKind::Accepted,
+            Self::ReplyPending { .. } => StageKind::ReplyPending,
+            Self::Folded { .. } => StageKind::Folded,
+            Self::Replied { .. } => StageKind::Replied,
+            Self::ProviderError(_) => StageKind::ProviderError,
+            Self::Ignored { .. } => StageKind::Ignored,
         }
     }
-
-    fn parse(raw: &str) -> Self {
-        match raw {
-            "reply_pending" => Stage::ReplyPending,
-            "folded" => Stage::Folded,
-            "replied" => Stage::Replied,
-            "provider_error" => Stage::ProviderError,
-            "ignored" => Stage::Ignored,
-            // An unknown stage is treated as unfinished rather than done: the
-            // recovery path is idempotent, so re-running is safe and silently
-            // dropping work is not.
-            _ => Stage::Accepted,
+    pub fn is_terminal(&self) -> bool {
+        match self {
+            Self::Accepted { .. } | Self::ReplyPending { .. } => false,
+            Self::Folded { .. }
+            | Self::Replied { .. }
+            | Self::ProviderError(_)
+            | Self::Ignored { .. } => true,
         }
     }
-}
-
-/// Closed vocabulary of reason codes stored in the ledger detail column.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EventReason {
-    AppAuthoredMessage,
-    NoAuthor,
-    SupersededByAppMention,
-    AdmissionTextUnavailable,
-    ThreadSessionRetired,
-    ThreadRootNotProcessed,
-    ThreadRootNotAvailable,
-    EmptyModelReply,
-    ReplyLostAfterCommit,
-}
-
-impl EventReason {
-    /// Exact wire/storage name.
-    pub const fn as_str(self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
+        self.kind().as_str()
+    }
+    pub fn detail(&self) -> Option<String> {
         match self {
-            Self::AppAuthoredMessage => "app_authored_message",
-            Self::NoAuthor => "no_author",
-            Self::SupersededByAppMention => "superseded_by_app_mention",
-            Self::AdmissionTextUnavailable => "admission_text_unavailable",
-            Self::ThreadSessionRetired => "thread_session_retired",
-            Self::ThreadRootNotProcessed => "thread_root_not_processed",
-            Self::ThreadRootNotAvailable => "thread_root_not_available",
-            Self::EmptyModelReply => "empty_model_reply",
-            Self::ReplyLostAfterCommit => "reply_lost_after_commit",
+            Self::Accepted { deferral } => deferral.map(|reason| reason.as_str().to_owned()),
+            Self::ReplyPending { reply } => Some(reply.clone()),
+            Self::Folded { reason } => reason.map(|reason| reason.as_str().to_owned()),
+            Self::Ignored { reason } => Some(reason.as_str().to_owned()),
+            Self::Replied { .. } | Self::ProviderError(_) => None,
         }
     }
-
-    /// Parse a stored reason code without changing unknown historical detail.
-    pub fn parse(raw: &str) -> Option<Self> {
-        Some(match raw {
-            "app_authored_message" => Self::AppAuthoredMessage,
-            "no_author" => Self::NoAuthor,
-            "superseded_by_app_mention" => Self::SupersededByAppMention,
-            "admission_text_unavailable" => Self::AdmissionTextUnavailable,
-            "thread_session_retired" => Self::ThreadSessionRetired,
-            "thread_root_not_processed" => Self::ThreadRootNotProcessed,
-            "thread_root_not_available" => Self::ThreadRootNotAvailable,
-            "empty_model_reply" => Self::EmptyModelReply,
-            "reply_lost_after_commit" => Self::ReplyLostAfterCommit,
-            _ => return None,
-        })
-    }
-}
-
-/// How an advance writes the nullable detail column.
-#[derive(Debug)]
-pub enum DetailWrite {
-    Keep,
-    /// Replace the existing detail with this value.
-    Set(String),
-    Clear,
-}
-
-impl DetailWrite {
-    fn sql_parts(self) -> (i64, Option<String>) {
+    pub fn reply_ts(&self) -> Option<&str> {
         match self {
-            Self::Keep => (0, None),
-            Self::Set(detail) => (1, Some(detail)),
-            Self::Clear => (2, None),
+            Self::Replied { reply_ts } => Some(reply_ts),
+            _ => None,
+        }
+    }
+    pub fn provider_failure(&self) -> Option<&ProviderFailure> {
+        match self {
+            Self::ProviderError(failure) => Some(failure),
+            _ => None,
         }
     }
 }
@@ -251,8 +273,6 @@ pub struct EventRecord {
     pub stage: Stage,
     /// The text admitted to the channel session, when one was admitted.
     pub input_text: Option<String>,
-    pub reply_ts: Option<String>,
-    pub detail: Option<String>,
     /// How many times the platform has delivered this event. Greater than one
     /// is direct evidence the retry path ran.
     pub deliveries: u32,
@@ -266,8 +286,6 @@ pub struct EventRecord {
     /// Retained channel boundary captured while a folded top-level message held
     /// the channel lock. Used while no committed turn carries the message yet.
     pub admission_node_id: Option<String>,
-    /// Typed provider failure that terminalized this event, when any.
-    pub provider_failure: Option<ProviderFailure>,
 }
 
 /// The outcome of claiming an event for handling.
@@ -349,7 +367,7 @@ impl EventLedger {
                         channel_id,
                         message_ts,
                         kind,
-                        Stage::Accepted.as_str(),
+                        StageKind::Accepted.as_str(),
                         input_text,
                         now,
                     ],
@@ -441,7 +459,7 @@ impl EventLedger {
                                 channel_id,
                                 thread_ts,
                                 KIND_MESSAGE,
-                                Stage::Folded.as_str(),
+                                StageKind::Folded.as_str(),
                                 message_ts
                             ],
                             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
@@ -492,7 +510,12 @@ impl EventLedger {
                 )?;
                 Ok(statement
                     .query_map(
-                        params![channel_id, thread_ts, KIND_MESSAGE, Stage::Folded.as_str()],
+                        params![
+                            channel_id,
+                            thread_ts,
+                            KIND_MESSAGE,
+                            StageKind::Folded.as_str()
+                        ],
                         |row| row.get::<_, String>(0),
                     )?
                     .collect::<rusqlite::Result<Vec<_>>>()?)
@@ -646,86 +669,19 @@ impl EventLedger {
     /// `replied` row back to `reply_pending` and cause the duplicate reply this
     /// whole module exists to prevent. Returns `false` when the row had already
     /// moved on, which callers treat as "somebody else finished this".
-    pub async fn advance(
-        &self,
-        event_id: String,
-        from: Stage,
-        to: Stage,
-        reply_ts: Option<String>,
-        detail: DetailWrite,
-    ) -> Result<bool> {
-        self.database
-            .call(move |connection| {
-                let (detail_mode, detail_value) = detail.sql_parts();
-                let updated = connection.execute(
-                    "UPDATE handled_events
-                     SET stage = ?3, reply_ts = COALESCE(?4, reply_ts),
-                         detail = CASE ?5
-                             WHEN 0 THEN detail
-                             WHEN 1 THEN ?6
-                             WHEN 2 THEN NULL
-                         END,
-                         updated_at = ?7
-                     WHERE event_id = ?1 AND stage = ?2",
-                    params![
-                        event_id,
-                        from.as_str(),
-                        to.as_str(),
-                        reply_ts,
-                        detail_mode,
-                        detail_value,
-                        now_seconds(),
-                    ],
-                )?;
-                Ok(updated == 1)
-            })
-            .await
-    }
-
-    /// Terminalize an event with its typed provider failure atomically.
-    pub async fn advance_provider_error(
-        &self,
-        event_id: String,
-        from: Stage,
-        failure: ProviderFailure,
-    ) -> Result<bool> {
-        self.database
-            .call(move |connection| {
-                let transaction = connection.transaction()?;
-                let updated = transaction.execute(
-                    "UPDATE handled_events
-                     SET stage = ?3, updated_at = ?4
-                     WHERE event_id = ?1 AND stage = ?2",
-                    params![
-                        event_id,
-                        from.as_str(),
-                        Stage::ProviderError.as_str(),
-                        now_seconds()
-                    ],
-                )?;
-                if updated == 1 {
-                    transaction.execute(
-                        "INSERT INTO event_provider_failures
-                            (event_id, kind, code, message, retryable)
-                         VALUES (?1, ?2, ?3, ?4, ?5)
-                         ON CONFLICT(event_id) DO UPDATE SET
-                            kind = excluded.kind,
-                            code = excluded.code,
-                            message = excluded.message,
-                            retryable = excluded.retryable",
-                        params![
-                            event_id,
-                            failure.kind.code(),
-                            failure.code,
-                            failure.message,
-                            failure.retryable as i64,
-                        ],
-                    )?;
-                }
-                transaction.commit()?;
-                Ok(updated == 1)
-            })
-            .await
+    pub async fn advance(&self, event_id: String, from: StageKind, to: Stage) -> Result<bool> {
+        self.database.call(move |connection| {
+            let failure = to.provider_failure();
+            let updated = connection.execute(
+                "UPDATE handled_events SET stage = ?3, reply_ts = ?4, detail = ?5,
+                 provider_kind = ?6, provider_code = ?7, provider_message = ?8, provider_retryable = ?9,
+                 updated_at = ?10 WHERE event_id = ?1 AND stage = ?2",
+                params![event_id, from.as_str(), to.as_str(), to.reply_ts(), to.detail(),
+                    failure.map(|failure| failure.kind.code()), failure.and_then(|failure| failure.code.as_deref()),
+                    failure.map(|failure| failure.message.as_str()), failure.map(|failure| i64::from(failure.retryable)), now_seconds()],
+            )?;
+            Ok(updated == 1)
+        }).await
     }
 
     pub async fn get(&self, event_id: String) -> Result<Option<EventRecord>> {
@@ -772,23 +728,99 @@ fn read(connection: &Connection, event_id: &str) -> Result<Option<EventRecord>> 
         .optional()?)
 }
 
-fn read_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRecord> {
-    Ok(EventRecord {
-        event_id: row.get(0)?,
-        channel_id: row.get(1)?,
-        message_ts: row.get(2)?,
-        kind: row.get(3)?,
-        stage: Stage::parse(&row.get::<_, String>(4)?),
-        input_text: row.get(5)?,
-        reply_ts: row.get(6)?,
-        detail: row.get(7)?,
-        deliveries: row.get(8)?,
-        thread_ts: row.get(9)?,
-        input_id: row.get(10)?,
-        fork_node_id: row.get(11)?,
-        admission_node_id: row.get(12)?,
-        provider_failure: provider_failure_from_row(row, 13)?,
-    })
+fn decode_stage(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stage> {
+    fn corrupt(message: impl Into<String>) -> rusqlite::Error {
+        rusqlite::Error::FromSqlConversionFailure(
+            4,
+            rusqlite::types::Type::Text,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                message.into(),
+            )),
+        )
+    }
+    let raw: String = row.get(4)?;
+    let kind =
+        StageKind::parse(&raw).ok_or_else(|| corrupt(format!("unknown ledger stage {raw}")))?;
+    let reply_ts: Option<String> = row.get(6)?;
+    let detail: Option<String> = row.get(7)?;
+    let provider_kind: Option<String> = row.get(9)?;
+    let provider_code: Option<String> = row.get(10)?;
+    let provider_message: Option<String> = row.get(11)?;
+    let provider_retryable: Option<i64> = row.get(12)?;
+    let has_failure = provider_kind.is_some()
+        || provider_code.is_some()
+        || provider_message.is_some()
+        || provider_retryable.is_some();
+    if kind != StageKind::ProviderError && has_failure {
+        return Err(corrupt("provider data on another stage"));
+    }
+    if kind != StageKind::Replied && reply_ts.is_some() {
+        return Err(corrupt("reply timestamp on another stage"));
+    }
+    let stage = match kind {
+        StageKind::Accepted => Stage::Accepted {
+            deferral: detail
+                .as_deref()
+                .map(|raw| {
+                    DeferralReason::parse(raw).ok_or_else(|| corrupt("unknown deferral reason"))
+                })
+                .transpose()?,
+        },
+        StageKind::ReplyPending => Stage::ReplyPending {
+            reply: detail
+                .filter(|reply| !reply.trim().is_empty())
+                .ok_or_else(|| corrupt("missing reply debt"))?,
+        },
+        StageKind::Folded => Stage::Folded {
+            reason: detail
+                .as_deref()
+                .map(|raw| FoldReason::parse(raw).ok_or_else(|| corrupt("unknown fold reason")))
+                .transpose()?,
+        },
+        StageKind::Replied => {
+            if detail.is_some() {
+                return Err(corrupt("stale reply debt"));
+            }
+            Stage::Replied {
+                reply_ts: reply_ts
+                    .filter(|ts| !ts.is_empty())
+                    .ok_or_else(|| corrupt("missing reply timestamp"))?,
+            }
+        }
+        StageKind::ProviderError => {
+            if detail.is_some() {
+                return Err(corrupt("detail on provider failure"));
+            }
+            let kind = provider_kind.ok_or_else(|| corrupt("missing provider kind"))?;
+            let kind =
+                serde_json::from_value(serde_json::Value::String(kind)).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        9,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })?;
+            let retryable = match provider_retryable {
+                Some(0) => false,
+                Some(1) => true,
+                _ => return Err(corrupt("missing or invalid provider retryability")),
+            };
+            Stage::ProviderError(ProviderFailure {
+                kind,
+                code: provider_code,
+                message: provider_message.ok_or_else(|| corrupt("missing provider message"))?,
+                retryable,
+            })
+        }
+        StageKind::Ignored => Stage::Ignored {
+            reason: detail
+                .as_deref()
+                .and_then(IgnoreReason::parse)
+                .ok_or_else(|| corrupt("missing or unknown ignore reason"))?,
+        },
+    };
+    Ok(stage)
 }
 
 fn read_base_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRecord> {
@@ -797,50 +829,23 @@ fn read_base_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRecord> {
         channel_id: row.get(1)?,
         message_ts: row.get(2)?,
         kind: row.get(3)?,
-        stage: Stage::parse(&row.get::<_, String>(4)?),
+        stage: decode_stage(row)?,
         input_text: row.get(5)?,
-        reply_ts: row.get(6)?,
-        detail: row.get(7)?,
         deliveries: row.get(8)?,
         thread_ts: None,
         input_id: None,
         fork_node_id: None,
         admission_node_id: None,
-        provider_failure: None,
     })
 }
 
-fn provider_failure_from_row(
-    row: &rusqlite::Row<'_>,
-    offset: usize,
-) -> rusqlite::Result<Option<ProviderFailure>> {
-    let kind: Option<String> = row.get(offset)?;
-    let code: Option<String> = row.get(offset + 1)?;
-    let message: Option<String> = row.get(offset + 2)?;
-    let retryable: Option<i64> = row.get(offset + 3)?;
-    Ok(match (kind, message, retryable) {
-        (Some(kind), Some(message), Some(retryable)) => Some(ProviderFailure {
-            kind: parse_provider_failure_kind(&kind),
-            code,
-            message,
-            retryable: retryable != 0,
-        }),
-        _ => None,
-    })
-}
-
-fn parse_provider_failure_kind(raw: &str) -> ProviderFailureKind {
-    match raw {
-        "transport" => ProviderFailureKind::Transport,
-        "timeout" => ProviderFailureKind::Timeout,
-        "http" => ProviderFailureKind::Http,
-        "stream" => ProviderFailureKind::Stream,
-        "auth" => ProviderFailureKind::Auth,
-        "validation" => ProviderFailureKind::Validation,
-        "quota" => ProviderFailureKind::Quota,
-        "unsupported" => ProviderFailureKind::Unsupported,
-        _ => ProviderFailureKind::Unknown,
-    }
+fn read_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRecord> {
+    let mut record = read_base_row(row)?;
+    record.thread_ts = row.get(13)?;
+    record.input_id = row.get(14)?;
+    record.fork_node_id = row.get(15)?;
+    record.admission_node_id = row.get(16)?;
+    Ok(record)
 }
 
 fn now_seconds() -> i64 {
@@ -853,11 +858,104 @@ fn now_seconds() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unknown_provider_failure_kinds_are_rejected() {
+        let connection = Connection::open_in_memory().expect("database");
+        connection.execute_batch(&SCHEMA).expect("schema");
+        connection
+            .execute_batch("PRAGMA ignore_check_constraints = ON")
+            .expect("inject corruption");
+        connection.execute("INSERT INTO handled_events (event_id, channel_id, message_ts, kind, stage, provider_kind, provider_message, provider_retryable, first_seen_at, updated_at) VALUES ('bad', 'C1', '1', 'message', 'provider_error', 'quoat', 'refusal', 0, 0, 0)", []).expect("corrupt failure");
+        assert!(
+            read(&connection, "bad").is_err(),
+            "unknown failure kind became a valid provider failure"
+        );
+    }
+
+    #[test]
+    fn unknown_stages_are_rejected_instead_of_resumed() {
+        let connection = Connection::open_in_memory().expect("database");
+        connection.execute_batch(&SCHEMA).expect("schema");
+        connection
+            .execute_batch("PRAGMA ignore_check_constraints = ON")
+            .expect("inject corruption");
+        connection.execute("INSERT INTO handled_events (event_id, channel_id, message_ts, kind, stage, first_seen_at, updated_at) VALUES ('bad', 'C1', '1', 'message', 'acceptde', 0, 0)", []).expect("corrupt row");
+        assert!(
+            read(&connection, "bad").is_err(),
+            "unknown stages must fail decoding"
+        );
+    }
+
+    #[test]
+    fn sql_rejects_stage_payloads_that_belong_to_another_stage() {
+        let connection = Connection::open_in_memory().expect("database");
+        connection.execute_batch(&SCHEMA).expect("schema");
+        for (stage, reply_ts, detail) in [
+            ("acceptde", None, None),
+            ("accepted", Some("1.2"), None),
+            ("accepted", None, Some("owed reply")),
+            ("reply_pending", None, None),
+            ("reply_pending", Some("1.2"), Some("owed reply")),
+            ("folded", None, Some("thread_root_not_processed")),
+            ("replied", None, None),
+            ("replied", Some("1.2"), Some("owed reply")),
+            ("ignored", None, None),
+            ("provider_error", None, None),
+        ] {
+            assert!(connection.execute("INSERT INTO handled_events (event_id, channel_id, message_ts, kind, stage, reply_ts, detail, first_seen_at, updated_at) VALUES (?1, 'C1', '1', 'message', ?1, ?2, ?3, 0, 0)", params![stage, reply_ts, detail]).is_err(), "invalid {stage} payload was accepted");
+        }
+        for (stage, provider_kind, provider_message, provider_retryable) in [
+            ("accepted", Some("quota"), Some("refusal"), Some(0)),
+            ("provider_error", None, Some("refusal"), Some(0)),
+            ("provider_error", Some("quota"), None, Some(0)),
+            ("provider_error", Some("quota"), Some("refusal"), None),
+            ("provider_error", Some("quota"), Some("refusal"), Some(2)),
+            ("provider_error", Some("quoota"), Some("refusal"), Some(0)),
+        ] {
+            assert!(connection.execute("INSERT INTO handled_events (event_id, channel_id, message_ts, kind, stage, provider_kind, provider_message, provider_retryable, first_seen_at, updated_at) VALUES ('provider', 'C1', '1', 'message', ?1, ?2, ?3, ?4, 0, 0)", params![stage, provider_kind, provider_message, provider_retryable]).is_err(), "invalid provider payload on {stage}");
+        }
+        for kind in provider_kind_names() {
+            assert!(connection.execute("INSERT INTO handled_events (event_id, channel_id, message_ts, kind, stage, provider_kind, provider_message, provider_retryable, first_seen_at, updated_at) VALUES (?1, 'C1', '1', 'message', 'provider_error', ?1, 'refusal', 0, 0, 0)", [kind]).is_ok(), "valid core provider kind {kind} was refused");
+        }
+    }
+
+    #[tokio::test]
+    async fn folding_a_deferred_event_removes_its_deferral() {
+        let (_scratch, ledger) = ledger().await;
+        claim(&ledger, "deferred").await;
+        ledger
+            .advance(
+                "deferred".into(),
+                StageKind::Accepted,
+                Stage::Accepted {
+                    deferral: Some(DeferralReason::ThreadRootNotProcessed),
+                },
+            )
+            .await
+            .expect("defer");
+        ledger
+            .advance(
+                "deferred".into(),
+                StageKind::Accepted,
+                Stage::Folded { reason: None },
+            )
+            .await
+            .expect("fold");
+        let row = ledger
+            .get("deferred".into())
+            .await
+            .expect("get")
+            .expect("row");
+        assert!(
+            row.stage.detail().is_none(),
+            "folded event retained a stale deferral"
+        );
+    }
 
     async fn ledger() -> (tempfile::TempDir, EventLedger) {
         let scratch = tempfile::tempdir().expect("tempdir");
         let database =
-            SqliteHandle::open(&scratch.path().join("events.db"), SCHEMA).expect("open ledger");
+            SqliteHandle::open(&scratch.path().join("events.db"), &SCHEMA).expect("open ledger");
         (scratch, EventLedger::new(database))
     }
 
@@ -882,7 +980,7 @@ mod tests {
         let second = claim(&ledger, "Ev1").await;
         assert!(matches!(second, Claim::Resume(_)));
         assert_eq!(second.record().deliveries, 2);
-        assert_eq!(second.record().stage, Stage::Accepted);
+        assert_eq!(second.record().stage.kind(), StageKind::Accepted);
     }
 
     #[tokio::test]
@@ -893,10 +991,8 @@ mod tests {
             ledger
                 .advance(
                     "Ev1".to_string(),
-                    Stage::Accepted,
-                    Stage::Folded,
-                    None,
-                    DetailWrite::Keep,
+                    StageKind::Accepted,
+                    Stage::Folded { reason: None }
                 )
                 .await
                 .expect("advance")
@@ -912,10 +1008,10 @@ mod tests {
             ledger
                 .advance(
                     "Ev1".to_string(),
-                    Stage::Accepted,
-                    Stage::Replied,
-                    Some("1.2".to_string()),
-                    DetailWrite::Keep,
+                    StageKind::Accepted,
+                    Stage::Replied {
+                        reply_ts: "1.2".to_string()
+                    }
                 )
                 .await
                 .expect("advance")
@@ -926,10 +1022,10 @@ mod tests {
             !ledger
                 .advance(
                     "Ev1".to_string(),
-                    Stage::Accepted,
-                    Stage::ReplyPending,
-                    None,
-                    DetailWrite::Set("stale text".to_string()),
+                    StageKind::Accepted,
+                    Stage::ReplyPending {
+                        reply: "stale text".to_string()
+                    }
                 )
                 .await
                 .expect("advance")
@@ -939,9 +1035,13 @@ mod tests {
             .await
             .expect("get")
             .expect("row");
-        assert_eq!(record.stage, Stage::Replied);
-        assert_eq!(record.reply_ts.as_deref(), Some("1.2"));
-        assert_eq!(record.detail, None, "the stale detail must not have landed");
+        assert_eq!(record.stage.kind(), StageKind::Replied);
+        assert_eq!(record.stage.reply_ts(), Some("1.2"));
+        assert_eq!(
+            record.stage.detail(),
+            None,
+            "the stale detail must not have landed"
+        );
     }
 
     #[tokio::test]
@@ -951,20 +1051,20 @@ mod tests {
         ledger
             .advance(
                 "Ev1".to_string(),
-                Stage::Accepted,
-                Stage::ReplyPending,
-                None,
-                DetailWrite::Set("owed reply".to_string()),
+                StageKind::Accepted,
+                Stage::ReplyPending {
+                    reply: "owed reply".to_string(),
+                },
             )
             .await
             .expect("record reply debt");
         ledger
             .advance(
                 "Ev1".to_string(),
-                Stage::ReplyPending,
-                Stage::Replied,
-                Some("1.2".to_string()),
-                DetailWrite::Clear,
+                StageKind::ReplyPending,
+                Stage::Replied {
+                    reply_ts: "1.2".to_string(),
+                },
             )
             .await
             .expect("clear reply debt");
@@ -973,7 +1073,11 @@ mod tests {
             .await
             .expect("get")
             .expect("row");
-        assert_eq!(record.detail, None, "settled reply debt must be cleared");
+        assert_eq!(
+            record.stage.detail(),
+            None,
+            "settled reply debt must be cleared"
+        );
     }
 
     #[tokio::test]
@@ -985,20 +1089,20 @@ mod tests {
         ledger
             .advance(
                 "Ev2".to_string(),
-                Stage::Accepted,
-                Stage::Replied,
-                None,
-                DetailWrite::Keep,
+                StageKind::Accepted,
+                Stage::Replied {
+                    reply_ts: "1.2".to_owned(),
+                },
             )
             .await
             .expect("advance");
         ledger
             .advance(
                 "Ev3".to_string(),
-                Stage::Accepted,
-                Stage::ReplyPending,
-                None,
-                DetailWrite::Set("owed".to_string()),
+                StageKind::Accepted,
+                Stage::ReplyPending {
+                    reply: "owed".to_string(),
+                },
             )
             .await
             .expect("advance");
@@ -1014,20 +1118,15 @@ mod tests {
 
     #[test]
     fn event_reasons_round_trip_their_stored_strings() {
-        let reasons = [
-            EventReason::AppAuthoredMessage,
-            EventReason::NoAuthor,
-            EventReason::SupersededByAppMention,
-            EventReason::AdmissionTextUnavailable,
-            EventReason::ThreadSessionRetired,
-            EventReason::ThreadRootNotProcessed,
-            EventReason::ThreadRootNotAvailable,
-            EventReason::EmptyModelReply,
-            EventReason::ReplyLostAfterCommit,
-        ];
-        for reason in reasons {
-            assert_eq!(EventReason::parse(reason.as_str()), Some(reason));
+        for reason in DeferralReason::ALL {
+            assert_eq!(DeferralReason::parse(reason.as_str()), Some(*reason));
         }
-        assert_eq!(EventReason::parse("not-a-reason"), None);
+        for reason in FoldReason::ALL {
+            assert_eq!(FoldReason::parse(reason.as_str()), Some(*reason));
+        }
+        for reason in IgnoreReason::ALL {
+            assert_eq!(IgnoreReason::parse(reason.as_str()), Some(*reason));
+        }
+        assert_eq!(DeferralReason::parse("not-a-reason"), None);
     }
 }

@@ -107,9 +107,6 @@
       "format": "uint32",
       "minimum": 1
     },
-    "model_code_pool": {
-      "$ref": "#/$defs/ModelCodePool"
-    },
     "observation": {
       "$ref": "#/$defs/Observation"
     },
@@ -235,9 +232,6 @@
     "tools": {
       "$ref": "#/$defs/Tools"
     },
-    "topology": {
-      "$ref": "#/$defs/Topology"
-    },
     "trigger_edits_per_turn": {
       "type": "number",
       "format": "double",
@@ -298,8 +292,6 @@
     "observation",
     "provider",
     "faults",
-    "topology",
-    "model_code_pool",
     "collection",
     "provenance",
     "inventory"
@@ -526,32 +518,6 @@
       "required": [
         "lash_sha",
         "figments_sha"
-      ]
-    },
-    "ModelCodePool": {
-      "type": "object",
-      "properties": {
-        "execution_memory_mib": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        },
-        "queue_limit": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        },
-        "workers_per_lash_worker": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "workers_per_lash_worker",
-        "queue_limit",
-        "execution_memory_mib"
       ]
     },
     "Observation": {
@@ -839,18 +805,6 @@
               "type": "string",
               "pattern": "^[IV](: .+)?$"
             },
-            "/model_code_pool/execution_memory_mib": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/model_code_pool/queue_limit": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/model_code_pool/workers_per_lash_worker": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
             "/observation/pending_reads_per_turn": {
               "type": "string",
               "pattern": "^[IV](: .+)?$"
@@ -1015,70 +969,6 @@
               "type": "string",
               "pattern": "^[IV](: .+)?$"
             },
-            "/topology/bandwidth_mbps": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/topology/garage_cpu": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/topology/garage_memory_mib": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/topology/network_jitter_ms": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/topology/one_way_delay_ms": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/topology/pg_connections_per_worker": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/topology/pg_cpu": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/topology/pg_memory_mib": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/topology/replication": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/topology/restate_cpu": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/topology/restate_memory_mib": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/topology/restate_nodes": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/topology/restate_partitions": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/topology/worker_cpu": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/topology/worker_memory_mib": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
-            "/topology/workers": {
-              "type": "string",
-              "pattern": "^[IV](: .+)?$"
-            },
             "/trigger_edits_per_turn": {
               "type": "string",
               "pattern": "^[IV](: .+)?$"
@@ -1134,9 +1024,6 @@
             "/inventory/lash_sha",
             "/llm_requests_per_turn",
             "/minimum_completed_turns",
-            "/model_code_pool/execution_memory_mib",
-            "/model_code_pool/queue_limit",
-            "/model_code_pool/workers_per_lash_worker",
             "/observation/pending_reads_per_turn",
             "/observation/poll_ms",
             "/observation/process_prune_s",
@@ -1178,22 +1065,6 @@
             "/tools/fanout",
             "/tools/parallel_share",
             "/tools/turn_share",
-            "/topology/bandwidth_mbps",
-            "/topology/garage_cpu",
-            "/topology/garage_memory_mib",
-            "/topology/network_jitter_ms",
-            "/topology/one_way_delay_ms",
-            "/topology/pg_connections_per_worker",
-            "/topology/pg_cpu",
-            "/topology/pg_memory_mib",
-            "/topology/replication",
-            "/topology/restate_cpu",
-            "/topology/restate_memory_mib",
-            "/topology/restate_nodes",
-            "/topology/restate_partitions",
-            "/topology/worker_cpu",
-            "/topology/worker_memory_mib",
-            "/topology/workers",
             "/trigger_edits_per_turn",
             "/turn_cancel_share",
             "/turns_per_session_s",
@@ -1344,110 +1215,6 @@
         "fanout",
         "parallel_share",
         "callback_ms"
-      ]
-    },
-    "Topology": {
-      "type": "object",
-      "properties": {
-        "bandwidth_mbps": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        },
-        "garage_cpu": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        },
-        "garage_memory_mib": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        },
-        "network_jitter_ms": {
-          "type": "number",
-          "format": "double",
-          "minimum": 0
-        },
-        "one_way_delay_ms": {
-          "type": "number",
-          "format": "double",
-          "minimum": 0
-        },
-        "pg_connections_per_worker": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        },
-        "pg_cpu": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        },
-        "pg_memory_mib": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        },
-        "replication": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        },
-        "restate_cpu": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        },
-        "restate_memory_mib": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        },
-        "restate_nodes": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        },
-        "restate_partitions": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        },
-        "worker_cpu": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        },
-        "worker_memory_mib": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        },
-        "workers": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 1
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "workers",
-        "worker_cpu",
-        "worker_memory_mib",
-        "pg_connections_per_worker",
-        "restate_nodes",
-        "restate_partitions",
-        "replication",
-        "restate_cpu",
-        "restate_memory_mib",
-        "pg_cpu",
-        "pg_memory_mib",
-        "garage_cpu",
-        "garage_memory_mib",
-        "one_way_delay_ms",
-        "network_jitter_ms",
-        "bandwidth_mbps"
       ]
     }
   }
