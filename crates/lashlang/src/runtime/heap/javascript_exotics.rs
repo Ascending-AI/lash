@@ -828,27 +828,37 @@ impl Heap {
         self.javascript_coercion_contains_projected_inner(value, &mut BTreeSet::new(), 1)
     }
 
+    /// `depth` counts the way the export walk counts: a reference or an inline
+    /// container is one level, a scalar leaf is none, so this probe refuses at
+    /// the same ceiling the coercion it precedes does.
     fn javascript_coercion_contains_projected_inner(
         &self,
         value: &Value,
         active: &mut BTreeSet<HeapId>,
         depth: usize,
     ) -> Result<bool, RuntimeError> {
-        super::ensure_value_depth(depth)?;
         let values = match value {
             Value::Projected(_) => return Ok(true),
-            Value::Tuple(values) | Value::List(values) => values.as_ref(),
-            Value::Ref(id) if active.insert(*id) => match self.get(*id)? {
-                HeapObject::Tuple(values) | HeapObject::List { items: values, .. } => {
-                    values.as_slice()
-                }
-                HeapObject::RegExpMatch(result) => result.items.as_slice(),
-                _ => {
-                    active.remove(id);
+            Value::Tuple(values) | Value::List(values) => {
+                super::ensure_value_depth(depth)?;
+                values.as_ref()
+            }
+            Value::Ref(id) => {
+                super::ensure_value_depth(depth)?;
+                if !active.insert(*id) {
                     return Ok(false);
                 }
-            },
-            Value::Ref(_) => return Ok(false),
+                match self.get(*id)? {
+                    HeapObject::Tuple(values) | HeapObject::List { items: values, .. } => {
+                        values.as_slice()
+                    }
+                    HeapObject::RegExpMatch(result) => result.items.as_slice(),
+                    _ => {
+                        active.remove(id);
+                        return Ok(false);
+                    }
+                }
+            }
             _ => return Ok(false),
         };
         let contains = values.iter().try_fold(false, |contains, value| {
@@ -891,9 +901,11 @@ impl Heap {
         Ok(javascript_to_string(&primitive))
     }
 
-    /// `depth` is the nesting level of `value` itself. The `active` set beside
-    /// it only closes cycles; a finite but deeply nested container is not
-    /// cyclic, and without a depth bound this walk and
+    /// `depth` counts the way the export walk counts: a reference or an inline
+    /// container is one level, a scalar leaf is none, so this walk and the
+    /// export walks refuse the same value at the same ceiling. The `active`
+    /// set beside it only closes cycles; a finite but deeply nested container
+    /// is not cyclic, and without a depth bound this walk and
     /// `javascript_sequence_string` recurse once per level until the thread
     /// stack is gone. The bound is the durable boundary's, so a value this
     /// refuses could never have been persisted either.
@@ -904,9 +916,9 @@ impl Heap {
         depth: usize,
         hint: PrimitiveHint,
     ) -> Result<Value, RuntimeError> {
-        super::ensure_value_depth(depth)?;
         let object = match value {
             Value::Ref(id) => {
+                super::ensure_value_depth(depth)?;
                 if !active.insert(*id) {
                     return Err(RuntimeError::ValidationFailed {
                         reason: "TS_CYCLIC_COERCION_UNSUPPORTED: cyclic object coercion"
@@ -979,11 +991,15 @@ impl Heap {
                 });
             }
             None => match value {
-                Value::Tuple(values) | Value::List(values) => Value::String(
-                    self.javascript_sequence_string(values, active, depth)?
-                        .into(),
-                ),
+                Value::Tuple(values) | Value::List(values) => {
+                    super::ensure_value_depth(depth)?;
+                    Value::String(
+                        self.javascript_sequence_string(values, active, depth)?
+                            .into(),
+                    )
+                }
                 Value::Record(record) => {
+                    super::ensure_value_depth(depth)?;
                     self.ensure_record_has_primitive(record)?;
                     self.plain_object_primitive(value, hint)?
                 }
@@ -1007,8 +1023,10 @@ impl Heap {
         Ok(primitive)
     }
 
-    /// `depth` is the nesting level of the container these values belong to;
-    /// each element sits one level below it.
+    /// `depth` is the level of the container these values belong to; a
+    /// reference or inline container element sits one level below it, a scalar
+    /// element at none — the scalar leaf a coercion reaches adds no level, the
+    /// same unit the export walk counts in.
     fn javascript_sequence_string(
         &self,
         values: &[Value],
@@ -1020,6 +1038,7 @@ impl Heap {
             .map(|value| match value {
                 Value::Null | Value::Undefined => Ok(String::new()),
                 Value::Ref(id) if matches!(self.get(*id)?, HeapObject::Date(_)) => {
+                    super::ensure_value_depth(depth + 1)?;
                     let HeapObject::Date(date) = self.get(*id)? else {
                         unreachable!()
                     };
