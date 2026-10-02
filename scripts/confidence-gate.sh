@@ -226,7 +226,7 @@ SIM_SEARCH_SETUP_SECONDS=1500
 # The workflow matrix fans each package out into fixed legs
 # (LASH_MUTATION_PACKAGES_SHARD "leg/legs"). A leg judges two bounded slices
 # of the package's mutant space -- a quick smoke slice and a deeper full
-# slice -- where slice index ((run - 1) * legs + leg - 1) % denom + 1 is
+# slice -- where slice index ((run - 1) * legs + leg - 1) % denom is
 # derived from LASH_MUTATION_RUN_INDEX so a run's legs cover consecutive
 # slices and successive runs sweep the space instead of re-judging one
 # prefix. Covering a 1,600-mutant space inside one run would need ~80 legs
@@ -2227,12 +2227,13 @@ EOF
 # (a source scan, no build), so the shard count tracks the space as it grows.
 # `rotate` picks the leg's slice from its LASH_MUTATION_PACKAGES_SHARD
 # "leg/legs" coordinate and LASH_MUTATION_RUN_INDEX: leg `leg` of run `run`
-# judges slice ((run - 1) * legs + leg - 1) % denom + 1, so the run's legs
+# judges slice ((run - 1) * legs + leg - 1) % denom, so the run's legs
 # cover consecutive slices and successive runs sweep the space. Without
-# `rotate` the first slice is judged.
+# `rotate` the first slice is judged. cargo-mutants counts slices from zero
+# and refuses `--shard k/n` unless k < n.
 mutation_packages_shard() {
   local package="$1" budget="$2" rotate="${3:-}"
-  local count denom index=1
+  local count denom index=0
   count="$(
     cargo mutants -p "$package" \
       "${area_mutation_file_args[@]}" \
@@ -2254,7 +2255,7 @@ mutation_packages_shard() {
     if [ -n "${LASH_MUTATION_RUN_INDEX:-}" ]; then
       base=$((LASH_MUTATION_RUN_INDEX - 1))
     fi
-    index=$(( (base * legs + leg - 1) % denom + 1 ))
+    index=$(( (base * legs + leg - 1) % denom ))
   fi
   mutation_packages_mutants_found="$count"
   mutation_packages_shard_result="$index/$denom"
@@ -2380,15 +2381,16 @@ run_lash_core_direct_model_mutation_evidence() {
   local timeout="${LASH_MUTATION_TIMEOUT_SECONDS:-180}"
   run_mutants_recorded "lash-core direct provider/direct request survivors" "${out_dir}/mutants-lash-core-direct-targeted" \
     cargo mutants \
-    -p lash-internal-core \
-    --file crates/lash-core/src/direct.rs \
+    -p lash-internal-core-execution \
+    --file crates/lash-core-execution/src/direct.rs \
     --re 'DirectRequest::json_schema|DirectLlmClient::provider|DirectLlmClient::provider_mut|DirectLlmClient::complete|build_llm_request|transport_stream_events_for_direct' \
     --baseline skip \
+    --cargo-arg=--features=testing \
     --jobs "$mutation_jobs" \
     --timeout "$timeout" \
     --minimum-test-timeout 30 \
     --output "${out_dir}/mutants-lash-core-direct-targeted" \
-    -- --locked direct
+    -- --locked -p lash-internal-core-execution --lib direct
   run_mutants_recorded "lash-core model token-limit survivors" "${out_dir}/mutants-lash-core-model-targeted" \
     cargo mutants \
     -p lash-internal-core-llm \
@@ -2473,8 +2475,8 @@ run_lash_sim_runtime_completion_mutation_evidence() {
   run_mutants_recorded "lash-sim runtime completion readiness" "${out_dir}/mutants-lash-sim-runner-runtime-completion-targeted" \
     cargo mutants \
     -p lash-sim \
-    --file crates/lash-sim/src/runner.rs \
-    --re 'runtime_completion_ready|register_ready_runtime_completions|RuntimeCompletionState::next_provider_turn_ready|RuntimeCompletionState::provider_completed|RuntimeCompletionState::durable_completed' \
+    --file crates/lash-sim/src/runner/runtime_completion.rs \
+    --re 'runtime_completion_ready|register_ready_runtime_completions|RuntimeCompletionState::next_provider_turn_ready|RuntimeCompletionState::provider_completed' \
     --baseline skip \
     --jobs "$mutation_jobs" \
     --timeout "$timeout" \

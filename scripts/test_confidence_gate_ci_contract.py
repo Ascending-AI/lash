@@ -1882,9 +1882,11 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn('artifact["corpus_seconds"] = int(corpus_seconds)', gate)
         self.assertIn('artifact["shard_seconds"]', gate)
 
-        # mutation-sim is a mutant count, not a seed budget: 49 mutants at the
-        # 2.03 min/mutant the cancelled run measured, plus the same 23 minutes
-        # of fixed cost, with margin for the 180 s per-test cap.
+        # mutation-sim is a mutant count, not a seed budget: 86 mutants
+        # (`cargo mutants --list` over its three sweeps: 7 scheduler, 51 oracle,
+        # 28 runtime-completion) at the 2.03 min/mutant the cancelled run
+        # measured, plus the same 23 minutes of fixed cost, with margin for the
+        # 180 s per-test cap.
         mutation_sim_cap = int(
             re.search(
                 r"^    timeout-minutes: (\d+)$",
@@ -1892,7 +1894,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                 re.MULTILINE,
             ).group(1)
         )
-        self.assertGreaterEqual(mutation_sim_cap, 23 + 49 * 2.03)
+        self.assertGreaterEqual(mutation_sim_cap, 23 + 86 * 2.03 * 1.3)
 
     def test_mutation_packages_legs_fit_their_job_cap(self) -> None:
         """Run 35117123483 cancelled three package legs at the 100-minute cap.
@@ -2050,13 +2052,17 @@ run_postgres_mutants_recorded() {{ printf 'PG %s\\n' "$*"; }}
 """
         # 23 mutants at budgets 12 (smoke, denom 2) and 5 (full, denom 5).
         # Two legs plus the run index walk consecutive slices of each space.
+        # cargo-mutants counts shards from zero: `--shard k/n` needs k < n, and
+        # run 35489555344 lost its single-slice protocol-standard leg to
+        # "invalid value '1/1' for '--shard <SHARD>'".
         cases = [
             # (run, leg spec) -> (smoke shard, full shard)
-            (1, "1/2", "1/2", "1/5"),
-            (1, "2/2", "2/2", "2/5"),
-            (2, "1/2", "1/2", "3/5"),
-            (2, "2/2", "2/2", "4/5"),
-            (3, "1/2", "1/2", "5/5"),
+            (1, "1/2", "0/2", "0/5"),
+            (1, "2/2", "1/2", "1/5"),
+            (2, "1/2", "0/2", "2/5"),
+            (2, "2/2", "1/2", "3/5"),
+            (3, "1/2", "0/2", "4/5"),
+            (3, "2/2", "1/2", "0/5"),
         ]
         for run_index, leg, smoke_shard, full_shard in cases:
             with self.subTest(run=run_index, leg=leg):
@@ -2075,6 +2081,30 @@ run_postgres_mutants_recorded() {{ printf 'PG %s\\n' "$*"; }}
                 self.assertEqual(0, result.returncode, result.stderr)
                 self.assertIn(f"--shard {smoke_shard} ", result.stdout)
                 self.assertIn(f"--shard {full_shard} ", result.stdout)
+
+        # A package whose whole space fits one slice judges shard 0 of 1.
+        env = dict(
+            os.environ,
+            LASH_MUTATION_PACKAGES_BOUNDED="1",
+            LASH_MUTATION_PACKAGES_SHARD="1/1",
+            LASH_MUTATION_RUN_INDEX="7",
+        )
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                harness
+                + "\nMUTATION_PACKAGES_SMOKE_MUTANTS=64"
+                + "\nrun_mutation_smoke",
+                "t",
+                "/tmp/x",
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("--shard 0/1 ", result.stdout)
 
         # Without the bound flag the full pass stays an unsharded sweep and
         # the smoke canary keeps its historical 1/64 slice; explicit shard
@@ -2111,6 +2141,56 @@ run_postgres_mutants_recorded() {{ printf 'PG %s\\n' "$*"; }}
         )
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("--shard 3/7 ", result.stdout)
+
+    def test_targeted_mutation_sweeps_select_live_functions(self) -> None:
+        """A targeted sweep must still have mutants to judge.
+
+        cargo-mutants exits zero when `--file` and `--re` select nothing, so a
+        sweep whose source file moved passes while judging no mutant at all:
+        the direct-request and runtime-completion sweeps did after their files
+        left `crates/lash-core/src/direct.rs` and `crates/lash-sim/src/runner.rs`.
+        """
+        gate = GATE.read_text(encoding="utf-8")
+        sweeps = [
+            command
+            for command in shell_logical_commands(gate)
+            if "cargo mutants" in command and "--re " in command
+        ]
+        self.assertGreaterEqual(len(sweeps), 7)
+        for command in sweeps:
+            name = re.search(r'run_mutants_recorded "([^"]+)"', command).group(1)
+            with self.subTest(sweep=name):
+                package = re.search(r" -p (\S+)", command).group(1)
+                files = re.findall(r"--file (\S+)", command)
+                self.assertTrue(files, "a targeted sweep names its files")
+                functions: set[str] = set()
+                for file in files:
+                    path = ROOT / file
+                    self.assertTrue(path.is_file(), f"{file} is not a source file")
+                    manifest = next(
+                        parent / "Cargo.toml"
+                        for parent in path.parents
+                        if (parent / "Cargo.toml").is_file()
+                    )
+                    self.assertEqual(
+                        package,
+                        tomllib.loads(manifest.read_text(encoding="utf-8"))["package"][
+                            "name"
+                        ],
+                        f"{file} is not in the mutated package",
+                    )
+                    functions.update(
+                        re.findall(
+                            r"\bfn ([a-z_][a-z0-9_]*)", path.read_text(encoding="utf-8")
+                        )
+                    )
+                pattern = re.search(r"--re '([^']+)'", command).group(1)
+                for alternative in pattern.split("|"):
+                    function = alternative.rsplit("::", 1)[-1]
+                    self.assertTrue(
+                        any(function in candidate for candidate in functions),
+                        f"{alternative} names no function in {files}",
+                    )
 
     def test_weekly_full_claim_requires_complete_mutant_union(self) -> None:
         """A rotating mutation leg's evidence says rotating, never full.
@@ -2244,9 +2324,9 @@ write_confidence_summary failed
         }
 
         # 23 mutants, smoke budget 12 -> 2 slices, full budget 5 -> 5 slices.
-        # Leg 2/4 of run 7 judges slice ((7-1)*4+1)%denom+1.
-        expected_smoke_shard = f"{(6 * 4 + 1) % 2 + 1}/2"
-        expected_full_shard = f"{(6 * 4 + 1) % 5 + 1}/5"
+        # Leg 2/4 of run 7 judges slice ((7-1)*4+1)%denom.
+        expected_smoke_shard = f"{(6 * 4 + 1) % 2}/2"
+        expected_full_shard = f"{(6 * 4 + 1) % 5}/5"
         with tempfile.TemporaryDirectory() as directory:
             out_dir = pathlib.Path(directory) / "leg"
             step_summary = pathlib.Path(directory) / "step-summary.md"
@@ -2337,8 +2417,12 @@ write_confidence_summary failed
                     )
 
             summary_text = step_summary.read_text(encoding="utf-8")
-            self.assertIn("bounded rotating slice `2/2`", summary_text)
-            self.assertIn("bounded rotating slice `1/5`", summary_text)
+            self.assertIn(
+                f"bounded rotating slice `{expected_smoke_shard}`", summary_text
+            )
+            self.assertIn(
+                f"bounded rotating slice `{expected_full_shard}`", summary_text
+            )
             self.assertIn("leg 2/4, run index 7", summary_text)
             self.assertIn(revision, summary_text)
 

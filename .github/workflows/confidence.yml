@@ -419,13 +419,14 @@ jobs:
     needs: confidence-build
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
     runs-on: ubuntu-24.04
-    # 49 mutants (7 smoke + 42 full). Run 35091816279 recorded 38 of them in
-    # the 77 minutes this job has after the 23 minutes it spends downloading
-    # and restoring the shared build, and was cancelled at the 100-minute cap
-    # with 11 left: 2.03 min/mutant, so the full set needs 99 min of work plus
-    # 23 min of fixed cost = 123 min. Five mutants hit the 180 s per-test cap,
-    # and a mutant set that shifts toward timeouts costs more, so 30% margin.
-    timeout-minutes: 160
+    # 86 mutants (7 scheduler + 51 oracle + 28 runtime-completion, counted by
+    # `cargo mutants --list`). Run 35091816279 recorded 38 mutants in the 77
+    # minutes this job had after the 23 minutes it spends downloading and
+    # restoring the shared build: 2.03 min/mutant, so the full set needs 175
+    # min of work. Five mutants hit the 180 s per-test cap, and a mutant set
+    # that shifts toward timeouts costs more, so 30% margin on the work:
+    # 175 * 1.3 + 23 = 250 min.
+    timeout-minutes: 250
     steps:
       - *checkout
 
