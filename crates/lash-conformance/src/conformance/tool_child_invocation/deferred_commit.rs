@@ -230,6 +230,11 @@ async fn deferred_close_while_held(fixture: &ToolChildLawFixture, prefix: &str, 
                 1,
                 "the committed child's presentation ran once"
             );
+            // Presentation precedes the child's seat. Keep the lent opener
+            // registered through that seat, including handler replay: the
+            // committed final seats as the child's success, not as the
+            // cancellation the close asked for.
+            await_committed_seat(&scoped, &group_key).await;
         }
         HeldAt::AfterToolHook => {
             // The cancel decision took the §4 point first. Whether the

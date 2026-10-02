@@ -184,30 +184,7 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
         );
         // The intents landing precedes the child's seat. Keep the lent
         // opener registered through that seat, including handler replay.
-        tokio::time::timeout(SETTLE_BUDGET, async {
-            loop {
-                match scoped
-                    .controller()
-                    .read_group_settlement(&group_key, 1)
-                    .await
-                {
-                    Ok(Some(rank)) => {
-                        assert!(
-                            rank.outcome.is_ok(),
-                            "the protected final seats success: {rank:?}"
-                        );
-                        break;
-                    }
-                    Ok(None) => tokio::time::sleep(POLL).await,
-                    Err(error) if error.code == crate::RuntimeErrorCode::EffectGroupUnsupported => {
-                        break;
-                    }
-                    Err(error) => panic!("read the protected child's seat: {error}"),
-                }
-            }
-        })
-        .await
-        .expect("the protected child seats before its lending opener is released");
+        await_committed_seat(&scoped, &group_key).await;
     }
 }
 

@@ -906,12 +906,7 @@ lash_conformance::tool_child_unroutable_tests!(
     }
 );
 
-super::effect_group_routing_miss::live_routing_miss_tests! {
-    live_restate_routing_miss_wait_children_end => wait_children_end_on_routing_miss,
-    live_restate_routing_miss_atomic_children_end => atomic_children_end_on_routing_miss,
-    live_restate_routing_miss_settled_tool_child_ends => settled_tool_child_ends_on_routing_miss,
-    live_restate_routing_miss_still_needed_children_are_never_killed => still_needed_children_are_never_killed,
-}
+super::effect_group_routing_miss::live_routing_miss_tests!();
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]

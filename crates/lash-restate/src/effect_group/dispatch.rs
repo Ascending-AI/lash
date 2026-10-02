@@ -724,6 +724,8 @@ impl EffectGroupDispatchImpl {
                 .await;
         }
         refuse_unrecorded_abort(request, &outcome)?;
+        #[cfg(test)]
+        crate::tests::effect_group_routing_miss::before_settled(&request.group_key).await;
         // The outcome is journaled once, as the execution that first
         // reached it built it. Its recorded steps replay the same, but
         // what the driver builds beside them does not have to: a child

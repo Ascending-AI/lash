@@ -1867,6 +1867,43 @@ async fn next_settlement(
     .unwrap_or_else(|error| panic!("settlement for rank {rank} failed to be served: {error}"))
 }
 
+/// Waits until the one committed child of `group_key` seats its success.
+///
+/// A committed final is protected (ADR 0099 §5): its child still owes the
+/// group a seat after its last observable step, and on a tier whose handlers
+/// replay it reaches that seat through its lending opener again. A law that
+/// releases the opener first leaves a child no executor carries, retrying
+/// for a seat it can never record (FIG-4785). A tier without group ranks has
+/// no seat to wait for.
+async fn await_committed_seat(scoped: &crate::ScopedEffectController<'_>, group_key: &str) {
+    tokio::time::timeout(SETTLE_BUDGET, async {
+        loop {
+            match scoped
+                .controller()
+                .read_group_settlement(group_key, 1)
+                .await
+            {
+                Ok(Some(rank)) => {
+                    assert!(
+                        rank.outcome.is_ok(),
+                        "the protected final seats success: {rank:?}"
+                    );
+                    break;
+                }
+                Ok(None) => tokio::time::sleep(POLL).await,
+                Err(error) if error.code == crate::RuntimeErrorCode::EffectGroupUnsupported => {
+                    break;
+                }
+                Err(error) => panic!("read the protected child's seat: {error}"),
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!("the committed child of {group_key} never seated under its lending opener")
+    });
+}
+
 // =============================================================================
 // Recovery: an opener that is not live on this host
 // =============================================================================
