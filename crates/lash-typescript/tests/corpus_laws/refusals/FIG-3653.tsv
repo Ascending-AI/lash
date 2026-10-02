@@ -3,8 +3,6 @@
 # whose program now round-trips, or whose refusal changed, fails the law
 # until it is deleted or corrected.
 # program id	refusal	reason
-differential:FIG-3653:10	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3653:11	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3653:12	cannot render a block in expression position as TypeScript	a groupBy call lowers to a statement sequence (its callback driver), which has no expression spelling
 differential:FIG-3653:13	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3653:16	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar

@@ -3,7 +3,6 @@
 # whose program now round-trips, or whose refusal changed, fails the law
 # until it is deleted or corrected.
 # program id	refusal	reason
-differential:FIG-3787:3	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3787:8	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3787:16	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3787:17	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
@@ -27,7 +26,6 @@ differential:FIG-3787:49	generated binding `__lashlang_stdlib` has no authored T
 differential:FIG-3787:50	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3787:51	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3787:52	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3787:53	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3787:54	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3787:55	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3787:56	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
@@ -45,6 +43,5 @@ differential:FIG-3787:67	generated binding `__lashlang_stdlib` has no authored T
 differential:FIG-3787:13	cannot render a block in expression position as TypeScript	an optional chain lowers to a statement sequence (its short circuit), which has no expression spelling
 differential:FIG-3787:30	cannot render a block in expression position as TypeScript	a `hasOwnProperty` call lowers to a statement sequence (its own-method dispatch), which has no expression spelling
 differential:FIG-3787:14	generated binding `__lashlang_0_reference_base` has no authored TypeScript spelling	a member update pins its reference base in a generated slot, which has no authored spelling
-differential:FIG-3787:31	cannot render a collection transform with extra arguments as TypeScript	a callback method called with more than its callback has no one-call spelling in the lens
 differential:FIG-3787:33	generated binding `__lashlang_heap_delete_member` has no authored TypeScript spelling	`delete` lowers to a heap builtin, which the lens printer does not re-sugar
 differential:FIG-3787:48	generated binding `__lashlang_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar

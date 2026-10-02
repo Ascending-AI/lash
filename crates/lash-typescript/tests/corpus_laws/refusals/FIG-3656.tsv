@@ -52,11 +52,7 @@ differential:FIG-3656:62	generated binding `__lashlang_stdlib` has no authored T
 differential:FIG-3656:63	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	the built-in constructor reference lowers to a stdlib helper, which the lens printer does not re-sugar
 differential:FIG-3656:64	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	the built-in constructor reference lowers to a stdlib helper, which the lens printer does not re-sugar
 differential:FIG-3656:65	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	the built-in constructor reference lowers to a stdlib helper, which the lens printer does not re-sugar
-differential:FIG-3656:67	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3656:68	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3656:69	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3656:7	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3656:70	generated binding `__lashlang_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3656:71	generated binding `__lashlang_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
 differential:FIG-3656:72	generated binding `__lashlang_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
 differential:FIG-3656:73	generated binding `__lashlang_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar

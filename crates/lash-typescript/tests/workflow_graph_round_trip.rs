@@ -494,6 +494,482 @@ fn opaque_statements_reject_globals_the_program_cannot_see() {
     assert_eq!(error.code(), "invalid_opaque_source");
 }
 
+/// The printer's totality law (FIG-4846): one specimen of every `Expr`
+/// variant prints, in a position the variant may legally occupy — statement
+/// forms through `typescript_statement_source`, operand forms through
+/// `typescript_expression_source`. `Printer::expression` matches `Expr`
+/// without a wildcard, so a variant added without an arm fails to compile;
+/// this law fails when an arm refuses its legal spelling.
+#[test]
+fn every_ir_variant_prints() {
+    use lashlang::{
+        AssignTarget, CatchClause, Expr, FunctionExpr, LabelMetadata, MethodKey, ResourceRefExpr,
+        StructuralRole, TryExpr,
+    };
+    let variable = |name: &str| Expr::Variable(name.into());
+    let arrow = |body: Expr| {
+        Expr::Function(Box::new(FunctionExpr {
+            name: None,
+            js_name: None,
+            receiver: None,
+            params: vec!["v".into()],
+            captures: Vec::new(),
+            body: Box::new(body),
+        }))
+    };
+    // An inline process literal only exists inside the lowerer's wrapper:
+    // its specimen is taken from a lowered program, which is where the
+    // printer finds it too.
+    let process_literal = {
+        let program =
+            parse("const p = async () => {\n  print(1);\n};\n").expect("a process literal lowers");
+        fn find(expression: &Expr) -> Option<Expr> {
+            if matches!(expression, Expr::ProcessLiteral(_)) {
+                return Some(expression.clone());
+            }
+            expression.children().find_map(find)
+        }
+        find(&program.main).expect("the lowered program holds a process literal")
+    };
+    // Operand-position specimens: one per variant that may evaluate a value.
+    let expressions: [(&str, Expr); 34] = [
+        ("LabelAnnotated", {
+            Expr::LabelAnnotated {
+                label: LabelMetadata {
+                    title: "note".into(),
+                    description: None,
+                },
+                expr: Box::new(Expr::Number(1.0)),
+            }
+        }),
+        ("Null", Expr::Null),
+        ("Undefined", Expr::Absent),
+        ("Bool", Expr::Bool(true)),
+        ("Number", Expr::Number(1.5)),
+        ("String", Expr::String("s".into())),
+        ("Variable", variable("v")),
+        ("List", Expr::List(vec![Expr::Number(1.0)])),
+        (
+            "Record",
+            Expr::Record(vec![("a".into(), Expr::Number(1.0))]),
+        ),
+        (
+            "If",
+            Expr::If {
+                condition: Box::new(Expr::Bool(true)),
+                then_block: Box::new(Expr::Number(1.0)),
+                else_block: Box::new(Expr::Number(2.0)),
+            },
+        ),
+        (
+            "ProcessRef",
+            Expr::ProcessRef {
+                process: "p".into(),
+            },
+        ),
+        ("HostDescriptorConstructor", {
+            Expr::HostDescriptorConstructor {
+                type_name: "timer.Schedule".into(),
+                input: Box::new(Expr::Record(vec![])),
+            }
+        }),
+        (
+            "ResourceRef",
+            Expr::ResourceRef(ResourceRefExpr::resolved(
+                vec!["tools".into()],
+                "Tools",
+                "tools",
+            )),
+        ),
+        (
+            "ReceiverCall",
+            Expr::ReceiverCall {
+                receiver: Box::new(Expr::ResourceRef(ResourceRefExpr::resolved(
+                    vec!["tools".into()],
+                    "Tools",
+                    "tools",
+                ))),
+                operation: "lookup".into(),
+                args: vec![Expr::Number(1.0)],
+            },
+        ),
+        ("Await", Expr::Await(Box::new(variable("p")))),
+        ("SleepFor", Expr::SleepFor(Box::new(Expr::Number(1.0)))),
+        ("WaitSignal", Expr::WaitSignal { name: "go".into() }),
+        ("ResultUnwrap", Expr::ResultUnwrap(Box::new(variable("r")))),
+        ("Print", Expr::Print(Box::new(Expr::Number(1.0)))),
+        ("Finish", Expr::Finish(Box::new(Expr::Number(1.0)))),
+        ("Fail", Expr::Fail(Box::new(Expr::String("e".into())))),
+        (
+            "BuiltinCall",
+            Expr::BuiltinCall {
+                name: "module_eval".into(),
+                args: vec![Expr::Number(1.0)],
+            },
+        ),
+        (
+            "Function",
+            arrow(Expr::FunctionReturn(Box::new(variable("v")))),
+        ),
+        ("ProcessLiteral", process_literal),
+        (
+            "Call",
+            Expr::Call {
+                function: Box::new(variable("f")),
+                args: vec![Expr::Number(1.0)],
+            },
+        ),
+        (
+            "MethodCall",
+            Expr::MethodCall {
+                receiver: Box::new(variable("o")),
+                method: MethodKey::Field("m".into()),
+                args: vec![Expr::Number(1.0)],
+            },
+        ),
+        (
+            "ThisCall",
+            Expr::ThisCall {
+                this: Box::new(variable("t")),
+                function: Box::new(variable("f")),
+                args: vec![Expr::Number(1.0)],
+            },
+        ),
+        (
+            "FunctionCall",
+            Expr::FunctionCall {
+                function: "f".into(),
+                args: vec![Expr::Number(1.0)],
+            },
+        ),
+        (
+            "Map",
+            Expr::Map {
+                items: Box::new(Expr::List(vec![Expr::Number(1.0)])),
+                function: Box::new(arrow(Expr::FunctionReturn(Box::new(variable("v"))))),
+            },
+        ),
+        (
+            "Field",
+            Expr::Field {
+                target: Box::new(variable("o")),
+                field: "m".into(),
+            },
+        ),
+        (
+            "Index",
+            Expr::Index {
+                target: Box::new(variable("o")),
+                index: Box::new(Expr::Number(0.0)),
+            },
+        ),
+        (
+            "JavaScriptUnary",
+            Expr::CoercingUnary {
+                op: lashlang::CoercingUnaryOp::Negate,
+                expr: Box::new(Expr::Number(1.0)),
+            },
+        ),
+        (
+            "JavaScriptBinary",
+            Expr::CoercingBinary {
+                left: Box::new(Expr::Number(1.0)),
+                op: lashlang::CoercingBinaryOp::Add,
+                right: Box::new(Expr::Number(2.0)),
+            },
+        ),
+        (
+            "JavaScriptLogical",
+            Expr::OperandLogical {
+                left: Box::new(variable("a")),
+                op: lashlang::OperandLogicalOp::Or,
+                right: Box::new(variable("b")),
+            },
+        ),
+    ];
+    // Statement-position specimens: one per variant that runs for effect.
+    let statements: [(&str, Expr); 10] = [
+        (
+            "Block",
+            Expr::Block(vec![Expr::FunctionReturn(Box::new(Expr::Null))]),
+        ),
+        ("Assign", {
+            Expr::Assign {
+                target: AssignTarget::variable("x".into()),
+                expr: Box::new(Expr::Number(1.0)),
+            }
+        }),
+        ("For", {
+            Expr::For {
+                binding: "v".into(),
+                authored_binding: None,
+                iterable: Box::new(Expr::List(vec![Expr::Number(1.0)])),
+                bind: None,
+                body: Box::new(Expr::Block(vec![])),
+            }
+        }),
+        ("While", {
+            Expr::While {
+                condition: Box::new(Expr::Bool(true)),
+                body: Box::new(Expr::Block(vec![Expr::Break])),
+            }
+        }),
+        (
+            "Role",
+            Expr::Role {
+                role: StructuralRole::Scope,
+                expr: Box::new(Expr::Block(vec![Expr::Null])),
+            },
+        ),
+        ("Break", Expr::Break),
+        ("Continue", Expr::Continue),
+        ("Try", {
+            Expr::Try(Box::new(TryExpr {
+                body: Box::new(Expr::Block(vec![Expr::Null])),
+                catch: Some(CatchClause {
+                    binding: "e".into(),
+                    body: Box::new(Expr::Block(vec![Expr::Null])),
+                }),
+                finally: None,
+            }))
+        }),
+        ("Throw", Expr::Throw(Box::new(Expr::String("e".into())))),
+        ("Return", Expr::FunctionReturn(Box::new(Expr::Null))),
+    ];
+    assert_eq!(
+        expressions.len() + statements.len(),
+        44,
+        "a specimen for every Expr variant"
+    );
+    for (variant, expression) in expressions {
+        let printed = typescript_expression_source(&expression)
+            .unwrap_or_else(|error| panic!("{variant} must print: {error}"));
+        assert!(
+            !printed.is_empty(),
+            "{variant} must print to source: {printed:?}"
+        );
+    }
+    let bound = vec!["x".to_string(), "v".to_string(), "e".to_string()];
+    for (variant, statement) in statements {
+        let printed =
+            lash_typescript::workflow_graph::typescript_statement_source(&statement, &bound)
+                .unwrap_or_else(|error| panic!("{variant} must print: {error}"));
+        assert!(
+            !printed.is_empty(),
+            "{variant} must print to source: {printed:?}"
+        );
+    }
+}
+
+#[test]
+fn host_descriptor_constructors_spell_registered_paths() {
+    use lashlang::Expr;
+    // A trigger-source constructor keeps its module path as its type name,
+    // so `timer.Schedule(..)` spells it and re-links the same constructor.
+    let constructor = Expr::HostDescriptorConstructor {
+        type_name: "timer.Schedule".into(),
+        input: Box::new(Expr::Record(vec![(
+            "expr".into(),
+            Expr::String("*".into()),
+        )])),
+    };
+    assert_eq!(
+        typescript_expression_source(&constructor).expect("path-named constructor prints"),
+        "timer.Schedule({ expr: \"*\" })"
+    );
+    // A constructor whose type name is not a module path keeps its typed
+    // refusal: the link resolved the path and the IR does not keep it.
+    for type_name in ["Schedule", "not a path", "__lashlang_0_x.y"] {
+        assert!(
+            matches!(
+                typescript_expression_source(&Expr::HostDescriptorConstructor {
+                    type_name: type_name.into(),
+                    input: Box::new(Expr::Null),
+                }),
+                Err(TypeScriptSourceError::UnknownHostDescriptorConstructor { .. })
+            ),
+            "{type_name} has no constructor path to spell"
+        );
+    }
+}
+
+#[test]
+fn this_call_prints_as_function_call_builtin() {
+    use lashlang::Expr;
+    // A builtin's explicit receiver spells `f["call"](t, ..)` — evaluation-
+    // equal, re-lowering to a computed method call rather than this node.
+    let call = Expr::ThisCall {
+        this: Box::new(Expr::Variable("t".into())),
+        function: Box::new(Expr::Variable("f".into())),
+        args: vec![Expr::Number(1.0)],
+    };
+    assert_eq!(
+        typescript_expression_source(&call).expect("ThisCall prints"),
+        "f[\"call\"](t, 1)"
+    );
+    assert!(
+        parse_typescript_expression(
+            "f[\"call\"](t, 1)",
+            &BTreeSet::new(),
+            &["f".to_string(), "t".to_string()].into_iter().collect()
+        )
+        .is_ok(),
+        "the spelling re-parses"
+    );
+}
+
+#[test]
+fn collection_transform_operands_round_trip() {
+    // FIG-4846: a transform whose call carries arguments past the callback
+    // prints them back — `reduce`'s initial value, a predicate's `thisArg`,
+    // `Array.from`'s mapper arguments, evaluated excess arguments.
+    for source in [
+        "const xs = [1, 2]; const t = {a: 1}; finish(xs.map(function (v) { return v + this.a; }, t));",
+        "const xs = [3, 1]; finish(xs.reduce((a, v) => a + v, 0));",
+        "const xs = [3, 1]; finish(xs.toSorted((a, b) => a - b));",
+        "const xs = [1, 2]; finish(Array.from(xs, (v) => v * 2));",
+        "const xs = [1, 2]; const t = {a: 1}; finish(Array.from(xs, function (v) { return v + this.a; }, t));",
+        "const xs = [1, 2]; finish(xs.every((v) => v > 0, undefined));",
+        "const o = {map: (f) => 1}; finish(o.map((v) => v, {a: 1}));",
+    ] {
+        assert_json_round_trip(source);
+    }
+}
+
+#[test]
+fn bare_map_intrinsic_prints_as_map_call() {
+    use lashlang::{Expr, FunctionExpr};
+    // A `Map` outside its owning shape — AST-only, never lowered from
+    // source — prints the evaluation-equal `.map` spelling.
+    let map = Expr::Map {
+        items: Box::new(Expr::List(vec![Expr::Number(1.0)])),
+        function: Box::new(Expr::Function(Box::new(FunctionExpr {
+            name: None,
+            js_name: None,
+            receiver: None,
+            params: vec!["v".into()],
+            captures: Vec::new(),
+            body: Box::new(Expr::Block(vec![Expr::FunctionReturn(Box::new(
+                Expr::Variable("v".into()),
+            ))])),
+        }))),
+    };
+    assert_eq!(
+        typescript_expression_source(&map).expect("bare map prints"),
+        "[1].map((v) => (v))"
+    );
+}
+
+#[test]
+fn destructured_parameters_round_trip() {
+    // FIG-4846: a destructured, defaulted or rest parameter lowers to a
+    // generated slot plus a prologue that binds the authored names; the
+    // signature prints back from the prologue's shape.
+    for source in [
+        "finish([1, 2].map(([k, v]) => k));",
+        "const f = ([a, b]) => a + b; finish(f([1, 2]));",
+        "const f = ([a, b = 4]) => a + b; finish(f([1]));",
+        "const f = ([a, ...rest]) => rest.length; finish(f([1, 2, 3]));",
+        "const f = ({x, y}) => x; finish(f({x: 1, y: 2}));",
+        "const f = ({x: named}) => named; finish(f({x: 1}));",
+        "const f = ([a], {x}) => a + x; finish(f([1], {x: 2}));",
+        "const f = ([a, [b, c]]) => b; finish(f([1, [2, 3]]));",
+        "const f = ({x: {y}}) => y; finish(f({x: {y: 3}}));",
+        "const f = ({x = 2}) => x; finish(f({}));",
+        "const f = ({x, ...rest}) => rest; finish(f({x: 1, y: 2}));",
+        "const f = (a = 1) => a; finish(f());",
+        "const f = (a, b = a + 1, ...r) => r.length; finish(f(1, undefined, 3, 4));",
+        "function f(a, b = 0) { return a + b; } finish(f(1));",
+        "const f = ({x: y = 3} = {}) => y; finish(f());",
+        "finish(((a, b = 1) => a + b).length);",
+    ] {
+        assert_json_round_trip(source);
+    }
+}
+
+#[test]
+fn arguments_reading_functions_round_trip() {
+    // A function that mentions `arguments` binds the object in a prologue
+    // ahead of its parameters — consumed into the signature — and reads it
+    // through a generated slot that displays as `arguments`; a mention the
+    // shallow scan misses lowers to the argv read inline and prints back as
+    // the identifier.
+    for source in [
+        "const f = function () { return arguments; }; finish(f(1, 2));",
+        "const f = function () { return arguments.length; }; finish(f(1, 2));",
+        "const f = function (x) { return arguments[x]; }; finish(f(1, 2));",
+        "const f = function () { const g = () => arguments; return g(); }; finish(f(1, 2));",
+    ] {
+        assert_json_round_trip(source);
+    }
+}
+
+#[test]
+fn promise_all_settled_round_trips() {
+    // `await Promise.allSettled(items)` lowers to the aggregate await plus a
+    // generated mapper folding each outcome into a settled record; the pair
+    // prints back as the authored call.
+    assert_json_round_trip("const v = await Promise.allSettled([tools.lookup({key: \"x\"})]);");
+    assert_json_round_trip("finish(await Promise.allSettled([tools.lookup({key: \"x\"})]));");
+}
+
+#[test]
+fn trigger_registration_inputs_round_trip() {
+    // A trigger registration's `inputs` is the erased arrow template: the
+    // default for a one-parameter target prints omitted, an explicit mapping
+    // prints back as `(event) => ({ .. })`.
+    let mut environment = lashlang::testing::harness::test_environment();
+    lashlang::add_trigger_resource_operations(&mut environment.resources)
+        .expect("the catalogue has no conflicting trigger operation");
+    lashlang::add_trigger_register_tool_binding(&mut environment.resources)
+        .expect("the catalogue has no conflicting register binding");
+    environment
+        .resources
+        .add_trigger_source_constructor(
+            ["timer", "Schedule"],
+            lashlang::TypeExpr::Object(vec![lashlang::TypeField {
+                name: "expr".into(),
+                ty: lashlang::TypeExpr::Str,
+                optional: false,
+            }]),
+            lashlang::NamedDataType::object(
+                "timer.Tick",
+                vec![lashlang::TypeField {
+                    name: "fired_at".into(),
+                    ty: lashlang::TypeExpr::Str,
+                    optional: false,
+                }],
+            )
+            .expect("a valid timer tick type"),
+        )
+        .expect("the catalogue has one timer trigger source");
+    let cases = [
+        // The default: the target takes the event alone, so `inputs` is
+        // omitted and the linker supplies `{event: <fired event>}`.
+        "await triggers.register({source:timer.Schedule({expr:\"0 8 * * *\"}),target:{definition:async(event)=>{await tools.echo({value:\"inline\"});return event;}}});",
+        // An explicit mapping: two parameters, one bound to the fired event.
+        "await triggers.register({source:timer.Schedule({expr:\"0 8 * * *\"}),target:{definition:async(tick,fixed)=>{await tools.echo({value:tick});return fixed;}},inputs:(e)=>({tick:e,fixed:\"inline\"})});",
+    ];
+    for source in cases {
+        let linked = lash_typescript::link(source, &environment).expect("fixture links");
+        let printed = typescript_program_source(linked.artifact.ir()).expect("registration prints");
+        let relinked =
+            lash_typescript::link(&printed, &environment).expect("the spelling re-admits");
+        assert_eq!(
+            relinked.artifact.module_ref(),
+            linked.artifact.module_ref(),
+            "the spelling re-admits to the same module: {printed}"
+        );
+    }
+    // The one-parameter default omits the field entirely.
+    let linked = lash_typescript::link(cases[0], &environment).expect("fixture links");
+    let printed = typescript_program_source(linked.artifact.ir()).expect("registration prints");
+    assert!(
+        !printed.contains("inputs"),
+        "the default `inputs` prints omitted: {printed}"
+    );
+}
+
 #[test]
 fn classic_for_prints_back_in_every_head_condition_and_update_form() {
     // FIG-3706: a classic `for` lowers to its head's statements and a

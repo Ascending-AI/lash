@@ -14,8 +14,30 @@
 //!   as `console.log(..)`, with however many arguments were authored.
 //! * `__lashlang_await_array([..], "all")` prints back as
 //!   `await Promise.all([..])`, and likewise for `allSettled`, `race` and
-//!   `any`; `__lashlang_pending_timer(ms)` prints back as `sleep(ms)`.
-//! * A collection-transform role prints back as `receiver.<operation>(fn)`.
+//!   `any`; `__lashlang_pending_timer(ms)` prints back as `sleep(ms)`. The
+//!   map intrinsic folding `"allSettled"` outcomes into settled records
+//!   prints back as `await Promise.allSettled([..])`.
+//! * A collection-transform role prints back as `receiver.<operation>(fn,
+//!   ..)`: the role's operands are the authored arguments after the
+//!   callback, so `reduce`'s initial value and a `thisArg` keep their call.
+//! * A bare `Map` intrinsic — AST-only, never the lowerer's own output for
+//!   an authored call — prints back as `items.map(fn)`, evaluation-equal but
+//!   not canonical.
+//! * A `ThisCall` — an explicit-receiver invocation the lowerer emits inside
+//!   generated shapes — prints back as `fn["call"](this, ..)`.
+//! * A `HostDescriptorConstructor` whose type name is a registered dotted
+//!   path prints back as `owner.Constructor(input)`, the source spelling the
+//!   path was admitted through.
+//! * A trigger registration's `inputs` prints back as the erased arrow
+//!   template `(event) => ({ .. })`, each event-marker entry read back as
+//!   the parameter — and is omitted entirely when it is the default a
+//!   one-parameter target's omitted `inputs` stands for.
+//! * A function signature's generated prologue prints back as the authored
+//!   parameters: a cell-boxed parameter, a destructured `[a, b = d, ..,
+//!   ...rest]` or `{k, ..}` pattern, and the `arguments` snapshot bind.
+//! * A role carries no semantics of its own: a role a specialized
+//!   recognizer did not claim, and a label annotation, print as the
+//!   expression they wrap.
 //! * An attribute-assignment role prints back as `object.field = value`.
 //! * `__lashlang_stdlib("<method>", receiver, ..)`, for a method of the
 //!   instance standard-library surface, prints back as
@@ -36,8 +58,7 @@
 
 use lashlang::{
     AssignPathStep, AssignTarget, CoercingBinaryOp, CoercingUnaryOp, Declaration, Expr,
-    FunctionDecl, FunctionExpr, MethodKey, OperandLogicalOp, ProcessDecl, ProcessLiteralExpr,
-    Program, ResourceRefExpr, StructuralRole, TypeExpr,
+    FunctionDecl, MethodKey, OperandLogicalOp, ProcessDecl, Program, StructuralRole,
 };
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -49,19 +70,23 @@ mod collection_transform;
 mod for_loop;
 mod json_stringify;
 mod loop_bindings;
+mod patterns;
+mod processes;
 mod property_presence;
 mod sparse_arrays;
+mod sugar;
 mod templates;
 
 use for_loop::{classic_for, is_statement_body, var_initialization};
-use templates::{template_parts, template_text};
+pub(super) use processes::process_literal_run_body;
+use processes::{authored_params, process_return_annotation, process_run_body};
+use sugar::{attribute_assignment, closure_function, is_closure_wrap};
 
 #[cfg(test)]
 use std::cell::Cell;
 
 use crate::LOWERED_BINDING_PREFIX;
 use crate::node_label::render_label_comment;
-use crate::signatures::INSTANCE_STDLIB_SIGNATURES;
 
 /// Error returned when canonical IR has no TypeScript spelling.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
@@ -259,45 +284,6 @@ impl<'p> Printer<'p> {
             .collect();
         out.push_str(&self.rooted_block(&function.body, 0, &mut bound)?);
         out.push('\n');
-        Ok(out)
-    }
-
-    /// Re-sugar a lowered process declaration into its authored arrow.
-    ///
-    /// A process is an uncalled `const`-bound `async` arrow (FIG-2999): the
-    /// binding is the name a reader sees, and the declaration's own name is a
-    /// lift digest that no authored source spells.
-    fn define_process(
-        &self,
-        binding: &str,
-        process: &ProcessDecl,
-        bound: &mut Vec<String>,
-    ) -> Printed {
-        let body = process_run_body(process).ok_or(TypeScriptSourceError::Unrepresentable {
-            kind: "a process body that is not the lowerer's process wrapper",
-        })?;
-        let params = authored_params(process)
-            .iter()
-            .map(|param| self.process_param(param))
-            .collect::<Result<Vec<_>, _>>()?;
-        let mut out = String::new();
-        if let Some(label) = &process.label {
-            out.push_str(&label_comment(label)?);
-            out.push('\n');
-        }
-        out.push_str(&format!(
-            "const {} = async ({}){} => ",
-            self.binding_identifier("process binding", binding)?,
-            params.join(", "),
-            process_return_annotation(super::authored_return_type(&process.origin))?,
-        ));
-        let mut run_bound = authored_params(process)
-            .iter()
-            .map(|param| param.name.to_string())
-            .collect::<Vec<_>>();
-        out.push_str(&self.rooted_block(body, 0, &mut run_bound)?);
-        out.push_str(";\n");
-        bound.push(binding.to_string());
         Ok(out)
     }
 
@@ -502,16 +488,18 @@ impl<'p> Printer<'p> {
                     self.block(expression, level, &mut inner, vars)?
                 ))
             }
-            // A function bound to its own name is its declaration.
+            // A function bound to its own name is its declaration — under
+            // the arity wrap a signature with defaults or a rest carries, or
+            // bare.
             Expr::Assign { target, expr }
                 if target.is_simple()
-                    && let Expr::Function(function) = expr.as_ref()
+                    && let Some((function, closure)) = closure_function(expr.as_ref())
                     && function.name.as_deref() == Some(target.root.as_str()) =>
             {
                 bound.push(target.root.to_string());
                 Ok(format!(
                     "{prefix}{}\n",
-                    self.named_function(target.root.as_str(), function)?
+                    self.named_function(target.root.as_str(), function, closure)?
                 ))
             }
             Expr::Assign { target, expr } => {
@@ -884,16 +872,43 @@ impl<'p> Printer<'p> {
                 None => self.identifier("process", process.as_str()),
             },
             Expr::ResourceRef(resource) => self.resource_ref(resource),
-            Expr::HostDescriptorConstructor { type_name, .. } => {
-                Err(TypeScriptSourceError::UnknownHostDescriptorConstructor {
-                    type_name: type_name.to_string(),
-                })
+            // A host constructor keeps only its *type* name after the link:
+            // for a trigger source that name is the constructor's own dotted
+            // path, so `timer.Schedule(..)` spells it back and re-links the
+            // same constructor. A name that is not such a path carries no
+            // constructor path the printer can spell.
+            Expr::HostDescriptorConstructor { type_name, input } => {
+                let path = type_name.split('.').collect::<Vec<_>>();
+                if path.len() >= 2
+                    && path.iter().all(|segment| {
+                        is_typescript_identifier(segment)
+                            && !segment.starts_with(LOWERED_BINDING_PREFIX)
+                    })
+                {
+                    Ok(format!("{type_name}({})", self.expression(input)?))
+                } else {
+                    Err(TypeScriptSourceError::UnknownHostDescriptorConstructor {
+                        type_name: type_name.to_string(),
+                    })
+                }
             }
             Expr::ReceiverCall {
                 receiver,
                 operation,
                 args,
             } => {
+                // A trigger registration's `inputs` is the erased
+                // `(event) => ({ .. })` template: each entry holding the
+                // event marker is the arrow's parameter read back, and the
+                // default the linker writes for a one-parameter target omits
+                // the field entirely.
+                if let Expr::ResourceRef(resource) = receiver.as_ref()
+                    && lashlang::is_trigger_resource_type(resource.resource_type.as_str())
+                    && matches!(operation.as_str(), "register" | "update" | "revive")
+                    && let [Expr::Record(entries)] = args.as_slice()
+                {
+                    return self.trigger_registration(receiver, operation, entries);
+                }
                 let args = self.arguments(args)?;
                 Ok(format!(
                     "{}.{}({})",
@@ -941,11 +956,32 @@ impl<'p> Printer<'p> {
                     }
                 })
             }
-            // Only generated code passes an explicit receiver (a callback's
-            // `thisArg`); the dialect has no `Function.prototype.call`.
-            Expr::ThisCall { .. } => Err(TypeScriptSourceError::Unrepresentable {
-                kind: "a call with an explicit receiver",
-            }),
+            // A builtin's explicit-receiver call — the callback `thisArg` of
+            // a collection transform or a replacer's holder. `f["call"](t,
+            // ..)` reads the `call` builtin from the function value and
+            // invokes it with `f` bound as its receiver, so `call`'s own
+            // `this` is the function and its first argument is the explicit
+            // receiver — the same evaluation `CallMethod` performs. The
+            // spelling evaluates `function` before `this`, the reverse of
+            // the node's order; every reachable `ThisCall` holds generated
+            // slots in both. Re-lowering yields a computed `MethodCall`,
+            // not this node — the spelling is evaluation-equal, not
+            // canonical.
+            Expr::ThisCall {
+                this,
+                function,
+                args,
+            } => {
+                let mut arguments = self.expression(this)?;
+                for arg in args {
+                    arguments.push_str(", ");
+                    arguments.push_str(&self.expression(arg)?);
+                }
+                Ok(format!(
+                    "{}[\"call\"]({arguments})",
+                    self.member_target(function)?
+                ))
+            }
             Expr::Function(function) => self.arrow(function),
             // An inline process body prints back as the authored async arrow
             // in its argument position, which re-parses to the same literal.
@@ -1026,12 +1062,14 @@ impl<'p> Printer<'p> {
             } => Err(TypeScriptSourceError::Unrepresentable {
                 kind: "a block in expression position",
             }),
-            Expr::Role { .. } => Err(TypeScriptSourceError::Unrepresentable {
-                kind: "a statement structure in expression position",
-            }),
-            Expr::LabelAnnotated { .. } => Err(TypeScriptSourceError::Unrepresentable {
-                kind: "a label-annotated expression",
-            }),
+            // A role is transparent: it executes exactly as the expression it
+            // wraps. A role whose own recognizer did not fire — a malformed
+            // shape, or a scope/completion that names no operand value —
+            // prints as its inner expression and lets the inner form decide.
+            Expr::Role { expr, .. } => self.expression(expr),
+            // The label annotates a node for the graph; in operand position
+            // the node it names is what evaluates.
+            Expr::LabelAnnotated { expr, .. } => self.expression(expr),
             Expr::Assign { .. } => Err(TypeScriptSourceError::Unrepresentable {
                 kind: "an assignment in expression position",
             }),
@@ -1052,213 +1090,18 @@ impl<'p> Printer<'p> {
             // A failed host operation throws in TypeScript, so the unwrap the
             // lowerer wraps every module call in has no spelling of its own.
             Expr::ResultUnwrap(value) => self.expression(value),
-            Expr::Map { .. } => Err(TypeScriptSourceError::Unrepresentable {
-                kind: "a bare map intrinsic",
-            }),
+            // The map intrinsic drives the callback once per item, which is
+            // the same traversal `items.map(fn)` lowers to. The spelling
+            // re-lowers to the collection-transform role around this node —
+            // evaluation-equal, not canonical — so every reachable `Map` the
+            // lowerer itself emits still prints inside the shape that owns
+            // it, and only a bare intrinsic reaches this arm.
+            Expr::Map { items, function } => Ok(format!(
+                "{}.map({})",
+                self.member_target(items)?,
+                self.expression(function)?
+            )),
         }
-    }
-
-    /// Re-sugar one lowered shape, or `Ok(None)` if this is not one.
-    fn sugar(&self, expression: &Expr) -> Result<Option<String>, TypeScriptSourceError> {
-        // `await x` on a value that may be a pending promise.
-        if let Expr::BuiltinCall { name, args } = expression
-            && name.as_str() == "__lashlang_await_pending"
-            && let [value] = args.as_slice()
-        {
-            return Ok(Some(format!("await {}", self.unary_operand(value)?)));
-        }
-        if let Expr::Print(inner) = expression
-            && let Some(args) = stdlib_call(inner, "__consoleObservationText")
-        {
-            return Ok(Some(format!("console.log({})", self.arguments(args)?)));
-        }
-        if let Expr::BuiltinCall { name, args } = expression
-            && name.as_str() == "__lashlang_await_array"
-            && let [items, Expr::String(method)] = args.as_slice()
-        {
-            return Ok(Some(format!(
-                "await Promise.{method}({})",
-                self.expression(items)?
-            )));
-        }
-        if let Expr::BuiltinCall { name, args } = expression
-            && name.as_str() == "__lashlang_pending_timer"
-            && let [duration] = args.as_slice()
-        {
-            return Ok(Some(format!("sleep({})", self.expression(duration)?)));
-        }
-        if let Expr::BuiltinCall { name, args } = expression
-            && name.as_str() == "__lashlang_pending_tool"
-            && let [call @ Expr::ReceiverCall { .. }] = args.as_slice()
-        {
-            return Ok(Some(self.expression(call)?));
-        }
-        if let Some(args) = stdlib_call(expression, "Lash.SparseArray") {
-            return self.sparse_array(args).map(Some);
-        }
-        if let Some([key, receiver]) = stdlib_call(expression, "Lash.HasProperty") {
-            return Ok(Some(format!(
-                "({} in {})",
-                self.binary_operand(key)?,
-                self.binary_operand(receiver)?
-            )));
-        }
-        if let Some(sugared) = self.property_presence(expression)? {
-            return Ok(Some(sugared));
-        }
-        if let Some(sugared) = self.json_stringify(expression)? {
-            return Ok(Some(sugared));
-        }
-        // `globalThis.name`, read live through the root-global read.
-        if let Expr::BuiltinCall { name, args } = expression
-            && name.as_str() == "__lashlang_global_get"
-            && let [Expr::String(global)] = args.as_slice()
-        {
-            return Ok(Some(format!(
-                "globalThis.{}",
-                self.identifier("global", global.as_str())?
-            )));
-        }
-        // A member reference's key is already converted once, at member
-        // evaluation; the authored index spells it.
-        if let Some([key]) = stdlib_call(expression, "Lash.ToPropertyKey") {
-            return Ok(Some(self.expression(key)?));
-        }
-        if let Some(sugared) = self.collection_transform(expression)? {
-            return Ok(Some(sugared));
-        }
-        if let Some((quasis, holes)) = template_parts(expression) {
-            let mut out = String::from("`");
-            for (index, quasi) in quasis.iter().enumerate() {
-                out.push_str(&template_text(quasi));
-                if let Some(hole) = holes.get(index) {
-                    out.push_str(&format!("${{{}}}", self.expression(hole)?));
-                }
-            }
-            out.push('`');
-            return Ok(Some(out));
-        }
-        if let Some((target, operator, value)) = attribute_assignment(expression)? {
-            return Ok(Some(format!(
-                "({target} {operator} {})",
-                self.expression(value)?
-            )));
-        }
-        // An instance standard-library call, `receiver.method(..)`.
-        if let Expr::BuiltinCall { name, args } = expression
-            && name.as_str() == "__lashlang_stdlib"
-            && let [Expr::String(method), receiver, args @ ..] = args.as_slice()
-            && INSTANCE_STDLIB_SIGNATURES
-                .iter()
-                .any(|signature| signature.method == method.as_str())
-        {
-            let args = self.arguments(args)?;
-            return Ok(Some(format!(
-                "{}.{method}({})",
-                self.member_target(receiver)?,
-                args
-            )));
-        }
-        Ok(None)
-    }
-
-    /// A call's arguments, comma-separated.
-    fn arguments(&self, args: &[Expr]) -> Printed {
-        let args = args
-            .iter()
-            .map(|arg| self.expression(arg))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(args.join(", "))
-    }
-
-    /// A closure prints as an arrow, and as an `async` arrow when its own body
-    /// awaits: only an async arrow lowers to a closure that awaits, and an
-    /// `await` in a sync arrow does not parse.
-    /// A process parameter with the annotation its declared type lowers
-    /// from, so a typed parameter keeps its type through a re-admission.
-    fn process_param(&self, param: &lashlang::ProcessParam) -> Printed {
-        let name = self.identifier("process parameter", param.name.as_str())?;
-        Ok(match type_annotation(&param.ty)? {
-            Some(annotation) => format!("{name}: {annotation}"),
-            None => name,
-        })
-    }
-
-    fn arrow(&self, function: &FunctionExpr) -> Printed {
-        if let Some(name) = &function.name {
-            return self.named_function(name.as_str(), function);
-        }
-        // A function that reads its receiver is a `function` form: an arrow's
-        // `this` is its enclosing function's.
-        if let Some(receiver) = &function.receiver {
-            self.receivers.borrow_mut().insert(receiver.to_string());
-            let params = function
-                .params
-                .iter()
-                .map(|param| self.binding_identifier("function parameter", param.as_str()))
-                .collect::<Result<Vec<_>, _>>()?;
-            let mut bound = function.params.iter().map(ToString::to_string).collect();
-            return Ok(format!(
-                "{}function ({}) {}",
-                if awaits_in_own_body(&function.body) {
-                    "async "
-                } else {
-                    ""
-                },
-                params.join(", "),
-                self.rooted_block(&function.body, 0, &mut bound)?
-            ));
-        }
-        let params = function
-            .params
-            .iter()
-            .map(|param| self.binding_identifier("arrow parameter", param.as_str()))
-            .collect::<Result<Vec<_>, _>>()?;
-        let mut bound = function.params.iter().map(ToString::to_string).collect();
-        // An expression-bodied arrow lowers to a body that is one `return`;
-        // it prints back as an expression body, which lowers to that `return`
-        // again, and a braced body would lower to a different program.
-        let body = match function.body.as_ref() {
-            Expr::Block(items) if let [Expr::FunctionReturn(value)] = items.as_slice() => {
-                format!("({})", self.expression(value)?)
-            }
-            body => self.rooted_block(body, 0, &mut bound)?,
-        };
-        Ok(format!(
-            "{}({}) => {body}",
-            if awaits_in_own_body(&function.body) {
-                "async "
-            } else {
-                ""
-            },
-            params.join(", "),
-        ))
-    }
-
-    /// A function with a name of its own is a `function` form: the name is
-    /// bound inside it, so an arrow (which has none) would lower to a
-    /// different function.
-    fn named_function(&self, name: &str, function: &FunctionExpr) -> Printed {
-        if let Some(receiver) = &function.receiver {
-            self.receivers.borrow_mut().insert(receiver.to_string());
-        }
-        let params = function
-            .params
-            .iter()
-            .map(|param| self.binding_identifier("function parameter", param.as_str()))
-            .collect::<Result<Vec<_>, _>>()?;
-        let mut bound = function.params.iter().map(ToString::to_string).collect();
-        Ok(format!(
-            "{}function {}({}) {}",
-            if awaits_in_own_body(&function.body) {
-                "async "
-            } else {
-                ""
-            },
-            self.binding_identifier("function", name)?,
-            params.join(", "),
-            self.rooted_block(&function.body, 0, &mut bound)?
-        ))
     }
 
     fn member_target(&self, expression: &Expr) -> Printed {
@@ -1273,12 +1116,15 @@ impl<'p> Printer<'p> {
             | Expr::ProcessRef { .. }
             | Expr::ResourceRef(_)
             | Expr::ReceiverCall { .. }
-            | Expr::BuiltinCall { .. }
             | Expr::FunctionCall { .. }
             | Expr::Call { .. }
             | Expr::MethodCall { .. }
             | Expr::Field { .. }
             | Expr::Index { .. } => self.expression(expression),
+            // A `__lashlang_closure` wrap prints as the arrow it carries,
+            // an AssignmentExpression, so it needs parentheses as a member
+            // target the same way `Expr::Function` does.
+            Expr::BuiltinCall { .. } if !is_closure_wrap(expression) => self.expression(expression),
             _ => Ok(format!("({})", self.expression(expression)?)),
         }
     }
@@ -1287,11 +1133,13 @@ impl<'p> Printer<'p> {
     /// parentheses.
     fn binary_operand(&self, expression: &Expr) -> Printed {
         let printed = self.expression(expression)?;
-        Ok(if matches!(expression, Expr::Function(_)) {
-            format!("({printed})")
-        } else {
-            printed
-        })
+        Ok(
+            if matches!(expression, Expr::Function(_)) || is_closure_wrap(expression) {
+                format!("({printed})")
+            } else {
+                printed
+            },
+        )
     }
 
     fn unary_operand(&self, expression: &Expr) -> Printed {
@@ -1301,33 +1149,6 @@ impl<'p> Printer<'p> {
             }
             _ => self.member_target(expression),
         }
-    }
-
-    fn resource_ref(&self, resource: &ResourceRefExpr) -> Printed {
-        let path = if resource.path.is_empty() {
-            resource
-                .alias
-                .split('.')
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-        } else {
-            resource
-                .path
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-        };
-        let Some((root, rest)) = path.split_first() else {
-            return Err(TypeScriptSourceError::Unrepresentable {
-                kind: "an unnamed resource",
-            });
-        };
-        let mut out = self.identifier("resource", root)?;
-        for segment in rest {
-            out.push('.');
-            out.push_str(&self.identifier("resource", segment)?);
-        }
-        Ok(out)
     }
 
     fn assign_target(&self, target: &AssignTarget) -> Printed {
@@ -1362,26 +1183,6 @@ impl<'p> Printer<'p> {
         }
         Ok(name.to_string())
     }
-}
-
-/// A process's authored parameters: a lifted literal's hidden start arguments
-/// are not among them.
-fn authored_params(process: &ProcessDecl) -> &[lashlang::ProcessParam] {
-    let hidden = match &process.origin {
-        lashlang::ProcessOrigin::Lifted { hidden_params, .. } => *hidden_params as usize,
-        lashlang::ProcessOrigin::Declared => 0,
-    };
-    &process.params[..process.params.len().saturating_sub(hidden)]
-}
-
-/// The authored `run` body inside a process-wrapper body.
-pub(super) fn process_run_body(process: &ProcessDecl) -> Option<&Expr> {
-    crate::lower::wrapped_run_body(&process.body)
-}
-
-/// The authored `run` body inside a process *literal*'s wrapper.
-pub(super) fn process_literal_run_body(literal: &ProcessLiteralExpr) -> Option<&Expr> {
-    crate::lower::wrapped_run_body(&literal.body)
 }
 
 /// The statements of a body, in authored order, without the structure that
@@ -1427,114 +1228,6 @@ fn compound_assign_block(items: &[Expr]) -> Option<(&str, &str, &Expr)> {
     .then(|| javascript_binary_op(*op))
     .filter(|op| !op.contains('=') && !matches!(*op, "<" | ">"))
     .map(|operator| (target.root.as_str(), operator, right.as_ref()))
-}
-
-/// The authored target spelling, assignment operator (`=`, or `op=` for an
-/// update) and right-hand side of an attribute-assignment role.
-fn attribute_assignment(
-    expression: &Expr,
-) -> Result<Option<(String, String, &Expr)>, TypeScriptSourceError> {
-    let Expr::Role {
-        role: StructuralRole::AttributeAssign,
-        expr,
-    } = expression
-    else {
-        return Ok(None);
-    };
-    let Some(parts) = lashlang::AttributeAssignParts::of(expr) else {
-        return Ok(None);
-    };
-    let printer = Printer::plain();
-    let object = printer.member_target(parts.object)?;
-    let target = match parts.step {
-        lashlang::AttributeStep::Field(field) => {
-            format!("{object}.{}", printer.identifier("field", field.as_str())?)
-        }
-        lashlang::AttributeStep::Index(index) => {
-            format!("{object}[{}]", printer.expression(index)?)
-        }
-    };
-    Ok(Some(match parts.update {
-        Some(update) => (
-            target,
-            format!("{}=", javascript_binary_op(update.operator.coercing_op())),
-            update.operand,
-        ),
-        None => (target, "=".to_string(), parts.value),
-    }))
-}
-
-/// Prints the settled output as an async return annotation.
-fn process_return_annotation(ty: Option<&TypeExpr>) -> Printed {
-    match ty {
-        Some(ty) => Ok(format!(
-            ": Promise<{}>",
-            type_annotation(ty)?.unwrap_or_else(|| "unknown".to_string())
-        )),
-        None => Ok(String::new()),
-    }
-}
-
-/// The TypeScript annotation a process parameter type lowers from, or `None`
-/// for `Any`, which an unannotated parameter lowers to. It inverts the
-/// lowering's annotation conversion; a type no annotation lowers to is
-/// refused rather than widened.
-fn type_annotation(ty: &TypeExpr) -> Result<Option<String>, TypeScriptSourceError> {
-    fn annotation(ty: &TypeExpr) -> Result<String, TypeScriptSourceError> {
-        Ok(match ty {
-            TypeExpr::Any => "unknown".to_string(),
-            TypeExpr::Str => "string".to_string(),
-            TypeExpr::Float => "number".to_string(),
-            TypeExpr::Bool => "boolean".to_string(),
-            TypeExpr::Null => "null".to_string(),
-            TypeExpr::Enum(values) => values
-                .iter()
-                .map(|value| string_literal(value.as_str()))
-                .collect::<Vec<_>>()
-                .join(" | "),
-            TypeExpr::List(item) => format!("Array<{}>", annotation(item)?),
-            TypeExpr::Object(fields) => format!(
-                "{{ {} }}",
-                fields
-                    .iter()
-                    .map(|field| {
-                        Ok(format!(
-                            "{}{}: {}",
-                            property_name(field.name.as_str()),
-                            if field.optional { "?" } else { "" },
-                            annotation(&field.ty)?
-                        ))
-                    })
-                    .collect::<Result<Vec<_>, TypeScriptSourceError>>()?
-                    .join("; ")
-            ),
-            TypeExpr::Union(items) => items
-                .iter()
-                .map(annotation)
-                .collect::<Result<Vec<_>, _>>()?
-                .join(" | "),
-            TypeExpr::Ref(name) => name.to_string(),
-            _ => {
-                return Err(TypeScriptSourceError::Unrepresentable {
-                    kind: "a process parameter type no TypeScript annotation lowers to",
-                });
-            }
-        })
-    }
-    match ty {
-        TypeExpr::Any => Ok(None),
-        ty => annotation(ty).map(Some),
-    }
-}
-
-/// Whether `expr` awaits in its own function body: a nested closure or process
-/// body awaits on its own account.
-fn awaits_in_own_body(expr: &Expr) -> bool {
-    match expr {
-        Expr::Await(_) => true,
-        Expr::Function(_) | Expr::ProcessLiteral(_) => false,
-        _ => expr.children().any(awaits_in_own_body),
-    }
 }
 
 /// `let` when the loop body reassigns its element binding, `const` otherwise.
@@ -1707,7 +1400,7 @@ fn string_literal(value: &str) -> String {
     out
 }
 
-fn is_typescript_identifier(name: &str) -> bool {
+pub(super) fn is_typescript_identifier(name: &str) -> bool {
     let mut characters = name.chars();
     let Some(first) = characters.next() else {
         return false;

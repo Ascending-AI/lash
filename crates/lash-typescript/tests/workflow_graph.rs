@@ -455,16 +455,9 @@ fn a_draft_claims_no_runtime_identity_and_identity_never_depends_on_printing() {
     assert_eq!(draft.source_identity, None);
 
     let artifact = lashlang::ModuleArtifact::from_program(lashlang::Program::block(vec![
-        lashlang::Expr::Map {
-            items: Box::new(lashlang::Expr::List(vec![])),
-            function: Box::new(lashlang::Expr::Function(Box::new(lashlang::FunctionExpr {
-                name: None,
-                js_name: None,
-                receiver: None,
-                params: vec!["item".into()],
-                captures: vec![],
-                body: Box::new(lashlang::Expr::Variable("item".into())),
-            }))),
+        lashlang::Expr::Call {
+            function: Box::new(lashlang::Expr::Block(vec![lashlang::Expr::Absent])),
+            args: vec![],
         },
     ]))
     .expect("a non-sourceable program still forms an artifact");
