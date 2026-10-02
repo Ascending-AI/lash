@@ -270,6 +270,28 @@ lash_rust_feature_library(
 )
 
 lash_rust_feature_test(
+    name = "lash-trace__unit_test__fv_8ada4082",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_trace",
+    crate_root = "src/lib.rs",
+    declared_features = [
+        "default",
+        "otel",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-trace", "lash_trace", "//crates/lash-trace:lash-trace__unit_test__fv_8ada4082"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-trace",
+    package_name = "lash-internal-trace",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_09d91587", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_8ada4082"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
     name = "lash-trace__unit_test__fv_971baab0",
     build_script = None,
     crate_features = [
@@ -291,6 +313,32 @@ lash_rust_feature_test(
     ],
     extra_deps = {"//third-party/rust:p0235": "opentelemetry"},
     variant_deps = {"//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_09d91587", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_971baab0"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "schema__test__fv_8ada4082",
+    crate_features = [],
+    crate_name = "schema",
+    crate_root = "tests/schema.rs",
+    declared_features = [
+        "default",
+        "otel",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-trace", "schema", "//crates/lash-trace:schema__test__fv_8ada4082"),
+    extra_compile_data = [
+        "//:host_schemas",
+    ],
+    library = "//crates/lash-trace:lash-trace__fv_8ada4082",
+    library_crate_name = "lash_trace",
+    manifest_dir = "crates/lash-trace",
+    package_name = "lash-internal-trace",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_09d91587"},
     version = "0.0.0-dev",
 )
 
@@ -324,6 +372,31 @@ lash_rust_feature_test(
 )
 
 lash_rust_feature_binary(
+    name = "trace_schema_generator__bin__fv_8ada4082",
+    crate_features = [],
+    crate_name = "trace_schema_generator",
+    crate_root = "src/bin/trace_schema_generator.rs",
+    declared_features = [
+        "default",
+        "otel",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-trace", "trace_schema_generator"),
+    extra_compile_data = [],
+    include_dev_deps = False,
+    library = "//crates/lash-trace:lash-trace__fv_8ada4082",
+    library_crate_name = "lash_trace",
+    manifest_dir = "crates/lash-trace",
+    package_name = "lash-internal-trace",
+    rustc_env = {},
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_09d91587"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_binary(
     name = "trace_schema_generator__bin__fv_971baab0",
     crate_features = [
         "otel",
@@ -347,6 +420,29 @@ lash_rust_feature_binary(
         "manual",
     ],
     extra_deps = {"//third-party/rust:p0235": "opentelemetry"},
+    variant_deps = {"//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_09d91587"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "trace_schema_generator__bin__unit_test__fv_8ada4082",
+    crate_features = [],
+    crate_name = "trace_schema_generator",
+    crate_root = "src/bin/trace_schema_generator.rs",
+    declared_features = [
+        "default",
+        "otel",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-trace", "trace_schema_generator", "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_8ada4082"),
+    extra_compile_data = [],
+    library = "//crates/lash-trace:lash-trace__fv_8ada4082",
+    library_crate_name = "lash_trace",
+    manifest_dir = "crates/lash-trace",
+    package_name = "lash-internal-trace",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
     variant_deps = {"//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_09d91587"},
     version = "0.0.0-dev",
 )

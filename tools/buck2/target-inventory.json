@@ -534,9 +534,13 @@
     "//crates/lash-trace:lash-trace__fv_971baab0[static]",
     "//crates/lash-trace:lash-trace__fv_ca9352be[static]",
     "//crates/lash-trace:lash-trace__fv_edf563c6[static]",
+    "//crates/lash-trace:lash-trace__unit_test__fv_8ada4082",
     "//crates/lash-trace:lash-trace__unit_test__fv_971baab0",
+    "//crates/lash-trace:schema__test__fv_8ada4082",
     "//crates/lash-trace:schema__test__fv_971baab0",
+    "//crates/lash-trace:trace_schema_generator__bin__fv_8ada4082",
     "//crates/lash-trace:trace_schema_generator__bin__fv_971baab0",
+    "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_8ada4082",
     "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_971baab0",
     "//crates/lash-typescript:lash-typescript__fv_14b892bf[static]",
     "//crates/lash-typescript:lash-typescript__fv_17e95450[static]",
@@ -1554,9 +1558,13 @@
     "//crates/lash-trace:lash-trace__fv_971baab0[check]",
     "//crates/lash-trace:lash-trace__fv_ca9352be[check]",
     "//crates/lash-trace:lash-trace__fv_edf563c6[check]",
+    "//crates/lash-trace:lash-trace__unit_test__fv_8ada4082[check]",
     "//crates/lash-trace:lash-trace__unit_test__fv_971baab0[check]",
+    "//crates/lash-trace:schema__test__fv_8ada4082[check]",
     "//crates/lash-trace:schema__test__fv_971baab0[check]",
+    "//crates/lash-trace:trace_schema_generator__bin__fv_8ada4082[check]",
     "//crates/lash-trace:trace_schema_generator__bin__fv_971baab0[check]",
+    "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_8ada4082[check]",
     "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_971baab0[check]",
     "//crates/lash-typescript:lash-typescript__fv_14b892bf[check]",
     "//crates/lash-typescript:lash-typescript__fv_17e95450[check]",
@@ -2592,9 +2600,13 @@
     "//crates/lash-trace:lash-trace__fv_971baab0",
     "//crates/lash-trace:lash-trace__fv_ca9352be",
     "//crates/lash-trace:lash-trace__fv_edf563c6",
+    "//crates/lash-trace:lash-trace__unit_test__fv_8ada4082",
     "//crates/lash-trace:lash-trace__unit_test__fv_971baab0",
+    "//crates/lash-trace:schema__test__fv_8ada4082",
     "//crates/lash-trace:schema__test__fv_971baab0",
+    "//crates/lash-trace:trace_schema_generator__bin__fv_8ada4082",
     "//crates/lash-trace:trace_schema_generator__bin__fv_971baab0",
+    "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_8ada4082",
     "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_971baab0",
     "//crates/lash-typescript:lash-typescript__fv_14b892bf",
     "//crates/lash-typescript:lash-typescript__fv_17e95450",
@@ -31657,6 +31669,18 @@
       "package": "lash-internal-sansio"
     },
     {
+      "build_label": "//crates/lash-sansio:lash-sansio__fv_09d91587[static]",
+      "check_label": "//crates/lash-sansio:lash-sansio__fv_09d91587[check]",
+      "clippy_label": "//crates/lash-sansio:lash-sansio__fv_09d91587__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-sansio:lash-sansio__fv_09d91587[doc]",
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-sansio:lash-sansio__fv_09d91587",
+      "package": "lash-internal-sansio"
+    },
+    {
       "build_label": "//crates/lash-sansio:lash-sansio__fv_32f43af7[static]",
       "check_label": "//crates/lash-sansio:lash-sansio__fv_32f43af7[check]",
       "clippy_label": "//crates/lash-sansio:lash-sansio__fv_32f43af7__clippy[clippy.txt]",
@@ -36509,15 +36533,13 @@
       "package": "lash-internal-trace"
     },
     {
-      "build_label": "//crates/lash-trace:lash-trace__fv_971baab0[static]",
-      "check_label": "//crates/lash-trace:lash-trace__fv_971baab0[check]",
-      "clippy_label": "//crates/lash-trace:lash-trace__fv_971baab0__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-trace:lash-trace__fv_971baab0[doc]",
-      "features": [
-        "otel"
-      ],
+      "build_label": "//crates/lash-trace:lash-trace__fv_8ada4082[static]",
+      "check_label": "//crates/lash-trace:lash-trace__fv_8ada4082[check]",
+      "clippy_label": "//crates/lash-trace:lash-trace__fv_8ada4082__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-trace:lash-trace__fv_8ada4082[doc]",
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-trace:lash-trace__fv_971baab0",
+      "label": "//crates/lash-trace:lash-trace__fv_8ada4082",
       "package": "lash-internal-trace"
     },
     {
@@ -36533,6 +36555,18 @@
       "package": "lash-internal-trace"
     },
     {
+      "build_label": "//crates/lash-trace:lash-trace__fv_971baab0[static]",
+      "check_label": "//crates/lash-trace:lash-trace__fv_971baab0[check]",
+      "clippy_label": "//crates/lash-trace:lash-trace__fv_971baab0__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-trace:lash-trace__fv_971baab0[doc]",
+      "features": [
+        "otel"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-trace:lash-trace__fv_971baab0",
+      "package": "lash-internal-trace"
+    },
+    {
       "build_label": "//crates/lash-trace:lash-trace__fv_ca9352be[static]",
       "check_label": "//crates/lash-trace:lash-trace__fv_ca9352be[check]",
       "clippy_label": "//crates/lash-trace:lash-trace__fv_ca9352be__clippy[clippy.txt]",
@@ -37064,6 +37098,15 @@
       ],
       "kind": "lib",
       "label": "//crates/lash-trace:lash-trace__fv_edf563c6",
+      "package": "lash-internal-trace"
+    },
+    {
+      "build_label": "//crates/lash-trace:lash-trace__unit_test__fv_8ada4082",
+      "check_label": "//crates/lash-trace:lash-trace__unit_test__fv_8ada4082[check]",
+      "clippy_label": "//crates/lash-trace:lash-trace__unit_test__fv_8ada4082__clippy[clippy.txt]",
+      "features": [],
+      "kind": "unit-test",
+      "label": "//crates/lash-trace:lash-trace__unit_test__fv_8ada4082",
       "package": "lash-internal-trace"
     },
     {
@@ -37078,6 +37121,15 @@
       "package": "lash-internal-trace"
     },
     {
+      "build_label": "//crates/lash-trace:schema__test__fv_8ada4082",
+      "check_label": "//crates/lash-trace:schema__test__fv_8ada4082[check]",
+      "clippy_label": "//crates/lash-trace:schema__test__fv_8ada4082__clippy[clippy.txt]",
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash-trace:schema__test__fv_8ada4082",
+      "package": "lash-internal-trace"
+    },
+    {
       "build_label": "//crates/lash-trace:schema__test__fv_971baab0",
       "check_label": "//crates/lash-trace:schema__test__fv_971baab0[check]",
       "clippy_label": "//crates/lash-trace:schema__test__fv_971baab0__clippy[clippy.txt]",
@@ -37089,6 +37141,15 @@
       "package": "lash-internal-trace"
     },
     {
+      "build_label": "//crates/lash-trace:trace_schema_generator__bin__fv_8ada4082",
+      "check_label": "//crates/lash-trace:trace_schema_generator__bin__fv_8ada4082[check]",
+      "clippy_label": "//crates/lash-trace:trace_schema_generator__bin__fv_8ada4082__clippy[clippy.txt]",
+      "features": [],
+      "kind": "bin",
+      "label": "//crates/lash-trace:trace_schema_generator__bin__fv_8ada4082",
+      "package": "lash-internal-trace"
+    },
+    {
       "build_label": "//crates/lash-trace:trace_schema_generator__bin__fv_971baab0",
       "check_label": "//crates/lash-trace:trace_schema_generator__bin__fv_971baab0[check]",
       "clippy_label": "//crates/lash-trace:trace_schema_generator__bin__fv_971baab0__clippy[clippy.txt]",
@@ -37097,6 +37158,15 @@
       ],
       "kind": "bin",
       "label": "//crates/lash-trace:trace_schema_generator__bin__fv_971baab0",
+      "package": "lash-internal-trace"
+    },
+    {
+      "build_label": "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_8ada4082",
+      "check_label": "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_8ada4082[check]",
+      "clippy_label": "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_8ada4082__clippy[clippy.txt]",
+      "features": [],
+      "kind": "bin-unit-test",
+      "label": "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_8ada4082",
       "package": "lash-internal-trace"
     },
     {
@@ -48062,9 +48132,13 @@
       "//crates/lash-trace:lash-trace__fv_8ada4082",
       "//crates/lash-trace:lash-trace__fv_971baab0",
       "//crates/lash-trace:lash-trace__fv_edf563c6",
+      "//crates/lash-trace:lash-trace__unit_test__fv_8ada4082",
       "//crates/lash-trace:lash-trace__unit_test__fv_971baab0",
+      "//crates/lash-trace:schema__test__fv_8ada4082",
       "//crates/lash-trace:schema__test__fv_971baab0",
+      "//crates/lash-trace:trace_schema_generator__bin__fv_8ada4082",
       "//crates/lash-trace:trace_schema_generator__bin__fv_971baab0",
+      "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_8ada4082",
       "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_971baab0",
       "//crates/lash-vm-broker:lash-vm-broker__fv_f2ed5911",
       "//crates/lash-vm-protocol:lash-vm-protocol",
@@ -54071,11 +54145,14 @@
     "//crates/lash-subagents:lash-subagents__unit_test": 300,
     "//crates/lash-tool-support:lash-tool-support__unit_test": 300,
     "//crates/lash-trace:lash-trace__unit_test": 300,
+    "//crates/lash-trace:lash-trace__unit_test__fv_8ada4082": 300,
     "//crates/lash-trace:lash-trace__unit_test__fv_971baab0": 300,
     "//crates/lash-trace:schema__test": 300,
+    "//crates/lash-trace:schema__test__fv_8ada4082": 300,
     "//crates/lash-trace:schema__test__fv_971baab0": 300,
     "//crates/lash-trace:test_batch": 300,
     "//crates/lash-trace:trace_schema_generator__bin__unit_test": 300,
+    "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_8ada4082": 300,
     "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_971baab0": 300,
     "//crates/lash-typescript:carrier_laws__test": 300,
     "//crates/lash-typescript:corpus_laws__test": 300,

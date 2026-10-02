@@ -27,7 +27,7 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTEXT = "CONTEXT.md"
-ADR_0030 = "docs/adr/0030-the-session-model-is-resolved-once-at-open.md"
+ADR_0030 = "docs/adr/0030-the-session-profile-is-resolved-once-at-open.md"
 ADR_0101 = "docs/adr/0101-one-session-ingress-carries-every-admitted-item.md"
 WAKE_DOC = "crates/lash-core-store/src/queued_work_vocabulary.rs"
 

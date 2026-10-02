@@ -581,6 +581,8 @@ UNCONSUMED_CI_PATHS: Mapping[str, str] = {
     "scripts/test-mcp-catalog.sh": "run by hand through kiln gate to repeat the MCP catalog turn-path and native Restate witnesses",
     "scripts/tool-batch-baseline.sh": "run by hand for the tool-batch baseline measurement",
     "scripts/test_landing_gates.py": "run on the lander beside scripts/ci/landing-gates.sh; it needs `kiln` on PATH, which the repository-gates runners do not have",
+    "scripts/generate-process-env-identity-golden.py": "run by hand to rewrite the process-environment identity fixture from the ignored generator's test log",
+    "scripts/release-rehearsal.sh": "run by hand in a disposable Kiln fork through its private PostgreSQL gate to rehearse the 1.0 baseline reset",
 }
 
 # Directories a CI script reads whole, one file per change -- the

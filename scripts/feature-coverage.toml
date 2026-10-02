@@ -77,6 +77,7 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-trace", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-trace", "--lib", "--no-default-features", "--features", "otel", "--locked"],
   ["cargo", "test", "-p", "lash-internal-trace", "--no-default-features", "--features", "otel", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-trace", "--tests", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-ids", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-effect", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-effect", "--lib", "--no-default-features", "--features", "otel-trace", "--locked"],

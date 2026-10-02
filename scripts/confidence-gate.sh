@@ -102,7 +102,7 @@ else
     process) selected_packages=(lash-internal-core-execution lash-internal-core-worker) ;;
     trigger) selected_packages=(lash-internal-core-execution) ;;
     effect-host) selected_packages=(lash-internal-core-execution lash-internal-core-effect lash-internal-conformance) ;;
-    provider) selected_packages=(lash-internal-core-execution lash-internal-core-llm) ;;
+    provider) selected_packages=(lash-internal-core-execution lash-internal-core-llm lash-internal-sansio) ;;
     protocol) selected_packages=(lash-internal-lashlang lash-internal-protocol-rlm lash-internal-protocol-standard) ;;
     sim) selected_packages=(lash-sim) ;;
   esac
@@ -135,7 +135,7 @@ else
     provider)
       area_mutation_file_args=(
         --file 'crates/lash-core-execution/src/direct.rs'
-        --file 'crates/lash-core-llm/src/llm_profile.rs'
+        --file 'crates/lash-sansio/src/llm_profile.rs'
         --file 'crates/lash-core-llm/src/llm/*.rs'
         --file 'crates/lash-core-llm/src/provider/*.rs'
       )
@@ -2394,15 +2394,15 @@ run_lash_core_direct_model_mutation_evidence() {
     -- --locked -p lash-internal-core-execution --lib direct
   run_mutants_recorded "lash-core model token-limit survivors" "${out_dir}/mutants-lash-core-model-targeted" \
     cargo mutants \
-    -p lash-internal-core-llm \
-    --file crates/lash-core-llm/src/llm_profile.rs \
-    --re 'LlmProfileMetadata::new|LlmProfileMetadata::with_limits|LlmProfileMetadataBuilder::build|LlmProfileLimits::validated|LlmProfileMetadata::context_window_tokens|RecordedLlmProfile::context_window_tokens|LlmProfileConfig::context_window_tokens' \
+    -p lash-internal-sansio \
+    --file crates/lash-sansio/src/llm_profile.rs \
+    --re 'LlmProfileMetadata::new|LlmProfileMetadata::with_limits|LlmProfileMetadataBuilder::build|OutputTokenLimits::new|LlmProfileMetadata::context_window_tokens|RecordedLlmProfile::context_window_tokens|LlmProfileConfig::context_window_tokens' \
     --baseline skip \
     --jobs "$mutation_jobs" \
     --timeout "$timeout" \
     --minimum-test-timeout 30 \
     --output "${out_dir}/mutants-lash-core-model-targeted" \
-    -- --locked -p lash-internal-core-llm --lib llm_profile
+    -- --locked -p lash-internal-sansio --lib llm_profile
 }
 
 run_authority_rebind_mutation_evidence() {

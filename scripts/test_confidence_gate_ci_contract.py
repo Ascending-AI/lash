@@ -3353,7 +3353,7 @@ derive_mutation_jobs() {{
         store_suites = STORE_TESTS.read_text(encoding="utf-8")
         for suite in ("pg-artifact-referrers", "pg-attachment-referrers"):
             selection = next(line for line in store_suites.splitlines() if f"[{suite}]=" in line)
-            self.assertIn("|::postgres|", selection)
+            self.assertIn("|postgres|", selection)
             self.assertIn("include-ignored", selection)
 
     def test_buck2_store_runtime_flags_and_reports_are_forwarded(self) -> None:
@@ -3647,6 +3647,7 @@ derive_mutation_jobs() {{
                 "sansio-schema-validation",
                 "otel-feature-chain",
                 "core-internal-features",
+                "figments-facade",
                 "language-testing-features",
                 "llm-transport-features",
                 "store-features",

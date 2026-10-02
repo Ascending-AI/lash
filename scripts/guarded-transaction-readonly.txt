@@ -17,6 +17,8 @@ sqlite crates/lash-sqlite-store/src/compat.rs::verify_tolerant  # writes only it
 sqlite crates/lash-sqlite-store/src/preflight.rs::read_compat_verdict  # runs verify_tolerant, whose writes go to its private in-memory baseline
 sqlite crates/lash-sqlite-store/src/session_meta.rs::load_session_meta  # one snapshot for the metadata read; the transaction writes nothing
 sqlite crates/lash-sqlite-store/src/process_registry_change.rs::processes_changed_since_conn  # one snapshot for the change page and its horizon; writes nothing
+sqlite crates/lash-sqlite-store/src/triggers/subscription_changes.rs::changed_since  # one snapshot for the cursor page and its compaction horizon; writes nothing
+sqlite crates/lash-sqlite-store/src/triggers/subscription_changes.rs::snapshot  # one snapshot for the live-subscription listing and the change clock; writes nothing
 sqlite crates/lash-sqlite-store/src/blobs.rs::raw_checkpoint_from_path_for_testing  # testing-only raw connection that decodes one checkpoint
 
 # --- PostgreSQL (lane L2) ---
@@ -56,3 +58,5 @@ postgres crates/lash-postgres-store/src/postgres/ingress_obligation.rs::peek_due
 postgres crates/lash-postgres-store/src/postgres/trigger_store.rs::list_subscriptions  # a subscription listing, the SELECT its filter's shape names
 postgres crates/lash-postgres-store/src/postgres/trigger_store.rs::list_occurrences  # an occurrence listing, the SELECT its filter's shape names
 postgres crates/lash-postgres-store/src/postgres/trigger_store.rs::list_deliveries_with  # runs the delivery listing SELECT its callers pass
+postgres crates/lash-postgres-store/src/postgres/trigger_store.rs::subscriptions_changed_since  # reads a cursor page and its compaction horizon in one REPEATABLE READ READ ONLY snapshot
+postgres crates/lash-postgres-store/src/postgres/trigger_store.rs::list_subscriptions_with_cursor  # reads the live subscriptions and the change clock in one REPEATABLE READ READ ONLY snapshot
