@@ -737,7 +737,7 @@ async fn a_recorded_budget_bounds_every_root_after_an_engine_restart(
     first: lash_core::Backend,
     restart: impl AsyncFnOnce() -> lash_core::Backend,
     prefix: &str,
-) -> Result<()> {
+) -> Result<LashCore> {
     let created = format!("{prefix}-created-bounded");
     let commanded = format!("{prefix}-commanded-bounded");
     let calls = Arc::new(AtomicUsize::new(0));
@@ -800,7 +800,7 @@ async fn a_recorded_budget_bounds_every_root_after_an_engine_restart(
         );
         eprintln!("{PROGRESS_MARKER}{id}: the host-opened root stopped at its budget");
     }
-    Ok(())
+    Ok(unbounded)
 }
 
 /// The law on the server double: the restart is `first`'s deployment
@@ -819,6 +819,7 @@ async fn after_a_restart_of_the_double(first: lash_restate_test::RestateTestBack
         "restart",
     )
     .await
+    .map(|_| ())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -894,7 +895,7 @@ async fn live_a_recorded_budget_bounds_every_root_after_a_deployment_restart() -
         second.finish().await;
     }
     first.finish().await;
-    result
+    result.map(|_| ())
 }
 
 /// How many times a `max_tool_calls` refusal appears in what the model is

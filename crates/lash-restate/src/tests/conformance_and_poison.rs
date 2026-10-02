@@ -351,8 +351,10 @@ mod recorded_execution_controls_live {
 lash_conformance::turn_runner_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
-        let harness =
-            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let harness = Arc::new(
+            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await,
+        );
+        let teardown = Arc::clone(&harness);
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let stores = harness.law_stores();
@@ -381,6 +383,13 @@ lash_conformance::turn_runner_tests!(
             move |law: &'static str| async move {
                 if law == "public_signal_intent_wakes_parked_process" {
                     verify_transport.assert_reattached_once();
+                }
+                if law == "a_diverged_tool_presentation_parks_the_turn" {
+                    teardown
+                        .kill_open(
+                            "the presentation-divergence law deliberately leaves its turn parked",
+                        )
+                        .await;
                 }
             },
         )
@@ -831,6 +840,9 @@ lash_conformance::effect_group_host_tests!(
         let harness = effect_group_conformance::LiveConformanceHarness::start().await;
         let factory = harness.group_host_factory();
         (harness, factory)
+    };
+    teardown |harness: effect_group_conformance::LiveConformanceHarness, law: &'static str| async move {
+        harness.finish_group_law(law).await;
     }
 );
 

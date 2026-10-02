@@ -7,6 +7,7 @@ import argparse
 import contextlib
 import importlib.util
 import io
+import http.server
 import json
 import itertools
 import os
@@ -15,6 +16,7 @@ import socket
 import stat
 import sys
 import tempfile
+import threading
 import textwrap
 import unittest
 from unittest import mock
@@ -373,13 +375,48 @@ class RunnerTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.directory.name)
         self.fake = FakeBinary(self.root)
+        self.rows = []
+        self.killed = []
+        self.admin_failure = False
+        owner = self
+
+        class Admin(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                owner.assertEqual("/query", self.path)
+                query = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                owner.assertIn("status != 'completed'", query["query"])
+                owner.assertTrue(owner.fake.calls(), "the law must exit before its census")
+                self.send_response(503 if owner.admin_failure else 200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"rows": owner.rows}).encode())
+
+            def do_PATCH(self):
+                invocation = self.path.split("/")[2]
+                owner.assertEqual(f"/invocations/{invocation}/kill", self.path)
+                owner.killed.append(invocation)
+                owner.rows = [row for row in owner.rows if row["id"] != invocation]
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        self.admin = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Admin)
+        self.admin_thread = threading.Thread(target=self.admin.serve_forever, kwargs={"poll_interval": 0.01})
+        self.admin_thread.start()
+        self.fake.env["RESTATE_ADMIN_URL"] = f"http://127.0.0.1:{self.admin.server_port}"
         self.patch_env = mock.patch.dict(os.environ, {
             "FAKE_ARGV_LOG": str(self.fake.argv_log),
             "LASH_VM_WORKER": str(self.fake.path),
+            "RESTATE_ADMIN_URL": self.fake.env["RESTATE_ADMIN_URL"],
         })
         self.patch_env.start()
 
     def tearDown(self) -> None:
+        self.admin.shutdown()
+        self.admin_thread.join()
+        self.admin.server_close()
         self.patch_env.stop()
         self.directory.cleanup()
 
@@ -421,6 +458,37 @@ class RunnerTests(unittest.TestCase):
     def test_the_panic_gate_fails_a_green_law_with_a_panic_in_its_output(self) -> None:
         self.assertEqual("ok", self.run_one("tests::panics_in_background"))
         self.assertEqual("panicked", self.run_one("tests::panics_in_background", panic_gate=True))
+
+    def test_leftovers_fail_a_passing_law_and_are_named_and_killed_before_the_next(self) -> None:
+        self.rows = [
+            dict(id="inv_b", target="Flow/b/run", status="suspended", retry_count=0, last_failure=None),
+            dict(id="inv_a", target="Flow/a/run", status="backing-off", retry_count=3, last_failure="broken"),
+        ]
+        self.assertEqual("leftovers", self.run_one("tests::passes"))
+        self.assertEqual(["inv_a", "inv_b"], self.killed)
+        output = (self.root / "out.log").read_text()
+        self.assertIn("tests::passes", output)
+        self.assertIn("Flow/a/run", output)
+        self.assertIn("backing-off", output)
+        self.assertIn("attempt=4", output)
+        self.assertIn("broken", output)
+        self.assertLess(output.index("inv_a"), output.index("inv_b"))
+        self.assertEqual("ok", self.run_one("tests::passes"))
+
+    def test_leftovers_are_killed_after_a_law_panics(self) -> None:
+        self.rows = [dict(id="inv_failed", target="Flow/fail/run", status="running")]
+        self.assertEqual("leftovers", self.run_one("tests::fails"))
+        self.assertEqual(["inv_failed"], self.killed)
+
+    def test_leftovers_are_killed_after_a_law_times_out(self) -> None:
+        self.rows = [dict(id="inv_timeout", target="Flow/hang/run", status="running")]
+        self.assertEqual("leftovers", self.run_one("tests::hangs", timeout=0.1))
+        self.assertEqual(["inv_timeout"], self.killed)
+
+    def test_an_admin_failure_cannot_certify_a_clean_law(self) -> None:
+        self.admin_failure = True
+        with self.assertRaisesRegex(RuntimeError, "tests::passes.*teardown"):
+            self.run_one("tests::passes")
 
     def suite(self, replay_divergent: dict[str, str]) -> object:
         return MODULE.Suite(
@@ -479,6 +547,24 @@ class RunnerTests(unittest.TestCase):
         with mock.patch.object(MODULE, "RestateServer"), contextlib.redirect_stdout(output):
             self.assertEqual(0, MODULE.run_suite(suite, "replay", self.args(only=["tests::fails"])))
         self.assertIn("held", output.getvalue())
+
+    def test_a_replay_divergence_cannot_excuse_leftovers(self) -> None:
+        self.rows = [dict(id="inv_held", target="Flow/held/run", status="suspended")]
+        suite = self.suite({"tests::fails": "held back (FIG-9)"})
+        with mock.patch.object(MODULE, "RestateServer"), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(1, MODULE.run_suite(suite, "replay", self.args(only=["tests::fails"])))
+        self.assertEqual(["inv_held"], self.killed)
+
+    def test_a_failed_teardown_is_attributed_and_stops_the_shard(self) -> None:
+        self.admin_failure = True
+        with mock.patch.object(MODULE, "RestateServer"), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(1, MODULE.run_suite(self.suite({}), "live", self.args(only=["passes", "fails"])))
+        summary = json.loads((self.root / "artifacts/fake-live/summary.json").read_text())
+        self.assertEqual(["tests::passes"], [test["name"] for test in summary["tests"]])
+        self.assertEqual("teardown_failed", summary["tests"][0]["status"])
+        self.assertEqual(["tests::fails"], summary["not_run"])
+        runs = [call[0] for call in self.fake.calls() if "--list" not in call]
+        self.assertEqual(["tests::passes"], runs)
 
     def test_a_held_law_failing_the_live_leg_fails_the_run(self) -> None:
         suite = self.suite({"tests::fails": "held back (FIG-9)"})

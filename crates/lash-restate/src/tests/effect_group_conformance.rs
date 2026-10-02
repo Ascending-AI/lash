@@ -435,6 +435,21 @@ pub(super) struct LiveConformanceHarness {
     server: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
+impl Drop for LiveConformanceHarness {
+    fn drop(&mut self) {
+        if matches!(self.admin, HarnessAdmin::Live { .. })
+            && self.shutdown_tx.get_mut().is_some()
+            && !std::thread::panicking()
+        {
+            // Registration macros retain this guard through the law. Finish
+            // before their runtime exits, while its endpoint can still serve.
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(self.finish());
+            });
+        }
+    }
+}
+
 impl LiveConformanceHarness {
     /// The shared-laws endpoint on a live server.
     pub(super) async fn start() -> Self {
@@ -945,12 +960,77 @@ impl LiveConformanceHarness {
     /// a registration fixture's maker, witness and teardown can still be torn
     /// down exactly once; a second call is a no-op.
     pub(super) async fn finish(&self) {
+        if self.shutdown_tx.lock().await.is_none() {
+            return;
+        }
+        let mut open = Vec::new();
+        let census = if matches!(self.admin, HarnessAdmin::Live { .. }) {
+            let admin = self.admin_client();
+            Some(tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    open = admin
+                        .query_json::<lash_restate_test::live::LiveInvocation>(
+                            "SELECT id, target, status, retry_count, last_failure FROM sys_invocation \
+                             WHERE status != 'completed' ORDER BY id",
+                        )
+                        .await?;
+                    if open.is_empty() {
+                        return Ok::<_, crate::RestateHttpError>(());
+                    }
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            }).await)
+        } else {
+            None
+        };
         if let Some(shutdown_tx) = self.shutdown_tx.lock().await.take() {
             let _ = shutdown_tx.send(());
         }
         if let Some(server) = self.server.lock().await.take() {
             server.await.expect("Restate effect-group endpoint task");
         }
+        if let Some(census) = census {
+            match census {
+                Ok(Ok(())) => (),
+                Ok(Err(error)) => panic!("finish census failed: {error}"),
+                Err(_) if open.is_empty() => {
+                    panic!("finish census did not complete within five seconds")
+                }
+                Err(_) => panic!("unexpected leftover invocations: {open:#?}"),
+            }
+        }
+    }
+
+    pub(super) async fn kill_open(&self, reason: &str) {
+        assert!(
+            !reason.trim().is_empty() && !reason.contains(['\n', '\r']),
+            "kill_open requires a nonempty, one-line reason",
+        );
+        let admin = self.admin_client();
+        tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let open = admin
+                    .query_json::<lash_restate_test::live::LiveInvocation>(
+                        "SELECT id, target, status, retry_count, last_failure FROM sys_invocation \
+                         WHERE status != 'completed' ORDER BY id",
+                    )
+                    .await
+                    .expect("kill_open census");
+                if open.is_empty() {
+                    return;
+                }
+                eprintln!("kill_open: {reason}\n{open:#?}");
+                for row in open {
+                    admin
+                        .kill_invocation(&crate::RestateInvocationId::new(row.id))
+                        .await
+                        .expect("kill deliberately unfinished invocation");
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("kill_open completes within thirty seconds");
     }
 
     /// FIG-3564 on live Restate: an over-budget group open gives up with the

@@ -790,6 +790,79 @@ async fn live_restate_a_registration_over_another_deployments_names_is_refused()
     holder.finish().await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs a live restate-server: the namespaces Restate suite runs it"]
+async fn live_restate_finish_rejects_leftovers_without_killing_foreign_work() {
+    let tag = run_tag("teardown");
+    let own = live_backend("NS_A", namespace(&format!("own-{tag}")), "own")
+        .await
+        .expect("own deployment");
+    let foreign = live_backend("NS_B", namespace(&format!("foreign-{tag}")), "foreign")
+        .await
+        .expect("foreign deployment");
+    let mut ids = Vec::new();
+    let mut holds = Vec::new();
+    for backend in [&own, &foreign] {
+        let service = backend.service_name("LashTurn");
+        holds.push(backend.hold(&service, None));
+        ids.push(
+            backend
+                .ingress()
+                .send_workflow_json(&service, &tag, "run", &json!({}))
+                .await
+                .expect("accept held invocation"),
+        );
+    }
+    let rows = own.invocations().await.expect("owned census");
+    assert_eq!(rows.len(), 1, "the law must exercise an owned leftover");
+    assert_eq!(
+        rows[0].id,
+        ids[0].as_str(),
+        "the census reached the held invocation"
+    );
+    assert_ne!(rows[0].status, "completed");
+    let finishing = own.clone();
+    let result = tokio::spawn(async move { finishing.finish().await }).await;
+    let error = result.expect_err("finish must fail rather than silently kill an open invocation");
+    let panic = error.into_panic();
+    let message = panic
+        .downcast_ref::<String>()
+        .expect("named leftover panic");
+    for expected in [
+        &rows[0].id,
+        &rows[0].target,
+        "status=",
+        "attempt=",
+        "last_failure=",
+    ] {
+        assert!(message.contains(expected), "missing {expected}: {message}");
+    }
+    assert_ne!(
+        own.invocations().await.expect("no silent kill")[0].status,
+        "completed"
+    );
+    assert_ne!(
+        foreign.invocations().await.expect("foreign work remains")[0].status,
+        "completed"
+    );
+    own.kill_open("the teardown law deliberately holds an owned invocation")
+        .await;
+    own.finish().await;
+    assert_ne!(
+        foreign
+            .invocations()
+            .await
+            .expect("finish excludes foreign work")[0]
+            .status,
+        "completed"
+    );
+    foreign
+        .kill_open("the teardown law deliberately holds a foreign invocation")
+        .await;
+    foreign.finish().await;
+    drop(holds);
+}
+
 /// This test crate's one path to a session that may not exist yet
 /// (FIG-4112): only `create` creates, so this creates `session_id` with the
 /// core's config unless the catalog already holds it, then hands back the

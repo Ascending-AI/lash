@@ -14,7 +14,7 @@ lifecycle it promises -- the chosen port reaching the command, teardown on a
 readiness failure, teardown on Ctrl-C, `all` in declared order -- is proven
 rather than asserted about the source. The `restate` service is a native
 process rather than a container, so its checks run a fake `restate-server`
-that answers the two health probes the real one does.
+that answers the health and query-readiness probes the real one does.
 """
 
 from __future__ import annotations
@@ -472,14 +472,23 @@ class WithServiceBehaviour(unittest.TestCase):
             self.assertIn("no command given", result.stderr)
 
 
-# A stand-in `restate-server`: it answers the admin and ingress health probes on
-# the addresses the launcher assigns, and records its pid so a test can see it
-# stopped.
+# A stand-in `restate-server`: it answers health and admin query probes on the
+# addresses the launcher assigns, and records its pid so a test can see it stopped.
 FAKE_RESTATE_SERVER = """\
 #!/usr/bin/env python3
 import http.server, os, pathlib, threading
 
 class Ok(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        if self.path != "/query":
+            self.send_error(404)
+            return
+        self.rfile.read(int(self.headers["Content-Length"]))
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(b'{"rows": []}')
+
     def do_GET(self):
         self.send_response(200)
         self.end_headers()

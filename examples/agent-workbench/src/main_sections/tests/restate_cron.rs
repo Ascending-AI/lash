@@ -127,6 +127,44 @@ pub(crate) struct LiveRestateCronScenario {
 }
 
 impl LiveRestateCronScenario {
+    pub(crate) async fn kill_open(&self, reason: &str) {
+        assert!(
+            !reason.trim().is_empty() && !reason.contains(['\n', '\r']),
+            "kill_open requires a nonempty, one-line reason",
+        );
+        let admin =
+            lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::with_client(
+                &self.state.restate_admin_url,
+                self.state.restate_http.clone(),
+            ));
+        let target = format!("WorkbenchCronJob/{}/run", self.cron_job_key);
+        tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let open = admin
+                    .query_json::<lash_restate_test::live::LiveInvocation>(&format!(
+                        "SELECT id, target, status, retry_count, last_failure FROM sys_invocation \
+                         WHERE status != 'completed' AND target = '{}' ORDER BY id",
+                        target.replace('\'', "''"),
+                    ))
+                    .await
+                    .expect("query the deliberately scheduled cron job");
+                if open.is_empty() {
+                    return;
+                }
+                eprintln!("kill_open: {reason}\n{open:#?}");
+                for row in open {
+                    admin
+                        .kill_invocation(&lash_restate::RestateInvocationId::new(row.id))
+                        .await
+                        .expect("kill the deliberately scheduled cron job");
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("cron cleanup completes within thirty seconds");
+    }
+
     pub(crate) async fn shutdown(mut self) {
         self.endpoint
             .stop_after_producers_closed_and_drained(&self.state, Duration::from_secs(30))

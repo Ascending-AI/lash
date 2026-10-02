@@ -76,6 +76,8 @@ import threading
 import time
 import tomllib
 import urllib.request
+import urllib.error
+import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
@@ -245,10 +247,11 @@ class FixedPort:
         pass
 
 
-def http_ok(url: str) -> bool:
+def http_ok(url: str, body: bytes | None = None) -> bool:
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    request = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
     try:
-        with opener.open(url, timeout=2) as response:
+        with opener.open(request, timeout=2) as response:
             return 200 <= response.status < 300
     except OSError:
         return False
@@ -327,8 +330,13 @@ class RestateServer:
                 start_new_session=True,
             )
         started = time.monotonic()
-        for url in (f"{self.admin_url}/health", f"{self.ingress_url}/restate/health"):
-            while not http_ok(url):
+        # Health can answer before partition 0 has a queryable leader.
+        for url, body in (
+            (f"{self.admin_url}/health", None),
+            (f"{self.ingress_url}/restate/health", None),
+            (f"{self.admin_url}/query", json.dumps({"query": "SELECT id FROM sys_invocation LIMIT 1"}).encode()),
+        ):
+            while not http_ok(url, body):
                 if self.process.poll() is not None:
                     raise SystemExit(
                         f"restate-server {self.name} exited with {self.process.returncode} "
@@ -584,7 +592,7 @@ PROGRESS_MARKER = "[restate-suite progress] "
 class Outcome:
     name: str
     shard: str
-    status: str  # ok | failed | panicked | timeout
+    status: str  # ok | failed | panicked | timeout | leftovers | teardown_failed
     seconds: float
     log: Path
 
@@ -598,11 +606,71 @@ class ShardPlan:
     endpoints: "dict[str, ReservedPort]" = field(default_factory=dict)
 
 
+def drain_leftovers(admin_url: str, name: str, log_path: Path) -> bool:
+    """Kill and name open work before another law can use this shard."""
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    deadline = time.monotonic() + 30
+    seen: set[str] = set()
+
+    def request(path: str, method: str, body: bytes | None = None) -> object:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("leftover invocations never completed")
+        req = urllib.request.Request(
+            f"{admin_url.rstrip('/')}/{path}", data=body, method=method,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        )
+        with opener.open(req, timeout=min(5, remaining)) as response:
+            return json.load(response) if method == "POST" else None
+
+    try:
+        while True:
+            response = request("query", "POST", json.dumps({
+                "query": "SELECT id, target, status, retry_count, last_failure FROM sys_invocation "
+                "WHERE status != 'completed' ORDER BY id",
+            }).encode())
+            rows = sorted(response["rows"], key=lambda row: row["id"])
+            if not rows:
+                return bool(seen)
+            fresh = [row for row in rows if row["id"] not in seen]
+            with log_path.open("a") as out:
+                if not seen:
+                    out.write(f"\nleftover invocations after {name}:\n")
+                for row in fresh:
+                    retries = row.get("retry_count")
+                    attempt = retries + 1 if retries is not None else "unknown"
+                    out.write(f"  {row['id']} target={row['target']!r} status={row['status']} "
+                              f"attempt={attempt} last_failure={row.get('last_failure')!r}\n")
+            errors = []
+            for row in fresh:
+                seen.add(row["id"])
+                try:
+                    request(f"invocations/{urllib.parse.quote(row['id'], safe='')}/kill", "PATCH")
+                except urllib.error.HTTPError as error:
+                    # A concurrent completion or retention sweep is accepted
+                    # only when the next census confirms this id is gone.
+                    if error.code not in (404, 409):
+                        errors.append(f"kill {row['id']}: {error}")
+                except OSError as error:
+                    errors.append(f"kill {row['id']}: {error}")
+            if errors:
+                raise RuntimeError("; ".join(errors))
+            if time.monotonic() >= deadline:
+                raise TimeoutError("leftover invocations never completed")
+            time.sleep(0.02)
+    except Exception as error:
+        message = f"{name}: teardown failed: {error}"
+        with log_path.open("a") as out:
+            out.write(f"\n{message}\n")
+        raise RuntimeError(message) from error
+
+
 def run_one(
     binary: Path, cwd: Path, name: str, env: dict[str, str], timeout: float, log_path: Path, panic_gate: bool
 ) -> tuple[str, float]:
     argv = [str(binary), name, "--exact", "--ignored", "--nocapture", "--test-threads=1"]
     started = time.monotonic()
+    timed_out = False
     with log_path.open("wb") as out, log_path.open("rb") as progress:
         process = subprocess.Popen(argv, cwd=cwd, env=env, stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
         # The law is killed once `timeout` passes with no step completed: since
@@ -623,16 +691,24 @@ def run_one(
             if time.monotonic() - last_progress > timeout:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait()
-                return "timeout", time.monotonic() - started
-    elapsed = time.monotonic() - started
+                timed_out = True
+                break
     output = log_path.read_text(errors="replace")
     # A name that matched nothing exits 0; a law that ran says so.
-    if code != 0 or "test result: ok. 1 passed" not in output:
-        return "failed", elapsed
+    if timed_out:
+        status = "timeout"
+    elif code != 0 or "test result: ok. 1 passed" not in output:
+        status = "failed"
     # A panic on a background task can leave the law itself green.
-    if panic_gate and "panicked at" in output:
-        return "panicked", elapsed
-    return "ok", elapsed
+    elif panic_gate and "panicked at" in output:
+        status = "panicked"
+    else:
+        status = "ok"
+    if drain_leftovers(env["RESTATE_ADMIN_URL"], name, log_path):
+        with log_path.open("a") as out:
+            out.write(f"process status before teardown: {status}\n")
+        status = "leftovers"
+    return status, time.monotonic() - started
 
 
 def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
@@ -719,15 +795,22 @@ def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
             except queue.Empty:
                 return
             log_path = artifacts / f"{name.replace('::', '__')}.log"
-            status, seconds = run_one(binary, cwd, name, env, timeout, log_path, suite.panic_gate)
+            law_started = time.monotonic()
+            try:
+                status, seconds = run_one(binary, cwd, name, env, timeout, log_path, suite.panic_gate)
+            except RuntimeError:
+                with lock:
+                    outcomes.append(Outcome(name, plan.name, "teardown_failed", time.monotonic() - law_started, log_path))
+                raise
             with lock:
                 outcomes.append(Outcome(name, plan.name, status, seconds, log_path))
-                if name in divergent:
+                if name in divergent and status != "leftovers":
                     mark = "HEALED" if status == "ok" else "held"
                 else:
-                    mark = {"ok": "ok", "failed": "FAILED", "panicked": "PANICKED", "timeout": "TIMED OUT"}[status]
+                    mark = {"ok": "ok", "failed": "FAILED", "panicked": "PANICKED", "timeout": "TIMED OUT",
+                            "leftovers": "LEFTOVERS"}[status]
                 print(f"[{len(outcomes)}/{len(to_run)}] {mark:9} {seconds:7.2f}s  {name}", flush=True)
-                if status != "ok" and name not in divergent:
+                if status != "ok" and (name not in divergent or status == "leftovers"):
                     print(f"----- {name}: output tail -----\n{tail(log_path, args.tail_lines)}")
                     print(f"----- {server.name}: server log tail -----\n{tail(server.log_path, 40)}\n-----", flush=True)
 
@@ -754,8 +837,10 @@ def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
     wall = time.monotonic() - started
 
     healed = [outcome for outcome in outcomes if outcome.name in divergent and outcome.status == "ok"]
-    still_held = [outcome for outcome in outcomes if outcome.name in divergent and outcome.status != "ok"]
-    bad = [outcome for outcome in outcomes if outcome.name not in divergent and outcome.status != "ok"]
+    still_held = [outcome for outcome in outcomes if outcome.name in divergent
+                  and outcome.status not in ("ok", "leftovers", "teardown_failed")]
+    bad = [outcome for outcome in outcomes if outcome.status in ("leftovers", "teardown_failed")
+           or (outcome.name not in divergent and outcome.status != "ok")]
     missing = sorted(set(to_run) - {outcome.name for outcome in outcomes})
     ordered = sorted(outcomes, key=lambda outcome: -outcome.seconds)
     summary = {
@@ -788,6 +873,8 @@ def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
     for outcome in healed:
         print(f"{outcome.name}: held law now passes: remove it from {divergence_shard(suite, outcome.name)}")
     if bad or missing or failures or healed:
+        if failures or any(outcome.status == "leftovers" for outcome in bad):
+            return 1
         reason = suite.report_only.get(leg)
         if reason is None:
             return 1

@@ -531,11 +531,11 @@ macro_rules! store_maintenance_fault_tests {
 /// Expansion machinery for effect-group host registration.
 #[macro_export]
 macro_rules! __effect_group_host_register {
-    ([$($attr:tt)*] $fixture:block; $law:ident, $label:literal, wired) => {
+    ([$($attr:tt)*] $fixture:block; $law:ident, $label:literal, wired; $teardown:expr) => {
         $($attr)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
-            let (_fixture_guard, factory) = $fixture;
+            let (fixture_guard, factory) = $fixture;
             let make = || {
                 factory(Some(
                     $crate::registration_macro_support::effect_group_suite_executors(),
@@ -543,23 +543,25 @@ macro_rules! __effect_group_host_register {
             };
             let prefix = $crate::registration_macro_support::effect_group_test_prefix($label);
             $crate::registration_macro_support::$law(&make, &prefix).await;
+            ($teardown)(fixture_guard, stringify!($law)).await;
         }
     };
-    ([$($attr:tt)*] $fixture:block; $law:ident, $label:literal, unwired) => {
+    ([$($attr:tt)*] $fixture:block; $law:ident, $label:literal, unwired; $teardown:expr) => {
         $($attr)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
-            let (_fixture_guard, factory) = $fixture;
+            let (fixture_guard, factory) = $fixture;
             let make = || factory(None);
             let prefix = $crate::registration_macro_support::effect_group_test_prefix($label);
             $crate::registration_macro_support::$law(&make, &prefix).await;
+            ($teardown)(fixture_guard, stringify!($law)).await;
         }
     };
-    ([$($attr:tt)*] $fixture:block; $law:ident, $label:literal, mixed) => {
+    ([$($attr:tt)*] $fixture:block; $law:ident, $label:literal, mixed; $teardown:expr) => {
         $($attr)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
-            let (_fixture_guard, factory) = $fixture;
+            let (fixture_guard, factory) = $fixture;
             let unwired = || factory(None);
             let make = || {
                 factory(Some(
@@ -568,7 +570,12 @@ macro_rules! __effect_group_host_register {
             };
             let prefix = $crate::registration_macro_support::effect_group_test_prefix($label);
             $crate::registration_macro_support::$law(&unwired, &make, &prefix).await;
+            ($teardown)(fixture_guard, stringify!($law)).await;
         }
+    };
+    ($attrs:tt $fixture:block; $law:ident, $label:literal, $mode:ident) => {
+        $crate::__effect_group_host_register!($attrs $fixture; $law, $label, $mode;
+            |guard, _law| async move { let _guard = guard; });
     };
 }
 
@@ -578,6 +585,8 @@ macro_rules! __effect_group_host_register {
 /// laws over an unregistered host register separately
 /// ([`effect_group_unwired_host_tests!`]): a tier whose host resolves group
 /// children elsewhere (Restate, at its endpoint) has no unregistered host.
+/// An optional `; teardown <closure>` receives the guard and law name after
+/// the law's assertions complete, and is awaited before the test exits.
 #[macro_export]
 macro_rules! effect_group_host_tests {
     ($fixture:block) => {
@@ -587,7 +596,14 @@ macro_rules! effect_group_host_tests {
         $crate::effect_group_host_tests!(@catalogue [$(#[$attr])*] $fixture);
     };
     (@catalogue [$($attr:tt)*] $fixture:block) => {
-        $crate::effect_group_host_tests!(@expand [$($attr)*] $fixture; [
+        $crate::effect_group_host_tests!(@catalogue [$($attr)*] $fixture;
+            |guard, _law| async move { let _guard = guard; });
+    };
+    ($(#[$attr:meta])* $fixture:block; teardown $teardown:expr) => {
+        $crate::effect_group_host_tests!(@catalogue [$(#[$attr])*] $fixture; $teardown);
+    };
+    (@catalogue [$($attr:tt)*] $fixture:block; $teardown:expr) => {
+        $crate::effect_group_host_tests!(@expand [$($attr)*] $fixture; $teardown; [
             (retired_scope_refuses_every_effect_wait_group_and_resolver_admission, "retired-admission", wired),
             (cancel_stops_the_losers, "group-cancel", wired),
             (cancel_gives_every_unsettled_child_a_cancellation_terminal, "group-cancel-terminals", wired),
@@ -619,10 +635,14 @@ macro_rules! effect_group_host_tests {
             (a_wait_cancelled_before_it_parks_is_still_released, "group-unparked-wait", wired),
         ]);
     };
-    (@expand $attrs:tt $fixture:block; [$(( $law:ident, $label:literal, $mode:ident )),* $(,)?]) => {
+    (@expand $attrs:tt $fixture:block; $teardown:expr; [$(( $law:ident, $label:literal, $mode:ident )),* $(,)?]) => {
         $(
-            $crate::__effect_group_host_register!($attrs $fixture; $law, $label, $mode);
+            $crate::__effect_group_host_register!($attrs $fixture; $law, $label, $mode; $teardown);
         )*
+    };
+    (@expand $attrs:tt $fixture:block; $laws:tt) => {
+        $crate::effect_group_host_tests!(@expand $attrs $fixture;
+            |guard, _law| async move { let _guard = guard; }; $laws);
     };
 }
 

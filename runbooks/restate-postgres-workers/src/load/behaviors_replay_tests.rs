@@ -929,6 +929,7 @@ async fn live_witness(case: Advance) {
         recorded.len(),
         passes.len()
     );
+    backend.finish().await;
 }
 
 macro_rules! live {

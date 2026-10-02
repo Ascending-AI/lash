@@ -177,6 +177,32 @@ mod live {
                 continuation: Arc::new(lash_conformance::NoContinuationFaults),
             };
             (harness, tier)
+        };
+        teardown |harness: LiveConformanceHarness, law: &'static str| async move {
+            let reason = match law {
+                "usage_of_a_root_parked_forever_before_finalization_is_read_without_driving"
+                | "usage_crash_p1_parked_forever"
+                | "usage_crash_p2_parked_forever" => Some(
+                    "the usage law deliberately parks a paid root forever without finalization",
+                ),
+                "substrate_lost_keeps_each_paid_call_once" => Some(
+                    "the usage law deliberately crashes a paid turn before recording substrate loss",
+                ),
+                "operator_cancelled_parked_keeps_each_paid_call_once" => Some(
+                    "the usage law deliberately parks a paid turn before recording operator cancellation",
+                ),
+                "tool_child_spend_counts_once_without_settlement_charging" => Some(
+                    "the child-spend law deliberately parks its replay after checking the retained ledger",
+                ),
+                "session_delete_drains_accounting_first" => Some(
+                    "the deletion accounting law deliberately kills its turn forever while a paid child finishes",
+                ),
+                _ => None,
+            };
+            if let Some(reason) = reason {
+                harness.kill_open(reason).await;
+            }
+            harness.finish().await;
         }
     );
 }

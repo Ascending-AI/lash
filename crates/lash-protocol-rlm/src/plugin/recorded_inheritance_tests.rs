@@ -576,8 +576,9 @@ async fn live_restate_process_runs_under_the_behaviour_its_creation_recorded() {
         .await
         .expect("serve and register the live Restate handlers");
     a_host_started_process_runs_under_the_behaviour_its_creation_recorded(
-        ProcessHost::Live(host),
+        ProcessHost::Live(host.clone()),
         &format!("recorded-process-live-{}", nonce()),
     )
     .await;
+    host.finish().await;
 }

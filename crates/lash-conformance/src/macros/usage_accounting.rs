@@ -7,10 +7,16 @@
 /// every registered test. The fixture block yields `(guard, tier)`: a value kept alive for the
 /// test's duration, and a
 /// [`UsageAccountingTier`](crate::UsageAccountingTier) over a fresh engine.
+/// An optional `; teardown <closure>` receives the guard and law name after
+/// the law's assertions complete, and is awaited before the test exits.
 #[macro_export]
 macro_rules! usage_accounting_engine_tests {
     ($(#[$meta:meta])* $tier:block) => {
-        $crate::usage_accounting_engine_tests!(@catalogue [$(#[$meta])*] $tier; [
+        $crate::usage_accounting_engine_tests!($(#[$meta])* $tier;
+            teardown |guard, _law| async move { let _guard = guard; });
+    };
+    ($(#[$meta:meta])* $tier:block; teardown $teardown:expr) => {
+        $crate::usage_accounting_engine_tests!(@catalogue [$(#[$meta])*] $tier; $teardown; [
             usage_of_a_root_parked_forever_before_finalization_is_read_without_driving,
             each_paid_attempt_counts_once_under_any_boundary_grouping_and_replay,
             usage_crash_p1_committed_completed,
@@ -34,17 +40,18 @@ macro_rules! usage_accounting_engine_tests {
             operator_cancelled_parked_keeps_each_paid_call_once,
         ]);
     };
-    (@catalogue $attrs:tt $tier:block; [$($law:ident),* $(,)?]) => {
+    (@catalogue $attrs:tt $tier:block; $teardown:expr; [$($law:ident),* $(,)?]) => {
         $(
-            $crate::usage_accounting_engine_tests!(@law $attrs $tier $law);
+            $crate::usage_accounting_engine_tests!(@law $attrs $tier $law; $teardown);
         )*
     };
-    (@law [$(#[$meta:meta])*] $tier:block $law:ident) => {
+    (@law [$(#[$meta:meta])*] $tier:block $law:ident; $teardown:expr) => {
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         $(#[$meta])*
         async fn $law() {
-            let (_tier_guard, tier) = $tier;
+            let (tier_guard, tier) = $tier;
             $crate::$law(&tier).await;
+            ($teardown)(tier_guard, stringify!($law)).await;
         }
     };
 }

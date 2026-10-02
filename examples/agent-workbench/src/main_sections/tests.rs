@@ -1518,6 +1518,9 @@ async fn live_restate_cron_zombie_cancel_path_end_to_end_inner() -> PathBuf {
     )
     .await;
     assert_no_active_lash_restate_invocations(&scenario.state, Duration::from_secs(10)).await;
+    scenario
+        .kill_open("the zombie-backstop law deliberately schedules a future cron tick before retiring its session")
+        .await;
     let data_dir = scenario.data_dir.clone();
     scenario.shutdown().await;
     data_dir

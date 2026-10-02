@@ -4,7 +4,7 @@ use lash::observe::{
     SessionResume,
 };
 
-async fn eviction_law(backend: lash::Backend, tag: &str) {
+async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
     let replay = Arc::new(InMemoryLiveReplayStore::new(
         InMemoryLiveReplayStoreConfig {
             max_sessions: 1,
@@ -104,14 +104,18 @@ async fn eviction_law(backend: lash::Backend, tag: &str) {
             LiveReplayGapReason::Unavailable
         ))
     ));
-    core.shutdown().await.expect("shutdown");
+    core
 }
 
 async fn on_double(tier: Tier, seed: u64, tag: &str) {
     let Some(double) = tiers::double(tier, seed, |stores| stores).await else {
         return;
     };
-    eviction_law(double.double.lash_backend(), tag).await;
+    eviction_law(double.double.lash_backend(), tag)
+        .await
+        .shutdown()
+        .await
+        .expect("shutdown");
 }
 
 #[tokio::test]
@@ -169,7 +173,9 @@ async fn on_live(postgres: bool) {
         })
         .await
         .expect("native Restate PostgreSQL backend");
-        eviction_law(live.lash_backend(), &tag).await;
+        let core = eviction_law(live.lash_backend(), &tag).await;
+        live.finish().await;
+        core.shutdown().await.expect("shutdown");
     } else {
         let directory = tempfile::tempdir().expect("SQLite directory");
         let live = LiveRestateBackend::start_with_store_set(config, |clock| async {
@@ -181,7 +187,9 @@ async fn on_live(postgres: bool) {
         })
         .await
         .expect("native Restate SQLite backend");
-        eviction_law(live.lash_backend(), &tag).await;
+        let core = eviction_law(live.lash_backend(), &tag).await;
+        live.finish().await;
+        core.shutdown().await.expect("shutdown");
     }
 }
 

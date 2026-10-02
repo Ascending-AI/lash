@@ -194,6 +194,22 @@ type SettleRow = (String, String, Option<u64>, Option<u64>);
 
 const INVOCATION_COLUMNS: &str = "id, target, status, retry_count, journal_size, last_failure, completion_result, completion_failure";
 
+fn leftover_listing(rows: &[LiveInvocation]) -> String {
+    rows.iter()
+        .map(|row| {
+            let attempt = row.retry_count.map_or_else(
+                || "unknown".to_owned(),
+                |retries| retries.saturating_add(1).to_string(),
+            );
+            format!(
+                "  {} target={:?} status={} attempt={attempt} last_failure={:?}",
+                row.id, row.target, row.status, row.last_failure,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// An invocation status that moves on by itself: work the server is about to
 /// hand the deployment.
 fn in_motion(status: &str) -> bool {
@@ -877,29 +893,75 @@ impl<Stores: StoreSet + ?Sized> LiveRestateBackend<Stores> {
         }
     }
 
-    /// End the backend: the deployment dies, and every invocation the server
-    /// still holds open is killed, so nothing of it reaches the endpoint the
-    /// next backend serves at the same address.
+    /// Let committed work finish for up to five seconds, then end the backend
+    /// and fail if its namespace still has open invocations.
+    /// Deliberately unfinished work must be released with [`Self::kill_open`]
+    /// first. The suite runner kills unexpected leftovers after the law exits.
     pub async fn finish(&self) {
+        let mut open = Vec::new();
+        let finished = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                open = self.open_invocations().await?;
+                if open.is_empty() {
+                    return Ok::<_, LiveError>(());
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await;
         self.stop_serving(true);
-        for _ in 0..3 {
-            let open = match self
-                .query(&format!(
-                    "SELECT {INVOCATION_COLUMNS} FROM sys_invocation WHERE status != 'completed' AND {}",
-                    self.own_invocations()
-                ))
-                .await
-            {
-                Ok(open) => open,
-                Err(_) => return,
-            };
-            if open.is_empty() {
-                return;
+        match finished {
+            Ok(Ok(())) => return,
+            Ok(Err(error)) => panic!("finish census failed: {error}"),
+            Err(_) if open.is_empty() => {
+                panic!("finish census did not complete within five seconds")
             }
-            for row in open {
-                let _ = self.kill_and_await(&row.id).await;
-            }
+            Err(_) => {}
         }
+        assert!(
+            open.is_empty(),
+            "unexpected leftover invocations:\n{}",
+            leftover_listing(&open),
+        );
+    }
+
+    /// Stop serving and kill deliberately unfinished work in this namespace.
+    /// `reason` must state, on one nonempty line, why the law leaves it open.
+    /// A completed or retained invocation needs no release. Admin failures
+    /// and a cleanup that exceeds thirty seconds fail the law.
+    pub async fn kill_open(&self, reason: &str) {
+        assert!(
+            !reason.trim().is_empty() && !reason.contains(['\n', '\r']),
+            "kill_open requires a nonempty, one-line reason",
+        );
+        self.stop_serving(true);
+        tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let open = self
+                    .open_invocations()
+                    .await
+                    .unwrap_or_else(|error| panic!("kill_open census failed, {reason}: {error}"));
+                if open.is_empty() {
+                    return;
+                }
+                eprintln!("kill_open: {reason}\n{}", leftover_listing(&open));
+                for row in open {
+                    self.kill_and_await(&row.id)
+                        .await
+                        .unwrap_or_else(|error| panic!("kill_open {}, {reason}: {error}", row.id));
+                }
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("kill_open did not complete within thirty seconds: {reason}"));
+    }
+
+    async fn open_invocations(&self) -> Result<Vec<LiveInvocation>, LiveError> {
+        self.query(&format!(
+            "SELECT {INVOCATION_COLUMNS} FROM sys_invocation WHERE status != 'completed' AND {} ORDER BY id",
+            self.own_invocations()
+        ))
+        .await
     }
 
     async fn query(&self, sql: &str) -> Result<Vec<LiveInvocation>, LiveError> {
