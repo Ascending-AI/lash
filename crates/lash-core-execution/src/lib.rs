@@ -398,22 +398,31 @@ pub mod facade_support {
     pub use crate::triggers::TriggerRegistration;
     pub use crate::triggers::TriggerRouter;
     pub use crate::triggers::TriggerTarget;
+    pub use crate::triggers::decode_trigger_delivery;
+    pub use crate::triggers::decode_trigger_mutation_receipt_json;
+    pub use crate::triggers::decode_trigger_occurrence_json;
+    pub use crate::triggers::decode_trigger_subscription_json;
     pub use crate::triggers::default_trigger_source_key;
     pub use crate::triggers::derived_trigger_subscription_key;
     pub use crate::triggers::deterministic_occurrence_id;
     pub use crate::triggers::deterministic_subscription_id;
     pub use crate::triggers::empty_trigger_source_key;
+    pub use crate::triggers::encode_trigger_row;
     pub use crate::triggers::evaluate_trigger_mutation;
     pub use crate::triggers::evaluate_trigger_mutation_with_incarnation;
     pub use crate::triggers::evaluate_trigger_prune;
     pub use crate::triggers::next_trigger_revision;
     pub use crate::triggers::next_trigger_store_revision;
+    pub use crate::triggers::prepare_trigger_command;
     pub use crate::triggers::sort_trigger_delivery_reservations;
+    pub use crate::triggers::stored_trigger_receipt;
     pub use crate::triggers::trigger_command_fingerprint;
     pub use crate::triggers::trigger_delivery_start_key;
+    pub use crate::triggers::trigger_mutation_records;
     pub use crate::triggers::trigger_occurrence_request_matches_record;
     pub use crate::triggers::trigger_operation_receipt_id;
     pub use crate::triggers::validate_trigger_occurrence_request;
+    pub use crate::triggers::{PreparedTriggerCommand, TriggerMutationPreparation};
     pub use lash_core_store::session_graph::facade_ops::{
         SessionGraphFacadeOps, SessionNodeProjection,
     };

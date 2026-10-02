@@ -3,7 +3,12 @@ use crate::conn::TxOutcome;
 use crate::schema_layout::Schema;
 use crate::{SqliteStore, sqlite_error};
 use async_trait::async_trait;
-use lash_core_execution::{LlmCallId, ModelKey, StoreError, TokenUsage};
+use lash_core_execution::store_backend_support::{
+    StoredOutstandingAttempt, StoredUsageAggregate, StoredUsageFact, StoredUsageRun,
+    decode_usage_completeness, usage_corrupt, usage_integer, usage_run_resolution_columns,
+    usage_unsigned,
+};
+use lash_core_execution::{StoreError, TokenUsage};
 use lash_core_store::RuntimeOwner;
 use lash_core_store::store::usage_accounting::UsageAccountingStore;
 use lash_core_store::usage_accounting::*;
@@ -41,68 +46,40 @@ pub(crate) fn retention_sql() -> (&'static str, &'static str, &'static str) {
         SQL.owners.delete_retired.sql(),
     )
 }
-fn corrupt(message: impl Into<String>) -> StoreError {
-    StoreError::StoredDataCorrupt {
-        record_kind: "usage accounting",
-        message: message.into(),
-    }
-}
-fn integer(value: u64) -> Result<i64, StoreError> {
-    i64::try_from(value).map_err(|_| corrupt("usage integer exceeds SQL range"))
-}
-fn unsigned(value: i64) -> Result<u64, StoreError> {
-    u64::try_from(value).map_err(|_| corrupt("negative usage sequence, timestamp or count"))
-}
-fn ordinal(value: i64) -> Result<u32, StoreError> {
-    u32::try_from(value).map_err(|_| corrupt("usage ordinal exceeds u32"))
-}
-fn effect(value: String) -> Result<UsageEffectKey, StoreError> {
-    serde_json::from_value(serde_json::Value::String(value)).map_err(|e| corrupt(e.to_string()))
-}
 fn decode_fact(row: &Row<'_>) -> Result<UsageFactRecord, StoreError> {
     macro_rules! get {
         ($n:expr) => {
             row.get($n).map_err(sqlite_error)?
         };
     }
-    let owner_kind: String = get!(1);
-    let owner_id: String = get!(2);
-    let owner = match owner_kind.as_str() {
-        "session" => RuntimeOwner::Session(lash_sansio::SessionId::from(owner_id)),
-        "process" => RuntimeOwner::Process(
-            lash_sansio::ProcessId::parse(&owner_id).map_err(|e| corrupt(e.to_string()))?,
-        ),
-        other => return Err(corrupt(format!("invalid owner kind {other}"))),
-    };
-    let kind: String = get!(6);
-    let disposition: String = get!(7);
-    let run: Option<String> = get!(8);
-    Ok(UsageFactRecord {
-        seq: unsigned(get!(0))?,
-        owner,
-        effect: effect(get!(3))?,
-        call_ordinal: ordinal(get!(4))?,
-        provider_attempt: ordinal(get!(5))?,
-        llm_call_id: LlmCallId(row.get::<_, String>(9).map_err(sqlite_error)?),
+    StoredUsageFact {
+        seq: get!(0),
+        owner_kind: get!(1),
+        owner_id: get!(2),
+        effect_key: get!(3),
+        call_ordinal: get!(4),
+        provider_attempt: get!(5),
+        fact_kind: get!(6),
+        disposition: get!(7),
+        run_id: get!(8),
+        llm_call_id: get!(9),
         source: get!(10),
-        model_key: ModelKey::new(row.get::<_, String>(11).map_err(sqlite_error)?),
+        model_key: get!(11),
         requested_model: get!(12),
         served_model: get!(13),
-        body: UsageFactBody::from_stored(
-            &kind,
-            &disposition,
-            run.map(UsageRunId::try_from).transpose()?,
-            TokenUsage {
-                input_tokens: get!(14),
-                output_tokens: get!(15),
-                cache_read_input_tokens: get!(16),
-                cache_write_input_tokens: get!(17),
-                reasoning_output_tokens: get!(18),
-            },
-            get!(19),
-        )?,
-        recorded_at_ms: unsigned(get!(21))?,
-    })
+        usage: TokenUsage {
+            input_tokens: get!(14),
+            output_tokens: get!(15),
+            cache_read_input_tokens: get!(16),
+            cache_write_input_tokens: get!(17),
+            reasoning_output_tokens: get!(18),
+        },
+        generation_id: get!(19),
+        // Column 20 is `payload_hash`: the conflict path's own read, never
+        // part of the domain record.
+        recorded_at_ms: get!(21),
+    }
+    .decode()
 }
 fn decode_run(row: &Row<'_>, owner: &RuntimeOwner) -> Result<UsageRunRecord, StoreError> {
     macro_rules! get {
@@ -110,78 +87,24 @@ fn decode_run(row: &Row<'_>, owner: &RuntimeOwner) -> Result<UsageRunRecord, Sto
             row.get($n).map_err(sqlite_error)?
         };
     }
-    let effect = effect(get!(0))?;
-    let scope: Option<String> = get!(2);
-    let source: Option<String> = get!(3);
-    let model: Option<String> = get!(4);
-    let requested: Option<String> = get!(5);
-    let admitted: Option<i64> = get!(6);
-    let admission = match (scope, source, model, requested, admitted) {
-        (None, None, None, None, None) => None,
-        (
-            Some(execution_scope_key),
-            Some(source),
-            Some(model),
-            Some(requested_model),
-            Some(at_ms),
-        ) => Some(UsageRunDispatch {
-            execution_scope_key,
-            source,
-            model_key: ModelKey::new(model),
-            requested_model,
-            admitted_at_ms: unsigned(at_ms)?,
-        }),
-        _ => return Err(corrupt("partial usage run admission")),
-    };
-    let call: Option<i64> = get!(9);
-    let attempt: Option<i64> = get!(10);
-    let fact_kind: Option<String> = get!(11);
-    let stored: Option<String> = get!(12);
-    let offered: Option<String> = get!(13);
-    let conflict = match (call, attempt, fact_kind, stored, offered) {
-        (None, None, None, None, None) => None,
-        (
-            Some(call),
-            Some(attempt),
-            Some(kind),
-            Some(stored_payload_hash),
-            Some(offered_payload_hash),
-        ) => Some(UsageFactConflict {
-            identity: UsageFactIdentity {
-                owner: owner.clone(),
-                effect: effect.clone(),
-                call_ordinal: ordinal(call)?,
-                provider_attempt: ordinal(attempt)?,
-                kind: match kind.as_str() {
-                    "attempt" => UsageFactKind::Attempt,
-                    "correction" => UsageFactKind::Correction,
-                    _ => return Err(corrupt("invalid conflict fact kind")),
-                },
-            },
-            stored_payload_hash,
-            offered_payload_hash,
-        }),
-        _ => return Err(corrupt("partial usage run conflict")),
-    };
-    let state: String = get!(7);
-    let reason: Option<String> = get!(8);
-    let resolved: Option<i64> = get!(14);
-    let state = UsageRunState::from_stored(
-        &state,
-        reason.as_deref(),
-        conflict,
-        resolved.map(unsigned).transpose()?,
-    )?;
-    if state == UsageRunState::Open && admission.is_none() {
-        return Err(corrupt("open usage run has no admission"));
+    StoredUsageRun {
+        effect_key: get!(0),
+        run_id: get!(1),
+        execution_scope_key: get!(2),
+        source: get!(3),
+        model_key: get!(4),
+        requested_model: get!(5),
+        admitted_at_ms: get!(6),
+        state: get!(7),
+        unknown_reason: get!(8),
+        conflict_call_ordinal: get!(9),
+        conflict_provider_attempt: get!(10),
+        conflict_fact_kind: get!(11),
+        conflict_stored_payload_hash: get!(12),
+        conflict_offered_payload_hash: get!(13),
+        resolved_at_ms: get!(14),
     }
-    let run: String = get!(1);
-    Ok(UsageRunRecord {
-        effect,
-        run: UsageRunId::try_from(run)?,
-        admission,
-        state,
-    })
+    .decode(owner)
 }
 
 fn insert_fact(
@@ -215,7 +138,7 @@ fn insert_fact(
                 usage.reasoning_output_tokens,
                 record.generation_id(),
                 hash,
-                integer(record.recorded_at_ms)?
+                usage_integer(record.recorded_at_ms)?
             ],
         )
         .map_err(sqlite_error)?;
@@ -244,12 +167,6 @@ fn insert_fact(
             stored_payload_hash: stored,
             offered_payload_hash: hash.to_owned(),
         })))
-    }
-}
-fn resolution_columns(resolution: &UsageRunResolution) -> (&'static str, Option<&'static str>) {
-    match resolution {
-        UsageRunResolution::Settled => ("settled", None),
-        UsageRunResolution::Unknown(reason) => ("unknown", Some(reason.as_str())),
     }
 }
 impl SqliteStore {
@@ -286,7 +203,7 @@ impl UsageAccountingStore for SqliteStore {
             if let Some(retired) = retired {
                 return Err(UsageAdmissionError::OwnerRetired {
                     owner: a.owner.clone(),
-                    retired_at_ms: unsigned(retired)?,
+                    retired_at_ms: usage_unsigned(retired)?,
                 });
             }
             let inserted = tx
@@ -301,7 +218,7 @@ impl UsageAccountingStore for SqliteStore {
                         a.source,
                         a.model_key.as_str(),
                         a.requested_model,
-                        integer(a.admitted_at_ms)?,
+                        usage_integer(a.admitted_at_ms)?,
                         "open",
                         Option::<&str>::None,
                         Option::<i64>::None
@@ -324,7 +241,7 @@ impl UsageAccountingStore for SqliteStore {
         let s = settlement.clone();
         self.usage_write(move |tx| {
             let (kind, id) = usage_owner_columns(&s.owner);
-            let now = integer(now_ms)?;
+            let now = usage_integer(now_ms)?;
             let mut receipt = UsageSettleReceipt {
                 inserted_facts: 0,
                 duplicate_facts: 0,
@@ -342,7 +259,7 @@ impl UsageAccountingStore for SqliteStore {
                     receipt.duplicate_facts += 1;
                 }
             }
-            let (state, reason) = resolution_columns(&receipt.run);
+            let (state, reason) = usage_run_resolution_columns(&receipt.run);
             tx.execute(
                 SQL.inserts.run.sql(),
                 params![
@@ -391,7 +308,7 @@ impl UsageAccountingStore for SqliteStore {
                 )
                 .map_err(sqlite_error)?,
             )
-            .map_err(|_| corrupt("superseded run count exceeds u32"))?;
+            .map_err(|_| usage_corrupt("superseded run count exceeds u32"))?;
             Ok(receipt)
         })
         .await
@@ -405,13 +322,15 @@ impl UsageAccountingStore for SqliteStore {
         if conflict.identity.owner != settlement.owner
             || conflict.identity.effect != settlement.effect
         {
-            return Err(corrupt("usage conflict belongs to another owner or effect"));
+            return Err(usage_corrupt(
+                "usage conflict belongs to another owner or effect",
+            ));
         }
         let s = settlement.clone();
         let conflict = conflict.clone();
         self.usage_write(move |tx| {
             let (kind, id) = usage_owner_columns(&s.owner);
-            let now = integer(now_ms)?;
+            let now = usage_integer(now_ms)?;
             for statement in [SQL.runs.insert_conflict.sql(), SQL.runs.conflict.sql()] {
                 tx.execute(
                     statement,
@@ -507,7 +426,7 @@ impl UsageAccountingStore for SqliteStore {
             let count = tx
                 .execute(
                     SQL.runs.retire_execution.sql(),
-                    params![kind, id, scope, integer(now_ms)?],
+                    params![kind, id, scope, usage_integer(now_ms)?],
                 )
                 .map_err(sqlite_error)?;
             Ok(count as u64)
@@ -523,16 +442,19 @@ impl UsageAccountingStore for SqliteStore {
         self.usage_write(move |tx| {
             let (kind, id) = usage_owner_columns(&owner);
             let inserted = tx
-                .execute(SQL.inserts.owner.sql(), params![kind, id, integer(now_ms)?])
+                .execute(
+                    SQL.inserts.owner.sql(),
+                    params![kind, id, usage_integer(now_ms)?],
+                )
                 .map_err(sqlite_error)?;
-            let retired = unsigned(
+            let retired = usage_unsigned(
                 tx.query_row(SQL.owners.find.sql(), params![kind, id], |row| row.get(0))
                     .map_err(sqlite_error)?,
             )?;
             let count = tx
                 .execute(
                     SQL.runs.retire_owner.sql(),
-                    params![kind, id, integer(now_ms)?],
+                    params![kind, id, usage_integer(now_ms)?],
                 )
                 .map_err(sqlite_error)?;
             Ok(UsageOwnerRetired {
@@ -580,15 +502,16 @@ impl UsageAccountingStore for SqliteStore {
                                 unreported,
                                 reconciled,
                             ) = row.map_err(sqlite_error)?;
-                            Ok(OwnerUsageRow {
+                            StoredUsageAggregate {
                                 source,
-                                model_key: ModelKey::new(model_key),
+                                model_key,
                                 requested_model,
                                 usage,
-                                reported_attempts: unsigned(reported)?,
-                                unreported_attempts: unsigned(unreported)?,
-                                reconciled_attempts: unsigned(reconciled)?,
-                            })
+                                reported_attempts: reported,
+                                unreported_attempts: unreported,
+                                reconciled_attempts: reconciled,
+                            }
+                            .decode()
                         })
                         .collect::<Result<Vec<_>, StoreError>>()?;
                     let outstanding = tx
@@ -618,16 +541,17 @@ impl UsageAccountingStore for SqliteStore {
                                 requested_model,
                                 generation_id,
                             ) = row.map_err(sqlite_error)?;
-                            Ok(OutstandingUsageAttempt {
-                                effect: effect(key)?,
-                                call_ordinal: ordinal(call)?,
-                                provider_attempt: ordinal(attempt)?,
-                                llm_call_id: LlmCallId(llm_call),
+                            StoredOutstandingAttempt {
+                                effect_key: key,
+                                call_ordinal: call,
+                                provider_attempt: attempt,
+                                llm_call_id: llm_call,
                                 source,
-                                model_key: ModelKey::new(model_key),
+                                model_key,
                                 requested_model,
                                 generation_id,
-                            })
+                            }
+                            .decode()
                         })
                         .collect::<Result<Vec<_>, StoreError>>()?;
                     let (open, oldest, unknown, conflicted): (i64, Option<i64>, i64, i64) = tx
@@ -645,14 +569,14 @@ impl UsageAccountingStore for SqliteStore {
                     Ok(OwnerUsage {
                         owner: owner.clone(),
                         rows,
-                        completeness: UsageCompleteness {
-                            open_runs: unsigned(open)?,
-                            oldest_open_admitted_at_ms: oldest.map(unsigned).transpose()?,
-                            unknown_runs: unsigned(unknown)?,
-                            conflicted_runs: unsigned(conflicted)?,
-                            unreported_attempts: outstanding.len() as u64,
+                        completeness: decode_usage_completeness(
+                            open,
+                            oldest,
+                            unknown,
+                            conflicted,
+                            outstanding.len() as u64,
                             retired,
-                        },
+                        )?,
                         outstanding,
                     })
                 };
@@ -671,7 +595,7 @@ impl UsageAccountingStore for SqliteStore {
             cursor.check_owner(owner)?;
         }
         let owner = owner.clone();
-        let after = integer(after.map_or(0, UsageFactCursor::after_seq))?;
+        let after = usage_integer(after.map_or(0, UsageFactCursor::after_seq))?;
         self.read_connection()
             .read(move |tx| {
                 let (kind, id) = usage_owner_columns(&owner);

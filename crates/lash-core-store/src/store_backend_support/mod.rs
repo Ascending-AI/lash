@@ -11,6 +11,7 @@ mod session_meta;
 pub mod turn_cancel;
 mod turn_input_batch;
 mod turn_input_lifecycle_sql;
+mod usage_records;
 
 pub use append_identity::decode_append_request_identity;
 pub use head_path::{HeadPathProbe, OwnerExit, OwnerExitParent, OwnerLowestNode, PathNode};
@@ -41,6 +42,11 @@ pub use turn_input_lifecycle_sql::{
     nonterminal_turn_input_state_predicate_sql, pending_active_turn_input_state_predicate_sql,
     released_turn_input_state_sql, terminal_turn_input_state_predicate_sql,
     undelivered_turn_input_state_predicate_sql,
+};
+pub use usage_records::{
+    StoredOutstandingAttempt, StoredUsageAggregate, StoredUsageFact, StoredUsageRun,
+    decode_usage_completeness, usage_corrupt, usage_effect_key, usage_integer, usage_ordinal,
+    usage_owner, usage_run_resolution_columns, usage_unsigned,
 };
 
 /// Durable receipt identity of one turn's final commit.

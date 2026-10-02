@@ -399,45 +399,28 @@ impl TriggerStore for PostgresTriggerStore {
         operation_id: &str,
         command: lash_core_execution::TriggerCommand,
     ) -> Result<lash_core_execution::TriggerEffectResult, PluginError> {
-        let owner_valid = match command.owner_scope() {
-            lash_core_execution::TriggerOwnerScope::Session { session_id } => {
-                crate::namespace::is_valid_opaque_key(session_id)
-            }
-            lash_core_execution::TriggerOwnerScope::Host { binding_id } => {
-                crate::namespace::is_valid_opaque_key(binding_id.trim())
-            }
-            lash_core_execution::TriggerOwnerScope::Platform => true,
+        let prepared = match lash_core_execution::facade_support::prepare_trigger_command(
+            command,
+            operation_id,
+            self.fixed_incarnation.clone(),
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => return Ok(Err(error)),
         };
-        if !crate::namespace::is_valid_opaque_key(operation_id.trim()) || !owner_valid {
-            return Ok(Err(lash_core_execution::TriggerOperationError::Invalid {
-                message: "invalid trigger operation or owner identifier".into(),
-            }));
-        }
-        if let lash_core_execution::TriggerCommand::List {
-            owner_scope,
-            mut filter,
-        } = command
-        {
-            filter.registrant_scope_id = Some(owner_scope.namespace());
-            return self
-                .list_subscriptions(filter)
-                .await
-                .map(|records| Ok(lash_core_execution::TriggerCommandOutcome::List { records }));
-        }
+        use lash_core_execution::facade_support::PreparedTriggerCommand;
+        let (command, preparation) = match prepared {
+            PreparedTriggerCommand::List(filter) => {
+                return self.list_subscriptions(filter).await.map(|records| {
+                    Ok(lash_core_execution::TriggerCommandOutcome::List { records })
+                });
+            }
+            PreparedTriggerCommand::Mutation {
+                command,
+                preparation,
+            } => (command, preparation),
+        };
 
         let sql = trigger_sql();
-        let request_fingerprint =
-            lash_core_execution::facade_support::trigger_command_fingerprint(&command);
-        let receipt_owner_scope = command.owner_scope().clone();
-        let receipt_id = lash_core_execution::facade_support::trigger_operation_receipt_id(
-            command.owner_scope(),
-            operation_id,
-        );
-        let subscription_key = command.subscription_key().unwrap_or_default().to_string();
-        let subscription_id = lash_core_execution::facade_support::deterministic_subscription_id(
-            command.owner_scope(),
-            &subscription_key,
-        );
         let mut tx = begin_guarded(&self.pool, &self.fence)
             .await
             .map_err(plugin_store_error)?;
@@ -446,13 +429,13 @@ impl TriggerStore for PostgresTriggerStore {
                 .lock_xact_by_text
                 .sql(),
         )
-        .bind(&subscription_id)
+        .bind(&preparation.subscription_id)
         .execute(&mut **tx)
         .await
         .map_err(plugin_sqlx_error)?;
 
         let stored = sqlx::query(sql.receipt.select_by_operation_id.sql())
-            .bind(&receipt_id)
+            .bind(&preparation.receipt_id)
             .fetch_optional(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?;
@@ -460,18 +443,11 @@ impl TriggerStore for PostgresTriggerStore {
             let stored_hash: String = row.get(0);
             let result_json: String = row.get(1);
             tx.commit().await.map_err(plugin_sqlx_error)?;
-            if stored_hash != request_fingerprint {
-                return Ok(Err(lash_core_execution::TriggerOperationError::Conflict {
-                    subscription_key,
-                    existing_revision: None,
-                    existing_definition_fingerprint: Some(stored_hash),
-                    requested_definition_fingerprint: Some(request_fingerprint),
-                    reason: format!(
-                        "operation id `{operation_id}` was reused with different content"
-                    ),
-                }));
-            }
-            return serde_json::from_str(&result_json).map_err(process_decode_error);
+            return lash_core_execution::facade_support::stored_trigger_receipt(
+                stored_hash,
+                &result_json,
+                &preparation,
+            );
         }
 
         let now = self.clock.timestamp_ms();
@@ -479,7 +455,7 @@ impl TriggerStore for PostgresTriggerStore {
             owner_scope,
             actor,
             subscription_keys,
-        } = &command
+        } = &*command
         {
             let rows = sqlx::query(sql.subscription_postgres.select_records_for_prune.sql())
                 .bind(owner_scope.namespace())
@@ -490,7 +466,7 @@ impl TriggerStore for PostgresTriggerStore {
                 .into_iter()
                 .map(|row| {
                     let json: String = row.get(0);
-                    serde_json::from_str(&json).map_err(process_decode_error)
+                    lash_core_execution::facade_support::decode_trigger_subscription_json(&json)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             lash_core_execution::facade_support::evaluate_trigger_prune(
@@ -503,42 +479,23 @@ impl TriggerStore for PostgresTriggerStore {
         } else {
             let current_json: Option<String> =
                 sqlx::query_scalar(sql.subscription_postgres.select_record_by_id.sql())
-                    .bind(&subscription_id)
+                    .bind(&preparation.subscription_id)
                     .fetch_optional(&mut **tx)
                     .await
                     .map_err(plugin_sqlx_error)?;
             let current = current_json
-                .map(|json| serde_json::from_str(&json).map_err(process_decode_error))
+                .map(|json| {
+                    lash_core_execution::facade_support::decode_trigger_subscription_json(&json)
+                })
                 .transpose()?;
-            if let Some(incarnation) = &self.fixed_incarnation {
-                lash_core_execution::facade_support::evaluate_trigger_mutation_with_incarnation(
-                    current,
-                    command,
-                    now,
-                    incarnation.clone(),
-                )?
-            } else {
-                let incarnation =
-                    lash_core_execution::trigger_incarnation(command.owner_scope(), operation_id);
-                lash_core_execution::facade_support::evaluate_trigger_mutation_with_incarnation(
-                    current,
-                    command,
-                    now,
-                    incarnation,
-                )?
-            }
+            lash_core_execution::facade_support::evaluate_trigger_mutation_with_incarnation(
+                current,
+                *command,
+                now,
+                preparation.incarnation.clone(),
+            )?
         };
-        let records = match &result {
-            Ok(lash_core_execution::TriggerCommandOutcome::Mutation { receipt }) => {
-                vec![&receipt.record_snapshot]
-            }
-            Ok(lash_core_execution::TriggerCommandOutcome::Prune { receipts }) => receipts
-                .iter()
-                .map(|receipt| &receipt.record_snapshot)
-                .collect(),
-            Ok(lash_core_execution::TriggerCommandOutcome::List { .. }) | Err(_) => Vec::new(),
-        };
-        for record in records {
+        for record in lash_core_execution::facade_support::trigger_mutation_records(&result) {
             let sql_revision =
                 plugin_sql_counter_value("trigger_subscription_revision", record.revision)?;
             sqlx::query(sql.subscription.upsert.sql())
@@ -554,17 +511,21 @@ impl TriggerStore for PostgresTriggerStore {
                 .bind(record.lifecycle.deleted_at_ms().map(|ms| ms as i64))
                 .bind(record.created_at_ms as i64)
                 .bind(record.updated_at_ms as i64)
-                .bind(serde_json::to_string(record).map_err(process_decode_error)?)
+                .bind(lash_core_execution::facade_support::encode_trigger_row(
+                    record,
+                )?)
                 .execute(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
         }
         sqlx::query(sql.receipt.insert.sql())
-            .bind(&receipt_id)
-            .bind(receipt_owner_scope.owner_kind_column())
-            .bind(receipt_owner_scope.owner_id_column())
-            .bind(&request_fingerprint)
-            .bind(serde_json::to_string(&result).map_err(process_decode_error)?)
+            .bind(&preparation.receipt_id)
+            .bind(preparation.owner_scope.owner_kind_column())
+            .bind(preparation.owner_scope.owner_id_column())
+            .bind(&preparation.request_fingerprint)
+            .bind(lash_core_execution::facade_support::encode_trigger_row(
+                &result,
+            )?)
             .bind(now as i64)
             .execute(&mut **tx)
             .await
@@ -590,7 +551,7 @@ impl TriggerStore for PostgresTriggerStore {
         for row in rows {
             let subscription_id: String = row.get(0);
             let json: String = row.get(1);
-            match serde_json::from_str(&json) {
+            match lash_core_execution::facade_support::decode_trigger_subscription_json(&json) {
                 Ok(record) if filter.matches(&record) => records.push(record),
                 Ok(_) => {}
                 Err(err) => tracing::warn!(
@@ -626,7 +587,7 @@ impl TriggerStore for PostgresTriggerStore {
             let subscription_id: String = row.get(0);
             let json: String = row.get(1);
             let mut record: TriggerSubscriptionRecord =
-                serde_json::from_str(&json).map_err(process_decode_error)?;
+                lash_core_execution::facade_support::decode_trigger_subscription_json(&json)?;
             let next_revision =
                 lash_core_execution::facade_support::next_trigger_store_revision(&record)?;
             record.tombstone(now);
@@ -638,7 +599,9 @@ impl TriggerStore for PostgresTriggerStore {
                 .bind(subscription_id)
                 .bind(sql_revision)
                 .bind(now as i64)
-                .bind(serde_json::to_string(&record).map_err(process_decode_error)?)
+                .bind(lash_core_execution::facade_support::encode_trigger_row(
+                    &record,
+                )?)
                 .execute(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
@@ -679,7 +642,7 @@ impl TriggerStore for PostgresTriggerStore {
         let (occurrence, is_new) = if let Some(row) = existing {
             let json: String = row.get(0);
             let occurrence: TriggerOccurrenceRecord =
-                serde_json::from_str(&json).map_err(process_decode_error)?;
+                lash_core_execution::facade_support::decode_trigger_occurrence_json(&json)?;
             if !lash_core_execution::facade_support::trigger_occurrence_request_matches_record(
                 &request,
                 &occurrence,
@@ -723,7 +686,9 @@ impl TriggerStore for PostgresTriggerStore {
                 .bind(&occurrence.source_key)
                 .bind(occurrence.occurred_at_ms as i64)
                 .bind(occurrence.outcome.kind())
-                .bind(serde_json::to_string(&occurrence).map_err(process_decode_error)?)
+                .bind(lash_core_execution::facade_support::encode_trigger_row(
+                    &occurrence,
+                )?)
                 .execute(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
@@ -781,7 +746,7 @@ impl TriggerStore for PostgresTriggerStore {
             // The statement's window is the clamped closed one; the filter's
             // own half-open bounds, over the raw `u64`s, decide each record.
             let record: TriggerOccurrenceRecord =
-                serde_json::from_str(&json).map_err(process_decode_error)?;
+                lash_core_execution::facade_support::decode_trigger_occurrence_json(&json)?;
             if filter.matches(&record) {
                 records.push(record);
             }
@@ -1211,17 +1176,18 @@ async fn reserve_postgres_deliveries(
     for row in rows {
         let subscription_id: String = row.get(0);
         let json: String = row.get(1);
-        let subscription: TriggerSubscriptionRecord = match serde_json::from_str(&json) {
-            Ok(subscription) => subscription,
-            Err(err) => {
-                tracing::warn!(
-                    error = %err,
-                    subscription_id,
-                    "skipping malformed trigger subscription during occurrence ingress"
-                );
-                continue;
-            }
-        };
+        let subscription: TriggerSubscriptionRecord =
+            match lash_core_execution::facade_support::decode_trigger_subscription_json(&json) {
+                Ok(subscription) => subscription,
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        subscription_id,
+                        "skipping malformed trigger subscription during occurrence ingress"
+                    );
+                    continue;
+                }
+            };
         let sql_revision =
             plugin_sql_counter_value("trigger_subscription_revision", subscription.revision)?;
         sqlx::query(sql.delivery.insert.sql())
@@ -1229,7 +1195,9 @@ async fn reserve_postgres_deliveries(
             .bind(&subscription.subscription_id)
             .bind(&subscription.incarnation)
             .bind(sql_revision)
-            .bind(serde_json::to_string(&subscription).map_err(process_decode_error)?)
+            .bind(lash_core_execution::facade_support::encode_trigger_row(
+                &subscription,
+            )?)
             .bind(created_at_ms as i64)
             .bind(
                 lash_core_execution::store::ObligationId::mint(
@@ -1266,7 +1234,8 @@ async fn postgres_delivery_snapshots(
             let json: String = row.get(2);
             Ok(TriggerDeliveryReservation {
                 occurrence: occurrence.clone(),
-                subscription: serde_json::from_str(&json).map_err(process_decode_error)?,
+                subscription:
+                    lash_core_execution::facade_support::decode_trigger_subscription_json(&json)?,
                 process_id: row
                     .get::<Option<String>, _>(0)
                     .map(|value| crate::stored_process_id(&value))
@@ -1296,16 +1265,14 @@ async fn list_deliveries_with(
         .map(|row| {
             let occurrence_json: String = row.get(2);
             let subscription_json: String = row.get(3);
-            Ok(TriggerDeliveryReservation {
-                occurrence: serde_json::from_str(&occurrence_json).map_err(process_decode_error)?,
-                subscription: serde_json::from_str(&subscription_json)
-                    .map_err(process_decode_error)?,
-                process_id: row
-                    .get::<Option<String>, _>(0)
+            lash_core_execution::facade_support::decode_trigger_delivery(
+                &occurrence_json,
+                &subscription_json,
+                row.get::<Option<String>, _>(0)
                     .map(|value| crate::stored_process_id(&value))
                     .transpose()?,
-                created_at_ms: plugin_u64_from_sql("TriggerDelivery", "created_at_ms", row.get(1))?,
-            })
+                row.get(1),
+            )
         })
         .collect()
 }

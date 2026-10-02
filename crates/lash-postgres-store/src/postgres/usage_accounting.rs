@@ -4,16 +4,20 @@ use crate::{PostgresStore, begin_guarded};
 use async_trait::async_trait;
 use lash_core_execution::RuntimeOwner;
 use lash_core_execution::UsageAccountingStore;
-use lash_core_execution::{LlmCallId, ModelKey, StoreError, TokenUsage};
-use lash_core_execution::{
-    OutstandingUsageAttempt, OwnerUsage, OwnerUsageRow, UsageAdmissionError, UsageAppendError,
-    UsageAppendReceipt, UsageCompleteness, UsageCorrection, UsageEffectKey, UsageFactBody,
-    UsageFactConflict, UsageFactCursor, UsageFactIdentity, UsageFactKind, UsageFactPage,
-    UsageFactRecord, UsageOwnerRetired, UsageReporting, UsageRunAdmission, UsageRunAdmitted,
-    UsageRunCursor, UsageRunDispatch, UsageRunFilter, UsageRunId, UsageRunPage, UsageRunRecord,
-    UsageRunResolution, UsageRunState, UsageSettleReceipt, UsageSettlement,
-    usage_correction_payload_hash, usage_fact_payload_hash, usage_owner_columns,
+use lash_core_execution::store_backend_support::{
+    StoredOutstandingAttempt, StoredUsageAggregate, StoredUsageFact, StoredUsageRun,
+    decode_usage_completeness, usage_corrupt, usage_integer, usage_run_resolution_columns,
+    usage_unsigned,
 };
+use lash_core_execution::{
+    OwnerUsage, UsageAdmissionError, UsageAppendError, UsageAppendReceipt, UsageCorrection,
+    UsageFactBody, UsageFactConflict, UsageFactCursor, UsageFactIdentity, UsageFactKind,
+    UsageFactPage, UsageFactRecord, UsageOwnerRetired, UsageReporting, UsageRunAdmission,
+    UsageRunAdmitted, UsageRunCursor, UsageRunFilter, UsageRunId, UsageRunPage, UsageRunRecord,
+    UsageRunResolution, UsageSettleReceipt, UsageSettlement, usage_correction_payload_hash,
+    usage_fact_payload_hash, usage_owner_columns,
+};
+use lash_core_execution::{StoreError, TokenUsage};
 use lash_store_sql::Dialect;
 use lash_store_sql::usage::{
     usage_facts::UsageFactsStatements, usage_owner_retirements::UsageOwnerRetirementsStatements,
@@ -60,68 +64,40 @@ pub(crate) fn retention_sql() -> (&'static str, &'static str, &'static str) {
         SQL.owners.delete_retired.sql(),
     )
 }
-fn corrupt(message: impl Into<String>) -> StoreError {
-    StoreError::StoredDataCorrupt {
-        record_kind: "usage accounting",
-        message: message.into(),
-    }
-}
-fn integer(value: u64) -> Result<i64, StoreError> {
-    i64::try_from(value).map_err(|_| corrupt("usage integer exceeds SQL range"))
-}
-fn unsigned(value: i64) -> Result<u64, StoreError> {
-    u64::try_from(value).map_err(|_| corrupt("negative usage sequence, timestamp or count"))
-}
-fn ordinal(value: i64) -> Result<u32, StoreError> {
-    u32::try_from(value).map_err(|_| corrupt("usage ordinal exceeds u32"))
-}
-fn effect(value: String) -> Result<UsageEffectKey, StoreError> {
-    serde_json::from_value(serde_json::Value::String(value)).map_err(|e| corrupt(e.to_string()))
-}
 fn decode_fact(row: &PgRow) -> Result<UsageFactRecord, StoreError> {
     macro_rules! get {
         ($n:expr) => {
             row.try_get($n).map_err(store_sqlx_error)?
         };
     }
-    let owner_kind: String = get!(1);
-    let owner_id: String = get!(2);
-    let owner = match owner_kind.as_str() {
-        "session" => RuntimeOwner::Session(lash_sansio::SessionId::from(owner_id)),
-        "process" => RuntimeOwner::Process(
-            lash_sansio::ProcessId::parse(&owner_id).map_err(|e| corrupt(e.to_string()))?,
-        ),
-        other => return Err(corrupt(format!("invalid owner kind {other}"))),
-    };
-    let kind: String = get!(6);
-    let disposition: String = get!(7);
-    let run: Option<String> = get!(8);
-    Ok(UsageFactRecord {
-        seq: unsigned(get!(0))?,
-        owner,
-        effect: effect(get!(3))?,
-        call_ordinal: ordinal(get!(4))?,
-        provider_attempt: ordinal(get!(5))?,
-        llm_call_id: LlmCallId(row.try_get::<String, _>(9).map_err(store_sqlx_error)?),
+    StoredUsageFact {
+        seq: get!(0),
+        owner_kind: get!(1),
+        owner_id: get!(2),
+        effect_key: get!(3),
+        call_ordinal: get!(4),
+        provider_attempt: get!(5),
+        fact_kind: get!(6),
+        disposition: get!(7),
+        run_id: get!(8),
+        llm_call_id: get!(9),
         source: get!(10),
-        model_key: ModelKey::new(row.try_get::<String, _>(11).map_err(store_sqlx_error)?),
+        model_key: get!(11),
         requested_model: get!(12),
         served_model: get!(13),
-        body: UsageFactBody::from_stored(
-            &kind,
-            &disposition,
-            run.map(UsageRunId::try_from).transpose()?,
-            TokenUsage {
-                input_tokens: get!(14),
-                output_tokens: get!(15),
-                cache_read_input_tokens: get!(16),
-                cache_write_input_tokens: get!(17),
-                reasoning_output_tokens: get!(18),
-            },
-            get!(19),
-        )?,
-        recorded_at_ms: unsigned(get!(21))?,
-    })
+        usage: TokenUsage {
+            input_tokens: get!(14),
+            output_tokens: get!(15),
+            cache_read_input_tokens: get!(16),
+            cache_write_input_tokens: get!(17),
+            reasoning_output_tokens: get!(18),
+        },
+        generation_id: get!(19),
+        // Column 20 is `payload_hash`: the conflict path's own read, never
+        // part of the domain record.
+        recorded_at_ms: get!(21),
+    }
+    .decode()
 }
 fn decode_run(row: &PgRow, owner: &RuntimeOwner) -> Result<UsageRunRecord, StoreError> {
     macro_rules! get {
@@ -129,78 +105,24 @@ fn decode_run(row: &PgRow, owner: &RuntimeOwner) -> Result<UsageRunRecord, Store
             row.try_get($n).map_err(store_sqlx_error)?
         };
     }
-    let effect = effect(get!(0))?;
-    let scope: Option<String> = get!(2);
-    let source: Option<String> = get!(3);
-    let model: Option<String> = get!(4);
-    let requested: Option<String> = get!(5);
-    let admitted: Option<i64> = get!(6);
-    let admission = match (scope, source, model, requested, admitted) {
-        (None, None, None, None, None) => None,
-        (
-            Some(execution_scope_key),
-            Some(source),
-            Some(model),
-            Some(requested_model),
-            Some(at_ms),
-        ) => Some(UsageRunDispatch {
-            execution_scope_key,
-            source,
-            model_key: ModelKey::new(model),
-            requested_model,
-            admitted_at_ms: unsigned(at_ms)?,
-        }),
-        _ => return Err(corrupt("partial usage run admission")),
-    };
-    let call: Option<i64> = get!(9);
-    let attempt: Option<i64> = get!(10);
-    let fact_kind: Option<String> = get!(11);
-    let stored: Option<String> = get!(12);
-    let offered: Option<String> = get!(13);
-    let conflict = match (call, attempt, fact_kind, stored, offered) {
-        (None, None, None, None, None) => None,
-        (
-            Some(call),
-            Some(attempt),
-            Some(kind),
-            Some(stored_payload_hash),
-            Some(offered_payload_hash),
-        ) => Some(UsageFactConflict {
-            identity: UsageFactIdentity {
-                owner: owner.clone(),
-                effect: effect.clone(),
-                call_ordinal: ordinal(call)?,
-                provider_attempt: ordinal(attempt)?,
-                kind: match kind.as_str() {
-                    "attempt" => UsageFactKind::Attempt,
-                    "correction" => UsageFactKind::Correction,
-                    _ => return Err(corrupt("invalid conflict fact kind")),
-                },
-            },
-            stored_payload_hash,
-            offered_payload_hash,
-        }),
-        _ => return Err(corrupt("partial usage run conflict")),
-    };
-    let state: String = get!(7);
-    let reason: Option<String> = get!(8);
-    let resolved: Option<i64> = get!(14);
-    let state = UsageRunState::from_stored(
-        &state,
-        reason.as_deref(),
-        conflict,
-        resolved.map(unsigned).transpose()?,
-    )?;
-    if state == UsageRunState::Open && admission.is_none() {
-        return Err(corrupt("open usage run has no admission"));
+    StoredUsageRun {
+        effect_key: get!(0),
+        run_id: get!(1),
+        execution_scope_key: get!(2),
+        source: get!(3),
+        model_key: get!(4),
+        requested_model: get!(5),
+        admitted_at_ms: get!(6),
+        state: get!(7),
+        unknown_reason: get!(8),
+        conflict_call_ordinal: get!(9),
+        conflict_provider_attempt: get!(10),
+        conflict_fact_kind: get!(11),
+        conflict_stored_payload_hash: get!(12),
+        conflict_offered_payload_hash: get!(13),
+        resolved_at_ms: get!(14),
     }
-    let run: String = get!(1);
-    Ok(UsageRunRecord {
-        effect,
-        run: UsageRunId::try_from(run)?,
-        admission,
-        state,
-    })
+    .decode(owner)
 }
 
 /// The absent retirement row cannot carry a row lock. Serialize every owner mutation
@@ -248,7 +170,7 @@ async fn insert_fact(
         .bind(usage.reasoning_output_tokens)
         .bind(record.generation_id())
         .bind(hash)
-        .bind(integer(record.recorded_at_ms)?)
+        .bind(usage_integer(record.recorded_at_ms)?)
         .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -273,12 +195,6 @@ async fn insert_fact(
             stored_payload_hash: stored,
             offered_payload_hash: hash.to_owned(),
         })))
-    }
-}
-fn resolution_columns(resolution: &UsageRunResolution) -> (&'static str, Option<&'static str>) {
-    match resolution {
-        UsageRunResolution::Settled => ("settled", None),
-        UsageRunResolution::Unknown(reason) => ("unknown", Some(reason.as_str())),
     }
 }
 async fn ensure_settlement_run(
@@ -325,7 +241,7 @@ impl UsageAccountingStore for PostgresStore {
         if let Some(retired) = retired {
             return Err(UsageAdmissionError::OwnerRetired {
                 owner: a.owner.clone(),
-                retired_at_ms: unsigned(retired)?,
+                retired_at_ms: usage_unsigned(retired)?,
             });
         }
         let inserted = sqlx::query(SQL.inserts.run.sql())
@@ -337,7 +253,7 @@ impl UsageAccountingStore for PostgresStore {
             .bind(&a.source)
             .bind(a.model_key.as_str())
             .bind(&a.requested_model)
-            .bind(integer(a.admitted_at_ms)?)
+            .bind(usage_integer(a.admitted_at_ms)?)
             .bind("open")
             .bind(Option::<&str>::None)
             .bind(Option::<i64>::None)
@@ -360,7 +276,7 @@ impl UsageAccountingStore for PostgresStore {
         let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         lock_owner(&mut tx, &s.owner).await?;
         let (kind, id) = usage_owner_columns(&s.owner);
-        let now = integer(now_ms)?;
+        let now = usage_integer(now_ms)?;
         let mut receipt = UsageSettleReceipt {
             inserted_facts: 0,
             duplicate_facts: 0,
@@ -380,7 +296,7 @@ impl UsageAccountingStore for PostgresStore {
                 receipt.duplicate_facts += 1;
             }
         }
-        let (state, reason) = resolution_columns(&receipt.run);
+        let (state, reason) = usage_run_resolution_columns(&receipt.run);
         ensure_settlement_run(&mut tx, s, state, reason, Some(now)).await?;
         sqlx::query(SQL.runs.resolve.sql())
             .bind(kind)
@@ -419,7 +335,7 @@ impl UsageAccountingStore for PostgresStore {
                 .map_err(store_sqlx_error)?
                 .rows_affected(),
         )
-        .map_err(|_| corrupt("superseded run count exceeds u32"))?;
+        .map_err(|_| usage_corrupt("superseded run count exceeds u32"))?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(receipt)
     }
@@ -430,12 +346,14 @@ impl UsageAccountingStore for PostgresStore {
         now_ms: u64,
     ) -> Result<(), StoreError> {
         if conflict.identity.owner != s.owner || conflict.identity.effect != s.effect {
-            return Err(corrupt("usage conflict belongs to another owner or effect"));
+            return Err(usage_corrupt(
+                "usage conflict belongs to another owner or effect",
+            ));
         }
         let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         lock_owner(&mut tx, &s.owner).await?;
         let (kind, id) = usage_owner_columns(&s.owner);
-        let now = integer(now_ms)?;
+        let now = usage_integer(now_ms)?;
         for statement in [SQL.runs.insert_conflict.sql(), SQL.runs.conflict.sql()] {
             sqlx::query(statement)
                 .bind(kind)
@@ -520,7 +438,7 @@ impl UsageAccountingStore for PostgresStore {
             .bind(kind)
             .bind(id)
             .bind(execution_scope_key)
-            .bind(integer(now_ms)?)
+            .bind(usage_integer(now_ms)?)
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?
@@ -539,7 +457,7 @@ impl UsageAccountingStore for PostgresStore {
         let inserted = sqlx::query(SQL.inserts.owner.sql())
             .bind(kind)
             .bind(id)
-            .bind(integer(now_ms)?)
+            .bind(usage_integer(now_ms)?)
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?
@@ -553,14 +471,14 @@ impl UsageAccountingStore for PostgresStore {
         let count = sqlx::query(SQL.runs.retire_owner.sql())
             .bind(kind)
             .bind(id)
-            .bind(integer(now_ms)?)
+            .bind(usage_integer(now_ms)?)
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?
             .rows_affected();
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(UsageOwnerRetired {
-            retired_at_ms: unsigned(retired)?,
+            retired_at_ms: usage_unsigned(retired)?,
             resolved_open_runs: count,
             already_retired: inserted == 0,
         })
@@ -578,11 +496,9 @@ impl UsageAccountingStore for PostgresStore {
             .map_err(store_sqlx_error)?
             .iter()
             .map(|row| {
-                Ok(OwnerUsageRow {
+                StoredUsageAggregate {
                     source: row.try_get(0).map_err(store_sqlx_error)?,
-                    model_key: ModelKey::new(
-                        row.try_get::<String, _>(1).map_err(store_sqlx_error)?,
-                    ),
+                    model_key: row.try_get(1).map_err(store_sqlx_error)?,
                     requested_model: row.try_get(2).map_err(store_sqlx_error)?,
                     usage: TokenUsage {
                         input_tokens: row.try_get(3).map_err(store_sqlx_error)?,
@@ -591,10 +507,11 @@ impl UsageAccountingStore for PostgresStore {
                         cache_write_input_tokens: row.try_get(6).map_err(store_sqlx_error)?,
                         reasoning_output_tokens: row.try_get(7).map_err(store_sqlx_error)?,
                     },
-                    reported_attempts: unsigned(row.try_get(8).map_err(store_sqlx_error)?)?,
-                    unreported_attempts: unsigned(row.try_get(9).map_err(store_sqlx_error)?)?,
-                    reconciled_attempts: unsigned(row.try_get(10).map_err(store_sqlx_error)?)?,
-                })
+                    reported_attempts: row.try_get(8).map_err(store_sqlx_error)?,
+                    unreported_attempts: row.try_get(9).map_err(store_sqlx_error)?,
+                    reconciled_attempts: row.try_get(10).map_err(store_sqlx_error)?,
+                }
+                .decode()
             })
             .collect::<Result<Vec<_>, StoreError>>()?;
         let outstanding = sqlx::query(SQL.facts.outstanding.sql())
@@ -605,18 +522,17 @@ impl UsageAccountingStore for PostgresStore {
             .map_err(store_sqlx_error)?
             .iter()
             .map(|row| {
-                Ok(OutstandingUsageAttempt {
-                    effect: effect(row.try_get(0).map_err(store_sqlx_error)?)?,
-                    call_ordinal: ordinal(row.try_get(1).map_err(store_sqlx_error)?)?,
-                    provider_attempt: ordinal(row.try_get(2).map_err(store_sqlx_error)?)?,
-                    llm_call_id: LlmCallId(row.try_get::<String, _>(3).map_err(store_sqlx_error)?),
+                StoredOutstandingAttempt {
+                    effect_key: row.try_get(0).map_err(store_sqlx_error)?,
+                    call_ordinal: row.try_get(1).map_err(store_sqlx_error)?,
+                    provider_attempt: row.try_get(2).map_err(store_sqlx_error)?,
+                    llm_call_id: row.try_get(3).map_err(store_sqlx_error)?,
                     source: row.try_get(4).map_err(store_sqlx_error)?,
-                    model_key: ModelKey::new(
-                        row.try_get::<String, _>(5).map_err(store_sqlx_error)?,
-                    ),
+                    model_key: row.try_get(5).map_err(store_sqlx_error)?,
                     requested_model: row.try_get(6).map_err(store_sqlx_error)?,
                     generation_id: row.try_get(7).map_err(store_sqlx_error)?,
-                })
+                }
+                .decode()
             })
             .collect::<Result<Vec<_>, StoreError>>()?;
         let counts = sqlx::query(SQL.runs.completeness.sql())
@@ -633,14 +549,14 @@ impl UsageAccountingStore for PostgresStore {
             .await
             .map_err(store_sqlx_error)?
             .is_some();
-        let completeness = UsageCompleteness {
-            open_runs: unsigned(counts.try_get(0).map_err(store_sqlx_error)?)?,
-            oldest_open_admitted_at_ms: oldest.map(unsigned).transpose()?,
-            unknown_runs: unsigned(counts.try_get(2).map_err(store_sqlx_error)?)?,
-            conflicted_runs: unsigned(counts.try_get(3).map_err(store_sqlx_error)?)?,
-            unreported_attempts: outstanding.len() as u64,
+        let completeness = decode_usage_completeness(
+            counts.try_get(0).map_err(store_sqlx_error)?,
+            oldest,
+            counts.try_get(2).map_err(store_sqlx_error)?,
+            counts.try_get(3).map_err(store_sqlx_error)?,
+            outstanding.len() as u64,
             retired,
-        };
+        )?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(OwnerUsage {
             owner: owner.clone(),
@@ -662,7 +578,7 @@ impl UsageAccountingStore for PostgresStore {
         let mut facts = sqlx::query(SQL.facts.page.sql())
             .bind(kind)
             .bind(id)
-            .bind(integer(after.map_or(0, UsageFactCursor::after_seq))?)
+            .bind(usage_integer(after.map_or(0, UsageFactCursor::after_seq))?)
             .bind(i64::from(limit.get()) + 1)
             .fetch_all(&self.pool)
             .await
