@@ -6,9 +6,10 @@
 //! deployment operation lists (`StoreOp`, `DeploymentOp`), so every listed
 //! operation is scriptable and a new one joins with no edit here.
 //!
-//! A rule matches an operation's `nth` call, optionally of one actor. There
-//! are no predicates over arguments: a law that needs one overrides that
-//! operation in a hand-written `RuntimeStoreDecorator`.
+//! A rule matches an operation's `nth` call, optionally of one actor, or the
+//! calls of each of a set of operations ([`Script::on_each`]). There are no
+//! predicates over arguments: a law that needs one overrides that operation
+//! in a hand-written `RuntimeStoreDecorator`.
 //!
 //! A rule that never fired fails the law when its script drops, so a law
 //! cannot pass without exercising what it armed.
@@ -185,10 +186,40 @@ enum Hits {
     From(usize),
 }
 
+/// The operations a rule acts on.
+#[derive(Clone)]
+enum Ops {
+    One(Op),
+    /// Each of these, or every operation when none is named.
+    Each(Arc<[Op]>),
+}
+
+impl Ops {
+    fn contains(&self, op: Op) -> bool {
+        match self {
+            Self::One(one) => *one == op,
+            Self::Each(ops) => ops.is_empty() || ops.contains(&op),
+        }
+    }
+}
+
+impl std::fmt::Display for Ops {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::One(op) => write!(f, "{op}"),
+            Self::Each(ops) if ops.is_empty() => f.write_str("*"),
+            Self::Each(ops) => {
+                let names: Vec<&str> = ops.iter().map(|op| op.name()).collect();
+                write!(f, "{}", names.join("|"))
+            }
+        }
+    }
+}
+
 /// The calls a rule acts on, and where in them.
 #[derive(Clone)]
 struct Target {
-    op: Op,
+    ops: Ops,
     actor: Option<String>,
     hits: Hits,
     phase: Phase,
@@ -196,7 +227,7 @@ struct Target {
 
 impl Target {
     fn matches(&self, call: &Call) -> bool {
-        if self.op != call.op || self.phase != call.phase {
+        if !self.ops.contains(call.op) || self.phase != call.phase {
             return false;
         }
         let nth = match &self.actor {
@@ -217,8 +248,8 @@ impl std::fmt::Display for Target {
             write!(f, "{actor}:")?;
         }
         match self.hits {
-            Hits::Nth(nth) => write!(f, "{}#{nth}", self.op)?,
-            Hits::From(first) => write!(f, "{}#{first}..", self.op)?,
+            Hits::Nth(nth) => write!(f, "{}#{nth}", self.ops)?,
+            Hits::From(first) => write!(f, "{}#{first}..", self.ops)?,
         }
         write!(f, " {}", self.phase)
     }
@@ -323,9 +354,24 @@ impl Script {
         On {
             script: self,
             target: Target {
-                op: op.into(),
+                ops: Ops::One(op.into()),
                 actor: None,
                 hits: Hits::Nth(1),
+                phase: Phase::Before,
+            },
+        }
+    }
+
+    /// Start a rule on every call of each of `ops`, or of every operation
+    /// when `ops` is empty. [`On::nth`] and [`On::from_nth`] count the calls
+    /// of each operation on its own.
+    pub fn on_each(&self, ops: &[Op]) -> On<'_> {
+        On {
+            script: self,
+            target: Target {
+                ops: Ops::Each(ops.into()),
+                actor: None,
+                hits: Hits::From(1),
                 phase: Phase::Before,
             },
         }
@@ -717,6 +763,41 @@ mod tests {
         assert_eq!(
             rendered(&script).last().map(String::as_str),
             Some("b:load_turn_park#3 before fail(transient)")
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_rule_on_each_operation_acts_on_every_call_of_the_named_ones() {
+        let script = Script::new();
+        let store = script.wrap("a", Arc::new(Counter::default()));
+        let held = script
+            .on_each(&[StoreOp::load_turn_park.into(), StoreOp::admit_root.into()])
+            .by("a")
+            .before()
+            .pause();
+        let every = script.on_each(&[]).after().pause();
+        every.open_all();
+        store
+            .call(StoreOp::lookup_session, store.inner().work())
+            .await
+            .expect("an operation the rule does not name passes");
+        for (op, arrivals) in [(StoreOp::load_turn_park, 1), (StoreOp::admit_root, 2)] {
+            let mut call = std::pin::pin!(store.call(op, store.inner().work()));
+            held.reached_by(&mut call, arrivals).await;
+            held.open_one();
+            call.await.expect("the call passes once let through");
+        }
+        assert_eq!(
+            every.arrived(),
+            3,
+            "a rule naming nothing acts on every operation"
+        );
+        assert_eq!(
+            rendered(&script)[2..4],
+            [
+                "a:load_turn_park#1 before pause",
+                "a:load_turn_park#1 after pause"
+            ]
         );
     }
 

@@ -14,9 +14,11 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 mod child_park;
+mod interleavings;
 mod lost_root;
 mod ownership;
 pub use child_park::*;
+pub use interleavings::*;
 pub use lost_root::*;
 pub use ownership::*;
 

@@ -106,7 +106,10 @@ impl Gate {
         self.permits.close();
     }
 
-    async fn arrivals(&self, count: usize) {
+    /// Wait until `count` arrivals reached the gate, however long that
+    /// takes: the caller bounds the wait and words its own failure.
+    /// [`Gate::reached`] is the bounded wait.
+    pub async fn arrivals(&self, count: usize) {
         loop {
             // Armed before the count is read, so an arrival between the read
             // and the wait still wakes this.

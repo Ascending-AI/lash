@@ -4,6 +4,7 @@ use lash_core::*;
 mod conformance;
 pub use conformance::*;
 mod effect_host_macros;
+mod interleave;
 use lash_core::attachments::*;
 use lash_core::facade_support::*;
 use lash_core::runtime::*;

@@ -166,7 +166,7 @@ impl StalledExecution for GatedExecution {
 /// One stopped-child reconcile pass over `execution`. A [`GatedExecution`]
 /// holds it at its engine probe: after it read the root's park, before it
 /// writes.
-fn held_pass<'a>(
+pub(super) fn held_pass<'a>(
     writer: &'a lash_core::drive::StoreParkRecovery<'a>,
     child: &'a ParkTarget,
     reason: &ParkReason,
