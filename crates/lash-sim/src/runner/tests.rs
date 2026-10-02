@@ -376,7 +376,7 @@ async fn generated_park_resume_transcript_is_readable_and_logical_size_labeled()
     suspend-tool  commit    checkpoint.commit       rev=0->1
     suspend-tool              turn_state            stored logical=131B
     suspend-tool              tool_state            stored logical=<opaque>
-    suspend-tool              plugin_state          stored {"embed_tools":{"generation":0,"values":{}},"lash.triggers":{"generation":0,"values":{}},"standard_protocol":{"generation":0,"values":{}}}
+    suspend-tool              plugin_state          stored {"embed_tools":{"format_version":1,"generation":0,"values":{}},"lash.triggers":{"format_version":1,"generation":0,"values":{}},"standard_protocol":{"format_version":1,"generation":0,"values":{}}}
     "#);
 }
 
