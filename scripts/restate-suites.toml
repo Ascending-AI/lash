@@ -1,3 +1,5 @@
+# Main's full run derives one CI job per suite and leg from this registry.
+# ci_driver optionally retains a suite's fixture ownership and cleanup.
 # The real-server Restate suites (FIG-3666), run by `scripts/ci/restate_suite.py`
 # beside a pinned `restate-server`: one server per shard, shared by the tests
 # it runs, isolated by unique keys and never reset.
@@ -69,6 +71,7 @@ shards = 1
 timeout_seconds = 180
 
 [suites.agent-workbench]
+ci_driver = "scripts/agent-workbench-restate-e2e.sh"
 label = "//examples/agent-workbench:agent-workbench__unit_test"
 cwd = "examples/agent-workbench"
 filters = ["live_restate_"]

@@ -591,6 +591,17 @@ witnesses for schema diffs; full dispatch runs all three. Compatibility compares
 live catalog artifacts and version stamps. Use `kiln gate lash <fork> -- <cmd>`
 for other live gates, with identities and ports derived from `KILN_GATE_ID`.
 
+Main's hourly full-profile dispatch derives its Restate suite/leg matrix from
+`scripts/restate-suites.toml`. Registering a suite adds live and replay jobs.
+`python3 scripts/ci/restate_matrix.py check` verifies the producer, matrix,
+runner and conclusion wiring. Jobs run at most three at once, each with its own
+PostgreSQL service. A registry `ci_driver` retains specialized fixture cleanup.
+Run the same entrypoint locally through a gate:
+
+```sh
+kiln gate lash <fork> -- python3 scripts/ci/restate_matrix.py run <suite> --leg replay
+```
+
 The ordinary partition retains ignored-test selection and exclusions. Live
 Restate tests remain ignored. The five
 `durable_fault_matrix_real_cargo_filters_chunk_0..4` cases remain in the named

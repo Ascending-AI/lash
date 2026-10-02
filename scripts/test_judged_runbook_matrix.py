@@ -1,6 +1,9 @@
 import importlib.util
+import json
 import pathlib
 import re
+import subprocess
+import sys
 import unittest
 
 import yaml
@@ -38,7 +41,14 @@ def expanded_job_names(template: str, matrix: dict) -> set:
     expansion the declared matrix produces. The literal template stays a
     valid citation: it is the name as the workflow file writes it."""
     expanded = {template}
-    for key in MATRIX_EXPRESSION.findall(template):
+    keys = MATRIX_EXPRESSION.findall(template)
+    if keys and isinstance(matrix, str):
+        if matrix != "${{ fromJSON(needs.plan.outputs.restate_matrix) }}":
+            raise ValueError(f"unresolved dynamic CI matrix: {matrix}")
+        matrix = json.loads(subprocess.check_output(
+            [sys.executable, str(ROOT / "scripts/ci/restate_matrix.py"), "matrix"], text=True
+        ))
+    for key in keys:
         values = set(matrix.get(key) or [])
         values.update(
             entry[key]

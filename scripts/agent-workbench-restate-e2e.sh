@@ -154,7 +154,7 @@ bash "$repo/scripts/ci/with-service.sh" pg16 -- bash -c '
   set -euo pipefail
   export AGENT_WORKBENCH_E2E_POSTGRES_BASE_URL="${LASH_POSTGRES_DATABASE_URL%/*}"
   exec python3 scripts/ci/restate_suite.py suite agent-workbench \
-    --leg "${AGENT_WORKBENCH_E2E_LEG:-live}" \
+    --leg "${LASH_RESTATE_SUITE_LEG:-${AGENT_WORKBENCH_E2E_LEG:-live}}" \
     --artifacts "$AGENT_WORKBENCH_E2E_SUITE_ARTIFACTS"
 ' 2>&1 | tee "$test_output"
 test_status="${PIPESTATUS[0]}"

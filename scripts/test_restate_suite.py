@@ -26,6 +26,62 @@ MODULE = importlib.util.module_from_spec(SPEC)
 sys.modules["restate_suite"] = MODULE
 SPEC.loader.exec_module(MODULE)
 
+sys.path.insert(0, str(ROOT / "scripts/ci"))
+import restate_matrix
+
+
+class MatrixTests(unittest.TestCase):
+    def test_every_registered_leg_is_reached_by_the_full_run(self) -> None:
+        import yaml
+
+        workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+        self.assertEqual([], restate_matrix.workflow_problems(workflow))
+
+    def test_registering_a_suite_adds_both_jobs_without_other_edits(self) -> None:
+        with mock.patch.object(restate_matrix, "load_registry", return_value={"new-suite": {}}):
+            self.assertEqual(
+                {"include": [{"suite": "new-suite", "leg": "live"}, {"suite": "new-suite", "leg": "replay"}]},
+                restate_matrix.matrix(),
+            )
+            self.assertEqual(["unreached Restate leg: new-suite/replay"],
+                             restate_matrix.coverage_problems([{"suite": "new-suite", "leg": "live"}]))
+
+    def test_a_missing_leg_or_broken_matrix_edge_fails_the_check(self) -> None:
+        import copy
+        import yaml
+
+        workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+        for mutate in (
+            lambda w: w["jobs"]["restate-suites"]["strategy"].update(matrix={"include": []}),
+            lambda w: w["jobs"]["plan"]["outputs"].pop("restate_matrix"),
+            lambda w: w["jobs"]["plan"]["steps"].remove(next(s for s in w["jobs"]["plan"]["steps"] if s.get("id") == "restate-matrix")),
+            lambda w: w["jobs"]["restate-suites"].update({"if": "false"}),
+            lambda w: w["jobs"]["ci-conclusion"]["needs"].remove("restate-suites"),
+            lambda w: next(s for s in w["jobs"]["restate-suites"]["steps"] if s.get("name") == "Run registered Restate leg").update({"if": "false"}),
+        ):
+            with self.subTest(mutation=mutate):
+                changed = copy.deepcopy(workflow)
+                mutate(changed)
+                self.assertTrue(restate_matrix.workflow_problems(changed))
+        rows = restate_matrix.matrix()["include"]
+        self.assertTrue(restate_matrix.coverage_problems(rows[:-1]))
+        self.assertTrue(restate_matrix.coverage_problems(rows + rows[:1]))
+
+    def test_ci_runs_the_same_suite_entrypoint_with_a_private_database(self) -> None:
+        with mock.patch.object(restate_matrix.subprocess, "call", return_value=19) as call:
+            self.assertEqual(19, restate_matrix.run("json-decode", "replay"))
+        command = call.call_args.args[0]
+        self.assertEqual(["bash", str(ROOT / "scripts/ci/with-service.sh"), "pg16", "--",
+                          sys.executable, str(ROOT / "scripts/ci/restate_suite.py"),
+                          "suite", "json-decode", "--leg", "replay", "--keep-test-logs"], command)
+
+    def test_the_registered_workbench_driver_retains_its_cleanup(self) -> None:
+        with mock.patch.object(restate_matrix.subprocess, "call", return_value=0) as call:
+            restate_matrix.run("agent-workbench", "replay")
+        self.assertEqual(["bash", str(ROOT / "scripts/agent-workbench-restate-e2e.sh")], call.call_args.args[0])
+        self.assertEqual("replay", call.call_args.kwargs["env"]["LASH_RESTATE_SUITE_LEG"])
+
+
 # A stand-in libtest binary: it records its argv, lists four ignored tests,
 # and runs a test by its name's verb; an unknown name runs nothing and exits 0.
 FAKE_LIBTEST = textwrap.dedent(

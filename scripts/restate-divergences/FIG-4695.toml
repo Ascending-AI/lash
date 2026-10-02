@@ -1,0 +1,2 @@
+[suites.agent-workbench.replay.divergent]
+"tests::restate_recovery_tests::live_restate_turn_input_ingress_delivers_once_and_queues_after_settle" = "The trace counts settlement observations repeated by handler replay; the committed-event oracle remains to be repaired (FIG-4695)"

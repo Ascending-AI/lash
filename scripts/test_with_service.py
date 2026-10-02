@@ -24,10 +24,12 @@ import pathlib
 import re
 import signal
 import subprocess
+import sys
 import tempfile
 import textwrap
 import time
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 WRAPPER = ROOT / "scripts" / "ci" / "with-service.sh"
@@ -235,56 +237,41 @@ class FakeDocker:
 
 
 class WithServiceBehaviour(unittest.TestCase):
-    def test_postgres_ci_recipes_get_service_and_propagate_failure(self) -> None:
-        step = workflow_text().split("      - name: Run functional E2E\n", 1)[1]
-        step = step.split("      - name:", 1)[0]
-        run = re.search(r"^        run: (.*)\n((?:          .*\n)*)", step, re.MULTILINE)
-        self.assertIsNotNone(run)
-        assert run is not None
-        command = textwrap.dedent(run[2]) if run[1] == "|" else run[1]
-        cases = (
-            ("server-double-e2e", 0),
-            ("server-double-e2e", 7),
-            ("effect-group-conformance-e2e", 0),
-            ("effect-group-conformance-e2e", 7),
-            ("workflow-graph-roundtrip-e2e", 0),
-        )
-        for recipe, exit_code in cases:
-            with self.subTest(recipe=recipe, exit_code=exit_code), tempfile.TemporaryDirectory() as raw:
-                directory = pathlib.Path(raw)
-                docker = FakeDocker(directory)
-                just = directory / "just"
-                just.write_text(
-                    '#!/usr/bin/env bash\n'
-                    'printf "%s\\n" "$1" "${LASH_POSTGRES_DATABASE_URL:-}" "${LASH_REQUIRE_POSTGRES:-}"\n'
-                    f"exit {exit_code}\n",
-                    encoding="utf-8",
-                )
-                just.chmod(0o755)
-                env = docker.env()
-                env.pop("LASH_POSTGRES_DATABASE_URL", None)
-                env.pop("LASH_REQUIRE_POSTGRES", None)
-                name = recipe.removesuffix("-e2e")
-                rendered = command.replace("${{ matrix.recipe }}", recipe).replace(
-                    "${{ matrix.name }}", name
-                )
-                result = subprocess.run(
-                    ["bash", "-euc", rendered],
-                    cwd=ROOT,
-                    env=env,
-                    text=True,
-                    capture_output=True,
-                    check=False,
-                    timeout=120,
-                )
-                self.assertEqual(1 if exit_code else 0, result.returncode, result.stderr)
-                self.assertEqual(recipe, result.stdout.splitlines()[0])
-                if recipe in ("server-double-e2e", "effect-group-conformance-e2e"):
+    def test_postgres_ci_suites_get_service_and_propagate_failure(self) -> None:
+        sys.path.insert(0, str(ROOT / "scripts/ci"))
+        import restate_matrix
+
+        for suite in ("server-double", "effect-group"):
+            for exit_code in (0, 7):
+                with self.subTest(suite=suite, exit_code=exit_code), tempfile.TemporaryDirectory() as raw:
+                    directory = pathlib.Path(raw)
+                    docker = FakeDocker(directory)
+                    binary = directory / "fake-suite-python"
+                    binary.write_text(
+                        '#!/usr/bin/env bash\n'
+                        'printf "%s\\n" "$*" "${LASH_POSTGRES_DATABASE_URL:-}" "${LASH_REQUIRE_POSTGRES:-}"\n'
+                        f"exit {exit_code}\n", encoding="utf-8",
+                    )
+                    binary.chmod(0o755)
+                    env = docker.env()
+                    env.pop("LASH_POSTGRES_DATABASE_URL", None)
+                    env.pop("LASH_REQUIRE_POSTGRES", None)
+                    results = []
+
+                    def execute(command, **kwargs):
+                        result = subprocess.run(command, **kwargs, text=True, capture_output=True, timeout=120)
+                        results.append(result)
+                        return result.returncode
+
+                    with mock.patch.dict(os.environ, env, clear=True), \
+                         mock.patch.object(sys, "executable", str(binary)), \
+                         mock.patch.object(restate_matrix.subprocess, "call", side_effect=execute):
+                        status = restate_matrix.run(suite, "replay")
+                    result = results[0]
+                    self.assertEqual(1 if exit_code else 0, status, result.stderr)
+                    self.assertIn(f"restate_suite.py suite {suite} --leg replay --keep-test-logs", result.stdout)
                     self.assertRegex(result.stdout, r"postgres://lash:lash@127\.0\.0\.1:\d+/lash\n1\n")
                     self.assertTrue(any(call.startswith("rm --force") for call in docker.logged()))
-                else:
-                    self.assertEqual(f"{recipe}\n\n\n", result.stdout)
-                    self.assertEqual([], docker.logged())
 
     def test_effect_group_recipe_requires_postgres_before_both_legs(self) -> None:
         justfile = (ROOT / "justfile").read_text(encoding="utf-8")

@@ -281,6 +281,7 @@ GATED_JOBS = {
     "rolling-upgrade": "rolling_upgrade",
     "s3-store": "stores",
     "functional-e2e": "functional_e2e",
+    "restate-suites": "restate_suites",
     "functional-e2e-process-operations": "functional_e2e",
     "fuzz-smoke": "rust",
     "unused-deps": "rust",
@@ -310,6 +311,7 @@ FEATURE_LANES_JOB = "feature-lanes"
 # postgres-store is not dispatch-only. Selected store PRs run PG16 and the
 # cross-backend differential; merge groups and dispatches retain their suites.
 DISPATCH_ONLY_JOBS = {
+    "restate-suites",
     "heavy-tests",
     "stack-budget",
     "s3-store",
@@ -605,6 +607,7 @@ PLAN_OUTPUT_FAMILIES: Mapping[str, frozenset[str]] = {
     "pr_tail_labels": frozenset(),
     "pr_test_labels": frozenset(),
     "pr_build_targets": frozenset(),
+    "restate_matrix": frozenset({"restate_suites"}),
 }
 _PLAN_OUTPUT = re.compile(r"needs\.plan\.outputs\.([A-Za-z0-9_]+)")
 

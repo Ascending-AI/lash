@@ -744,6 +744,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         """
         workflow = WORKFLOW.read_text(encoding="utf-8")
         dispatch_only = {
+            "restate-suites",
             "heavy-tests",
             "stack-budget",
             "s3-store",

@@ -1341,74 +1341,31 @@ class RestateSuiteSelectionTests(unittest.TestCase):
     def plan(self, *paths: str) -> dict[str, str]:
         return ci_plan.classify([("M", path) for path in paths])
 
-    def test_root_control_runs_both_legs_in_a_ci_selected_recipe(self) -> None:
-        import tomllib
-
-        registry = tomllib.loads((ROOT / "scripts/restate-suites.toml").read_text())["suites"]
-        self.assertIn("root-control", registry)
-        recipes = ci_plan._justfile_recipes((ROOT / "justfile").read_text())
-        job = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]["functional-e2e"]
-        selected = {row["recipe"] for row in job["strategy"]["matrix"]["include"]}
-        run = next(step["run"] for step in job["steps"] if step.get("name") == "Run functional E2E")
-        self.assertIn("just ${{ matrix.recipe }}", run)
-        with mock.patch.object(subprocess, "run", side_effect=AssertionError("parse only")):
+    def assert_suite_legs_selected(self, names: set[str]) -> None:
+        rows = json.loads(subprocess.check_output(
+            [sys.executable, str(ROOT / "scripts/ci/restate_matrix.py"), "matrix"], text=True
+        ))["include"]
+        selected = {(row["suite"], row["leg"]) for row in rows}
+        for name in names:
             for leg in ("live", "replay"):
-                with self.subTest(leg=leg):
-                    command = re.compile(
-                        rf'^\s*python3\s+"\{{\{{repo\}}\}}/scripts/ci/restate_suite\.py"'
-                        rf'\s+suite\s+root-control\s+--leg\s+{leg}\b',
-                        re.MULTILINE,
-                    )
-                    self.assertTrue(any(command.search(recipes[recipe]) for recipe in selected),
-                                    f"root-control {leg} has no CI-selected recipe")
+                self.assertIn((name, leg), selected)
+        job = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]["restate-suites"]
+        self.assertEqual("${{ fromJSON(needs.plan.outputs.restate_matrix) }}", job["strategy"]["matrix"])
 
-    def test_session_driver_runs_both_legs_in_a_ci_selected_recipe(self) -> None:
-        """The session drive's live continuation law runs where CI selects it.
+    def test_root_control_runs_both_legs_in_the_derived_matrix(self) -> None:
+        self.assert_suite_legs_selected({"root-control"})
 
-        The suite was registered and no recipe or workflow ran it (FIG-4523),
-        so its law went unexecuted through FIG-4506. The justfile and the
-        workflow are parsed; nothing shells out to `just`.
-        """
+    def test_session_driver_runs_both_legs_in_the_derived_matrix(self) -> None:
+        self.assert_suite_legs_selected({"session-driver"})
 
-        import tomllib
-
-        registry = tomllib.loads((ROOT / "scripts/restate-suites.toml").read_text())["suites"]
-        self.assertIn("session-driver", registry)
-        recipes = ci_plan._justfile_recipes((ROOT / "justfile").read_text())
-        job = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]["functional-e2e"]
-        selected = {row["recipe"] for row in job["strategy"]["matrix"]["include"]}
-        run = next(step["run"] for step in job["steps"] if step.get("name") == "Run functional E2E")
-        self.assertIn("just ${{ matrix.recipe }}", run)
-        with mock.patch.object(subprocess, "run", side_effect=AssertionError("parse only")):
-            for leg in ("live", "replay"):
-                with self.subTest(leg=leg):
-                    command = re.compile(
-                        rf'^\s*python3\s+"\{{\{{repo\}}\}}/scripts/ci/restate_suite\.py"'
-                        rf'\s+suite\s+session-driver\s+--leg\s+{leg}\b',
-                        re.MULTILINE,
-                    )
-                    self.assertTrue(any(command.search(recipes[recipe]) for recipe in selected),
-                                    f"session-driver {leg} has no CI-selected recipe")
-
-    def test_load_replay_suites_run_both_legs_in_a_ci_selected_recipe(self) -> None:
+    def test_load_replay_suites_run_both_legs_in_the_derived_matrix(self) -> None:
         import tomllib
 
         registry = tomllib.loads((ROOT / "scripts/restate-suites.toml").read_text())["suites"]
         suites = {name for name, spec in registry.items()
                   if spec["cwd"] == "runbooks/restate-postgres-workers"}
         self.assertTrue(suites)
-        recipes = ci_plan._justfile_recipes((ROOT / "justfile").read_text())
-        job = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]["functional-e2e"]
-        selected = {row["recipe"] for row in job["strategy"]["matrix"]["include"]}
-        run = next(step["run"] for step in job["steps"] if step.get("name") == "Run functional E2E")
-        self.assertIn("just ${{ matrix.recipe }}", run)
-        for suite in suites:
-            for leg in ("live", "replay"):
-                with self.subTest(suite=suite, leg=leg):
-                    self.assertTrue(any(
-                        f"suite {suite} --leg {leg}" in recipes[recipe]
-                        for recipe in selected
-                    ), f"{suite} {leg} has no CI-selected recipe")
+        self.assert_suite_legs_selected(suites)
 
     def test_the_registry_derives_the_suite_owners(self) -> None:
         self.assertEqual(
@@ -1533,8 +1490,6 @@ class RestateSuiteSelectionTests(unittest.TestCase):
             {
                 "agent-service",
                 "agent-workbench",
-                "effect-group-conformance",
-                "server-double",
             },
             {leg["name"] for leg in legs if leg["restate"]},
         )
@@ -2676,8 +2631,7 @@ class WorkflowRegistrationTests(unittest.TestCase):
         self.assertNotIn("pull_request", consumer["if"])
         self.assertEqual(["process-operations"],
                          [leg["name"] for leg in consumer["strategy"]["matrix"]["include"]])
-        self.assertEqual({"agent-service", "agent-workbench", "effect-group-conformance",
-                          "server-double", "workflow-graph-roundtrip",
+        self.assertEqual({"agent-service", "agent-workbench", "workflow-graph-roundtrip",
                           "slack-clone-full-host"},
                          {leg["name"] for leg in other["strategy"]["matrix"]["include"]})
         self.assertFalse(any("worker binaries" in step.get("name", "") for step in other["steps"]))

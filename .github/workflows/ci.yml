@@ -154,6 +154,7 @@ jobs:
       functional_e2e: ${{ steps.classify.outputs.functional_e2e }}
       workers_e2e: ${{ steps.classify.outputs.workers_e2e }}
       restate_suites: ${{ steps.classify.outputs.restate_suites }}
+      restate_matrix: ${{ steps.restate-matrix.outputs.restate_matrix }}
       rolling_upgrade: ${{ steps.classify.outputs.rolling_upgrade }}
       release_journal_replay: ${{ steps.classify.outputs.release_journal_replay }}
       feature_lanes: ${{ steps.classify.outputs.feature_lanes }}
@@ -203,6 +204,10 @@ jobs:
           done
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
+
+      - name: Derive registered Restate legs
+        id: restate-matrix
+        run: python3 scripts/ci/restate_matrix.py matrix --github-output >> "${GITHUB_OUTPUT}"
 
       - name: Classify exact diff
         id: classify
@@ -526,6 +531,7 @@ jobs:
           python3 scripts/test_filtered_store_gates.py
           python3 scripts/test_launcher_test_sandbox.py
           python3 scripts/test_agent_workbench_restate_e2e.py
+          python3 scripts/ci/restate_matrix.py check
           python3 scripts/test_restate_suite.py
           python3 scripts/test_check_facade_only_examples.py
           python3 scripts/test_facade_completeness.py
@@ -2231,6 +2237,54 @@ jobs:
           compression-level: 1
           retention-days: 1
 
+  # The hourly main runner dispatches the full profile. Registration alone
+  # adds both legs; at most three service jobs run at once.
+  restate-suites:
+    name: Restate ${{ matrix.suite }} / ${{ matrix.leg }}
+    env:
+      AGENT_WORKBENCH_E2E_ARTIFACT_DIR: target/functional-e2e-artifacts/agent-workbench
+    needs: plan
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: build-cache
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix: ${{ fromJSON(needs.plan.outputs.restate_matrix) }}
+    steps:
+      - *checkout
+
+      - name: Configure shared build cache
+        uses: ./.github/actions/buck2-shared-cache
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
+      - name: Run registered Restate leg
+        env:
+          SUITE: ${{ matrix.suite }}
+          LEG: ${{ matrix.leg }}
+        run: python3 scripts/ci/restate_matrix.py run "$SUITE" --leg "$LEG"
+
+      - name: Upload Restate evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: restate-${{ matrix.suite }}-${{ matrix.leg }}-attempt-${{ github.run_attempt }}
+          path: |
+            target/restate-suites/**
+            target/functional-e2e-artifacts/agent-workbench/**
+          if-no-files-found: error
+
+      - name: Remove client credentials
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
+
   functional-e2e:
     name: Functional E2E (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
@@ -2249,7 +2303,7 @@ jobs:
     environment: build-cache
     env:
       RUN_FUNCTIONAL_E2E: >-
-        ${{ github.event_name == 'workflow_dispatch'
+        ${{ (github.event_name == 'workflow_dispatch' && matrix.name != 'agent-workbench')
         || (github.event_name == 'pull_request'
         && (matrix.name == 'agent-service' || matrix.name == 'agent-workbench')) }}
 
@@ -2269,22 +2323,6 @@ jobs:
             recipe: agent-workbench-restate-e2e
             node: false
             artifact: agent-workbench
-            browser: false
-            buck2: true
-            restate: true
-            runner: ubuntu-24.04
-          - name: effect-group-conformance
-            recipe: effect-group-conformance-e2e
-            node: false
-            artifact: effect-group-conformance
-            browser: false
-            buck2: true
-            restate: true
-            runner: ubuntu-24.04
-          - name: server-double
-            recipe: server-double-e2e
-            node: false
-            artifact: none
             browser: false
             buck2: true
             restate: true
@@ -2398,12 +2436,7 @@ jobs:
           LASH_SLACK_CLONE_E2E_ARTIFACT_DIR: ${{ matrix.browser && format('{0}/slack-clone-full-host-e2e', runner.temp) || '' }}
         run: |
           set -euo pipefail
-          # The crash-window and effect-group attachment laws require PostgreSQL in both legs.
-          if [ "${{ matrix.name }}" = "server-double" ] || [ "${{ matrix.name }}" = "effect-group-conformance" ]; then
-            bash scripts/ci/with-service.sh pg16 -- just ${{ matrix.recipe }}
-          else
-            just ${{ matrix.recipe }}
-          fi
+          just ${{ matrix.recipe }}
 
       - name: Remove client credentials
         if: always() && env.RUN_FUNCTIONAL_E2E == 'true' && matrix.buck2
@@ -3080,6 +3113,7 @@ jobs:
       - fuzz-smoke
       - stack-budget
       - functional-e2e
+      - restate-suites
       - functional-e2e-process-operations
       - pr-host-workers
       - rolling-upgrade
