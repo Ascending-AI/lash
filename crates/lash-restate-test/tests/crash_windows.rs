@@ -39,7 +39,7 @@
 // binds); ambient env access is sanctioned in test targets.
 #![allow(clippy::disallowed_methods)]
 
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -50,7 +50,9 @@ use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt as _};
 use lash_restate::RestateNamespace;
 use lash_restate_test::live::{LiveConfig, LiveRestateBackend};
 use lash_restate_test::protocol::MessageType;
-use lash_restate_test::{CrashPoint, CrashRule, HandlerAttempt, RestateTestBackend, ServerConfig};
+use lash_restate_test::{
+    CrashCount, CrashPoint, CrashRule, HandlerAttempt, RestateTestBackend, ServerConfig,
+};
 use lashlang::testing::ast_builders as b;
 use serde_json::json;
 
@@ -74,7 +76,7 @@ enum Engine {
     Double(RestateTestBackend),
     Live {
         backend: LiveRestateBackend,
-        crashes: Arc<AtomicU64>,
+        crashes: CrashCount,
         /// The task that brings the deployment back after each crash.
         restarts: tokio::task::AbortHandle,
     },
@@ -127,20 +129,18 @@ impl Engine {
         // A crash kills the deployment where it stands: its endpoint stops
         // serving and the server retries every attempt it ran there. A host
         // comes back after a short outage, and the retries replay into it.
-        let crashes = Arc::new(AtomicU64::new(0));
-        let (crashed, mut restart) = tokio::sync::mpsc::unbounded_channel::<()>();
-        let counted = Arc::clone(&crashes);
+        let crashes = CrashCount::new();
         assert!(
-            backend.on_crash(Arc::new(move |_target: &str| {
-                counted.fetch_add(1, Ordering::SeqCst);
-                let _ = crashed.send(());
-            })),
+            backend.on_crash(crashes.listener()),
             "the crash listener is the backend's first"
         );
         let restarts = {
             let backend = backend.clone();
+            let mut on_restart = crashes.clone();
             tokio::spawn(async move {
-                while restart.recv().await.is_some() {
+                let mut seen = 0;
+                while let Ok(count) = on_restart.wait_until(seen + 1).await {
+                    seen = count;
                     tokio::time::sleep(Duration::from_millis(100)).await;
                     backend
                         .start_serving()
@@ -192,7 +192,7 @@ impl Engine {
     fn crashes(&self) -> u64 {
         match self {
             Self::Double(backend) => backend.server().stats().crashes,
-            Self::Live { crashes, .. } => crashes.load(Ordering::SeqCst),
+            Self::Live { crashes, .. } => crashes.get(),
         }
     }
 

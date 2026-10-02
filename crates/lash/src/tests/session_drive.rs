@@ -589,34 +589,36 @@ async fn a_root_replayed_after_its_session_was_deleted_replays_its_journal() -> 
     let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let factory = Arc::clone(&fixture.core.store_factory);
     let clock = fixture._double.lash_backend().clock();
-    assert!(server.on_crash(Arc::new({
-        let closed = Arc::clone(&closed);
-        let session_id = session_id.clone();
-        move |_target: &str| {
-            let factory = Arc::clone(&factory);
+    assert!(
+        server.on_crash(lash_restate_test::CrashCount::new().listener_with({
+            let closed = Arc::clone(&closed);
             let session_id = session_id.clone();
-            let at_ms = clock.timestamp_ms();
-            let close = std::thread::spawn(move || {
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("a runtime for the close")
-                    .block_on(async {
-                        factory
-                            .begin_session_close(&session_id, at_ms)
-                            .await
-                            .expect("the close commits")
-                            .expect("the session exists");
-                        factory
-                            .delete_session(&session_id)
-                            .await
-                            .expect("the storage delete commits");
-                    });
-            })
-            .join();
-            closed.store(close.is_ok(), Ordering::SeqCst);
-        }
-    })));
+            move |_target: &str| {
+                let factory = Arc::clone(&factory);
+                let session_id = session_id.clone();
+                let at_ms = clock.timestamp_ms();
+                let close = std::thread::spawn(move || {
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("a runtime for the close")
+                        .block_on(async {
+                            factory
+                                .begin_session_close(&session_id, at_ms)
+                                .await
+                                .expect("the close commits")
+                                .expect("the session exists");
+                            factory
+                                .delete_session(&session_id)
+                                .await
+                                .expect("the storage delete commits");
+                        });
+                })
+                .join();
+                closed.store(close.is_ok(), Ordering::SeqCst);
+            }
+        }))
+    );
 
     let store = lash_core::runtime::live_session_view(&fixture.core.store_factory, &session_id)
         .await?

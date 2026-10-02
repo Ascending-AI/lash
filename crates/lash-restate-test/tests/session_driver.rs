@@ -34,8 +34,8 @@ use lash_core::{
 use lash_restate::{Call, Reply, RestateSessionDriveRequest, RestateTurnDriveRequest};
 use lash_restate_test::protocol::MessageType;
 use lash_restate_test::{
-    CrashPoint, CrashRule, DeploymentHooks, Refusal, RestateTestBackend, SESSION_DRIVER_SERVICE,
-    ServerConfig, TURN_DRIVER_SERVICE,
+    CrashCount, CrashPoint, CrashRule, DeploymentHooks, Refusal, RestateTestBackend,
+    SESSION_DRIVER_SERVICE, ServerConfig, TURN_DRIVER_SERVICE,
 };
 
 // ---------------------------------------------------------------------------
@@ -1963,17 +1963,15 @@ async fn live_restate_drive_continuation_crash_redrives_one_successor() {
             .lash_backend()
             .session_work()
             .install_session_driver(Arc::clone(&driver) as Arc<dyn SessionDriver>);
-        let crashes = Arc::new(AtomicUsize::new(0));
-        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
-        let counted = Arc::clone(&crashes);
-        assert!(backend.on_crash(Arc::new(move |_| {
-            counted.fetch_add(1, Ordering::SeqCst);
-            sender.send(()).expect("restart listener");
-        })));
+        let crashes = CrashCount::new();
+        assert!(backend.on_crash(crashes.listener()));
         let restart = {
             let backend = backend.clone();
+            let mut on_restart = crashes.clone();
             tokio::spawn(async move {
-                while receiver.recv().await.is_some() {
+                let mut seen = 0;
+                while let Ok(count) = on_restart.wait_until(seen + 1).await {
+                    seen = count;
                     tokio::time::sleep(Duration::from_millis(100)).await;
                     backend.start_serving().await.expect("restart the endpoint");
                 }
@@ -2008,7 +2006,7 @@ async fn live_restate_drive_continuation_crash_redrives_one_successor() {
         backend
             .settle(Duration::from_secs(20), Duration::from_millis(100))
             .await;
-        assert_eq!(crashes.load(Ordering::SeqCst), 1, "{cut:?}");
+        assert_eq!(crashes.get(), 1, "{cut:?}");
         let invocations = backend.invocations().await.expect("read invocations");
         assert_eq!(
             invocations

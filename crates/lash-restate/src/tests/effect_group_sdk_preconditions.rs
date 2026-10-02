@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use lash_core::testing::poll_until;
 use restate_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -618,24 +619,6 @@ async fn closed_status(
 ) -> Option<crate::RestateInvocationLifecycle> {
     let status = admin.invocation_status(id).await.ok()??;
     (!status.is_still_active()).then_some(status.status)
-}
-
-async fn poll_until<T, P, F>(budget: Duration, what: &str, mut probe: P) -> T
-where
-    P: FnMut() -> F,
-    F: std::future::Future<Output = Option<T>>,
-{
-    let deadline = std::time::Instant::now() + budget;
-    loop {
-        if let Some(value) = probe().await {
-            return value;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "timed out after {budget:?} waiting for {what}"
-        );
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
 }
 
 fn required_url(name: &str) -> String {

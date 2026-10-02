@@ -569,20 +569,15 @@ async fn a_drive_on_a_draining_build_hands_over_after_its_current_root(
             .expect("enqueue the input");
     }
 
-    let crashes = Arc::new(AtomicUsize::new(0));
-    let died = Arc::new(tokio::sync::Notify::new());
+    let mut crashes = lash_restate_test::CrashCount::new();
     if crash {
-        let crashes = Arc::clone(&crashes);
-        let died = Arc::clone(&died);
         let armed = Arc::clone(&lever.armed);
         engine.crash_before_the_hand_over(
             &session_id,
-            Arc::new(move |_| {
-                crashes.fetch_add(1, Ordering::SeqCst);
-                // The operator ends the drain while N is down: whatever reads
-                // the mark next finds none.
+            crashes.listener_with(move |_| {
+                // The operator ends the drain while N is down: whatever
+                // reads the mark next finds none.
                 armed.store(true, Ordering::SeqCst);
-                died.notify_one();
             }),
         );
     }
@@ -610,9 +605,10 @@ async fn a_drive_on_a_draining_build_hands_over_after_its_current_root(
     );
     model.release.notify_one();
     if crash {
-        tokio::time::timeout(WEDGE, died.notified())
+        tokio::time::timeout(WEDGE, crashes.wait_until(1))
             .await
-            .expect("build N dies before it hands the drive over");
+            .expect("build N dies before it hands the drive over")
+            .expect("observe the crash");
         engine.serve_the_replay().await;
     }
 
@@ -726,7 +722,7 @@ async fn a_drive_on_a_draining_build_hands_over_after_its_current_root(
     );
 
     if crash {
-        assert_eq!(crashes.load(Ordering::SeqCst), 1, "build N died once");
+        assert_eq!(crashes.get(), 1, "build N died once");
         if !always_replay {
             // The newest build's later admissions read the marks, so the
             // operator's removal has run: the replay on N had no mark to

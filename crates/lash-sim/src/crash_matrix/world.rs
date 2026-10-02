@@ -227,18 +227,20 @@ impl CrashWorld {
             let proxy: Weak<DriverProxy> = Arc::downgrade(&proxy);
             let killing = Arc::clone(&killing);
             let available = Arc::clone(&available);
-            engine.on_crash(Arc::new(move |target| {
-                if killing.load(Ordering::SeqCst) {
-                    return;
-                }
-                available.store(false, Ordering::SeqCst);
-                if let Some(trip) = trip.upgrade() {
-                    trip.fire(format!("engine:{target}"));
-                }
-                if let Some(proxy) = proxy.upgrade() {
-                    proxy.down();
-                }
-            }));
+            engine.on_crash(
+                lash_restate_test::CrashCount::new().listener_with(move |target| {
+                    if killing.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    available.store(false, Ordering::SeqCst);
+                    if let Some(trip) = trip.upgrade() {
+                        trip.fire(format!("engine:{target}"));
+                    }
+                    if let Some(proxy) = proxy.upgrade() {
+                        proxy.down();
+                    }
+                }),
+            );
         }
         let engine_now_ms = engine.now_ms();
         Ok(Self {

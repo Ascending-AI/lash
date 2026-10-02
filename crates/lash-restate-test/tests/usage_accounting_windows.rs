@@ -5,7 +5,7 @@ use lash_core::llm::types::{LlmOutputPart, LlmResponse};
 use lash_core::{RuntimeOwner, SessionId};
 use lash_restate_test::live::{LiveConfig, LiveRestateBackend};
 use lash_restate_test::protocol::MessageType;
-use lash_restate_test::{CrashPoint, CrashRule};
+use lash_restate_test::{CrashCount, CrashPoint, CrashRule};
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -256,9 +256,8 @@ async fn charged(
 
 async fn cut_before_send(kill: bool) {
     let (backend, _, _) = backend(if kill { "p6" } else { "p3" }, false).await;
-    let crashed = Arc::new(tokio::sync::Notify::new());
-    let observed = crashed.clone();
-    assert!(backend.on_crash(Arc::new(move |_| observed.notify_one())));
+    let mut crashed = CrashCount::new();
+    assert!(backend.on_crash(crashed.listener()));
     let calls = Arc::new(AtomicUsize::new(0));
     let id = SessionId::from(tag("cut"));
     let owner = RuntimeOwner::Session(id.clone());
@@ -274,9 +273,10 @@ async fn cut_before_send(kill: bool) {
             .output()
             .await
     });
-    tokio::time::timeout(BOUND, crashed.notified())
+    tokio::time::timeout(BOUND, crashed.wait_until(1))
         .await
-        .expect("cut before second settle send");
+        .expect("cut before second settle send")
+        .expect("observe the crash");
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     let invocations = backend.invocations().await.unwrap();
     let root = invocations

@@ -507,13 +507,11 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
     // runs before the engine starts the replay.
     let first = Arc::new(std::sync::Mutex::new(Some(core)));
     let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let crashes = Arc::new(AtomicUsize::new(0));
-    assert!(engine.on_crash(Arc::new({
+    let crashes = lash_restate_test::CrashCount::new();
+    assert!(engine.on_crash(crashes.listener_with({
         let first = Arc::clone(&first);
         let dropped = Arc::clone(&dropped);
-        let crashes = Arc::clone(&crashes);
         move |_target: &str| {
-            crashes.fetch_add(1, Ordering::SeqCst);
             let core = first
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -588,10 +586,7 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
         open_session_invocations(&engine, &session_id).await,
         session_journals(&engine, &session_id).await,
     );
-    assert!(
-        crashes.load(Ordering::SeqCst) >= 1,
-        "the first attempt died"
-    );
+    assert!(crashes.get() >= 1, "the first attempt died");
     let run = root_run().await.expect("the root's run is an invocation");
     let outcome = engine.outcome(&run).await;
     let evidence = format!(

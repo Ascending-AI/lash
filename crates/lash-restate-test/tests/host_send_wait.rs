@@ -60,7 +60,9 @@ use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_restate_test::live::{LiveConfig, LiveRestateBackend};
 use lash_restate_test::protocol::MessageType;
-use lash_restate_test::{CrashPoint, CrashRule, HandlerAttempt, RestateTestBackend, ServerConfig};
+use lash_restate_test::{
+    CrashCount, CrashPoint, CrashRule, HandlerAttempt, RestateTestBackend, ServerConfig,
+};
 use restate_sdk::context::{
     ContextPromises, ContextReadState, ContextWriteState, ObjectContext, SharedObjectContext,
     SharedWorkflowContext, WorkflowContext,
@@ -1150,7 +1152,7 @@ async fn live_restate_root_killed_after_its_session_was_deleted_ends_typed() {
     // runs as the deployment dies, and the delete is the store's alone.
     let deleted = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let factory = backend.lash_backend().session_store_factory();
-    assert!(backend.on_crash(Arc::new({
+    assert!(backend.on_crash(CrashCount::new().listener_with({
         let deleted = Arc::clone(&deleted);
         let session_id = session_id.clone();
         move |_target: &str| {
@@ -2016,7 +2018,7 @@ async fn live_restate_follow_on_root_killed_after_its_session_was_deleted_ends_t
     // runs as the deployment dies, and the delete is the store's alone.
     let deleted = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let factory = backend.lash_backend().session_store_factory();
-    assert!(backend.on_crash(Arc::new({
+    assert!(backend.on_crash(CrashCount::new().listener_with({
         let deleted = Arc::clone(&deleted);
         let session_id = session_id.clone();
         move |_target: &str| {

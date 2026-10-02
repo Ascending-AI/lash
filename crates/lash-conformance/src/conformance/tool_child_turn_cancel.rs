@@ -11,7 +11,7 @@
 //! ignores its cancellation token.
 
 use crate::admit;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::{TestTurnDrive as _, wait_until};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -211,16 +211,6 @@ fn text(text: &str) -> crate::LlmResponse {
 
 fn empty_object_schema() -> serde_json::Value {
     serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false })
-}
-
-async fn wait_until(what: &str, mut ready: impl FnMut() -> bool) {
-    tokio::time::timeout(Duration::from_secs(30), async {
-        while !ready() {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .unwrap_or_else(|_| panic!("timed out waiting until {what}"));
 }
 
 #[derive(Clone)]

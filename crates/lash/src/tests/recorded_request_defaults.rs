@@ -164,7 +164,7 @@ async fn two_sessions_under_two_model_keys_each_keep_their_request_defaults_acro
     assert!(
         double.server().on_crash({
             let models = Arc::clone(&models);
-            Arc::new(move |_| models.redeploy())
+            lash_restate_test::CrashCount::new().listener_with(move |_| models.redeploy())
         }),
         "the double takes the law's crash listener"
     );

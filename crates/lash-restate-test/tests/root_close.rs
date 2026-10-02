@@ -29,7 +29,7 @@ use lash_core::store::{
     ObligationSettlement, ObligationStanding, ObligationState, SettleOutcome, StalledObligation,
 };
 use lash_restate_test::{
-    CrashPoint, CrashRule, RestateTestBackend, ServerConfig, TURN_DRIVER_SERVICE,
+    CrashCount, CrashPoint, CrashRule, RestateTestBackend, ServerConfig, TURN_DRIVER_SERVICE,
 };
 
 /// Holds the first scope close a root's close claims, at its claim, until
@@ -450,10 +450,8 @@ async fn a_close_crashed_after_the_next_root_was_admitted_converges_once() {
         .open()
         .await
         .expect("open");
-    let (crashes, mut crash_count) = tokio::sync::watch::channel(0usize);
-    assert!(world.backend.server().on_crash(Arc::new(move |_: &str| {
-        crashes.send_modify(|count| *count += 1);
-    })));
+    let mut crash_count = CrashCount::new();
+    assert!(world.backend.server().on_crash(crash_count.listener()));
 
     world.ask(&session, "first question").await;
     held(&world.gate).await;
@@ -481,7 +479,7 @@ async fn a_close_crashed_after_the_next_root_was_admitted_converges_once() {
         .expect("observe the held settlement");
     assert_eq!(world.state(&first).await, Some(ObligationState::Delivered));
     assert_eq!(
-        *crash_count.borrow(),
+        crash_count.get(),
         0,
         "settlement does not prove the crash happened"
     );
@@ -489,13 +487,10 @@ async fn a_close_crashed_after_the_next_root_was_admitted_converges_once() {
         .send(())
         .expect("let the run result reach the crash rule");
 
-    tokio::time::timeout(
-        Duration::from_secs(30),
-        crash_count.wait_for(|count| *count > 0),
-    )
-    .await
-    .expect("the held close reaches its crash rule")
-    .expect("observe the close crash");
+    tokio::time::timeout(Duration::from_secs(30), crash_count.wait_until(1))
+        .await
+        .expect("the held close reaches its crash rule")
+        .expect("observe the close crash");
     tokio::time::timeout(Duration::from_secs(30), world.backend.server().settle())
         .await
         .expect("the close replay settles");
@@ -511,7 +506,7 @@ async fn a_close_crashed_after_the_next_root_was_admitted_converges_once() {
         replayed.iter().all(|close| close.status == "completed"),
         "both close invocations complete: {replayed:?}"
     );
-    assert_eq!(*crash_count.borrow(), 1, "the held close crashed once");
+    assert_eq!(crash_count.get(), 1, "the held close crashed once");
     let granted = world.closes_delivered(2).await;
     assert!(granted.contains_key(&first));
     assert!(

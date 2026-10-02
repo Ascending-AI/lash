@@ -470,24 +470,26 @@ async fn a_root_replayed_after_its_session_was_deleted_ends_typed(
     // started: the listener runs before the server starts it, and the delete
     // is the store's alone, so it needs nothing from the server.
     let deleted = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    assert!(server.on_crash(Arc::new({
-        let deleted = Arc::clone(&deleted);
-        let deleter = world.deleter.clone();
-        let session_id = session_id.clone();
-        move |_target: &str| {
-            let deleter = deleter.clone();
+    assert!(
+        server.on_crash(lash_restate_test::CrashCount::new().listener_with({
+            let deleted = Arc::clone(&deleted);
+            let deleter = world.deleter.clone();
             let session_id = session_id.clone();
-            let delete = std::thread::spawn(move || {
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("a runtime for the delete")
-                    .block_on(deleter.delete(&session_id));
-            })
-            .join();
-            deleted.store(delete.is_ok(), Ordering::SeqCst);
-        }
-    })));
+            move |_target: &str| {
+                let deleter = deleter.clone();
+                let session_id = session_id.clone();
+                let delete = std::thread::spawn(move || {
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("a runtime for the delete")
+                        .block_on(deleter.delete(&session_id));
+                })
+                .join();
+                deleted.store(delete.is_ok(), Ordering::SeqCst);
+            }
+        }))
+    );
 
     if work == Work::Command {
         Box::pin(
@@ -806,25 +808,27 @@ async fn a_changed_host_bound_does_not_change_the_recovery_decision(
     // listener runs before the server starts the replay.
     let first = Arc::new(std::sync::Mutex::new(Some(core)));
     let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    assert!(server.on_crash(Arc::new({
-        let first = Arc::clone(&first);
-        let dropped = Arc::clone(&dropped);
-        move |_target: &str| {
-            let core = first
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .take();
-            let drop_core = std::thread::spawn(move || {
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("a runtime for the drop")
-                    .block_on(async move { drop(core) });
-            })
-            .join();
-            dropped.store(drop_core.is_ok(), Ordering::SeqCst);
-        }
-    })));
+    assert!(
+        server.on_crash(lash_restate_test::CrashCount::new().listener_with({
+            let first = Arc::clone(&first);
+            let dropped = Arc::clone(&dropped);
+            move |_target: &str| {
+                let core = first
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .take();
+                let drop_core = std::thread::spawn(move || {
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("a runtime for the drop")
+                        .block_on(async move { drop(core) });
+                })
+                .join();
+                dropped.store(drop_core.is_ok(), Ordering::SeqCst);
+            }
+        }))
+    );
     engine_port.schedule_drive(
         &session_id,
         lash_core::engine::DriveRequestId::new("changed-recovery-bound"),

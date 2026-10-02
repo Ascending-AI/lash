@@ -10,7 +10,7 @@ use lash_core::runtime::artifact_cleanup::{
 use lash_core::runtime::drive::relay::relay_due;
 use lash_core::{ArtifactReferrer, AttachmentReferrers, ReferrerClaim, StoreError, StoreSet};
 use lash_restate_test::live::{LiveConfig, LiveRestateBackend};
-use lash_restate_test::{CrashPoint, CrashRule, RestateTestBackend, ServerConfig};
+use lash_restate_test::{CrashCount, CrashPoint, CrashRule, RestateTestBackend, ServerConfig};
 use std::num::NonZeroUsize;
 
 const ACQUIRE: &str = "process-attach-acquire";
@@ -276,9 +276,7 @@ impl World {
         }
     }
 
-    fn crash_acquisition(&self, crashed: Arc<tokio::sync::Notify>) {
-        let listener: lash_restate_test::server::CrashListener =
-            Arc::new(move |_| crashed.notify_one());
+    fn crash_acquisition(&self, listener: lash_restate_test::CrashListener) {
         let rule = CrashRule::new(CrashPoint::BeforeRunResult {
             name: Some(ACQUIRE.to_owned()),
         })
@@ -592,16 +590,17 @@ async fn receiver_prune_law(live: bool) {
         address,
     } = prepare_delivery(&world).await;
     let attachments = &world.acquisitions.inner;
-    let crashed = Arc::new(tokio::sync::Notify::new());
-    world.crash_acquisition(Arc::clone(&crashed));
+    let mut crashed = CrashCount::new();
+    world.crash_acquisition(crashed.listener());
     world
         .ingress()
         .send_workflow_json(ATTACH, &address.workflow_key, "run", &request)
         .await
         .expect("send detached resolver");
-    tokio::time::timeout(BOUND, crashed.notified())
+    tokio::time::timeout(BOUND, crashed.wait_until(1))
         .await
-        .expect("crash before acquisition recording");
+        .expect("crash before acquisition recording")
+        .expect("observe the crash");
     assert!(
         attachments
             .attachment_referrers(&id)

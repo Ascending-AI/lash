@@ -6,7 +6,11 @@
 //! [`CrashPoint::BeforeRunResult`] — the `ctx.run` closure already ran, its
 //! result never became durable, and the replay runs it again.
 
+use std::sync::Arc;
+
 use crate::protocol::MessageType;
+
+use super::CrashListener;
 
 /// Where in an attempt a crash strikes.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -246,5 +250,72 @@ impl CrashPlan {
             return true;
         }
         false
+    }
+}
+
+/// A count of the attempts an `on_crash` listener reports crashed, readable
+/// and awaitable from the test task while the listener runs under the
+/// server's lock.
+///
+/// `RestateTestServer::on_crash` — and the live backend's — takes one
+/// listener and refuses a second. A law that waits on, counts or reacts to
+/// crashes builds its listener here and reads this side back, instead of
+/// wiring its own counter, channel or flag for the same event.
+#[derive(Clone)]
+pub struct CrashCount {
+    crashes: tokio::sync::watch::Sender<u64>,
+    observed: tokio::sync::watch::Receiver<u64>,
+}
+
+impl CrashCount {
+    /// A count of zero. It moves once a listener built from it is
+    /// registered and a crash drops an attempt.
+    pub fn new() -> Self {
+        let (crashes, observed) = tokio::sync::watch::channel(0);
+        Self { crashes, observed }
+    }
+
+    /// The listener that counts each crash — the `on_crash` argument.
+    pub fn listener(&self) -> CrashListener {
+        self.listener_with(|_| ())
+    }
+
+    /// The listener that runs `hook` with the crashed invocation's target
+    /// and counts the crash once `hook` returns, so [`wait_until`] observes
+    /// a crash only once its hook ran. The hook's bound is the listener's:
+    /// it runs under the server's lock, so it may act on the store or a
+    /// worker slot but must never call back into the server.
+    ///
+    /// [`wait_until`]: Self::wait_until
+    pub fn listener_with(&self, hook: impl Fn(&str) + Send + Sync + 'static) -> CrashListener {
+        let crashes = self.crashes.clone();
+        Arc::new(move |target: &str| {
+            hook(target);
+            crashes.send_modify(|count| *count += 1);
+        })
+    }
+
+    /// The crashes counted so far.
+    pub fn get(&self) -> u64 {
+        *self.observed.borrow()
+    }
+
+    /// Resolve once at least `at_least` crashes landed, with the count
+    /// then. `Err` only when the count can no longer move — every listener
+    /// and reader of it is gone.
+    pub async fn wait_until(
+        &mut self,
+        at_least: u64,
+    ) -> Result<u64, tokio::sync::watch::error::RecvError> {
+        self.observed
+            .wait_for(|count| *count >= at_least)
+            .await
+            .map(|count| *count)
+    }
+}
+
+impl Default for CrashCount {
+    fn default() -> Self {
+        Self::new()
     }
 }

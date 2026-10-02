@@ -46,10 +46,10 @@ pub use backend::{
 pub use open_handler::OpenHandler;
 pub use protocol::ProtocolVersion;
 pub use server::{
-    AttemptDispatch, CrashListener, CrashPoint, CrashRule, DeploymentHooks, DeploymentId,
-    DropWatch, Hold, InvocationView, JournalEntryView, RandomCrashes, Refusal, RefuseHook,
-    RemoveDeploymentError, RestateTestServer, ResumeDeployment, ResumeRefusal, RetryPolicy,
-    ServedHook, ServerConfig, StartError, Stats, TimeMode, TimerView,
+    AttemptDispatch, CrashCount, CrashListener, CrashPoint, CrashRule, DeploymentHooks,
+    DeploymentId, DropWatch, Hold, InvocationView, JournalEntryView, RandomCrashes, Refusal,
+    RefuseHook, RemoveDeploymentError, RestateTestServer, ResumeDeployment, ResumeRefusal,
+    RetryPolicy, ServedHook, ServerConfig, StartError, Stats, TimeMode, TimerView,
 };
 
 /// Completed group-dispatch and opener suspensions on a server double.

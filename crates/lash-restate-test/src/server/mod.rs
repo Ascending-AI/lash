@@ -34,8 +34,8 @@ use restate_sdk::endpoint::Endpoint;
 use tokio::sync::Notify;
 
 pub use catalog::{HandlerKind, OnMaxAttempts, ServiceKind};
+pub use crash::{CrashCount, CrashPoint, CrashRule, RandomCrashes};
 pub(crate) use crash::{CrashPlan, CrashSite};
-pub use crash::{CrashPoint, CrashRule, RandomCrashes};
 pub use ids::{DeploymentId, InvocationId};
 pub use model::TimerView;
 pub use processor::{RetryPolicy, Stats};

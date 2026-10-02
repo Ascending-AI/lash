@@ -68,6 +68,7 @@ pub mod conformance_support;
 mod kernel_door_tests;
 mod layered_backend;
 mod live_replay;
+mod poll;
 mod recording_store;
 pub mod runtime_helpers;
 #[cfg(feature = "testing")]
@@ -79,6 +80,7 @@ mod turn_drive;
 #[cfg(target_os = "linux")]
 pub use thread_census::ThreadCensus;
 
+pub use poll::{poll_until, wait_until};
 pub use turn_drive::TestTurnDrive;
 
 #[cfg(test)]

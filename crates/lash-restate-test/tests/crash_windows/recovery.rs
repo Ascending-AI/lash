@@ -499,15 +499,21 @@ async fn process_completion_wait_tracks_only_owned_invocations() {
         .await
         .expect("manual recovery backend");
         let on_crash = Arc::clone(&blocked);
-        assert!(backend.server().on_crash(Arc::new(move |target| {
-            *on_crash.lock().unwrap() = Some(
-                target
-                    .strip_prefix(&format!("{PROCESS_WORKFLOW}/"))
-                    .and_then(|target| target.strip_suffix("/run"))
-                    .expect("the cut targets a process run")
-                    .to_owned(),
-            );
-        })));
+        assert!(
+            backend
+                .server()
+                .on_crash(
+                    lash_restate_test::CrashCount::new().listener_with(move |target| {
+                        *on_crash.lock().unwrap() = Some(
+                            target
+                                .strip_prefix(&format!("{PROCESS_WORKFLOW}/"))
+                                .and_then(|target| target.strip_suffix("/run"))
+                                .expect("the cut targets a process run")
+                                .to_owned(),
+                        );
+                    })
+                )
+        );
         let engine = Engine::Double(backend.clone());
         let executions = Arc::new(AtomicUsize::new(0));
         let core = process_core(&engine, &executions);

@@ -41,7 +41,7 @@ use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmRequest, LlmResponse};
 use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt as _};
 use lash_restate_test::protocol::MessageType;
-use lash_restate_test::{CrashPoint, CrashRule, RestateTestBackend, ServerConfig};
+use lash_restate_test::{CrashCount, CrashPoint, CrashRule, RestateTestBackend, ServerConfig};
 use lashlang::testing::ast_builders as b;
 use serde_json::json;
 
@@ -380,13 +380,15 @@ async fn run_process(scenario: Scenario) -> Run {
     if let Some(fresh_core) = &fresh_core {
         let fresh = Mutex::new(Some(process_worker(fresh_core)));
         let slot = restate.process_worker_slot();
-        restate.server().on_crash(Arc::new(move |target: &str| {
-            if target.starts_with(PROCESS_WORKFLOW)
-                && let Some(worker) = fresh.lock().unwrap().take()
-            {
-                slot.install(worker);
-            }
-        }));
+        restate
+            .server()
+            .on_crash(CrashCount::new().listener_with(move |target: &str| {
+                if target.starts_with(PROCESS_WORKFLOW)
+                    && let Some(worker) = fresh.lock().unwrap().take()
+                {
+                    slot.install(worker);
+                }
+            }));
     }
     if let Some(rule) = scenario.crash.clone() {
         restate.server().crash_on(rule);
