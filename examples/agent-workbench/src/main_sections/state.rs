@@ -133,8 +133,8 @@ pub(crate) enum WorkbenchAuthorizationAction {
     /// session-scoped: no chat participant should ever be able to reach it.
     PruneTriggerMutationReceipts,
     /// Destructive, deployment-wide store-growth maintenance: trigger
-    /// occurrence reclamation, session-store vacuum, and attachment
-    /// reclamation. Operator-only for the same reason
+    /// occurrence reclamation, explicit tombstone forget, session-store vacuum,
+    /// and attachment reclamation. Operator-only for the same reason
     /// [`WorkbenchAuthorizationAction::PruneTriggerMutationReceipts`] is — it
     /// deletes durable rows and bytes across sessions, and the caller owns the
     /// safety argument.

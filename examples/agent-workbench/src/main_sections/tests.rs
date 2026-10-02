@@ -1228,6 +1228,8 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
 #[cfg(test)]
 #[path = "tests/trigger_lifecycle.rs"]
 mod trigger_lifecycle_tests;
+#[path = "tests/trigger_retention.rs"]
+mod trigger_retention_tests;
 #[test]
 fn button_trigger_occurrence_is_finishted_to_restate_workflow() {
     run_async_test_on_stack_budget("workbench-trigger-restate-test", || {

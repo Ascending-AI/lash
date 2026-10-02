@@ -548,16 +548,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             "/api/admin/trigger-mutation-receipts/prune",
             post(prune_trigger_mutation_receipts),
         )
-        // Deliberately absent from the UI and unscheduled, like receipt prune.
-        .route(
-            "/api/admin/trigger-occurrences/reclaim",
-            post(reclaim_trigger_occurrences),
-        )
-        // The only reclaim path for non-fired audit rows; same posture.
-        .route(
-            "/api/admin/trigger-occurrences/prune-audit",
-            post(prune_non_fired_occurrences),
-        )
+        .merge(trigger_occurrence_admin_routes())
         // Deliberately absent from the UI, and deliberately unscheduled: see
         // the handler's contract.
         .route("/api/admin/store-maintenance", post(run_store_maintenance))

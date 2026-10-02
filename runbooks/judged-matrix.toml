@@ -121,3 +121,4 @@ session-operator = { tier = "deterministic", model = "scripted-provider" }
 resident-tool-authority = { tier = "deterministic", model = "scripted-provider" }
 rolling-upgrade = { tier = "deterministic", model = "scripted-provider" }
 workbench-attachment-reclamation = { tier = "deterministic", model = "scripted-provider" }
+workbench-trigger-retention = { tier = "deterministic", model = "scripted-provider" }

@@ -10,6 +10,9 @@ after its first delivery: it fires repeatedly without looping, can be disabled a
 re-enabled, can be deleted, and handles a fire during a foreground turn without taking
 over that turn's ingress.
 
+Operator retention and redelivery after tombstone forget have a separate
+[deterministic runbook](../workbench-trigger-retention/runbook.md).
+
 **Mid-turn contract.** Trigger occurrence dispatch and its durable process may run while
 the session has a foreground turn. Any resulting session wake is durable queued work; it
 must not submit a competing turn while that foreground turn owns ingress. The session's

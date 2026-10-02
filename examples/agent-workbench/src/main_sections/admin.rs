@@ -6,6 +6,92 @@ use lash::SessionId;
 
 use lash::persistence::EmptyRootSetPolicy;
 
+pub(crate) fn trigger_occurrence_admin_routes() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/api/admin/trigger-occurrences/reclaim",
+            post(reclaim_trigger_occurrences),
+        )
+        .route(
+            "/api/admin/trigger-occurrences/forget-tombstones",
+            post(forget_trigger_tombstones),
+        )
+        .route(
+            "/api/admin/trigger-occurrences/prune-audit",
+            post(prune_non_fired_occurrences),
+        )
+}
+
+#[derive(Debug)]
+pub(crate) enum TriggerOccurrenceAdminError {
+    Authorization(AppError),
+    Reclaim(
+        Box<
+            lash::persistence::MaintenanceFailure<
+                lash::triggers::TriggerOccurrenceReclamationReport,
+                Box<PluginError>,
+            >,
+        >,
+    ),
+    Forget(Box<lash::EmbedError>),
+}
+
+impl IntoResponse for TriggerOccurrenceAdminError {
+    fn into_response(self) -> Response {
+        use lash::persistence::MaintenanceStop;
+        match self {
+            Self::Authorization(error) => error.into_response(),
+            Self::Reclaim(failure) => {
+                let (status, stop, cause) = match &failure.stop {
+                    MaintenanceStop::Refused(refusal) => (
+                        StatusCode::CONFLICT,
+                        "refused",
+                        json!({"reason": refusal.to_string()}),
+                    ),
+                    MaintenanceStop::Failed(error) => (
+                        if error.is_retryable() {
+                            StatusCode::SERVICE_UNAVAILABLE
+                        } else {
+                            StatusCode::INTERNAL_SERVER_ERROR
+                        },
+                        "failed",
+                        json!(error),
+                    ),
+                };
+                (
+                    status,
+                    Json(json!({
+                        "error": "trigger occurrence reclamation stopped",
+                        "stop": stop,
+                        "cause": cause,
+                        "partial": failure.partial,
+                    })),
+                )
+                    .into_response()
+            }
+            Self::Forget(error) => {
+                let status = if error.is_retryable() {
+                    StatusCode::SERVICE_UNAVAILABLE
+                } else {
+                    StatusCode::INTERNAL_SERVER_ERROR
+                };
+                match error.as_ref() {
+                    lash::EmbedError::Store(source) => (
+                        status,
+                        Json(json!({
+                            "error": "trigger tombstone forget failed",
+                            "stop": "failed",
+                            "cause": lash::runtime::RuntimeEffectControllerError::from(source),
+                        })),
+                    )
+                        .into_response(),
+                    _ => AppError::runtime(*error).into_response(),
+                }
+            }
+        }
+    }
+}
+
 /// Operator-supplied retention bound for `prune_trigger_mutation_receipts`.
 ///
 /// There is no default and no relative form ("older than 30 days"): the caller
@@ -91,15 +177,17 @@ pub(crate) struct ReclaimTriggerOccurrencesRequest {
 pub(crate) async fn reclaim_trigger_occurrences(
     State(state): State<AppState>,
     Json(request): Json<ReclaimTriggerOccurrencesRequest>,
-) -> Result<Json<lash::triggers::TriggerOccurrenceReclamationReport>, AppError> {
+) -> Result<Json<lash::triggers::TriggerOccurrenceReclamationReport>, TriggerOccurrenceAdminError> {
     state
         .authorization
-        .authorize(WorkbenchAuthorizationAction::RunStoreMaintenance)?;
+        .authorize(WorkbenchAuthorizationAction::RunStoreMaintenance)
+        .map_err(TriggerOccurrenceAdminError::Authorization)?;
     let report = state
-        .trigger_store
+        .core
+        .processes()
         .reclaim_trigger_occurrences(request.cutoff_epoch_ms)
         .await
-        .map_err(AppError::internal)?;
+        .map_err(|failure| TriggerOccurrenceAdminError::Reclaim(Box::new(failure)))?;
     state.trace(
         "admin.trigger_occurrences.reclaimed",
         json!({
@@ -108,6 +196,49 @@ pub(crate) async fn reclaim_trigger_occurrences(
         }),
     );
     Ok(Json(report))
+}
+
+/// The host vouches that its source will not redeliver the selected identities.
+/// The bound is exclusive and measured on the tombstones' store-clock write time.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ForgetTriggerTombstonesRequest {
+    pub(crate) written_before_epoch_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct ForgetTriggerTombstonesResponse {
+    pub(crate) forgotten: usize,
+    pub(crate) written_before_epoch_ms: u64,
+}
+
+/// Explicit, deployment-wide and unscheduled. A later redelivery of a forgotten
+/// occurrence runs again; occurrences whose tombstones remain are still refused.
+pub(crate) async fn forget_trigger_tombstones(
+    State(state): State<AppState>,
+    Json(request): Json<ForgetTriggerTombstonesRequest>,
+) -> Result<Json<ForgetTriggerTombstonesResponse>, TriggerOccurrenceAdminError> {
+    state
+        .authorization
+        .authorize(WorkbenchAuthorizationAction::RunStoreMaintenance)
+        .map_err(TriggerOccurrenceAdminError::Authorization)?;
+    let forgotten = state
+        .core
+        .processes()
+        .forget_trigger_tombstones(request.written_before_epoch_ms)
+        .await
+        .map_err(|error| TriggerOccurrenceAdminError::Forget(Box::new(error)))?;
+    state.trace(
+        "admin.trigger_occurrences.tombstones_forgotten",
+        json!({
+            "written_before_epoch_ms": request.written_before_epoch_ms,
+            "forgotten": forgotten,
+        }),
+    );
+    Ok(Json(ForgetTriggerTombstonesResponse {
+        forgotten,
+        written_before_epoch_ms: request.written_before_epoch_ms,
+    }))
 }
 
 /// Operator-supplied audit-retention cutoff for non-fired trigger occurrences.
