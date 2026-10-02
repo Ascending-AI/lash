@@ -40,8 +40,6 @@ pub struct RemoteProcessExecutionPolicy {
         skip_serializing_if = "crate::llm::RemoteAttachmentCapabilitySnapshot::is_empty"
     )]
     pub attachment_acceptance: crate::llm::RemoteAttachmentCapabilitySnapshot,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<SessionId>,
     #[serde(default)]
     pub autonomous: bool,
     pub turn_budget: RemoteTurnBudget,
@@ -80,7 +78,6 @@ impl RemoteProcessExecutionPolicy {
         Self {
             model: None,
             attachment_acceptance: Default::default(),
-            session_id: None,
             autonomous: false,
             turn_budget,
             max_tool_calls,

@@ -547,21 +547,14 @@ impl LashRuntime {
         // Head-authoritative adoption (FIG-1875): the durable head wins for
         // every fact it carries. Session config is durable (read + guarded
         // write, FIG-1555/FIG-1895), so the head already holds any committed
-        // override; only the runtime-lease facts stay live-owned. The
-        // provider resolver is also live-owned and is not part of the
+        // override. The provider resolver is live-owned and is not part of the
         // durable head.
-        let live_owned = crate::runtime::state::LiveOwnedSessionFacts::of(&self.state.policy);
         let mut adopted = self.state.clone();
-        crate::runtime::state::adopt_durable_head(
-            &mut adopted,
-            read,
-            live_owned,
-            self.fleet_format(),
-        )
-        .map_err(|source| SessionError::Store {
-            context: "failed to adopt the session window".to_string(),
-            source,
-        })?;
+        crate::runtime::state::adopt_durable_head(&mut adopted, read, self.fleet_format())
+            .map_err(|source| SessionError::Store {
+                context: "failed to adopt the session window".to_string(),
+                source,
+            })?;
         Box::pin(self.adopt_resident_state(adopted)).await?;
         self.resident_session.mark_graph_head_current();
         Ok(())

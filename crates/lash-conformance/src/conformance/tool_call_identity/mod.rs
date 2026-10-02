@@ -546,8 +546,6 @@ impl World {
             ..Self::new(tier, law)
         };
         let (config, factories) = world.host_and_factories();
-        let mut policy = crate::testing::mock_session_policy();
-        policy.session_id = Some(world.session_id.clone());
         // One watch, two consumers: the runtime's process port and the
         // worker observe the same registry handle.
         let watched = crate::facade_support::watch_process_registry(registry);
@@ -696,8 +694,7 @@ impl World {
     ) -> crate::LashRuntime {
         let (mut config, factories) = self.host_and_factories();
         config.control.tool_surface_open_mode = mode;
-        let mut policy = crate::testing::mock_session_policy();
-        policy.session_id = Some(self.session_id.clone());
+        let policy = crate::testing::mock_session_policy();
         let mut builder =
             crate::LashRuntime::builder(config, crate::testing::runtime_lease_owner())
                 .with_session_id(&self.session_id)

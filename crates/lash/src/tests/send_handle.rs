@@ -779,9 +779,8 @@ async fn a_drive_never_runs_on_a_session_opened_to_observe() -> Result<()> {
         .output()
         .await?;
 
-    let mut policy =
+    let policy =
         lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
-    policy.session_id = Some(session_id.clone());
     let store = lash_core::runtime::admit_session_view(
         &fixture.core.store_factory,
         &lash_core::SessionStoreCreateRequest {

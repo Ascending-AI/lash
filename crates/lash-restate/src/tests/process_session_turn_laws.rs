@@ -166,10 +166,7 @@ async fn parent_runtime_with_llm_profiles(
     models: Arc<dyn lash_core::LlmProfiles>,
 ) -> lash_core::facade_support::LashRuntime {
     let parent = SessionId::from("test-parent");
-    let policy = lash_core::SessionPolicy {
-        session_id: Some(parent.clone()),
-        ..recovery_session_policy()
-    };
+    let policy = recovery_session_policy();
     let store = lash_core::runtime::admit_session_view(
         &factory,
         &lash_core::SessionStoreCreateRequest {

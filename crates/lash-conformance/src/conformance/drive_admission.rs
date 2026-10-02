@@ -147,8 +147,7 @@ impl DriveParts {
         if let Some(state) = &self.initial_head {
             return state.clone();
         }
-        let mut policy = crate::testing::mock_session_policy();
-        policy.session_id = Some(self.session_id.clone());
+        let policy = crate::testing::mock_session_policy();
         crate::RuntimeSessionState {
             session_id: self.session_id.clone(),
             policy,

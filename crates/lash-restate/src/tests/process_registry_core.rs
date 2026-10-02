@@ -46,7 +46,7 @@ pub(super) async fn restate_handler_replay_retries_final_lash_commit_idempotentl
             .expect("open session store"),
     );
     let runtime_store = session_view(store.clone(), session_id);
-    let policy = replay_test_policy(&SessionId::from(session_id));
+    let policy = lash_core::testing::mock_session_policy();
     let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
     bind_restate_test_effect_host(&mut host, &context);
@@ -165,7 +165,7 @@ pub(super) async fn restate_replay_drive_seal_takes_recorded_branch() {
         drive_seal_count: Arc::clone(&drive_seal_count),
     });
     let runtime_store: lash_core::store::SessionStore = probed_store;
-    let policy = replay_test_policy(&SessionId::from(session_id));
+    let policy = lash_core::testing::mock_session_policy();
     let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
     bind_restate_test_effect_host(&mut host, &context);
@@ -486,7 +486,7 @@ finish(await handle);
             .expect("open session store"),
     );
     let runtime_store = session_view(store, session_id);
-    let policy = replay_test_policy(&SessionId::from(session_id));
+    let policy = lash_core::testing::mock_session_policy();
     let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
     bind_restate_test_effect_host(&mut host, &context);

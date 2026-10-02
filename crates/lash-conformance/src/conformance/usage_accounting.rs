@@ -428,9 +428,7 @@ impl World {
     }
 
     fn policy(&self) -> crate::SessionPolicy {
-        let mut policy = crate::testing::mock_session_policy();
-        policy.session_id = Some(self.session_id.clone());
-        policy
+        crate::testing::mock_session_policy()
     }
 
     /// A fresh runtime over the tier's host and stores, loading the session

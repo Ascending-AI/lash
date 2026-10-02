@@ -128,7 +128,6 @@ pub fn session_store_request(
                 ),
             )),
             attachment_acceptance: Default::default(),
-            session_id: Some(SessionId::from(session_id.to_string())),
             autonomous: false,
             turn_budget: crate::TurnBudget::Unbounded,
             max_tool_calls: crate::MaxToolCalls::new(1024),

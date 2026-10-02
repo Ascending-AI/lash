@@ -417,7 +417,6 @@ async fn fork_distinguishes_collected_revision_from_unknown_and_deleted_sources(
     )));
     let source_policy = lash_core::SessionPolicy {
         model: source_profile,
-        session_id: Some(SessionId::from("orphaned-fork-source")),
         ..lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
@@ -568,7 +567,6 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
         // pin is a fact, so a host naming a different one is refused at
         // open rather than silently discarded (FIG-1558).
         model: source_profile,
-        session_id: Some(SessionId::from("fork-observer-source")),
         ..lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
@@ -1005,7 +1003,6 @@ async fn duplicate_only_fork_intents_are_canonical(
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let policy = lash_core::SessionPolicy {
-        session_id: Some(source_session_id.clone()),
         ..lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
@@ -1414,7 +1411,6 @@ async fn a_fork_runs_under_its_branch_points_generation_not_what_the_host_passes
     )));
     let source_policy = lash_core::SessionPolicy {
         model: source_profile,
-        session_id: Some(SessionId::from("generation-fork-source")),
         // The branch point ran with sampling of its own: the branch's.
         generation: lash_core::GenerationOptions {
             seed: Some(9),

@@ -1475,7 +1475,6 @@ async fn drive_turn(
     );
     host.providers.models = crate::testing::standard_test_llm_profiles(model.into_handle());
     let mut policy = crate::testing::mock_session_policy();
-    policy.session_id = Some(world.session_id.clone());
     if let Some(max_tool_calls) = world.state.max_tool_calls {
         policy.max_tool_calls = crate::MaxToolCalls::new(max_tool_calls);
     }

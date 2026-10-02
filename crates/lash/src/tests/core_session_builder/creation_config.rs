@@ -150,6 +150,30 @@ fn assert_request_uses_creation_config(request: &lash_core::LlmRequest) {
     assert_eq!(request.generation.seed, Some(7));
 }
 
+#[tokio::test]
+async fn identical_session_configs_share_a_process_execution_environment() -> Result<()> {
+    let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (core, backend, _writes) = counting_core(captures).await?;
+    create_with_creation_spec(&core, "env-owner-a").await?;
+    create_with_creation_spec(&core, "env-owner-b").await?;
+    let first = core.session("env-owner-a").open().await?;
+    let second = core.session("env-owner-b").open().await?;
+    assert_ne!(first.session_id(), second.session_id());
+    let (_, first_config) = recorded_config(&backend, "env-owner-a").await;
+    let (_, second_config) = recorded_config(&backend, "env-owner-b").await;
+    assert_eq!(first_config, second_config);
+    let first_env = lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::AdmittedPluginConfig::new(first_config.plugin_config, 0),
+        first.policy_snapshot(),
+    );
+    let second_env = lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::AdmittedPluginConfig::new(second_config.plugin_config, 0),
+        second.policy_snapshot(),
+    );
+    assert_eq!(first_env.stable_ref()?, second_env.stable_ref()?);
+    Ok(())
+}
+
 /// A reopen opens with the recorded config unchanged, and the open makes no
 /// store write at all.
 #[tokio::test]

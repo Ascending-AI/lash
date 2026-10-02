@@ -890,11 +890,9 @@ fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlem
         None,
     )
     .expect("head window");
-    let live_owned = LiveOwnedSessionFacts::of(&state.policy);
     adopt_durable_head(
         &mut state,
         head.clone(),
-        live_owned,
         crate::store::FleetFormat::current(),
     )
     .expect("head reload");
@@ -907,11 +905,9 @@ fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlem
         crate::store::persisted_session_config_from_state(&state),
         sticky
     );
-    let live_owned = LiveOwnedSessionFacts::of(&state.policy);
     adopt_durable_head(
         &mut state,
         head.clone(),
-        live_owned,
         crate::store::FleetFormat::current(),
     )
     .expect("next root reload");

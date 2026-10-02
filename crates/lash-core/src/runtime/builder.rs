@@ -165,11 +165,6 @@ impl EmbeddedRuntimeBuilder {
                     if let Some(session_id) = &self.session_id {
                         state.session_id = session_id.clone();
                     }
-                    if let Some(policy) = &self.policy {
-                        // The recorded model is a durable fact: the builder's
-                        // policy never replaces or fills it.
-                        state.policy.session_id = policy.session_id.clone();
-                    }
                     state
                 },
                 false,
@@ -178,7 +173,7 @@ impl EmbeddedRuntimeBuilder {
         if let Some(store) = &self.store {
             // The view names its session; a builder session id that
             // disagrees is refused below, before anything is adopted.
-            if let Some(mut state) = crate::store::load_session_window_state(
+            if let Some(state) = crate::store::load_session_window_state(
                 store,
                 crate::store::WindowSelector::Current,
             )
@@ -196,11 +191,6 @@ impl EmbeddedRuntimeBuilder {
                         "store is bound to session `{}` but builder requested `{session_id}`",
                         state.session_id
                     )));
-                }
-                if let Some(policy) = &self.policy {
-                    // The recorded model is a durable fact: the builder's
-                    // policy never replaces or fills it.
-                    state.policy.session_id = policy.session_id.clone();
                 }
                 return Ok((state, false));
             }

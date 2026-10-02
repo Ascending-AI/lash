@@ -70,7 +70,6 @@ impl SessionDriver for HeldDriver {
         let mut state =
             lash_core::RuntimeSessionState::new(lash_core::testing::mock_session_policy());
         state.session_id = self.session.clone();
-        state.policy.session_id = Some(self.session.clone());
         let operation = lash_core::OperationId::turn(
             self.session.as_str(),
             root.as_str(),

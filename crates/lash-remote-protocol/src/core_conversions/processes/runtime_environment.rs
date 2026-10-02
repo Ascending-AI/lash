@@ -434,7 +434,6 @@ impl From<lash_core::SessionPolicy> for RemoteProcessExecutionPolicy {
         let lash_core::SessionPolicy {
             model,
             attachment_acceptance,
-            session_id,
             autonomous,
             turn_budget,
             max_tool_calls,
@@ -445,7 +444,6 @@ impl From<lash_core::SessionPolicy> for RemoteProcessExecutionPolicy {
         Self {
             model: model.map(Into::into),
             attachment_acceptance: std::sync::Arc::unwrap_or_clone(attachment_acceptance).into(),
-            session_id,
             autonomous,
             turn_budget: turn_budget.into(),
             max_tool_calls: max_tool_calls.non_zero(),
@@ -529,7 +527,6 @@ impl TryFrom<RemoteProcessExecutionPolicy> for lash_core::SessionPolicy {
         let RemoteProcessExecutionPolicy {
             model,
             attachment_acceptance,
-            session_id,
             autonomous,
             turn_budget,
             max_tool_calls,
@@ -540,7 +537,6 @@ impl TryFrom<RemoteProcessExecutionPolicy> for lash_core::SessionPolicy {
         Ok(Self {
             model: model.map(TryInto::try_into).transpose()?,
             attachment_acceptance: std::sync::Arc::new(attachment_acceptance.into()),
-            session_id,
             autonomous,
             turn_budget: turn_budget.into(),
             max_tool_calls: max_tool_calls.into(),

@@ -63,7 +63,6 @@ async fn host_can_rewind_from_a_surviving_branch_after_deleting_the_source() {
             model.wire_model.clone(),
             model.clone(),
         )),
-        session_id: Some(SessionId::from(SOURCE_SESSION.to_string())),
         ..SessionPolicy::new(TurnBudget::Unbounded, lash::MaxToolCalls::new(1024))
     };
     let source = admitted_view(
@@ -85,11 +84,7 @@ async fn host_can_rewind_from_a_surviving_branch_after_deleting_the_source() {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(FOREIGN_TARGET.to_string()),
             relation: SessionRelation::Root,
-            config: SessionPolicy {
-                session_id: Some(SessionId::from(FOREIGN_TARGET.to_string())),
-                ..source_policy.clone()
-            }
-            .into(),
+            config: source_policy.clone().into(),
             head: SessionCreationHead::Config,
         },
     )

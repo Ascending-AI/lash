@@ -762,8 +762,7 @@ async fn build_runtime(parts: &LawParts, crash: Option<FrameOpenCrash>) -> crate
             crash: crash.expect("the crash point is present"),
         }));
     }
-    let mut policy = crate::testing::mock_session_policy();
-    policy.session_id = Some(parts.session_id.clone());
+    let policy = crate::testing::mock_session_policy();
     let crash_after_summary = crash == Some(FrameOpenCrash::AfterSummary);
     let law = &parts.compaction;
     let compaction: Vec<Arc<dyn PluginFactory>> = match law.compactor {

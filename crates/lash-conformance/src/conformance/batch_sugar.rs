@@ -405,8 +405,7 @@ impl SugarTurn {
         config.providers.models = crate::testing::standard_test_llm_profiles(
             scripted_model(self.script.clone(), Arc::clone(&self.on_call)).into_handle(),
         );
-        let mut policy = crate::testing::mock_session_policy();
-        policy.session_id = Some(self.session_id.clone());
+        let policy = crate::testing::mock_session_policy();
         let state = crate::RuntimeSessionState {
             session_id: self.session_id.clone(),
             policy: policy.clone(),

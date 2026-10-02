@@ -1507,25 +1507,6 @@ pub(crate) fn apply_session_checkpoint(
     Ok(())
 }
 
-/// The runtime-lease facts that stay live-owned across a durable-head
-/// adoption (FIG-1875).
-///
-/// Everything the head carries is adopted head-authoritatively; only the
-/// session binding is installed by the caller (FIG-4376). The provider
-/// resolver is also live-owned, but it lives outside `RuntimeSessionState`
-/// and is never touched by adoption.
-pub struct LiveOwnedSessionFacts {
-    pub(crate) session_id: Option<SessionId>,
-}
-
-impl LiveOwnedSessionFacts {
-    /// Capture the live-owned facts of the policy about to be overwritten.
-    pub fn of(policy: &SessionPolicy) -> Self {
-        let session_id = policy.session_id.clone();
-        Self { session_id }
-    }
-}
-
 /// Adopt a durable session window (ADR 0112 §5) as one total operation.
 ///
 /// This is the single home of the head→state mapping (FIG-1875, ruled
@@ -1533,12 +1514,11 @@ impl LiveOwnedSessionFacts {
 /// it carries — the current frame's window, frames, config, protocol turn
 /// options, checkpoint progress, authority, and usage totals. The resident
 /// graph becomes exactly the window, so residency starts proportional to the
-/// current frame (§9). No resident copy of a durable fact is preserved; the
-/// only survivor is the caller's [`LiveOwnedSessionFacts`], the binding.
+/// current frame (§9). No resident copy of a durable fact is preserved. The
+/// window names the session in `RuntimeSessionState::session_id`.
 pub fn adopt_durable_head(
     state: &mut RuntimeSessionState,
     head: crate::store::SessionWindowRead,
-    live_owned: LiveOwnedSessionFacts,
     fleet_format: crate::store::FleetFormat,
 ) -> Result<(), crate::StoreError> {
     // Defend against third-party stores that hand back an unvalidated
@@ -1577,7 +1557,6 @@ pub fn adopt_durable_head(
     // is superseded with the view.
     state.authority.root_view = None;
     adopt_session_config(state, &config);
-    state.policy.session_id = live_owned.session_id;
     // The config is adopted before the checkpoint restore, so a
     // checkpointless graph's initial frame captures it.
     apply_session_checkpoint(state, checkpoint, fleet_format)?;

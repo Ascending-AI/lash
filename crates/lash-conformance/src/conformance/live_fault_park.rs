@@ -174,8 +174,7 @@ impl World {
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
     async fn runtime(&self) -> crate::LashRuntime {
-        let mut policy = crate::testing::mock_session_policy();
-        policy.session_id = Some(self.session_id.clone());
+        let policy = crate::testing::mock_session_policy();
         let state = crate::RuntimeSessionState {
             session_id: self.session_id.clone(),
             policy: policy.clone(),

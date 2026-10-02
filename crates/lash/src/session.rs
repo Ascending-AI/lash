@@ -367,7 +367,7 @@ impl SessionBuilder {
     /// runs as supplied: its recorded model is never replaced or filled.
     async fn open_supplied_state(
         self,
-        mut state: RuntimeSessionState,
+        state: RuntimeSessionState,
         resident: bool,
     ) -> Result<LashSession> {
         if state.session_id != self.session_id {
@@ -381,7 +381,6 @@ impl SessionBuilder {
         let resolved = self.existing_store().await?;
         self.reconcile_process_observer_intents(Some(&resolved.store))
             .await?;
-        bind_to_opener(&mut state, &self.session_id);
         Box::pin(self.open_resolved(state, resolved, resident)).await
     }
 
@@ -389,7 +388,7 @@ impl SessionBuilder {
     /// this core stands beneath it. The model key is minted into a recorded
     /// binding by the core's models now.
     fn minted_policy(&self, spec: &SessionSpec) -> Result<SessionPolicy> {
-        let mut policy = spec
+        let policy = spec
             .resolve_root(self.core.env.core.providers.models.as_ref())
             .map_err(|error| match error {
                 lash_core::facade_support::SpecResolveError::Model(error) => {
@@ -409,14 +408,13 @@ impl SessionBuilder {
                     EmbedError::ReasoningRefused(error)
                 }
             })?;
-        policy.session_id = Some(self.session_id.clone());
         Ok(policy)
     }
 
     /// The state an existing session opens with: what it recorded, as
-    /// recorded (FIG-4099), its execution controls included (FIG-4376). Only
-    /// the session binding follows this open; nothing is written. A catalog
-    /// row with no head recorded no config and is refused with
+    /// recorded (FIG-4099), its execution controls included (FIG-4376).
+    /// Nothing is written. A catalog row with no head recorded no config is
+    /// refused with
     /// [`EmbedError::SessionCreationUnrecorded`]: no open stands defaults in
     /// for it (FIG-4553).
     async fn recorded_state(
@@ -428,7 +426,7 @@ impl SessionBuilder {
                 session_id: self.session_id.clone(),
             });
         };
-        let mut state = loaded.state;
+        let state = loaded.state;
         if state.session_id != self.session_id {
             return Err(EmbedError::Store(
                 lash_core::StoreError::StoreSessionMismatch {
@@ -437,7 +435,6 @@ impl SessionBuilder {
                 },
             ));
         }
-        bind_to_opener(&mut state, &self.session_id);
         Ok(state)
     }
 
@@ -602,7 +599,7 @@ pub(crate) async fn load_state_from_store(
             session_id: session_id.clone(),
         });
     };
-    let mut state = loaded.state;
+    let state = loaded.state;
     if state.session_id != session_id {
         return Err(EmbedError::Store(
             lash_core::StoreError::StoreSessionMismatch {
@@ -611,19 +608,7 @@ pub(crate) async fn load_state_from_store(
             },
         ));
     }
-    bind_to_opener(&mut state, session_id);
     Ok(state)
-}
-
-/// Bind recorded state to its opener (FIG-4099, FIG-4376).
-///
-/// The recorded config — model binding and reasoning, attachment acceptance,
-/// prompt, generation and the execution controls (turn budget, autonomy,
-/// no-progress budget, charge safety) — is the session's and stays as
-/// recorded; an open never fills or replaces it, and reads nothing but the
-/// record (FIG-4594). The opener owns only the session binding.
-fn bind_to_opener(state: &mut RuntimeSessionState, session_id: &SessionId) {
-    state.policy.session_id = Some(session_id.clone());
 }
 
 /// The session's current frame as runtime state, after the store confirms

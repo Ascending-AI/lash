@@ -7,6 +7,23 @@ use schemars::JsonSchema;
 
 use super::*;
 
+#[test]
+fn execution_policy_rejects_the_retired_session_id() {
+    let policy = RemoteProcessExecutionPolicy::new(
+        RemoteTurnBudget::Unbounded,
+        std::num::NonZeroUsize::new(1024).expect("nonzero limit"),
+    );
+    let encoded = serde_json::to_value(&policy).expect("encode policy");
+    assert!(encoded.get("session_id").is_none());
+    for retired in [serde_json::Value::Null, serde_json::json!("session")] {
+        let mut fields = encoded.clone();
+        fields["session_id"] = retired;
+        let error = serde_json::from_value::<RemoteProcessExecutionPolicy>(fields)
+            .expect_err("the retired session id is refused");
+        assert!(error.to_string().contains("unknown field `session_id`"));
+    }
+}
+
 #[path = "tests/identity.rs"]
 mod identity_tests;
 #[path = "tests/model_call_ledger.rs"]

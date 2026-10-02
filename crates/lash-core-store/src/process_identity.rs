@@ -435,13 +435,11 @@ impl ProcessExecutionEnvSpec {
 
     /// Content-addresses the exact bytes persisted by [`Self::to_store_bytes`].
     ///
-    /// Version 6 adds reasoning-retention capability and selection to the
-    /// policy's semantic identity.
-    /// Older environment references are refused at load and must be recreated; a
-    /// future byte-format change requires a new textual family version and the
-    /// same explicit old-row policy. These bytes follow the final binary's
-    /// serde-json feature set; enabling order-preserving maps is therefore an
-    /// identity-format change that requires a new family version.
+    /// The policy contains execution settings, with the owning session named
+    /// only by its runtime state. Identical captured settings therefore share
+    /// an environment reference across sessions.
+    /// These bytes follow the final binary's serde-json feature set. Shapes
+    /// and golden vectors change in place until the 1.0 version freeze ends.
     pub fn stable_ref(&self) -> Result<ProcessExecutionEnvRef, serde_json::Error> {
         self.to_store_bytes()
             .map(|bytes| process_execution_env_ref_for_bytes(&bytes))

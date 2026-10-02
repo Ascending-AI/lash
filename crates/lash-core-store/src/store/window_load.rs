@@ -12,8 +12,8 @@ pub struct LoadedSessionWindow {
 }
 
 /// Adopt a window read onto a default state. Adoption is head-authoritative
-/// (FIG-1875): every config fact is the head's, and the session binding
-/// starts unbound.
+/// (FIG-1875): every config fact is the head's, and the window names its
+/// session.
 pub fn window_state(
     read: SessionWindowRead,
     fleet: super::FleetFormat,
@@ -23,8 +23,7 @@ pub fn window_state(
         config.turn_budget,
         config.max_tool_calls,
     ));
-    let live_owned = crate::runtime::state::LiveOwnedSessionFacts::of(&state.policy);
-    crate::runtime::state::adopt_durable_head(&mut state, read, live_owned, fleet)?;
+    crate::runtime::state::adopt_durable_head(&mut state, read, fleet)?;
     Ok(LoadedSessionWindow { state, config })
 }
 
@@ -68,8 +67,8 @@ pub async fn load_session_read_view(
     ))
 }
 
-/// Re-adopt the session's current frame into `state`, keeping the session
-/// binding and the resident open's tool-state claim. Everything else,
+/// Re-adopt the session's current frame into `state`, keeping the resident
+/// open's tool-state claim. Everything else,
 /// the execution controls included (FIG-4376), is the head's. Answers whether
 /// the session has a head: one with none leaves `state` unchanged.
 pub async fn refresh_session_window(
@@ -81,7 +80,6 @@ pub async fn refresh_session_window(
     };
     validate_window_session(store.session_id(), &read)?;
     let mut fresh = window_state(read, store.fleet_format())?.state;
-    fresh.policy.session_id = state.policy.session_id.clone();
     // `preserve_tool_state_snapshot` is a per-open claim (FIG-3353), not
     // durable content: a whole-state reload must keep the resident open's
     // decision or a later stamp would export the unreconciled registry.

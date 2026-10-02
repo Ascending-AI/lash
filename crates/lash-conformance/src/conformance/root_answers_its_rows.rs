@@ -451,8 +451,7 @@ impl LawParts {
                     crate::QueuedWorkBatchingConfig::new(1),
                 );
         host.providers.models = crate::testing::standard_test_llm_profiles(model);
-        let mut policy = crate::testing::mock_session_policy();
-        policy.session_id = Some(self.session_id.clone());
+        let policy = crate::testing::mock_session_policy();
         Box::pin(
             crate::LashRuntime::builder(host, crate::testing::runtime_lease_owner())
                 .with_session_id(&self.session_id)

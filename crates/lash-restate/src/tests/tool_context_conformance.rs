@@ -185,7 +185,7 @@ impl ProductionToolCell {
                 .expect("open production-path session store"),
         );
         let runtime_store = session_view(store, session_id.clone());
-        let policy = replay_test_policy(&session_id);
+        let policy = lash_core::testing::mock_session_policy();
         let initial_state = replay_test_state(&session_id, &policy);
         Self {
             _dir: dir,

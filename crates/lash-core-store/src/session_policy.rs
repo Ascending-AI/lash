@@ -3,9 +3,7 @@
 use std::sync::Arc;
 
 use crate::provider::AttachmentCapabilitySnapshot;
-use crate::{
-    ChargeSafetyPolicy, LlmProfileConfig, MaxToolCalls, NoProgressBudget, SessionId, TurnBudget,
-};
+use crate::{ChargeSafetyPolicy, LlmProfileConfig, MaxToolCalls, NoProgressBudget, TurnBudget};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionPolicy {
@@ -17,7 +15,6 @@ pub struct SessionPolicy {
     /// against (ADR 0026). Session config of its own: a model change keeps
     /// them, and only an explicit change replaces them.
     pub attachment_acceptance: Arc<AttachmentCapabilitySnapshot>,
-    pub session_id: Option<SessionId>,
     pub autonomous: bool,
     /// Required turn-budget decision. A host must choose either a non-zero
     /// bound or explicit unbounded execution; absence is never interpreted.
@@ -58,7 +55,6 @@ impl SessionPolicy {
         Self {
             model: None,
             attachment_acceptance: Arc::default(),
-            session_id: None,
             autonomous: false,
             turn_budget,
             max_tool_calls,

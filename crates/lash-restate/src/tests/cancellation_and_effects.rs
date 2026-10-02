@@ -1138,12 +1138,6 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
     );
 }
 
-pub(super) fn replay_test_policy(session_id: &SessionId) -> lash_core::SessionPolicy {
-    let mut policy = lash_core::testing::mock_session_policy();
-    policy.session_id = Some(SessionId::from(session_id.to_string()));
-    policy
-}
-
 pub(super) fn replay_test_state(
     session_id: &SessionId,
     policy: &lash_core::SessionPolicy,

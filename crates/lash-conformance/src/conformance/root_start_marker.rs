@@ -34,8 +34,7 @@ impl MarkerParts {
         reason = "conformance-law fixture: the law's runtime builds"
     )]
     async fn runtime(&self) -> crate::LashRuntime {
-        let mut policy = crate::testing::mock_session_policy();
-        policy.session_id = Some(self.session_id.clone());
+        let policy = crate::testing::mock_session_policy();
         Box::pin(
             crate::LashRuntime::builder(self.host.clone(), crate::testing::runtime_lease_owner())
                 .with_session_id(&self.session_id)

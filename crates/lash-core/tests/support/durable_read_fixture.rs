@@ -1307,7 +1307,6 @@ fn assert_graph_payloads(nodes: &[std::sync::Arc<lash_core::SessionNodeRecord>])
             assert_eq!(reason.as_str(), "initial");
             assert_eq!(assignment.policy.model, None);
             assert_eq!(assignment.policy.context_window_tokens(), None);
-            assert_eq!(assignment.policy.session_id, None);
             assert!(!assignment.policy.autonomous);
             assert_eq!(
                 assignment.policy.turn_budget,

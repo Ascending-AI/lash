@@ -163,8 +163,7 @@ impl World {
             host.control.scope_close = Arc::new(self.law_sink());
         }
         host.providers.models = lash_core::testing::standard_test_llm_profiles(model.into_handle());
-        let mut policy = lash_core::testing::mock_session_policy();
-        policy.session_id = Some(self.session_id.clone());
+        let policy = lash_core::testing::mock_session_policy();
         let state = lash_core::RuntimeSessionState {
             session_id: self.session_id.clone(),
             policy: policy.clone(),

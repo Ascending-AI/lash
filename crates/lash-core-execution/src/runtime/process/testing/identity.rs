@@ -1,5 +1,4 @@
 use crate::ProcessId;
-use crate::SessionId;
 use serde_json::json;
 
 use super::super::model::{
@@ -47,7 +46,6 @@ fn process_execution_env_identity_golden_corpus() {
             .with_reasoning(crate::ReasoningSelection::Effort("high".to_string())),
         ),
         attachment_acceptance: Default::default(),
-        session_id: Some(SessionId::from("session")),
         autonomous: true,
         turn_budget: crate::TurnBudget::bounded(1),
         max_tool_calls: crate::MaxToolCalls::new(1024),
@@ -81,12 +79,12 @@ fn process_execution_env_identity_golden_corpus() {
         actual,
         [
             (
-                "{\"plugin_config\":{\"revision\":0,\"config\":{}},\"policy\":{\"session_id\":null,\"autonomous\":false,\"turn_budget\":\"unbounded\",\"max_tool_calls\":1024}}".to_string(),
-                "process-env:v6:blake3:359aa9b669b4a7fb3a7a471a622a7d316cda72d3c5f9adbb8f48738103447383".to_string(),
+                "{\"plugin_config\":{\"revision\":0,\"config\":{}},\"policy\":{\"autonomous\":false,\"turn_budget\":\"unbounded\",\"max_tool_calls\":1024}}".to_string(),
+                "process-env:v6:blake3:3641569afdcec6b35e96943efa84f8677600ab5ce39909921592ff7a4cde44ee".to_string(),
             ),
             (
-                r#"{"plugin_config":{"revision":3,"config":{"protocol":"protocol","namespaces":{"a:b":{"format_version":1,"value":{"enabled":true}}}}},"policy":{"model":{"model":{"key":"rich-key","metadata":{"wire_model":"model:rich","limits":{"context_window_tokens":8192,"output_token_capacity":2048},"capability":{"instruction_role":"developer","native_mid_conversation_system":true,"cache_control":"anthropic","stream_termination":"eof_tolerated","sampling":"pinned","reasoning":{"efforts":["low","high"],"encoding":{"budget":{"high":1024,"low":256}},"disable":true,"mandatory":true}}}},"reasoning":{"effort":"high"}},"session_id":"session","autonomous":true,"turn_budget":{"bounded":1},"max_tool_calls":1024,"generation":{"output_token_cap":1024,"temperature":0.25,"seed":-7}}}"#.to_string(),
-                "process-env:v6:blake3:941fc994f65ac26fe5da636106bfd9082c3d40e3e654a0f20934481e3e3245c7".to_string(),
+                r#"{"plugin_config":{"revision":3,"config":{"protocol":"protocol","namespaces":{"a:b":{"format_version":1,"value":{"enabled":true}}}}},"policy":{"model":{"model":{"key":"rich-key","metadata":{"wire_model":"model:rich","limits":{"context_window_tokens":8192,"output_token_capacity":2048},"capability":{"instruction_role":"developer","native_mid_conversation_system":true,"cache_control":"anthropic","stream_termination":"eof_tolerated","sampling":"pinned","reasoning":{"efforts":["low","high"],"encoding":{"budget":{"high":1024,"low":256}},"disable":true,"mandatory":true}}}},"reasoning":{"effort":"high"}},"autonomous":true,"turn_budget":{"bounded":1},"max_tool_calls":1024,"generation":{"output_token_cap":1024,"temperature":0.25,"seed":-7}}}"#.to_string(),
+                "process-env:v6:blake3:375dbc9991d83cdac4145861714e1f9c30eac81d2a9f2b91077ab0c8314f35aa".to_string(),
             ),
         ]
     );

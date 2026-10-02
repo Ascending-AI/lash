@@ -100,11 +100,7 @@ fn recorded_creation_plan(
     created: &RuntimeSessionState,
 ) -> Result<SessionInitPlan, crate::PluginError> {
     let (session_id, mut request) = identified_create_request(request)?;
-    let mut policy = created.policy.clone();
-    // The session binding is live-owned, never part of a recorded head.
-    if request.relation.parent_session_id().is_some() {
-        policy.session_id = Some(session_id.clone());
-    }
+    let policy = created.policy.clone();
     request.tool_access = created.authority.tool_access.clone();
     request.subagent = created.authority.subagent.clone();
     let facts = ChildFacts {
@@ -293,9 +289,6 @@ pub(in crate::runtime::session_manager) fn resolve_child_facts(
         policy.model = Some(model);
     }
     let is_child = request.relation.parent_session_id().is_some();
-    if is_child {
-        policy.session_id = Some(SessionId::from(session_id.to_string()));
-    }
     // Every installed owner resolves its namespace from the request, the
     // starter's recorded namespace standing as the parent's for a child
     // (FIG-4379). The creation head records the result.

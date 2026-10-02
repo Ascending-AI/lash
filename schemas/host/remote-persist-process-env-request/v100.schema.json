@@ -491,12 +491,6 @@
         "no_progress_budget": {
           "$ref": "#/$defs/RemoteNoProgressBudget"
         },
-        "session_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "turn_budget": {
           "$ref": "#/$defs/RemoteTurnBudget"
         }

@@ -162,7 +162,6 @@ pub async fn attachment_materialization_turn_witnesses(
         host.providers.models = crate::testing::standard_test_llm_profiles(provider);
         let store = law_session_store(stores.as_ref(), &session_id).await;
         let mut policy = crate::testing::mock_session_policy();
-        policy.session_id = Some(session_id.clone());
         policy.attachment_acceptance = attachment_test_acceptance();
         let state = RuntimeSessionState {
             session_id: session_id.clone(),

@@ -219,8 +219,7 @@ impl SpawnWorld {
             .cloned()
             .chain([subagents])
             .collect::<Vec<_>>();
-        let mut policy = crate::testing::mock_session_policy();
-        policy.session_id = Some(session_id.clone());
+        let policy = crate::testing::mock_session_policy();
         let state = crate::RuntimeSessionState {
             session_id: session_id.clone(),
             policy: policy.clone(),

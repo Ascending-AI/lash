@@ -9,7 +9,6 @@
 //! wire until it is named here -- so a field this file does not mention is a
 //! runtime-only field by construction.
 
-use crate::SessionId;
 use crate::{LlmProfileConfig, MaxToolCalls, NoProgressBudget, SessionPolicy, TurnBudget};
 
 impl serde::Serialize for SessionPolicy {
@@ -19,7 +18,7 @@ impl serde::Serialize for SessionPolicy {
     {
         use serde::ser::SerializeStruct;
 
-        let mut fields = 4;
+        let mut fields = 3;
         if self.model.is_some() {
             fields += 1;
         }
@@ -42,7 +41,6 @@ impl serde::Serialize for SessionPolicy {
         if !self.attachment_acceptance.is_empty() {
             state.serialize_field("attachment_acceptance", &self.attachment_acceptance)?;
         }
-        state.serialize_field("session_id", &self.session_id)?;
         state.serialize_field("autonomous", &self.autonomous)?;
         state.serialize_field("turn_budget", &self.turn_budget)?;
         state.serialize_field("max_tool_calls", &self.max_tool_calls)?;
@@ -72,8 +70,6 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
             #[serde(default)]
             attachment_acceptance: std::sync::Arc<crate::provider::AttachmentCapabilitySnapshot>,
             #[serde(default)]
-            session_id: Option<SessionId>,
-            #[serde(default)]
             autonomous: bool,
             turn_budget: TurnBudget,
             max_tool_calls: MaxToolCalls,
@@ -89,7 +85,6 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
         Ok(Self {
             model: wire.model,
             attachment_acceptance: wire.attachment_acceptance,
-            session_id: wire.session_id,
             autonomous: wire.autonomous,
             turn_budget: wire.turn_budget,
             max_tool_calls: wire.max_tool_calls,

@@ -960,7 +960,6 @@ impl TestRuntime {
             .expect("plugins");
         if let Some(session_id) = self.session_id {
             initial_state.session_id = session_id.clone();
-            initial_state.policy.session_id = Some(session_id);
         }
         let mut policy = standard_test_policy();
         policy.attachment_acceptance = self.attachment_acceptance.clone();

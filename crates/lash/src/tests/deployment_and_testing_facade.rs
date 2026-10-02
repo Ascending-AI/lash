@@ -80,11 +80,10 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
         assert!(idle.drained());
 
         let session_id = lash_core::SessionId::from("drain-parked-turn");
-        let mut policy = lash_core::SessionPolicy::new(
+        let policy = lash_core::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
         );
-        policy.session_id = Some(session_id.clone());
         let store = lash_core::runtime::admit_session_view(
             &factory,
             &lash_core::SessionStoreCreateRequest {
@@ -220,9 +219,8 @@ async fn parked_work_merges_parked_turns_and_processes() {
     let process_park = parked_process.park().cloned().expect("parked");
 
     let session_id = lash_core::SessionId::from("parked-work-turn");
-    let mut policy =
+    let policy =
         lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
-    policy.session_id = Some(session_id.clone());
     let store = lash_core::runtime::admit_session_view(
         &factory,
         &lash_core::SessionStoreCreateRequest {

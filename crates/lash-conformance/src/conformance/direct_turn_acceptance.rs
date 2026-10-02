@@ -96,8 +96,7 @@ async fn acceptance_runtime_with_batching(
         batching.clone(),
     );
     host.providers.models = crate::testing::standard_test_llm_profiles(provider);
-    let mut policy = crate::testing::mock_session_policy();
-    policy.session_id = Some(SessionId::from(session_id.to_string()));
+    let policy = crate::testing::mock_session_policy();
     let state = crate::RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),
         policy: policy.clone(),

@@ -303,7 +303,6 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
                 crate::testing::test_llm_profile_metadata("wake-crash-model"),
             )),
             attachment_acceptance: Default::default(),
-            session_id: Some(SessionId::from(target_session_id.to_string())),
             autonomous: false,
             turn_budget: crate::TurnBudget::Unbounded,
             max_tool_calls: crate::MaxToolCalls::new(1024),
@@ -402,11 +401,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(authority_target_session_id.to_string()),
             relation: crate::SessionRelation::Root,
-            config: crate::SessionPolicy {
-                session_id: Some(SessionId::from(authority_target_session_id.to_string())),
-                ..request.config.session_policy()
-            }
-            .into(),
+            config: request.config.session_policy().into(),
             head: crate::SessionCreationHead::Config,
         })
         .await

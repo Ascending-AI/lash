@@ -158,8 +158,7 @@ struct RedriveParts {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn build_runtime(parts: RedriveParts) -> crate::LashRuntime {
-    let mut policy = crate::testing::mock_session_policy();
-    policy.session_id = Some(parts.session_id.clone());
+    let policy = crate::testing::mock_session_policy();
     let state = crate::RuntimeSessionState {
         session_id: parts.session_id.clone(),
         policy: policy.clone(),

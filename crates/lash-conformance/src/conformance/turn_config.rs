@@ -47,9 +47,8 @@ async fn build_runtime(parts: ConfigParts) -> crate::LashRuntime {
 )]
 async fn build_runtime_under(
     parts: ConfigParts,
-    mut policy: crate::SessionPolicy,
+    policy: crate::SessionPolicy,
 ) -> crate::LashRuntime {
-    policy.session_id = Some(parts.session_id.clone());
     Box::pin(
         crate::LashRuntime::builder(parts.host, crate::testing::runtime_lease_owner())
             .with_session_id(&parts.session_id)
@@ -566,8 +565,7 @@ pub async fn an_older_admission_redriven_after_a_profile_change_is_fenced_out(
     let law =
         CommittedRootUnderALlmProfileChange::new(prefix, name, &effect_host, &stores, &runner)
             .await;
-    let mut policy = crate::testing::mock_session_policy();
-    policy.session_id = Some(law.parts.session_id.clone());
+    let policy = crate::testing::mock_session_policy();
     let rerun = crate::RuntimeSessionState {
         session_id: law.parts.session_id.clone(),
         policy,

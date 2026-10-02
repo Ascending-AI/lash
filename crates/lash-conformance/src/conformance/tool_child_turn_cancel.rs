@@ -62,8 +62,7 @@ async fn build_runtime(parts: TurnParts) -> crate::LashRuntime {
         crate::QueuedWorkBatchingConfig::new(1),
     );
     config.providers.models = crate::testing::standard_test_llm_profiles(model.into_handle());
-    let mut policy = crate::testing::mock_session_policy();
-    policy.session_id = Some(session_id.clone());
+    let policy = crate::testing::mock_session_policy();
     let state = crate::RuntimeSessionState {
         session_id: session_id.clone(),
         policy: policy.clone(),
