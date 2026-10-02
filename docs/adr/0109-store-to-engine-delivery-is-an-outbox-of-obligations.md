@@ -411,7 +411,8 @@ A crash between terminal commit and scope close leaves durable terminal
 evidence and an owed root-row obligation. The recorded close step or the due
 relay completes it. The close transaction delivers the row; replay finds
 it settled. A delivered close does not become new work on the next tick.
-ADR 0108 §5 owns the lifetime meaning of the close.
+ADR 0108 §5 owns the lifetime meaning of the close. A close that meets
+corrupt stored data is refused rather than retried (§9).
 
 Evidence: `crates/lash-sqlite-store/src/session_roots.rs:169` and
 `crates/lash-core/src/runtime/drive/scope_close.rs:85`.
@@ -444,6 +445,47 @@ checks terminal publication. `crates/lash/src/tests/obligation_relays.rs`
 checks core relay assembly. The session-delete finalizer is covered by
 `crates/lash/src/tests/core_session_builder/session_delete_finalizer.rs` and
 `crates/lash-sim/tests/session_delete_bounds.rs`.
+
+## 9. Corruption after a published answer is the session's fault
+
+A root's answer is published before its scope closes (§4) and before its
+drive's next admission reads the session. Corrupt stored data met by either
+step cannot fail that root, and no retry repairs it. The published answer
+stands and is never rewritten or retracted.
+
+The session owns the fault. Its `session_meta` row records one
+`SessionFault`: the typed code (`runtime_store_corrupt`), the message, the
+typed cause with its fields, what met it (`scope_close` of a root, or
+`drive_admission`) and when. A session already faulted keeps its first
+fault. The row lives and dies with the session.
+
+- **Scope close.** `ScopeCloseRelay` records the fault and refuses the
+  delivery, so the root's `ScopeClose` obligation stalls as `refused` on
+  that attempt under the same code (§1.4, §1.5). A fault that could not be
+  recorded leaves the close owed for another attempt. Every other store
+  error stays retryable.
+- **Drive admission.** The recorded `AdmitDrive` step records the fault
+  before it answers the corruption as its terminal outcome. A fault that
+  could not be recorded is the attempt's, and the engine runs the step
+  again.
+
+While the fault stands the session admits nothing. `StoredDriveEpoch`
+carries it, admission refuses every drive with the fault's code and cause,
+and a send whose input is still open is answered with the same typed error
+from the store, whether or not a drive reached it. Accepted inputs stay
+accepted; their ingress obligations follow §1.4.
+
+`LashCore::session_faults` lists standing faults in session-id order.
+`LashCore::clear_session_fault` is the only thing that clears one, after
+the operator repaired the data. A stalled close is re-armed separately with
+`LashCore::rearm_obligation`; a re-armed close that meets the corruption
+again records the fault again.
+
+Evidence: `crates/lash-core-store/src/store/session_fault.rs`,
+`crates/lash-core/src/runtime/drive/scope_close.rs`,
+`crates/lash-core/src/runtime/drive/admission.rs`,
+`crates/lash/src/send/resolve.rs` and
+`crates/lash/src/tests/store_faults.rs`.
 
 ## Model usage accounting
 

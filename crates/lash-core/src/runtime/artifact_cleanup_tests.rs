@@ -521,6 +521,7 @@ impl Harness {
                 key,
                 token: &ClaimToken::new("artifact-cleanup-harness"),
                 attempt: 1,
+                started_ms: 0,
             })
             .await
     }

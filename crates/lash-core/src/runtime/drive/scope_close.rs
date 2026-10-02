@@ -89,28 +89,63 @@ impl ObligationRelay for ScopeCloseRelay {
     }
 
     async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
-        let ObligationDelivery { key, .. } = delivery;
+        let ObligationDelivery {
+            key, started_ms, ..
+        } = delivery;
         let ObligationKey::ScopeClose { session_id, root } = key else {
             return Err(DeliveryFailure::key_mismatch(
                 ObligationKind::ScopeClose,
                 key,
             ));
         };
-        let terminal = self
-            .sessions
-            .root_terminal(session_id, root)
-            .await
-            .map_err(DeliveryFailure::retryable)?
-            .ok_or_else(|| {
+        let terminal = match self.sessions.root_terminal(session_id, root).await {
+            Ok(terminal) => terminal.ok_or_else(|| {
                 DeliveryFailure::row_invariant(format!(
                     "root `{root}` of session `{session_id}` armed a scope close but \
                      carries no terminal evidence"
                 ))
-            })?;
-        self.sink
-            .close_root_scope(&terminal)
+            })?,
+            Err(error) => return Err(self.failure(session_id, root, error, started_ms).await),
+        };
+        match self.sink.close_root_scope(&terminal).await {
+            Ok(()) => Ok(()),
+            Err(error) => Err(self.failure(session_id, root, error, started_ms).await),
+        }
+    }
+}
+
+impl ScopeCloseRelay {
+    /// Why the close of `root` did not deliver. Corrupt stored data is
+    /// refused, so the obligation stalls at once instead of retrying a read
+    /// no attempt repairs, and it is recorded as the session's fault (ADR
+    /// 0109 §9): the root's answer is already published, so the fault is how
+    /// a host learns of it. A fault that could not be recorded leaves the
+    /// close owed, and the next attempt records it. Every other store error
+    /// is worth another attempt.
+    async fn failure(
+        &self,
+        session_id: &crate::SessionId,
+        root: &crate::TurnId,
+        error: StoreError,
+        at_ms: u64,
+    ) -> DeliveryFailure {
+        if error.runtime_code() != crate::RuntimeErrorCode::RuntimeStoreCorrupt {
+            return DeliveryFailure::retryable(error);
+        }
+        let record = crate::store::SessionFaultRecord::new(
+            crate::store::SessionFaultOrigin::ScopeClose { root: root.clone() },
+            &error.runtime_error(),
+        );
+        match self
+            .sessions
+            .record_session_fault(session_id, &record, at_ms)
             .await
-            .map_err(DeliveryFailure::retryable)
+        {
+            Ok(_) | Err(StoreError::UnsupportedStoreOperation { .. }) => {
+                DeliveryFailure::refused(error)
+            }
+            Err(unrecorded) => DeliveryFailure::retryable(unrecorded),
+        }
     }
 }
 

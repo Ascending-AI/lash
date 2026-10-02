@@ -431,6 +431,8 @@ table lash_session_meta
   column drive_admission_id text nullable
   column drive_epoch bigint not-null default
   column drive_root_start text nullable
+  column fault_at_ms bigint nullable
+  column fault_json text nullable
   column last_commit_at_ms bigint nullable
   column obligation_attempts integer not-null default
   column obligation_claim_token text nullable
@@ -645,11 +647,11 @@ table lash_usage_facts
   column generation_id text nullable
   column input_tokens bigint not-null
   column llm_call_id text not-null
-  column profile_key text not-null
   column output_tokens bigint not-null
   column owner_id text not-null
   column owner_kind text not-null
   column payload_hash text not-null
+  column profile_key text not-null
   column provider_attempt bigint not-null
   column reasoning_output_tokens bigint not-null
   column recorded_at_ms bigint not-null
@@ -674,9 +676,9 @@ table lash_usage_runs
   column conflict_stored_payload_hash text nullable
   column effect_key text not-null
   column execution_scope_key text nullable
-  column profile_key text nullable
   column owner_id text not-null
   column owner_kind text not-null
+  column profile_key text nullable
   column requested_model text nullable
   column resolved_at_ms bigint nullable
   column run_id text not-null

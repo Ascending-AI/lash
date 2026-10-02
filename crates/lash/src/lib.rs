@@ -238,8 +238,9 @@ pub use lash_core::facade_support::{
 };
 pub use lash_core::runtime::ExternalCompletionError;
 pub use lash_core::store::{
-    DeliveryError, ObligationId, ObligationKey, ObligationKind, ObligationState, StallReason,
-    StalledObligation, UndecodableObligation, session_delete::SessionCleanup,
+    DeliveryError, ObligationId, ObligationKey, ObligationKind, ObligationState, SessionFault,
+    SessionFaultOrigin, SessionFaultRecord, StallReason, StalledObligation, UndecodableObligation,
+    session_delete::SessionCleanup,
 };
 pub use lash_core::{
     AdmissionRefusal, AwaitEventKey, AwaitEventWaitIdentity, BatchId, ChargeSafetyPolicy,

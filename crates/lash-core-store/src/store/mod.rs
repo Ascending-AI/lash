@@ -75,6 +75,7 @@ pub use session_config_views::{
 };
 mod lease_owner;
 pub mod session_delete;
+mod session_fault;
 mod state_version;
 #[cfg(any(test, feature = "testing"))]
 mod testing;
@@ -205,6 +206,7 @@ pub use semantic_boundary::{
     CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION,
     RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION,
 };
+pub use session_fault::{SessionFault, SessionFaultOrigin, SessionFaultRecord};
 
 pub use session_view::SessionStore;
 pub use state_version::{

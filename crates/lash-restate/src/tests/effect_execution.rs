@@ -160,6 +160,7 @@ pub(super) async fn start_delivery_refuses_externally_owned_rows() {
                 },
                 token: &lash_core::store::ClaimToken::mint(),
                 attempt: 1,
+                started_ms: 0,
             },
         )
         .await

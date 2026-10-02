@@ -70,7 +70,8 @@ lash_store_sql::statements! {
         /// deadlock, where exclusive holders simply queue.
         select_drive_epoch_locked = "SELECT drive_epoch, drive_admission_id, drive_root_start, closing_intent,
             EXISTS (SELECT 1 FROM control_intents WHERE control_intents.session_id = session_meta.session_id
-                AND kind IN ('cancel', 'fork') AND engine_half_owed)
+                AND kind IN ('cancel', 'fork') AND engine_half_owed),
+            fault_json, fault_at_ms
             FROM session_meta WHERE session_id = ?1 FOR NO KEY UPDATE";
 
         exists_materialized = "SELECT EXISTS(

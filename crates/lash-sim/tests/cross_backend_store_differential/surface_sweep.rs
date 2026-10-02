@@ -88,6 +88,10 @@ pub(super) enum SurfaceMethod {
     LoadKnownNode,
     LoadUnknownNode,
     ReadDriveEpoch,
+    /// The session fault's whole life (ADR 0109 §9): recorded once, kept
+    /// against a second recording, read alone, on the drive epoch and in the
+    /// listing, then cleared once.
+    SessionFault,
     ListQueuedWork,
     ListPendingQueuedWork,
     PendingSessionWorkOrdering,
@@ -243,6 +247,7 @@ impl SurfaceMethod {
             Self::LoadKnownNode => "surface:load_node_known",
             Self::LoadUnknownNode => "surface:load_node_unknown",
             Self::ReadDriveEpoch => "surface:read_drive_epoch",
+            Self::SessionFault => "surface:session_fault",
             Self::ListQueuedWork => "surface:list_queued_work",
             Self::ListPendingQueuedWork => "surface:list_open_queued_work",
             Self::PendingSessionWorkOrdering => "surface:pending_session_work_ordering",
@@ -509,6 +514,7 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::LoadKnownNode),
             surface(SurfaceMethod::LoadUnknownNode),
             surface(SurfaceMethod::ReadDriveEpoch),
+            surface(SurfaceMethod::SessionFault),
             surface(SurfaceMethod::ListQueuedWork),
             surface(SurfaceMethod::ListPendingQueuedWork),
             surface(SurfaceMethod::PendingSessionWorkOrdering),
@@ -1135,6 +1141,40 @@ impl BackendRunner {
                     "epoch={} admission_present={}",
                     observed.epoch,
                     observed.admission().is_some()
+                )
+            }
+            SurfaceMethod::SessionFault => {
+                let record = |message: &str| lash_core::store::SessionFaultRecord {
+                    origin: lash_core::store::SessionFaultOrigin::DriveAdmission,
+                    code: lash_core::RuntimeErrorCode::RuntimeStoreCorrupt,
+                    message: message.to_string(),
+                    cause: None,
+                };
+                let first = store
+                    .record_session_fault(&session_id, &record("first"), 7)
+                    .await?;
+                let kept = store
+                    .record_session_fault(&session_id, &record("second"), 9)
+                    .await?;
+                let read = store.session_fault(&session_id).await?;
+                let gate = store.drive_epoch(&session_id).await?.fault;
+                let listed = store
+                    .list_session_faults(None, std::num::NonZeroUsize::MAX)
+                    .await?
+                    .into_iter()
+                    .filter(|fault| fault.session_id == session_id)
+                    .collect::<Vec<_>>();
+                let cleared = store.clear_session_fault(&session_id).await?;
+                let again = store.clear_session_fault(&session_id).await?;
+                let after = store.session_fault(&session_id).await?;
+                format!(
+                    "first={first:?} kept_first={} read={} gate={} listed={} cleared={cleared} \
+                     again={again} after_present={}",
+                    kept == first,
+                    read == first,
+                    gate == first,
+                    listed.len(),
+                    after.is_some()
                 )
             }
             SurfaceMethod::ListQueuedWork => {

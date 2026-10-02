@@ -431,7 +431,7 @@ async fn admit_on_store(
         request,
         authority,
         ordinal,
-        Some(store),
+        Some((store, Arc::clone(&host.clock))),
         host.session_store_factory(),
         draining.map(|generation| admission::DrainRead {
             marks: host.backend().generation_drain(),
@@ -444,15 +444,16 @@ async fn admit_on_store(
 /// Emit admission `ordinal`'s journaled `AdmitDrive` step through
 /// `controller`, which must serve the request's
 /// [`drive_admission_scope`](crate::engine::drive_admission_scope). `store`
-/// is the session's history store, or `None` when the session could not be
-/// opened at all — deleted, or closed past admission — in which case the
-/// step's recorded body is the retirement itself (FIG-3630).
+/// is the session's history store and the host clock a fault it records is
+/// stamped with, or `None` when the session could not be opened at all —
+/// deleted, or closed past admission — in which case the step's recorded
+/// body is the retirement itself (FIG-3630).
 async fn emit_admission_step(
     controller: &ScopedEffectController<'_>,
     request: &DriveRequest,
     authority: AdmissionAuthority<'_>,
     ordinal: u32,
-    store: Option<crate::store::SessionStore>,
+    store: Option<(crate::store::SessionStore, Arc<dyn crate::Clock>)>,
     stores: Arc<dyn crate::DeploymentStore>,
     drain: Option<admission::DrainRead>,
 ) -> Result<AdmitVerdict, DriveAbort> {

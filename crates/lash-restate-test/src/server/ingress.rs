@@ -96,23 +96,36 @@ fn error(status: u16, message: impl Into<String>) -> HttpResponse {
     respond_json(status, &json!({ "message": message.into() }))
 }
 
-/// An invocation failure as Restate's ingress answers it: the failure code
-/// as the status, `{code, message}` as the body.
+/// A failure as Restate's ingress answers it: the failure code as the
+/// status, `{code, message}` as the body.
 fn failure_response(failure: &pb::Failure) -> HttpResponse {
-    let status = u16::try_from(failure.code)
+    respond_json(
+        failure_status(failure),
+        &json!({ "code": failure.code, "message": failure.message }),
+    )
+}
+
+fn failure_status(failure: &pb::Failure) -> u16 {
+    u16::try_from(failure.code)
         .ok()
         .filter(|code| (400..=599).contains(code))
-        .unwrap_or(500);
+        .unwrap_or(500)
+}
+
+/// A handler's terminal failure as Restate's ingress answers it: the body
+/// names the `invocation` as its source, which tells the failure the handler
+/// chose from an unavailable ingress under the same 5xx status.
+fn terminal_failure_response(failure: &pb::Failure) -> HttpResponse {
     respond_json(
-        status,
-        &json!({ "code": failure.code, "message": failure.message }),
+        failure_status(failure),
+        &json!({ "code": failure.code, "message": failure.message, "source": "invocation" }),
     )
 }
 
 fn outcome_response(outcome: Outcome) -> HttpResponse {
     match outcome {
         Outcome::Success(bytes) => respond(200, bytes),
-        Outcome::Failure(failure) => failure_response(&failure),
+        Outcome::Failure(failure) => terminal_failure_response(&failure),
     }
 }
 

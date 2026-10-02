@@ -320,6 +320,9 @@ CREATE TABLE IF NOT EXISTS lash_session_meta (
     obligation_last_error TEXT,
     obligation_last_error_code TEXT CONSTRAINT ck_session_meta_obligation_error_code CHECK ((obligation_last_error IS NULL) = (obligation_last_error_code IS NULL)),
     obligation_settled_at_ms BIGINT,
+    -- The session's standing fault (ADR 0109 §9) and when it was recorded.
+    fault_json TEXT,
+    fault_at_ms BIGINT CONSTRAINT ck_session_meta_fault CHECK ((fault_json IS NULL) = (fault_at_ms IS NULL)),
     -- The drive authority holds exactly the states a raise writes: unraised,
     -- sealed by an execution (its start marker), or raised by a control verb
     -- (no marker). A closing session was raised by its close.
@@ -342,6 +345,10 @@ CREATE INDEX IF NOT EXISTS idx_lash_session_meta_obligation_due
 CREATE INDEX IF NOT EXISTS idx_lash_session_meta_obligation_stalled
     ON lash_session_meta(obligation_id)
     WHERE obligation_state = 'stalled';
+-- The fault listing (ADR 0109 §9).
+CREATE INDEX IF NOT EXISTS idx_lash_session_meta_fault
+    ON lash_session_meta(session_id)
+    WHERE fault_json IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_lash_session_meta_catalog
     ON lash_session_meta(created_at_ms, session_id);
 CREATE INDEX IF NOT EXISTS idx_lash_session_meta_state_version

@@ -1,0 +1,198 @@
+//! A session's durable fault (ADR 0109 §9): corrupt stored data the engine
+//! met where no sender is left to answer.
+//!
+//! A root's answer is published before its scope closes and before its
+//! drive's next admission reads the session. Stored data that either one
+//! finds corrupt cannot fail that root, whose answer stands, and no retry
+//! repairs it. The fault is recorded on the session's `session_meta` row
+//! instead, with the typed code and cause the read failed with. While it
+//! stands the session admits nothing and every drive is refused with it.
+//! Only an operator clears it.
+
+use serde::{Deserialize, Serialize};
+
+use crate::{RuntimeError, RuntimeErrorCause, RuntimeErrorCode, SessionId, TurnId};
+
+/// What met the fault.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "origin", rename_all = "snake_case")]
+pub enum SessionFaultOrigin {
+    /// The owed scope close of `root`, whose `ScopeClose` obligation stalled
+    /// as refused with the same code.
+    ScopeClose { root: TurnId },
+    /// A drive's admission.
+    DriveAdmission,
+}
+
+/// The failure a session fault retains: a runtime error's typed code, its
+/// message and its cause.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionFaultRecord {
+    #[serde(flatten)]
+    pub origin: SessionFaultOrigin,
+    pub code: RuntimeErrorCode,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause: Option<RuntimeErrorCause>,
+}
+
+impl SessionFaultRecord {
+    /// The fault `origin` met as `error`.
+    #[must_use]
+    pub fn new(origin: SessionFaultOrigin, error: &RuntimeError) -> Self {
+        Self {
+            origin,
+            code: error.code.clone(),
+            message: error.message.clone(),
+            cause: error.cause.clone(),
+        }
+    }
+
+    /// The error every drive of the faulted session is refused with: the
+    /// recorded code, message and cause.
+    #[must_use]
+    pub fn runtime_error(&self) -> RuntimeError {
+        let error = RuntimeError::new(self.code.clone(), self.message.clone());
+        match &self.cause {
+            Some(cause) => error.with_cause(cause.clone()),
+            None => error,
+        }
+    }
+}
+
+/// A session's standing fault, as an operator lists it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionFault {
+    pub session_id: SessionId,
+    #[serde(flatten)]
+    pub record: SessionFaultRecord,
+    /// Host-clock epoch milliseconds of the recording.
+    pub recorded_at_ms: u64,
+}
+
+impl SessionFaultRecord {
+    /// The `fault_json` column's text.
+    ///
+    /// # Errors
+    ///
+    /// The record did not encode.
+    pub fn to_stored(&self) -> Result<String, super::StoreError> {
+        serde_json::to_string(self).map_err(|error| super::StoreError::RecordEncodingFailed {
+            record_kind: "SessionFault".to_string(),
+            message: error.to_string(),
+        })
+    }
+}
+
+impl SessionFault {
+    /// Decode `session_id`'s `fault_json` and `fault_at_ms` columns.
+    ///
+    /// # Errors
+    ///
+    /// A column no build writes is corrupt.
+    pub fn from_stored(
+        session_id: SessionId,
+        fault_json: &str,
+        fault_at_ms: i64,
+    ) -> Result<Self, super::StoreError> {
+        let corrupt = |message: String| super::StoreError::StoredDataCorrupt {
+            record_kind: "SessionFault",
+            message,
+        };
+        Ok(Self {
+            session_id,
+            record: serde_json::from_str(fault_json).map_err(|error| corrupt(error.to_string()))?,
+            recorded_at_ms: u64::try_from(fault_at_ms).map_err(|_| {
+                corrupt(format!(
+                    "fault_at_ms must be non-negative, got {fault_at_ms}"
+                ))
+            })?,
+        })
+    }
+
+    /// [`Self::from_stored`] for the two nullable columns of a drive-epoch
+    /// read: both set, or neither.
+    ///
+    /// # Errors
+    ///
+    /// One column without the other, or a column no build writes, is corrupt.
+    pub fn from_stored_columns(
+        session_id: &SessionId,
+        fault_json: Option<String>,
+        fault_at_ms: Option<i64>,
+    ) -> Result<Option<Self>, super::StoreError> {
+        match (fault_json, fault_at_ms) {
+            (None, None) => Ok(None),
+            (Some(json), Some(at_ms)) => {
+                Self::from_stored(session_id.clone(), &json, at_ms).map(Some)
+            }
+            _ => Err(super::StoreError::StoredDataCorrupt {
+                record_kind: "SessionFault",
+                message: "fault_json and fault_at_ms are set together".to_string(),
+            }),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stored_fault_keeps_its_typed_code_cause_and_origin() {
+        let error = crate::StoreError::StoredDataCorrupt {
+            record_kind: "SessionMeta",
+            message: "unreadable".to_string(),
+        }
+        .runtime_error();
+        let record = SessionFaultRecord::new(
+            SessionFaultOrigin::ScopeClose {
+                root: TurnId::from("root-1"),
+            },
+            &error,
+        );
+        let stored = record.to_stored().expect("encode the fault");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&stored).expect("stored JSON"),
+            serde_json::json!({
+                "origin": "scope_close",
+                "root": "root-1",
+                "code": "runtime_store_corrupt",
+                "message": "stored SessionMeta data is corrupt: unreadable",
+                "cause": {
+                    "kind": "stored_data_corrupt",
+                    "record_kind": "SessionMeta",
+                    "message": "unreadable",
+                },
+            })
+        );
+        let session = SessionId::from("s");
+        let fault = SessionFault::from_stored(session.clone(), &stored, 7).expect("decode");
+        assert_eq!(
+            fault,
+            SessionFault {
+                session_id: session.clone(),
+                record: record.clone(),
+                recorded_at_ms: 7,
+            }
+        );
+        let refusal = fault.record.runtime_error();
+        assert_eq!((&refusal.code, &refusal.cause), (&error.code, &error.cause));
+        assert!(refusal.is_terminal() && !refusal.is_retryable());
+
+        assert_eq!(
+            SessionFault::from_stored_columns(&session, None, None).expect("no fault"),
+            None
+        );
+        for (json, at_ms) in [(Some(stored.clone()), None), (None, Some(7))] {
+            assert!(matches!(
+                SessionFault::from_stored_columns(&session, json, at_ms),
+                Err(crate::StoreError::StoredDataCorrupt { .. })
+            ));
+        }
+        assert!(matches!(
+            SessionFault::from_stored(session, "{}", 7),
+            Err(crate::StoreError::StoredDataCorrupt { .. })
+        ));
+    }
+}

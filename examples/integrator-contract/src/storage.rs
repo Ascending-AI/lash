@@ -480,6 +480,30 @@ impl DriveEpochStore for Integrator {
     async fn drive_epoch(&self, session_id: &SessionId) -> Result<StoredDriveEpoch, StoreError> {
         unreachable!("external signature witness")
     }
+    async fn record_session_fault(
+        &self,
+        session_id: &SessionId,
+        record: &lash::SessionFaultRecord,
+        at_ms: u64,
+    ) -> Result<Option<lash::SessionFault>, StoreError> {
+        unreachable!("external signature witness")
+    }
+    async fn session_fault(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<lash::SessionFault>, StoreError> {
+        unreachable!("external signature witness")
+    }
+    async fn list_session_faults(
+        &self,
+        after: Option<&SessionId>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<lash::SessionFault>, StoreError> {
+        unreachable!("external signature witness")
+    }
+    async fn clear_session_fault(&self, session_id: &SessionId) -> Result<bool, StoreError> {
+        unreachable!("external signature witness")
+    }
 }
 
 #[lash::async_trait]

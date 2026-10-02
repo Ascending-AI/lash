@@ -346,6 +346,30 @@ impl LashCore {
             .await?)
     }
 
+    /// The standing session faults after session `after`, in session-id
+    /// order, at most `limit` (ADR 0109 §9): corrupt stored data the engine
+    /// met after a root's answer was published, at the root's owed scope
+    /// close or at its drive's next admission. Each carries the typed code
+    /// and cause the read failed with. A faulted session admits nothing:
+    /// every send to it is answered with the fault until
+    /// [`clear_session_fault`](Self::clear_session_fault).
+    pub async fn session_faults(
+        &self,
+        after: Option<&lash_core::SessionId>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<lash_core::store::SessionFault>> {
+        Ok(self.store_factory.list_session_faults(after, limit).await?)
+    }
+
+    /// Clear `session_id`'s fault once its stored data is repaired (ADR 0109
+    /// §9): the session admits again. Nothing clears a fault but this verb.
+    /// A fault a scope close recorded also left that root's `ScopeClose`
+    /// obligation stalled, which [`rearm_obligation`](Self::rearm_obligation)
+    /// makes due again. `false` when the session has no fault.
+    pub async fn clear_session_fault(&self, session_id: &lash_core::SessionId) -> Result<bool> {
+        Ok(self.store_factory.clear_session_fault(session_id).await?)
+    }
+
     /// The deployment's parked work — turns and processes whose redrive
     /// refuses to replay their journals — to list, summarize and follow
     /// (FIG-3659).

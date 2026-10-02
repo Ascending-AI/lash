@@ -2,7 +2,9 @@
 //! batch admission, and a committed child's reopen on every SQL backend.
 //! Transient failures and lost replies must preserve the clean answer,
 //! transcript and input applications; sticky refusals and corruption must
-//! answer typed within a deadline. Only ticketed outcome rows may differ.
+//! answer typed within a deadline. Corruption met after a root's answer was
+//! published leaves that answer standing and is recorded as the session's
+//! typed fault (ADR 0109 §9). Only ticketed outcome rows may differ.
 //!
 //! A send to a session the engine cannot open is answered, never left
 //! waiting (FIG-4597).
@@ -574,7 +576,10 @@ mod sweep {
         inputs: Vec<String>,
         trace: Vec<Call>,
         paused: Vec<String>,
+        faults: Vec<lash_core::store::SessionFault>,
     }
+
+    const FAULTS: std::num::NonZeroUsize = std::num::NonZeroUsize::MIN.saturating_add(7);
 
     async fn run(storage: Storage, scenario: Scenario, cell: Option<Cell>) -> Run {
         let (double, _held, _seams) = double_over(storage).await;
@@ -738,6 +743,34 @@ mod sweep {
         if settled.is_err() {
             answer = Err("the drive did not settle".into());
         }
+        // Corruption met after the answer was published is recorded beside
+        // the drive: by the root's scope close, or by its next admission.
+        let mut faults = Vec::new();
+        if matches!(
+            (&answer, cell),
+            (
+                Ok(Answer::Success(_)),
+                Some(Cell {
+                    kind: Kind::Corrupt,
+                    ..
+                })
+            )
+        ) {
+            let recorded = tokio::time::timeout(WITHIN, async {
+                loop {
+                    let faults = inner
+                        .list_session_faults(None, FAULTS)
+                        .await
+                        .expect("session faults");
+                    if !faults.is_empty() {
+                        return faults;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await;
+            faults = recorded.unwrap_or_default();
+        }
         let trace = script.trace()[start..].to_vec();
         let paused = invocations(&double)
             .into_iter()
@@ -795,6 +828,7 @@ mod sweep {
             inputs,
             trace,
             paused,
+            faults,
         };
         drop(core);
         drop(script); // An unfired rule fails this cell even if its answer matched.
@@ -846,11 +880,24 @@ mod sweep {
                 };
                 let typed = matches!(answer, Answer::Refused { code, terminal: true, cause }
                     if code == expected_code && (matches!(scenario, Scenario::Child) || cause.as_ref() == Some(&expected_cause)));
-                let background = matches!(cell.kind, Kind::Permanent)
-                    && run.answer == clean.answer
+                let published = run.answer == clean.answer
                     && run.transcript == clean.transcript
                     && run.applications == clean.applications
                     && run.inputs == clean.inputs;
+                // The published answer stands, and the corruption is the
+                // session's one durable fault, typed as the sender of an
+                // unpublished answer would have read it.
+                let faulted = matches!(run.faults.as_slice(), [fault]
+                    if fault.session_id.as_str() == ID
+                        && fault.record.code.as_str() == expected_code
+                        && fault.record.cause.as_ref().map(|cause| {
+                            serde_json::to_value(cause).expect("typed cause")
+                        }) == Some(expected_cause.clone()));
+                let background = published
+                    && match cell.kind {
+                        Kind::Permanent => true,
+                        _ => faulted,
+                    };
                 if !typed && !background {
                     return Err(format!(
                         "expected terminal {} with its cause",
@@ -1357,6 +1404,179 @@ mod sweep {
         );
     }
 
+    /// Corrupt stored data met by a root's owed scope close, after its
+    /// answer was published (FIG-4777): the answer stands, the close's
+    /// obligation stalls refused instead of retrying, and the session
+    /// carries the typed fault, which refuses every later send until an
+    /// operator clears it. `cleared` takes the operator's verbs instead of
+    /// the refused send, whose input would hold the session's ingress claim.
+    async fn closure_corruption_faults_the_session(storage: Storage, cleared: bool) {
+        const SESSION: &str = "closure-corruption";
+        let (double, _held, _seams) = double_over(storage).await;
+        let script = Script::new();
+        let store = script.wrap("deployment", double.lash_backend().session_store_factory());
+        let backend =
+            DecoratedBackend::over(double.lash_backend()).session_store_factory(move |_| store);
+        let core = builder(backend.into())
+            .build(crate::testing::runtime_lease_owner())
+            .expect("fixture core");
+        crate::tests::create_catalog_session(&core, SESSION)
+            .await
+            .expect("create the session");
+        crate::tests::harness::serve_processes_on(&double, &core);
+        let durable = core
+            .session(SESSION)
+            .durable()
+            .await
+            .expect("durable handle");
+        durable
+            .pending_turn_inputs()
+            .await
+            .expect("resolve before arming");
+        // One corrupt read: what refuses the later send is the recorded
+        // fault, not the store.
+        script
+            .on(StoreOp::bound_turn_scopes)
+            .nth(script.calls(StoreOp::bound_turn_scopes) + 1)
+            .before()
+            .fail(|| Kind::Corrupt.error());
+        let id = SessionId::from(SESSION);
+        let first = tokio::time::timeout(
+            ANSWERS_WITHIN,
+            durable.send(TurnInput::text("first")).output(),
+        )
+        .await
+        .expect("the first send is answered")
+        .expect("the published answer stands");
+        assert_eq!(first.assistant_message(), Some("echo: first"));
+
+        let fault = tokio::time::timeout(ANSWERS_WITHIN, async {
+            loop {
+                let faults = core
+                    .session_faults(None, FAULTS)
+                    .await
+                    .expect("session faults");
+                if let [fault] = faults.as_slice() {
+                    return fault.clone();
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the close records the session's fault");
+        let cause = serde_json::json!({
+            "kind": "stored_data_corrupt", "record_kind": "store-fault-sweep",
+            "message": "injected unreadable record",
+        });
+        assert_eq!(fault.session_id, id);
+        assert_eq!(
+            fault.record.code,
+            lash_core::RuntimeErrorCode::RuntimeStoreCorrupt
+        );
+        assert_eq!(
+            serde_json::to_value(&fault.record.cause).expect("typed cause"),
+            cause
+        );
+        let lash_core::store::SessionFaultOrigin::ScopeClose { root } = &fault.record.origin else {
+            panic!("the scope close met the fault: {fault:?}");
+        };
+
+        // The close's obligation stalled on its first attempt, for an
+        // operator to re-arm: corrupt data is never retried.
+        let stalled = tokio::time::timeout(ANSWERS_WITHIN, async {
+            loop {
+                let stalled = core
+                    .stalled_obligations(lash_core::store::ObligationKind::ScopeClose, None, FAULTS)
+                    .await
+                    .expect("stalled scope closes");
+                if let [stalled] = stalled.as_slice() {
+                    return stalled.clone();
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the close's obligation stalls");
+        assert_eq!(
+            stalled.key,
+            Ok(lash_core::store::ObligationKey::ScopeClose {
+                session_id: id.clone(),
+                root: root.clone(),
+            })
+        );
+        assert_eq!(
+            (stalled.reason, stalled.attempts),
+            (lash_core::store::StallReason::Refused, 1)
+        );
+        assert_eq!(
+            stalled.last_error.as_ref().map(|error| error.code.clone()),
+            Some(lash_core::RuntimeErrorCode::RuntimeStoreCorrupt)
+        );
+        tokio::time::timeout(ANSWERS_WITHIN, double.settle_session_drive(&id))
+            .await
+            .expect("the drive ends");
+        assert_nothing_paused(&double);
+
+        if !cleared {
+            // Further work is refused with the fault's own code and cause.
+            let refused = tokio::time::timeout(
+                ANSWERS_WITHIN,
+                durable.send(TurnInput::text("second")).output(),
+            )
+            .await
+            .expect("the second send is answered")
+            .expect_err("a faulted session admits nothing");
+            let refused = drive_refusal(SESSION, refused);
+            assert_eq!(
+                refused.code,
+                lash_core::RuntimeErrorCode::RuntimeStoreCorrupt,
+                "{refused:?}"
+            );
+            assert_eq!(
+                serde_json::to_value(&refused.cause).expect("typed cause"),
+                cause
+            );
+            assert!(
+                refused.is_terminal() && !refused.is_retryable(),
+                "{refused:?}"
+            );
+            assert_eq!(
+                script.calls(StoreOp::bound_turn_scopes),
+                1,
+                "the corrupt read is not retried"
+            );
+            return;
+        }
+
+        // The operator's verbs: the fault clears once, the stalled close is
+        // due again, and the session admits.
+        assert!(
+            core.clear_session_fault(&id)
+                .await
+                .expect("clear the fault")
+        );
+        assert!(!core.clear_session_fault(&id).await.expect("clear again"));
+        assert!(
+            core.rearm_obligation(lash_core::store::ObligationKind::ScopeClose, &stalled.id)
+                .await
+                .expect("re-arm the close")
+        );
+        assert!(
+            core.session_faults(None, FAULTS)
+                .await
+                .expect("session faults")
+                .is_empty()
+        );
+        let second = tokio::time::timeout(
+            ANSWERS_WITHIN,
+            durable.send(TurnInput::text("second")).output(),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("the second send is answered: {:?}", invocations(&double)))
+        .expect("a cleared session admits");
+        assert_eq!(second.assistant_message(), Some("echo: second"));
+    }
+
     macro_rules! laws {
         ($module:ident, $storage:expr $(, $ignore:meta)?) => {
             mod $module {
@@ -1377,6 +1597,11 @@ mod sweep {
                 async fn an_undecodable_head_is_refused_corrupt_and_not_retried() { undecodable_head_is_refused_corrupt($storage).await; }
                 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] $(#[$ignore])?
                 async fn a_committed_child_outside_the_window_ends_its_process_typed() { committed_child_outside_the_window_ends_its_process($storage).await; }
+                #[tokio::test(flavor = "multi_thread", worker_threads = 4)] $(#[$ignore])?
+                async fn closure_corruption_faults_the_session_until_an_operator_clears_it() {
+                    closure_corruption_faults_the_session($storage, false).await;
+                    closure_corruption_faults_the_session($storage, true).await;
+                }
             }
         };
     }

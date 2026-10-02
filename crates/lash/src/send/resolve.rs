@@ -35,6 +35,10 @@ pub(super) enum Resolution {
     /// The input is open and its delivery to the engine stalled (ADR 0109
     /// §3): no drive will take it until its obligation is re-armed.
     Stalled(StalledDelivery),
+    /// The input is open and its session carries a fault (ADR 0109 §9): no
+    /// drive admits it until an operator clears the fault, whose typed
+    /// error is the answer.
+    Faulted(lash_core::RuntimeError),
 }
 
 fn store_error(error: lash_core::StoreError) -> crate::EmbedError {
@@ -72,6 +76,11 @@ pub(super) async fn resolve_input(
     }
     if !open {
         return Ok(Resolution::Withdrawn);
+    }
+    match parts.store.session_fault().await {
+        Ok(Some(fault)) => return Ok(Resolution::Faulted(fault.record.runtime_error())),
+        Ok(None) | Err(lash_core::StoreError::UnsupportedStoreOperation { .. }) => {}
+        Err(error) => return Err(store_error(error)),
     }
     Ok(match stalled_delivery(parts, &receipt.input_id).await? {
         Some(stalled) => Resolution::Stalled(stalled),

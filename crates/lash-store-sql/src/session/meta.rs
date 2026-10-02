@@ -73,8 +73,28 @@ crate::statements! {
         /// drives on.
         select_drive_epoch = "SELECT drive_epoch, drive_admission_id, drive_root_start, closing_intent,
             EXISTS (SELECT 1 FROM control_intents WHERE control_intents.session_id = session_meta.session_id
-                AND kind IN ('cancel', 'fork') AND engine_half_owed)
+                AND kind IN ('cancel', 'fork') AND engine_half_owed),
+            fault_json, fault_at_ms
             FROM session_meta WHERE session_id = ?1";
+
+        /// Record fault `?2` on session `?1` at `?3` (ADR 0109 §9). A session
+        /// already faulted keeps its first: zero rows.
+        record_fault = "UPDATE session_meta SET fault_json = ?2, fault_at_ms = ?3
+             WHERE session_id = ?1 AND fault_json IS NULL";
+
+        /// Session `?1`'s standing fault and when it was recorded.
+        select_fault = "SELECT fault_json, fault_at_ms FROM session_meta
+             WHERE session_id = ?1 AND fault_json IS NOT NULL";
+
+        /// The standing faults of sessions after `?1`, in session-id order,
+        /// at most `?2`.
+        list_faults = "SELECT session_id, fault_json, fault_at_ms FROM session_meta
+             WHERE fault_json IS NOT NULL AND session_id > ?1
+             ORDER BY session_id LIMIT ?2";
+
+        /// Clear session `?1`'s fault. Zero rows means it had none.
+        clear_fault = "UPDATE session_meta SET fault_json = NULL, fault_at_ms = NULL
+             WHERE session_id = ?1 AND fault_json IS NOT NULL";
 
         /// The seal's compare-and-set: raise session `?1`'s drive epoch from
         /// `?2` to `?3` under admission `?4`, sealed by the execution whose

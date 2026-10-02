@@ -127,6 +127,10 @@ macro_rules! runtime_store_operations {
             DriveEpochStore {
                 [session] fn seal_drive_epoch(&self, session_id: &SessionId, admission: &AdmissionId, observed_epoch: u64, root_start: &RootStartNonce, hold: Option<&RootHold>) -> Result<DriveEpochSeal, StoreError>;
                 [session] fn drive_epoch(&self, session_id: &SessionId) -> Result<StoredDriveEpoch, StoreError>;
+                [session] fn record_session_fault(&self, session_id: &SessionId, record: &SessionFaultRecord, at_ms: u64) -> Result<Option<SessionFault>, StoreError>;
+                [session] fn session_fault(&self, session_id: &SessionId) -> Result<Option<SessionFault>, StoreError>;
+                [catalog] fn list_session_faults(&self, after: Option<&SessionId>, limit: std::num::NonZeroUsize) -> Result<Vec<SessionFault>, StoreError>;
+                [session] fn clear_session_fault(&self, session_id: &SessionId) -> Result<bool, StoreError>;
             }
             RootStore {
                 [session] fn unfinished_root(&self, session_id: &SessionId) -> Result<Option<UnfinishedRoot>, StoreError>;

@@ -121,6 +121,7 @@ pub async fn a_control_raise_answers_no_seal_as_sealed(
             }),
             closing: Some(intent.id),
             control_pending: false,
+            fault: None,
         }
     );
 

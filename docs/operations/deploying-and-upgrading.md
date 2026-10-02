@@ -165,6 +165,13 @@ state while investigating either refusal.
    the owning host (re-arm it once its cause is fixed), and keep the ones no
    build can decode, with the listing, in the release record.
 
+   A `scope_close` obligation stalled as `refused` under
+   `runtime_store_corrupt` also left a fault on its session (ADR 0109 §9):
+   the session admits nothing until the owning host repairs the stored
+   data, clears the fault (`LashCore::clear_session_fault`) and re-arms the
+   close. `LashCore::session_faults` lists every faulted session, including
+   one whose drive admission met the corruption with no obligation to stall.
+
 4. Retire N's Restate deployment only after the drain and the host's pinned
    invocation check both pass: remove every deployment that serves N's
    generation lanes (`…_g$OLD_GENERATION`) from the Restate server. Then

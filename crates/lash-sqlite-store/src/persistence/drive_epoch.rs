@@ -9,8 +9,8 @@
 use super::*;
 use lash_core_execution::store::{
     AdmissionId, DriveEpochSeal, DriveEpochSealDecision, DriveEpochStore, DriveFence, RootHold,
-    RootStartNonce, StoredDriveEpoch, decide_drive_epoch_seal, decide_root_hold,
-    require_current_drive_fence,
+    RootStartNonce, SessionFault, SessionFaultRecord, StoredDriveEpoch, decide_drive_epoch_seal,
+    decide_root_hold, require_current_drive_fence,
 };
 use lash_core_execution::store_backend_support::sealed_drive_fence;
 
@@ -31,6 +31,8 @@ pub(crate) fn drive_epoch_conn(
                     row.get::<_, Option<String>>(2)?,
                     row.get::<_, Option<i64>>(3)?,
                     row.get::<_, bool>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<i64>>(6)?,
                 ))
             },
         )
@@ -53,7 +55,25 @@ pub(crate) fn drive_epoch_conn(
             .transpose()?
             .map(lash_core_execution::store::ControlIntentId::from_sequence),
         row.4,
+        SessionFault::from_stored_columns(session_id, row.5, row.6)?,
     )
+}
+
+/// The session's standing fault (ADR 0109 §9), read inside the caller's
+/// transaction.
+fn session_fault_conn(
+    conn: &Connection,
+    session_id: &SessionId,
+) -> Result<Option<SessionFault>, StoreError> {
+    conn.query_row(
+        session_sql().meta.select_fault.sql(),
+        params![session_id.as_str()],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+    )
+    .optional()
+    .map_err(sqlite_error)?
+    .map(|(json, at_ms)| SessionFault::from_stored(session_id.clone(), &json, at_ms))
+    .transpose()
 }
 
 /// Refuse `fence` unless it is the session's current drive fence, read in the
@@ -182,6 +202,84 @@ impl DriveEpochStore for SqliteStore {
         let session_id = session_id.clone();
         self.conn
             .call(move |conn| Ok(drive_epoch_conn(conn, &session_id)))
+            .await
+            .map_err(sqlite_error)?
+    }
+
+    async fn record_session_fault(
+        &self,
+        session_id: &SessionId,
+        record: &SessionFaultRecord,
+        at_ms: u64,
+    ) -> Result<Option<SessionFault>, StoreError> {
+        let session_id = session_id.clone();
+        let fault_json = record.to_stored()?;
+        let at_ms = sql_counter_value("fault_at_ms", at_ms)?;
+        self.conn
+            .write_flow(move |tx| {
+                commit((|| {
+                    tx.execute(
+                        session_sql().meta.record_fault.sql(),
+                        params![session_id.as_str(), fault_json, at_ms],
+                    )
+                    .map_err(sqlite_error)?;
+                    session_fault_conn(tx, &session_id)
+                })())
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
+    async fn session_fault(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<SessionFault>, StoreError> {
+        let session_id = session_id.clone();
+        self.conn
+            .call(move |conn| Ok(session_fault_conn(conn, &session_id)))
+            .await
+            .map_err(sqlite_error)?
+    }
+
+    async fn list_session_faults(
+        &self,
+        after: Option<&SessionId>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<SessionFault>, StoreError> {
+        let after = after.map_or_else(String::new, |id| id.as_str().to_owned());
+        let limit = i64::try_from(limit.get()).unwrap_or(i64::MAX);
+        let rows: Vec<(String, String, i64)> = self
+            .conn
+            .call(move |conn| {
+                let mut select = conn.prepare_cached(session_sql().meta.list_faults.sql())?;
+                select
+                    .query_map(params![after, limit], |row| {
+                        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                    })?
+                    .collect()
+            })
+            .await
+            .map_err(sqlite_error)?;
+        rows.into_iter()
+            .map(|(session_id, json, at_ms)| {
+                SessionFault::from_stored(SessionId::from(session_id), &json, at_ms)
+            })
+            .collect()
+    }
+
+    async fn clear_session_fault(&self, session_id: &SessionId) -> Result<bool, StoreError> {
+        let session_id = session_id.clone();
+        self.conn
+            .write_flow(move |tx| {
+                commit(
+                    tx.execute(
+                        session_sql().meta.clear_fault.sql(),
+                        params![session_id.as_str()],
+                    )
+                    .map(|changed| changed == 1)
+                    .map_err(sqlite_error),
+                )
+            })
             .await
             .map_err(sqlite_error)?
     }

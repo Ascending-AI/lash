@@ -633,6 +633,10 @@ pub(super) async fn follow(
                     drain(ctx, &mut adoption, &mut observation, tap).await;
                     return Err(EmbedError::Runtime(refusal));
                 }
+                Resolution::Faulted(fault) => {
+                    drain(ctx, &mut adoption, &mut observation, tap).await;
+                    return Err(EmbedError::Runtime(fault));
+                }
                 Resolution::Stalled(stalled) => {
                     drain(ctx, &mut adoption, &mut observation, tap).await;
                     return Ok(Followed::Answered(Box::new(SendOutcome::Stalled {

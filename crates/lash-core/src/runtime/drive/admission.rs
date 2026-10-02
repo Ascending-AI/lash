@@ -17,7 +17,7 @@ use crate::engine::{
     SealRefusal, SealVerdict,
 };
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
-use crate::store::DriveEpochSeal;
+use crate::store::{DriveEpochSeal, StoredDriveEpoch};
 use crate::{
     RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectOutcome, RuntimeErrorCode, StoreError, TurnId,
@@ -39,6 +39,34 @@ pub(super) fn store_fault(context: &str, error: StoreError) -> RuntimeEffectCont
     fault.retryable_uncommitted_derivation()
 }
 
+/// Record corrupt stored data an admission met as the session's fault
+/// (ADR 0109 §9), then answer `error`: the admission may follow a root whose
+/// answer is already published, so no sender is left to hear the refusal. A
+/// session already faulted keeps its first fault, so the refusal a standing
+/// fault makes records nothing new. A fault that could not be recorded is the
+/// attempt's, so the engine runs the step again.
+async fn record_fault(
+    stores: Arc<dyn crate::DeploymentStore>,
+    clock: Arc<dyn crate::Clock>,
+    session: &crate::SessionId,
+    error: RuntimeEffectControllerError,
+) -> RuntimeEffectControllerError {
+    if error.code != RuntimeErrorCode::RuntimeStoreCorrupt {
+        return error;
+    }
+    let record = crate::store::SessionFaultRecord::new(
+        crate::store::SessionFaultOrigin::DriveAdmission,
+        &error.clone().into_runtime_error(),
+    );
+    match stores
+        .record_session_fault(session, &record, clock.timestamp_ms())
+        .await
+    {
+        Ok(_) | Err(StoreError::UnsupportedStoreOperation { .. }) => error,
+        Err(unrecorded) => store_fault("session fault record", unrecorded),
+    }
+}
+
 fn executor_mismatch(
     expected: &str,
     envelope: &RuntimeEffectEnvelope,
@@ -57,10 +85,11 @@ fn executor_mismatch(
 /// Everything it reads is live store state, which is why it runs only inside
 /// the recorded step: the verdict it returns is what every replay decodes.
 pub(in crate::runtime) struct AdmitDriveRunner {
-    /// The session's history store, or `None` when the engine could not open
-    /// it at all — the session's tombstone already committed — in which case
-    /// the step's recorded body is the retirement itself.
-    pub(in crate::runtime) store: Option<crate::store::SessionStore>,
+    /// The session's history store and the host clock a fault it records is
+    /// stamped with, or `None` when the engine could not open the store at
+    /// all — the session's tombstone already committed — in which case the
+    /// step's recorded body is the retirement itself.
+    pub(in crate::runtime) store: Option<(crate::store::SessionStore, Arc<dyn crate::Clock>)>,
     /// The deployment's control-intent ledger: a park names its redrive by
     /// intent id, and whether that redrive is settled lives here (D15).
     pub(in crate::runtime) stores: Arc<dyn crate::DeploymentStore>,
@@ -113,7 +142,16 @@ impl RuntimeEffectLocalRunner for AdmitDriveRunner {
                 "drive admission executor was bound to another drive request",
             ));
         }
-        let verdict = self.admit().await?;
+        let session = self.request.session.clone();
+        let stores = Arc::clone(&self.stores);
+        let clock = self.store.as_ref().map(|(_, clock)| Arc::clone(clock));
+        let verdict = match (self.admit().await, clock) {
+            (Ok(verdict), _) => verdict,
+            (Err(error), Some(clock)) => {
+                return Err(record_fault(stores, clock, &session, error).await);
+            }
+            (Err(error), None) => return Err(error),
+        };
         Ok(RuntimeEffectOutcome::AdmitDrive {
             verdict: Box::new(verdict),
         })
@@ -127,7 +165,7 @@ impl AdmitDriveRunner {
         // between an earlier attempt's journaled step and this redrive —
         // still emits this step, and its recorded body is the retirement
         // itself: a settled fact, not a fault a rerun could answer.
-        let Some(store) = self.store.clone() else {
+        let Some((store, _)) = self.store.clone() else {
             return Err(store_fault(
                 "session store open",
                 StoreError::SessionDeleted {
@@ -151,6 +189,16 @@ impl AdmitDriveRunner {
         let stored_epoch = match store.drive_epoch().await {
             Ok(epoch) if epoch.closing.is_some() || epoch.control_pending => {
                 return Ok(AdmitVerdict::Idle);
+            }
+            // A faulted session admits nothing (ADR 0109 §9): the drive is
+            // refused with the fault's own code and cause until an operator
+            // clears it.
+            Ok(StoredDriveEpoch {
+                fault: Some(fault), ..
+            }) => {
+                return Err(RuntimeEffectControllerError::from(
+                    fault.record.runtime_error(),
+                ));
             }
             Ok(epoch) => Ok(epoch),
             Err(

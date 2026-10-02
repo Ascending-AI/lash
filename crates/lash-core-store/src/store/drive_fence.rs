@@ -255,6 +255,10 @@ pub struct StoredDriveEpoch {
     /// its store half already ended the root and raised the epoch past the
     /// old execution's fence, so that execution can neither commit nor park.
     pub control_pending: bool,
+    /// The session's standing fault (ADR 0109 §9): corrupt stored data met
+    /// after a root's answer was published. Every drive is refused with it
+    /// until an operator clears it.
+    pub fault: Option<super::SessionFault>,
 }
 
 impl StoredDriveEpoch {
@@ -266,6 +270,7 @@ impl StoredDriveEpoch {
             last_raise: None,
             closing: None,
             control_pending: false,
+            fault: None,
         }
     }
 
@@ -287,6 +292,7 @@ impl StoredDriveEpoch {
         root_start: Option<String>,
         closing: Option<super::ControlIntentId>,
         control_pending: bool,
+        fault: Option<super::SessionFault>,
     ) -> Result<Self, StoreError> {
         let corrupt = |message: &str| StoreError::StoredDataCorrupt {
             record_kind: "SessionMeta",
@@ -318,6 +324,7 @@ impl StoredDriveEpoch {
             last_raise,
             closing,
             control_pending,
+            fault,
         })
     }
 }
@@ -434,6 +441,34 @@ pub trait DriveEpochStore: Send + Sync {
 
     /// The session's stored drive epoch.
     async fn drive_epoch(&self, session_id: &SessionId) -> Result<StoredDriveEpoch, StoreError>;
+
+    /// Record `record` as `session_id`'s fault at `at_ms` (ADR 0109 §9) and
+    /// answer the fault that now stands: a session already faulted keeps its
+    /// first. `None` when the session has no `session_meta` row.
+    async fn record_session_fault(
+        &self,
+        session_id: &SessionId,
+        record: &super::SessionFaultRecord,
+        at_ms: u64,
+    ) -> Result<Option<super::SessionFault>, StoreError>;
+
+    /// `session_id`'s standing fault, read by itself.
+    async fn session_fault(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<super::SessionFault>, StoreError>;
+
+    /// The standing session faults after session `after`, in session-id
+    /// order, at most `limit`.
+    async fn list_session_faults(
+        &self,
+        after: Option<&SessionId>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<super::SessionFault>, StoreError>;
+
+    /// Clear `session_id`'s fault, an operator's verb: the session admits
+    /// again. `false` when it had none.
+    async fn clear_session_fault(&self, session_id: &SessionId) -> Result<bool, StoreError>;
 }
 
 /// The fence of the admission that last raised `session_id`'s epoch in
@@ -490,6 +525,7 @@ impl InMemoryDriveEpochs {
                     }),
                     closing: None,
                     control_pending: false,
+                    fault: None,
                 };
                 DriveEpochSeal::Sealed(DriveFence::sealed_by_store(
                     session_id.clone(),
@@ -529,6 +565,7 @@ impl InMemoryDriveEpochs {
                 }),
                 closing: Some(intent),
                 control_pending: false,
+                fault: None,
             };
         }
     }
@@ -554,6 +591,7 @@ mod tests {
             }),
             closing: None,
             control_pending: false,
+            fault: None,
         }
     }
 
@@ -640,6 +678,7 @@ mod tests {
             }),
             closing: Some(super::super::ControlIntentId::from_sequence(1)),
             control_pending: false,
+            fault: None,
         };
         assert_eq!(
             decide_drive_epoch_seal(&session, &closing, &AdmissionId::new("a"), 5, &nonce()),
@@ -697,8 +736,9 @@ mod tests {
     fn a_raise_without_a_start_marker_answers_no_seal_as_sealed() {
         let session = SessionId::from("s");
         let admission = AdmissionId::new("a");
-        let control = StoredDriveEpoch::from_stored(4, Some("a".to_string()), None, None, false)
-            .expect("a control raise");
+        let control =
+            StoredDriveEpoch::from_stored(4, Some("a".to_string()), None, None, false, None)
+                .expect("a control raise");
         assert_eq!(
             control.last_raise,
             Some(DriveRaise::Control {
@@ -720,11 +760,11 @@ mod tests {
         let admission = || Some("a".to_string());
         let marker = || Some("n".to_string());
         assert_eq!(
-            StoredDriveEpoch::from_stored(0, None, None, None, false).expect("unraised"),
+            StoredDriveEpoch::from_stored(0, None, None, None, false, None).expect("unraised"),
             StoredDriveEpoch::unraised()
         );
         assert_eq!(
-            StoredDriveEpoch::from_stored(2, admission(), marker(), None, true)
+            StoredDriveEpoch::from_stored(2, admission(), marker(), None, true, None)
                 .expect("sealed")
                 .last_raise,
             Some(DriveRaise::Sealed {
@@ -732,36 +772,36 @@ mod tests {
                 root_start: RootStartNonce::new("n"),
             })
         );
-        StoredDriveEpoch::from_stored(2, admission(), None, Some(intent), false)
+        StoredDriveEpoch::from_stored(2, admission(), None, Some(intent), false, None)
             .expect("closing under its close's raise");
         for (case, decoded) in [
             (
                 "an unraised epoch naming an admission",
-                StoredDriveEpoch::from_stored(0, admission(), None, None, false),
+                StoredDriveEpoch::from_stored(0, admission(), None, None, false, None),
             ),
             (
                 "an unraised epoch naming a start marker",
-                StoredDriveEpoch::from_stored(0, None, marker(), None, false),
+                StoredDriveEpoch::from_stored(0, None, marker(), None, false, None),
             ),
             (
                 "an unraised epoch naming a seal",
-                StoredDriveEpoch::from_stored(0, admission(), marker(), None, false),
+                StoredDriveEpoch::from_stored(0, admission(), marker(), None, false, None),
             ),
             (
                 "a raised epoch naming no admission",
-                StoredDriveEpoch::from_stored(1, None, None, None, false),
+                StoredDriveEpoch::from_stored(1, None, None, None, false, None),
             ),
             (
                 "a start marker without its admission",
-                StoredDriveEpoch::from_stored(1, None, marker(), None, false),
+                StoredDriveEpoch::from_stored(1, None, marker(), None, false, None),
             ),
             (
                 "a closing session no close raised",
-                StoredDriveEpoch::from_stored(0, None, None, Some(intent), false),
+                StoredDriveEpoch::from_stored(0, None, None, Some(intent), false, None),
             ),
             (
                 "a closing session an execution sealed",
-                StoredDriveEpoch::from_stored(1, admission(), marker(), Some(intent), false),
+                StoredDriveEpoch::from_stored(1, admission(), marker(), Some(intent), false, None),
             ),
         ] {
             assert!(

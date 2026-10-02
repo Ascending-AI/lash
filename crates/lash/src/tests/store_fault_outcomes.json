@@ -15,13 +15,6 @@
   },
   {
     "backend": "Memory",
-    "scenario": "Open",
-    "cell": "bound_turn_scopes#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = bound_turn_scopes#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "Memory",
     "scenario": "Assembly",
     "cell": "admit_at_checkpoint#1/Permanent",
     "ticket": "FIG-4649",
@@ -33,13 +26,6 @@
     "cell": "admit_at_checkpoint#1/Corrupt",
     "ticket": "FIG-4649",
     "reason_contains": "cell = admit_at_checkpoint#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Stopped { codes: [\"lash:runtime_store_corrupt\", \"lash:assistant_output_recovered_from_state\"] })"
-  },
-  {
-    "backend": "Memory",
-    "scenario": "Assembly",
-    "cell": "bound_turn_scopes#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = bound_turn_scopes#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
   },
   {
     "backend": "Memory",
@@ -56,13 +42,6 @@
     "reason_contains": "cell = admit_at_checkpoint#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Stopped { codes: [\"lash:runtime_store_corrupt\", \"lash:assistant_output_recovered_from_state\"] })"
   },
   {
-    "backend": "Memory",
-    "scenario": "Admission",
-    "cell": "bound_turn_scopes#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = bound_turn_scopes#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\", \"echo: second\", \"echo: third\"]))"
-  },
-  {
     "backend": "File",
     "scenario": "Open",
     "cell": "admit_at_checkpoint#1/Permanent",
@@ -75,13 +54,6 @@
     "cell": "admit_at_checkpoint#1/Corrupt",
     "ticket": "FIG-4649",
     "reason_contains": "cell = admit_at_checkpoint#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Stopped { codes: [\"lash:runtime_store_corrupt\", \"lash:assistant_output_recovered_from_state\"] })"
-  },
-  {
-    "backend": "File",
-    "scenario": "Open",
-    "cell": "bound_turn_scopes#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = bound_turn_scopes#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
   },
   {
     "backend": "File",
@@ -99,13 +71,6 @@
   },
   {
     "backend": "File",
-    "scenario": "Assembly",
-    "cell": "bound_turn_scopes#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = bound_turn_scopes#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "File",
     "scenario": "Admission",
     "cell": "admit_at_checkpoint#1/Permanent",
     "ticket": "FIG-4649",
@@ -117,13 +82,6 @@
     "cell": "admit_at_checkpoint#1/Corrupt",
     "ticket": "FIG-4649",
     "reason_contains": "cell = admit_at_checkpoint#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Stopped { codes: [\"lash:runtime_store_corrupt\", \"lash:assistant_output_recovered_from_state\"] })"
-  },
-  {
-    "backend": "File",
-    "scenario": "Admission",
-    "cell": "bound_turn_scopes#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = bound_turn_scopes#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\", \"echo: second\", \"echo: third\"]))"
   },
   {
     "backend": "Postgres",
@@ -141,13 +99,6 @@
   },
   {
     "backend": "Postgres",
-    "scenario": "Open",
-    "cell": "bound_turn_scopes#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = bound_turn_scopes#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "Postgres",
     "scenario": "Assembly",
     "cell": "admit_at_checkpoint#1/Permanent",
     "ticket": "FIG-4649",
@@ -162,13 +113,6 @@
   },
   {
     "backend": "Postgres",
-    "scenario": "Assembly",
-    "cell": "bound_turn_scopes#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = bound_turn_scopes#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "Postgres",
     "scenario": "Admission",
     "cell": "admit_at_checkpoint#1/Permanent",
     "ticket": "FIG-4649",
@@ -180,13 +124,6 @@
     "cell": "admit_at_checkpoint#1/Corrupt",
     "ticket": "FIG-4649",
     "reason_contains": "cell = admit_at_checkpoint#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Stopped { codes: [\"lash:runtime_store_corrupt\", \"lash:assistant_output_recovered_from_state\"] })"
-  },
-  {
-    "backend": "Postgres",
-    "scenario": "Admission",
-    "cell": "bound_turn_scopes#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = bound_turn_scopes#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\", \"echo: second\", \"echo: third\"]))"
   },
   {
     "backend": "Memory",
@@ -201,13 +138,6 @@
     "cell": "admit_at_checkpoint#1/Corrupt",
     "ticket": "FIG-4649",
     "reason_contains": "cell = admit_at_checkpoint#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Refused { code: \"process_session_turn_runtime_error\", cause: None, terminal: true })"
-  },
-  {
-    "backend": "Memory",
-    "scenario": "Child",
-    "cell": "bound_turn_scopes#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = bound_turn_scopes#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
   },
   {
     "backend": "Memory",
@@ -240,13 +170,6 @@
   {
     "backend": "File",
     "scenario": "Child",
-    "cell": "bound_turn_scopes#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = bound_turn_scopes#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "File",
-    "scenario": "Child",
     "cell": "enqueue_pending_turn_inputs#1/Transient",
     "ticket": "FIG-4649",
     "reason_contains": "cell = enqueue_pending_turn_inputs#1/Transient: no answer within 10s\nanswer = Err(\"no answer within 10s\")"
@@ -275,13 +198,6 @@
   {
     "backend": "Postgres",
     "scenario": "Child",
-    "cell": "bound_turn_scopes#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = bound_turn_scopes#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "Postgres",
-    "scenario": "Child",
     "cell": "enqueue_pending_turn_inputs#1/Transient",
     "ticket": "FIG-4649",
     "reason_contains": "cell = enqueue_pending_turn_inputs#1/Transient: no answer within 10s\nanswer = Err(\"no answer within 10s\")"
@@ -292,320 +208,5 @@
     "cell": "enqueue_pending_turn_inputs#1/LostReply",
     "ticket": "FIG-4649",
     "reason_contains": "cell = enqueue_pending_turn_inputs#1/LostReply: no answer within 10s\nanswer = Err(\"no answer within 10s\")"
-  },
-  {
-    "backend": "Memory",
-    "scenario": "Assembly",
-    "cell": "drive_epoch#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = drive_epoch#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "Memory",
-    "scenario": "Assembly",
-    "cell": "list_pending_turn_inputs#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = list_pending_turn_inputs#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "Memory",
-    "scenario": "Assembly",
-    "cell": "list_queued_work#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = list_queued_work#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "Memory",
-    "scenario": "Assembly",
-    "cell": "load_session_head_meta#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = load_session_head_meta#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "Memory",
-    "scenario": "Assembly",
-    "cell": "pending_session_work_ordering#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = pending_session_work_ordering#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "Memory",
-    "scenario": "Assembly",
-    "cell": "read_session_state_version#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = read_session_state_version#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "Memory",
-    "scenario": "Assembly",
-    "cell": "unfinished_root#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = unfinished_root#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "File",
-    "scenario": "Assembly",
-    "cell": "drive_epoch#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = drive_epoch#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "File",
-    "scenario": "Assembly",
-    "cell": "list_pending_turn_inputs#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = list_pending_turn_inputs#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "File",
-    "scenario": "Assembly",
-    "cell": "list_queued_work#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = list_queued_work#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "File",
-    "scenario": "Assembly",
-    "cell": "load_session_head_meta#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = load_session_head_meta#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "File",
-    "scenario": "Assembly",
-    "cell": "pending_session_work_ordering#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = pending_session_work_ordering#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "File",
-    "scenario": "Assembly",
-    "cell": "read_session_state_version#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = read_session_state_version#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "File",
-    "scenario": "Assembly",
-    "cell": "unfinished_root#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = unfinished_root#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "Postgres",
-    "scenario": "Assembly",
-    "cell": "drive_epoch#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = drive_epoch#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "Postgres",
-    "scenario": "Assembly",
-    "cell": "list_pending_turn_inputs#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = list_pending_turn_inputs#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "Postgres",
-    "scenario": "Assembly",
-    "cell": "list_queued_work#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = list_queued_work#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "Postgres",
-    "scenario": "Assembly",
-    "cell": "load_session_head_meta#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = load_session_head_meta#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "Postgres",
-    "scenario": "Assembly",
-    "cell": "pending_session_work_ordering#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = pending_session_work_ordering#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "Postgres",
-    "scenario": "Assembly",
-    "cell": "read_session_state_version#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = read_session_state_version#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "Postgres",
-    "scenario": "Assembly",
-    "cell": "unfinished_root#1/Corrupt",
-    "ticket": "FIG-4777",
-    "reason_contains": "cell = unfinished_root#1/Corrupt: expected terminal runtime_store_corrupt with its cause\nanswer = Ok(Success([\"echo: first\"]))"
-  },
-  {
-    "backend": "Memory",
-    "scenario": "Open",
-    "cell": "admit_at_checkpoint#1/Transient",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/Transient: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Stopped { codes: [\"lash:runtime_store\", \"lash:assistant_output_recovered_from_state\"] })"
-  },
-  {
-    "backend": "Memory",
-    "scenario": "Open",
-    "cell": "admit_at_checkpoint#1/LostReply",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/LostReply: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Stopped { codes: [\"lash:runtime_store\", \"lash:assistant_output_recovered_from_state\"] })"
-  },
-  {
-    "backend": "Memory",
-    "scenario": "Assembly",
-    "cell": "admit_at_checkpoint#1/Transient",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/Transient: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Stopped { codes: [\"lash:runtime_store\", \"lash:assistant_output_recovered_from_state\"] })"
-  },
-  {
-    "backend": "Memory",
-    "scenario": "Assembly",
-    "cell": "admit_at_checkpoint#1/LostReply",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/LostReply: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Stopped { codes: [\"lash:runtime_store\", \"lash:assistant_output_recovered_from_state\"] })"
-  },
-  {
-    "backend": "Memory",
-    "scenario": "Admission",
-    "cell": "admit_at_checkpoint#1/Transient",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/Transient: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Stopped { codes: [\"lash:runtime_store\", \"lash:assistant_output_recovered_from_state\"] })"
-  },
-  {
-    "backend": "Memory",
-    "scenario": "Admission",
-    "cell": "admit_at_checkpoint#1/LostReply",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/LostReply: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Stopped { codes: [\"lash:runtime_store\", \"lash:assistant_output_recovered_from_state\"] })"
-  },
-  {
-    "backend": "File",
-    "scenario": "Open",
-    "cell": "admit_at_checkpoint#1/Transient",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/Transient: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Stopped { codes: [\"lash:runtime_store\", \"lash:assistant_output_recovered_from_state\"] })"
-  },
-  {
-    "backend": "File",
-    "scenario": "Open",
-    "cell": "admit_at_checkpoint#1/LostReply",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/LostReply: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Stopped { codes: [\"lash:runtime_store\", \"lash:assistant_output_recovered_from_state\"] })"
-  },
-  {
-    "backend": "File",
-    "scenario": "Assembly",
-    "cell": "admit_at_checkpoint#1/Transient",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/Transient: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Stopped { codes: [\"lash:runtime_store\", \"lash:assistant_output_recovered_from_state\"] })"
-  },
-  {
-    "backend": "File",
-    "scenario": "Assembly",
-    "cell": "admit_at_checkpoint#1/LostReply",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/LostReply: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Stopped { codes: [\"lash:runtime_store\", \"lash:assistant_output_recovered_from_state\"] })"
-  },
-  {
-    "backend": "File",
-    "scenario": "Admission",
-    "cell": "admit_at_checkpoint#1/Transient",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/Transient: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Stopped { codes: [\"lash:runtime_store\", \"lash:assistant_output_recovered_from_state\"] })"
-  },
-  {
-    "backend": "File",
-    "scenario": "Admission",
-    "cell": "admit_at_checkpoint#1/LostReply",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/LostReply: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Stopped { codes: [\"lash:runtime_store\", \"lash:assistant_output_recovered_from_state\"] })"
-  },
-  {
-    "backend": "Postgres",
-    "scenario": "Open",
-    "cell": "admit_at_checkpoint#1/Transient",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/Transient: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Stopped { codes: [\"lash:runtime_store\", \"lash:assistant_output_recovered_from_state\"] })"
-  },
-  {
-    "backend": "Postgres",
-    "scenario": "Open",
-    "cell": "admit_at_checkpoint#1/LostReply",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/LostReply: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Stopped { codes: [\"lash:runtime_store\", \"lash:assistant_output_recovered_from_state\"] })"
-  },
-  {
-    "backend": "Postgres",
-    "scenario": "Assembly",
-    "cell": "admit_at_checkpoint#1/Transient",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/Transient: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Stopped { codes: [\"lash:runtime_store\", \"lash:assistant_output_recovered_from_state\"] })"
-  },
-  {
-    "backend": "Postgres",
-    "scenario": "Assembly",
-    "cell": "admit_at_checkpoint#1/LostReply",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/LostReply: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Stopped { codes: [\"lash:runtime_store\", \"lash:assistant_output_recovered_from_state\"] })"
-  },
-  {
-    "backend": "Postgres",
-    "scenario": "Admission",
-    "cell": "admit_at_checkpoint#1/Transient",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/Transient: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Stopped { codes: [\"lash:runtime_store\", \"lash:assistant_output_recovered_from_state\"] })"
-  },
-  {
-    "backend": "Postgres",
-    "scenario": "Admission",
-    "cell": "admit_at_checkpoint#1/LostReply",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/LostReply: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Stopped { codes: [\"lash:runtime_store\", \"lash:assistant_output_recovered_from_state\"] })"
-  },
-  {
-    "backend": "Memory",
-    "scenario": "Child",
-    "cell": "admit_at_checkpoint#1/Transient",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/Transient: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Refused { code: \"process_session_turn_runtime_error\", cause: None, terminal: true })"
-  },
-  {
-    "backend": "Memory",
-    "scenario": "Child",
-    "cell": "admit_at_checkpoint#1/LostReply",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/LostReply: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Refused { code: \"process_session_turn_runtime_error\", cause: None, terminal: true })"
-  },
-  {
-    "backend": "File",
-    "scenario": "Child",
-    "cell": "admit_at_checkpoint#1/Transient",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/Transient: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Refused { code: \"process_session_turn_runtime_error\", cause: None, terminal: true })"
-  },
-  {
-    "backend": "File",
-    "scenario": "Child",
-    "cell": "admit_at_checkpoint#1/LostReply",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/LostReply: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Refused { code: \"process_session_turn_runtime_error\", cause: None, terminal: true })"
-  },
-  {
-    "backend": "Postgres",
-    "scenario": "Child",
-    "cell": "admit_at_checkpoint#1/Transient",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/Transient: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Refused { code: \"process_session_turn_runtime_error\", cause: None, terminal: true })"
-  },
-  {
-    "backend": "Postgres",
-    "scenario": "Child",
-    "cell": "admit_at_checkpoint#1/LostReply",
-    "ticket": "FIG-4651",
-    "reason_contains": "cell = admit_at_checkpoint#1/LostReply: recovery changed the answer, transcript, or admitted-once evidence\nanswer = Ok(Refused { code: \"process_session_turn_runtime_error\", cause: None, terminal: true })"
   }
 ]

@@ -219,6 +219,8 @@ pub struct ObligationDelivery<'a> {
     pub token: &'a ClaimToken,
     /// Which claim of the obligation this is, counting from 1.
     pub attempt: u32,
+    /// Host-clock epoch milliseconds at which this attempt started.
+    pub started_ms: u64,
 }
 
 /// How one claimed obligation settled.
@@ -367,6 +369,7 @@ async fn attempt(
                     key,
                     token: &claimed.token,
                     attempt: claimed.attempts,
+                    started_ms,
                 }),
             )
             .await
@@ -419,6 +422,7 @@ async fn attempt(
                 key,
                 token: &claimed.token,
                 attempt: claimed.attempts,
+                started_ms,
             })
             .await;
     }
