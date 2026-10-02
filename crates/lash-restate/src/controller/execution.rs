@@ -41,6 +41,17 @@ pub(crate) enum RestateEffectExecution {
         invocation: RuntimeEffectInvocation,
         key: AwaitEventKey,
     },
+    ArmToolCompletion {
+        invocation: RuntimeEffectInvocation,
+        key: AwaitEventKey,
+        timeout_ms: Option<u64>,
+    },
+    AwaitToolCompletions {
+        invocation: RuntimeEffectInvocation,
+        waits: Vec<lash_core::ToolCompletionWait>,
+        dispatch: Option<lash_core::ToolDispatchCursor>,
+        transferable: bool,
+    },
     PeekAwaitEvent {
         invocation: RuntimeEffectInvocation,
         key: AwaitEventKey,
@@ -58,6 +69,8 @@ impl RestateEffectExecution {
             | Self::DurableProcessCommand { invocation, .. }
             | Self::Timer { invocation, .. }
             | Self::AwaitEvent { invocation, .. }
+            | Self::ArmToolCompletion { invocation, .. }
+            | Self::AwaitToolCompletions { invocation, .. }
             | Self::PeekAwaitEvent { invocation, .. } => invocation,
             Self::DirectLocal { envelope } | Self::JournaledRun { envelope, .. } => {
                 &envelope.invocation
@@ -132,7 +145,7 @@ pub(crate) fn restate_effect_execution(
         },
         // Deliberately not `JournaledRun`, and unreachable on the group path.
         // A tool invocation is ADR 0099 §2's handler-level driver: retry,
-        // completion-key derivation and the deferred await are coordination,
+        // completion-key derivation and resolver arming are coordination,
         // and §2 forbids coordination inside a recorded body ("A recorded body
         // must not emit commands into an ordinal-addressed journal"). The
         // `EffectGroupDispatch::child` handler resolves the `ToolChildDriver`
@@ -155,6 +168,27 @@ pub(crate) fn restate_effect_execution(
         RuntimeEffectCommand::AwaitEvent { key } => {
             refuse_unhonored_group_membership(group.as_deref(), "restate await event")?;
             RestateEffectExecution::AwaitEvent { invocation, key }
+        }
+        RuntimeEffectCommand::ArmToolCompletion { key, timeout_ms } => {
+            refuse_unhonored_group_membership(group.as_deref(), "restate tool completion arm")?;
+            RestateEffectExecution::ArmToolCompletion {
+                invocation,
+                key,
+                timeout_ms,
+            }
+        }
+        RuntimeEffectCommand::AwaitToolCompletions {
+            waits,
+            dispatch,
+            transferable,
+        } => {
+            refuse_unhonored_group_membership(group.as_deref(), "restate tool completion wait")?;
+            RestateEffectExecution::AwaitToolCompletions {
+                invocation,
+                waits,
+                dispatch,
+                transferable,
+            }
         }
         RuntimeEffectCommand::PeekAwaitEvent { key } => {
             refuse_unhonored_group_membership(group.as_deref(), "restate peek await event")?;

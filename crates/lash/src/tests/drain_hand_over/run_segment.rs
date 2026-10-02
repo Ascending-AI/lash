@@ -106,6 +106,385 @@ struct CountedLookup {
     executed: Arc<AtomicUsize>,
 }
 
+struct DeferredLookup {
+    executed: Arc<AtomicUsize>,
+    key: Arc<std::sync::Mutex<Option<lash_core::AwaitEventKey>>>,
+    dispatched: Arc<tokio::sync::Notify>,
+    deadline: Option<std::time::Duration>,
+}
+
+fn deferred_definition() -> lash_core::ToolDefinition {
+    test_tool_definition_with_tool_binding(lash_core::ToolDefinition::raw("tool:app_lookup", "app_lookup", "Look up app state.", serde_json::json!({"type":"object","properties":{"slot":{"type":"integer"}},"additionalProperties":false}), serde_json::json!({"type":"object"})).expect("tool schemas"), "app_lookup")
+}
+
+#[async_trait]
+impl ToolProvider for DeferredLookup {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![deferred_definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "app_lookup").then(|| Arc::new(deferred_definition().contract()))
+    }
+
+    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id == deferred_definition().id()
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.executed.fetch_add(1, Ordering::SeqCst);
+        if let Some(slot) = call.args.get("slot").and_then(serde_json::Value::as_u64)
+            && slot != 1
+        {
+            return lash_core::ToolOutcome::ok(serde_json::json!({"slot":slot})).into();
+        }
+        *self.key.lock_recover() = Some(call.context.completion_key().expect("a durable key"));
+        self.dispatched.notify_one();
+        let mut pending = lash_core::PendingCompletion::new();
+        if let Some(deadline) = self.deadline {
+            pending = pending.with_deadline(deadline);
+        }
+        lash_core::ToolOutcome::pending(pending).into()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_deferred_tools_run_hands_over_before_its_external_result() -> Result<()> {
+    deferred_round_law(DeferredCase::Resolve).await
+}
+
+#[derive(Clone, Copy, Debug)]
+enum DeferredCase {
+    Resolve,
+    Mixed,
+    Deadline,
+    Cancel,
+    DispatchBefore,
+    DispatchAfter,
+    TransferBefore,
+    TransferAfter,
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_mixed_deferred_round_folds_results_in_source_order() -> Result<()> {
+    deferred_round_law(DeferredCase::Mixed).await
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_deferred_deadline_keeps_its_absolute_time_after_handover() -> Result<()> {
+    deferred_round_law(DeferredCase::Deadline).await
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cancellation_reaches_a_deferred_round_after_handover() -> Result<()> {
+    deferred_round_law(DeferredCase::Cancel).await
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn deferred_dispatch_and_ownership_transfer_recover_on_both_sides() -> Result<()> {
+    for case in [
+        DeferredCase::DispatchBefore,
+        DeferredCase::DispatchAfter,
+        DeferredCase::TransferBefore,
+        DeferredCase::TransferAfter,
+    ] {
+        deferred_round_law(case).await?;
+    }
+    Ok(())
+}
+
+async fn deferred_round_law(case: DeferredCase) -> Result<()> {
+    let World { engine, _keep, .. } = double_world(Storage::SqliteMemory).await;
+    let model = Arc::new(RunModel {
+        tool_rounds: 1,
+        held: &[],
+        requests: std::sync::Mutex::default(),
+        reached: tokio::sync::Notify::new(),
+        release: tokio::sync::Notify::new(),
+    });
+    let provider = if matches!(case, DeferredCase::Mixed) {
+        let model = Arc::clone(&model);
+        crate::testing::TestProvider::builder()
+            .kind("run-segment")
+            .complete(move |request| {
+                let model = Arc::clone(&model);
+                async move {
+                    let call = {
+                        let mut requests = model.requests.lock_recover();
+                        requests.push(request.clone());
+                        requests.len()
+                    };
+                    if call == 1 {
+                        return Ok(LlmResponse {
+                            parts: (0..3)
+                                .map(|slot| LlmOutputPart::ToolCall {
+                                    call_id: format!("lookup-{slot}"),
+                                    tool_name: "app_lookup".to_owned(),
+                                    input_json: serde_json::json!({"slot":slot}).to_string(),
+                                    replay: None,
+                                })
+                                .collect(),
+                            ..Default::default()
+                        });
+                    }
+                    Ok(text_response(&format!(
+                        "answered after {} tool result(s)",
+                        tool_results(&request)
+                    )))
+                }
+            })
+            .build()
+            .into_handle()
+    } else {
+        run_provider(&model)
+    };
+    let Engine::Double(double) = &engine else {
+        unreachable!("the law uses the double")
+    };
+    let crashes = lash_restate_test::CrashCount::new();
+    assert!(double.server().on_crash(crashes.listener()));
+    use lash_restate_test::{CrashPoint, CrashRule};
+    if matches!(
+        case,
+        DeferredCase::DispatchBefore | DeferredCase::DispatchAfter
+    ) {
+        double.server().crash_on(
+            CrashRule::new(if matches!(case, DeferredCase::DispatchBefore) {
+                CrashPoint::BeforeCommand { index: 1 }
+            } else {
+                CrashPoint::BeforeFrame {
+                    ty: lash_restate_test::protocol::MessageType::OutputCommand,
+                }
+            })
+            .handler("child"),
+        );
+    }
+    let executed = Arc::new(AtomicUsize::new(0));
+    let key = Arc::new(std::sync::Mutex::new(None));
+    let dispatched = Arc::new(tokio::sync::Notify::new());
+    let old = engine
+        .old_backend()
+        .build_generation()
+        .expect("a build")
+        .clone();
+    let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(engine.old_backend())
+        .with_session_work(engine.old_work())
+        .into_backend();
+    let core = LashCore::standard_builder(backend)
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(
+            crate::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_admission(1),
+        )
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
+        .tools(Arc::new(DeferredLookup {
+            executed: Arc::clone(&executed),
+            key: Arc::clone(&key),
+            dispatched: Arc::clone(&dispatched),
+            deadline: matches!(case, DeferredCase::Deadline)
+                .then(|| std::time::Duration::from_secs(3600)),
+        }))
+        .build(crate::testing::runtime_lease_owner())?;
+    let handle = core
+        .session(lash_core::SessionId::fixture(format!(
+            "deferred-run-{case:?}"
+        )))
+        .created()
+        .await
+        .open()
+        .await?
+        .send(TurnInput::text("wait for the external result"))
+        .id("run-run")
+        .await?;
+    tokio::time::timeout(WEDGE, dispatched.notified())
+        .await
+        .expect("the tool deferred");
+    let parked = parked_deferred_run(double.server(), "run-run").await;
+    if matches!(case, DeferredCase::TransferBefore) {
+        assert!(double.server().crash(&parked.id));
+        parked_deferred_run(double.server(), "run-run").await;
+    }
+    if matches!(case, DeferredCase::TransferAfter) {
+        double.server().crash_on(
+            CrashRule::new(CrashPoint::BeforeFrame {
+                ty: lash_restate_test::protocol::MessageType::OutputCommand,
+            })
+            .service(lash_restate_test::TURN_DRIVER_SERVICE)
+            .handler("run")
+            .key_ending("run-run"),
+        );
+    }
+    if matches!(case, DeferredCase::Deadline) {
+        double.server().advance(std::time::Duration::from_secs(900));
+    }
+    let next = BuildGeneration::for_test("deferred-run-next");
+    engine
+        .roll(next.clone(), &Arc::new(Model::holding(0)))
+        .await;
+    engine
+        .old_backend()
+        .generation_drain()
+        .mark_draining(&old, 1)
+        .await?;
+    let deadline = tokio::time::Instant::now() + WEDGE;
+    loop {
+        core._session_shifts
+            .reconcile(
+                &lash_core::engine::ReconcileCursor::default(),
+                std::num::NonZeroUsize::new(16).expect("a page"),
+            )
+            .await?;
+        let drain = engine.old_backend().generation_drain();
+        if drain.generation_work(&old).await?.in_flight_turns == 0
+            && drain.generation_work(&next).await?.in_flight_turns == 1
+        {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the deferred tool pins its Run on the draining build: old={:?}, next={:?}, pending={:#?}",
+            drain.generation_work(&old).await?,
+            drain.generation_work(&next).await?,
+            double
+                .server()
+                .invocations()
+                .into_iter()
+                .filter(|view| view.status != "completed")
+                .collect::<Vec<_>>()
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        model.requests.lock_recover().len(),
+        1,
+        "no model request while waiting"
+    );
+    assert_eq!(
+        executed.load(Ordering::SeqCst),
+        if matches!(case, DeferredCase::Mixed) {
+            3
+        } else {
+            1
+        },
+        "handover never redispatches the tool"
+    );
+    let completion = key.lock_recover().clone().expect("the original key");
+    parked_deferred_run(double.server(), "follow-on:run-run:agent-frame:1#0").await;
+    match case {
+        DeferredCase::Cancel => {
+            handle.cancel().origin("deferred-round-law").await?;
+        }
+        DeferredCase::Deadline => {
+            double
+                .server()
+                .advance(std::time::Duration::from_secs(2701));
+        }
+        _ => {
+            core.completions()
+                .resolve(
+                    completion.clone(),
+                    lash_core::Resolution::Ok(serde_json::json!({ "slot": 1 })),
+                )
+                .await?;
+        }
+    }
+    let output = tokio::time::timeout(WEDGE, handle.output())
+        .await
+        .unwrap_or_else(|error| {
+            let pending = double.server().invocations().into_iter().filter(|view| view.status != "completed").collect::<Vec<_>>();
+            let journals = pending.iter().filter(|view| view.target.contains(lash_restate_test::TURN_DRIVER_SERVICE)).map(|view| {
+                let entries = double.server().journal(&view.id).unwrap_or_default();
+                let tail = entries.into_iter().rev().take(12).map(|entry| (entry.ty, entry.name.clone(), entry.call_command().map(|call| (call.service_name, call.handler_name)), entry.run_completion().map(|result| result.map(|bytes| String::from_utf8_lossy(&bytes).into_owned())))).collect::<Vec<_>>();
+                (view.target.clone(), tail)
+            }).collect::<Vec<_>>();
+            panic!("the Run completes: {error:?}; model requests={}, pending={pending:#?}, journals={journals:#?}", model.requests.lock_recover().len());
+        })?;
+    if matches!(case, DeferredCase::Cancel) {
+        assert!(matches!(
+            output.result.outcome,
+            TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
+        ));
+        assert_eq!(model.requests.lock_recover().len(), 1);
+    } else {
+        let expected = if matches!(case, DeferredCase::Mixed) {
+            3
+        } else {
+            1
+        };
+        assert_eq!(
+            output.result.outcome,
+            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage {
+                text: format!("answered after {expected} tool result(s)")
+            }),
+            "the real results remain correlated in the resumed prompt: {:#?}",
+            model.requests.lock_recover()
+        );
+        let requests = model.requests.lock_recover();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(tool_results(&requests[1]), expected);
+        let results = requests[1]
+            .messages
+            .iter()
+            .flat_map(|message| message.blocks.iter())
+            .filter_map(|block| match block {
+                LlmContentBlock::ToolResult {
+                    call_id, content, ..
+                } => Some((
+                    call_id.clone(),
+                    serde_json::to_string(content).expect("model return"),
+                )),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if matches!(case, DeferredCase::Mixed) {
+            assert_eq!(
+                results
+                    .iter()
+                    .map(|(id, _)| id.as_str())
+                    .collect::<Vec<_>>(),
+                ["lookup-0", "lookup-1", "lookup-2"]
+            );
+        }
+        if matches!(case, DeferredCase::Deadline) {
+            assert!(
+                results[0].1.contains("pending tool completion timed out"),
+                "the timeout is the normal tool result: {results:?}"
+            );
+        }
+    }
+    assert_eq!(
+        executed.load(Ordering::SeqCst),
+        if matches!(case, DeferredCase::Mixed) {
+            3
+        } else {
+            1
+        }
+    );
+    if matches!(
+        case,
+        DeferredCase::DispatchBefore
+            | DeferredCase::DispatchAfter
+            | DeferredCase::TransferBefore
+            | DeferredCase::TransferAfter
+    ) {
+        assert_eq!(crashes.get(), 1, "the requested crash actually ran");
+    }
+    let late = core
+        .completions()
+        .resolve(
+            completion,
+            lash_core::Resolution::Ok(serde_json::json!({"late":true})),
+        )
+        .await?;
+    assert!(
+        matches!(
+            late,
+            lash_core::ResolveOutcome::AlreadyResolved { .. }
+                | lash_core::ResolveOutcome::UnknownOrRevoked
+        ),
+        "a late result cannot replace the terminal: {late:?}"
+    );
+    drop(core);
+    engine.finish().await;
+    Ok(())
+}
+
 #[async_trait]
 impl ToolProvider for CountedLookup {
     fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
@@ -844,4 +1223,35 @@ drain_hand_over_laws! {
     run_turn_budget_sqlite_file: turn_budget, Storage::SqliteFile, ();
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     run_turn_budget_postgres: turn_budget, Storage::Postgres, ();
+}
+
+async fn parked_deferred_run(
+    server: &lash_restate_test::RestateTestServer,
+    key: &str,
+) -> lash_restate_test::InvocationView {
+    let target = format!("{key}/run");
+    let deadline = tokio::time::Instant::now() + WEDGE;
+    let mut seen = None;
+    loop {
+        let view = server.invocations().into_iter().find(|view| {
+            view.target.contains(lash_restate_test::TURN_DRIVER_SERVICE)
+                && view.target.ends_with(&target)
+                && view.status == "running"
+                && view.blocked_on_server == Some(true)
+        });
+        if let Some(view) = view {
+            if seen == Some(view.journal_len) {
+                return view;
+            }
+            seen = Some(view.journal_len);
+        } else {
+            seen = None;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the run never parked: {:#?}",
+            server.invocations()
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
 }

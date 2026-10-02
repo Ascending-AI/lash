@@ -74,7 +74,8 @@ impl ProtocolDriverHandle for ExpandingDriver {
         _calls: &ResponseToolCalls,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
-        vec![DriverAction::Start(PendingWork::Tools {
+        vec![DriverAction::Start(PendingWork::WaitingForToolResults {
+            settled: None,
             calls: vec![
                 slot_call(tc("native"), "list"),
                 slot_call(tc("wrapper").child(0), "read"),

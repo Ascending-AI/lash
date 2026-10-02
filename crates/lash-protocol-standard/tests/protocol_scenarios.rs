@@ -1286,7 +1286,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ThirdPartyDriver {
                 request: ctx.project_llm_request(true),
                 driver_state: None,
             },
-            PublicWork::Tool => PendingWork::Tools {
+            PublicWork::Tool => PendingWork::WaitingForToolResults {
+                settled: None,
                 calls: vec![PendingToolCall {
                     call_id: lash_core::ToolCallId::fixture("third-party-call"),
                     provider_call_id: Some("provider-call".into()),

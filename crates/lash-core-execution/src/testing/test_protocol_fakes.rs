@@ -447,7 +447,8 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                 })),
             ]));
         }
-        actions.push(DriverAction::Start(PendingWork::Tools {
+        actions.push(DriverAction::Start(PendingWork::WaitingForToolResults {
+            settled: None,
             calls: pending_calls,
             expansion: Default::default(),
         }));

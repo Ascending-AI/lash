@@ -268,6 +268,9 @@ impl RuntimeExecutionContext<'_> {
                             ))
                         }
                         GroupChildSettled::Timer => ToolAggregateLeafReply::Timer,
+                        GroupChildSettled::Deferred(_) => {
+                            unreachable!("logical consumers never publish dispatch markers")
+                        }
                     });
                 }
             }

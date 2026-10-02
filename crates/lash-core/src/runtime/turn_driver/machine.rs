@@ -114,7 +114,7 @@ impl RuntimeTurnDriver<'_> {
         event_tx: TurnObserver,
         run_offset: usize,
     ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
-        self.resume_suspended_cell(&mut machine);
+        self.resume_suspended_cell(&mut machine)?;
         loop {
             let Some(effect) = machine.poll_effect() else {
                 break;
@@ -176,8 +176,18 @@ impl RuntimeTurnDriver<'_> {
                         .await?;
                 }
                 Effect::ToolCalls { id, calls, .. } => {
-                    self.handle_tool_calls_effect(&mut machine, id, calls, &event_tx)
+                    self.handle_tool_calls_effect(&mut machine, id, calls, &event_tx, run_offset)
                         .await?;
+                }
+                Effect::AwaitToolResults { id, state } => {
+                    self.handle_await_tool_results_effect(
+                        &mut machine,
+                        id,
+                        state,
+                        run_offset,
+                        &event_tx,
+                    )
+                    .await?;
                 }
                 Effect::ReportToolCalls { completed } => {
                     self.report_undispatched_turn_tool_calls(

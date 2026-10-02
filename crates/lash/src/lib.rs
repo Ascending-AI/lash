@@ -444,7 +444,7 @@ pub mod tools {
         CompactToolContract, EmitProcessEventIntent, EmitTriggerIntent, ExecutionOwner,
         PendingAnnouncement, PendingCompletion, PendingResolver, PreparedToolCall,
         SignalProcessIntent, StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES,
-        TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V3, TimeoutBehavior,
+        TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V3,
         ToolArgumentProjectionPolicy, ToolAttachmentClient, ToolAttemptOutcome, ToolCall,
         ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCatalogEntry, ToolContract,
         ToolDefinition, ToolDirectCompletionClient, ToolDiscovery, ToolExecutionGrant, ToolFailure,
@@ -772,9 +772,12 @@ pub mod plugins {
     pub use lash_core::session::{
         CompletedProtocolToolCall, Incorporated, IncorporationLedger, OpenerGroupsClosed,
         SettlementSource, ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateLeafReply,
-        ToolAggregateOutcome, ToolAggregateRequest,
+        ToolAggregateOutcome, ToolAggregateRequest, ToolDispatchResult,
     };
-    pub use lash_core::tool_dispatch::{ToolCallIds, ToolDispatchOutcome, ToolPreparationOutcome};
+    pub use lash_core::tool_dispatch::{
+        ArmedResolver, DeferredToolCompletion, LaunchReceipt, PendingToolDispatchOutcome,
+        ToolCallIds, ToolDispatchOutcome, ToolPreparationOutcome,
+    };
     pub use lash_core::{
         ArtifactReferrerPorts, CommandJournalGuard, CommandReplayKey, DeclaredModuleArtifact,
         DefinitionAcquisition, RecordedKeyFence, ReferrerAcquisition, RefusedWriteRange,
@@ -1434,9 +1437,10 @@ pub mod runtime {
         RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
         RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
         RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeInvocation,
-        RuntimeProviderConfig, ScopedEffectController, SessionWorkEngine, SleepSpec, TraceEmitter,
-        TraceRuntime, TurnCancelWait, TurnContext, TurnControlBinding, WorkCadenceError,
-        WorkCadencePolicy, effect_groups_unsupported,
+        RuntimeProviderConfig, ScopedEffectController, SessionWorkEngine, SleepSpec,
+        ToolCompletionEvent, ToolCompletionWait, ToolDispatchCursor, TraceEmitter, TraceRuntime,
+        TurnCancelWait, TurnContext, TurnControlBinding, WorkCadenceError, WorkCadencePolicy,
+        effect_groups_unsupported,
     };
     /// Explicitly unstable internal instrumentation. Phase names may change
     /// with the turn loop. See `docs/architecture/turn-phase-probe.md`.

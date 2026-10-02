@@ -43,6 +43,36 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
             "await_event",
         ),
         (
+            RuntimeEffectCommand::ArmToolCompletion {
+                key: restate_await_event_key(
+                    &durable_turn_scope("session", "turn"),
+                    AwaitEventWaitIdentity::Custom {
+                        key: "tool-arm".into(),
+                    },
+                )
+                .expect("tool completion key"),
+                timeout_ms: Some(1000),
+            },
+            "arm_tool_completion",
+        ),
+        (
+            RuntimeEffectCommand::AwaitToolCompletions {
+                waits: vec![lash_core::ToolCompletionWait {
+                    key: restate_await_event_key(
+                        &durable_turn_scope("session", "turn"),
+                        AwaitEventWaitIdentity::Custom {
+                            key: "tool-wait".into(),
+                        },
+                    )
+                    .expect("tool completion key"),
+                    deadline_ms: Some(1000),
+                }],
+                dispatch: None,
+                transferable: true,
+            },
+            "await_tool_completions",
+        ),
+        (
             RuntimeEffectCommand::PeekAwaitEvent {
                 key: restate_await_event_key(
                     &durable_turn_scope("session", "turn"),
@@ -181,6 +211,8 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
             RestateEffectExecution::DirectLocal { .. } => "direct_local",
             RestateEffectExecution::Timer { .. } => "timer",
             RestateEffectExecution::AwaitEvent { .. } => "await_event",
+            RestateEffectExecution::ArmToolCompletion { .. } => "arm_tool_completion",
+            RestateEffectExecution::AwaitToolCompletions { .. } => "await_tool_completions",
             RestateEffectExecution::PeekAwaitEvent { .. } => "peek_await_event",
             RestateEffectExecution::JournaledRun { .. } => "journaled_run",
         };

@@ -36,7 +36,7 @@ impl LashRuntime {
                 crate::runtime::logical_turn::follow_on_input(&owed, crate::TurnContext::default()),
             ),
             crate::store::FollowOnRecovery::Exhausted(owed) => {
-                LogicalTurnStart::ExhaustedFollowOn(owed)
+                LogicalTurnStart::ExhaustedFollowOn(Box::new(owed))
             }
         };
         let run = self

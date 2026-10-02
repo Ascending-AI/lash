@@ -234,6 +234,7 @@ pub(super) fn follow_on_after_turn(
                     protocol_iterations: captured.iterations,
                     cell: captured.cell.clone(),
                     opener: captured.opener.clone(),
+                    tools: captured.tools.clone(),
                 }),
                 owed.map_or(0, |owed| owed.chain_depth),
             )
@@ -291,7 +292,7 @@ pub(super) enum LogicalTurnStart {
     /// A recovered follow-on whose recovery bound is spent (ADR 0101 §3): it
     /// never runs, and commits as the failed turn carrying
     /// `FollowOnRecoveryExhausted` with its task as the delivered input.
-    ExhaustedFollowOn(crate::store::PendingFollowOn),
+    ExhaustedFollowOn(Box<crate::store::PendingFollowOn>),
 }
 
 impl LogicalTurnStart {

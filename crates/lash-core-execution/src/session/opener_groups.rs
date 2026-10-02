@@ -506,6 +506,15 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
         for group_key in &closed.groups {
             self.incorporate_group_outcome(group_key).await?;
+            let mut rank = 1;
+            while let Some(settled) = controller.read_group_settlement(group_key, rank).await? {
+                if let Ok(crate::RuntimeEffectOutcome::ToolInvocationDeferred { completion }) =
+                    settled.outcome
+                {
+                    self.abandon_deferred_tool_completion(*completion).await?;
+                }
+                rank += 1;
+            }
         }
         // The opener has ended: nothing it formed is required by it any more.
         self.opener_groups.lock_recover().reserved.clear();

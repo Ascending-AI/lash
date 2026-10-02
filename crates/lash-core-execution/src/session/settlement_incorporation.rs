@@ -272,6 +272,26 @@ impl<'run> RuntimeExecutionContext<'run> {
                 Ok(crate::RuntimeEffectOutcome::ToolInvocation { settlement, .. }) => {
                     self.incorporate_tool_settlement(source, &settlement)?;
                 }
+                Ok(crate::RuntimeEffectOutcome::ToolInvocationDeferred { completion }) => {
+                    let mut ledger = self.incorporation_ledger().lock_recover();
+                    if !ledger.incorporated.contains(&source) {
+                        self.restore_started_process_ids(
+                            &crate::runtime::effect::tool_settlement::settlement_possession(
+                                &completion.armed.intent_outcomes(),
+                            ),
+                        );
+                        self.dispatch.checkpoint_messages.enqueue(
+                            completion
+                                .pending
+                                .captures
+                                .iter()
+                                .flat_map(|capture| capture.messages.iter().cloned())
+                                .collect(),
+                        );
+                        self.restore_tool_trigger_outcomes(completion.pending.triggers.clone());
+                        ledger.incorporated.insert(source);
+                    }
+                }
                 // A non-tool child, or a child whose terminal is a recorded
                 // error, carries no settlement facts; the rank still joins
                 // the incorporated prefix so the next record starts after it.

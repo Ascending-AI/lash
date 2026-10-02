@@ -17,18 +17,20 @@ pub use pending_resolver::{
     model_visible_intent_outcomes,
 };
 
+pub(crate) use attempt_coordinator::{
+    CommittedToolDispatch, commit_deferred_group_child, commit_unarmed_tool_child,
+    drain_committed_group_child, group_child_cancelled,
+};
 pub use attempt_coordinator::{
     GroupChildCoordination, ToolAttemptLineage, coordinate_tool_invocation,
-};
-pub(crate) use attempt_coordinator::{
-    commit_deferred_group_child, drain_committed_group_child, group_child_cancelled,
 };
 #[cfg(feature = "testing")]
 pub use context::{CheckpointMessageBuffer, ToolCallLaunch, ToolTriggerOutcomeBuffer};
 #[cfg(not(feature = "testing"))]
 pub use context::{CheckpointMessageBuffer, ToolCallLaunch, ToolTriggerOutcomeBuffer};
 pub use context::{
-    PendingToolDispatchOutcome, ToolCallIds, ToolDispatchOutcome, ToolPreparationOutcome,
+    DeferredToolCompletion, PendingToolDispatchOutcome, ToolCallIds, ToolDispatchOutcome,
+    ToolPreparationOutcome,
 };
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use execution::coordinate_prepared_tool_call_launch_with_execution_context;

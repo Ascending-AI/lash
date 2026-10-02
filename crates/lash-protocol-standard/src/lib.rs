@@ -702,7 +702,7 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
 
 /// Protocol driver for the Standard protocol. Consumes native
 /// tool-call envelopes from the LLM, expands `batch` sugar into the step's
-/// one tool group and dispatches it via `PendingWork::Tools`, and splices
+/// one tool group and dispatches it via `PendingWork::WaitingForToolResults`, and splices
 /// reasoning parts into the assistant message so provider replay metadata
 /// preserves chain-of-thought ordering.
 #[derive(Default)]
@@ -1120,7 +1120,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                 },
             )]));
         }
-        actions.push(DriverAction::Start(PendingWork::Tools {
+        actions.push(DriverAction::Start(PendingWork::WaitingForToolResults {
+            settled: None,
             calls,
             expansion: expansion.plan,
         }));

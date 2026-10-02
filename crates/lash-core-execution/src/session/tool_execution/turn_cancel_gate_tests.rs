@@ -12,7 +12,7 @@ use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// Captures the wait shape each `AwaitEvent` effect asks the host for.
+/// Captures the wait shape each completion wait asks the host for.
 #[derive(Default)]
 struct AwaitShapeRecorder {
     waits: std::sync::Mutex<Vec<(bool, Option<crate::ExecutionScope>)>>,
@@ -33,9 +33,15 @@ impl crate::RuntimeEffectController for AwaitShapeRecorder {
         envelope: crate::RuntimeEffectEnvelope,
         local_executor: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        if matches!(
+            &envelope.command,
+            crate::RuntimeEffectCommand::ArmToolCompletion { .. }
+        ) {
+            return Ok(crate::RuntimeEffectOutcome::ArmToolCompletion { deadline_ms: None });
+        }
         if !matches!(
             &envelope.command,
-            crate::RuntimeEffectCommand::AwaitEvent { .. }
+            crate::RuntimeEffectCommand::AwaitToolCompletions { .. }
         ) {
             if matches!(&envelope.command, crate::RuntimeEffectCommand::Sleep { .. }) {
                 let options = local_executor.into_sleep_options();
@@ -51,8 +57,11 @@ impl crate::RuntimeEffectController for AwaitShapeRecorder {
             options.observe_turn_cancel,
             options.turn_cancel_scope.clone(),
         ));
-        Ok(crate::RuntimeEffectOutcome::AwaitEvent {
-            resolution: crate::Resolution::Ok(serde_json::json!({"done": true})),
+        Ok(crate::RuntimeEffectOutcome::AwaitToolCompletions {
+            event: crate::ToolCompletionEvent::Resolved {
+                position: 0,
+                resolution: crate::Resolution::Ok(serde_json::json!({"done": true})),
+            },
         })
     }
 
@@ -174,7 +183,7 @@ async fn deferred_tool_await_shape(
         context = context.without_turn_cancel_observation();
     }
     let outcome = context
-        .await_pending_tool_dispatch_outcome(None, pending_tool(), None, None)
+        .complete_pending_tool_dispatch_outcome(None, pending_tool(), None, None)
         .await
         .expect("the recorded wait settles");
     assert_eq!(outcome.record.tool, "deferred");

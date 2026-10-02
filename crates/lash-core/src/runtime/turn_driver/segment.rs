@@ -1,11 +1,10 @@
 //! A turn's segment boundary (FIG-4739): the quiet point at which a physical
 //! turn ends so its logical run goes on in a new invocation.
 //!
-//! A boundary is taken only where a new machine can pick the run up from
-//! committed history alone: when the machine asks for a model call after the
-//! turn has already made one. Nothing is in flight there, the messages are a
-//! prompt, and the continuation the commit owes starts from them with no
-//! input of its own. A boundary is never proactive: it is taken because the
+//! A boundary is taken before a later model call or after every tool dispatch
+//! has settled and the Run owns its pending completions. The successor picks
+//! up committed history and the owed waiting phase without repeating the
+//! model call or dispatch. A boundary is never proactive: it is taken because the
 //! invocation's journal reached its budget, or because the build it runs on
 //! asked the turn to hand over, and both answers are recorded facts, so a
 //! replay ends the turn where its first execution did.
@@ -22,6 +21,7 @@ pub(in crate::runtime) struct BoundaryTaken {
     /// issues again.
     pub(in crate::runtime) cell: Option<crate::store::SuspendedCell>,
     pub(in crate::runtime) opener: crate::store::RunOpenerState,
+    pub(in crate::runtime) tools: Option<serde_json::Value>,
 }
 
 /// What a turn carries for its run's segment boundaries.
@@ -40,6 +40,7 @@ pub(in crate::runtime) struct TurnSegment {
     /// The code cell the run's earlier turn stopped inside at its boundary:
     /// this turn's machine issues it again in place of its first model call.
     pub(in crate::runtime) resume: Option<crate::store::SuspendedCell>,
+    resume_tools: Option<serde_json::Value>,
     /// Set when the turn ended at a boundary.
     pub(in crate::runtime) taken: Option<BoundaryTaken>,
 }
@@ -54,6 +55,7 @@ impl TurnSegment {
             iterations_spent: continuation.map_or(0, |owed| owed.protocol_iterations),
             model_calls: 0,
             resume: continuation.and_then(|owed| owed.cell.clone()),
+            resume_tools: continuation.and_then(|owed| owed.tools.clone()),
             taken: None,
         }
     }
@@ -114,6 +116,7 @@ impl RuntimeTurnDriver<'_> {
             iterations: self.segment.spent_through(iteration, run_offset),
             cell: None,
             opener: self.opener_state.snapshot(),
+            tools: None,
         });
         machine.finish_with_outcome(TurnOutcome::SegmentBoundary { reason });
         Ok(true)
@@ -164,6 +167,7 @@ impl RuntimeTurnDriver<'_> {
                 .spent_through(machine.protocol_iteration(), run_offset),
             cell: Some(cell),
             opener: self.opener_state.snapshot(),
+            tools: None,
         });
         machine.finish_with_outcome(TurnOutcome::SegmentBoundary {
             reason: crate::BoundaryReason::HandOver,
@@ -171,9 +175,25 @@ impl RuntimeTurnDriver<'_> {
         Ok(())
     }
 
-    /// Starts the machine at the code cell the run's earlier turn stopped
-    /// inside, when this turn continues one.
-    pub(super) fn resume_suspended_cell(&mut self, machine: &mut TurnMachine) {
+    /// Resumes the code cell or tool round the Run's earlier turn suspended.
+    pub(super) fn resume_suspended_cell(
+        &mut self,
+        machine: &mut TurnMachine,
+    ) -> Result<(), RuntimeError> {
+        if let Some(tools) = self.segment.resume_tools.take() {
+            let (state, expansion) = serde_json::from_value(tools).map_err(|error| {
+                RuntimeError::new(
+                    RuntimeErrorCode::ExecutionStateCaptureFailed,
+                    error.to_string(),
+                )
+            })?;
+            self.segment.model_calls = 1;
+            machine.resume_with(crate::sansio::PendingWork::WaitingForToolResults {
+                calls: Vec::new(),
+                settled: Some(state),
+                expansion,
+            });
+        }
         if let Some(cell) = self.segment.resume.take() {
             // The resumed cell is this turn's work: the model call after it
             // is a quiet point like any other.
@@ -187,6 +207,37 @@ impl RuntimeTurnDriver<'_> {
                 ),
             });
         }
+        Ok(())
+    }
+
+    pub(super) fn end_waiting_for_tool_results(
+        &mut self,
+        machine: &mut TurnMachine,
+        run_offset: usize,
+        reason: crate::BoundaryReason,
+    ) -> Result<(), RuntimeError> {
+        let (state, expansion) = machine.waiting_tool_results().ok_or_else(|| {
+            RuntimeError::new(
+                RuntimeErrorCode::ExecutionStateCaptureFailed,
+                "a tool wait handed over without its settled round",
+            )
+        })?;
+        let tools = serde_json::to_value((state, expansion)).map_err(|error| {
+            RuntimeError::new(
+                RuntimeErrorCode::ExecutionStateCaptureFailed,
+                error.to_string(),
+            )
+        })?;
+        self.segment.taken = Some(BoundaryTaken {
+            iterations: self
+                .segment
+                .spent_through(machine.protocol_iteration(), run_offset),
+            cell: None,
+            tools: Some(tools),
+            opener: self.opener_state.snapshot(),
+        });
+        machine.finish_with_outcome(TurnOutcome::SegmentBoundary { reason });
+        Ok(())
     }
 
     /// The turn's recorded read of its build's drain mark at the quiet point

@@ -67,14 +67,14 @@ pub enum ResolverArming {
 }
 
 /// What an armed resolver launched.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct ArmedResolver {
     /// A declared start's launch receipt, when the call declared one.
     pub launch: Option<LaunchReceipt>,
 }
 
 /// A declared start's launch receipt.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct LaunchReceipt {
     /// The realized start, or its typed refusal, as the call's intent
     /// outcome for index 0. It is host-facing metadata: the model sees the

@@ -63,6 +63,7 @@ mod child_cancel;
 #[macro_use]
 mod index_calls;
 mod gate_race;
+mod tool_completion;
 #[macro_use]
 mod segment_wait;
 mod wake;
@@ -366,6 +367,34 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
             replay_key,
             turn_cancel,
         ))
+    }
+
+    fn arm_tool_completion<'run>(
+        &'run self,
+        _namespace: &'run crate::RestateNamespace,
+        _key: lash_core::AwaitEventKey,
+        _deadline_ms: Option<u64>,
+        _now_ms: u64,
+    ) -> crate::JournaledFuture<'run, ()>
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async { Err(TerminalError::new("tool completion arming is unavailable")) })
+    }
+
+    fn await_tool_completions<'run>(
+        &'run self,
+        _namespace: &'run crate::RestateNamespace,
+        _waits: Vec<lash_core::ToolCompletionWait>,
+        _dispatch: Option<lash_core::ToolDispatchCursor>,
+        _turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+        _generation: Option<lash_core::engine::BuildGeneration>,
+        _process_cancel: ProcessCancelRace,
+    ) -> TurnCancelRaceFuture<'run, lash_core::ToolCompletionEvent>
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async { Err(TerminalError::new("tool completion waiting is unavailable")) })
     }
 
     /// A process segment's signal wait, raced against its cancel and
@@ -1251,6 +1280,45 @@ macro_rules! impl_restate_controller_context {
                         }
                         Ok(outcome.map(|reply| TurnWaitOutcome::Resolved(reply.into_body())))
                     })
+                }
+
+                fn arm_tool_completion<'run>(
+                    &'run self, namespace: &'run crate::RestateNamespace,
+                    key: lash_core::AwaitEventKey, deadline_ms: Option<u64>, now_ms: u64,
+                ) -> crate::JournaledFuture<'run, ()> where 'ctx: 'run {
+                    Box::pin(tool_completion::arm(self, namespace, key, deadline_ms, now_ms))
+                }
+
+                fn await_tool_completions<'run>(
+                    &'run self, namespace: &'run crate::RestateNamespace,
+                    waits: Vec<lash_core::ToolCompletionWait>, dispatch: Option<lash_core::ToolDispatchCursor>,
+                    turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+                    generation: Option<lash_core::engine::BuildGeneration>,
+                    process_cancel: ProcessCancelRace,
+                ) -> TurnCancelRaceFuture<'run, lash_core::ToolCompletionEvent> where 'ctx: 'run {
+                    let context: &'run $context<'run> = self;
+                    let promise = if turn_cancel.is_none() && process_cancel == ProcessCancelRace::Raced {
+                        let Some(promise) = process_cancel_promise!($promises, $context, 'run, context) else {
+                            return Box::pin(async { Err(TerminalError::new("a process cancel race needs a workflow promise surface")) });
+                        };
+                        Some(promise)
+                    } else { None };
+                    use restate_sdk::context::DurableFuture;
+                    let awakeables = tool_completion::WaitAwakeables {
+                        completion: Box::new(move |position| {
+                            let (id, wait) = context.awakeable::<Json<RestateTurnCancelWake>>();
+                            (id, erase_gate_wait(wait.map_ok(move |Json(wake)| match wake {
+                                RestateTurnCancelWake::SessionRevoked => tool_completion::CompletionWake::Revoked,
+                                _ => tool_completion::CompletionWake::Completion { position },
+                            })))
+                        }),
+                        dispatch: Box::new(move || {
+                            let (id, wait) = context.awakeable::<Json<EffectGroupNotification>>();
+                            (id, erase_gate_wait(wait.map_ok(|_| tool_completion::CompletionWake::DispatchReady)))
+                        }),
+                        gate: Box::new(move || gate_awakeable(context)),
+                    };
+                    Box::pin(tool_completion::wait(context, namespace, tool_completion::WaitRequest { waits, dispatch, turn_cancel, generation }, awakeables, promise))
                 }
 
                 process_signal_wait_method!($promises, $context, 'ctx);

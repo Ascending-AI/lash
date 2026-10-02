@@ -4,13 +4,13 @@
 //! # What "handler level" means, and why it is not a detail
 //!
 //! ADR 0099 §2: "A tool child is a replayable invocation driver. Retry,
-//! completion-key derivation and deferred await are *coordination* and run
+//! completion-key derivation and resolver arming are *coordination* and run
 //! at handler level on the child's own admitted controller. Only atomic
 //! attempts run inside recorded bodies." The structural
 //! reason is ADR 0042's — "A recorded body must not emit commands into an
 //! ordinal-addressed journal" — so a driver that lived inside a `ctx.run`
 //! closure could not journal its second attempt, its retry sleep or its
-//! deferred await, and a child expressed as a single
+//! resolver arming, and a child expressed as a single
 //! [`ToolAttempt`](super::envelope::RuntimeEffectCommand::ToolAttempt) could
 //! not retry at all, because a second attempt is a second envelope with a
 //! second hash.
@@ -21,7 +21,9 @@
 //! child's recorded identity through
 //! [`GroupChildBinding`](crate::GroupChildBinding) so every admission it
 //! serves arbitrates under the child's own §4 decision — and emits that
-//! child's attempts, retry sleeps and awaits as its own journal entries.
+//! child's attempts, retry sleeps and durable arming as its own journal entries.
+//! A deferred dispatch seals its descriptor and returns; its opener owns the
+//! completion wait and presents the real result only when it resolves.
 //!
 //! # The one rebind site
 //!
@@ -45,11 +47,11 @@
 //!
 //! It holds no in-process drain slot. §5 orders sibling drains by a durable
 //! per-group rank: §4 commits the child's final at the child's terminal — its
-//! final attempt's boundary or its resolved completion — and reserves its
+//! final attempt's boundary or its armed deferral — and reserves its
 //! rank, and §5 admits a drain with intents by that rank, which orders it
 //! against every sibling without a process-local gate.
 //!
-//! It projects the child's result exactly once, at its own presentation
+//! It projects an inline result exactly once, at its own presentation
 //! boundary: the session's ordered presentation steps run once through the
 //! journaled `PresentToolResult` effect under the child's bound controller,
 //! and the driver journals the resolved `ModelToolReturn` on the settlement
@@ -73,7 +75,10 @@ use super::executor::{
 use super::live_openers::{LiveOpenerContext, LiveOpenerRegistry};
 use super::tool_child::{ToolChildOpenerContext, ToolChildRequest};
 use super::tool_settlement::ToolSettlement;
-use crate::tool_dispatch::{ToolCallLaunch, ToolDispatchContext, ToolDispatchOutcome};
+use crate::tool_dispatch::{
+    CommittedToolDispatch, DeferredToolCompletion, ToolCallLaunch, ToolDispatchContext,
+    ToolDispatchOutcome,
+};
 use crate::{
     AdmittedScope, EffectOpener, ProcessExecutionEnvStore, ToolCatalog, ToolChildExecutionTraceHook,
 };
@@ -834,7 +839,7 @@ impl ToolChildDriver for ToolChildRunner {
 
 /// How a tool child reaches its terminal in this invocation.
 enum ChildTerminal {
-    /// Runs its attempts, retry sleeps and deferred await, and commits its
+    /// Runs its attempts, retry sleeps and durable arming, and commits its
     /// final against its own replay row (`child`).
     Shift { child: crate::EffectAddress },
     /// Drains the final an earlier invocation committed.
@@ -961,7 +966,7 @@ pub(crate) fn rebind_child_dispatch<'run>(
 /// id when there is one, and a default otherwise: a contract is read during
 /// preparation, which has already happened, since a child carries a
 /// `PreparedToolCall`, so neither can change what the child does.
-fn admitted_catalog(request: &ToolChildRequest) -> ToolCatalog {
+pub(crate) fn admitted_catalog(request: &ToolChildRequest) -> ToolCatalog {
     let manifest = request.admission.manifest().clone();
     let surface = &request.session.tool_surface;
     let recorded_contract = surface
@@ -1132,14 +1137,18 @@ async fn run_tool_child<'run>(
     let executed: std::pin::Pin<
         Box<
             dyn std::future::Future<
-                    Output = Result<ToolDispatchOutcome, RuntimeEffectControllerError>,
+                    Output = Result<CommittedToolDispatch, RuntimeEffectControllerError>,
                 > + Send
                 + '_,
         >,
     > = match terminal {
-        ChildTerminal::Shift { child } => {
-            Box::pin(shift(&dispatch, request, child, turn_cancel_wait))
-        }
+        ChildTerminal::Shift { child } => Box::pin(shift(
+            &dispatch,
+            request,
+            child,
+            turn_cancel_wait,
+            resolved.recorder.as_deref(),
+        )),
         ChildTerminal::DrainCommitted { committed } => {
             let dispatch = Arc::clone(&dispatch);
             Box::pin(async move {
@@ -1151,7 +1160,7 @@ async fn run_tool_child<'run>(
     // On a built context, a session service call the child made abandons the
     // shift where it stands, as a crash would: nothing the refused call led
     // to is recorded (see `SessionServicesRefusal`).
-    let mut outcome = match &resolved.refusal {
+    let terminal = match &resolved.refusal {
         None => executed.await?,
         Some(refusal) => match refusal.abandoning(executed).await {
             Ok(outcome) => outcome?,
@@ -1171,6 +1180,12 @@ async fn run_tool_child<'run>(
     if let Some(refusal) = served_only.as_ref().and_then(|guard| guard.tripped()) {
         return Err(refusal);
     }
+    let mut outcome = match terminal {
+        CommittedToolDispatch::Done(outcome) => *outcome,
+        CommittedToolDispatch::Deferred(completion) => {
+            return Ok(RuntimeEffectOutcome::ToolInvocationDeferred { completion });
+        }
+    };
     // The settlement is aggregated from the journaled outcome by the one
     // constructor every terminal owns (FIG-3411): per-attempt facts ride
     // `outcome.captures` and its `triggers`; the child-local buffers drain
@@ -1320,13 +1335,14 @@ pub(crate) async fn validate_recorded_authorities(
     Ok(())
 }
 
-/// Executes the child's attempts, retry sleeps and deferred await.
+/// Executes the child's attempts, retry sleeps and durable arming.
 async fn shift(
     dispatch: &Arc<ToolDispatchContext<'_>>,
     request: &ToolChildRequest,
     child: crate::EffectAddress,
     turn_cancel_wait: crate::runtime::TurnCancelWait,
-) -> Result<ToolDispatchOutcome, RuntimeEffectControllerError> {
+    recorder: Option<&ChildStreamRecorder>,
+) -> Result<CommittedToolDispatch, RuntimeEffectControllerError> {
     let tool_context = child_tool_context(dispatch, request, &turn_cancel_wait);
     let executor_context = tool_context.clone();
     let executor_dispatch = Arc::clone(dispatch);
@@ -1353,32 +1369,93 @@ async fn shift(
     ))
     .await;
     match coordinated.launch {
-        ToolCallLaunch::Done(outcome) => Ok(*outcome),
-        // Deferred completion is coordination and belongs at handler level
-        // (§2), so the driver arms the resolver the call named and parks on its
-        // own journaled await rather than handing a parked child back to a
-        // group that can only read settlements.
-        //
-        // The resolved completion is this child's terminal, so its final
-        // record crosses the §4 boundary here — before presentation, exactly
-        // where an inline terminal crosses it. Left to the child's finalize,
-        // the commit would land only after the presentation boundary, and a
-        // sibling that settled later but committed at its own attempt boundary
-        // would take the earlier commit position and lead the settlement order
-        // (FIG-3609). A parked attempt declares no intents, so there is no
-        // drain to admit behind the barrier: the discharge seats the rank.
-        ToolCallLaunch::Pending(pending) => {
-            let outcome =
-                await_child_completion(dispatch, request, *pending, &turn_cancel_wait).await?;
+        ToolCallLaunch::Done(outcome) => Ok(CommittedToolDispatch::Done(outcome)),
+        ToolCallLaunch::Pending(mut pending) => {
+            let site = crate::tool_dispatch::ParkSite {
+                processes: dispatch.processes.as_ref(),
+                owner: dispatch.owner.runtime_owner(),
+                call_id: &request.call.call_id,
+                scope: dispatch
+                    .process_scope()
+                    .with_turn_cancellation(&turn_cancel_wait),
+                child_trace_hook: None,
+            };
+            let armed = match crate::tool_dispatch::arm_pending_resolver(&site, &pending).await? {
+                crate::tool_dispatch::ResolverArming::Armed(armed) => armed,
+                crate::tool_dispatch::ResolverArming::Resolved { resolution, armed } => {
+                    // The resolver's already-terminal result still owns the same completion key.
+                    dispatch
+                        .effect_controller
+                        .controller()
+                        .resolve_await_event(&pending.key, *resolution)
+                        .await?;
+                    armed
+                }
+                crate::tool_dispatch::ResolverArming::Settled { failure, armed } => {
+                    let outcome = crate::tool_dispatch::commit_unarmed_tool_child(
+                        dispatch.as_ref(),
+                        &group_child,
+                        unarmed_child_outcome(*pending, *failure, armed),
+                    )
+                    .await?;
+                    return Ok(CommittedToolDispatch::Done(Box::new(outcome)));
+                }
+            };
+            let parent = request.lineage.parent_invocation().ok_or_else(|| {
+                RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                    "a deferred tool has no recorded parent invocation",
+                )
+            })?;
+            let invocation = journaled_await_invocation(dispatch, parent, &request.call.call_id);
+            let clock = Arc::clone(&dispatch.clock);
+            let deadline = dispatch
+                .effect_controller
+                .execute_effect(
+                    RuntimeEffectEnvelope::new(
+                        invocation,
+                        RuntimeEffectCommand::ArmToolCompletion {
+                            key: pending.key.clone(),
+                            timeout_ms: pending
+                                .pending
+                                .deadline
+                                .map(|duration| duration.as_millis().min(u64::MAX as u128) as u64),
+                        },
+                    ),
+                    RuntimeEffectLocalExecutor::await_event_under(&turn_cancel_wait, None, clock),
+                )
+                .await?;
+            let RuntimeEffectOutcome::ArmToolCompletion { deadline_ms } = deadline else {
+                return Err(RuntimeEffectControllerError::wrong_outcome(
+                    crate::RuntimeEffectKind::ArmToolCompletion,
+                    deadline.kind(),
+                ));
+            };
+            let capture = crate::runtime::ToolAttemptCapture {
+                messages: dispatch.checkpoint_messages.drain(),
+                ..Default::default()
+            };
+            if !capture.is_empty() {
+                pending.captures.push(capture);
+            }
+            pending.triggers.extend(dispatch.trigger_outcomes.drain());
+            let completion = DeferredToolCompletion {
+                request: Box::new(request.clone()),
+                pending,
+                armed,
+                deadline_ms,
+                stream: recorder
+                    .map(ChildStreamRecorder::finish)
+                    .unwrap_or_default(),
+            };
             crate::tool_dispatch::commit_deferred_group_child(
                 dispatch.as_ref(),
                 &group_child,
-                outcome,
+                Box::new(completion),
             )
             .await
+            .map(CommittedToolDispatch::Deferred)
         }
-        // A refusal, not a settlement: a fabricated terminal here would journal
-        // an outcome no effect ever produced.
         ToolCallLaunch::ControllerAborted(error) => Err(error),
     }
 }
@@ -1444,119 +1521,38 @@ fn child_turn_cancel_scope(
     }
 }
 
-/// Arms the resolver the parked call named, then parks on the child's own
-/// journaled await.
-async fn await_child_completion(
-    dispatch: &Arc<ToolDispatchContext<'_>>,
-    request: &ToolChildRequest,
-    pending: crate::tool_dispatch::PendingToolDispatchOutcome,
-    turn_cancel_wait: &crate::runtime::TurnCancelWait,
-) -> Result<ToolDispatchOutcome, RuntimeEffectControllerError> {
-    await_journaled_tool_completion(
-        dispatch,
-        request.lineage.parent_invocation(),
-        &request.call.call_id,
-        pending,
-        turn_cancel_wait,
-    )
-    .await
-}
-
-/// Arms the resolver a deferred tool call named, then parks on a journaled
-/// await derived from the lineage the caller supplies.
-///
-/// The driver parks the child's deferred call under the request's *recorded*
-/// parent invocation, so a redrive re-derives the same replay key rather than
-/// a fresh one — the same reconstruction property this module's
-/// documentation claims for the attempts themselves.
-///
-/// The arming runs before the park and on every redrive, for the reason the
-/// session path states: the recorded attempt body that named the resolver does
-/// not re-run, so nothing else would arm it.
-async fn await_journaled_tool_completion(
+pub(crate) async fn complete_deferred_tool(
     dispatch: &ToolDispatchContext<'_>,
-    parent_invocation: Option<&crate::RuntimeInvocation>,
-    call_id: &crate::ToolCallId,
-    pending: crate::tool_dispatch::PendingToolDispatchOutcome,
+    completion: DeferredToolCompletion,
+    resolution: crate::Resolution,
     turn_cancel_wait: &crate::runtime::TurnCancelWait,
 ) -> Result<ToolDispatchOutcome, RuntimeEffectControllerError> {
+    let pending = *completion.pending;
+    let armed = completion.armed;
     let site = crate::tool_dispatch::ParkSite {
         processes: dispatch.processes.as_ref(),
         owner: dispatch.owner.runtime_owner(),
-        call_id,
+        call_id: &pending.call_id,
         scope: dispatch
             .process_scope()
             .with_turn_cancellation(turn_cancel_wait),
         child_trace_hook: None,
     };
-    let Some(invocation) =
-        parent_invocation.map(|parent| journaled_await_invocation(dispatch, parent, call_id))
-    else {
-        return Ok(unarmed_child_outcome(
-            pending,
-            crate::ToolFailure::runtime(
-                crate::ToolFailureClass::Internal,
-                "pending_tool_resolver_unarmed",
-                "the declared resolver for this group child could not be armed: the caller's \
-                 lineage names no invocation to hang an await on",
-            ),
-            crate::tool_dispatch::ArmedResolver::default(),
-        ));
-    };
-    let (armed, resolved) =
-        match crate::tool_dispatch::arm_pending_resolver(&site, &pending).await? {
-            crate::tool_dispatch::ResolverArming::Armed(armed) => (armed, None),
-            crate::tool_dispatch::ResolverArming::Resolved { resolution, armed } => {
-                (armed, Some(*resolution))
-            }
-            crate::tool_dispatch::ResolverArming::Settled { failure, armed } => {
-                return Ok(unarmed_child_outcome(pending, *failure, armed));
-            }
-        };
-    let resolver = pending.pending.resolved_by.clone();
-    // The journaled await's replay key is the settled call's observation key:
-    // unique per (parent, call id) and re-derived identically on a redrive
-    // (ADR 0105 §1).
-    let settle_key = invocation.effect_replay_key().to_owned();
-    let deadline = pending
-        .pending
-        .deadline
-        .map(|duration| dispatch.clock.now() + duration);
-    // The settled call's observed duration is this resume's live window —
-    // the journaled await and pending row carry no clock facts (FIG-3696).
-    let settle_started = dispatch.clock.now();
-    let outcome = if let Some(resolution) = resolved {
-        Ok(resolution)
-    } else {
-        dispatch
-            .effect_controller
-            .execute_effect(
-                RuntimeEffectEnvelope::new(
-                    invocation,
-                    RuntimeEffectCommand::AwaitEvent {
-                        key: pending.key.clone(),
-                    },
-                ),
-                RuntimeEffectLocalExecutor::await_event_under(
-                    turn_cancel_wait,
-                    deadline,
-                    Arc::clone(&dispatch.clock),
-                ),
+    let parent = completion
+        .request
+        .lineage
+        .parent_invocation()
+        .ok_or_else(|| {
+            RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                "a deferred tool has no recorded parent invocation",
             )
-            .await
-            .and_then(RuntimeEffectOutcome::into_await_event)
-    };
-    let resolution = match outcome {
-        Ok(resolution) => resolution,
-        // The await's recorded `Failed` terminal replaying is the call's
-        // result. Anything else — a replay divergence against its record, a
-        // live journal fault — is a refusal, returned so the caller refuses
-        // the call rather than settling the error as its result (FIG-3679).
-        Err(error) if error.journaled => {
-            return Ok(failed_child_outcome(pending, &error.to_string(), &armed));
-        }
-        Err(error) => return Err(error),
-    };
+        })?;
+    let settle_key = journaled_await_invocation(dispatch, parent, &pending.call_id)
+        .effect_replay_key()
+        .to_owned();
+    let resolver = pending.pending.resolved_by.clone();
+    let settle_started = dispatch.clock.now();
     crate::tool_dispatch::finish_parked_wait(
         &site,
         &pending.pending,
@@ -1644,32 +1640,6 @@ fn unarmed_child_outcome(
     }
 }
 
-/// The child's await itself failed, which is the child's terminal.
-fn failed_child_outcome(
-    pending: crate::tool_dispatch::PendingToolDispatchOutcome,
-    reason: &str,
-    armed: &crate::tool_dispatch::ArmedResolver,
-) -> ToolDispatchOutcome {
-    ToolDispatchOutcome {
-        record: crate::ToolCallRecord {
-            call_id: pending.call_id,
-            provider_call_id: pending.provider_call_id,
-            tool: pending.tool_name,
-            args: pending.args,
-            output: crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
-                crate::ToolFailureClass::Internal,
-                "pending_tool_completion_failed",
-                reason.to_string(),
-            )),
-        },
-        attempts: pending.attempts,
-        intents: crate::ToolIntents::default(),
-        intent_outcomes: armed.intent_outcomes(),
-        captures: pending.captures,
-        triggers: pending.triggers,
-    }
-}
-
 /// The child's presentation boundary: the registered presentation steps, run
 /// once over the settled outcome, with attachment notices computed under the
 /// child's *recorded* environment (ADR 0099 §3 — a reopen uses the recorded
@@ -1683,7 +1653,7 @@ fn failed_child_outcome(
 /// presentation *effect* — a replay divergence against its recorded envelope, a
 /// journal fault — is no presentation at all: it refuses the child, exactly as
 /// a failed attempt effect does, and never settles as the model-facing return.
-async fn resolve_model_return(
+pub(crate) async fn resolve_model_return(
     dispatch: &ToolDispatchContext<'_>,
     request: &ToolChildRequest,
     outcome: &ToolDispatchOutcome,

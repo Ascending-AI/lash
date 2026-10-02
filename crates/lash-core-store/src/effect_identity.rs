@@ -41,6 +41,8 @@ pub enum RuntimeEffectKind {
     /// (ADR 0099 §2). Distinct from [`ToolAttempt`](Self::ToolAttempt), which is
     /// the atomic body of one attempt.
     ToolInvocation,
+    ArmToolCompletion,
+    AwaitToolCompletions,
     /// The opener-journaled record of a group's incorporated settlement prefix
     /// (ADR 0099 §6): which ranks the opener applied before an externally
     /// effective step, so replay restores exactly that mapping.
@@ -139,6 +141,8 @@ impl RuntimeEffectKind {
             Self::Direct => "direct",
             Self::ToolAttempt => "tool_attempt",
             Self::ToolInvocation => "tool_invocation",
+            Self::ArmToolCompletion => "arm_tool_completion",
+            Self::AwaitToolCompletions => "await_tool_completions",
             Self::IncorporateGroupSettlements => "incorporate_group_settlements",
             Self::PresentToolResult => "present_tool_result",
             Self::ToolParentEnd => "tool_parent_end",

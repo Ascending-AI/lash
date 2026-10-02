@@ -1,4 +1,5 @@
 use super::*;
+use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
 use lash_sansio::session_model::{FailureCode, TurnFailureCode};
 
 impl RuntimeTurnDriver<'_> {
@@ -405,22 +406,60 @@ impl RuntimeTurnDriver<'_> {
         id: crate::sansio::EffectId,
         calls: Vec<crate::sansio::PendingToolCall>,
         event_tx: &TurnObserver,
+        run_offset: usize,
     ) -> Result<(), RuntimeError> {
         // Per-tool trace events (ToolCallStarted / ToolCallCompleted) are
         // emitted from the shared tool-execution seam so every tool call
         // produces exactly one Started + one Completed pair. See
         // `RuntimeExecutionContext::emit_tool_call_started_trace` /
         // `emit_tool_call_completed_trace`.
-        let results = match self
-            .invoke_turn_tool_calls_effect(machine, id, calls, event_tx)
+        let round = match Box::pin(self.invoke_turn_tool_calls_effect(machine, id, calls, event_tx))
             .await
         {
-            Ok(results) => results,
+            Ok(round) => round,
             Err(err) => {
                 Self::fail_or_abort_runtime_effect_controller(machine, err)?;
                 return Ok(());
             }
         };
+        if !round.pending.is_empty() {
+            let state = serde_json::to_value(round).map_err(|error| {
+                RuntimeError::new(
+                    RuntimeErrorCode::ExecutionStateCaptureFailed,
+                    error.to_string(),
+                )
+            })?;
+            if !machine.settle_tool_dispatch(state) {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::ExecutionStateCaptureFailed,
+                    "the machine was not waiting on the dispatched tools",
+                ));
+            }
+            if self.segment.allowed
+                && let Some(reason) = self
+                    .scoped_effect_controller
+                    .controller()
+                    .wants_segment_boundary(&crate::SegmentProgress {
+                        effects_executed: self.scoped_effect_controller.effects_executed(),
+                        journaled_bytes_estimate: None,
+                    })
+            {
+                return self.end_waiting_for_tool_results(machine, run_offset, reason);
+            }
+            return Ok(());
+        }
+        let results = round
+            .completed()
+            .map_err(RuntimeEffectControllerError::into_runtime_error)?;
+        self.deliver_tool_results(machine, id, results)
+    }
+
+    fn deliver_tool_results(
+        &mut self,
+        machine: &mut TurnMachine,
+        id: crate::sansio::EffectId,
+        results: Vec<crate::sansio::CompletedToolCall>,
+    ) -> Result<(), RuntimeError> {
         for result in &results {
             let producer = crate::AttachmentProducer::Tool {
                 tool_name: result.tool_name.clone(),
@@ -445,6 +484,125 @@ impl RuntimeTurnDriver<'_> {
         }
         self.handle_machine_response(machine, Response::ToolResults { id, results })?;
         Ok(())
+    }
+
+    pub(super) async fn handle_await_tool_results_effect(
+        &mut self,
+        machine: &mut TurnMachine,
+        id: crate::sansio::EffectId,
+        state: serde_json::Value,
+        run_offset: usize,
+        event_tx: &TurnObserver,
+    ) -> Result<(), RuntimeError> {
+        let mut round: super::tools::WaitingToolRound =
+            serde_json::from_value(state).map_err(|error| {
+                RuntimeError::new(
+                    RuntimeErrorCode::ExecutionStateCaptureFailed,
+                    error.to_string(),
+                )
+            })?;
+        round
+            .validate()
+            .map_err(RuntimeEffectControllerError::into_runtime_error)?;
+        while !round.pending.is_empty() {
+            let context = self
+                .execution_context(
+                    event_tx,
+                    Arc::new(crate::ChronologicalProjection::default()),
+                )
+                .map_err(|error| {
+                    RuntimeError::new(
+                        RuntimeErrorCode::ToolCatalogResolutionFailed,
+                        error.to_string(),
+                    )
+                })?
+                .with_tracing(self.execution_tracing(machine.protocol_iteration()));
+            let waits = round
+                .pending
+                .iter()
+                .map(|(_, completion)| crate::ToolCompletionWait {
+                    key: completion.pending.key.clone(),
+                    deadline_ms: completion.deadline_ms,
+                })
+                .collect();
+            let step = format!(
+                "{}:tool-results:{}:{}",
+                self.turn_id,
+                machine.protocol_iteration(),
+                round
+                    .results
+                    .iter()
+                    .filter(|result| result.is_some())
+                    .count()
+            );
+            let event = context
+                .await_deferred_tool_completions(&step, waits, None, self.cells_hand_over())
+                .await;
+            match event {
+                Ok(crate::ToolCompletionEvent::Resolved {
+                    position,
+                    resolution,
+                }) => {
+                    if position >= round.pending.len() {
+                        return Err(RuntimeError::new(
+                            RuntimeErrorCode::RuntimeEffectGroupShape,
+                            "a completion wait returned an invalid tool position",
+                        ));
+                    }
+                    let (source_index, completion) = round.pending.remove(position);
+                    let completed = context
+                        .finish_deferred_tool_completion(*completion, resolution)
+                        .await
+                        .map_err(RuntimeEffectControllerError::into_runtime_error)?;
+                    round.results[source_index] = Some(completed.completed);
+                }
+                Err(error) if error.code == RuntimeErrorCode::TurnWaitHandedOver => {
+                    drop(context);
+                    let state = serde_json::to_value(round).map_err(|error| {
+                        RuntimeError::new(
+                            RuntimeErrorCode::ExecutionStateCaptureFailed,
+                            error.to_string(),
+                        )
+                    })?;
+                    machine.settle_tool_dispatch(state);
+                    return self.end_waiting_for_tool_results(
+                        machine,
+                        run_offset,
+                        crate::BoundaryReason::HandOver,
+                    );
+                }
+                Err(error) if error.code == RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled => {
+                    context.note_turn_cancelled();
+                    for (source_index, completion) in round.pending.drain(..) {
+                        let completed = context
+                            .cancel_deferred_tool_completion(*completion)
+                            .await
+                            .map_err(RuntimeEffectControllerError::into_runtime_error)?;
+                        round.results[source_index] = Some(completed.completed);
+                    }
+                }
+                Err(error) => {
+                    Self::fail_or_abort_runtime_effect_controller(machine, error)?;
+                    return Ok(());
+                }
+                Ok(
+                    crate::ToolCompletionEvent::DispatchReady
+                    | crate::ToolCompletionEvent::HandedOver,
+                ) => {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::RuntimeEffectWrongOutcome,
+                        "a settled run tool round observed an unexpected completion event",
+                    ));
+                }
+            }
+        }
+        self.deliver_tool_results(
+            machine,
+            id,
+            round
+                .completed()
+                .map_err(RuntimeEffectControllerError::into_runtime_error)?,
+        )
     }
 
     /// The cancellation a code cell's turn honours after the cell: the

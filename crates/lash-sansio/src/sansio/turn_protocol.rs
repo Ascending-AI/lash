@@ -255,6 +255,10 @@ pub enum Effect<M: TurnProtocol = UnitTurnProtocol> {
         #[serde(default, skip_serializing_if = "ToolExpansionPlan::is_empty")]
         expansion: ToolExpansionPlan,
     },
+    AwaitToolResults {
+        id: EffectId,
+        state: serde_json::Value,
+    },
     ExecCode {
         id: EffectId,
         language: String,
@@ -312,6 +316,10 @@ impl<M: TurnProtocol> Clone for Effect<M> {
                 id: *id,
                 calls: calls.clone(),
                 expansion: expansion.clone(),
+            },
+            Self::AwaitToolResults { id, state } => Self::AwaitToolResults {
+                id: *id,
+                state: state.clone(),
             },
             Self::ReportToolCalls { completed } => Self::ReportToolCalls {
                 completed: completed.clone(),
@@ -521,9 +529,12 @@ pub enum PendingWork<M: TurnProtocol = UnitTurnProtocol> {
         request: Arc<LlmRequest>,
         driver_state: Option<M::DriverState>,
     },
-    Tools {
+    WaitingForToolResults {
         /// The flat executable slots of the step's one tool group.
         calls: Vec<PendingToolCall>,
+        /// Settled dispatch state owned by the runtime; present only after every dispatch ended.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        settled: Option<serde_json::Value>,
         /// How the slots fold back into the response's calls. Empty when the
         /// response held no sugar, and then absent from the encoding.
         #[serde(default, skip_serializing_if = "ToolExpansionPlan::is_empty")]
@@ -551,7 +562,12 @@ impl<M: TurnProtocol> Clone for PendingWork<M> {
                 request: Arc::clone(request),
                 driver_state: driver_state.clone(),
             },
-            Self::Tools { calls, expansion } => Self::Tools {
+            Self::WaitingForToolResults {
+                calls,
+                expansion,
+                settled,
+            } => Self::WaitingForToolResults {
+                settled: settled.clone(),
                 calls: calls.clone(),
                 expansion: expansion.clone(),
             },
@@ -585,10 +601,20 @@ impl<M: TurnProtocol> PendingWork<M> {
                 id,
                 request: Arc::clone(request),
             },
-            Self::Tools { calls, expansion } => Effect::ToolCalls {
-                id,
-                calls: calls.clone(),
-                expansion: expansion.clone(),
+            Self::WaitingForToolResults {
+                calls,
+                expansion,
+                settled,
+            } => match settled {
+                None => Effect::ToolCalls {
+                    id,
+                    calls: calls.clone(),
+                    expansion: expansion.clone(),
+                },
+                Some(state) => Effect::AwaitToolResults {
+                    id,
+                    state: state.clone(),
+                },
             },
             Self::Exec { language, code, .. } => Effect::ExecCode {
                 id,
@@ -637,11 +663,19 @@ impl<M: TurnProtocol> PendingWork<M> {
                     driver_state,
                 }),
             },
-            Self::Tools { calls, expansion } => match response {
+            Self::WaitingForToolResults {
+                calls,
+                expansion,
+                settled,
+            } => match response {
                 Response::ToolResults { results, .. } => {
                     Ok(AnsweredWork::Tools { expansion, results })
                 }
-                _ => Err(Self::Tools { calls, expansion }),
+                _ => Err(Self::WaitingForToolResults {
+                    calls,
+                    expansion,
+                    settled,
+                }),
             },
             Self::Exec {
                 language,

@@ -57,7 +57,7 @@ pub struct RuntimeExecutionContext<'run> {
     /// is judged against, tool by tool (FIG-3587). `None` means the dispatch
     /// catalog is live.
     live_tool_catalog: Option<Arc<crate::ToolCatalog>>,
-    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    pub(super) process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     /// `F` this execution's durable writers emit — recorded by the bound
     /// session's store, so a stamped surface version is the fleet's, not the
     /// build's newest (FIG-3796). Contexts with no store default to the

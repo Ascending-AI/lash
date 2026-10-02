@@ -529,6 +529,18 @@ pub struct PendingToolDispatchOutcome {
     pub triggers: Vec<crate::tool_dispatch::ToolTriggerEffectOutcome>,
 }
 
+/// A settled dispatch whose completion belongs to its Run. The recorded
+/// request retains its presentation environment and the original call keys.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeferredToolCompletion {
+    pub request: Box<crate::runtime::ToolChildRequest>,
+    pub pending: Box<PendingToolDispatchOutcome>,
+    pub armed: super::ArmedResolver,
+    pub deadline_ms: Option<u64>,
+    pub stream: crate::runtime::effect::RecordedChildStream,
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ToolCallLaunch {

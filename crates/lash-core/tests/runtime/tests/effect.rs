@@ -810,6 +810,110 @@ async fn tool_attempt_effect_crosses_controller_per_child_attempt_and_runs_local
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn recording_controller_preserves_deferred_tool_completions() {
+    struct DeferredEchoTool {
+        resolver: Arc<dyn lash_core::EffectHost>,
+    }
+
+    #[async_trait::async_trait]
+    impl lash_core::ToolProvider for DeferredEchoTool {
+        fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+            EchoTool.tool_manifests()
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+            EchoTool.resolve_contract(name)
+        }
+
+        fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
+            self.tool_manifests()
+                .iter()
+                .any(|manifest| &manifest.id == tool_id)
+        }
+
+        async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+            let key = call
+                .context
+                .completion_key()
+                .expect("the call has its original completion key");
+            let value = call.args["value"]
+                .as_str()
+                .expect("the echo input is valid");
+            self.resolver
+                .await_event_resolver()
+                .resolve_await_event(
+                    &key,
+                    Resolution::Ok(json!({ "payload": format!("raw:{value}") })),
+                )
+                .await
+                .expect("resolve the original completion");
+            lash_core::ToolAttemptOutcome::Pending(lash_core::PendingCompletion::default())
+        }
+    }
+
+    let double = kernel_double(SEED + 0x40, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let recorder = RecordingEffectController::default();
+    let mut runtime = runtime_with_plugins_and_tools_and_host(
+        Vec::new(),
+        Arc::new(DeferredEchoTool {
+            resolver: backend.effect_host(),
+        }),
+        mock_provider(Vec::new()),
+        host_with_effect_recorder(&backend, recorder.clone()),
+    )
+    .await;
+
+    let handler = double
+        .open_handler(AdmittedScope::turn("root", "deferred-recording"))
+        .await
+        .expect("open the turn's handler");
+    let scope = lash_core::testing::LayeredEffectHost::layer_scoped(
+        handler.scoped(),
+        Arc::new(recorder.clone()),
+    )
+    .expect("layer the handler's controller");
+
+    let turn = runtime
+        .execute_turn(
+            TurnInput::text("use the tool"),
+            lash_core::facade_support::TurnOptions::new(CancellationToken::new(), scope),
+        )
+        .await
+        .expect("the deferred round completes");
+    handler.close().await.expect("close the turn's handler");
+
+    assert!(
+        matches!(turn.outcome, TurnOutcome::Finished(_)),
+        "deferred outcome: {:?}; errors: {:?}; records: {:?}; calls: {:?}",
+        turn.outcome,
+        turn.errors,
+        recorder.records(),
+        turn.tool_calls,
+    );
+    assert_eq!(recorder.count_kind(RuntimeEffectKind::ToolAttempt), 2);
+    assert_eq!(recorder.count_kind(RuntimeEffectKind::ArmToolCompletion), 2);
+    assert_eq!(
+        recorder.count_kind(RuntimeEffectKind::AwaitToolCompletions),
+        2
+    );
+    assert_eq!(recorder.count_kind(RuntimeEffectKind::LlmCall), 2);
+    assert_eq!(turn.tool_calls.len(), 2);
+    for (call, (provider_id, payload)) in turn
+        .tool_calls
+        .iter()
+        .zip([("call-1", "raw:hi"), ("call-2", "raw:there")])
+    {
+        assert_eq!(call.provider_call_id.as_deref(), Some(provider_id));
+        assert!(call.output.is_success());
+        assert_eq!(
+            call.output.value_for_projection(),
+            json!({ "payload": payload })
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn exec_and_execution_environment_effects_cross_controller_once() {
     let double = kernel_double(SEED + 10, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();

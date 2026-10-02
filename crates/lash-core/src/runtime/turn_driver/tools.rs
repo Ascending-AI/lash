@@ -36,7 +36,7 @@ impl RuntimeTurnDriver<'_> {
         id: crate::sansio::EffectId,
         calls: Vec<crate::sansio::PendingToolCall>,
         event_tx: &TurnObserver,
-    ) -> Result<Vec<crate::sansio::CompletedToolCall>, RuntimeEffectControllerError> {
+    ) -> Result<WaitingToolRound, RuntimeEffectControllerError> {
         let prepare_context = self
             .execution_context(
                 event_tx,
@@ -52,6 +52,7 @@ impl RuntimeTurnDriver<'_> {
         let call_count = calls.len();
         let mut results = vec![None; call_count];
         let mut prepared_entries = Vec::new();
+        let mut pending = Vec::new();
         for (index, call) in calls.into_iter().enumerate() {
             let ids = crate::tool_dispatch::ToolCallIds::of_pending(&call);
             let call_id = ids.call_id.clone();
@@ -108,8 +109,8 @@ impl RuntimeTurnDriver<'_> {
 
         if !prepared_entries.is_empty() {
             // ADR 0099: the turn's tool calls open as one durable effect group
-            // of `ToolInvocation` children; a deferred leaf parks inside its
-            // own child driver. The calls are the step's flat slots: native
+            // of `ToolInvocation` children; a deferred leaf seals its dispatch
+            // and leaves its original completion key for the Run to wait on. The calls are the step's flat slots: native
             // calls and the members the protocol expanded from its sugar
             // (ADR 0116 §2) alike, so every one starts before any is awaited.
             // A step with no slot left opens no group.
@@ -128,25 +129,21 @@ impl RuntimeTurnDriver<'_> {
             // group and reopen its settlements.
             let batch_id = crate::BatchId::parse(group_invocation.effect_replay_key())?;
             let completions = prepare_context
-                .execute_prepared_tool_group(batch_id, group_invocation, prepared_entries)
+                .dispatch_prepared_tool_group(batch_id, group_invocation, prepared_entries)
                 .await?;
             for (source_index, completed) in completions {
-                results[source_index] = Some(completed.completed);
+                match completed {
+                    lash_core_execution::core_internal::ToolDispatchResult::Done(completed) => {
+                        results[source_index] = Some(completed.completed)
+                    }
+                    lash_core_execution::core_internal::ToolDispatchResult::Deferred(
+                        completion,
+                    ) => pending.push((source_index, completion)),
+                }
             }
         }
         drop(prepare_context);
-        results
-            .into_iter()
-            .enumerate()
-            .map(|(index, result)| {
-                result.ok_or_else(|| {
-                    RuntimeEffectControllerError::new(
-                        crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-                        format!("the turn's tool group did not fill result slot {index}"),
-                    )
-                })
-            })
-            .collect()
+        Ok(WaitingToolRound { results, pending })
     }
 }
 
@@ -167,5 +164,50 @@ impl RuntimeTurnDriver<'_> {
                 error.to_string(),
             )
         })
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct WaitingToolRound {
+    pub(super) results: Vec<Option<crate::sansio::CompletedToolCall>>,
+    pub(super) pending: Vec<(usize, Box<crate::tool_dispatch::DeferredToolCompletion>)>,
+}
+
+impl WaitingToolRound {
+    pub(super) fn validate(&self) -> Result<(), RuntimeEffectControllerError> {
+        let mut slots = std::collections::BTreeSet::new();
+        for (position, completion) in &self.pending {
+            if !matches!(self.results.get(*position), Some(None)) || !slots.insert(*position) {
+                return Err(RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                    "a waiting tool round has an invalid or duplicate pending slot",
+                ));
+            }
+            completion.request.validate()?;
+            if completion.request.call.call_id != completion.pending.call_id {
+                return Err(RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                    "a deferred completion names a different call than its admitted request",
+                ));
+            }
+        }
+        Ok(())
+    }
+    pub(super) fn completed(
+        self,
+    ) -> Result<Vec<crate::sansio::CompletedToolCall>, RuntimeEffectControllerError> {
+        self.results
+            .into_iter()
+            .enumerate()
+            .map(|(index, result)| {
+                result.ok_or_else(|| {
+                    RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                        format!("the tool round left result slot {index} empty"),
+                    )
+                })
+            })
+            .collect()
     }
 }

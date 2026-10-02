@@ -574,7 +574,8 @@ impl ProtocolDriverHandle<HostTurnProtocol> for MinimalProtocolDriver {
                 TurnFinish::AssistantMessage { text },
             ))]
         } else {
-            vec![DriverAction::Start(PendingWork::Tools {
+            vec![DriverAction::Start(PendingWork::WaitingForToolResults {
+                settled: None,
                 calls,
                 expansion: Default::default(),
             })]

@@ -578,8 +578,7 @@ pub use tool_registry::{
     ToolSurfaceOpenMode,
 };
 pub use tool_result::{
-    CancelHint, PendingAnnouncement, PendingCompletion, PendingResolver, TimeoutBehavior,
-    ToolOutcome,
+    CancelHint, PendingAnnouncement, PendingCompletion, PendingResolver, ToolOutcome,
 };
 pub use tool_result::{DeclaredStart, DeclaredStartRefused};
 pub use triggers::{
@@ -839,11 +838,11 @@ pub use runtime::{
     SessionCreationHead, SessionEntry, SessionId, SessionListFilter, SessionRelationKind,
     SessionScope, SessionStateVersionRefusal, SessionStoreCreateRequest, SessionView,
     SessionWorkEngine, SleepSpec, SlotId, StartCx, StartCxError, StartKey, StoreRealization,
-    StoredDataCorruption, Target, ToolAttemptLaunch, TurnActivity, TurnActivityId,
-    TurnCancelAffectedInput, TurnCancelAffectedWake, TurnCancelClosureAuthorization,
-    TurnCancelClosureAuthorizationOutcome, TurnCancelClosureOwnerBinding,
-    TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelInputOutcome,
-    TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelRequestRecord,
+    StoredDataCorruption, Target, ToolAttemptLaunch, ToolCompletionEvent, ToolCompletionWait,
+    ToolDispatchCursor, TurnActivity, TurnActivityId, TurnCancelAffectedInput,
+    TurnCancelAffectedWake, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
+    TurnCancelClosureOwnerBinding, TurnCancelClosureProposal, TurnCancelClosureSettlement,
+    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelRequestRecord,
     TurnCancelUndeliveredInputPolicy, TurnCancellationAuthority, TurnContext,
     TurnControlAttachment, TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
     TurnEvent, TurnFailureCause, TurnFailureEvidence, TurnFailurePartialOutput,
@@ -946,6 +945,7 @@ pub mod core_internal {
     pub use crate::runtime::effect::executor::{sleep_duration, sleep_with_cancellation};
     pub use crate::runtime::effect::tool_child_runtime_ops::ToolChildHostRuntimeOps;
     pub use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps;
+    pub use crate::session::tool_execution::ToolDispatchResult;
     pub use lash_core_store::process_identity::StartKeyDerivation;
     pub fn attach_process_invocation_correlation(
         turn_context: &mut crate::TurnContext,

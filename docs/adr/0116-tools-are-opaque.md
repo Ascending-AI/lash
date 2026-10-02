@@ -130,7 +130,7 @@ re-run sees the call id the first run saw
 #### 2.1 Where the expansion happens
 
 The standard driver expands response calls into a flat list and a
-`ToolExpansionPlan`. `PendingWork::Tools` and the tool-call effect carry the
+`ToolExpansionPlan`. `PendingWork::WaitingForToolResults` and the tool-call effect carry the
 plan beside the slots. Runtime preparation and execution receive ordinary
 calls. The turn machine folds completed slots before transcript and stream
 processing (`crates/lash-protocol-standard/src/lib.rs:679`, `:728`,
@@ -278,10 +278,21 @@ the call; infrastructure faults and replay refusals propagate for recovery
 `crates/lash-core-execution/src/tool_dispatch/intent_executor.rs:193`).
 
 The launch does not wait for the child terminal. A group of spawns can launch
-all children before any result resolves. The pending child's final settlement
-occurs after resolution
-(`crates/lash-core-execution/src/runtime/effect/tool_child_driver.rs:1475`,
-`:1493`, `:1528`).
+all children before any result resolves. A deferred child freezes its request,
+completion descriptor and absolute deadline, durably arms its resolver and
+timer, then seals `Deferred` as its dispatch final. That final retains completion
+responsibility until the opener incorporates every dispatch rank and takes it.
+
+A standard Run then waits in `WaitingForToolResults`, carrying both completed
+slots and pending descriptors. A requested segment boundary commits that phase
+with the owed successor. The successor waits on the original completion keys
+and deadlines without dispatching the tools again. No model request runs while
+the round is pending. Resolution runs normal settlement and presentation once,
+then folds the real tool results in source order. Aggregate consumers await
+logical completions too: a `Deferred` rank never wins `race` or `any`
+(`crates/lash-core-execution/src/runtime/effect/tool_child_driver.rs`,
+`crates/lash-core-execution/src/session/tool_execution/deferred.rs`,
+`crates/lash-core/src/runtime/turn_driver/handlers.rs`).
 
 #### 3.3 The launch obligation
 
@@ -304,8 +315,7 @@ keeps the obligation for the opener to discharge
 
 #### 3.5 A timeout cancels the child
 
-A pending deadline resolves as the configured `TimeoutBehavior`.
-`ErrorAsResult` returns a timeout failure; `FailTurn` fails the turn.
+A pending deadline resolves as a typed tool-failure result.
 For runtime-owned resolvers with `CancelExternalWork`, the finish path
 cancels the child before releasing its hold
 (`crates/lash-core-execution/src/tool_result.rs:1`,

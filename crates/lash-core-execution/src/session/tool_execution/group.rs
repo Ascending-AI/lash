@@ -122,6 +122,7 @@ pub(crate) enum GroupChildSettled {
     Tool(Box<CompletedProtocolToolCall>),
     /// A timer child that elapsed; its fulfilment value is `undefined`.
     Timer,
+    Deferred(Box<crate::tool_dispatch::DeferredToolCompletion>),
 }
 
 impl GroupChildSettled {
@@ -135,6 +136,7 @@ impl GroupChildSettled {
                 )
             }
             Self::Timer => true,
+            Self::Deferred(_) => false,
         }
     }
 }
@@ -598,9 +600,20 @@ impl RuntimeExecutionContext<'_> {
     /// end resumes whatever closing is recorded under its scope.
     pub(crate) async fn consume_tool_child_group(
         &self,
+        handle: crate::EffectGroupHandle,
+        children: &[PreparedGroupChild],
+        consumer: ToolAggregateConsumer,
+    ) -> Result<ToolChildGroupSettled, crate::RuntimeEffectControllerError> {
+        self.consume_tool_child_group_mode(handle, children, consumer, false)
+            .await
+    }
+
+    async fn consume_tool_child_group_mode(
+        &self,
         mut handle: crate::EffectGroupHandle,
         children: &[PreparedGroupChild],
         consumer: ToolAggregateConsumer,
+        dispatch_only: bool,
     ) -> Result<ToolChildGroupSettled, crate::RuntimeEffectControllerError> {
         let controller = self.dispatch.effect_controller.controller();
         let cancel = self.cancellation_token.clone().unwrap_or_default();
@@ -614,7 +627,9 @@ impl RuntimeExecutionContext<'_> {
         let mut settlement_positions = Vec::with_capacity(children.len());
         let mut decided = None;
         let mut lost_to_turn_gate = false;
-        while !handle.is_exhausted() {
+        let mut pending: Vec<(usize, Box<crate::tool_dispatch::DeferredToolCompletion>)> =
+            Vec::new();
+        while !handle.is_exhausted() || !pending.is_empty() {
             // A turn that already recorded its cancellation awaits no rank:
             // the recorded fact answers exactly as a wait that lost to the
             // gate would, at the same point on every replay (FIG-3672 P9).
@@ -625,9 +640,79 @@ impl RuntimeExecutionContext<'_> {
                 ))
             } else {
                 let turn_cancel = self.turn_cancel_wait(cancel.child_token());
-                let awaited = controller
-                    .await_next_settlement(&mut handle, turn_cancel.clone())
-                    .await;
+                let completion = if pending.is_empty() {
+                    None
+                } else {
+                    Some(
+                        self.await_deferred_tool_completions(
+                            &format!(
+                                "{}:completion:{}:{}",
+                                handle.group_key(),
+                                handle.consumed(),
+                                settlement_positions.len()
+                            ),
+                            pending
+                                .iter()
+                                .map(|(_, completion)| crate::ToolCompletionWait {
+                                    key: completion.pending.key.clone(),
+                                    deadline_ms: completion.deadline_ms,
+                                })
+                                .collect(),
+                            (!handle.is_exhausted()).then(|| crate::ToolDispatchCursor {
+                                group_key: handle.group_key().to_owned(),
+                                rank: handle.consumed() as u64 + 1,
+                            }),
+                            false,
+                        )
+                        .await,
+                    )
+                };
+                let awaited = match completion {
+                    Some(Ok(crate::ToolCompletionEvent::Resolved {
+                        position,
+                        resolution,
+                    })) => {
+                        if position >= pending.len() {
+                            self.retain_outstanding_group(handle);
+                            return Err(crate::RuntimeEffectControllerError::new(
+                                crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                                "a completion wait returned an invalid tool position",
+                            ));
+                        }
+                        let (position, completion) = pending.remove(position);
+                        let outcome = match self
+                            .finish_deferred_tool_completion(*completion, resolution)
+                            .await
+                        {
+                            Ok(outcome) => outcome,
+                            Err(error) => {
+                                self.retain_outstanding_group(handle);
+                                return Err(error);
+                            }
+                        };
+                        let child = GroupChildSettled::Tool(Box::new(outcome));
+                        let decides = consumer.decides(child.fulfilled());
+                        settled[position] = Some(child);
+                        settlement_positions.push(position);
+                        if decides {
+                            self.incorporate_group_prefix(&handle).await?;
+                            self.retain_outstanding_group(handle);
+                            return Ok(ToolChildGroupSettled {
+                                settled,
+                                settlement_positions,
+                                decided: Some(position),
+                                cancelled: false,
+                            });
+                        }
+                        continue;
+                    }
+                    Some(Err(error)) => Err(error),
+                    _ => {
+                        controller
+                            .await_next_settlement(&mut handle, turn_cancel.clone())
+                            .await
+                    }
+                };
                 // Decided by the wait's recorded outcome alone, never by a
                 // live read of the execution's token: a turn-observing rank
                 // wait that ended cancelled is the turn's cancellation, and an
@@ -724,6 +809,11 @@ impl RuntimeExecutionContext<'_> {
                     return Err(error);
                 }
             };
+            if !dispatch_only && let GroupChildSettled::Deferred(completion) = child {
+                pending.push((position, completion));
+                self.incorporate_group_prefix(&handle).await?;
+                continue;
+            }
             let decides = decided.is_none() && consumer.decides(child.fulfilled());
             settled[position] = Some(child);
             settlement_positions.push(position);
@@ -751,18 +841,26 @@ impl RuntimeExecutionContext<'_> {
         // land once under its recorded `child_replay_key`, and a replay
         // re-incorporates exactly this prefix (FIG-3411 part 2).
         self.incorporate_group_prefix(&handle).await?;
-        // Every child ranked, was consumed and is incorporated: the opener no
-        // longer depends on the group (ADR 0099 §9's release condition).
-        self.release_group_work(handle.group_key());
-        if let Err(error) = controller
+        let group_key = handle.group_key().to_owned();
+        let past_every_rank = (handle.children() as u64).checked_add(1).ok_or_else(|| {
+            crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                "a tool group has more children than ranks",
+            )
+        })?;
+        let closed = controller
             .close_effect_group(handle, LoserPolicy::RunToCompletion)
-            .await
-        {
-            tracing::warn!(
-                error = %error,
-                "closing a consumed tool-child group failed; the disposition is durable and the close is retryable"
-            );
+            .await;
+        if dispatch_only {
+            closed?;
+            // A root waiting phase is quiet only after every dispatch obligation seated.
+            controller
+                .await_group_child_drain_admission(&group_key, past_every_rank)
+                .await?;
+        } else if let Err(error) = closed {
+            tracing::warn!(error = %error, "closing a consumed tool-child group failed; the disposition is durable and the close is retryable");
         }
+        self.release_group_work(&group_key);
         Ok(ToolChildGroupSettled {
             settled,
             settlement_positions,
@@ -798,7 +896,7 @@ impl RuntimeExecutionContext<'_> {
             ) => self
                 .apply_tool_child_settlement(
                     &group_child_replay_key(group_key, position),
-                    leaf,
+                    &leaf.call.call,
                     *outcome,
                     *settlement,
                     self.dispatch
@@ -809,6 +907,18 @@ impl RuntimeExecutionContext<'_> {
                 )
                 .await
                 .map(|completed| GroupChildSettled::Tool(Box::new(completed))),
+            (
+                Some(PreparedGroupChild::Tool(_)),
+                Ok(crate::RuntimeEffectOutcome::ToolInvocationDeferred { completion }),
+            ) => {
+                self.emit_recorded_child_stream_value(
+                    &group_child_replay_key(group_key, position),
+                    &completion.pending.call_id,
+                    &serde_json::Value::Null,
+                    &completion.stream,
+                );
+                Ok(GroupChildSettled::Deferred(completion))
+            }
             (Some(PreparedGroupChild::Timer { .. }), Ok(crate::RuntimeEffectOutcome::Sleep)) => {
                 Ok(GroupChildSettled::Timer)
             }
@@ -858,21 +968,18 @@ impl RuntimeExecutionContext<'_> {
         let presentation_started = self.dispatch.clock.now();
         // The consumer fills the rank-ordered prefix it consumed, one position
         // per rank, so the next unconsumed rank follows its length.
-        let (first_unconsumed, last_rank) = u64::try_from(settled.settlement_positions.len() + 1)
-            .ok()
-            .zip(u64::try_from(children.len()).ok())
-            .ok_or_else(|| {
-                crate::RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-                    format!("effect group {group_key} has more children than ranks"),
-                )
-            })?;
+        let last_rank = u64::try_from(children.len()).ok().ok_or_else(|| {
+            crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                format!("effect group {group_key} has more children than ranks"),
+            )
+        })?;
         // Past the last rank: every committed child of the closed group has
         // seated, or retirement released the wait.
         controller
             .await_group_child_drain_admission(group_key, last_rank + 1)
             .await?;
-        for rank in first_unconsumed..=last_rank {
+        for rank in 1..=last_rank {
             let ranked = controller
                 .read_group_settlement(group_key, rank)
                 .await?
@@ -885,6 +992,12 @@ impl RuntimeExecutionContext<'_> {
                         ),
                     )
                 })?;
+            if settled.settled.iter().enumerate().any(|(position, child)| {
+                child.is_some()
+                    && group_child_replay_key(group_key, position) == ranked.child_replay_key
+            }) {
+                continue;
+            }
             let (position, child) = self
                 .present_cancelled_group_rank(
                     group_key,
@@ -933,6 +1046,13 @@ impl RuntimeExecutionContext<'_> {
                 )
             })?;
         match (&children[position], ranked.outcome) {
+            (
+                PreparedGroupChild::Tool(_),
+                Ok(crate::RuntimeEffectOutcome::ToolInvocationDeferred { completion }),
+            ) => self
+                .cancel_deferred_tool_completion(*completion)
+                .await
+                .map(|completed| (position, GroupChildSettled::Tool(Box::new(completed)))),
             (PreparedGroupChild::Tool(leaf), Err(error))
                 if error.code == crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled =>
             {
@@ -1084,12 +1204,12 @@ impl RuntimeExecutionContext<'_> {
     pub(crate) async fn apply_tool_child_settlement(
         &self,
         call_key: &str,
-        leaf: &PreparedToolChildLeaf,
+        call: &crate::PreparedToolCall,
         outcome: ToolDispatchOutcome,
         settlement: crate::runtime::ToolSettlement,
         duration_ms: u64,
     ) -> Result<CompletedProtocolToolCall, crate::RuntimeEffectControllerError> {
-        let call_id = leaf.call.call.call_id.clone();
+        let call_id = call.call_id.clone();
         let correlation_id = tool_activity_id(&call_id);
         // Settlement *facts* (possession, messages, triggers, usage) are not
         // applied here: `consume_tool_child_group` incorporates the
@@ -1123,7 +1243,7 @@ impl RuntimeExecutionContext<'_> {
         }
         let record = ToolCallRecord {
             call_id: call_id.clone(),
-            provider_call_id: leaf.call.call.provider_call_id.clone(),
+            provider_call_id: call.provider_call_id.clone(),
             tool: outcome.record.tool.clone(),
             args: outcome.record.args.clone(),
             output: outcome.record.output.clone(),
@@ -1132,13 +1252,13 @@ impl RuntimeExecutionContext<'_> {
         Ok(CompletedProtocolToolCall {
             completed: crate::sansio::CompletedToolCall {
                 call_id,
-                provider_call_id: leaf.call.call.provider_call_id.clone(),
+                provider_call_id: call.provider_call_id.clone(),
                 tool_name: outcome.record.tool,
                 args: outcome.record.args,
                 output: outcome.record.output,
                 model_return: settlement.model_return,
                 intent_outcomes: outcome.intent_outcomes,
-                replay: leaf.call.call.replay.clone(),
+                replay: call.replay.clone(),
             },
             record,
         })
@@ -1156,12 +1276,12 @@ impl RuntimeExecutionContext<'_> {
     /// the caller maps onto its existing error type; a cancelled turn yields
     /// each member's durable final — its result if it committed, a cancelled
     /// completion if the cancel decided it — not an error.
-    pub async fn execute_prepared_tool_group(
+    pub async fn dispatch_prepared_tool_group(
         &self,
         batch_id: crate::BatchId,
         group_invocation: crate::RuntimeEffectInvocation,
         prepared_entries: Vec<(usize, crate::PreparedToolCall)>,
-    ) -> Result<Vec<(usize, CompletedProtocolToolCall)>, crate::RuntimeEffectControllerError> {
+    ) -> Result<Vec<(usize, ToolDispatchResult)>, crate::RuntimeEffectControllerError> {
         let batch = crate::PreparedToolBatch::new(
             batch_id.clone(),
             prepared_entries
@@ -1224,12 +1344,19 @@ impl RuntimeExecutionContext<'_> {
                 return Ok(leaves
                     .iter()
                     .filter_map(PreparedGroupChild::tool)
-                    .map(|leaf| (leaf.input_index, limit_refused_group_leaf(leaf, exceeded)))
+                    .map(|leaf| {
+                        (
+                            leaf.input_index,
+                            ToolDispatchResult::Done(Box::new(limit_refused_group_leaf(
+                                leaf, exceeded,
+                            ))),
+                        )
+                    })
                     .collect());
             }
         };
         let mut settled = self
-            .consume_tool_child_group(handle, &leaves, consumer)
+            .consume_tool_child_group_mode(handle, &leaves, consumer, true)
             .await?;
         if settled.cancelled {
             self.present_cancelled_tool_group(&group_key, &leaves, &mut settled)
@@ -1237,18 +1364,25 @@ impl RuntimeExecutionContext<'_> {
         }
         let mut results = Vec::with_capacity(leaves.len());
         for (position, leaf) in leaves.iter().enumerate() {
-            let (Some(leaf), Some(GroupChildSettled::Tool(completed))) =
-                (leaf.tool(), settled.settled[position].take())
-            else {
-                return Err(crate::RuntimeEffectControllerError::new(
+            let leaf = leaf.tool().ok_or_else(|| {
+                crate::RuntimeEffectControllerError::new(
                     crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-                    format!(
-                        "tool-child group {batch_id} consumed position {position} without \
-                         filling it with a tool call"
-                    ),
-                ));
+                    "a tool dispatch group held a timer",
+                )
+            })?;
+            let result = match settled.settled[position].take() {
+                Some(GroupChildSettled::Tool(completed)) => ToolDispatchResult::Done(completed),
+                Some(GroupChildSettled::Deferred(completion)) => {
+                    ToolDispatchResult::Deferred(completion)
+                }
+                _ => {
+                    return Err(crate::RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                        "a tool dispatch group left a slot empty",
+                    ));
+                }
             };
-            results.push((leaf.input_index, *completed));
+            results.push((leaf.input_index, result));
         }
         Ok(results)
     }
@@ -1344,7 +1478,17 @@ impl RuntimeExecutionContext<'_> {
         stream: &crate::runtime::effect::RecordedChildStream,
     ) {
         let record = serde_json::to_value(record).unwrap_or_default();
-        let (events, undecodable) = stream.decode(&record);
+        self.emit_recorded_child_stream_value(call_key, call_id, &record, stream);
+    }
+
+    fn emit_recorded_child_stream_value(
+        &self,
+        call_key: &str,
+        call_id: &crate::ToolCallId,
+        record: &serde_json::Value,
+        stream: &crate::runtime::effect::RecordedChildStream,
+    ) {
+        let (events, undecodable) = stream.decode(record);
         if undecodable > 0 {
             tracing::warn!(
                 call_id = call_id.as_str(),
@@ -1515,4 +1659,11 @@ mod tests {
         );
         assert_eq!(first.matches(second_id.as_str()).count(), 0);
     }
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "dispatch", rename_all = "snake_case")]
+pub enum ToolDispatchResult {
+    Done(Box<CompletedProtocolToolCall>),
+    Deferred(Box<crate::tool_dispatch::DeferredToolCompletion>),
 }

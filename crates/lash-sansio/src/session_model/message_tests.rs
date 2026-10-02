@@ -77,6 +77,48 @@ fn witness_message(id: &str, text: &str) -> Message {
 }
 
 #[test]
+fn a_result_appended_to_cached_history_keeps_its_original_provider_correlation() {
+    let call_id = crate::ToolCallId::fixture("deferred-call");
+    let call = Message {
+        id: "call".into(),
+        role: MessageRole::Assistant,
+        parts: shared_parts(vec![Part::tool_call(
+            "call.p0".into(),
+            "{}".into(),
+            call_id.clone(),
+            "provider-call".into(),
+            "lookup".into(),
+            None,
+        )]),
+        origin: None,
+        reply_marker: None,
+    };
+    let cache = Arc::new(BaseRenderCache::new());
+    let mut sequence = MessageSequence::from_base(vec![call].into()).with_base_render_cache(cache);
+    sequence.render_prompt();
+    sequence.push(Message {
+        id: "result".into(),
+        role: MessageRole::User,
+        parts: shared_parts(vec![Part::tool_result(
+            "result.p0".into(),
+            vec![ModelToolReturnPart::text("resolved")],
+            call_id,
+            "lookup".into(),
+        )]),
+        origin: None,
+        reply_marker: None,
+    });
+    let rendered = sequence.render_prompt();
+    assert_eq!(
+        rendered.messages,
+        render_prompt(sequence.as_slice()).messages
+    );
+    assert!(rendered.messages.iter().flat_map(|message| message.blocks.iter()).any(|block| {
+        matches!(block, LlmContentBlock::ToolResult { call_id, .. } if call_id == "provider-call")
+    }));
+}
+
+#[test]
 fn a_shared_base_witnesses_the_preserved_prefix_and_names_the_delta() {
     let base = AppendVec::from(vec![witness_message("m0", "one")]);
     let current = MessageSequence::from_base(base.clone());

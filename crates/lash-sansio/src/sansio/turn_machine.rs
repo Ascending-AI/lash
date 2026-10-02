@@ -77,6 +77,39 @@ impl<M: TurnProtocol> TurnMachine<M> {
         }
     }
 
+    pub fn settle_tool_dispatch(&mut self, state: serde_json::Value) -> bool {
+        match &mut self.state {
+            MachineState::Waiting {
+                work: PendingWork::WaitingForToolResults { calls, settled, .. },
+                delivery,
+                ..
+            } => {
+                calls.clear();
+                *settled = Some(state);
+                *delivery = EffectDeliveryStatus::Pending;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub fn waiting_tool_results(
+        &self,
+    ) -> Option<(&serde_json::Value, &crate::sansio::ToolExpansionPlan)> {
+        match &self.state {
+            MachineState::Waiting {
+                work:
+                    PendingWork::WaitingForToolResults {
+                        settled: Some(state),
+                        expansion,
+                        ..
+                    },
+                ..
+            } => Some((state, expansion)),
+            _ => None,
+        }
+    }
+
     /// Record the cancellation request the host has observed for this turn.
     /// The first observation wins; later ones are ignored.
     pub fn record_cancellation_evidence(&mut self, evidence: crate::TurnCancellationEvidence) {

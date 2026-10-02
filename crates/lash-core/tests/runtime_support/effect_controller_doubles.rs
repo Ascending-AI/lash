@@ -694,6 +694,15 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
                     .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))
                     .await
             }
+            command @ (RuntimeEffectCommand::ArmToolCompletion { .. }
+            | RuntimeEffectCommand::AwaitToolCompletions { .. }) => {
+                inner
+                    .execute_effect(
+                        RuntimeEffectEnvelope::new(envelope.invocation, command),
+                        local_executor,
+                    )
+                    .await
+            }
             command @ RuntimeEffectCommand::IncorporateGroupSettlements { .. } => {
                 local_executor
                     .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))

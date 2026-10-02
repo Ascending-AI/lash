@@ -80,6 +80,9 @@ pub struct RunContinuation {
     /// protocol steps, whose continuation asks the model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cell: Option<SuspendedCell>,
+    /// The settled tool round the root still awaits, including its expansion plan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<serde_json::Value>,
     /// The logical opener's groups and incorporation ledger. Every physical
     /// boundary carries them, including a boundary between code cells.
     pub opener: RunOpenerState,

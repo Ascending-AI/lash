@@ -82,6 +82,30 @@ pub(super) async fn race_turn_gate<'run, 'ctx, C, T>(
 where
     C: ContextClient<'ctx>,
 {
+    race_turn_gate_many(
+        context,
+        namespace,
+        session_id,
+        turn_cancel,
+        hand_over,
+        awakeable,
+        move || vec![guarded()],
+    )
+    .await
+}
+
+pub(super) async fn race_turn_gate_many<'run, 'ctx, C, T>(
+    context: &C,
+    namespace: &crate::RestateNamespace,
+    session_id: &SessionId,
+    turn_cancel: RestateDurableWaitAwaitRequest,
+    hand_over: Option<lash_core::engine::BuildGeneration>,
+    awakeable: impl Fn() -> (String, GateWait<'run, Json<RestateTurnCancelWake>>),
+    guarded: impl FnOnce() -> Vec<GateWait<'run, T>>,
+) -> Result<TurnGateRace<T>, TerminalError>
+where
+    C: ContextClient<'ctx>,
+{
     let scope = turn_cancel.key.scope.clone();
     let authority_id = crate::durable_wait::restate_authority_id_for_key(&turn_cancel.key)
         .ok_or_else(|| {
@@ -107,16 +131,16 @@ where
             ));
         }
     };
-    let guarded = guarded();
-    match first_of_gate_race(&*guarded, &*awakeable_wait).await? {
-        GateRaceWinner::Guarded => {
-            let value = guarded.await?;
+    let mut guarded = guarded();
+    match first_of_many_gate_race(&guarded, &*awakeable_wait).await? {
+        winner if winner < guarded.len() => {
+            let value = guarded.remove(winner).await?;
             retire_turn_cancel_gate(context, namespace, session_id, gate).await?;
             return Ok(TurnGateRace::Ended(
                 RestateTurnCancelRaceOutcome::Completed(value),
             ));
         }
-        GateRaceWinner::Gate => {}
+        _ => {}
     }
     let Json(wake) = awakeable_wait.await?;
     match wake {
@@ -171,8 +195,8 @@ where
             ));
         }
     };
-    match first_of_gate_race(&*guarded, &*escalation).await? {
-        GateRaceWinner::Guarded => {
+    match first_of_many_gate_race(&guarded, &*escalation).await? {
+        winner if winner < guarded.len() => {
             // The escalation entry is retired whichever way the guarded wait
             // settles: it only ever exists on the deferred branch, so no
             // journal written before the mode existed can reach this
@@ -180,7 +204,7 @@ where
             // index holding an entry for a wait that is gone. The success path
             // keeps the deployed order — guarded value first, then the
             // retirement — byte for byte.
-            let value = guarded.await;
+            let value = guarded.remove(winner).await;
             let retirement =
                 retire_turn_cancel_gate(context, namespace, session_id, escalation_gate).await;
             let value = value?;
@@ -189,7 +213,7 @@ where
                 RestateTurnCancelRaceOutcome::Completed(value),
             ))
         }
-        GateRaceWinner::Gate => {
+        _ => {
             let Json(wake) = escalation.await?;
             Ok(TurnGateRace::Ended(match wake {
                 // The escalation promise only ever holds an immediate request;
@@ -207,4 +231,20 @@ where
             }))
         }
     }
+}
+
+fn first_of_many_gate_race<T, A>(
+    guarded: &[GateWait<'_, T>],
+    gate: &A,
+) -> impl std::future::Future<Output = Result<usize, TerminalError>> + Send + use<T, A>
+where
+    A: SealedDurableFuture + ?Sized,
+{
+    let inner = gate.inner_context();
+    let handles = guarded
+        .iter()
+        .map(|wait| wait.handle())
+        .chain(std::iter::once(gate.handle()))
+        .collect();
+    async move { inner.select(handles).await }
 }

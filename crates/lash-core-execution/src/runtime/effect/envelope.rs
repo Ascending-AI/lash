@@ -411,6 +411,33 @@ pub enum SleepSpec {
 }
 
 /// Serializable command emitted at Lash's nondeterministic runtime boundary.
+/// An armed completion the caller still owns.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolCompletionWait {
+    pub key: crate::AwaitEventKey,
+    pub deadline_ms: Option<u64>,
+}
+
+/// The next dispatch settlement competing with deferred logical completions.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolDispatchCursor {
+    pub group_key: String,
+    pub rank: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum ToolCompletionEvent {
+    Resolved {
+        position: usize,
+        resolution: crate::Resolution,
+    },
+    DispatchReady,
+    HandedOver,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RuntimeEffectCommand {
@@ -460,6 +487,17 @@ pub enum RuntimeEffectCommand {
     /// Boxed to keep the command inside its measured size budget below.
     ToolInvocation {
         request: Box<super::tool_child::ToolChildRequest>,
+    },
+    /// Freeze a deferred dispatch's absolute deadline and durably arm it.
+    ArmToolCompletion {
+        key: crate::AwaitEventKey,
+        timeout_ms: Option<u64>,
+    },
+    /// The Run waits on its settled dispatch's original completion key.
+    AwaitToolCompletions {
+        waits: Vec<ToolCompletionWait>,
+        dispatch: Option<ToolDispatchCursor>,
+        transferable: bool,
     },
     /// Record the opener's incorporated settlement prefix of a durable effect
     /// group (ADR 0099 §6): the journaled mapping from group identity to the
@@ -721,6 +759,8 @@ impl RuntimeEffectCommand {
             Self::Direct { .. } => RuntimeEffectKind::Direct,
             Self::ToolAttempt { .. } => RuntimeEffectKind::ToolAttempt,
             Self::ToolInvocation { .. } => RuntimeEffectKind::ToolInvocation,
+            Self::ArmToolCompletion { .. } => RuntimeEffectKind::ArmToolCompletion,
+            Self::AwaitToolCompletions { .. } => RuntimeEffectKind::AwaitToolCompletions,
             Self::IncorporateGroupSettlements { .. } => {
                 RuntimeEffectKind::IncorporateGroupSettlements
             }
@@ -1358,17 +1398,25 @@ pub enum RuntimeEffectOutcome {
     /// settlement as recorded evidence; it never re-executes a declaration and
     /// never re-runs the projector.
     ///
-    /// There is deliberately no pending arm. Deferred completion is
-    /// *coordination* and runs at handler level inside the driver (§2), so a
-    /// child that parked has already been awaited by the time this outcome
-    /// exists: a group child settles once, and a journaled "still pending" is a
-    /// state no reader of a settlement could act on.
+    /// An inline dispatch carries its real result. A deferred dispatch uses
+    /// `ToolInvocationDeferred`; its caller owns the completion from that durable final onward.
     ToolInvocation {
         outcome: Box<crate::tool_dispatch::ToolDispatchOutcome>,
         /// The §6/§13 settlement the child accumulated in its own address
         /// space. Always journaled: a child that reached a terminal always
         /// produced a settled presentation.
         settlement: Box<ToolSettlement>,
+    },
+    /// The dispatch is settled. Its original completion key stays open and
+    /// the Run owns the armed resolver, deadline and eventual presentation.
+    ToolInvocationDeferred {
+        completion: Box<crate::tool_dispatch::DeferredToolCompletion>,
+    },
+    ArmToolCompletion {
+        deadline_ms: Option<u64>,
+    },
+    AwaitToolCompletions {
+        event: ToolCompletionEvent,
     },
     /// The group-settlement prefix an
     /// [`IncorporateGroupSettlements`](RuntimeEffectCommand::IncorporateGroupSettlements)
@@ -1854,7 +1902,11 @@ impl RuntimeEffectOutcome {
             Self::AssistantResponseHooks { .. } => RuntimeEffectKind::AssistantResponseHooks,
             Self::Direct { .. } => RuntimeEffectKind::Direct,
             Self::ToolAttempt { .. } => RuntimeEffectKind::ToolAttempt,
-            Self::ToolInvocation { .. } => RuntimeEffectKind::ToolInvocation,
+            Self::ToolInvocation { .. } | Self::ToolInvocationDeferred { .. } => {
+                RuntimeEffectKind::ToolInvocation
+            }
+            Self::ArmToolCompletion { .. } => RuntimeEffectKind::ArmToolCompletion,
+            Self::AwaitToolCompletions { .. } => RuntimeEffectKind::AwaitToolCompletions,
             Self::IncorporateGroupSettlements { .. } => {
                 RuntimeEffectKind::IncorporateGroupSettlements
             }

@@ -432,7 +432,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for CheckpointDriver {
                 request: ctx.project_llm_request(false),
                 driver_state: None,
             })],
-            Self::Tools => vec![DriverAction::Start(PendingWork::Tools {
+            Self::Tools => vec![DriverAction::Start(PendingWork::WaitingForToolResults {
+                settled: None,
                 calls: checkpoint_tool_calls(ctx.protocol_iteration()),
                 expansion: Default::default(),
             })],

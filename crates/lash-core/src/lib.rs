@@ -561,8 +561,7 @@ pub use tool_registry::{
     ToolSurfaceOpenMode,
 };
 pub use tool_result::{
-    CancelHint, PendingAnnouncement, PendingCompletion, PendingResolver, TimeoutBehavior,
-    ToolOutcome,
+    CancelHint, PendingAnnouncement, PendingCompletion, PendingResolver, ToolOutcome,
 };
 pub use tool_result::{DeclaredStart, DeclaredStartRefused};
 pub use triggers::{
@@ -771,8 +770,9 @@ pub use runtime::{
     SessionQueueEventKind, SessionRelationKind, SessionRevision, SessionScope, SessionShifts,
     SessionStateVersionRefusal, SessionStoreCreateRequest, SessionView, SessionWorkEngine,
     SleepSpec, SlotId, StartCx, StartCxError, StartKey, StoreRealization, StoredDataCorruption,
-    Target, ToolAttemptLaunch, TurnActivity, TurnActivityId, TurnCancelAffectedInput,
-    TurnCancelAffectedWake, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
+    Target, ToolAttemptLaunch, ToolCompletionEvent, ToolCompletionWait, ToolDispatchCursor,
+    TurnActivity, TurnActivityId, TurnCancelAffectedInput, TurnCancelAffectedWake,
+    TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
     TurnCancelClosureOwnerBinding, TurnCancelClosureProposal, TurnCancelClosureSettlement,
     TurnCancelGatePair, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
     TurnCancelRequestRecord, TurnCancelUndeliveredInputPolicy, TurnCancelWait,

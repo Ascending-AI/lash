@@ -1358,7 +1358,9 @@ impl MessageSequence {
             None => render_prompt(base.as_slice()),
         };
         if !delta.is_empty() {
-            append_rendered_prompt(&mut rendered, delta.as_slice());
+            append_structured_prompt_tail(delta, base.as_slice(), |message| {
+                rendered.messages.push(message);
+            });
         }
         rendered
     }
@@ -1531,22 +1533,7 @@ fn render_structured_prompt(msgs: &[Message]) -> RenderedPrompt {
 }
 
 fn append_structured_prompt(rendered: &mut RenderedPrompt, msgs: &[Message]) {
-    // Outbound, a result answers the provider with the correlation of the
-    // call it pairs with by `ToolCallId`.
-    let provider_call_ids = msgs
-        .iter()
-        .flat_map(|msg| msg.parts.iter())
-        .filter_map(|part| Some((part.call_id()?, part.provider_call_id()?)))
-        .collect::<std::collections::HashMap<_, _>>();
-    for msg in msgs {
-        if let Some(projected) = render_structured_message(msg, |call_id| {
-            provider_call_ids
-                .get(call_id)
-                .map(|provider_call_id| (*provider_call_id).to_string())
-        }) {
-            rendered.messages.push(projected);
-        }
-    }
+    append_structured_prompt_tail(msgs, &[], |message| rendered.messages.push(message));
 }
 
 /// Renders `msgs[start..]` onto `rendered`, the render of `msgs[..start]`.
@@ -1561,12 +1548,19 @@ fn append_structured_prompt_after(
     start: usize,
 ) {
     let appended = &msgs[start..];
+    append_structured_prompt_tail(appended, &msgs[..start], |message| rendered.push(message));
+}
+
+fn append_structured_prompt_tail(
+    appended: &[Message],
+    prefix: &[Message],
+    mut push: impl FnMut(LlmMessage),
+) {
     let provider_call_ids = appended
         .iter()
         .flat_map(|msg| msg.parts.iter())
         .filter_map(|part| Some((part.call_id()?, part.provider_call_id()?)))
         .collect::<std::collections::HashMap<_, _>>();
-    let prefix = &msgs[..start];
     for msg in appended {
         if let Some(projected) = render_structured_message(msg, |call_id| {
             provider_call_ids
@@ -1583,7 +1577,7 @@ fn append_structured_prompt_after(
                 })
                 .map(str::to_string)
         }) {
-            rendered.push(projected);
+            push(projected);
         }
     }
 }

@@ -1578,6 +1578,27 @@ where
                     }
                 }
             }
+            RestateEffectExecution::ArmToolCompletion {
+                key, timeout_ms, ..
+            } => {
+                self.arm_tool_completion(key, timeout_ms, local_executor)
+                    .await
+            }
+            RestateEffectExecution::AwaitToolCompletions {
+                invocation,
+                waits,
+                dispatch,
+                transferable,
+            } => {
+                self.await_tool_completions(
+                    invocation,
+                    waits,
+                    dispatch,
+                    transferable,
+                    local_executor,
+                )
+                .await
+            }
             RestateEffectExecution::PeekAwaitEvent { key, .. } => self
                 .peek_turn_gate(&key)
                 .await
@@ -1719,6 +1740,7 @@ pub use process_scheduling::ProcessWorkflowStartFailure;
 use process_scheduling::schedule_restate_process;
 
 mod execution;
+mod tool_completion;
 use execution::tracing_sleep_error;
 pub(crate) use execution::{
     RestateEffectExecution, restate_effect_execution, restate_effect_name,

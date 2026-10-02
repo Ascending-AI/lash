@@ -19,7 +19,7 @@ pub use tool_child::{
     ToolChildOpenerContext, ToolChildRebuildRefusal, ToolChildRequest, ToolChildScope,
     ToolChildSessionFacts, UnrecordedSessionSources,
 };
-mod tool_child_driver;
+pub(crate) mod tool_child_driver;
 pub(crate) use tool_child_driver::runtime_ops as tool_child_runtime_ops;
 #[cfg(feature = "testing")]
 pub(crate) use tool_child_driver::validate_recorded_authorities;
@@ -38,7 +38,7 @@ pub use recorded_stream::{
     CHILD_STREAM_BYTE_BUDGET, ChildStreamTruncation, DecodedChildEvent, RecordedChildChannel,
     RecordedChildEvent, RecordedChildStream,
 };
-mod tool_settlement;
+pub(crate) mod tool_settlement;
 pub use tool_settlement::{
     TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_SETTLEMENT_VERSION, ToolAttemptCapture, ToolSettlement,
 };
@@ -54,6 +54,7 @@ pub use envelope::{
     RuntimeAssistantResponseHooksOutcome, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
     RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectOutcome, RuntimeInvocation,
     ServedExecutionEnvironmentSync, SleepSpec, ToolAttemptEffectOutcome, ToolAttemptLaunch,
+    ToolCompletionEvent, ToolCompletionWait, ToolDispatchCursor,
 };
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{

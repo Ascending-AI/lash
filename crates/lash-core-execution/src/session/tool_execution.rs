@@ -405,7 +405,7 @@ impl ToolInvocationReply {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct CompletedProtocolToolCall {
     pub completed: crate::sansio::CompletedToolCall,
     pub record: ToolCallRecord,
@@ -557,12 +557,13 @@ impl ToolBatchReplies {
 mod aggregate;
 #[path = "tool_execution/batch.rs"]
 mod batch;
+mod deferred;
 mod group;
 
 pub use aggregate::{
     ToolAggregateLeaf, ToolAggregateLeafReply, ToolAggregateOutcome, ToolAggregateRequest,
 };
-pub use group::ToolAggregateConsumer;
+pub use group::{ToolAggregateConsumer, ToolDispatchResult};
 #[cfg(test)]
 #[path = "tool_execution/turn_cancel_gate_tests.rs"]
 mod turn_cancel_gate_tests;
@@ -1055,7 +1056,7 @@ impl RuntimeExecutionContext<'_> {
         clippy::expect_used,
         reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
     )]
-    async fn await_pending_tool_dispatch_outcome(
+    async fn complete_pending_tool_dispatch_outcome(
         &self,
         parent_invocation: Option<crate::RuntimeInvocation>,
         pending: crate::tool_dispatch::PendingToolDispatchOutcome,
@@ -1122,40 +1123,87 @@ impl RuntimeExecutionContext<'_> {
             };
         let resolver = pending.pending.resolved_by.clone();
         let completion_key = pending.key.clone();
-        let deadline = pending
-            .pending
-            .deadline
-            .map(|duration| self.dispatch.clock.now() + duration);
+        let armed_deadline = self
+            .dispatch
+            .effect_controller
+            .execute_effect(
+                crate::RuntimeEffectEnvelope::new(
+                    invocation,
+                    crate::RuntimeEffectCommand::ArmToolCompletion {
+                        key: pending.key.clone(),
+                        timeout_ms: pending
+                            .pending
+                            .deadline
+                            .map(|duration| duration.as_millis().min(u64::MAX as u128) as u64),
+                    },
+                ),
+                crate::RuntimeEffectLocalExecutor::await_event_under(
+                    &self.turn_cancel_wait(cancellation),
+                    None,
+                    Arc::clone(&self.dispatch.clock),
+                ),
+            )
+            .await?;
+        let crate::RuntimeEffectOutcome::ArmToolCompletion { deadline_ms } = armed_deadline else {
+            return Err(crate::RuntimeEffectControllerError::wrong_outcome(
+                crate::RuntimeEffectKind::ArmToolCompletion,
+                armed_deadline.kind(),
+            ));
+        };
         let outcome = if let Some(resolution) = resolved {
             Ok(resolution)
         } else {
-            self.dispatch
-                .effect_controller
-                .execute_effect(
-                    crate::RuntimeEffectEnvelope::new(
-                        invocation,
-                        crate::RuntimeEffectCommand::AwaitEvent { key: pending.key },
-                    ),
-                    crate::RuntimeEffectLocalExecutor::await_event_under(
-                        &self.turn_cancel_wait(cancellation),
-                        deadline,
-                        std::sync::Arc::clone(&self.dispatch.clock),
-                    ),
+            match self
+                .await_deferred_tool_completions(
+                    &format!("{call_key}:completion"),
+                    vec![crate::ToolCompletionWait {
+                        key: pending.key.clone(),
+                        deadline_ms,
+                    }],
+                    None,
+                    false,
                 )
                 .await
-                .and_then(crate::RuntimeEffectOutcome::into_await_event)
+            {
+                Ok(crate::ToolCompletionEvent::Resolved {
+                    position: 0,
+                    resolution,
+                }) => Ok(resolution),
+                Ok(_) => Err(crate::RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                    "a scalar tool completion wait returned an invalid branch",
+                )),
+                Err(error)
+                    if error.code == crate::RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled =>
+                {
+                    if self.observe_turn_cancel {
+                        self.note_turn_cancelled();
+                    }
+                    let terminal = self
+                        .dispatch
+                        .effect_controller
+                        .controller()
+                        .resolve_await_event(&pending.key, crate::Resolution::Cancelled)
+                        .await?;
+                    Ok(match terminal {
+                        crate::ResolveOutcome::AlreadyResolved { terminal } => terminal,
+                        _ => crate::Resolution::Cancelled,
+                    })
+                }
+                Err(error) => Err(error),
+            }
         };
         let resolution = match outcome {
             Ok(resolution) => resolution,
             Err(err) => {
-                // An unrecorded `Err` from the journaled `AwaitEvent` — a live
+                // An unrecorded `Err` from the completion wait — a live
                 // controller fault (its claim or finalize failed) or a replay
                 // divergence against its record — is a refusal, not the
                 // tool's result: it returns to the caller, which aborts the
                 // enclosing run and presents nothing, so neither a store
                 // diagnostic nor a conflict commits or reaches the model as a
                 // tool result (FIG-3528, FIG-3679). A journaled error is the
-                // await's recorded `Failed` terminal replaying and stays on
+                // wait's recorded `Failed` terminal replaying and stays on
                 // the result surface.
                 if !err.journaled {
                     return Err(err);
@@ -1438,7 +1486,7 @@ impl RuntimeExecutionContext<'_> {
             ToolCallLaunch::Pending(pending) => {
                 let (tool, args) = (pending.tool_name.clone(), pending.args.clone());
                 match self
-                    .await_pending_tool_dispatch_outcome(
+                    .complete_pending_tool_dispatch_outcome(
                         parent_invocation.clone(),
                         *pending,
                         self.cancellation_token.clone(),

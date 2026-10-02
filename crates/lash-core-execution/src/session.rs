@@ -35,8 +35,8 @@ pub use settlement_incorporation::{Incorporated, IncorporationLedger, Settlement
 /// Runtime tool invocation requests and their collected replies.
 pub use tool_execution::{
     CompletedProtocolToolCall, ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateLeafReply,
-    ToolAggregateOutcome, ToolAggregateRequest, ToolBatchReplies, ToolInvocation,
-    ToolInvocationReply,
+    ToolAggregateOutcome, ToolAggregateRequest, ToolBatchReplies, ToolDispatchResult,
+    ToolInvocation, ToolInvocationReply,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]

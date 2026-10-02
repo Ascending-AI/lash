@@ -914,7 +914,8 @@ impl ProtocolDriverHandle for ToolBatchDriver {
         _calls: &crate::ResponseToolCalls,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
-        vec![DriverAction::Start(PendingWork::Tools {
+        vec![DriverAction::Start(PendingWork::WaitingForToolResults {
+            settled: None,
             calls: vec![
                 PendingToolCall {
                     call_id: crate::ToolCallId::fixture("call-read"),
@@ -1960,7 +1961,7 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
         &mut machine,
         || Arc::new(ToolBatchDriver),
         tool_calls,
-        serde_json::json!({"Waiting": {"effect_id": 3, "work": {"Tools": {
+        serde_json::json!({"Waiting": {"effect_id": 3, "work": {"WaitingForToolResults": {
             "calls": serde_json::to_value(calls).expect("calls json"),
         }}}}),
     );

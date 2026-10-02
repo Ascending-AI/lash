@@ -1,13 +1,3 @@
-/// What a pending tool call does when its `deadline` elapses.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TimeoutBehavior {
-    /// Resolve the call as a timeout failure the model can observe and react to.
-    ErrorAsResult,
-    /// Fail the whole turn instead of feeding a timeout result back to the model.
-    FailTurn,
-}
-
 /// What a pending tool call signals about its out-of-band work when cancelled.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -254,18 +244,16 @@ pub enum DeclaredStartRefused {
 }
 
 /// Configuration carried by a [`ToolOutcome::Pending`] result: how long the runtime
-/// waits for the deferred outcome, what to do if it times out or is cancelled, and
+/// waits for the deferred outcome, what to do if it is cancelled, and
 /// any process event the runtime announces when the call parks.
 ///
-/// Defaults to no deadline, [`TimeoutBehavior::ErrorAsResult`],
+/// A deadline expires as a typed tool-failure result. Defaults to no deadline,
 /// [`CancelHint::CancelExternalWork`], and no announcement.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PendingCompletion {
     /// `None` waits indefinitely (until the turn or process is otherwise cancelled).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deadline: Option<std::time::Duration>,
-    /// What the runtime does when `deadline` elapses without a resolution.
-    pub on_timeout: TimeoutBehavior,
     /// What the runtime signals about out-of-band work if the call is cancelled.
     pub on_cancel: CancelHint,
     /// Process event the runtime appends when this call parks, if any.
@@ -284,7 +272,6 @@ impl Default for PendingCompletion {
     fn default() -> Self {
         Self {
             deadline: None,
-            on_timeout: TimeoutBehavior::ErrorAsResult,
             on_cancel: CancelHint::CancelExternalWork,
             announcement: None,
             resolved_by: None,
@@ -299,20 +286,13 @@ impl PendingCompletion {
         Self::default()
     }
 
-    /// Sets the maximum durable wait for tool implementors; expiry follows the configured timeout
-    /// behavior rather than completing the tool successfully.
+    /// Sets the maximum durable wait. Expiry returns a typed timeout failure
+    /// as the tool's result.
     pub fn with_deadline(mut self, deadline: std::time::Duration) -> Self {
         self.deadline = Some(deadline);
         if let Some(PendingResolver::DeclaredStart(start)) = self.resolved_by.as_mut() {
             start.deadline = Some(deadline);
         }
-        self
-    }
-
-    /// Selects turn failure on deadline expiry for tool implementors instead of returning a timeout
-    /// result to the model.
-    pub fn fail_turn_on_timeout(mut self) -> Self {
-        self.on_timeout = TimeoutBehavior::FailTurn;
         self
     }
 

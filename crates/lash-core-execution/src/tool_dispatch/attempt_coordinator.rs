@@ -557,12 +557,29 @@ struct SealedToolFinal {
     recorded_call_id: lash_sansio::ToolCallId,
     record: ToolCallRecord,
     intents: crate::ToolIntents,
+    intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
     attempts: Vec<lash_trace::TraceRetryAttempt>,
     captures: Vec<crate::runtime::ToolAttemptCapture>,
     triggers: Vec<ToolTriggerEffectOutcome>,
 }
 
-impl SealedToolFinal {
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(tag = "dispatch", rename_all = "snake_case")]
+enum SealedToolDispatch {
+    Done {
+        final_result: Box<SealedToolFinal>,
+    },
+    Deferred {
+        completion: Box<super::DeferredToolCompletion>,
+    },
+}
+
+pub(crate) enum CommittedToolDispatch {
+    Done(Box<ToolDispatchOutcome>),
+    Deferred(Box<super::DeferredToolCompletion>),
+}
+
+impl SealedToolDispatch {
     fn drain_input(&self, replay_key: &str) -> Result<String, crate::RuntimeEffectControllerError> {
         serde_json::to_string(self).map_err(|error| {
             crate::RuntimeEffectControllerError::new(
@@ -605,13 +622,29 @@ async fn settle_terminal_attempt(
         recorded_call_id: recorded_call_id.clone(),
         record: *record,
         intents,
+        intent_outcomes: Vec::new(),
         attempts,
         captures,
         triggers,
     };
-    let (sealed, drain_admission) =
-        commit_group_child_boundary(context, group_child.as_ref(), sealed).await?;
-    drain_sealed_final(context, sealed, drain_admission.as_ref(), child_trace_hook).await
+    let (sealed, drain_admission) = commit_group_child_boundary(
+        context,
+        group_child.as_ref(),
+        SealedToolDispatch::Done {
+            final_result: Box::new(sealed),
+        },
+    )
+    .await?;
+    let SealedToolDispatch::Done {
+        final_result: sealed,
+    } = sealed
+    else {
+        return Err(crate::RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+            "an inline final cannot replace a committed deferred dispatch",
+        ));
+    };
+    drain_sealed_final(context, *sealed, drain_admission.as_ref(), child_trace_hook).await
 }
 
 /// Drains a committed final and projects its intent outcomes onto its record.
@@ -634,6 +667,7 @@ async fn drain_sealed_final(
         recorded_call_id,
         mut record,
         intents,
+        intent_outcomes: mut retained_outcomes,
         attempts,
         captures,
         triggers,
@@ -673,11 +707,12 @@ async fn drain_sealed_final(
             ));
         }
     };
+    retained_outcomes.extend(intent_outcomes);
     Ok(ToolDispatchOutcome {
         record,
         attempts,
         intents,
-        intent_outcomes,
+        intent_outcomes: retained_outcomes,
         captures,
         triggers,
     })
@@ -715,9 +750,11 @@ pub(crate) struct GroupChildDrainAdmission {
 async fn commit_group_child_boundary(
     context: &ToolDispatchContext<'_>,
     group_child: Option<&GroupChildCoordination>,
-    sealed: SealedToolFinal,
-) -> Result<(SealedToolFinal, Option<GroupChildDrainAdmission>), crate::RuntimeEffectControllerError>
-{
+    sealed: SealedToolDispatch,
+) -> Result<
+    (SealedToolDispatch, Option<GroupChildDrainAdmission>),
+    crate::RuntimeEffectControllerError,
+> {
     let Some(address) = group_child.map(|child| &child.child) else {
         return Ok((sealed, None));
     };
@@ -747,7 +784,7 @@ async fn commit_group_child_boundary(
             rank,
             drain_input,
         } => Ok((
-            SealedToolFinal::from_drain_input(&drain_input, &address.replay_key)?,
+            SealedToolDispatch::from_drain_input(&drain_input, &address.replay_key)?,
             Some(GroupChildDrainAdmission { group_key, rank }),
         )),
         crate::runtime::effect::EffectGroupChildCommitOutcome::CancelDecided {
@@ -764,12 +801,31 @@ async fn commit_group_child_boundary(
     }
 }
 
-/// A deferred child's §4 boundary: its resolved completion is its terminal,
-/// and it commits here as an inline terminal does. A parked attempt declares
-/// no intents, so there is no drain to admit behind the barrier: the discharge
-/// seats the rank. The outcome is the committed final, whichever invocation
-/// committed it.
+/// Seals an armed deferred descriptor at the dispatch's final-commit fence.
+/// Its resolver and deadline remain owned by this immutable final until the
+/// Run incorporates it and takes responsibility for the logical result.
 pub(crate) async fn commit_deferred_group_child(
+    context: &ToolDispatchContext<'_>,
+    group_child: &GroupChildCoordination,
+    completion: Box<super::DeferredToolCompletion>,
+) -> Result<Box<super::DeferredToolCompletion>, crate::RuntimeEffectControllerError> {
+    let (sealed, _) = commit_group_child_boundary(
+        context,
+        Some(group_child),
+        SealedToolDispatch::Deferred { completion },
+    )
+    .await?;
+    match sealed {
+        SealedToolDispatch::Deferred { completion } => Ok(completion),
+        SealedToolDispatch::Done { .. } => Err(crate::RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+            "a deferred dispatch cannot replace a committed inline final",
+        )),
+    }
+}
+
+/// A resolver refusal is a completed dispatch and crosses the same final-commit fence.
+pub(crate) async fn commit_unarmed_tool_child(
     context: &ToolDispatchContext<'_>,
     group_child: &GroupChildCoordination,
     outcome: ToolDispatchOutcome,
@@ -782,24 +838,33 @@ pub(crate) async fn commit_deferred_group_child(
         captures,
         triggers,
     } = outcome;
-    let sealed = SealedToolFinal {
+    let final_result = SealedToolFinal {
         minting_emission: None,
         recorded_call_id: record.call_id.clone(),
         record,
         intents,
+        intent_outcomes,
         attempts,
         captures,
         triggers,
     };
-    let (sealed, _) = commit_group_child_boundary(context, Some(group_child), sealed).await?;
-    Ok(ToolDispatchOutcome {
-        record: sealed.record,
-        attempts: sealed.attempts,
-        intents: sealed.intents,
-        intent_outcomes,
-        captures: sealed.captures,
-        triggers: sealed.triggers,
-    })
+    let (sealed, admission) = commit_group_child_boundary(
+        context,
+        Some(group_child),
+        SealedToolDispatch::Done {
+            final_result: Box::new(final_result),
+        },
+    )
+    .await?;
+    match sealed {
+        SealedToolDispatch::Done { final_result } => {
+            drain_sealed_final(context, *final_result, admission.as_ref(), None).await
+        }
+        SealedToolDispatch::Deferred { .. } => Err(crate::RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+            "a resolver refusal cannot replace a committed deferred dispatch",
+        )),
+    }
 }
 
 /// Finishes a group child whose final an earlier invocation committed at the
@@ -809,18 +874,25 @@ pub(crate) async fn commit_deferred_group_child(
 pub(crate) async fn drain_committed_group_child(
     context: &ToolDispatchContext<'_>,
     committed: &crate::runtime::effect::CommittedGroupChildFinal,
-) -> Result<ToolDispatchOutcome, crate::RuntimeEffectControllerError> {
-    let sealed = SealedToolFinal::from_drain_input(&committed.drain_input, &committed.group_key)?;
-    drain_sealed_final(
-        context,
-        sealed,
-        Some(&GroupChildDrainAdmission {
-            group_key: committed.group_key.clone(),
-            rank: committed.rank,
-        }),
-        None,
-    )
-    .await
+) -> Result<CommittedToolDispatch, crate::RuntimeEffectControllerError> {
+    let sealed =
+        SealedToolDispatch::from_drain_input(&committed.drain_input, &committed.group_key)?;
+    match sealed {
+        SealedToolDispatch::Deferred { completion } => {
+            Ok(CommittedToolDispatch::Deferred(completion))
+        }
+        SealedToolDispatch::Done { final_result } => drain_sealed_final(
+            context,
+            *final_result,
+            Some(&GroupChildDrainAdmission {
+                group_key: committed.group_key.clone(),
+                rank: committed.rank,
+            }),
+            None,
+        )
+        .await
+        .map(|outcome| CommittedToolDispatch::Done(Box::new(outcome))),
+    }
 }
 
 /// Whether `outcome` is the attempt's declared process start at
