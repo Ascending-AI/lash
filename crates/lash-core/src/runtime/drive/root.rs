@@ -366,6 +366,10 @@ impl LashRuntime {
                     follow_on: follow_on.turn.clone(),
                     attempts: follow_on.attempts,
                     generation: admitted.admitted_generation().clone(),
+                    plugin_host: self
+                        .session
+                        .as_ref()
+                        .map(|session| session.plugins().host().clone()),
                     base: crate::store::SessionHeadRef {
                         // Read by the decision body on its first execution.
                         generation: 0,
@@ -381,7 +385,7 @@ impl LashRuntime {
         )
         .await?
         .map_err(|error| drive_abort(Some(&root), error))?;
-        let (recovery, base, turn_index) = match answer {
+        let (recovery, base, turn_index, plugins) = match answer {
             FollowOnRecoveryAnswer::Ceded => {
                 return Ok(RootRun {
                     outcome: RootOutcome::Ceded { root },
@@ -398,21 +402,33 @@ impl LashRuntime {
                 follow_on,
                 base,
                 turn_index,
+                plugins,
             } => (
                 crate::store::FollowOnRecovery::Run(follow_on),
                 base,
                 turn_index,
+                plugins,
             ),
             FollowOnRecoveryAnswer::Exhausted {
                 follow_on,
                 base,
                 turn_index,
+                plugins,
             } => (
                 crate::store::FollowOnRecovery::Exhausted(follow_on),
                 base,
                 turn_index,
+                plugins,
             ),
         };
+        // The recovery is the follow-on's admission by this build, and a
+        // run's segment boundary is a plugin adoption point (FIG-4739): every
+        // commit of the follow-on's turn writes plugin namespaces in the
+        // formats the decision recorded (FIG-4747), on this execution and on
+        // every replay of it.
+        if let Some(session) = self.session.as_ref() {
+            session.plugins().adopt_plugin_admission(plugins);
+        }
         // The follow-on's turn runs on the head its decision recorded, at the
         // index it recorded, whatever head this execution refreshed: a replay
         // after the follow-on's own commit finds a head that commit moved
@@ -719,6 +735,10 @@ struct RecoverFollowOnRunner {
     /// The generation of the build this recovery runs on, which holds the
     /// follow-on's root from the raise on (FIG-4739).
     generation: crate::engine::BuildGeneration,
+    /// The plugins the follow-on's turn runs, whose composition and writer
+    /// formats the decision records (FIG-4747). `None` for a runtime with
+    /// no session.
+    plugin_host: Option<crate::plugin::PluginHost>,
     /// The resident head the follow-on's turn runs on, as the drive
     /// refreshed it. Its generation is read in the body.
     base: crate::store::SessionHeadRef,
@@ -747,6 +767,13 @@ impl RecoverFollowOnRunner {
         };
         self.store.retain_admission_base(&self.fence, &base).await?;
         let turn_index = self.turn_index as u64;
+        // Chosen from the fleet record as it stands now, and recorded with
+        // the decision: nothing of the follow-on's turn ran under an earlier
+        // execution of this step whose answer was lost.
+        let plugins = match &self.plugin_host {
+            Some(host) => host.admit_plugins(self.store.store().as_ref()).await?,
+            None => crate::store::plugin_writers::PluginAdmission::default(),
+        };
         let raised_earlier = owed.attempts > basis.attempts;
         Ok(match recovery {
             crate::store::FollowOnRecovery::Run(_) => FollowOnRecoveryAnswer::Run {
@@ -763,6 +790,7 @@ impl RecoverFollowOnRunner {
                 },
                 base,
                 turn_index,
+                plugins,
             },
             crate::store::FollowOnRecovery::Exhausted(_) => FollowOnRecoveryAnswer::Exhausted {
                 // The head's fact: an earlier execution of this step may have
@@ -770,6 +798,7 @@ impl RecoverFollowOnRunner {
                 follow_on: owed,
                 base,
                 turn_index,
+                plugins,
             },
         })
     }

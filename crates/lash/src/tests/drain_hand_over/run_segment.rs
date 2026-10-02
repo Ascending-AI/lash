@@ -243,6 +243,75 @@ impl RunRoll {
             .in_flight_turns
     }
 
+    /// The continuation's admission is a plugin adoption point (FIG-4747):
+    /// the decision that admitted it on N+1 journaled the plugin composition
+    /// and writer formats it runs under, the record a run's own admission
+    /// keeps. One core serves both builds here, so the two records agree.
+    async fn assert_continuation_recorded_its_plugins(&self) -> Result<()> {
+        let Engine::Double(double) = &self.engine else {
+            unreachable!("the law runs on the double");
+        };
+        let server = double.server();
+        let continuation = server
+            .invocations()
+            .into_iter()
+            .find(|view| {
+                view.target
+                    .ends_with("follow-on:run-root:agent-frame:1#0/run")
+            })
+            .expect("the continuation's root invocation");
+        fn decision(value: &serde_json::Value) -> Option<&serde_json::Value> {
+            match value {
+                serde_json::Value::Object(fields) => {
+                    if fields.get("decision").and_then(|d| d.as_str()) == Some("run") {
+                        return Some(value);
+                    }
+                    fields.values().find_map(decision)
+                }
+                serde_json::Value::Array(items) => items.iter().find_map(decision),
+                _ => None,
+            }
+        }
+        let recorded = server
+            .journal(&continuation.id)
+            .expect("the continuation's journal")
+            .iter()
+            .filter_map(|entry| entry.run_completion()?.ok())
+            .filter_map(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .find_map(|value| decision(&value).and_then(|run| run.get("plugins").cloned()))
+            .expect("the continuation's admission journaled its plugins");
+        let recorded: lash_core::store::plugin_writers::PluginAdmission =
+            serde_json::from_value(recorded)?;
+        assert!(
+            !recorded.plugins().is_empty(),
+            "the record names the admitting build's composition"
+        );
+        let store = lash_core::runtime::live_session_view(&self.core.store_factory, &self.session)
+            .await?
+            .expect("an opened session has a store");
+        let fence = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
+            store.store(),
+            &self.session,
+            "run-segment-plugins",
+        )
+        .await;
+        let admitted = store
+            .admit_root(
+                &lash_core::testing::store_fixtures::admit_root_request_for_test(
+                    &fence,
+                    &lash_core::TurnId::from("run-root"),
+                    lash_core::store::AdmittedHead::Input(lash_core::InputId::from("recorded")),
+                ),
+            )
+            .await?
+            .expect("the run's admission is recorded");
+        assert_eq!(
+            recorded, admitted.plugins,
+            "the continuation records the composition and writers a run's admission does"
+        );
+        Ok(())
+    }
+
     /// The run left nothing behind: the head owes no continuation, and the
     /// draining build holds none of it.
     async fn assert_ended(&self) -> Result<()> {
@@ -396,6 +465,7 @@ async fn a_run_on_a_draining_build_goes_on_in_a_new_invocation(
     if crash.is_some() {
         assert_eq!(crashes.get(), 1, "the invocation died once");
     }
+    roll.assert_continuation_recorded_its_plugins().await?;
     roll.assert_ended().await
 }
 

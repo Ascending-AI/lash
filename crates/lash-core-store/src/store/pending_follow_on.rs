@@ -228,6 +228,13 @@ pub enum FollowOnRecovery {
 /// admission retains its own (FIG-3682), and the root adopts it and pins the
 /// index before its turn, so a replay after the follow-on's own commit moved
 /// the head runs the turn it recorded.
+///
+/// The decision is also the admission of the follow-on's turn by the build
+/// that recovers it, so it records `plugins` as a root's admission does
+/// (FIG-4747, FIG-4739): that build's plugin composition and the writer
+/// format chosen for each plugin. A run that crossed a segment boundary
+/// adopts the plugins of the build its continuation is admitted on, and
+/// every replay of that continuation writes in the recorded formats.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "decision", rename_all = "snake_case")]
 pub enum FollowOnRecoveryAnswer {
@@ -236,6 +243,7 @@ pub enum FollowOnRecoveryAnswer {
         follow_on: PendingFollowOn,
         base: super::SessionHeadRef,
         turn_index: u64,
+        plugins: super::plugin_writers::PluginAdmission,
     },
     /// The recovery bound is spent: the follow-on commits as its failed
     /// terminal, carrying `FollowOnRecoveryExhausted`.
@@ -243,6 +251,7 @@ pub enum FollowOnRecoveryAnswer {
         follow_on: PendingFollowOn,
         base: super::SessionHeadRef,
         turn_index: u64,
+        plugins: super::plugin_writers::PluginAdmission,
     },
     /// The head owed the follow-on no longer: another driver answered it,
     /// and the root runs nothing.
