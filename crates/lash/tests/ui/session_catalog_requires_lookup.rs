@@ -3,11 +3,10 @@
 //! `Absent` is a durable negative answer, not a fallback for a catalog that
 //! cannot resolve an id. The missing method must remain a compile error.
 
-use lash::{SessionId, SessionListFilter, SessionView};
+use lash::{RetainedRevision, Retention, SessionId, SessionListFilter, SessionView, Target};
 use lash::persistence::{
-    ForkSessionReceipt, ForkSessionRequest, MaintenanceResult, RetainedRevision, Retention,
-    SessionAdmission, SessionBlobReclaimReport, SessionCatalogStore, SessionStoreCreateRequest,
-    StoreError, Target,
+    ForkSessionReceipt, ForkSessionRequest, MaintenanceResult, SessionAdmission,
+    SessionBlobReclaimReport, SessionCatalogStore, SessionStoreCreateRequest, StoreError,
 };
 
 struct SilentLookup;

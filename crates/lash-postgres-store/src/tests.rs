@@ -1272,7 +1272,7 @@ fn postgres_statement_name(query: &str) -> &'static str {
         q if q.starts_with("SELECT pending_follow_on_json FROM lash_session_head") => {
             "pending-follow-on-read"
         }
-        q if q.starts_with("SELECT head_json, head_revision") => "head-load",
+        q if q.starts_with("SELECT head.head_json, head.head_revision") => "head-load",
         q if q.starts_with("SELECT head_revision") => "head-lock",
         q if q.starts_with("SELECT node_id FROM lash_graph_nodes") => "graph-nodes-exist",
         q if q.starts_with("SELECT hash FROM lash_blobs") => "blob-lock",

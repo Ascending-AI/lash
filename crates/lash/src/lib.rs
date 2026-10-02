@@ -577,11 +577,10 @@ pub mod persistence {
         PendingTurnInputBatch, PendingTurnInputDraft, ProcessWakeSource, QueuedCheckpointTurnInput,
         QueuedCheckpointWork, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
         QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkKind, QueuedWorkPayload,
-        RetainedRevision, Retention, RuntimeCheckpointComponents, RuntimeSessionState,
-        SessionCreationHead, SessionCursorError, SessionStoreCreateRequest, Target,
-        TurnInputAdmissionMode, TurnInputCheckpointBoundary, TurnInputCompletion,
-        TurnInputCompletionData, TurnInputIngress, TurnInputState, TurnInputStateKind,
-        TurnLaneAdmissionPolicy,
+        RuntimeCheckpointComponents, RuntimeSessionState, SessionCreationHead, SessionCursorError,
+        SessionStoreCreateRequest, TurnInputAdmissionMode, TurnInputCheckpointBoundary,
+        TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputState,
+        TurnInputStateKind, TurnLaneAdmissionPolicy,
     };
     pub use lash_core::session_graph::RealizedNodeTimestamp;
     /// The artifact-cleanup ledger a [`StoreSet`](crate::StoreSet) hands out

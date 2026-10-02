@@ -194,7 +194,7 @@ class Journey:
         return self.sql(
             self.bot_db,
             "SELECT h.event_id, h.channel_id, h.message_ts, h.kind, h.stage, h.input_text, "
-            "h.reply_ts, h.detail, h.deliveries, r.thread_ts, r.input_id, r.fork_node_id "
+            "h.reply_ts, h.detail, h.deliveries, r.thread_ts, r.input_id "
             "FROM handled_events h LEFT JOIN event_routes r USING(event_id) ORDER BY h.first_seen_at, h.event_id",
         )
 

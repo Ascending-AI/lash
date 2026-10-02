@@ -129,9 +129,10 @@ impl ProcessWorkSubstrate for ScriptedEngine {
             .unwrap_or(Answer::Publish);
         match answer {
             Answer::Publish => Ok(()),
-            Answer::Unreachable => Err(PluginError::Session(
-                "the engine's ingress is unreachable".to_owned(),
-            )),
+            Answer::Unreachable => Err(PluginError::Runtime(lash_core::RuntimeError::new(
+                lash_core::RuntimeErrorCode::EngineProcessAwait,
+                "the engine's ingress is unreachable",
+            ))),
             Answer::Refuse => Err(PluginError::Runtime(lash_core::RuntimeError::new(
                 lash_core::RuntimeErrorCode::EngineServiceUnregistered,
                 "no deployment binds the process workflow",

@@ -100,7 +100,7 @@ pub async fn a_store_fault_in_an_intents_delivery_stalls_its_obligation_and_neve
         assert_eq!(stalled.reason, StallReason::AttemptsExhausted, "{call:?}");
         assert_eq!(
             stalled.last_error.map(|error| error.code),
-            Some(crate::RuntimeErrorCode::RuntimeStore),
+            Some(crate::StoreError::Contended.runtime_code()),
             "{call:?}: the stall row keeps the store fault's code"
         );
         // Nothing wrote the intent, and it owes nothing: the store's session
