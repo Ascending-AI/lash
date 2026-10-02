@@ -1,0 +1,682 @@
+{
+  "fixture_schema_version": 1,
+  "head_revision": 4,
+  "node_ids_in_read_order": [
+    "frame-node/v3/5d28b33821af555152375193c404a7714a5d3a982d7df9d5e38594163143731f",
+    "n_3246dccf4a810defd9cc125efda53f1ac7be7acd0a13c98aa3b3e4d1c7f4bb08",
+    "n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a"
+  ],
+  "current_append_retry": {
+    "commit_budget": {
+      "bytes": {
+        "bounded": 1048576
+      },
+      "nodes": {
+        "bounded": 512
+      }
+    },
+    "session_id": "durable-read-fixture",
+    "expected_head_revision": 0,
+    "config": {
+      "turn_budget": "unbounded",
+      "autonomous": false,
+      "no_progress_budget": {
+        "bounded": 12
+      },
+      "charge_safety": {
+        "mode": "require_guarantee"
+      },
+      "generation": {},
+      "tool_access": {
+        "mode": "ambient"
+      },
+      "subagent": null,
+      "plugin_config": {},
+      "config_revision": 0
+    },
+    "current_frame_node_id": "frame-node/v3/5d28b33821af555152375193c404a7714a5d3a982d7df9d5e38594163143731f",
+    "graph": {
+      "Extend": {
+        "nodes": [
+          {
+            "node_id": "frame-node/v3/5d28b33821af555152375193c404a7714a5d3a982d7df9d5e38594163143731f",
+            "timestamp": "2023-11-14T22:13:20+00:00",
+            "kind": "frame_open",
+            "frame_key": "frame-key/v2/3d5efb3ba3c6ff75d7f6ef7d84727fe3070416f76c9e8c0f7b055d946b343e2d",
+            "reason": "initial",
+            "assignment": {
+              "policy": {
+                "session_id": null,
+                "autonomous": false,
+                "turn_budget": "unbounded"
+              },
+              "plugin_config": {}
+            }
+          },
+          {
+            "node_id": "n_3246dccf4a810defd9cc125efda53f1ac7be7acd0a13c98aa3b3e4d1c7f4bb08",
+            "parent_node_id": "frame-node/v3/5d28b33821af555152375193c404a7714a5d3a982d7df9d5e38594163143731f",
+            "timestamp": "2023-11-14T22:13:20+00:00",
+            "kind": "event",
+            "event": {
+              "Conversation": {
+                "id": "m_append_9304aea3269b249d9b8e240f046976a16b2a95e618eb374edf1eded586a60e3c",
+                "role": "User",
+                "parts": [
+                  {
+                    "id": "m_append_9304aea3269b249d9b8e240f046976a16b2a95e618eb374edf1eded586a60e3c.p0",
+                    "kind": "Text",
+                    "content": "durable read user message"
+                  }
+                ],
+                "origin": {
+                  "kind": "plugin",
+                  "plugin_id": "plugin"
+                }
+              }
+            }
+          },
+          {
+            "node_id": "n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a",
+            "parent_node_id": "n_3246dccf4a810defd9cc125efda53f1ac7be7acd0a13c98aa3b3e4d1c7f4bb08",
+            "timestamp": "2023-11-14T22:13:20+00:00",
+            "kind": "plugin",
+            "plugin_type": "durable-read-plugin",
+            "body": {
+              "fixture": true,
+              "order": 2,
+              "output": {
+                "outcome": {
+                  "payload": {
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "fixture": "raw"
+                    }
+                  },
+                  "status": "success"
+                },
+                "view": {
+                  "blocks": [
+                    {
+                      "text": "durable read authored view",
+                      "type": "text"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "graph_base_leaf_node_id": "draft-node/v3/f765d83acdd6097ab5969f3c4d7f4d0ccd9d2ef967601f69813f1a93a7973f69",
+    "checkpoint": {
+      "turn_state": {
+        "turn_index": 0,
+        "token_usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "reasoning_output_tokens": 0
+        }
+      }
+    },
+    "turn_commit": {
+      "operation": {
+        "scope": {
+          "type": "runtime_operation",
+          "operation_id": "session:durable-read-fixture:boundary:durable-read-current-append"
+        },
+        "key": "append-session-nodes"
+      },
+      "append_request_identity": {
+        "kind": "append",
+        "identity_encoding_version": 1,
+        "request_identity_hash": "28cc110ed19c5c931910a75632069760f62879e14c4d8cca91b42311542d90d1",
+        "requested_node_count": 2
+      }
+    },
+    "adopted_intent_rows": 0,
+    "committed_attachment_ids": []
+  },
+  "legacy_commit_retry": {
+    "commit_budget": {
+      "bytes": {
+        "bounded": 1048576
+      },
+      "nodes": {
+        "bounded": 512
+      }
+    },
+    "session_id": "durable-read-fixture",
+    "expected_head_revision": 1,
+    "config": {
+      "turn_budget": "unbounded",
+      "autonomous": false,
+      "no_progress_budget": {
+        "bounded": 12
+      },
+      "charge_safety": {
+        "mode": "require_guarantee"
+      },
+      "generation": {},
+      "tool_access": {
+        "mode": "ambient"
+      },
+      "subagent": null,
+      "plugin_config": {},
+      "config_revision": 0
+    },
+    "current_frame_node_id": "frame-node/v3/5d28b33821af555152375193c404a7714a5d3a982d7df9d5e38594163143731f",
+    "graph": "PreserveHead",
+    "graph_base_leaf_node_id": "n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a",
+    "checkpoint": {
+      "turn_state": {
+        "turn_index": 7,
+        "token_usage": {
+          "input_tokens": 13,
+          "output_tokens": 8,
+          "cache_read_input_tokens": 5,
+          "cache_write_input_tokens": 3,
+          "reasoning_output_tokens": 2
+        }
+      },
+      "components": {
+        "execution_state": {
+          "Changed": {
+            "encoding_version": 1,
+            "body": [
+              70,
+              73,
+              71,
+              56,
+              56,
+              55
+            ]
+          }
+        },
+        "plugin_state": {
+          "Changed": {
+            "encoding_version": 1,
+            "body": [
+              129,
+              188,
+              100,
+              117,
+              114,
+              97,
+              98,
+              108,
+              101,
+              45,
+              114,
+              101,
+              97,
+              100,
+              45,
+              115,
+              110,
+              97,
+              112,
+              115,
+              104,
+              111,
+              116,
+              45,
+              112,
+              108,
+              117,
+              103,
+              105,
+              110,
+              130,
+              170,
+              103,
+              101,
+              110,
+              101,
+              114,
+              97,
+              116,
+              105,
+              111,
+              110,
+              205,
+              3,
+              119,
+              166,
+              118,
+              97,
+              108,
+              117,
+              101,
+              115,
+              129,
+              165,
+              115,
+              116,
+              97,
+              116,
+              101,
+              130,
+              167,
+              102,
+              105,
+              120,
+              116,
+              117,
+              114,
+              101,
+              172,
+              112,
+              108,
+              117,
+              103,
+              105,
+              110,
+              45,
+              115,
+              116,
+              97,
+              116,
+              101,
+              165,
+              118,
+              97,
+              108,
+              117,
+              101,
+              205,
+              3,
+              119
+            ]
+          }
+        },
+        "tool_state": {
+          "Changed": {
+            "encoding_version": 1,
+            "body": [
+              130,
+              170,
+              103,
+              101,
+              110,
+              101,
+              114,
+              97,
+              116,
+              105,
+              111,
+              110,
+              205,
+              3,
+              119,
+              165,
+              116,
+              111,
+              111,
+              108,
+              115,
+              128
+            ]
+          }
+        }
+      }
+    },
+    "turn_commit": {
+      "operation": {
+        "scope": {
+          "type": "runtime_operation",
+          "operation_id": "durable-read-legacy-commit"
+        },
+        "key": "commit"
+      },
+      "append_request_identity": {
+        "kind": "plain_commit"
+      }
+    },
+    "adopted_intent_rows": 1,
+    "committed_attachment_ids": [
+      "durable-read-attachment"
+    ]
+  },
+  "record_config_retry": {
+    "commit_budget": {
+      "bytes": {
+        "bounded": 1048576
+      },
+      "nodes": {
+        "bounded": 512
+      }
+    },
+    "session_id": "durable-read-fixture",
+    "expected_head_revision": 2,
+    "config": {
+      "turn_budget": "unbounded",
+      "autonomous": false,
+      "no_progress_budget": {
+        "bounded": 12
+      },
+      "charge_safety": {
+        "mode": "require_guarantee"
+      },
+      "generation": {},
+      "tool_access": {
+        "mode": "ambient"
+      },
+      "subagent": null,
+      "plugin_config": {},
+      "config_revision": 0
+    },
+    "current_frame_node_id": "frame-node/v3/5d28b33821af555152375193c404a7714a5d3a982d7df9d5e38594163143731f",
+    "graph": "PreserveHead",
+    "graph_base_leaf_node_id": "n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a",
+    "checkpoint": {
+      "turn_state": {
+        "turn_index": 7,
+        "token_usage": {
+          "input_tokens": 13,
+          "output_tokens": 8,
+          "cache_read_input_tokens": 5,
+          "cache_write_input_tokens": 3,
+          "reasoning_output_tokens": 2
+        }
+      },
+      "components": {
+        "execution_state": {
+          "Unchanged": {
+            "descriptor": {
+              "blob_ref": "76a31ea97e133ae7ed233e34355d8eb5308dea8ab031b1b39a67936fb8bc99c8",
+              "encoding_version": 1
+            }
+          }
+        },
+        "plugin_state": {
+          "Unchanged": {
+            "descriptor": {
+              "blob_ref": "c6155fdf1d371a10a71a007337606ed5e5aa78bbe6f4f673c02d52460e20b249",
+              "encoding_version": 1
+            }
+          }
+        },
+        "tool_state": {
+          "Unchanged": {
+            "descriptor": {
+              "blob_ref": "9b32938f19d00ce8e3cc0116769a86590e9a8b9635bda84ab5627671ca62a51d",
+              "encoding_version": 1
+            }
+          }
+        }
+      }
+    },
+    "turn_commit": {
+      "operation": {
+        "scope": {
+          "type": "runtime_operation",
+          "operation_id": "session:durable-read-fixture:boundary:protocol-materialization"
+        },
+        "key": "record-config"
+      },
+      "append_request_identity": {
+        "kind": "semantic_boundary",
+        "operation": "record-config",
+        "identity_encoding_version": 1,
+        "request_identity_hash": "8eb19a7bce3f611c33b6e0cb7045a1dbd303e44ca29f7b87b2994913eebf87a9"
+      }
+    },
+    "adopted_intent_rows": 0,
+    "committed_attachment_ids": []
+  },
+  "queue_batch_id": "qwb:7e635522b53e00911b73ffd64e645117fc1b3b5e7950e8687e02ef07885db80a",
+  "pending_input_id": "durable-read-pending-input",
+  "process_env_ref": "process-env:v6:blake3:a2be1511dbfc20a2df62205822240227fb1c8a05705837fdc0db9aacd95dc45e",
+  "wake_delivery": {
+    "version": 1,
+    "wake_id": "wake:v1:blake3:5f8eb7fb2de74745b4f301023356a7a43ea1452d796158036ec9542fde33d409",
+    "target_session_id": "durable-read-fixture",
+    "process_id": "p_00000000000070008000000000000002",
+    "sequence": 1,
+    "event_type": "fixture.wake",
+    "event_invocation": {
+      "attribution": {},
+      "subject": {
+        "type": "process_event",
+        "process_id": "p_00000000000070008000000000000002",
+        "sequence": 1,
+        "event_type": "fixture.wake"
+      },
+      "caused_by": {
+        "type": "process",
+        "process_id": "p_00000000000070008000000000000002"
+      }
+    },
+    "authority": {
+      "principal": "host"
+    },
+    "input": "durable read wake",
+    "created_at_ms": 1700000000000
+  },
+  "trigger_delivery": {
+    "occurrence": {
+      "occurrence_id": "trigger:durable-read-occurrence",
+      "source_type": "fixture.event",
+      "source_key": "fixture-source",
+      "payload": {
+        "value": 42
+      },
+      "idempotency_key": "durable-read-occurrence",
+      "occurred_at_ms": 1700000000000
+    },
+    "subscription": {
+      "subscription_id": "trigger-subscription:v1:blake3:888a801e9db17827835391b306f82939d62dd5df18a7468298853b6259ed4e11",
+      "owner_scope": {
+        "type": "session",
+        "session_id": "durable-read-fixture"
+      },
+      "subscription_key": "durable-read-trigger",
+      "incarnation": "durable-read-trigger-incarnation",
+      "revision": 1,
+      "definition_fingerprint": "trigger-definition:v1:blake3:1206c996d22316af384acc797d8fbd18788de313b734e47a46b70112dbca98e6",
+      "registrant": {
+        "type": "session",
+        "session_id": "durable-read-fixture"
+      },
+      "env_ref": "process-env:v6:blake3:a2be1511dbfc20a2df62205822240227fb1c8a05705837fdc0db9aacd95dc45e",
+      "wake_target": {
+        "session_id": "durable-read-fixture"
+      },
+      "name": "Durable read trigger",
+      "source_type": "fixture.event",
+      "source_key": "fixture-source",
+      "source": {
+        "fixture": "source"
+      },
+      "payload_schema": {
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "value"
+          ],
+          "type": "object"
+        }
+      },
+      "source_capture": {
+        "constructor_path": [
+          "fixture",
+          "event"
+        ],
+        "config_schema": {
+          "schema": {
+            "additionalProperties": false,
+            "properties": {
+              "fixture": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "route": {
+          "kind": "provider",
+          "provider_id": "fixture-provider",
+          "route": {
+            "account": "fixture"
+          }
+        }
+      },
+      "target": {
+        "type": "engine",
+        "kind": "durable-read-trigger-target",
+        "payload": {
+          "fixture": "trigger"
+        }
+      },
+      "target_identity": {
+        "kind": "durable-read-trigger-target",
+        "label": "Durable read trigger target",
+        "definition": {
+          "engine_kind": "durable-read-trigger-target",
+          "definition": {
+            "fixture": "trigger"
+          },
+          "signature": {
+            "signature": "unknown"
+          }
+        }
+      },
+      "event_types": [],
+      "input_template": {
+        "event": {
+          "type": "event"
+        }
+      },
+      "target_label": "Durable read trigger target",
+      "lifecycle": {
+        "lifecycle": "enabled"
+      },
+      "created_at_ms": 1700000000000,
+      "updated_at_ms": 1700000000000
+    },
+    "created_at_ms": 1700000000000
+  },
+  "waiting_process": {
+    "id": "p_00000000000070008000000000000001",
+    "start_key": "process-start-key:v1:host:blake3:87196b72f39a2af03893f3bf8000ead79de0d7245ef36918f505981372729001",
+    "last_event_sequence": 5,
+    "input": {
+      "type": "engine",
+      "kind": "durable-read-engine",
+      "payload": {
+        "fixture": "process"
+      }
+    },
+    "lifetime": {
+      "lifetime": "detached"
+    },
+    "ancestry": [],
+    "identity": {
+      "kind": "durable-read-engine",
+      "label": "Durable read fixture",
+      "definition": {
+        "engine_kind": "durable-read-engine",
+        "definition": {
+          "fixture": "process"
+        },
+        "signature": {
+          "signature": "unknown"
+        }
+      }
+    },
+    "event_types": [
+      {
+        "name": "process.completed",
+        "payload_schema": {
+          "schema": {}
+        },
+        "semantics": {
+          "terminal": {
+            "status": "completed",
+            "await_output": {
+              "pointer": "/await_output"
+            }
+          }
+        }
+      },
+      {
+        "name": "process.failed",
+        "payload_schema": {
+          "schema": {}
+        },
+        "semantics": {
+          "terminal": {
+            "status": "failed",
+            "await_output": {
+              "pointer": "/await_output"
+            }
+          }
+        }
+      },
+      {
+        "name": "process.cancelled",
+        "payload_schema": {
+          "schema": {}
+        },
+        "semantics": {
+          "terminal": {
+            "status": "cancelled",
+            "await_output": {
+              "pointer": "/await_output"
+            }
+          }
+        }
+      },
+      {
+        "name": "process.abandoned",
+        "payload_schema": {
+          "schema": {}
+        },
+        "semantics": {
+          "terminal": {
+            "status": "abandoned",
+            "await_output": {
+              "pointer": "/await_output"
+            }
+          }
+        }
+      }
+    ],
+    "provenance": {
+      "originator": {
+        "type": "host"
+      }
+    },
+    "env_ref": "process-env:v6:blake3:a2be1511dbfc20a2df62205822240227fb1c8a05705837fdc0db9aacd95dc45e",
+    "created_at_ms": 1700000000000,
+    "updated_at_ms": 1700000000000,
+    "first_started": {
+      "owner": {
+        "owner_id": "restate:p_00000000000070008000000000000001",
+        "incarnation_id": "durable-read-fixture"
+      },
+      "attempt": 1,
+      "started_at_ms": 0
+    },
+    "wait": {
+      "kind": {
+        "kind": "signal",
+        "name": "fixture-ready",
+        "event_type": "process.signal.fixture-ready",
+        "key": "durable-read-wait-key",
+        "ordinal": 1
+      },
+      "since_ms": 123
+    },
+    "status": "waiting"
+  }
+}

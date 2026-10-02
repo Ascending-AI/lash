@@ -1,0 +1,60 @@
+{
+  "generation": {
+    "bytecode_format_version": 1,
+    "segment_state_version": 1,
+    "vm_continuation_format_version": 1
+  },
+  "input": {
+    "args": {},
+    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:parked-loop",
+    "module_ref": "lashlang:v2:blake3:parked-loop",
+    "process_ref": {
+      "component": "parked-loop",
+      "pos": 0
+    }
+  },
+  "program": "for (const item of [1]) { await sleep(item); } finish(null);",
+  "program_hash": "blake3:62952c84e721ea959e41956f593c6837530b7dc238c3368157001128137fcd10",
+  "segment_state": {
+    "commands": {
+      "dispatched": "b455a28b3c942b7064416064130948637df805d313b053af4c5b9eb0521acd42",
+      "next": 0
+    },
+    "effect_omissions": {},
+    "event_sequence": 0,
+    "incorporation_ledger": {
+      "incorporated": []
+    },
+    "outstanding_groups": [],
+    "pending_summary": [],
+    "signal_wait_ordinals": {},
+    "started_process_ids": [],
+    "version": 1,
+    "vm": {
+      "bytes": "gqJ2bcUEQnsiZm9ybWF0X3ZlcnNpb24iOjEsImV4ZWN1dGFibGUiOiJibGFrZTM6M2VhYjc4YzMxN2YzYTk4ZjYyMjk0MjdjNjAyZjQ3OGVhNzY4Y2RmZjFiNzkzOTY0Mzc3MTJmNjUzMDZiYzM5MCIsInJlZmVyZW5jZV9zZW1hbnRpY3MiOmZhbHNlLCJpbnN0cnVjdGlvbl9wb2ludGVyIjo3LCJhY3RpdmVfZnVuY3Rpb24iOm51bGwsIm9wZXJhbmRfc3RhY2siOlt7ImtpbmQiOiJudWxsIn1dLCJwZW5kaW5nX3Rvb2xzIjp7fSwiZXhlY3V0aW9uX25vbmNlIjoxNjI5NDIwODQxNjY1ODYwNzUzNSwibGFzdF92YWx1ZSI6eyJraW5kIjoic2V0IiwidmFsdWUiOnsia2luZCI6Im51bGwifX0sInNsb3RzIjpbeyJraW5kIjoic2V0IiwidmFsdWUiOnsia2luZCI6Im51bWJlciIsInZhbHVlIjp7InZlcnNpb24iOjEsImJpdHMiOjQ2MDcxODI0MTg4MDAwMTc0MDh9fX1dLCJnbG9iYWxzIjp7ImtpbmQiOiJyZWNvcmQiLCJ2YWx1ZSI6W119LCJpdGVyYXRvcl9zdGFjayI6W3siY3Vyc29yIjp7IkxpdmUiOnsic291cmNlIjp7ImtpbmQiOiJyZWYiLCJ2YWx1ZSI6MX0sIm5leHRfaW5kZXgiOjF9fSwiYmluZGluZ19zbG90IjowLCJyZXN0b3JlX3ZhbHVlIjp7ImtpbmQiOiJ1bnNldCJ9fV0sImZyYW1lX3N0YWNrIjpbXSwiaGFuZGxlcl9zdGFjayI6W10sImZpbmFsbHlfc3RhY2siOltdLCJvY2N1cnJlbmNlX2NvdW50ZXJzIjp7Im5vZGU6MWRlNmVjYTdmYmI1YzAyZmEzYjMyZDQ3IjoxLCJub2RlOjY2MGYzMjVkNTNjZTk5MTkxZjQ2YzhmMSI6MX0sIm1vZGUiOiJQcm9jZXNzIiwicHJvZmlsZSI6bnVsbCwicGVuZGluZ19lcnJvcl9zcGFuIjpudWxsLCJpbnN0cnVjdGlvbnNfZXhlY3V0ZWQiOjcsImhlYXAiOnsibmV4dF9pZCI6MiwiYWxsb2NhdGlvbl9jb3VudGVyIjoxLCJsaXZlX2xvZ2ljYWxfYnl0ZXMiOjg4LCJzaXplX3NjaGVkdWxlX3ZlcnNpb24iOjEsIm9iamVjdHMiOlt7ImlkIjoxLCJvYmplY3QiOnsia2luZCI6Imxpc3QiLCJpdGVtcyI6W3sia2luZCI6Im51bWJlciIsInZhbHVlIjp7InZlcnNpb24iOjEsImJpdHMiOjQ2MDcxODI0MTg4MDAwMTc0MDh9fV19fV19LCJyZXN1bWUiOnsia2luZCI6Im5leHRfaW5zdHJ1Y3Rpb24ifX2ncmVxdWVzdMA=",
+      "definition_ids": [],
+      "format_version": 1,
+      "hash": "9bbbc8c2f3a997d3100ac52bdd3bb5940f3aa06a2b8885d2d15dd3cd7e4a021a",
+      "kind": "continuation",
+      "len": 1106,
+      "owner": "process:p_0926e047cf4f778da52b8dd14bacc5f2",
+      "vm_contract": {
+        "abi": 1,
+        "accounting": 1,
+        "bytecode": 1,
+        "continuation": 1,
+        "heap": 1,
+        "snapshot": 1
+      }
+    },
+    "worker_recovery": {
+      "boundary": 0,
+      "totals": {
+        "attempts": 0,
+        "cpu_nanos": 0,
+        "replacement": false,
+        "unknown_cpu_attempts": 0
+      }
+    }
+  }
+}

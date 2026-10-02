@@ -1,0 +1,131 @@
+{
+  "schema": "lash.release-fixtures-manifest.v1",
+  "tag": "cut-1.0-dry-run",
+  "source_commit": "f0a01a920d71b98ef55f8f8485b312731e36956c",
+  "dry_run": false,
+  "captured_at": "2026-10-02T02:39:47+00:00",
+  "legs": [
+    {
+      "name": "sqlite-stores",
+      "source": "fixtures/durable-read/v1/sqlite",
+      "note": "the SQLite catalogs the tagged build's generator writes; expected.json and versions.json come along",
+      "files": [
+        {
+          "path": "durable-core.db",
+          "sha256": "23a58e3d3fd74c50463371e0112552eb44f3dbe4d6cb718aebc98d9c36d3321d",
+          "bytes": 614400
+        },
+        {
+          "path": "expected.json",
+          "sha256": "a0b355f5292f21e0800f9a3fde8238e5ff9f006c2f01672895c1e4a13b9e46f1",
+          "bytes": 18106
+        },
+        {
+          "path": "processes.db",
+          "sha256": "f0756cc77a1269eb8ac5cf7deccf707e781c351f0fe514aeedd051c2b248cbfe",
+          "bytes": 307200
+        },
+        {
+          "path": "triggers.db",
+          "sha256": "706d5e44c97940df898b464fc2484f65489ba3ce7584cacc3db5e2b066f8654f",
+          "bytes": 106496
+        },
+        {
+          "path": "versions.json",
+          "sha256": "21eae3c451346e3cf04fbf89623501fb4d7b1b58355f6605729cd150242a3582",
+          "bytes": 59
+        }
+      ]
+    },
+    {
+      "name": "postgres-store",
+      "source": "fixtures/durable-read/v1/postgres",
+      "note": "the durable-read pg_dump, version manifest, and expectations; regeneration needs an owned throwaway database",
+      "files": [
+        {
+          "path": "expected.json",
+          "sha256": "631a29fb4c851e57c0b7b8f4c898eccaa71bbac27dd43c3492eaeba084d9ba3f",
+          "bytes": 18106
+        },
+        {
+          "path": "fixture.sql",
+          "sha256": "e539d611c5f950c5313652d6e22d8ea56b20d2a53e3c3d230fe60540bf1465ab",
+          "bytes": 155207
+        },
+        {
+          "path": "version.json",
+          "sha256": "d48fe06f367756c31e9767b92caa3a9a74a108ecc9282c5de56643d8da95a630",
+          "bytes": 18
+        }
+      ]
+    },
+    {
+      "name": "session-at-rest",
+      "source": "fixtures/durable-read/v1/sqlite/durable-core.db",
+      "note": "the seeded `durable-read-fixture` session catalog at rest: session-state marker, session head, graph nodes, and checkpoints. The same file the sqlite-stores leg carries, named separately for the session-state law",
+      "files": [
+        {
+          "path": "durable-core.db",
+          "sha256": "23a58e3d3fd74c50463371e0112552eb44f3dbe4d6cb718aebc98d9c36d3321d",
+          "bytes": 614400
+        }
+      ]
+    },
+    {
+      "name": "segment-state",
+      "source": "crates/lash-lashlang-runtime/src/fixtures",
+      "note": "the LashlangSegmentState the tagged build parks inside a loop, with the generation that wrote it",
+      "files": [
+        {
+          "path": "lashlang_segment_parked_loop.json",
+          "sha256": "008296f5f05af9064debe250427b4956762eddfdfaa88327ba2f80b7be40eed8",
+          "bytes": 3068
+        }
+      ]
+    },
+    {
+      "name": "tool-intent-journals",
+      "source": "crates/lash-restate/tests/fixtures/tool_intent_journals",
+      "note": "Restate endpoint-interruption journal captures, each with the generation that wrote it",
+      "files": [
+        {
+          "path": "full-drain.json",
+          "sha256": "7afd4e23e5fcd3668eaa4a1a919dad8ec132c188fd70cdff9d82507b34e2e33c",
+          "bytes": 55835
+        },
+        {
+          "path": "mid-drain.json",
+          "sha256": "9154dae410b95f853fd0dd161ae21b8d7b794d6a9cb1e2927e81500b15da44d1",
+          "bytes": 13820
+        },
+        {
+          "path": "mid-intent.json",
+          "sha256": "c075c51fb532b2c813196b7b7b8a847a28371c18433c77cd95db6bede6a98973",
+          "bytes": 29878
+        }
+      ]
+    },
+    {
+      "name": "replay-corpus",
+      "source": "crates/lash-restate/testdata/replay-corpus",
+      "note": "one ordered journal per scenario, stamped with the capturing build's generation",
+      "files": [
+        {
+          "path": "lashlang-effect-summary/journal.json",
+          "sha256": "f929ae5b66ea1816eaf16f6a35430604529a43b124fe323110e0f38edf6fdf77",
+          "bytes": 5783
+        },
+        {
+          "path": "scalar-lashlang-tool-attempt/journal.json",
+          "sha256": "78b06a656c775965c8a1eb67a7346a06be199ad00097b7fce5f6b161e309316e",
+          "bytes": 2166
+        },
+        {
+          "path": "sleep-envelope/journal.json",
+          "sha256": "844ab408c4cfb0d4fcaaf2d088de06dc79513ceace3df7f035b2068763378399",
+          "bytes": 838
+        }
+      ]
+    }
+  ]
+}
