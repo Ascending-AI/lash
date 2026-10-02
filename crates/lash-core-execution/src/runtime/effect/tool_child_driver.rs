@@ -282,7 +282,7 @@ impl ToolChildHost {
         request: &ToolChildRequest,
     ) -> Result<ScopedEffectController<'static>, RuntimeEffectControllerError> {
         self.effect_host()?
-            .scoped_static(request.scope.admitted_scope.clone())
+            .scoped_static(request.scope.claim_scope())
             .map_err(RuntimeEffectControllerError::from)?
             .ok_or_else(|| {
                 RuntimeEffectControllerError::new(
@@ -742,7 +742,7 @@ impl RuntimeEffectLocalRunner for ToolChildRunner {
                 child: envelope.invocation.address.clone(),
             },
             self.host
-                .child_controller(&request.scope.admitted_scope, binding)?,
+                .child_controller(&request.scope.claim_scope(), binding)?,
         ))
         .await
     }
@@ -890,8 +890,8 @@ pub(crate) fn rebind_child_dispatch<'run>(
     // opener: a lent context of another process, or of no process, carries
     // none the child may start under (FIG-3607 R2).
     let enclosing = request
-        .enclosing_process
-        .clone()
+        .enclosing_process()
+        .cloned()
         .map(crate::ScopeId::process);
     if child
         .process_lineage
@@ -1069,15 +1069,12 @@ async fn run_tool_child<'run>(
 
     let execution_env_spec = load_execution_env(host, request, &controller).await?;
 
-    // The controller arrives bound to the request's recorded admitted pair:
-    // the claim scope *and* the incarnation it was admitted under, one checked
-    // value. Who builds it is the tier's business — the in-process runner asks
-    // this host for a `'static` one, a handler-bound tier scopes its own — and
-    // there is no post-construction pin step either way: the pair was checked
-    // when the request was decoded (`AdmittedScope::new` is the only
-    // construction), and `enclosing_process` is never it: that field is tool
-    // execution context, which `ToolChildRequest::validate` has already
-    // reconciled with the opener.
+    // The controller arrives bound to the request's claim scope, which is its
+    // recorded opener's own. Who builds it is the tier's business — the
+    // in-process runner asks this host for a `'static` one, a handler-bound
+    // tier scopes its own — and there is no post-construction pin step either
+    // way: the claim scope and the enclosing process are both derived from the
+    // one opener the request records.
     validate_recorded_authorities(host, &controller, request).await?;
 
     let resolved = host
@@ -1396,7 +1393,7 @@ fn child_tool_context<'run>(
     let mut builder = crate::ToolContext::from_dispatch(Arc::clone(dispatch), &request.call)
         .cancellation_token(Some(turn_cancel_wait.cancellation().clone()))
         .parent_invocation(request.lineage.parent_invocation().cloned());
-    if let Some(process_id) = request.enclosing_process.as_ref() {
+    if let Some(process_id) = request.enclosing_process() {
         builder = builder.enclosing_process(Some(process_id.clone()));
     }
     builder.build()

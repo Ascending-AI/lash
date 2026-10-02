@@ -1361,7 +1361,7 @@ impl RuntimeEffectController for RestateEffectHostController {
         } else {
             None
         };
-        let settlement = settlement_from_payload(record, payload)?;
+        let settlement = settlement_from_payload(rank, record, payload)?;
         handle.advance()?;
         if handle.is_exhausted()
             && let Some(executors) = self.group_executors.get()
@@ -1452,7 +1452,7 @@ impl RuntimeEffectController for RestateEffectHostController {
         } else {
             None
         };
-        let settlement = settlement_from_payload(record, payload)?;
+        let settlement = settlement_from_payload(rank, record, payload)?;
         Ok(Some(lash_core::RankedGroupSettlement {
             sequence: settlement.sequence,
             child_replay_key,

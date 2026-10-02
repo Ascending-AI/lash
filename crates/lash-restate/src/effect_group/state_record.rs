@@ -108,70 +108,164 @@ pub enum EffectGroupSettlementTerminal {
     Cancelled,
 }
 
+/// One seated rank as a read serves it. The rank is the reader's own
+/// question, so the record does not repeat it.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EffectGroupSettlementRecord {
     pub position: usize,
-    pub sequence: u64,
     pub terminal: EffectGroupSettlementTerminal,
 }
 
-/// Which side of the §4 arbitration point committed for one child.
+/// What one child holds at the §4 arbitration point, and whether its rank is
+/// seated.
 ///
 /// `record_settlement` is the child's final record reaching the point and
 /// `close`/`retirement_cancel` are the cancel disposition reaching it, and
 /// whichever wrote first holds it. `CancelDecided` is what turns a late
 /// `record_settlement` into the typed `CancelDecided` refusal rather than an
-/// indistinguishable `Duplicate`. A child absent from the map is `pending`.
+/// indistinguishable `Duplicate`.
 ///
-/// Either side reserves the child's settlement rank at the point (FIG-4308):
-/// `Committed` holds the rank its seat will publish once the child's drain
-/// and projection are done, and a cancel decision seats its rank in the same
-/// step. Rank order is therefore the order of §4 decisions; commit order is
-/// that order restricted to committed children.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// - `Committed`: the child's own final won the point and reserved its rank
+///   (FIG-4308); the seat is owed until its drain and projection are done.
+/// - `Seated`: the committed child published its terminal at that rank.
+/// - `CancelDecided`: the cancel disposition won the point, which seats the
+///   rank cancelled in the same step.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupChildCommitState {
-    Committed { rank: u64 },
+pub enum EffectGroupSeat {
+    Committed,
+    Seated {
+        terminal: EffectGroupSettlementTerminal,
+    },
     CancelDecided,
+}
+
+impl EffectGroupSeat {
+    /// The terminal a seated rank serves; `None` while the seat is owed.
+    fn terminal(&self) -> Option<EffectGroupSettlementTerminal> {
+        match self {
+            Self::Committed => None,
+            Self::Seated { terminal } => Some(terminal.clone()),
+            Self::CancelDecided => Some(EffectGroupSettlementTerminal::Cancelled),
+        }
+    }
+
+    pub(crate) fn is_seated(&self) -> bool {
+        !matches!(self, Self::Committed)
+    }
+}
+
+/// One §4 decision: the child it decided and what that child holds.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EffectGroupDecision {
+    pub position: usize,
+    pub seat: EffectGroupSeat,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EffectGroupStateLiveRecord {
     pub(crate) shape: EffectGroupShape,
-    /// The next rank a §4 decision reserves.
-    pub(crate) next_rank: u64,
-    /// Every child whose §4 point is taken, by either side.
-    #[serde(with = "btree_map_as_pairs")]
-    pub(crate) commit_states: BTreeMap<usize, EffectGroupChildCommitState>,
-    /// The published settlements by rank: a reserved rank appears here only
-    /// once its child has seated.
-    #[serde(with = "btree_map_as_pairs")]
-    pub(crate) settlements: BTreeMap<u64, EffectGroupSettlementRecord>,
-    #[serde(with = "btree_map_as_pairs")]
-    pub(crate) settled_positions: BTreeMap<usize, u64>,
+    /// Every child whose §4 point is taken, by either side, in rank order:
+    /// the decision at index `i` holds rank `i + 1`. Rank order is therefore
+    /// the order of §4 decisions, and commit order is that order restricted
+    /// to committed children. A child absent from it is `pending`.
+    pub(crate) decisions: Vec<EffectGroupDecision>,
 }
 
 impl EffectGroupStateLiveRecord {
-    /// Reserves the next rank for a §4 decision.
-    pub(crate) fn reserve_rank(&mut self, group_key: &str) -> Result<u64, TerminalError> {
-        let rank = self.next_rank;
-        self.next_rank = self.next_rank.checked_add(1).ok_or_else(|| {
-            TerminalError::new(format!(
-                "effect group {group_key} exhausted settlement ranks"
-            ))
-        })?;
-        Ok(rank)
+    /// A live record no child has decided.
+    pub(crate) fn undecided(shape: EffectGroupShape) -> Self {
+        Self {
+            shape,
+            decisions: Vec::new(),
+        }
+    }
+
+    /// Every decision with the rank it holds, in rank order.
+    pub(crate) fn ranked(&self) -> impl Iterator<Item = (u64, &EffectGroupDecision)> {
+        (1..).zip(&self.decisions)
+    }
+
+    /// The rank `position` holds and its seat, or `None` while it is pending.
+    pub(crate) fn decision(&self, position: usize) -> Option<(u64, &EffectGroupSeat)> {
+        self.ranked()
+            .find(|(_, decision)| decision.position == position)
+            .map(|(rank, decision)| (rank, &decision.seat))
+    }
+
+    /// Takes the §4 point for a pending `position` and answers the rank the
+    /// decision reserves: the next one.
+    pub(crate) fn decide(&mut self, position: usize, seat: EffectGroupSeat) -> u64 {
+        self.decisions.push(EffectGroupDecision { position, seat });
+        self.decisions.len() as u64
+    }
+
+    /// Publishes the seat of a decision at the rank it reserved.
+    pub(crate) fn seat(&mut self, rank: u64, seat: EffectGroupSeat) {
+        if let Some(decision) = usize::try_from(rank)
+            .ok()
+            .and_then(|rank| rank.checked_sub(1))
+            .and_then(|index| self.decisions.get_mut(index))
+        {
+            decision.seat = seat;
+        }
+    }
+
+    /// Whether `position`'s rank is seated, by its own settlement or by a
+    /// cancel decision.
+    pub(crate) fn is_seated(&self, position: usize) -> bool {
+        self.decision(position)
+            .is_some_and(|(_, seat)| seat.is_seated())
+    }
+
+    /// How many positions are seated.
+    pub(crate) fn seated(&self) -> usize {
+        self.decisions
+            .iter()
+            .filter(|decision| decision.seat.is_seated())
+            .count()
+    }
+
+    /// The committed children whose seat is still owed, as `(rank, position)`
+    /// in rank order.
+    pub(crate) fn owed(&self) -> impl Iterator<Item = (u64, usize)> {
+        self.ranked()
+            .filter(|(_, decision)| !decision.seat.is_seated())
+            .map(|(rank, decision)| (rank, decision.position))
     }
 
     /// The contiguous-seated watermark: the highest rank `r` such that every
-    /// rank `1..=r` is seated, or 0. It is derived from the published
-    /// settlements, so it can never disagree with them. A read is served only
-    /// at or below it (FIG-4308).
+    /// rank `1..=r` is seated, or 0. A read is served only at or below it
+    /// (FIG-4308).
     pub(crate) fn seated_prefix(&self) -> u64 {
-        (1..)
-            .take_while(|rank| self.settlements.contains_key(rank))
-            .last()
-            .unwrap_or(0)
+        self.decisions
+            .iter()
+            .take_while(|decision| decision.seat.is_seated())
+            .count() as u64
+    }
+
+    /// The settlement `rank` serves once it is seated.
+    pub(crate) fn settlement(&self, rank: u64) -> Option<EffectGroupSettlementRecord> {
+        let index = usize::try_from(rank).ok()?.checked_sub(1)?;
+        let decision = self.decisions.get(index)?;
+        Some(EffectGroupSettlementRecord {
+            position: decision.position,
+            terminal: decision.seat.terminal()?,
+        })
+    }
+
+    /// Seats every still-pending position cancelled (the cancel disposition
+    /// reaching the §4 point) and answers the positions it decided. A
+    /// committed child keeps the decision it holds, and an already-cancelled
+    /// one its first seat.
+    pub(crate) fn decide_pending_cancelled(&mut self) -> Vec<usize> {
+        let pending = (0..self.shape.children())
+            .filter(|position| self.decision(*position).is_none())
+            .collect::<Vec<_>>();
+        for position in &pending {
+            self.decide(*position, EffectGroupSeat::CancelDecided);
+        }
+        pending
     }
 }
 
@@ -308,10 +402,8 @@ pub(crate) fn paused_work_need(
             .iter()
             .find(|(_, id)| **id == request.invocation_id)
         {
-            Some((position, _)) => live.settled_positions.contains_key(position),
-            None => {
-                live.shape.children() > 0 && live.settled_positions.len() >= live.shape.children()
-            }
+            Some((position, _)) => live.is_seated(*position),
+            None => live.shape.children() > 0 && live.seated() >= live.shape.children(),
         };
     if seated {
         EffectGroupOpenerResponse::Seated
@@ -363,11 +455,11 @@ pub(crate) fn decide_group_child_admission(
             EffectGroupCloseOutcome::RunToCompletion => {
                 admit_dispatched(addresses, live, position, invocation_id)
             }
-            EffectGroupCloseOutcome::Cancel => match live.commit_states.get(&position) {
-                Some(EffectGroupChildCommitState::CancelDecided) => {
+            EffectGroupCloseOutcome::Cancel => match live.decision(position) {
+                Some((_, EffectGroupSeat::CancelDecided)) => {
                     EffectGroupAdmissionResponse::CancelDecided
                 }
-                Some(EffectGroupChildCommitState::Committed { .. }) => {
+                Some((_, EffectGroupSeat::Committed | EffectGroupSeat::Seated { .. })) => {
                     admit_dispatched(addresses, live, position, invocation_id)
                 }
                 None => EffectGroupAdmissionResponse::Refused,
@@ -389,8 +481,11 @@ fn admit_dispatched(
         None => EffectGroupAdmissionResponse::Refused,
         Some(_)
             if matches!(
-                live.commit_states.get(&position),
-                Some(EffectGroupChildCommitState::Committed { .. })
+                live.decision(position),
+                Some((
+                    _,
+                    EffectGroupSeat::Committed | EffectGroupSeat::Seated { .. }
+                ))
             ) =>
         {
             EffectGroupAdmissionResponse::AttachExpired
@@ -405,18 +500,12 @@ mod admission_tests {
     use super::*;
 
     fn live_record() -> EffectGroupStateLiveRecord {
-        EffectGroupStateLiveRecord {
-            shape: EffectGroupShape {
-                wake: lash_core::GroupWakePolicy::All,
-                loser_disposition: LoserPolicy::RunToCompletion,
-                replay_keys: vec!["child-0".to_owned()],
-                opener: lash_core::AdmittedScope::turn("session", "turn"),
-            },
-            next_rank: 1,
-            commit_states: BTreeMap::new(),
-            settlements: BTreeMap::new(),
-            settled_positions: BTreeMap::new(),
-        }
+        EffectGroupStateLiveRecord::undecided(EffectGroupShape {
+            wake: lash_core::GroupWakePolicy::All,
+            loser_disposition: LoserPolicy::RunToCompletion,
+            replay_keys: vec!["child-0".to_owned()],
+            opener: lash_core::AdmittedScope::turn("session", "turn"),
+        })
     }
 
     fn adopted_dispatch() -> EffectGroupDispatchState {
@@ -472,9 +561,7 @@ mod admission_tests {
     #[test]
     fn a_cancel_closed_groups_committed_child_admits_its_successor_to_drain() {
         let mut committed = live_record();
-        committed
-            .commit_states
-            .insert(0, EffectGroupChildCommitState::Committed { rank: 1 });
+        committed.decide(0, EffectGroupSeat::Committed);
         let addresses: BTreeMap<usize, String> =
             [(0, "child-invocation-0".to_owned())].into_iter().collect();
         for lifecycle in [
@@ -528,9 +615,7 @@ mod admission_tests {
         // A child the close decided is told so: the close already released
         // its wait, so the child has nothing left to do (FIG-3630).
         let mut decided = live_record();
-        decided
-            .commit_states
-            .insert(0, EffectGroupChildCommitState::CancelDecided);
+        decided.decide(0, EffectGroupSeat::CancelDecided);
         let decided = EffectGroupLifecycle::Closed {
             effective: EffectGroupCloseOutcome::Cancel,
             reopened: false,
@@ -562,20 +647,14 @@ mod paused_work_tests {
     }
 
     fn live(children: usize) -> EffectGroupStateLiveRecord {
-        EffectGroupStateLiveRecord {
-            shape: EffectGroupShape {
-                wake: lash_core::GroupWakePolicy::All,
-                loser_disposition: LoserPolicy::RunToCompletion,
-                replay_keys: (0..children)
-                    .map(|child| format!("child-{child}"))
-                    .collect(),
-                opener: opener(),
-            },
-            next_rank: 1,
-            commit_states: BTreeMap::new(),
-            settlements: BTreeMap::new(),
-            settled_positions: BTreeMap::new(),
-        }
+        EffectGroupStateLiveRecord::undecided(EffectGroupShape {
+            wake: lash_core::GroupWakePolicy::All,
+            loser_disposition: LoserPolicy::RunToCompletion,
+            replay_keys: (0..children)
+                .map(|child| format!("child-{child}"))
+                .collect(),
+            opener: opener(),
+        })
     }
 
     fn addresses(children: usize) -> BTreeMap<usize, String> {
@@ -600,7 +679,12 @@ mod paused_work_tests {
     #[test]
     fn a_closed_groups_unseated_loser_is_needed_and_a_seated_position_is_not() {
         let mut winner_seated = live(2);
-        winner_seated.settled_positions.insert(0, 1);
+        winner_seated.decide(
+            0,
+            EffectGroupSeat::Seated {
+                terminal: EffectGroupSettlementTerminal::StoredPayload,
+            },
+        );
         for effective in [
             EffectGroupCloseOutcome::RunToCompletion,
             EffectGroupCloseOutcome::Cancel,
@@ -627,10 +711,7 @@ mod paused_work_tests {
             );
         }
         let mut decided = winner_seated;
-        decided
-            .commit_states
-            .insert(1, EffectGroupChildCommitState::CancelDecided);
-        decided.settled_positions.insert(1, 2);
+        assert_eq!(decided.decide_pending_cancelled(), vec![1]);
         let cancelled = EffectGroupLifecycle::Closed {
             effective: EffectGroupCloseOutcome::Cancel,
             reopened: false,
@@ -696,5 +777,97 @@ mod paused_work_tests {
                 needed()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod decision_tests {
+    use super::*;
+
+    fn live(children: usize) -> EffectGroupStateLiveRecord {
+        EffectGroupStateLiveRecord::undecided(EffectGroupShape {
+            wake: lash_core::GroupWakePolicy::All,
+            loser_disposition: LoserPolicy::RunToCompletion,
+            replay_keys: (0..children)
+                .map(|child| format!("child-{child}"))
+                .collect(),
+            opener: lash_core::AdmittedScope::turn("session", "turn"),
+        })
+    }
+
+    /// The index holds each child's decision, rank and seat once, in rank
+    /// order (FIG-4665): the next rank, the seated prefix, the seated count
+    /// and each served settlement are read off the one list, so none of them
+    /// can disagree with it.
+    #[test]
+    fn rank_seat_and_prefix_are_read_off_the_one_decision_list() {
+        let mut live = live(4);
+        assert_eq!(live.seated_prefix(), 0);
+        assert!(live.decision(2).is_none());
+        // Position 2 commits first, then position 0: rank order is decision
+        // order, not position order.
+        assert_eq!(live.decide(2, EffectGroupSeat::Committed), 1);
+        assert_eq!(live.decide(0, EffectGroupSeat::Committed), 2);
+        assert_eq!(live.owed().collect::<Vec<_>>(), vec![(1, 2), (2, 0)]);
+        assert!(
+            live.settlement(1).is_none(),
+            "a reserved rank serves nothing"
+        );
+        // Rank 2 seats before rank 1: the prefix stays behind the hole.
+        live.decisions[1].seat = EffectGroupSeat::Seated {
+            terminal: EffectGroupSettlementTerminal::StoredPayload,
+        };
+        assert_eq!((live.seated(), live.seated_prefix()), (1, 0));
+        assert!(live.is_seated(0) && !live.is_seated(2));
+        // A cancel disposition seats exactly the pending positions, at the
+        // next ranks, and decides nothing twice.
+        assert_eq!(live.decide_pending_cancelled(), vec![1, 3]);
+        assert_eq!(live.decide_pending_cancelled(), Vec::<usize>::new());
+        assert!(matches!(
+            live.decision(3),
+            Some((4, EffectGroupSeat::CancelDecided))
+        ));
+        assert_eq!((live.seated(), live.seated_prefix()), (3, 0));
+        live.decisions[0].seat = EffectGroupSeat::Seated {
+            terminal: EffectGroupSettlementTerminal::Cancelled,
+        };
+        assert_eq!((live.seated(), live.seated_prefix()), (4, 4));
+        assert!(live.owed().next().is_none());
+        let served = (1..=5)
+            .map(|rank| live.settlement(rank).map(|settlement| settlement.position))
+            .collect::<Vec<_>>();
+        assert_eq!(served, vec![Some(2), Some(0), Some(1), Some(3), None]);
+        assert!(live.settlement(0).is_none());
+    }
+
+    /// The stored and served shapes carry each fact once: no rank counter,
+    /// no position index, and no `sequence` beside the rank a reader asked.
+    #[test]
+    fn the_stored_record_and_the_served_settlement_repeat_no_rank() {
+        let mut live = live(2);
+        live.decide(1, EffectGroupSeat::Committed);
+        live.decide(0, EffectGroupSeat::CancelDecided);
+        assert_eq!(
+            serde_json::to_value(&live).expect("serialize the live record")["decisions"],
+            serde_json::json!([
+                { "position": 1, "seat": { "type": "committed" } },
+                { "position": 0, "seat": { "type": "cancel_decided" } },
+            ])
+        );
+        assert_eq!(
+            serde_json::to_value(&live)
+                .expect("serialize the live record")
+                .as_object()
+                .expect("a record is an object")
+                .keys()
+                .map(String::as_str)
+                .collect::<std::collections::BTreeSet<_>>(),
+            ["decisions", "shape"].into_iter().collect()
+        );
+        assert_eq!(
+            serde_json::to_value(live.settlement(2).expect("rank 2 is seated"))
+                .expect("serialize the served settlement"),
+            serde_json::json!({ "position": 0, "terminal": { "type": "cancelled" } })
+        );
     }
 }

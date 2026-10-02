@@ -20,7 +20,7 @@ pub(super) async fn served_run(
     // Seated ranks are immutable, so the run is the same facts a read of
     // each rank would serve.
     let records = (from..)
-        .map_while(|rank| live.settlements.get(&rank).cloned())
+        .map_while(|rank| live.settlement(rank))
         .collect::<Vec<_>>();
     // Every get is issued before any is awaited, in rank order, so the
     // journal is the same on every replay.

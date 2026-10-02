@@ -133,18 +133,12 @@ mod tests {
             dispatch_route: "EffectGroupDispatch".to_owned(),
             lifecycle: EffectGroupLifecycle::Preparing {
                 dispatch: EffectGroupDispatchState::Unadopted,
-                live: EffectGroupStateLiveRecord {
-                    shape: EffectGroupShape {
-                        wake: lash_core::GroupWakePolicy::All,
-                        loser_disposition: LoserPolicy::RunToCompletion,
-                        replay_keys: vec!["child-0".to_owned()],
-                        opener: lash_core::AdmittedScope::turn("session", "turn"),
-                    },
-                    next_rank: 0,
-                    commit_states: BTreeMap::new(),
-                    settlements: BTreeMap::new(),
-                    settled_positions: BTreeMap::new(),
-                },
+                live: EffectGroupStateLiveRecord::undecided(EffectGroupShape {
+                    wake: lash_core::GroupWakePolicy::All,
+                    loser_disposition: LoserPolicy::RunToCompletion,
+                    replay_keys: vec!["child-0".to_owned()],
+                    opener: lash_core::AdmittedScope::turn("session", "turn"),
+                }),
             },
         })
         .expect("serialize an index record");

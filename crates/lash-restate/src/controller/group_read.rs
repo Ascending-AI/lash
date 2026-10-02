@@ -172,7 +172,7 @@ where
         }
     };
     let payload = served_payload(group_key, rank, served.payload)?;
-    let settlement = settlement_from_payload(served.settlement, payload)?;
+    let settlement = settlement_from_payload(rank, served.settlement, payload)?;
     Ok(Some(RankedGroupSettlement {
         sequence: settlement.sequence,
         child_replay_key: served.child_replay_key,
@@ -219,7 +219,7 @@ where
         None => read_from_rank(controller, &group_key, rank, cancel).await?,
     };
     let payload = served_payload(&group_key, rank, served.payload)?;
-    let settlement = settlement_from_payload(served.settlement, payload)?;
+    let settlement = settlement_from_payload(rank, served.settlement, payload)?;
     handle.advance()?;
     Ok(settlement)
 }

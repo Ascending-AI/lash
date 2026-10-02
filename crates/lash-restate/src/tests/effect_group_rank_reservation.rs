@@ -182,9 +182,9 @@ impl Group {
     pub(super) async fn run_from(&self, rank: u64) -> Option<Vec<(u64, usize)>> {
         match self.read(rank, false, true).await {
             EffectGroupReadRankResponse::SettledRun { ranks } => Some(
-                ranks
-                    .iter()
-                    .map(|served| (served.settlement.sequence, served.settlement.position))
+                (rank..)
+                    .zip(&ranks)
+                    .map(|(rank, served)| (rank, served.settlement.position))
                     .collect(),
             ),
             EffectGroupReadRankResponse::NotSettled | EffectGroupReadRankResponse::Closed => None,
@@ -587,9 +587,9 @@ async fn a_cancel_decided_behind_a_draining_commit_ranks_after_it() {
         panic!("the reopened caller is served once A seats");
     };
     assert_eq!(
-        ranks
-            .iter()
-            .map(|served| (served.settlement.sequence, served.settlement.position))
+        (1u64..)
+            .zip(&ranks)
+            .map(|(rank, served)| (rank, served.settlement.position))
             .collect::<Vec<_>>(),
         vec![(1, 0), (2, 1)],
         "the run is A, then B's cancellation"

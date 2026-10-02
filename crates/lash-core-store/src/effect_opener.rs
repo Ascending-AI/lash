@@ -245,6 +245,24 @@ impl EffectOpener {
         session_encoding_range(SESSION_OPERATION_TAG, session_id)
     }
 
+    /// The scope this opener's work is admitted and claimed under: the
+    /// inverse of [`for_scope`](Self::for_scope), so an opener and its claim
+    /// scope are one recorded fact.
+    #[must_use]
+    pub fn admitted_scope(&self) -> AdmittedScope {
+        match self {
+            Self::Turn {
+                session_id,
+                turn_id,
+            } => AdmittedScope::turn(session_id.clone(), turn_id.clone()),
+            Self::SessionOperation {
+                session_id,
+                operation_id,
+            } => AdmittedScope::session_operation(session_id.clone(), operation_id.clone()),
+            Self::Process { process_id } => AdmittedScope::process(process_id.clone()),
+        }
+    }
+
     /// The one owner derivation: the admitted execution scope, and nothing
     /// else.
     ///

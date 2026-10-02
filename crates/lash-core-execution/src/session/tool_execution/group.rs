@@ -403,7 +403,7 @@ impl RuntimeExecutionContext<'_> {
                     &call_id,
                 )
                 .await?;
-            let mut request = ToolChildRequest::new(
+            let request = ToolChildRequest::new(
                 call,
                 leaf.admission.clone(),
                 crate::tool_dispatch::ToolAttemptLineage::under(
@@ -411,7 +411,6 @@ impl RuntimeExecutionContext<'_> {
                 ),
                 ToolChildScope {
                     opener: opener.clone(),
-                    admitted_scope: admitted.clone(),
                     owner: self.dispatch.owner.clone(),
                 },
                 cancellation_authority.clone(),
@@ -419,9 +418,6 @@ impl RuntimeExecutionContext<'_> {
                 completion_routing,
                 session_facts.clone(),
             );
-            if let Some(process_id) = opener.process_id() {
-                request = request.with_enclosing_process(process_id.clone());
-            }
             envelopes.push(crate::RuntimeEffectEnvelope::new(
                 crate::RuntimeEffectInvocation::new(
                     crate::EffectAddress::new(

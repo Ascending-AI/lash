@@ -1575,7 +1575,6 @@ fn leaf_request(
         crate::runtime::effect::ToolChildScope {
             opener: crate::EffectOpener::for_scope(&admitted)
                 .expect("a turn scope derives an opener"),
-            admitted_scope: admitted,
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: session_id.clone(),
                 agent_frame_id: crate::FrameNodeId::new("law-frame").expect("a valid frame id"),

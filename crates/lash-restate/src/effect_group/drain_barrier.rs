@@ -18,60 +18,43 @@ use super::*;
 /// after the close decided every undecided child. A cancel-decided sibling
 /// never blocks: its decision seats it.
 pub(super) fn blocking_positions(live: &EffectGroupStateLiveRecord, below: u64) -> Vec<usize> {
-    let mut blockers = live
-        .commit_states
-        .iter()
-        .filter_map(|(position, state)| match state {
-            EffectGroupChildCommitState::Committed { rank }
-                if *rank < below && !live.settled_positions.contains_key(position) =>
-            {
-                Some((*rank, *position))
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    blockers.sort_unstable();
-    blockers.into_iter().map(|(_, position)| position).collect()
+    live.owed()
+        .take_while(|(rank, _)| *rank < below)
+        .map(|(_, position)| position)
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn live_record(commits: &[(usize, u64)], seated: &[usize]) -> EffectGroupStateLiveRecord {
-        EffectGroupStateLiveRecord {
-            shape: EffectGroupShape {
-                wake: lash_core::GroupWakePolicy::All,
-                loser_disposition: LoserPolicy::RunToCompletion,
-                replay_keys: (0..6).map(|position| format!("child-{position}")).collect(),
-                opener: lash_core::AdmittedScope::turn("session", "turn"),
-            },
-            next_rank: 1,
-            commit_states: commits
-                .iter()
-                .map(|&(position, rank)| {
-                    (position, EffectGroupChildCommitState::Committed { rank })
-                })
-                .collect(),
-            settlements: BTreeMap::new(),
-            settled_positions: seated
-                .iter()
-                .map(|&position| {
-                    let rank = commits
-                        .iter()
-                        .find(|(committed, _)| *committed == position)
-                        .map_or(0, |(_, rank)| *rank);
-                    (position, rank)
-                })
-                .collect(),
+    /// A live record whose children committed in the order given, with the
+    /// `seated` positions' ranks published.
+    fn live_record(commits: &[usize], seated: &[usize]) -> EffectGroupStateLiveRecord {
+        let mut live = EffectGroupStateLiveRecord::undecided(EffectGroupShape {
+            wake: lash_core::GroupWakePolicy::All,
+            loser_disposition: LoserPolicy::RunToCompletion,
+            replay_keys: (0..6).map(|position| format!("child-{position}")).collect(),
+            opener: lash_core::AdmittedScope::turn("session", "turn"),
+        });
+        for &position in commits {
+            let seat = if seated.contains(&position) {
+                EffectGroupSeat::Seated {
+                    terminal: EffectGroupSettlementTerminal::StoredPayload,
+                }
+            } else {
+                EffectGroupSeat::Committed
+            };
+            live.decide(position, seat);
         }
+        live
     }
 
     #[test]
     fn the_barrier_is_every_unseated_committed_sibling_below_in_rank_order() {
         // Positions and ranks differ: position 4 committed first, position 1
         // last among those below rank 5.
-        let live = live_record(&[(4, 1), (0, 2), (3, 3), (1, 4), (2, 5)], &[]);
+        let live = live_record(&[4, 0, 3, 1, 2], &[]);
         assert_eq!(blocking_positions(&live, 5), vec![4, 0, 3, 1]);
         assert_eq!(blocking_positions(&live, 2), vec![4]);
         assert_eq!(blocking_positions(&live, 1), Vec::<usize>::new());
@@ -81,17 +64,16 @@ mod tests {
     fn a_seated_sibling_no_longer_blocks_even_out_of_rank_order() {
         // Rank 4 seated before ranks 2 and 3: the lower unseated ones still
         // block, because a seat no longer waits on the siblings below it.
-        let live = live_record(&[(4, 1), (0, 2), (3, 3), (1, 4), (2, 5)], &[1, 4]);
+        let live = live_record(&[4, 0, 3, 1, 2], &[1, 4]);
         assert_eq!(blocking_positions(&live, 5), vec![0, 3]);
-        let live = live_record(&[(4, 1), (0, 2)], &[4, 0]);
+        let live = live_record(&[4, 0], &[4, 0]);
         assert_eq!(blocking_positions(&live, 3), Vec::<usize>::new());
     }
 
     #[test]
     fn a_cancel_decided_sibling_does_not_block() {
-        let mut live = live_record(&[(0, 1)], &[]);
-        live.commit_states
-            .insert(1, EffectGroupChildCommitState::CancelDecided);
+        let mut live = live_record(&[0], &[]);
+        live.decide(1, EffectGroupSeat::CancelDecided);
         assert_eq!(blocking_positions(&live, 5), vec![0]);
     }
 }

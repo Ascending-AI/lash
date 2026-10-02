@@ -2481,24 +2481,6 @@ pub(super) fn recovery_artifact_store() -> lashlang::LashlangArtifacts {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn group_rank_allocator_refuses_exhaustion_without_a_reservation() {
-    let harness = effect_group_conformance::LiveConformanceHarness::start_on(
-        effect_group_conformance::HarnessServer::in_process(),
-    )
-    .await;
-    harness.rank_allocator_exhaustion().await;
-    harness.finish().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "requires an isolated Restate server; run by the effect-group suite"]
-async fn live_group_rank_allocator_refuses_exhaustion_without_a_reservation() {
-    let harness = effect_group_conformance::LiveConformanceHarness::start().await;
-    harness.rank_allocator_exhaustion().await;
-    harness.finish().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires isolated native Restate and PostgreSQL services"]
 async fn live_attachment_materialization_turn_witnesses() {
     let harness = effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;

@@ -230,7 +230,6 @@ mod tests {
                 ToolAttemptLineage::default(),
                 ToolChildScope {
                     opener: crate::EffectOpener::turn(SESSION, TURN),
-                    admitted_scope: crate::AdmittedScope::turn(SESSION, TURN),
                     owner: crate::ExecutionOwner::SessionFrame {
                         session_id: SessionId::from(SESSION),
                         agent_frame_id: FrameNodeId::new("frame").expect("a valid frame id"),
@@ -264,7 +263,8 @@ mod tests {
     fn envelope(request: ToolChildRequest, child: &str) -> crate::RuntimeEffectEnvelope {
         crate::RuntimeEffectEnvelope::new(
             crate::RuntimeEffectInvocation::new(
-                crate::EffectAddress::new(scope(), child).expect("a valid effect address"),
+                crate::EffectAddress::new(request.scope.claim_scope().into_scope(), child)
+                    .expect("a valid effect address"),
                 crate::RuntimeAttribution::for_session(SESSION),
                 child,
             ),
@@ -299,9 +299,10 @@ mod tests {
             .host
             .install_tool_child_host(Arc::clone(&worker.tool_children))
             .expect("the backend host takes its first tool-child host");
+        let claim_scope = envelope.invocation.execution_scope().clone();
         let controller = backend
             .host
-            .scoped_static(crate::AdmittedScope::turn(SESSION, TURN))
+            .scoped_static(crate::AdmittedScope::new(claim_scope.clone()))
             .expect("the backend host admits the scope")
             .expect("the backend host lends a static controller")
             .owned_controller()
@@ -316,7 +317,7 @@ mod tests {
             controller.as_ref(),
             crate::RuntimeEffectGroup::try_new(
                 crate::RuntimeEffectInvocation::new(
-                    crate::EffectAddress::new(scope(), format!("group:{group_key}"))
+                    crate::EffectAddress::new(claim_scope, format!("group:{group_key}"))
                         .expect("a valid group address"),
                     crate::RuntimeAttribution::none(),
                     group_key.clone(),
@@ -600,10 +601,18 @@ mod tests {
         let mut request = backend.request(ToolRetryPolicy::Never).await;
         let opener = crate::ProcessId::fixture("worker");
         request.scope.opener = crate::EffectOpener::process(opener.clone());
-        request.enclosing_process = Some(opener);
+        request.cancellation_authority = crate::TurnControlBindingId::new(
+            crate::runtime::effect::executor::turn_control_binding_id_for_scope(
+                &backend.host.turn_control_binding_id(),
+                &crate::ExecutionScope::process(opener.clone()),
+            )
+            .expect("a scope-derived binding id"),
+        )
+        .expect("a valid binding id");
+        assert_eq!(request.enclosing_process(), Some(&opener));
         request
             .validate()
-            .expect("a process opener enclosing itself is a legal request");
+            .expect("a process opener's request is a legal request");
 
         let outcome = run_child(&backend, &worker, envelope(request, "child"))
             .await

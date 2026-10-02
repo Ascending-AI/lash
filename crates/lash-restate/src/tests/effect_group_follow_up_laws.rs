@@ -95,7 +95,7 @@ async fn seat_recovery(tier: HarnessStoreTier) {
     let seated = read_rank(&harness.ingress(), &group_key).await;
     assert!(
         matches!(seated, crate::EffectGroupReadRankResponse::Settled { ref settlement, .. }
-            if settlement.sequence == 1 && settlement.position == 0),
+            if settlement.position == 0),
         "the recovered final seats at the original rank: {seated:?}"
     );
     let children: Vec<_> = server

@@ -107,7 +107,6 @@ fn tool_request(scope: &ExecutionScope) -> lash_core::runtime::effect::ToolChild
         lash_core::runtime::effect::ToolChildScope {
             opener: lash_core::EffectOpener::for_scope(&admitted)
                 .expect("a turn scope derives an opener"),
-            admitted_scope: admitted,
             owner: lash_core::ExecutionOwner::SessionFrame {
                 session_id: SessionId::from(SESSION),
                 agent_frame_id: lash_core::FrameNodeId::new("frame").expect("a valid frame id"),

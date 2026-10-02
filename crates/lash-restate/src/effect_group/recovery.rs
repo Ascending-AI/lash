@@ -69,14 +69,12 @@ pub(super) async fn resend_owed_children(
 /// The positions whose §4 point holds a committed final and whose rank is not
 /// seated yet, in position order.
 fn owed_positions(live: &EffectGroupStateLiveRecord) -> Vec<usize> {
-    live.commit_states
-        .iter()
-        .filter(|(position, state)| {
-            matches!(state, EffectGroupChildCommitState::Committed { .. })
-                && !live.settled_positions.contains_key(position)
-        })
-        .map(|(position, _)| *position)
-        .collect()
+    let mut owed = live
+        .owed()
+        .map(|(_, position)| position)
+        .collect::<Vec<_>>();
+    owed.sort_unstable();
+    owed
 }
 
 /// The object-state key an index's record lives under, for an operator's

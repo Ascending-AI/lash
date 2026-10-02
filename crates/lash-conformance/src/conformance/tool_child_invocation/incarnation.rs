@@ -2,12 +2,9 @@ use pretty_assertions::assert_eq;
 
 use super::*;
 
-/// The process-scope sibling of [`leaf_request`]. `opener_ref` pins the
-/// process the recorded opener names — inside `admitted_scope`, the one
-/// admitted fact — and `enclosing` is the process the request admits the
-/// call inside. `None` only for the malformed probe: a process opener with
-/// no enclosing process, which `ToolChildRequest::validate` refuses
-/// because the opener and its enclosing process are one fact (ADR 0099 §1).
+/// The process-scope sibling of [`leaf_request`]. `opener_ref` is the process
+/// the recorded opener names: the request's claim scope and the process its
+/// call runs inside are both that opener's own (ADR 0099 §1).
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -17,7 +14,6 @@ use super::*;
     reason = "the request's fields are the leaf's parameters; a struct would only rename the list"
 )]
 fn process_leaf_request(
-    scope: &crate::ExecutionScope,
     session_id: &crate::SessionId,
     call_id: &str,
     tool_id: &str,
@@ -27,10 +23,9 @@ fn process_leaf_request(
     env_ref: &crate::ProcessExecutionEnvRef,
     parent: &crate::RuntimeInvocation,
     opener_ref: &crate::ProcessId,
-    enclosing: Option<crate::ProcessId>,
     cancellation: crate::TurnControlBindingId,
 ) -> crate::runtime::effect::ToolChildRequest {
-    let mut request = crate::runtime::effect::ToolChildRequest::new(
+    crate::runtime::effect::ToolChildRequest::new(
         crate::PreparedToolCall {
             call_id: super::leaf_call_id(call_id),
             provider_call_id: None,
@@ -47,7 +42,6 @@ fn process_leaf_request(
                 opener_ref.clone(),
             ))
             .expect("a process scope derives an opener"),
-            admitted_scope: crate::AdmittedScope::new(scope.clone()),
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: session_id.clone(),
                 agent_frame_id: crate::FrameNodeId::new("law-frame").expect("a valid frame id"),
@@ -57,19 +51,16 @@ fn process_leaf_request(
         env_ref.clone(),
         routing,
         super::law_session_facts(),
-    );
-    if let Some(process_id) = enclosing {
-        request = request.with_enclosing_process(process_id);
-    }
-    request
+    )
 }
 
 /// The foreign-opener law's group: two deferred leaves — one resolved inside the
 /// crashed world so its settlement orders the crash boundary, one left parked
 /// as the survivor the foreign opener must refuse — a leaf that reads its
-/// start context under the recorded pin, and a plain leaf. The malformed probe cannot
-/// ride inside the group: a process opener with no enclosing process is
-/// refused at envelope construction, which the law asserts directly instead.
+/// start context under the recorded pin, and a plain leaf. The misaddressed
+/// probe cannot ride inside the group: a request addressed outside its
+/// opener's scope is refused at envelope construction, which the law asserts
+/// directly instead.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -84,16 +75,12 @@ fn incarnation_group(
     cancellation: crate::TurnControlBindingId,
 ) -> crate::RuntimeEffectGroup {
     let parent = parent_invocation(scope);
-    let child = |position: usize,
-                 tool_id: &str,
-                 routing: ToolChildCompletionRouting,
-                 enclosing: Option<crate::ProcessId>| {
+    let child = |position: usize, tool_id: &str, routing: ToolChildCompletionRouting| {
         child_envelope(
             scope,
             group_key,
             position,
             process_leaf_request(
-                scope,
                 session_id,
                 &format!("{group_key}-call-{position}"),
                 tool_id,
@@ -103,7 +90,6 @@ fn incarnation_group(
                 env_ref,
                 &parent,
                 recorded_ref,
-                enclosing,
                 cancellation.clone(),
             ),
         )
@@ -117,25 +103,10 @@ fn incarnation_group(
         ),
         group_key.to_string(),
         vec![
-            child(
-                0,
-                LEAF_DEFERRED,
-                routing.clone(),
-                Some(recorded_ref.clone()),
-            ),
-            child(
-                1,
-                LEAF_PARENT,
-                ToolChildCompletionRouting::Inline,
-                Some(recorded_ref.clone()),
-            ),
-            child(
-                2,
-                LEAF_PLAIN,
-                ToolChildCompletionRouting::Inline,
-                Some(recorded_ref.clone()),
-            ),
-            child(3, LEAF_DEFERRED, routing, Some(recorded_ref.clone())),
+            child(0, LEAF_DEFERRED, routing.clone()),
+            child(1, LEAF_PARENT, ToolChildCompletionRouting::Inline),
+            child(2, LEAF_PLAIN, ToolChildCompletionRouting::Inline),
+            child(3, LEAF_DEFERRED, routing),
         ],
         crate::GroupWakePolicy::All,
         crate::LoserPolicy::RunToCompletion,
@@ -150,15 +121,15 @@ fn incarnation_group(
 /// opener: two deferred leaves (one resolved to order the crash boundary, one
 /// the durable survivor), a leaf whose start context's durable parent must
 /// name the recorded process, and a plain leaf. The
-/// malformed request — a process opener that records no enclosing process —
-/// is asserted directly: the boundary refuses it at envelope construction,
-/// so no journal can hold it, because the opener and its enclosing process
-/// are one fact.
+/// misaddressed request — one `process(P)` opened, in an envelope addressed
+/// under `process(Q)` — is asserted directly: the boundary refuses it at
+/// envelope construction, so no journal can hold it, because a child is
+/// claimed under its opener's own scope.
 ///
 /// On the durable tiers the group journals under `process(P)`, the worker
 /// dies, and a live opener of another process `Q` proves it cannot drain the
 /// survivor. On every tier the start-context leaf's settlement names `P` and
-/// the malformed request is refused with `ToolChildRequestOpener`.
+/// the misaddressed request is refused with `ToolChildRequestOpener`.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -201,14 +172,12 @@ pub async fn another_process_is_not_the_recorded_opener(
     // string a retired delimiter codec would have produced.
     let expected_parent = crate::ScopeId::process(recorded_ref.clone()).storage_id();
 
-    // The malformed probe: a process opener that records no enclosing
-    // process. `ToolChildRequest::validate` makes the opener and its
-    // enclosing process one fact, so the envelope constructor refuses the
-    // pair — the malformed request cannot be journaled at all, which is a
-    // stronger boundary than the settle-time refusal a group child could
-    // have shown.
-    let malformed = process_leaf_request(
-        &scope_p,
+    // The misaddressed probe: a request `process(P)` opened, in an envelope
+    // addressed under `process(Q)`. The request's claim scope is its opener's
+    // own, so the envelope constructor refuses the pair — it cannot be
+    // journaled at all, which is a stronger boundary than the settle-time
+    // refusal a group child could have shown.
+    let misaddressed = process_leaf_request(
         &session_id,
         &format!("{group_key}-call-malformed"),
         LEAF_PLAIN,
@@ -218,34 +187,30 @@ pub async fn another_process_is_not_the_recorded_opener(
         &env_ref,
         &parent_invocation(&scope_p),
         &recorded_ref,
-        None,
-        crate::TurnControlBindingId::new("lash-conformance-malformed-probe")
+        crate::TurnControlBindingId::new("lash-conformance-misaddressed-probe")
             .expect("a valid binding id"),
     );
-    let error = malformed
-        .validate()
-        .expect_err("a process opener without its enclosing process is refused");
     assert_eq!(
-        error.code,
-        crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
-        "the opener and its enclosing process are one fact: {error}"
+        misaddressed.enclosing_process(),
+        Some(&recorded_ref),
+        "a process opener's child runs inside the opener itself"
     );
     let error = crate::RuntimeEffectEnvelope::try_new(
         crate::RuntimeEffectInvocation::new(
-            crate::EffectAddress::new(scope_p.clone(), format!("{group_key}:malformed"))
+            crate::EffectAddress::new(scope_q.clone(), format!("{group_key}:misaddressed"))
                 .expect("valid group-child address"),
             crate::RuntimeAttribution::none(),
             "effect",
         ),
         crate::RuntimeEffectCommand::ToolInvocation {
-            request: Box::new(malformed),
+            request: Box::new(misaddressed),
         },
     )
-    .expect_err("the boundary refuses the malformed pair at construction");
+    .expect_err("the boundary refuses the misaddressed pair at construction");
     assert_eq!(
         error.code,
         crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
-        "no journal can hold a request whose opener and enclosing process disagree: {error}"
+        "no journal can hold a request claimed outside its opener's scope: {error}"
     );
 
     /// Asserts the start-context leaf's recorded process — identical on

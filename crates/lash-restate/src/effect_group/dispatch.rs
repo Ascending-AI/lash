@@ -134,7 +134,7 @@ impl EffectGroupDispatchImpl {
         }
         let parked = crate::turn_handler::park_refused_group_child(
             self.sessions.as_ref(),
-            child.scope.admitted_scope.scope(),
+            child.scope.claim_scope().scope(),
             refusal,
         )
         .await;
@@ -654,7 +654,7 @@ impl EffectGroupDispatchImpl {
             membership,
         };
         let scoped = controller
-            .scoped_effect_controller_for_group_child(child.scope.admitted_scope.clone(), binding)
+            .scoped_effect_controller_for_group_child(child.scope.claim_scope(), binding)
             .map_err(TerminalError::from_error)?;
         // Routed through the host's stack before its first effect. A
         // failed route is the child's outcome, as any failure of its

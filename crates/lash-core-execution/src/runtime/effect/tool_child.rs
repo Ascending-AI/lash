@@ -159,9 +159,13 @@ use super::executor::RuntimeEffectControllerError;
 /// request is refused, typed and before any effect, at
 /// [`ToolChildRequest::validate`].
 ///
+/// The claim scope and the enclosing process are no longer recorded beside the
+/// opener (FIG-4665): both are the opener's own, derived by
+/// [`ToolChildScope::claim_scope`] and [`ToolChildRequest::enclosing_process`].
+/// The shape changed in place under the pre-1.0 version freeze.
+///
 /// version_guard(
 ///     roots(ToolChildRequest),
-///     roots(path = "crates/lash-core-store/src/admitted_scope.rs", AdmittedScopeWire),
 ///     roots(path = "crates/lash-core-store/src/session_identity.rs", SessionToolAccessWire),
 ///     file(
 ///         path = "crates/lash-sansio/src/identity.rs",
@@ -271,11 +275,12 @@ pub enum ToolChildCompletionRouting {
 
 /// Where a tool child runs and whose work it is.
 ///
-/// Four facts that always travel together and are never independently
-/// meaningful: a child admitted under one opener, one claim scope, one session
-/// and one frame. Grouping them keeps the request's constructor honest about
-/// what a caller must supply, and makes "the child's binding" a thing a reader
-/// can name.
+/// Two facts that always travel together and are never independently
+/// meaningful: the opener the child was admitted under, and the owner its
+/// work runs for. The child's claim scope and enclosing process are the
+/// opener's own ([`claim_scope`](Self::claim_scope),
+/// [`ToolChildRequest::enclosing_process`]), derived rather than recorded
+/// beside it, so no request can pair an opener with another scope.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ToolChildScope {
@@ -287,21 +292,9 @@ pub struct ToolChildScope {
     /// only `process_id`, so a scope retained here would leave recovery-time
     /// validation with nothing to validate and would let a process
     /// re-registered under the same name alias its predecessor's groups and
-    /// fences. The scope is the child's *claim address*, which is
-    /// [`admitted_scope`](Self::admitted_scope); the opener is who owns it.
+    /// fences. The scope is the child's *claim address*, which
+    /// [`claim_scope`](Self::claim_scope) derives; the opener is who owns it.
     pub opener: EffectOpener,
-    /// The scope this child is admitted and claimed under, which a process
-    /// opener's child need not share with its opener.
-    ///
-    /// The checked [`AdmittedScope`] pair, not a bare [`ExecutionScope`]: a
-    /// process claim carries its store-minted incarnation inside the same
-    /// value, so the half-admitted shape — a process scope with no pin, or a
-    /// pin naming another process — cannot be journaled. Decoding re-runs
-    /// `AdmittedScope::new` through the wire helper rather than trusting the
-    /// bytes; this is the pin the child's controller is constructed from,
-    /// never `enclosing_process`.
-    #[serde(with = "lash_core_store::admitted_scope::wire")]
-    pub admitted_scope: AdmittedScope,
     /// Who the child's work runs for: the session and agent frame of a turn
     /// opener, or the process of a process opener.
     ///
@@ -312,6 +305,17 @@ pub struct ToolChildScope {
 }
 
 impl ToolChildScope {
+    /// The scope this child is admitted and claimed under: its opener's own.
+    ///
+    /// Group formation derives the opener from the admitted scope
+    /// ([`EffectOpener::for_scope`]), so this is that scope read back — the
+    /// one the child's controller is constructed from and its envelope is
+    /// addressed under.
+    #[must_use]
+    pub fn claim_scope(&self) -> AdmittedScope {
+        self.opener.admitted_scope()
+    }
+
     /// Refuses a binding whose opener and owner disagree.
     ///
     /// A turn opener already names its session and a process opener its
@@ -363,8 +367,7 @@ impl ToolChildScope {
 /// | [`call`](Self::call) | group formation (FIG-3397), from the prepared batch call | the handler-level driver (FIG-2266), as the call to execute |
 /// | [`admission`](Self::admission) | group formation, from the grant or the admitted catalog manifest | the driver, for authority, retry policy and argument projection, without the live catalog |
 /// | [`lineage`](Self::lineage) | group formation, as the parent the leaf's attempts descend from | the driver, as each attempt's causal parent |
-/// | [`scope`](Self::scope) | group formation, as the opener, claim scope, session and frame | recovery (FIG-3396 §1) validates the opener; the driver reconstructs the admitted controller and its session-scoped services |
-/// | [`enclosing_process`](Self::enclosing_process) | group formation, when the opener is a process, as a `ProcessId` | the driver, to set the call's enclosing process incarnation |
+/// | [`scope`](Self::scope) | group formation, as the opener and the owner | recovery (FIG-3396 §1) validates the opener; the driver reconstructs the admitted controller from its claim scope, sets the call's enclosing process from it, and binds its session-scoped services |
 /// | [`cancellation_authority`](Self::cancellation_authority) | group formation, from the opener's turn-control binding | the cooperative cancel path (FIG-2266) and the cancel disposition (FIG-3409) |
 /// | [`execution_env`](Self::execution_env) | group formation, from `captured_process_execution_env_ref` (required) | the driver, to resolve the captured environment; held by its `ArtifactReferrer::Execution` edge until the journal settles |
 /// | [`completion_routing`](Self::completion_routing) | group formation, from the admitted deferral and routing facts | the driver and recovery, to refuse a key nothing can resolve |
@@ -396,22 +399,6 @@ pub struct ToolChildRequest {
     pub lineage: ToolAttemptLineage,
     /// Where this child runs and whose work it is.
     pub scope: ToolChildScope,
-    /// The process **incarnation** this call executes inside, when the opener
-    /// is a process.
-    ///
-    /// A [`ProcessId`], not a `ProcessId`, for §1's reason: the enclosing
-    /// process a recovered child reports must be the incarnation it was
-    /// admitted under, never whatever process currently carries that name.
-    /// `None` for a non-process opener, which encloses no process — and
-    /// required to *be* the opener's own incarnation for a process opener
-    /// ([`validate`](Self::validate) refuses any other pair).
-    ///
-    /// This is tool execution context only. The child's **claim** pin — the
-    /// incarnation its controller is constructed under — is inside
-    /// [`scope.admitted_scope`](ToolChildScope::admitted_scope), the checked
-    /// pair; nothing here re-pins a claim.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enclosing_process: Option<ProcessId>,
     /// The turn-cancellation authority that may cancel this child.
     ///
     /// This is the identity `turn_control_binding_id_for_scope` mints and
@@ -459,7 +446,7 @@ impl ToolChildRequest {
         match self.completion_routing {
             ToolChildCompletionRouting::Inline => None,
             ToolChildCompletionRouting::Durable => Some((
-                self.scope.admitted_scope.scope().clone(),
+                self.scope.claim_scope().into_scope(),
                 crate::AwaitEventWaitIdentity::tool_completion(self.call.call_id.clone()),
             )),
         }
@@ -467,10 +454,9 @@ impl ToolChildRequest {
 
     /// Assembles a request at the current format version.
     ///
-    /// The facts with no sensible absence are taken here; the enclosing
-    /// process, which only a process opener has, is set through the builder
-    /// below, so a caller cannot omit an opener, an admission or a
-    /// cancellation authority by forgetting a field.
+    /// The facts with no sensible absence are taken here, so a caller cannot
+    /// omit an opener, an admission or a cancellation authority by forgetting
+    /// a field.
     #[must_use]
     #[expect(
         clippy::too_many_arguments,
@@ -492,7 +478,6 @@ impl ToolChildRequest {
             admission,
             lineage,
             scope,
-            enclosing_process: None,
             cancellation_authority,
             execution_env,
             completion_routing,
@@ -500,10 +485,36 @@ impl ToolChildRequest {
         }
     }
 
+    /// The process this call executes inside: the opener itself when the
+    /// opener is a process, and none otherwise.
     #[must_use]
-    pub fn with_enclosing_process(mut self, process_id: ProcessId) -> Self {
-        self.enclosing_process = Some(process_id);
-        self
+    pub fn enclosing_process(&self) -> Option<&ProcessId> {
+        self.scope.opener.process_id()
+    }
+
+    /// Refuses an envelope address that is not this child's claim scope.
+    ///
+    /// The child's controller is constructed under its opener's scope, so an
+    /// envelope addressed anywhere else would be claimed under one scope and
+    /// run under another.
+    pub fn validate_address(
+        &self,
+        address: &crate::EffectAddress,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let claim_scope = self.scope.claim_scope();
+        if &address.execution_scope == claim_scope.scope() {
+            return Ok(());
+        }
+        Err(RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
+            format!(
+                "tool-child envelope is addressed under {:?} but its retained request opens \
+                 under `{}`; a child is claimed under its opener's own scope, so the two are \
+                 one fact",
+                address.execution_scope,
+                self.scope.opener.render(),
+            ),
+        ))
     }
 
     /// The retry policy the child was admitted under.
@@ -530,34 +541,6 @@ impl ToolChildRequest {
             ));
         }
         self.scope.validate()?;
-        match (&self.scope.opener, self.enclosing_process.as_ref()) {
-            (EffectOpener::Process { process_id }, Some(enclosing)) if process_id == enclosing => {}
-            (EffectOpener::Process { process_id }, enclosing) => {
-                return Err(RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
-                    format!(
-                        "retained tool-child request opens under process incarnation \
-                         `{process_id}` but records {enclosing} as its enclosing process; \
-                         a process opener's child executes inside the opener's own \
-                         incarnation, so the two are one fact",
-                        enclosing = enclosing
-                            .map(|process_id| format!("`{process_id}`"))
-                            .unwrap_or_else(|| "no incarnation".to_string()),
-                    ),
-                ));
-            }
-            (_, Some(enclosing)) => {
-                return Err(RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
-                    format!(
-                        "retained tool-child request opens under `{}` but records enclosing \
-                         process `{enclosing}`; only a process opener encloses a process",
-                        self.scope.opener.render(),
-                    ),
-                ));
-            }
-            (_, None) => {}
-        }
         if self.admission.manifest().id != self.call.tool_id {
             return Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectToolChildRequestAdmission,

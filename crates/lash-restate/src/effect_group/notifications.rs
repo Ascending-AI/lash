@@ -179,14 +179,10 @@ pub(crate) fn notice_answer(
         EffectGroupNotice::Drained { rank } => blocking_positions(live, *rank)
             .is_empty()
             .then_some(EffectGroupNotification::Drained),
-        EffectGroupNotice::ChildCancel { position } => match live.commit_states.get(position) {
-            Some(EffectGroupChildCommitState::CancelDecided) => {
-                Some(EffectGroupNotification::Cancel)
-            }
-            _ if live.settled_positions.contains_key(position) => {
-                Some(EffectGroupNotification::Settled)
-            }
-            _ => None,
+        EffectGroupNotice::ChildCancel { position } => match live.decision(*position) {
+            Some((_, EffectGroupSeat::CancelDecided)) => Some(EffectGroupNotification::Cancel),
+            Some((_, EffectGroupSeat::Seated { .. })) => Some(EffectGroupNotification::Settled),
+            Some((_, EffectGroupSeat::Committed)) | None => None,
         },
     }
 }

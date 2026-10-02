@@ -95,7 +95,6 @@ fn request_with_identity(identity: ToolAttemptLineage) -> ToolChildRequest {
         identity,
         ToolChildScope {
             opener: crate::EffectOpener::turn("child-session", "turn"),
-            admitted_scope: crate::AdmittedScope::turn("child-session", "turn"),
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: SessionId::from("child-session"),
                 agent_frame_id: FrameNodeId::new("child-frame").expect("a valid frame id"),
@@ -780,7 +779,7 @@ async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
         store: Arc<dyn crate::ProcessExecutionEnvStore>,
     ) -> RuntimeEffectControllerError {
         let address = crate::EffectAddress::new(
-            request.scope.admitted_scope.scope().clone(),
+            request.scope.claim_scope().into_scope(),
             format!("{}:env", request.call.call_id),
         )
         .expect("a valid load address");

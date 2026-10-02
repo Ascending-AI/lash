@@ -327,9 +327,7 @@ impl EffectGroupState for EffectGroupStateImpl {
         object_state::admit_shared(&ctx, &EFFECT_GROUP_STATE_FAMILY).await?;
         let unsettled = match load_index_shared(&ctx).await? {
             Some(record) => record.live().map_or(0, |live| {
-                live.shape
-                    .children()
-                    .saturating_sub(live.settled_positions.len())
+                live.shape.children().saturating_sub(live.seated())
             }),
             None => 0,
         };
@@ -395,13 +393,7 @@ impl EffectGroupState for EffectGroupStateImpl {
                     dispatch_route: dispatch_route.clone(),
                     lifecycle: EffectGroupLifecycle::Preparing {
                         dispatch: EffectGroupDispatchState::Unadopted,
-                        live: EffectGroupStateLiveRecord {
-                            shape: request.shape,
-                            next_rank: 1,
-                            commit_states: BTreeMap::new(),
-                            settlements: BTreeMap::new(),
-                            settled_positions: BTreeMap::new(),
-                        },
+                        live: EffectGroupStateLiveRecord::undecided(request.shape),
                     },
                 },
             );
@@ -717,24 +709,14 @@ impl EffectGroupState for EffectGroupStateImpl {
                 EffectGroupCommitChildResponse::UnknownChild,
             ));
         };
-        match live.commit_states.get(&position).copied() {
-            Some(EffectGroupChildCommitState::CancelDecided) => {
-                let rank = live
-                    .settled_positions
-                    .get(&position)
-                    .copied()
-                    .ok_or_else(|| {
-                        TerminalError::new(format!(
-                            "effect group {group_key} child {position} is cancel-decided but \
-                             holds no rank; the decision and its seat commit in one handler"
-                        ))
-                    })?;
+        match live.decision(position) {
+            Some((rank, EffectGroupSeat::CancelDecided)) => {
                 return Ok(Reply::at(
                     wire,
                     EffectGroupCommitChildResponse::CancelDecided { rank },
                 ));
             }
-            Some(EffectGroupChildCommitState::Committed { rank }) => {
+            Some((rank, EffectGroupSeat::Committed | EffectGroupSeat::Seated { .. })) => {
                 let committed = load_committed_final(&ctx, &committed_final_state_key(position))
                     .await?
                     .ok_or_else(|| {
@@ -751,9 +733,7 @@ impl EffectGroupState for EffectGroupStateImpl {
             }
             None => {}
         }
-        let rank = live.reserve_rank(&group_key)?;
-        live.commit_states
-            .insert(position, EffectGroupChildCommitState::Committed { rank });
+        let rank = live.decide(position, EffectGroupSeat::Committed);
         drain_index::register(&ctx, &self.namespace, &record).await?;
         #[cfg(test)]
         drain_cut::pause(&ctx, &group_key, "before_commit").await?;
@@ -811,11 +791,13 @@ impl EffectGroupState for EffectGroupStateImpl {
         };
         Ok(Reply::at(
             wire,
-            match live.commit_states.get(&position).copied() {
-                Some(EffectGroupChildCommitState::CancelDecided) => {
+            match live.decision(position) {
+                Some((_, EffectGroupSeat::CancelDecided)) => {
                     EffectGroupAdmitSemanticResponse::CancelDecided
                 }
-                _ => EffectGroupAdmitSemanticResponse::Admitted,
+                Some((_, EffectGroupSeat::Committed | EffectGroupSeat::Seated { .. })) | None => {
+                    EffectGroupAdmitSemanticResponse::Admitted
+                }
             },
         ))
     }
@@ -854,46 +836,14 @@ impl EffectGroupState for EffectGroupStateImpl {
         // arriving with no commit at all is a protocol defect — `commit_child`
         // is the only writer of `Committed` and it runs before any payload
         // exists to settle.
-        let rank = match live.commit_states.get(&request.position).copied() {
-            Some(EffectGroupChildCommitState::CancelDecided) => {
-                let rank = live
-                    .settled_positions
-                    .get(&request.position)
-                    .copied()
-                    .ok_or_else(|| {
-                        TerminalError::new(format!(
-                            "effect group {group_key} child {} is cancel-decided but holds \
-                             no rank; the decision and its seat commit in one handler",
-                            request.position
-                        ))
-                    })?;
+        let rank = match live.decision(request.position) {
+            Some((rank, EffectGroupSeat::CancelDecided)) => {
                 return Ok(Reply::at(
                     wire,
                     EffectGroupRecordSettlementResponse::CancelDecided { rank },
                 ));
             }
-            Some(EffectGroupChildCommitState::Committed { rank })
-                if live.settled_positions.contains_key(&request.position) =>
-            {
-                let seated = live
-                    .settled_positions
-                    .get(&request.position)
-                    .copied()
-                    .ok_or_else(|| {
-                        TerminalError::new(format!(
-                            "effect group {group_key} child {} is committed and seated but \
-                             holds no rank; the seat and its rank commit in one handler",
-                            request.position
-                        ))
-                    })?;
-                if seated != rank {
-                    return Err(TerminalError::new(format!(
-                        "effect group {group_key} child {} seated rank {seated}, but its \
-                         commit reserved rank {rank}; a seat publishes only its reserved rank",
-                        request.position
-                    ))
-                    .into());
-                }
+            Some((rank, EffectGroupSeat::Seated { .. })) => {
                 // A redriven seat completes whoever still waits on it.
                 notifications::notify_satisfied(&ctx, object.writer, &record).await?;
                 return Ok(Reply::at(
@@ -901,7 +851,7 @@ impl EffectGroupState for EffectGroupStateImpl {
                     EffectGroupRecordSettlementResponse::Duplicate { rank },
                 ));
             }
-            Some(EffectGroupChildCommitState::Committed { rank }) => rank,
+            Some((rank, EffectGroupSeat::Committed)) => rank,
             None => {
                 return Err(TerminalError::new(format!(
                     "effect group {group_key} child {} reached record_settlement with no \
@@ -912,13 +862,12 @@ impl EffectGroupState for EffectGroupStateImpl {
                 .into());
             }
         };
-        let settlement = EffectGroupSettlementRecord {
-            position: request.position,
-            sequence: rank,
-            terminal: request.terminal,
-        };
-        live.settlements.insert(rank, settlement);
-        live.settled_positions.insert(request.position, rank);
+        live.seat(
+            rank,
+            EffectGroupSeat::Seated {
+                terminal: request.terminal,
+            },
+        );
         store_index(&ctx, object.writer, record.clone());
         #[cfg(test)]
         drain_cut::pause(&ctx, &group_key, "after_seat").await?;
@@ -969,7 +918,7 @@ impl EffectGroupState for EffectGroupStateImpl {
         // its rank when the drain finishes (FIG-3481).
         let served = (1..=live.seated_prefix())
             .contains(&request.rank)
-            .then(|| live.settlements.get(&request.rank).cloned())
+            .then(|| live.settlement(request.rank))
             .flatten();
         let Some(settlement) = served else {
             return Ok(Reply::at(
@@ -1049,31 +998,14 @@ impl EffectGroupState for EffectGroupStateImpl {
         if prior.as_ref() == Some(&EffectGroupCloseOutcome::from(effective)) {
             return Ok(Reply::at(wire, EffectGroupCloseResponse::AlreadyClosed));
         }
-        let mut decided = Vec::new();
-        if effective == LoserPolicy::Cancel {
-            let live = record.live_mut()?;
-            for position in 0..live.shape.children() {
-                // The §4 decision, not the seat: a committed child is
-                // protected by the decision it holds, and an already-cancelled
-                // one keeps its first seat.
-                if live.commit_states.contains_key(&position) {
-                    continue;
-                }
-                live.commit_states
-                    .insert(position, EffectGroupChildCommitState::CancelDecided);
-                decided.push(position);
-                let rank = live.reserve_rank(&group_key)?;
-                live.settlements.insert(
-                    rank,
-                    EffectGroupSettlementRecord {
-                        position,
-                        sequence: rank,
-                        terminal: EffectGroupSettlementTerminal::Cancelled,
-                    },
-                );
-                live.settled_positions.insert(position, rank);
-            }
-        }
+        // The §4 decision, not the seat: a committed child is protected by
+        // the decision it holds, and an already-cancelled one keeps its first
+        // seat.
+        let decided = if effective == LoserPolicy::Cancel {
+            record.live_mut()?.decide_pending_cancelled()
+        } else {
+            Vec::new()
+        };
         seal_cancel_decisions(&ctx, &self.namespace, &group_key, &decided).await?;
         let live = record.live()?.clone();
         record.lifecycle = EffectGroupLifecycle::Closed {
@@ -1098,10 +1030,9 @@ impl EffectGroupState for EffectGroupStateImpl {
                 // its `record_settlement` seats the rank and notifies its
                 // waiters when the drain finishes.
                 if matches!(
-                    live.commit_states.get(&position),
-                    Some(EffectGroupChildCommitState::Committed { .. })
-                ) && !live.settled_positions.contains_key(&position)
-                {
+                    live.decision(position),
+                    Some((_, EffectGroupSeat::Committed))
+                ) {
                     continue;
                 }
                 if let Some(invocation_id) = addresses.get(&position) {
@@ -1261,12 +1192,11 @@ impl EffectGroupState for EffectGroupStateImpl {
                 EffectGroupRetirementCancelResponse::UnknownGroup,
             ));
         };
-        let mut decided = Vec::new();
-        let changed = {
-            let (facts, live) = match &mut record.lifecycle {
+        let decided = {
+            let live = match &mut record.lifecycle {
                 EffectGroupLifecycle::Retired {
-                    cleanup: EffectGroupCleanup::Pending { facts, live },
-                } => (facts, live),
+                    cleanup: EffectGroupCleanup::Pending { live, .. },
+                } => live,
                 EffectGroupLifecycle::Retired {
                     cleanup: EffectGroupCleanup::Complete { .. },
                 } => {
@@ -1282,39 +1212,19 @@ impl EffectGroupState for EffectGroupStateImpl {
                     ));
                 }
             };
-            let mut changed = false;
-            for position in 0..facts.children() {
-                // Same §4 arbitration as a `Cancel` close: a committed child keeps
-                // its own settlement, and only the undecided are seated cancelled.
-                if live.commit_states.contains_key(&position) {
-                    continue;
-                }
-                live.commit_states
-                    .insert(position, EffectGroupChildCommitState::CancelDecided);
-                decided.push(position);
-                let rank = live.reserve_rank(&group_key)?;
-                live.settlements.insert(
-                    rank,
-                    EffectGroupSettlementRecord {
-                        position,
-                        sequence: rank,
-                        terminal: EffectGroupSettlementTerminal::Cancelled,
-                    },
-                );
-                live.settled_positions.insert(position, rank);
-                changed = true;
-            }
+            // Same §4 arbitration as a `Cancel` close: a committed child keeps
+            // its own settlement, and only the undecided are seated cancelled.
             // A committed-but-undrained child is a pending protected drain
-            // (ADR 0099 §4): it holds no rank yet. Nobody waits to hear of
+            // (ADR 0099 §4): its seat is still owed. Nobody waits to hear of
             // these decisions: `retire` already answered every subscriber
             // `Retired`, and a later one is answered from the retired record.
-            changed
+            live.decide_pending_cancelled()
         };
         seal_cancel_decisions(&ctx, &self.namespace, &group_key, &decided).await?;
         store_index(&ctx, object.writer, record);
         Ok(Reply::at(
             wire,
-            if changed {
+            if !decided.is_empty() {
                 EffectGroupRetirementCancelResponse::Applied
             } else {
                 EffectGroupRetirementCancelResponse::AlreadyApplied
@@ -1418,6 +1328,7 @@ pub(crate) fn ingress_group_error(
 }
 
 pub(crate) fn settlement_from_payload(
+    rank: u64,
     record: EffectGroupSettlementRecord,
     payload: Option<Vec<u8>>,
 ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
@@ -1425,14 +1336,12 @@ pub(crate) fn settlement_from_payload(
         EffectGroupSettlementTerminal::StoredPayload => {
             let bytes = payload.ok_or_else(|| {
                 group_shape_error(format!(
-                    "effect group settlement rank {} refers to a missing payload",
-                    record.sequence
+                    "effect group settlement rank {rank} refers to a missing payload"
                 ))
             })?;
             serde_json::from_slice::<RuntimeEffectOutcome>(&bytes).map_err(|error| {
                 group_shape_error(format!(
-                    "decode effect group settlement rank {} payload: {error}",
-                    record.sequence
+                    "decode effect group settlement rank {rank} payload: {error}"
                 ))
             })
         }
@@ -1444,7 +1353,7 @@ pub(crate) fn settlement_from_payload(
     };
     Ok(GroupSettlement {
         position: record.position,
-        sequence: record.sequence,
+        sequence: rank,
         outcome,
     })
 }

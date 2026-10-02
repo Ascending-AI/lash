@@ -173,7 +173,7 @@ async fn enclosing_lineage(
     env: &RuntimeEnvironment,
     request: &lash_core::facade_support::ToolChildRequest,
 ) -> Result<Option<lash_core::ProcessLineage>, PluginError> {
-    let Some(process_id) = request.enclosing_process.as_ref() else {
+    let Some(process_id) = request.enclosing_process() else {
         return Ok(None);
     };
     let registry = env.process_registry().ok_or_else(|| {

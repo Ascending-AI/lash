@@ -40,7 +40,6 @@ mod tests {
     fn scope() -> ToolChildScope {
         ToolChildScope {
             opener: EffectOpener::turn("session", "turn"),
-            admitted_scope: AdmittedScope::turn("session", "turn"),
             owner: lash_core_execution::ExecutionOwner::SessionFrame {
                 session_id: SessionId::from("session"),
                 agent_frame_id: frame(),
@@ -82,10 +81,7 @@ mod tests {
     #[test]
     fn a_request_round_trips_every_field_through_its_durable_bytes() {
         let mut original = request();
-        // A consistent process-opener request: the enclosing incarnation is
-        // the opener's own, which is the only pair `validate` admits.
         original.scope.opener = EffectOpener::process(process_id("process-9"));
-        original = original.with_enclosing_process(process_id("process-9"));
         let json = serde_json::to_string(&original).expect("a request serializes");
         let decoded: ToolChildRequest = serde_json::from_str(&json).expect("a request decodes");
         assert_eq!(decoded, original);
@@ -93,9 +89,9 @@ mod tests {
         assert_eq!(decoded.cancellation_authority.as_str(), "binding-7");
         assert_eq!(decoded.execution_env.as_str(), "env-ref");
         assert_eq!(
-            decoded.enclosing_process,
-            Some(process_id("process-9")),
-            "the enclosing process must survive as an incarnation, not a bare name"
+            decoded.enclosing_process(),
+            Some(&process_id("process-9")),
+            "the enclosing process is the recorded opener's own"
         );
         assert_eq!(
             decoded
@@ -222,29 +218,92 @@ mod tests {
         );
     }
 
-    /// The opener and the admitted scope are two facts, not one. A process
-    /// opener's child is claimed under its own scope, and collapsing them would
-    /// make a recovered child validate its opener against the wrong identity.
+    /// The opener is recorded once (FIG-4665): the claim scope and the
+    /// enclosing process are derived from it, so no request can pair a
+    /// process opener with another claim scope, and a retained copy of either
+    /// is an unknown field, refused at decode.
     #[test]
-    fn the_opener_and_the_admitted_scope_are_retained_separately() {
+    fn the_claim_scope_and_enclosing_process_are_the_openers_own() {
         let mut request = request();
+        assert_eq!(
+            request.scope.claim_scope(),
+            AdmittedScope::turn("session", "turn")
+        );
+        assert_eq!(request.enclosing_process(), None);
         request.scope.opener = EffectOpener::process(process_id("process-1"));
-        request.scope.admitted_scope = AdmittedScope::runtime_operation("op-1");
-        request.enclosing_process = Some(process_id("process-1"));
-        let decoded: ToolChildRequest =
-            serde_json::from_str(&serde_json::to_string(&request).expect("serializes"))
-                .expect("decodes");
+        request.validate().expect("a process opener's request");
         assert_eq!(
-            decoded.scope.opener,
-            EffectOpener::process(process_id("process-1"))
+            request.scope.claim_scope(),
+            AdmittedScope::process(process_id("process-1"))
         );
-        assert_eq!(
-            decoded.scope.admitted_scope,
-            AdmittedScope::runtime_operation("op-1")
-        );
-        decoded
-            .validate()
-            .expect("a process opener needs no session match");
+        assert_eq!(request.enclosing_process(), Some(&process_id("process-1")));
+        let wire = serde_json::to_value(&request).expect("serializes");
+        assert!(wire.get("enclosing_process").is_none());
+        assert!(wire["scope"].get("admitted_scope").is_none());
+        for (parent, field) in [
+            (None, "enclosing_process"),
+            (Some("scope"), "admitted_scope"),
+        ] {
+            let mut stale = wire.clone();
+            let object = match parent {
+                Some(parent) => &mut stale[parent],
+                None => &mut stale,
+            };
+            object[field] = serde_json::json!("process-2");
+            assert!(
+                serde_json::from_value::<ToolChildRequest>(stale).is_err(),
+                "a second copy of the opener's {field} is refused"
+            );
+        }
+    }
+
+    /// The envelope checks its address against the request's one opener: a
+    /// child addressed outside its claim scope is refused at construction
+    /// and at decode, typed, so it can never be claimed under one scope and
+    /// run under another.
+    #[test]
+    fn an_envelope_addressed_outside_its_openers_scope_is_refused() {
+        let envelope = |scope: lash_core_execution::ExecutionScope| {
+            RuntimeEffectEnvelope::try_new(
+                RuntimeEffectInvocation::new(
+                    lash_core_execution::EffectAddress::new(scope, "child")
+                        .expect("a valid effect address"),
+                    lash_core_execution::RuntimeAttribution::none(),
+                    "child",
+                ),
+                RuntimeEffectCommand::ToolInvocation {
+                    request: Box::new(request()),
+                },
+            )
+        };
+        let admitted = envelope(lash_core_execution::ExecutionScope::turn("session", "turn"))
+            .expect("the opener's own scope is the child's address");
+        for foreign in [
+            lash_core_execution::ExecutionScope::turn("session", "another-turn"),
+            lash_core_execution::ExecutionScope::process(process_id("process-1")),
+        ] {
+            assert_eq!(
+                envelope(foreign.clone())
+                    .expect_err("an address outside the opener's scope is refused")
+                    .code,
+                lash_core_execution::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener
+            );
+            let mut wire = serde_json::to_value(&admitted).expect("serializes");
+            wire["invocation"]["address"]["execution_scope"] =
+                serde_json::to_value(&foreign).expect("a scope serializes");
+            let refusal = serde_json::from_value::<RuntimeEffectEnvelope>(wire)
+                .expect_err("a decoded envelope is checked as a constructed one is");
+            assert!(
+                refusal
+                    .to_string()
+                    .contains("claimed under its opener's own scope"),
+                "{refusal}"
+            );
+        }
+        serde_json::from_value::<RuntimeEffectEnvelope>(
+            serde_json::to_value(&admitted).expect("serializes"),
+        )
+        .expect("the admitted envelope round-trips");
     }
 
     /// The defect ADR 0099 §1 names, at the shape level: a process re-registered
@@ -279,81 +338,6 @@ mod tests {
             crossed
                 .validate()
                 .expect_err("a crossed opener session is refused")
-                .code,
-            lash_core_execution::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener
-        );
-    }
-
-    /// The claim pair is checked at decode, not trusted: a journal row that
-    /// pairs a process scope with no incarnation — or with another process's —
-    /// does not decode, because `AdmittedScope::new` is the only construction
-    /// and it refuses the half-admitted shape.
-    #[test]
-    fn a_half_admitted_claim_pair_does_not_decode() {
-        let wire = |process: serde_json::Value| {
-            let mut value = serde_json::to_value(request()).expect("a request serializes");
-            *value
-                .pointer_mut("/scope/admitted_scope")
-                .expect("the wire pair is a nested object") = serde_json::json!({
-                "scope": { "type": "process", "process_id": "worker" },
-                "process": process,
-            });
-            value
-        };
-        assert!(
-            serde_json::from_value::<ToolChildRequest>(wire(serde_json::Value::Null)).is_err(),
-            "a process claim with no incarnation is the half-admitted shape the pair exists to refuse"
-        );
-        let mismatched =
-            serde_json::to_value(process_id("other-worker")).expect("a process ref serializes");
-        assert!(
-            serde_json::from_value::<ToolChildRequest>(wire(mismatched)).is_err(),
-            "a pin naming another process is refused at decode, not trusted"
-        );
-    }
-
-    /// A process opener's enclosing process is the opener itself — the one
-    /// fact stated twice. A request that pairs `process(P)` with enclosing
-    /// `process(Q)`, or with no enclosing at all, is refused at the boundary
-    /// rather than run under another process's context.
-    #[test]
-    fn a_process_opener_must_enclose_itself() {
-        let mut request = request();
-        request.scope.opener = EffectOpener::process(process_id("worker"));
-        request.scope.admitted_scope = AdmittedScope::process(process_id("worker"));
-        request.enclosing_process = Some(process_id("another-worker"));
-        assert_eq!(
-            request
-                .validate()
-                .expect_err("enclosing another process is refused")
-                .code,
-            lash_core_execution::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener
-        );
-        request.enclosing_process = None;
-        assert_eq!(
-            request
-                .validate()
-                .expect_err("a process opener with no enclosing process is refused")
-                .code,
-            lash_core_execution::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener
-        );
-        request.enclosing_process = Some(process_id("worker"));
-        request
-            .validate()
-            .expect("the opener's own incarnation is the one legal enclosing");
-    }
-
-    /// Symmetrically: a non-process opener encloses no process, so a retained
-    /// `enclosing_process` on a turn or session-operation opener is a refused
-    /// inconsistency rather than a stray field.
-    #[test]
-    fn a_non_process_opener_records_no_enclosing_process() {
-        let mut request = request();
-        request.enclosing_process = Some(process_id("worker"));
-        assert_eq!(
-            request
-                .validate()
-                .expect_err("a turn opener with an enclosing process is refused")
                 .code,
             lash_core_execution::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener
         );

@@ -44,7 +44,6 @@ pub(crate) enum EffectGroupRunTerminal {
 pub(crate) struct EffectGroupRankWitness {
     pub(crate) rank: u64,
     pub(crate) position: usize,
-    pub(crate) sequence: u64,
     pub(crate) terminal: EffectGroupRunTerminal,
 }
 
@@ -161,7 +160,7 @@ pub(crate) async fn run_effect_group(
         .unwrap_or_else(|| panic!("a terminal three-child report has rank one"));
     if workflow.group_key != report.group_key
         || workflow.first_position != first.position
-        || workflow.first_sequence != first.sequence
+        || workflow.first_sequence != first.rank
     {
         return Err(AppError::internal(format!(
             "effect-group workflow result disagrees with its durable ranks: workflow={workflow:?}, report={report:?}"
@@ -280,7 +279,6 @@ async fn read_effect_group_report(
         settlements.push(EffectGroupRankWitness {
             rank,
             position: settlement.position,
-            sequence: settlement.sequence,
             terminal,
         });
     }
@@ -296,14 +294,6 @@ async fn read_effect_group_report(
     if positions != (0..CHILD_DURATIONS_MS.len()).collect::<Vec<_>>() {
         return Err(AppError::internal(format!(
             "effect group {group_key} did not settle each child position exactly once"
-        )));
-    }
-    if !settlements
-        .windows(2)
-        .all(|pair| pair[0].sequence < pair[1].sequence)
-    {
-        return Err(AppError::internal(format!(
-            "effect group {group_key} settlement sequences were not strictly increasing"
         )));
     }
     if first.terminal != EffectGroupRunTerminal::Completed {

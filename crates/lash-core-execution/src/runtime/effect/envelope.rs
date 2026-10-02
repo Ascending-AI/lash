@@ -191,7 +191,12 @@ impl<'de> Deserialize<'de> for RuntimeEffectInvocation {
 }
 
 /// Fully serializable envelope emitted at Lash's nondeterministic boundary.
+///
+/// Decoding validates the command against the address as construction does,
+/// so a retained tool-child request addressed outside its opener's scope is
+/// refused at decode rather than trusted.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(try_from = "RuntimeEffectEnvelopeWire")]
 pub struct RuntimeEffectEnvelope {
     pub invocation: RuntimeEffectInvocation,
     pub command: RuntimeEffectCommand,
@@ -204,6 +209,24 @@ pub struct RuntimeEffectEnvelope {
     /// the envelope inside its measured size budget below.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<Box<EffectGroupMembership>>,
+}
+
+#[derive(Deserialize)]
+struct RuntimeEffectEnvelopeWire {
+    invocation: RuntimeEffectInvocation,
+    command: RuntimeEffectCommand,
+    #[serde(default)]
+    group: Option<Box<EffectGroupMembership>>,
+}
+
+impl TryFrom<RuntimeEffectEnvelopeWire> for RuntimeEffectEnvelope {
+    type Error = RuntimeEffectControllerError;
+
+    fn try_from(wire: RuntimeEffectEnvelopeWire) -> Result<Self, Self::Error> {
+        let mut envelope = Self::try_new(wire.invocation, wire.command)?;
+        envelope.group = wire.group;
+        Ok(envelope)
+    }
 }
 
 // Measured 600 B on rustc 1.97.0, x86_64-unknown-linux-gnu after the
@@ -228,7 +251,7 @@ impl RuntimeEffectEnvelope {
         command: RuntimeEffectCommand,
     ) -> Result<Self, RuntimeEffectControllerError> {
         invocation.validate()?;
-        validate_effect_command(&command)?;
+        validate_effect_command(&invocation.address, &command)?;
         Ok(Self {
             invocation,
             command,
@@ -278,6 +301,7 @@ impl RuntimeEffectEnvelope {
 }
 
 fn validate_effect_command(
+    address: &EffectAddress,
     command: &RuntimeEffectCommand,
 ) -> Result<(), RuntimeEffectControllerError> {
     if let RuntimeEffectCommand::ToolAttempt {
@@ -297,6 +321,7 @@ fn validate_effect_command(
     }
     if let RuntimeEffectCommand::ToolInvocation { request } = command {
         request.validate()?;
+        request.validate_address(address)?;
     }
     Ok(())
 }

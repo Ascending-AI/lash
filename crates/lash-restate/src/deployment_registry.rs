@@ -255,28 +255,16 @@ mod tests {
                             replay_keys: vec![format!("{key}-child")],
                             opener: lash_core::AdmittedScope::turn("session", "turn"),
                         },
-                        next_rank: 2,
-                        commit_states: BTreeMap::from([(
-                            0,
-                            EffectGroupChildCommitState::Committed { rank: 1 },
-                        )]),
-                        settlements: if drained {
-                            BTreeMap::from([(
-                                1,
-                                EffectGroupSettlementRecord {
-                                    position: 0,
-                                    sequence: 1,
+                        decisions: vec![EffectGroupDecision {
+                            position: 0,
+                            seat: if drained {
+                                EffectGroupSeat::Seated {
                                     terminal: EffectGroupSettlementTerminal::Cancelled,
-                                },
-                            )])
-                        } else {
-                            BTreeMap::new()
-                        },
-                        settled_positions: if drained {
-                            BTreeMap::from([(0, 1)])
-                        } else {
-                            BTreeMap::new()
-                        },
+                                }
+                            } else {
+                                EffectGroupSeat::Committed
+                            },
+                        }],
                     },
                 },
             };

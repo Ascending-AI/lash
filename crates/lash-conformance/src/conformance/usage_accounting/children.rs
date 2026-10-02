@@ -190,7 +190,6 @@ async fn incorporate(world: &World, scoped: &crate::ScopedEffectController<'_>) 
                 crate::tool_dispatch::ToolAttemptLineage::under(parent.clone()),
                 crate::runtime::effect::ToolChildScope {
                     opener: crate::EffectOpener::for_scope(&scope).expect("opener"),
-                    admitted_scope: scope.clone(),
                     owner: dispatch.owner.clone(),
                 },
                 crate::TurnControlBindingId::new(binding.binding_id().to_string())

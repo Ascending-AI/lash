@@ -88,7 +88,6 @@ mod tests {
             identity,
             ToolChildScope {
                 opener: crate::EffectOpener::turn("child-session", "turn"),
-                admitted_scope: crate::AdmittedScope::turn("child-session", "turn"),
                 owner: crate::ExecutionOwner::SessionFrame {
                     session_id: SessionId::from("child-session"),
                     agent_frame_id: FrameNodeId::new("child-frame").expect("a valid frame id"),
@@ -302,7 +301,7 @@ mod tests {
             crate::RuntimeEffectGroup::try_new(
                 crate::RuntimeEffectInvocation::new(
                     crate::EffectAddress::new(
-                        ExecutionScope::turn("child-session", "turn"),
+                        envelope.invocation.execution_scope().clone(),
                         format!("group:{group_key}"),
                     )
                     .expect("a valid group address"),
@@ -333,23 +332,24 @@ mod tests {
         .expect("the group settles its one child")
     }
 
-    /// The claim pin is the recorded `AdmittedScope`, never `enclosing_process`.
-    /// A process opener legitimately encloses its own incarnation, so the pair
-    /// `opener = P#7, enclosing = P#7` validates — but when the admitted claim is a
-    /// turn scope, the controller must stay that turn's controller. The retired
-    /// post-admission pin block would have pinned P#7 onto it instead, making
-    /// the execution context the claim pin.
+    /// A child's claim scope is its opener's own (FIG-4665): a request records
+    /// its opener once, so a process opener's child is claimed under that
+    /// process and runs inside it. No request can pair a process opener with
+    /// another claim scope, and an envelope addressed outside it is refused
+    /// at construction.
     ///
     /// On the double the bound controller is minted inside the child's own
     /// invocation and routed through the registered resolver once — the pin
     /// the probe records is the one the dispatch mints.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn a_process_openers_enclosing_incarnation_is_never_the_claim_pin() {
+    async fn a_process_openers_child_is_claimed_under_the_process() {
         let double =
             crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
         let host: Arc<dyn EffectHost> = double.lash_backend().effect_host();
+        let opener_ref = crate::ProcessId::fixture("worker");
+        let claim_scope = ExecutionScope::process(opener_ref.clone());
         let controller = host
-            .scoped_static(crate::AdmittedScope::turn("child-session", "turn"))
+            .scoped_static(crate::AdmittedScope::process(opener_ref.clone()))
             .expect("the backend host admits the scope")
             .expect("the backend host lends a static controller")
             .owned_controller()
@@ -359,12 +359,36 @@ mod tests {
         let tool_children =
             ToolChildHost::new(&host, Arc::clone(&env_store), double.stores().clock());
         let mut request = durably_admitted_request(&host, ToolChildCompletionRouting::Inline);
-        let opener_ref = crate::ProcessId::fixture("worker");
         request.scope.opener = crate::EffectOpener::process(opener_ref.clone());
-        request.enclosing_process = Some(opener_ref);
+        request.cancellation_authority = crate::TurnControlBindingId::new(
+            crate::runtime::effect::executor::turn_control_binding_id_for_scope(
+                &host.turn_control_binding_id(),
+                &claim_scope,
+            )
+            .expect("a scope-derived binding id"),
+        )
+        .expect("a valid binding id");
+        assert_eq!(request.scope.claim_scope().scope(), &claim_scope);
+        assert_eq!(request.enclosing_process(), Some(&opener_ref));
         request
             .validate()
-            .expect("a process opener enclosing its own incarnation is a legal request");
+            .expect("a process opener's request is a legal request");
+        let misaddressed = crate::RuntimeEffectEnvelope::try_new(
+            crate::RuntimeEffectInvocation::new(
+                crate::EffectAddress::new(ExecutionScope::turn("child-session", "turn"), "child")
+                    .expect("a valid effect address"),
+                crate::RuntimeAttribution::for_session("child-session"),
+                "child",
+            ),
+            RuntimeEffectCommand::ToolInvocation {
+                request: Box::new(request.clone()),
+            },
+        )
+        .expect_err("an envelope addressed outside its opener's scope is refused");
+        assert_eq!(
+            misaddressed.code,
+            crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener
+        );
         request.execution_env = crate::publish_process_execution_env(
             env_store.as_ref(),
             &crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(
@@ -378,7 +402,7 @@ mod tests {
         let opener = request.scope.opener.clone();
         let envelope = crate::RuntimeEffectEnvelope::new(
             crate::RuntimeEffectInvocation::new(
-                crate::EffectAddress::new(ExecutionScope::turn("child-session", "turn"), "child")
+                crate::EffectAddress::new(claim_scope.clone(), "child")
                     .expect("a valid effect address"),
                 crate::RuntimeAttribution::for_session("child-session"),
                 "child",
@@ -419,12 +443,13 @@ mod tests {
 
         assert_eq!(
             probe.scope().as_ref(),
-            Some(&ExecutionScope::turn("child-session", "turn")),
-            "the bound controller is the recorded claim's, a turn scope"
+            Some(&claim_scope),
+            "the bound controller is the opener's own scope"
         );
-        assert!(
-            probe.process().is_none(),
-            "the opener's incarnation never became the claim pin"
+        assert_eq!(
+            probe.process().as_ref(),
+            Some(&opener_ref),
+            "the child is claimed under the process that opened it"
         );
         let outcome = settlement
             .outcome
