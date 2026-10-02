@@ -123,6 +123,7 @@ pub(crate) async fn execute_parked_cell_for_tests(
             cell_bindings: Default::default(),
             workers: service.clone(),
             artifact_store: crate::testing::sqlite_memory_artifact_store().await,
+            ledgers: Default::default(),
         }),
     };
     let owner = VmOwner::new("parked-cell-witness");
@@ -162,6 +163,8 @@ pub(crate) async fn execute_parked_cell_for_tests(
         ),
         state: start,
         boundary,
+        hand_over: None,
+        projection_namespace: None,
     };
     let BrokeredEnd::Suspended { checkpoint } = run(start, &|| true)
         .run()

@@ -220,6 +220,20 @@ impl<'run> RuntimeExecutionContext<'run> {
         registry.outstanding = handles;
     }
 
+    /// The tool calls this context's cell has made so far, by group key
+    /// (FIG-4546), for a segment boundary inside the cell: the successor
+    /// segment runs the rest of the same cell, so it counts on from these.
+    #[must_use]
+    pub fn cell_tool_calls_snapshot(&self) -> std::collections::BTreeMap<String, usize> {
+        self.cell_tool_calls.lock_recover().clone()
+    }
+
+    /// Resume counting a cell's tool calls from what its predecessor segment
+    /// made.
+    pub fn restore_cell_tool_calls(&self, made: std::collections::BTreeMap<String, usize>) {
+        *self.cell_tool_calls.lock_recover() = made;
+    }
+
     /// The prefix every group key this opener forms carries: `{scope}:group:`.
     pub(crate) fn own_group_key_prefix(&self) -> String {
         format!("{}:group:", self.execution_scope_id())

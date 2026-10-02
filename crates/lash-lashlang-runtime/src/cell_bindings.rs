@@ -96,6 +96,26 @@ impl CellToolBindings {
         self.drifted.get(tool_id)
     }
 
+    /// The binding record this set was read from, for a segment boundary
+    /// inside the cell: the successor segment links against the same record
+    /// through [`Self::from_record`], judged against its own live registry.
+    pub fn record(&self) -> Result<serde_json::Value, serde_json::Error> {
+        self.recorded
+            .iter()
+            .map(|(path, definition)| Ok((path.clone(), serde_json::to_value(definition)?)))
+            .collect::<Result<serde_json::Map<_, _>, _>>()
+            .map(serde_json::Value::Object)
+    }
+
+    /// The binding set a predecessor segment recorded, compared against the
+    /// registry live now.
+    pub fn from_record(
+        record: serde_json::Value,
+        live: &lash_core::ToolCatalog,
+    ) -> Result<Self, lash_core::RuntimeEffectControllerError> {
+        compare(record, live)
+    }
+
     #[cfg(test)]
     pub(crate) fn has_drift(&self) -> bool {
         !self.drifted.is_empty()

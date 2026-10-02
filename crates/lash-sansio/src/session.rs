@@ -299,6 +299,13 @@ pub struct ExecResponse {
     /// is, and for a value history keeps inline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_finish_retained: Option<crate::RetainedOutput>,
+    /// The cell stopped at a segment boundary inside it (FIG-4739): a durable
+    /// wait it issued was handed to the Run's successor segment, and the
+    /// executor holds the cell's state for the execution that resumes it. A
+    /// suspended response is not the cell's answer: nothing in it enters
+    /// history, and the turn that receives it ends at the boundary.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub suspended: bool,
 }
 
 #[cfg(test)]

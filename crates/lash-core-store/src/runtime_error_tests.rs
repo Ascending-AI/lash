@@ -133,6 +133,7 @@ first_party_codes! {
         Self::ProcessSignalWaitCancelled,
         Self::ProcessSignalWaitHandedOver,
         Self::ProcessSignalWaitTimeout,
+        Self::TurnWaitHandedOver,
         Self::EngineAwaitEventAwait,
         Self::EngineAwaitEventCancel,
         Self::EngineAwaitEventPeek,

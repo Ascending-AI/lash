@@ -481,6 +481,7 @@ async fn process_map_fixture(workers: lash_vm_client::service::Service) {
         runtime_host,
     );
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
+        hand_over_awaits: None,
         registry: registry.clone(),
         effect_host: Arc::clone(&effect_host),
         originator_override: None,

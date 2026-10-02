@@ -31,6 +31,17 @@ impl Performed {
     }
 }
 
+/// What performing an operation its run parked on answered.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ParkedPerformed {
+    /// The operation ended; the resumed run is answered with its outcome.
+    Performed(Performed),
+    /// The parent left the operation open for a successor segment: the run
+    /// ends [`BrokeredEnd::Suspended`](crate::BrokeredEnd::Suspended) on the
+    /// state it parked in.
+    HandedOver,
+}
+
 /// A fault of the parent's own journal or store: nothing about the worker or
 /// the guest. The run stops and the owning invocation is re-driven.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -82,6 +93,20 @@ pub trait ParentEffects: Send + Sync {
     /// Performs `operation` through the parent's journal: dispatches it, or
     /// serves the outcome the journal recorded for it.
     async fn perform(&self, operation: &AdmittedOperation) -> Result<Performed, ParentFault>;
+
+    /// [`perform`](Self::perform) for an operation the run parked on. Its
+    /// state is captured, so the parent may leave the operation open for the
+    /// segment that resumes the run ([`ParkedPerformed::HandedOver`]). An
+    /// operation performed in place never hands over this way: its run holds
+    /// no captured state to resume from.
+    async fn perform_parked(
+        &self,
+        operation: &AdmittedOperation,
+    ) -> Result<ParkedPerformed, ParentFault> {
+        self.perform(operation)
+            .await
+            .map(ParkedPerformed::Performed)
+    }
 
     /// The journaled observation of cancellation at instruction checkpoint
     /// `checkpoint` (ADR 0039): recorded once, and served on every replay.

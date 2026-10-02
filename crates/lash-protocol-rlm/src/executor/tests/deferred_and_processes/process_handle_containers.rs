@@ -67,6 +67,7 @@ async fn control_round_trip(storage: &str, access: &str, suspension: &str) {
         runtime_host,
     );
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
+        hand_over_awaits: None,
         registry: registry.clone(),
         effect_host: Arc::clone(&effect_host),
         originator_override: None,

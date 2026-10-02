@@ -270,6 +270,9 @@ impl RuntimeErrorCode {
             Self::ProcessSignalWaitHandedOver => Terminal,
             // the durable signal wait settled timed out.
             Self::ProcessSignalWaitTimeout => Terminal,
+            // the wait moved to the Run's successor segment; this segment ends
+            // at a boundary, and no retry of it waits again.
+            Self::TurnWaitHandedOver => Terminal,
             // engine interaction failed; the engine redrives the invocation.
             Self::EngineAwaitEventAwait => Retryable,
             // engine interaction failed; the engine redrives the invocation.

@@ -94,6 +94,7 @@ impl lash_core::plugin::CodeExecutorPlugin for SettlementExecutor {
                 degraded_bindings: Vec::new(),
                 terminal_finish: None,
                 terminal_finish_retained: None,
+                suspended: false,
             });
         }
         Ok(lash_core::ExecResponse {
@@ -108,6 +109,7 @@ impl lash_core::plugin::CodeExecutorPlugin for SettlementExecutor {
             degraded_bindings: Vec::new(),
             terminal_finish: None,
             terminal_finish_retained: None,
+            suspended: false,
         })
     }
 

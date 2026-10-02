@@ -339,6 +339,7 @@ fn response(finish: Option<serde_json::Value>) -> lash_core::ExecResponse {
         degraded_bindings: Vec::new(),
         terminal_finish: finish,
         terminal_finish_retained: None,
+        suspended: false,
     }
 }
 

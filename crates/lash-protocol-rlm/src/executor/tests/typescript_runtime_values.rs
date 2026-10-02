@@ -63,6 +63,7 @@ pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomn
         runtime_host,
     );
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
+        hand_over_awaits: None,
         registry: registry.clone(),
         effect_host: Arc::clone(&effect_host),
         originator_override: None,

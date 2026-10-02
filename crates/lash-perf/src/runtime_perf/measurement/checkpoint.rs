@@ -667,6 +667,7 @@ fn checkpoint_pending_exec(
             degraded_bindings: Vec::new(),
             terminal_finish: Some(serde_json::json!("runtime perf benchmark ok")),
             terminal_finish_retained: None,
+            suspended: false,
         }),
     });
     drain_checkpoint_machine(&mut restored);

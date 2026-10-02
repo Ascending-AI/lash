@@ -6,13 +6,20 @@ use std::sync::{Arc, Mutex};
 /// never authority, and another run cannot accidentally reuse their keys.
 pub struct Projections {
     values: Mutex<Vec<ProjectedValue>>,
+    /// How many of `values` are the run's admitted bindings; the rest were
+    /// exported from host outcomes while it ran.
+    admitted: usize,
     namespace: String,
     max_nodes: usize,
 }
 impl Projections {
+    /// The registry of `bindings` under `namespace`, or under a fresh one.
+    /// A run resumed from another segment's state passes the namespace that
+    /// state's tokens name; every other run mints its own.
     pub fn new(
         bindings: &ProjectedBindings,
         max_nodes: usize,
+        namespace: Option<String>,
     ) -> Result<(Self, Vec<ProjectionDescription>), String> {
         let values = bindings
             .names()
@@ -33,8 +40,9 @@ impl Projections {
             .collect();
         Ok((
             Self {
+                admitted: values.len(),
                 values: Mutex::new(values.into_iter().map(|(_, value)| value).collect()),
-                namespace: uuid::Uuid::new_v4().to_string(),
+                namespace: namespace.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
                 max_nodes,
             },
             descriptions,
@@ -42,6 +50,18 @@ impl Projections {
     }
     pub fn namespace(&self) -> &str {
         &self.namespace
+    }
+    /// Whether the registry holds only the run's admitted bindings, so a
+    /// segment that admits the same bindings under the same namespace
+    /// resolves every token this run minted. A descriptor exported from a
+    /// host outcome lives only in this registry: a run holding one cannot be
+    /// resumed elsewhere.
+    pub fn rebuildable(&self) -> bool {
+        self.values
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
+            == self.admitted
     }
     pub fn read(&self, request: ProjectionRead) -> Result<Option<ProjectedReadResponse>, String> {
         let value = self

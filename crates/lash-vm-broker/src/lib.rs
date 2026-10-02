@@ -40,7 +40,7 @@ pub use broker::{
     Broker, BrokerBounds, BrokerFailure, BrokeredEnd, FrameFence, ParkedOperation, RunStart,
     SettledOperation, Settlement,
 };
-pub use effects::{ParentEffects, ParentFault, Performed};
+pub use effects::{ParentEffects, ParentFault, ParkedPerformed, Performed};
 pub use identity::CodeCallIdentities;
 pub use ledger::{
     AdmittedCall, AdmittedKind, AdmittedOperation, Checkpoint, CheckpointRefusal, CheckpointStore,

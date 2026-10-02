@@ -826,6 +826,7 @@ fn rlm_exec_response(
         degraded_bindings: Vec::new(),
         terminal_finish,
         terminal_finish_retained: None,
+        suspended: false,
     }
 }
 
@@ -864,6 +865,7 @@ fn rlm_exec_response_with_tool_calls(
         degraded_bindings: Vec::new(),
         terminal_finish,
         terminal_finish_retained: None,
+        suspended: false,
     }
 }
 

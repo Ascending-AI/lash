@@ -1267,6 +1267,8 @@ pub(super) async fn execute_with_projected(
         ),
         state: snapshot,
         boundary: &|| false,
+        hand_over: None,
+        projection_namespace: None,
     }
     .run()
     .await

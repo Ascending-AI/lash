@@ -45,6 +45,20 @@ pub(super) struct HostBridge<'run> {
     /// instead of the guest catching the cancellation as a rejected call. A
     /// replay divergence ends it the same way (FIG-3586).
     cancellation: ExecutionCancellation,
+    /// Whether the operation being performed is one the cell's run is parked
+    /// on (FIG-4739): only then may its wait be handed to the Run's successor
+    /// segment, which resumes the cell from the state it parked in.
+    hand_over: Arc<lash_lashlang_runtime::HandOverGate>,
+}
+
+/// The host-side ledgers of a cell that a segment boundary inside it hands
+/// to the segment that resumes it (FIG-4739). The prints live beside them,
+/// in the list the executor shares with the bridge.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub(super) struct CellHostLedgers {
+    pub printed_images: Vec<AttachmentRef>,
+    pub calls: Vec<(usize, lash_core::ExecutedCall)>,
+    pub next_tool_index: usize,
 }
 
 pub(super) struct HostBridgeConfig<'run> {
@@ -57,6 +71,8 @@ pub(super) struct HostBridgeConfig<'run> {
     pub cell_bindings: lash_lashlang_runtime::CellToolBindings,
     pub artifact_store: lashlang::LashlangArtifacts,
     pub workers: lash_vm_client::service::Service,
+    /// The ledgers a predecessor segment handed over, for a resumed cell.
+    pub ledgers: CellHostLedgers,
 }
 
 type HostAbilityFuture<'a> =
@@ -68,9 +84,9 @@ impl<'run> HostBridge<'run> {
             cell: config.cell,
             ctx: config.ctx,
             prints: config.prints,
-            printed_images: Mutex::new(Vec::new()),
-            calls: Mutex::new(Vec::new()),
-            next_tool_index: Mutex::new(0),
+            printed_images: Mutex::new(config.ledgers.printed_images),
+            calls: Mutex::new(config.ledgers.calls),
+            next_tool_index: Mutex::new(config.ledgers.next_tool_index),
             lashlang_execution_trace: config.lashlang_execution_trace,
             host_environment: config.host_environment,
             deferred_execution_grants: config.deferred_execution_grants,
@@ -78,7 +94,27 @@ impl<'run> HostBridge<'run> {
             artifact_store: config.artifact_store,
             workers: config.workers,
             cancellation: ExecutionCancellation::new(),
+            hand_over: Arc::new(lash_lashlang_runtime::HandOverGate::new()),
         }
+    }
+
+    /// The gate the cell's run reports a parked operation through.
+    pub(super) fn hand_over_gate(&self) -> &lash_lashlang_runtime::HandOverGate {
+        &self.hand_over
+    }
+
+    /// The ledgers a segment boundary inside the cell hands over.
+    pub(super) fn ledgers(&self) -> CellHostLedgers {
+        CellHostLedgers {
+            printed_images: self.printed_images.lock_recover().clone(),
+            calls: self.calls.lock_recover().clone(),
+            next_tool_index: *self.next_tool_index.lock_recover(),
+        }
+    }
+
+    /// The context the cell's commands run under, for the ledgers it owns.
+    pub(super) fn ctx(&self) -> &RuntimeExecutionContext<'run> {
+        &self.ctx
     }
 
     fn next_index(&self) -> usize {
@@ -877,7 +913,11 @@ impl HostBridge<'_> {
         reply
     }
 
-    async fn await_handle(&self, handle: FlowValue) -> Result<FlowValue, ExecutionHostError> {
+    /// Awaits a handle. An await the cell's run is parked on may be handed to
+    /// the Run's successor segment (FIG-4739): the command returns its
+    /// ordinal and its call index, nothing of it is recorded, and the run
+    /// ends on the state it parked in, which issues the await again.
+    async fn await_handle(&self, handle: FlowValue) -> Result<AbilityOutcome, ExecutionHostError> {
         let commands = self.commands()?;
         let command = commands.issue()?;
         let handle = match handle_to_json(&handle) {
@@ -892,13 +932,22 @@ impl HostBridge<'_> {
         let in_flight = commands.enter(command, CommandShape::AwaitHandle).await?;
         // The await's process command journals under the command's key, as
         // a child of the command's own invocation.
-        let command_ctx = in_flight.ctx.under_command(&in_flight.command.key);
+        let command_ctx = in_flight
+            .ctx
+            .under_command(&in_flight.command.key)
+            .with_transferable_waits(self.hand_over.parked());
         let reply = {
             let _phase = self.ctx.named_phase("rlm_process.await_handle");
             command_ctx.await_tool_handle(call_id.clone(), handle).await
         };
+        if command_ctx.take_wait_handed_over() {
+            commands.hand_over(&in_flight)?;
+            *self.next_tool_index.lock_recover() = index;
+            return Ok(AbilityOutcome::HandedOver);
+        }
         commands.finish(&in_flight)?;
         self.consume_recorded_reply(index, "await_handle", reply, call_id.as_str())
+            .map(AbilityOutcome::Value)
     }
 
     async fn print(&self, value: FlowValue) -> Result<(), ExecutionHostError> {
@@ -985,9 +1034,7 @@ impl HostBridge<'_> {
                     .await
                     .map(AbilityOutcome::ResourceOperationBatch)
             }),
-            AbilityOp::Await(handle) => {
-                Box::pin(async move { self.await_handle(handle).await.map(AbilityOutcome::Value) })
-            }
+            AbilityOp::Await(handle) => Box::pin(async move { self.await_handle(handle).await }),
             AbilityOp::Print(value) => Box::pin(async move {
                 self.print(value).await?;
                 Ok(AbilityOutcome::Unit)

@@ -64,7 +64,10 @@
 //! ([`ParentEffects::needs_worker`]) parks the run first: the broker sends
 //! `Park`, commits nothing, releases the slot, performs the operation, checks
 //! a worker out again and resumes the run from the parked state, answering
-//! the request the run issues again with the outcome it held.
+//! the request the run issues again with the outcome it held. An operation
+//! the parent hands over instead ([`ParkedPerformed::HandedOver`]) ends the
+//! run [`BrokeredEnd::Suspended`] on the parked state, which issues the
+//! operation again in the segment that resumes it.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -81,7 +84,7 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use crate::authority::{AdmittedContext, AuthorityRefusal, HandleGrant, RequestFingerprint};
-use crate::effects::{ParentEffects, ParentFault, Performed};
+use crate::effects::{ParentEffects, ParentFault, ParkedPerformed, Performed};
 use crate::ledger::{
     AdmittedKind, AdmittedOperation, Checkpoint, CheckpointRefusal, CheckpointStore, ParentLedger,
 };
@@ -420,11 +423,30 @@ impl Broker<'_> {
                         .release(checkout)
                         .await
                         .map_err(|refusal| BrokerFailure::Unavailable { refusal })?;
-                    let performed = self
+                    let performed = match self
                         .effects
-                        .perform(&operation)
+                        .perform_parked(&operation)
                         .await
-                        .map_err(|fault| BrokerFailure::Parent { fault })?;
+                        .map_err(|fault| BrokerFailure::Parent { fault })?
+                    {
+                        ParkedPerformed::Performed(performed) => performed,
+                        // The parent kept the operation open for a successor
+                        // segment: the run ends parked on it, and the state
+                        // it parked in issues the operation again when it
+                        // resumes.
+                        ParkedPerformed::HandedOver => {
+                            let checkpoint = Checkpoint {
+                                vm: parked,
+                                ledger: ledger.snapshot(),
+                                frame_epoch,
+                            };
+                            self.checkpoints
+                                .commit(&checkpoint)
+                                .await
+                                .map_err(|refusal| BrokerFailure::Checkpoint { refusal })?;
+                            return Ok(BrokeredEnd::Suspended { checkpoint });
+                        }
+                    };
                     let outcome = self
                         .deliverable(&mut ledger, &operation, performed, frame_epoch)
                         .map_err(|outcome| BrokerFailure::WorkerLost {

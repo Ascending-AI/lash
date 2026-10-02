@@ -19,12 +19,53 @@ pub struct WorkerRun<'a, H> {
     pub bounds: ExecutionBounds,
     pub state: StartState,
     pub boundary: &'a (dyn Fn() -> bool + Send + Sync),
+    /// The gate a foreground run hands an operation over through: a run that
+    /// has one ends [`BrokeredEnd::Suspended`] when its host answers
+    /// [`lashlang::AbilityOutcome::HandedOver`] to an operation the run is
+    /// parked on. A process body has none: its signal wait hands over through
+    /// the worker, which suspends on the answer.
+    pub hand_over: Option<&'a HandOverGate>,
+    /// The namespace the run's projection tokens are minted under: the one a
+    /// continuation's tokens name, for a run resumed from another segment's
+    /// state, and a fresh one otherwise.
+    pub projection_namespace: Option<String>,
+}
+
+/// Whether the operation a foreground run's host is performing is one the
+/// run parked on, so its state is captured and the operation can be left open
+/// for the segment that resumes it.
+#[derive(Debug, Default)]
+pub struct HandOverGate {
+    parked: std::sync::atomic::AtomicBool,
+    namespace: Mutex<Option<String>>,
+}
+
+impl HandOverGate {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether the operation being performed may be handed over.
+    pub fn parked(&self) -> bool {
+        self.parked.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// The namespace the run's projection tokens are minted under, once an
+    /// operation of the run could be handed over: what the segment that
+    /// resumes the run passes as [`WorkerRun::projection_namespace`].
+    pub fn projection_namespace(&self) -> Option<String> {
+        self.namespace
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
 }
 
 struct Effects<'a, H> {
     host: &'a H,
     projections: lash_vm_client::Projections,
     boundary: &'a (dyn Fn() -> bool + Send + Sync),
+    hand_over: Option<&'a HandOverGate>,
 }
 #[async_trait::async_trait]
 impl<H: ExecutionHost + Sync> ParentEffects for Effects<'_, H> {
@@ -90,6 +131,34 @@ impl<H: ExecutionHost + Sync> ParentEffects for Effects<'_, H> {
             }
         };
         Ok(Performed::outcome(outcome))
+    }
+    async fn perform_parked(
+        &self,
+        operation: &AdmittedOperation,
+    ) -> Result<ParkedPerformed, ParentFault> {
+        // A token minted for a descriptor a host outcome exported resolves
+        // only in this run's registry, so a run holding one stays here.
+        let Some(gate) = self.hand_over.filter(|_| self.projections.rebuildable()) else {
+            return self
+                .perform(operation)
+                .await
+                .map(ParkedPerformed::Performed);
+        };
+        gate.namespace
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_or_insert_with(|| self.projections.namespace().to_owned());
+        gate.parked.store(true, std::sync::atomic::Ordering::SeqCst);
+        let performed = self.perform(operation).await;
+        gate.parked
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        Ok(match performed? {
+            Performed {
+                outcome: EffectOutcome::HandedOver,
+                ..
+            } => ParkedPerformed::HandedOver,
+            performed => ParkedPerformed::Performed(performed),
+        })
     }
     async fn observe_cancellation(&self, checkpoint: u64) -> Result<bool, ParentFault> {
         self.host.cancel_checkpoint(checkpoint).await;
@@ -177,6 +246,7 @@ impl<H: ExecutionHost + Sync> WorkerRun<'_, H> {
         let (projections, descriptions) = lash_vm_client::Projections::new(
             &self.projected,
             self.service.config().protocol.decode.max_nodes as usize,
+            self.projection_namespace.take(),
         )
         .map_err(|fault| BrokerFailure::Parent {
             fault: ParentFault(fault),
@@ -225,6 +295,7 @@ impl<H: ExecutionHost + Sync> WorkerRun<'_, H> {
             host: self.host,
             projections,
             boundary: self.boundary,
+            hand_over: self.hand_over,
         };
         let captures = Capture(Mutex::new(None));
         let broker = Broker {
@@ -446,6 +517,7 @@ mod tests {
         let (projections, _) = lash_vm_client::Projections::new(
             &lashlang::ProjectedBindings::default(),
             workers.config().protocol.decode.max_nodes as usize,
+            None,
         )
         .expect("no projected bindings");
         let effects = ObservedEffects {
@@ -453,6 +525,7 @@ mod tests {
                 host: &host,
                 projections,
                 boundary: &|| false,
+                hand_over: None,
             },
             grants: grants.clone(),
             resolutions: Mutex::new(Vec::new()),

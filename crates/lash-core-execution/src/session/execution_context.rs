@@ -78,6 +78,13 @@ pub struct RuntimeExecutionContext<'run> {
     token_is_lent_stop: bool,
     turn_cancel: RecordedTurnCancel,
     pub(super) observe_turn_cancel: bool,
+    /// Whether a durable wait this context issues may be handed to the Run's
+    /// successor segment (FIG-4739): set by a code cell for an operation its
+    /// run is parked on, whose state is captured, and never otherwise.
+    transferable_waits: bool,
+    /// Set when a transferable wait this context issued was handed over,
+    /// shared with every context derived from this one.
+    wait_handed_over: Arc<std::sync::atomic::AtomicBool>,
     /// Durable cancellation authority for waits issued by this execution.
     /// A follow-on physical turn keeps its admitted effect scope but observes
     /// the cancellation gate addressed to its own turn identity.
@@ -520,6 +527,8 @@ impl<'run> RuntimeExecutionContext<'run> {
             token_is_lent_stop: self.token_is_lent_stop,
             turn_cancel: self.turn_cancel.clone(),
             observe_turn_cancel: self.observe_turn_cancel,
+            transferable_waits: self.transferable_waits,
+            wait_handed_over: Arc::clone(&self.wait_handed_over),
             turn_cancel_scope: self.turn_cancel_scope.clone(),
             tracing: self.tracing.clone(),
             code_block_graph_key: self.code_block_graph_key.clone(),
@@ -966,9 +975,34 @@ impl<'run> RuntimeExecutionContext<'run> {
                     .effect_controller
                     .turn_cancel_wait(cancellation),
             }
+            .transferable(self.transferable_waits)
         } else {
             crate::runtime::TurnCancelWait::unobserved(cancellation)
         }
+    }
+
+    /// Marks the durable waits this context issues as ones the Run's
+    /// successor segment may take over (FIG-4739). A wait handed over answers
+    /// [`TurnWaitHandedOver`](crate::RuntimeErrorCode::TurnWaitHandedOver)
+    /// and stays open: the caller must hold captured state that issues the
+    /// wait again.
+    pub fn with_transferable_waits(mut self, transferable: bool) -> Self {
+        self.transferable_waits = transferable;
+        self
+    }
+
+    /// Records that a transferable wait this context issued was handed to
+    /// the Run's successor segment.
+    pub(crate) fn record_wait_handed_over(&self) {
+        self.wait_handed_over
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Whether a wait this context issued was handed to the Run's successor
+    /// segment since the last call; the answer is taken.
+    pub fn take_wait_handed_over(&self) -> bool {
+        self.wait_handed_over
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
     }
 
     pub fn with_process_work(mut self, process_work: Option<crate::ProcessWorkWiring>) -> Self {

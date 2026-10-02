@@ -106,6 +106,15 @@ impl RuntimeExecutionContext<'_> {
             .await;
         let output = match output {
             Ok(output) => output.into_tool_output(),
+            // The wait was handed to the Run's successor segment (FIG-4739):
+            // it has no outcome here, so nothing of the call is recorded or
+            // observed. The caller stops on it.
+            Err(crate::PluginError::RuntimeEffectController(err))
+                if err.code == crate::RuntimeErrorCode::TurnWaitHandedOver =>
+            {
+                self.record_wait_handed_over();
+                return ToolInvocationReply::error(json!(err.to_string()));
+            }
             Err(crate::PluginError::RuntimeEffectController(err)) => {
                 self.record_nested_effect_error(err.clone());
                 ToolInvocationReply::error(json!(err.to_string())).output

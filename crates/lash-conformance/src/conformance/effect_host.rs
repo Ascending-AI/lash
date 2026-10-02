@@ -723,6 +723,7 @@ where
                             degraded_bindings: Vec::new(),
                             terminal_finish: Some(value),
                             terminal_finish_retained: None,
+                            suspended: false,
                         })),
                     })
                 }),

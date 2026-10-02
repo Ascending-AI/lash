@@ -839,6 +839,8 @@ async fn execute_lashlang(
         bounds,
         state: start,
         boundary: &boundary,
+        hand_over: None,
+        projection_namespace: None,
     }
     .run()
     .await;

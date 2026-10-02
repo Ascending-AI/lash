@@ -708,6 +708,27 @@ impl LashlangReplayRun {
         Ok(())
     }
 
+    /// Returns `command` to the mint: its host left it open for the segment
+    /// that resumes the run, which issues it again under the same ordinal and
+    /// key. Only the run's last issued command can be handed over, and it
+    /// joins no dispatched digest here: the segment that completes it records
+    /// it.
+    pub fn hand_over(&self, command: &IssuedCommand) -> Result<(), ReplayDivergence> {
+        let mut state = self.state.lock_recover();
+        if state.ordinals.next != command.ordinal + 1 {
+            return Err(ReplayDivergence::at(
+                &self.namespace,
+                Some(command.ordinal),
+                format!(
+                    "this command was handed over after the run issued ordinal {}",
+                    state.ordinals.next.saturating_sub(1)
+                ),
+            ));
+        }
+        state.ordinals.next = command.ordinal;
+        Ok(())
+    }
+
     /// The seal this run writes as its last nested effect, after checking
     /// that no recorded command lies beyond the commands it issued.
     pub fn seal(&self) -> Result<RunSeal, ReplayDivergence> {

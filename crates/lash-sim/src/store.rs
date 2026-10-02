@@ -697,6 +697,7 @@ impl ModelStore {
                         "exit_code": exit_code,
                     })),
                     terminal_finish_retained: None,
+                    suspended: false,
                 };
                 let outcome = lash_core::RuntimeEffectOutcome::ExecCode {
                     result: Box::new(Ok(response)),

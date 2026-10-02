@@ -140,6 +140,7 @@ impl lash_core::plugin::CodeExecutorPlugin for EffectControllerTestCodeExecutor 
             degraded_bindings: Vec::new(),
             terminal_finish: None,
             terminal_finish_retained: None,
+            suspended: false,
         })
     }
 }

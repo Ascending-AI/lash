@@ -58,6 +58,7 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
             ),
         ]),
         deferred_trigger_resolutions: deferred_trigger_resolutions.clone(),
+        suspended_cell: Some(PersistedValue::Inline { body: vec![2] }),
     };
 
     assert_field_schema(
@@ -68,6 +69,7 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
             "state_header",
             "globals",
             "deferred_trigger_resolutions",
+            "suspended_cell",
         ],
         &[serialized_fields(&root)],
     );
@@ -710,6 +712,7 @@ fn version_26_root_encodes_to_golden_bytes() {
         globals,
         deferred_trigger_resolutions:
             lash_lashlang_runtime::DeferredTriggerResolutionRecord::default(),
+        suspended_cell: None,
     };
 
     let encoded = rmp_serde::to_vec_named(&root).expect("encode the golden root");
@@ -1198,7 +1201,8 @@ fn persisted_root_fields_and_encoder_floor_are_pinned() {
             "engine",
             "state_header",
             "globals",
-            "deferred_trigger_resolutions"
+            "deferred_trigger_resolutions",
+            "suspended_cell"
         ]
     );
     let root = RlmSnapshotRoot {
@@ -1207,6 +1211,7 @@ fn persisted_root_fields_and_encoder_floor_are_pinned() {
         state_header: vec![0, 255],
         globals: BTreeMap::new(),
         deferred_trigger_resolutions: Default::default(),
+        suspended_cell: None,
     };
     let encoded = rmp_serde::to_vec_named(&root).expect("encode root");
     assert_eq!(encoded[0], 0x85, "the root is a named five-field map");

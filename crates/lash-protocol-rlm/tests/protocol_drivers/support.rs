@@ -375,6 +375,7 @@ pub(crate) fn exec_response(
         degraded_bindings: Vec::new(),
         terminal_finish: final_output,
         terminal_finish_retained: None,
+        suspended: false,
     }
 }
 

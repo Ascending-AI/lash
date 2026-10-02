@@ -1620,6 +1620,10 @@ pub(super) struct TypeScriptSignalProcessService {
     pub(super) registry: Arc<dyn lash_core::ProcessRegistry>,
     pub(super) effect_host: Arc<dyn lash_core::EffectHost>,
     pub(super) originator_override: Option<lash_core::ProcessOriginator>,
+    /// While set, an await the caller marked transferable is answered as the
+    /// engine of a draining build answers it (FIG-4739): handed to the Run's
+    /// successor segment, with the wait left open.
+    pub(super) hand_over_awaits: Option<Arc<std::sync::atomic::AtomicBool>>,
     /// Where a recorded start publishes the execution env its registration
     /// then references. FIG-2999: `processes.start` is a declaring leaf tool,
     /// so the env is captured on the recorded-intent route rather than by the
@@ -2005,8 +2009,24 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
     async fn await_process(
         &self,
         process_id: &ProcessId,
-        _scope: lash_core::ProcessOpScope<'_>,
+        scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<lash_core::ProcessAwaitOutput, lash_core::PluginError> {
+        if scope
+            .turn_cancellation
+            .as_ref()
+            .is_some_and(|turn| turn.transferable)
+            && self
+                .hand_over_awaits
+                .as_ref()
+                .is_some_and(|armed| armed.load(std::sync::atomic::Ordering::SeqCst))
+        {
+            return Err(lash_core::PluginError::RuntimeEffectController(
+                lash_core::RuntimeEffectControllerError::new(
+                    lash_core::RuntimeErrorCode::TurnWaitHandedOver,
+                    "the wait was handed to the Run's successor segment",
+                ),
+            ));
+        }
         let registry: Arc<dyn lash_core::ProcessRegistry> = self.registry.clone();
         lash_core::NoProcessWork::for_registry(registry)
             .await_terminal(process_id)
@@ -2212,6 +2232,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         runtime_host,
     );
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
+        hand_over_awaits: None,
         registry: registry.clone(),
         effect_host: Arc::clone(&effect_host),
         originator_override: None,
@@ -2353,6 +2374,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         runtime_host,
     );
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
+        hand_over_awaits: None,
         registry: registry.clone(),
         effect_host: Arc::clone(&effect_host),
         originator_override: None,
@@ -2478,6 +2500,7 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         )
     };
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
+        hand_over_awaits: None,
         registry: registry.clone(),
         effect_host: Arc::clone(&effect_host),
         originator_override: None,

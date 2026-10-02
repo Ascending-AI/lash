@@ -827,6 +827,7 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
             degraded_bindings: Vec::new(),
             terminal_finish: None,
             terminal_finish_retained: None,
+            suspended: false,
         }),
     });
 
@@ -1202,6 +1203,7 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
             degraded_bindings: Vec::new(),
             terminal_finish: None,
             terminal_finish_retained: None,
+            suspended: false,
         }),
     });
 

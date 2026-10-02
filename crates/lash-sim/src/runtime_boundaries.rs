@@ -484,6 +484,7 @@ impl RuntimeBoundaryHarness {
                 "exit_code": exit_code,
             })),
             terminal_finish_retained: None,
+            suspended: false,
         };
         let (outcome, execution_count) = self
             .run_once(

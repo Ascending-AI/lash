@@ -53,6 +53,28 @@ impl RlmProjectedBindings {
         })
     }
 
+    /// The bindings as a cell records them, for a segment boundary inside
+    /// the cell: the successor segment links against these through
+    /// [`Self::from_recorded`], never against its own live projections.
+    pub(crate) fn recorded(&self) -> Result<serde_json::Value, serde_json::Error> {
+        serde_json::to_value(
+            self.bindings
+                .iter()
+                .map(|(name, value)| (name.clone(), RecordedProjection(value.clone())))
+                .collect::<BTreeMap<_, _>>(),
+        )
+    }
+
+    pub(crate) fn from_recorded(recorded: serde_json::Value) -> Result<Self, serde_json::Error> {
+        let bindings: BTreeMap<String, RecordedProjection> = serde_json::from_value(recorded)?;
+        Ok(Self {
+            bindings: bindings
+                .into_iter()
+                .map(|(name, RecordedProjection(value))| (name, value))
+                .collect(),
+        })
+    }
+
     pub fn new() -> Self {
         Self::default()
     }

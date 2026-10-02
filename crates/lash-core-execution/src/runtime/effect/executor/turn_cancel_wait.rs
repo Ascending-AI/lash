@@ -13,6 +13,12 @@ use super::WaitControls;
 pub struct ProcessTurnCancellation {
     pub cancellation: CancellationToken,
     pub scope: crate::ExecutionScope,
+    /// Whether the operation's wait may be handed to the Run's successor
+    /// segment (FIG-4739): an engine that drains a build races such a wait
+    /// against the Run's hand-over, and answers
+    /// [`TurnWaitHandedOver`](crate::RuntimeErrorCode::TurnWaitHandedOver)
+    /// with the wait left open when the hand-over wins.
+    pub transferable: bool,
 }
 
 impl ProcessTurnCancellation {
@@ -20,6 +26,7 @@ impl ProcessTurnCancellation {
         Self {
             cancellation,
             scope,
+            transferable: false,
         }
     }
 }
@@ -46,6 +53,8 @@ pub struct TurnCancelWait {
     /// `None` when the enclosing execution runs without turn observation, as
     /// process bodies do.
     observed_scope: Option<crate::ExecutionScope>,
+    /// Whether the wait may be handed to the Run's successor segment.
+    transferable: bool,
 }
 
 impl TurnCancelWait {
@@ -55,6 +64,7 @@ impl TurnCancelWait {
         Self {
             cancellation,
             observed_scope: Some(scope),
+            transferable: false,
         }
     }
 
@@ -63,7 +73,17 @@ impl TurnCancelWait {
         Self {
             cancellation,
             observed_scope: None,
+            transferable: false,
         }
+    }
+
+    /// Whether the wait may be handed to the Run's successor segment
+    /// (FIG-4739). Only a wait that observes its turn can be: the hand-over
+    /// is the turn's.
+    #[must_use]
+    pub fn transferable(mut self, transferable: bool) -> Self {
+        self.transferable = transferable && self.observed_scope.is_some();
+        self
     }
 
     /// The cooperative cancellation the wait races, for callers that carry
@@ -86,7 +106,10 @@ impl TurnCancelWait {
     pub(crate) fn process_turn_cancellation(&self) -> Option<ProcessTurnCancellation> {
         self.observed_scope
             .as_ref()
-            .map(|scope| ProcessTurnCancellation::new(self.cancellation.clone(), scope.clone()))
+            .map(|scope| ProcessTurnCancellation {
+                transferable: self.transferable,
+                ..ProcessTurnCancellation::new(self.cancellation.clone(), scope.clone())
+            })
     }
 
     pub(super) fn controls(&self) -> WaitControls {
@@ -95,5 +118,21 @@ impl TurnCancelWait {
             observe_turn_cancel: self.observed_scope.is_some(),
             turn_cancel_scope: self.observed_scope.clone(),
         }
+    }
+}
+
+impl super::RuntimeEffectLocalExecutor<'_> {
+    /// Whether this process command's wait may be handed to the Run's
+    /// successor segment (FIG-4739): the turn that issued it holds captured
+    /// state that issues it again. An engine draining its build races only
+    /// such a wait against the Run's hand-over.
+    pub fn process_wait_transferable(&self) -> bool {
+        matches!(
+            &self.state,
+            super::RuntimeEffectLocalExecutorState::Target(super::LocalTarget::Process(super::ProcessLocalExecution {
+                turn_cancellation: Some(turn_cancellation),
+                ..
+            })) if turn_cancellation.transferable
+        )
     }
 }

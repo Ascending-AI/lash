@@ -167,6 +167,19 @@ impl<'run> ReplayCommands<'_, 'run> {
             .map_err(|divergence| self.stop(divergence.into_error(&self.attribution())))
     }
 
+    /// Leaves a command open for the segment that resumes the run: the wait
+    /// it issued was handed over, so the run stops on it and its successor
+    /// issues it again under the same ordinal. A replay mismatch its effects
+    /// met stops the run here, as [`Self::finish`] would.
+    pub fn hand_over(&self, in_flight: &CommandInFlight<'_>) -> Result<(), ExecutionHostError> {
+        if let Some(refusal) = in_flight.guard.tripped() {
+            return Err(self.stop(refusal));
+        }
+        self.run
+            .hand_over(&in_flight.command)
+            .map_err(|divergence| self.stop(divergence.into_error(&self.attribution())))
+    }
+
     /// Closes a command that never reached the host: it failed in the bridge.
     /// A command the journal recorded as dispatched refuses here.
     pub fn skipped(&self, command: &IssuedCommand) -> Result<(), ExecutionHostError> {

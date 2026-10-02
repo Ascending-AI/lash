@@ -198,6 +198,8 @@ async fn a_continuation_the_worker_refuses_ends_the_process_and_is_never_retried
         ),
         state: lash_vm_protocol::StartState::Continuation(vm),
         boundary: &|| false,
+        hand_over: None,
+        projection_namespace: None,
     }
     .run()
     .await

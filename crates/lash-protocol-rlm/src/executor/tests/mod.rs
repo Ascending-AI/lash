@@ -17,6 +17,7 @@ mod step_trace;
 use super::*;
 use std::sync::Mutex;
 
+mod cell_segment_handover;
 mod deferred_and_processes;
 mod frame_referrers;
 mod lifecycle_and_diagnostics;

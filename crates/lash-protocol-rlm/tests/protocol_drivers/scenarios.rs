@@ -648,6 +648,7 @@ fn rlm_protocol_scenario_exec_result_emits_accounting_without_storing_tool_call_
             degraded_bindings: Vec::new(),
             terminal_finish: None,
             terminal_finish_retained: None,
+            suspended: false,
         })
         .expect(RlmProtocolExpectations {
             exec_codes: vec!["x = await tools.read_file({ path: \"foo\" })?"],
@@ -698,6 +699,7 @@ fn rlm_protocol_scenario_exec_any_tool_control_frame_switch_is_terminal() {
             degraded_bindings: Vec::new(),
             terminal_finish: None,
             terminal_finish_retained: None,
+            suspended: false,
         })
         .checkpoint()
         .expect(RlmProtocolExpectations {
@@ -754,6 +756,7 @@ fn rlm_protocol_scenario_exec_any_tool_control_fail_is_terminal_error() {
             degraded_bindings: Vec::new(),
             terminal_finish: None,
             terminal_finish_retained: None,
+            suspended: false,
         })
         .checkpoint()
         .expect(RlmProtocolExpectations {

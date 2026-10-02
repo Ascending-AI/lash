@@ -351,6 +351,11 @@ pub enum RuntimeErrorCode {
     /// it, for its continuation to wait again. Never a guest-visible outcome.
     ProcessSignalWaitHandedOver,
     ProcessSignalWaitTimeout,
+    /// A Run's durable wait was handed to the Run's successor segment on the
+    /// drain's wake (FIG-4739): the wait stays open and the code cell that
+    /// issued it stops on it, for its continuation to wait again. Never a
+    /// guest-visible outcome.
+    TurnWaitHandedOver,
     EngineAwaitEventAwait,
     EngineAwaitEventCancel,
     EngineAwaitEventPeek,
@@ -714,6 +719,7 @@ impl RuntimeErrorCode {
             Self::ProcessSignalWaitCancelled => "process_signal_wait_cancelled",
             Self::ProcessSignalWaitHandedOver => "process_signal_wait_handed_over",
             Self::ProcessSignalWaitTimeout => "process_signal_wait_timeout",
+            Self::TurnWaitHandedOver => "turn_wait_handed_over",
             Self::EngineAwaitEventAwait => "engine_await_event_await",
             Self::EngineAwaitEventCancel => "engine_await_event_cancel",
             Self::EngineAwaitEventPeek => "engine_await_event_peek",
@@ -1011,6 +1017,7 @@ impl RuntimeErrorCode {
             "process_signal_wait_cancelled" => Self::ProcessSignalWaitCancelled,
             "process_signal_wait_handed_over" => Self::ProcessSignalWaitHandedOver,
             "process_signal_wait_timeout" => Self::ProcessSignalWaitTimeout,
+            "turn_wait_handed_over" => Self::TurnWaitHandedOver,
             "engine_await_event_await" => Self::EngineAwaitEventAwait,
             "engine_await_event_cancel" => Self::EngineAwaitEventCancel,
             "engine_await_event_peek" => Self::EngineAwaitEventPeek,

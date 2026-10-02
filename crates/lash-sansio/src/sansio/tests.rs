@@ -276,6 +276,7 @@ fn empty_exec_response() -> crate::ExecResponse {
         degraded_bindings: Vec::new(),
         terminal_finish: None,
         terminal_finish_retained: None,
+        suspended: false,
     }
 }
 

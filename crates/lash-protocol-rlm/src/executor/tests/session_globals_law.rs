@@ -132,6 +132,7 @@ async fn process_context<'h>(
         )
     };
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
+        hand_over_awaits: None,
         registry: backend.process_registry(),
         effect_host: Arc::clone(&effect_host),
         originator_override: None,
