@@ -1435,7 +1435,7 @@ impl<'de> serde::Deserialize<'de> for RestateInvocationLifecycle {
 /// The `sys_invocation` projection `RestateInvocationStatus` deserializes
 /// from; every query selecting that row reads this one list so the
 /// projection and the struct's fields cannot drift.
-const RESTATE_INVOCATION_STATUS_COLUMNS: &str = "id, target, target_service_name, target_service_key, target_handler_name, status, completion_result, completion_failure";
+pub(crate) const RESTATE_INVOCATION_STATUS_COLUMNS: &str = "id, target, target_service_name, target_service_key, target_handler_name, status, completion_result, completion_failure";
 
 /// The `sys_invocation` filter that selects still-open invocations, derived
 /// from [`RestateInvocationLifecycle::KNOWN_OPEN`] so the SQL text and

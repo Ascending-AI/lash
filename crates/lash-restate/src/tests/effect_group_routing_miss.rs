@@ -15,17 +15,34 @@ use crate::effect_group::{
 
 const BUDGET: Duration = Duration::from_secs(15);
 
+/// Routing misses, counted by child. The endpoint serves every group on its
+/// lane, so another group's still-needed child misses here too (FIG-4762):
+/// a count that is not keyed by child reads those misses as this child's.
 #[derive(Default)]
 struct MissingExecutor {
-    misses: AtomicUsize,
+    misses: Mutex<HashMap<String, usize>>,
+}
+
+impl MissingExecutor {
+    fn misses_of(&self, replay_key: &str) -> usize {
+        self.misses
+            .lock_recover()
+            .get(replay_key)
+            .copied()
+            .unwrap_or(0)
+    }
 }
 
 impl lash_core::GroupExecutors for MissingExecutor {
     fn executor_for(
         &self,
-        _: &RuntimeEffectEnvelope,
+        envelope: &RuntimeEffectEnvelope,
     ) -> Option<RuntimeEffectLocalExecutor<'static>> {
-        self.misses.fetch_add(1, Ordering::SeqCst);
+        *self
+            .misses
+            .lock_recover()
+            .entry(envelope.invocation.effect_replay_key().to_owned())
+            .or_default() += 1;
         None
     }
 
@@ -41,7 +58,11 @@ enum End {
     Retired,
 }
 
-async fn await_end(harness: &LiveConformanceHarness, group_key: &str, end: End) {
+async fn await_end(
+    harness: &LiveConformanceHarness,
+    group_key: &str,
+    end: End,
+) -> crate::RestateInvocationStatus {
     let mut last = None;
     let completed = tokio::time::timeout(BUDGET, async {
         loop {
@@ -57,93 +78,191 @@ async fn await_end(harness: &LiveConformanceHarness, group_key: &str, end: End) 
                                 && status.completion_failure.as_deref() == Some("[409] cancelled")),
                         "only an authorized engine release may complete the invocation without a reply: {status:?}"
                     );
-                    return;
+                    return status;
                 }
                 if status.completed_successfully() {
-                    return;
+                    return status;
                 }
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     }).await;
-    assert!(
-        completed.is_ok(),
-        "a child whose seat is no longer needed ends on its routing miss: {last:?}"
-    );
+    completed.unwrap_or_else(|_| {
+        panic!("a child whose seat is no longer needed ends on its routing miss: {last:?}")
+    })
 }
 
-async fn uncarried_child(harness: &LiveConformanceHarness, kind: &str, end: Option<End>) {
-    let group_key = witness_key(&format!("routing-miss-{kind}-{end:?}"));
-    let mut child = witness_child(&group_key, 0);
-    child.command = match kind {
-        "sleep" => RuntimeEffectCommand::Sleep {
-            spec: lash_core::SleepSpec::For {
-                duration_ms: 3_600_000,
-            },
-        },
-        "await" => {
-            let key = harness
-                .endpoint_host()
-                .await_event_key(
-                    child.invocation.execution_scope(),
-                    AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
-                        "routing-miss",
-                    )),
-                )
-                .await
-                .expect("mint the wait child's key");
-            RuntimeEffectCommand::AwaitEvent { key }
-        }
-        "atomic" => child.command,
-        _ => unreachable!("the law's three child kinds"),
-    };
-    let children = vec![child];
-    let mut shape = witness_shape(&group_key, &children);
-    shape.loser_disposition = lash_core::LoserPolicy::Cancel;
-    let missing = Arc::new(MissingExecutor::default());
-    harness.install_current_executors(Arc::clone(&missing) as Arc<dyn lash_core::GroupExecutors>);
-    let ingress = harness.ingress();
-    let opened: EffectGroupOpenResponse = ingress
-        .call_lash_object(
-            "EffectGroupIndex",
-            &group_key,
-            "open",
-            &EffectGroupOpenRequest {
-                shape: shape.clone(),
-                membership: witness_membership(&children),
-                dispatch_route: witness_dispatch_route(),
-                content_checked: false,
-            },
-        )
-        .await
-        .expect("open the law's group");
-    assert!(matches!(
-        opened,
-        EffectGroupOpenResponse::OpenedFresh { .. }
-    ));
-    ingress
-        .send_workflow_json(
-            &witness_dispatch_route(),
-            &group_key,
-            "run",
-            &crate::Call::new(EffectGroupDispatchRequest {
-                group_key: group_key.clone(),
-            }),
-        )
-        .await
-        .expect("dispatch the child");
+/// A group whose one child no executor carries, dispatched on the harness's
+/// endpoint under its own miss count.
+struct Uncarried {
+    group_key: String,
+    shape: crate::effect_group::EffectGroupShape,
+    replay_key: String,
+    missing: Arc<MissingExecutor>,
+}
 
-    tokio::time::timeout(BUDGET, async {
-        while missing.misses.load(Ordering::SeqCst) < 3 {
-            tokio::time::sleep(Duration::from_millis(10)).await;
+impl Uncarried {
+    async fn dispatch(harness: &LiveConformanceHarness, kind: &str, label: &str) -> Self {
+        let group_key = witness_key(&format!("routing-miss-{kind}-{label}"));
+        let mut child = witness_child(&group_key, 0);
+        child.command = match kind {
+            "sleep" => RuntimeEffectCommand::Sleep {
+                spec: lash_core::SleepSpec::For {
+                    duration_ms: 3_600_000,
+                },
+            },
+            "await" => {
+                let key = harness
+                    .endpoint_host()
+                    .await_event_key(
+                        child.invocation.execution_scope(),
+                        AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(
+                            "routing-miss",
+                        )),
+                    )
+                    .await
+                    .expect("mint the wait child's key");
+                RuntimeEffectCommand::AwaitEvent { key }
+            }
+            "atomic" => child.command,
+            _ => unreachable!("the law's three child kinds"),
+        };
+        let replay_key = child.invocation.effect_replay_key().to_owned();
+        let children = vec![child];
+        let mut shape = witness_shape(&group_key, &children);
+        shape.loser_disposition = lash_core::LoserPolicy::Cancel;
+        let missing = Arc::new(MissingExecutor::default());
+        harness
+            .install_current_executors(Arc::clone(&missing) as Arc<dyn lash_core::GroupExecutors>);
+        let ingress = harness.ingress();
+        let opened: EffectGroupOpenResponse = ingress
+            .call_lash_object(
+                "EffectGroupIndex",
+                &group_key,
+                "open",
+                &EffectGroupOpenRequest {
+                    shape: shape.clone(),
+                    membership: witness_membership(&children),
+                    dispatch_route: witness_dispatch_route(),
+                    content_checked: false,
+                },
+            )
+            .await
+            .expect("open the law's group");
+        assert!(matches!(
+            opened,
+            EffectGroupOpenResponse::OpenedFresh { .. }
+        ));
+        ingress
+            .send_workflow_json(
+                &witness_dispatch_route(),
+                &group_key,
+                "run",
+                &crate::Call::new(EffectGroupDispatchRequest {
+                    group_key: group_key.clone(),
+                }),
+            )
+            .await
+            .expect("dispatch the child");
+        Self {
+            group_key,
+            shape,
+            replay_key,
+            missing,
         }
-    })
-    .await
-    .expect("a still-needed child keeps retrying without an executor");
+    }
+
+    /// This child's own misses on the resolver its group was dispatched under.
+    fn misses(&self) -> usize {
+        self.missing.misses_of(&self.replay_key)
+    }
+
+    async fn misses_past(&self, misses: usize, why: &str) {
+        tokio::time::timeout(BUDGET, async {
+            while self.misses() <= misses {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("{why}"));
+    }
+
+    /// Every invocation Restate records for this child, on any lane.
+    async fn invocations(
+        &self,
+        harness: &LiveConformanceHarness,
+    ) -> Vec<crate::RestateInvocationStatus> {
+        harness
+            .admin_client()
+            .query_json(&format!(
+                "SELECT {} FROM sys_invocation WHERE {} AND target_service_key = {} AND target_handler_name = 'child'",
+                crate::ingress::RESTATE_INVOCATION_STATUS_COLUMNS,
+                crate::ingress::service_lanes_sql("EffectGroupDispatch"),
+                crate::ingress::sql_string_literal(&self.group_key),
+            ))
+            .await
+            .expect("read the child's invocations")
+    }
+
+    async fn close(&self, harness: &LiveConformanceHarness) -> EffectGroupCloseResponse {
+        harness
+            .ingress()
+            .call_lash_object(
+                "EffectGroupIndex",
+                &self.group_key,
+                "close",
+                &EffectGroupCloseRequest {
+                    disposition: lash_core::LoserPolicy::Cancel,
+                },
+            )
+            .await
+            .expect("close the law's group")
+    }
+}
+
+/// A child whose invocation ended, as Restate recorded it at its end.
+struct Ended {
+    child: Uncarried,
+    invocation: crate::RestateInvocationStatus,
+    attempts: usize,
+}
+
+impl Ended {
+    /// Nothing of the child started after its end (FIG-4762), read from what
+    /// is recorded rather than from a quiet interval: Restate holds the one
+    /// invocation the dispatch minted, completed as it was at its end, and
+    /// the endpoint recorded no attempt of this child since.
+    async fn assert_nothing_started_since(&self, harness: &LiveConformanceHarness) {
+        assert_eq!(
+            self.child.invocations(harness).await,
+            vec![self.invocation.clone()],
+            "no invocation of the child starts after its end, and the ended one stays completed"
+        );
+        assert_eq!(
+            self.child.misses(),
+            self.attempts,
+            "a completed invocation never retries: {:?}",
+            self.invocation
+        );
+    }
+}
+
+async fn uncarried_child(
+    harness: &LiveConformanceHarness,
+    kind: &str,
+    end: Option<End>,
+) -> Option<Ended> {
+    let child = Uncarried::dispatch(harness, kind, &format!("{end:?}")).await;
+    let group_key = &child.group_key;
+    let ingress = harness.ingress();
+
+    child
+        .misses_past(2, "a still-needed child keeps retrying without an executor")
+        .await;
     let notice: Option<EffectGroupNotification> = ingress
         .call_lash_object(
             "EffectGroupIndex",
-            &group_key,
+            group_key,
             "child_cancel",
             &EffectGroupChildCancelRequest { position: 0 },
         )
@@ -154,17 +273,12 @@ async fn uncarried_child(harness: &LiveConformanceHarness, kind: &str, end: Opti
         "routing misses do not settle a still-needed child"
     );
 
-    let misses = missing.misses.load(Ordering::SeqCst);
-    tokio::time::timeout(BUDGET, async {
-        while missing.misses.load(Ordering::SeqCst) <= misses {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("the still-needed invocation keeps retrying");
+    child
+        .misses_past(child.misses(), "the still-needed invocation keeps retrying")
+        .await;
     let status = harness
         .admin_client()
-        .workflow_invocation_status("EffectGroupDispatch", &group_key, "child")
+        .workflow_invocation_status("EffectGroupDispatch", group_key, "child")
         .await
         .expect("read the still-needed invocation")
         .expect("the still-needed invocation exists");
@@ -172,50 +286,25 @@ async fn uncarried_child(harness: &LiveConformanceHarness, kind: &str, end: Opti
         status.is_still_active(),
         "a still-needed child is never killed: {status:?}"
     );
-    assert!(
-        missing.misses.load(Ordering::SeqCst) > misses,
-        "the still-needed invocation keeps retrying"
-    );
     let Some(end) = end else {
-        let _: EffectGroupCloseResponse = ingress
-            .call_lash_object(
-                "EffectGroupIndex",
-                &group_key,
-                "close",
-                &EffectGroupCloseRequest {
-                    disposition: lash_core::LoserPolicy::Cancel,
-                },
-            )
-            .await
-            .expect("clean up after the still-needed observation");
-        await_end(harness, &group_key, End::Cancel).await;
-        return;
+        child.close(harness).await;
+        await_end(harness, group_key, End::Cancel).await;
+        return None;
     };
 
     let expected = match end {
         End::Cancel => {
-            let closed: EffectGroupCloseResponse = ingress
-                .call_lash_object(
-                    "EffectGroupIndex",
-                    &group_key,
-                    "close",
-                    &EffectGroupCloseRequest {
-                        disposition: lash_core::LoserPolicy::Cancel,
-                    },
-                )
-                .await
-                .expect("decide the child's cancellation");
-            assert_eq!(closed, EffectGroupCloseResponse::Closed);
+            assert_eq!(child.close(harness).await, EffectGroupCloseResponse::Closed);
             EffectGroupNotification::Cancel
         }
         End::Settled | End::Retired => {
             let committed: EffectGroupCommitChildResponse = ingress
                 .call_lash_object(
                     "EffectGroupIndex",
-                    &group_key,
+                    group_key,
                     "commit_child",
                     &EffectGroupCommitChildRequest {
-                        replay_key: shape.replay_keys[0].clone(),
+                        replay_key: child.shape.replay_keys[0].clone(),
                         committed: EffectGroupCommittedFinal::Held,
                     },
                 )
@@ -228,7 +317,7 @@ async fn uncarried_child(harness: &LiveConformanceHarness, kind: &str, end: Opti
             let seated: EffectGroupRecordSettlementResponse = ingress
                 .call_lash_object(
                     "EffectGroupIndex",
-                    &group_key,
+                    group_key,
                     "record_settlement",
                     &EffectGroupRecordSettlementRequest {
                         position: 0,
@@ -243,7 +332,7 @@ async fn uncarried_child(harness: &LiveConformanceHarness, kind: &str, end: Opti
             ));
             if matches!(end, End::Retired) {
                 let _: crate::effect_group::EffectGroupRetireResponse = ingress
-                    .call_lash_object("EffectGroupIndex", &group_key, "retire", &())
+                    .call_lash_object("EffectGroupIndex", group_key, "retire", &())
                     .await
                     .expect("retire the group");
                 EffectGroupNotification::Retired
@@ -255,7 +344,7 @@ async fn uncarried_child(harness: &LiveConformanceHarness, kind: &str, end: Opti
     let notice: Option<EffectGroupNotification> = ingress
         .call_lash_object(
             "EffectGroupIndex",
-            &group_key,
+            group_key,
             "child_cancel",
             &EffectGroupChildCancelRequest { position: 0 },
         )
@@ -264,33 +353,67 @@ async fn uncarried_child(harness: &LiveConformanceHarness, kind: &str, end: Opti
     assert_eq!(notice, Some(expected));
     println!(
         "routing-miss {kind} {end:?}: durable end observed after {} misses",
-        missing.misses.load(Ordering::SeqCst)
+        child.misses()
     );
-    await_end(harness, &group_key, end).await;
-    let ended = missing.misses.load(Ordering::SeqCst);
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert_eq!(
-        missing.misses.load(Ordering::SeqCst),
-        ended,
-        "a completed invocation never retries"
+    let invocation = await_end(harness, group_key, end).await;
+    let attempts = child.misses();
+    let ended = Ended {
+        child,
+        invocation,
+        attempts,
+    };
+    ended.assert_nothing_started_since(harness).await;
+    Some(ended)
+}
+
+/// Runs the law's children beside a still-needed child of another group that
+/// keeps missing on the same endpoint, as an earlier law's group does on a
+/// shared live server (FIG-4762). Each ended child's recorded facts are read
+/// at its end and again after every later child ran; the bystander is never
+/// released.
+async fn children_end_beside_a_bystander(harness: &LiveConformanceHarness, cases: &[(&str, End)]) {
+    let bystander = Uncarried::dispatch(harness, "atomic", "bystander").await;
+    bystander
+        .misses_past(0, "the bystander retries without an executor")
+        .await;
+    let mut ended = Vec::new();
+    for (kind, end) in cases {
+        let child = uncarried_child(harness, kind, Some(*end))
+            .await
+            .expect("the law's child ended");
+        ended.push(child);
+    }
+    for child in &ended {
+        child.assert_nothing_started_since(harness).await;
+    }
+    let foreign: usize = ended
+        .iter()
+        .map(|child| child.child.missing.misses_of(&bystander.replay_key))
+        .sum();
+    println!("routing-miss bystander: {foreign} misses beside the law's children");
+    let status = bystander.invocations(harness).await;
+    assert!(
+        matches!(status.as_slice(), [status] if status.is_still_active()),
+        "another group's routing misses never release a still-needed child: {status:?}"
     );
+    bystander.close(harness).await;
+    await_end(harness, &bystander.group_key, End::Cancel).await;
 }
 
 pub(super) async fn wait_children_end_on_routing_miss(target: HarnessServer) {
     let harness = LiveConformanceHarness::start_on(target).await;
-    for kind in ["sleep", "await"] {
-        for end in [End::Settled, End::Cancel, End::Retired] {
-            uncarried_child(&harness, kind, Some(end)).await;
-        }
-    }
+    let cases = ["sleep", "await"]
+        .into_iter()
+        .flat_map(|kind| [End::Settled, End::Cancel, End::Retired].map(|end| (kind, end)))
+        .collect::<Vec<_>>();
+    children_end_beside_a_bystander(&harness, &cases).await;
     harness.finish().await;
 }
 
 pub(super) async fn atomic_children_end_on_routing_miss(target: HarnessServer) {
     let harness = LiveConformanceHarness::start_on(target).await;
-    for end in [End::Settled, End::Cancel, End::Retired] {
-        uncarried_child(&harness, "atomic", Some(end)).await;
-    }
+    let cases = [End::Settled, End::Cancel, End::Retired].map(|end| ("atomic", end));
+    children_end_beside_a_bystander(&harness, &cases).await;
     harness.finish().await;
 }
 
