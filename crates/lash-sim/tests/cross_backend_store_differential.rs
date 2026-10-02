@@ -2376,31 +2376,33 @@ fn generated_catalog_covers_required_adversarial_shapes() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "compares three durable backends; requires Postgres (`just push-gate`, or `LASH_POSTGRES_DATABASE_URL=... just cross-backend-store-soak`)"]
-async fn cross_backend_store_differential_agrees() {
+async fn open_postgres_differential()
+-> Result<(PgConnection, PostgresStorage, String), Box<dyn std::error::Error + Send + Sync>> {
     let database_url = lash_postgres_store::testing::required_database_url();
     // `push-gate` runs workspace tests through nextest, so this test is a
     // separate process from the Postgres conformance tests. Hold their common
     // session-level advisory lock for the entire differential: both suites use
     // the configured database as disposable test state.
-    let mut database_lock = PgConnection::connect(&database_url)
-        .await
-        .expect("connect Postgres differential advisory lock");
+    let mut database_lock = PgConnection::connect(&database_url).await?;
     sqlx::query("SELECT pg_advisory_lock($1)")
         .bind(SHARED_DATABASE_LOCK_KEY)
         .execute(&mut database_lock)
-        .await
-        .expect("acquire Postgres differential advisory lock");
+        .await?;
     // Worker open never provisions (FIG-3797): apply the committed artifact,
     // the same step `lash migrate` performs, before opening.
     sqlx::raw_sql(PostgresStorage::schema_ddl())
         .execute(&mut database_lock)
+        .await?;
+    let postgres = PostgresStorage::connect(&database_url).await?;
+    Ok((database_lock, postgres, database_url))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "compares three durable backends; requires Postgres (`just push-gate`, or `LASH_POSTGRES_DATABASE_URL=... just cross-backend-store-soak`)"]
+async fn cross_backend_store_differential_agrees() {
+    let (_database_lock, postgres, database_url) = open_postgres_differential()
         .await
-        .expect("provision the shared Postgres database from schema.sql");
-    let postgres = PostgresStorage::connect(&database_url)
-        .await
-        .expect("connect required Postgres differential backend");
+        .expect("open the PostgreSQL differential fixture");
     let sqlite_root = tempfile::tempdir().expect("create SQLite differential root");
     verify_independent_session_meta_layout(sqlite_root.path(), &postgres).await;
     let run_nonce = run_nonce();

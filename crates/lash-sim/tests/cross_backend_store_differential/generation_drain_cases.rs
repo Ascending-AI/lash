@@ -18,6 +18,17 @@ use super::*;
 
 const T0: u64 = 2_000_000;
 
+/// The generation drain contract can run without unrelated differential cases.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "compares three durable backends; requires PostgreSQL in a pg16 gate"]
+async fn generation_drains_agree() {
+    let (_database_lock, postgres, _database_url) = open_postgres_differential()
+        .await
+        .expect("open the PostgreSQL generation drain fixture");
+    let sqlite_root = tempfile::tempdir().expect("create SQLite generation drain root");
+    compare_generation_drains(sqlite_root.path(), &postgres, &run_nonce()).await;
+}
+
 /// One backend's answers to the script, with ids replaced by their aliases.
 type Transcript = Vec<String>;
 
@@ -370,6 +381,11 @@ pub(super) async fn compare_generation_drains(
             "page of a -> 0",
             "live of a -> {\"p1\", \"p2\"}",
             "live of b -> [\"p3\"]",
+            "sessions page of a -> 1",
+            "sessions page of a -> 1",
+            "sessions page of a -> 0",
+            "sessions in flight of a -> [\"ia\", \"qa\"]",
+            "sessions in flight of b -> [\"qc\"]",
             "clear a -> true",
             "clear a again -> false",
             "marks after clear -> [\"b\"]",
