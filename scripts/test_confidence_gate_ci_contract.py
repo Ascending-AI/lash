@@ -2193,6 +2193,110 @@ run_postgres_mutants_recorded() {{ printf 'PG %s\\n' "$*"; }}
                         f"{alternative} names no function in {files}",
                     )
 
+    def test_area_mutation_selectors_match_mutated_packages(self) -> None:
+        """An area or replay/commit selector must still have mutants to judge.
+
+        cargo-mutants exits zero when its `--file` filters select nothing, so
+        a selector that names a file that moved out of the mutated package —
+        or out of the tree — passes while judging no mutants. The kernel
+        split left every area sweep and the replay/commit lane pointing at
+        `crates/lash-core/src/...` paths that no longer exist.
+        """
+        package_of: dict[pathlib.Path, str] = {}
+
+        def owning_package(path: pathlib.Path) -> str:
+            for parent in path.parents:
+                manifest = parent / "Cargo.toml"
+                if manifest.is_file():
+                    if manifest not in package_of:
+                        package_of[manifest] = tomllib.loads(
+                            manifest.read_text(encoding="utf-8")
+                        )["package"]["name"]
+                    return package_of[manifest]
+            raise AssertionError(f"{path} is not inside a package")
+
+        workspace_packages = {
+            owning_package(path)
+            for path in ROOT.glob("crates/*/Cargo.toml")
+        }
+        lanes = {
+            "full+area:store",
+            "full+area:process",
+            "full+area:trigger",
+            "full+area:effect-host",
+            "full+area:protocol",
+            "full+area:provider",
+            "full+area:sim",
+            "mutation",
+        }
+        for selector in sorted(lanes):
+            with self.subTest(selector=selector):
+                plan = subprocess.run(
+                    ["bash", str(GATE), "--dry-run", selector],
+                    cwd=ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(0, plan.returncode, plan.stderr)
+                if selector == "mutation":
+                    package_line = re.search(
+                        r"replay/commit mutations for ([^:]*):",
+                        plan.stdout,
+                    )
+                else:
+                    package_line = re.search(
+                        r"area:\S+ targeted shard for: (.*)",
+                        plan.stdout,
+                    )
+                self.assertIsNotNone(
+                    package_line,
+                    f"{selector} dry run does not name the packages it mutates",
+                )
+                packages = package_line.group(1).split()
+                self.assertTrue(packages, f"{selector} mutates no package")
+                if selector == "mutation":
+                    # cargo-mutants counts shards from zero and refuses k/n
+                    # unless k < n, so the whole-space shard is 0/1.
+                    self.assertIn(
+                        "LASH_AREA_MUTATION_SHARD=0/1",
+                        GATE.read_text(encoding="utf-8"),
+                    )
+                for package in packages:
+                    self.assertIn(
+                        package,
+                        workspace_packages,
+                        f"{selector} mutates {package}, which is not a workspace package",
+                    )
+                filters = re.findall(r"--file (\S+)", plan.stdout)
+                matched_packages: set[str] = set()
+                for pattern in filters:
+                    matches = [
+                        path
+                        for path in ROOT.glob(pattern)
+                        if path.is_file()
+                    ]
+                    self.assertTrue(
+                        matches, f"{selector} --file {pattern} matches no source file"
+                    )
+                    for match in matches:
+                        owner = owning_package(match)
+                        self.assertIn(
+                            owner,
+                            packages,
+                            f"{selector} --file {pattern} matches {match} in "
+                            f"{owner}, which the lane does not mutate",
+                        )
+                        matched_packages.add(owner)
+                for package in packages:
+                    if filters:
+                        self.assertIn(
+                            package,
+                            matched_packages,
+                            f"{selector} mutates {package} but no --file "
+                            "selector names its source",
+                        )
+
     def test_weekly_full_claim_requires_complete_mutant_union(self) -> None:
         """A rotating mutation leg's evidence says rotating, never full.
 
@@ -2856,7 +2960,7 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
             )
             self.assertEqual(trigger_plan.returncode, 0, trigger_plan.stderr)
             self.assertIn("source filters:", trigger_plan.stdout)
-            self.assertIn("crates/lash-core/src/triggers", trigger_plan.stdout)
+            self.assertIn("crates/lash-core-execution/src/triggers", trigger_plan.stdout)
 
             invalid = subprocess.run(
                 ["bash", str(GATE), "--dry-run", "fast+area:unknown"],

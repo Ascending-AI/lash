@@ -99,43 +99,43 @@ if [ "$area" = "all" ]; then
 else
   case "$area" in
     store) selected_packages=(lash-internal-sqlite-store lash-internal-postgres-store) ;;
-    process|trigger|effect-host) selected_packages=(lash-internal-core) ;;
-    provider) selected_packages=(lash-internal-core lash-internal-core-llm) ;;
+    process) selected_packages=(lash-internal-core-execution lash-internal-core-worker) ;;
+    trigger) selected_packages=(lash-internal-core-execution) ;;
+    effect-host) selected_packages=(lash-internal-core-execution lash-internal-core-effect lash-internal-conformance) ;;
+    provider) selected_packages=(lash-internal-core-execution lash-internal-core-llm) ;;
     protocol) selected_packages=(lash-internal-lashlang lash-internal-protocol-rlm lash-internal-protocol-standard) ;;
     sim) selected_packages=(lash-sim) ;;
   esac
   case "$area" in
     process)
       area_mutation_file_args=(
-        --file 'crates/lash-core/src/runtime/process.rs'
-        --file 'crates/lash-core/src/runtime/process/*.rs'
-        --file 'crates/lash-core/src/runtime/process_worker/*.rs'
-        --file 'crates/lash-core/src/runtime/process_work_driver.rs'
-        --file 'crates/lash-core/src/runtime/queued_work_driver.rs'
-        --file 'crates/lash-core/src/runtime/wake_delivery_driver.rs'
-        --file 'crates/lash-core/src/session/process_handles.rs'
-        --file 'crates/lash-core/src/tool_provider/process*.rs'
+        --file 'crates/lash-core-execution/src/runtime/process.rs'
+        --file 'crates/lash-core-execution/src/runtime/process/**/*.rs'
+        --file 'crates/lash-core-worker/src/runtime/process_worker/*.rs'
+        --file 'crates/lash-core-execution/src/runtime/work/*.rs'
+        --file 'crates/lash-core-execution/src/session/process_handles.rs'
+        --file 'crates/lash-core-execution/src/tool_provider/process*.rs'
       )
       ;;
     trigger)
       area_mutation_file_args=(
-        --file 'crates/lash-core/src/triggers.rs'
-        --file 'crates/lash-core/src/triggers/*.rs'
-        --file 'crates/lash-core/src/plugin/trigger_registry.rs'
-        --file 'crates/lash-core/src/tool_provider/triggers.rs'
+        --file 'crates/lash-core-execution/src/triggers.rs'
+        --file 'crates/lash-core-execution/src/triggers/**/*.rs'
+        --file 'crates/lash-core-execution/src/plugin/trigger_registry.rs'
       )
       ;;
     effect-host)
       area_mutation_file_args=(
-        --file 'crates/lash-core/src/runtime/effect/*.rs'
+        --file 'crates/lash-core-execution/src/runtime/effect/**/*.rs'
+        --file 'crates/lash-core-effect/src/*.rs'
         --file 'crates/lash-conformance/src/conformance/await_event_cold.rs'
         --file 'crates/lash-conformance/src/conformance/effect_host.rs'
       )
       ;;
     provider)
       area_mutation_file_args=(
-        --file 'crates/lash-core/src/direct.rs'
-        --file 'crates/lash-core-llm/src/model.rs'
+        --file 'crates/lash-core-execution/src/direct.rs'
+        --file 'crates/lash-core-llm/src/llm_profile.rs'
         --file 'crates/lash-core-llm/src/llm/*.rs'
         --file 'crates/lash-core-llm/src/provider/*.rs'
       )
@@ -149,14 +149,15 @@ if [ "$lane" = "mutation" ]; then
     exit 2
   fi
   area="replay-commit"
-  selected_packages=(lash-internal-core)
+  selected_packages=(lash-internal-core lash-internal-core-store)
   area_mutation_file_args=(
     --file 'crates/lash-core/src/runtime/observation/replay.rs'
+    --file 'crates/lash-core/src/runtime/observation/replay/**/*.rs'
     --file 'crates/lash-core/src/runtime/commit_admission.rs'
     --file 'crates/lash-core/src/runtime/turn_commit_draft.rs'
-    --file 'crates/lash-core/src/runtime/turn_boundary/accepted_commit.rs'
-    --file 'crates/lash-core/src/runtime/turn_boundary/final_commit_input.rs'
-    --file 'crates/lash-core/src/store/*commit*.rs'
+    --file 'crates/lash-core/src/runtime/turn_boundary.rs'
+    --file 'crates/lash-core/src/runtime/turn_boundary/*.rs'
+    --file 'crates/lash-core-store/src/store/*commit*.rs'
   )
 fi
 
@@ -2394,14 +2395,14 @@ run_lash_core_direct_model_mutation_evidence() {
   run_mutants_recorded "lash-core model token-limit survivors" "${out_dir}/mutants-lash-core-model-targeted" \
     cargo mutants \
     -p lash-internal-core-llm \
-    --file crates/lash-core-llm/src/model.rs \
+    --file crates/lash-core-llm/src/llm_profile.rs \
     --re 'LlmProfileMetadata::new|LlmProfileMetadata::with_limits|LlmProfileMetadataBuilder::build|LlmProfileLimits::validated|LlmProfileMetadata::context_window_tokens|RecordedLlmProfile::context_window_tokens|LlmProfileConfig::context_window_tokens' \
     --baseline skip \
     --jobs "$mutation_jobs" \
     --timeout "$timeout" \
     --minimum-test-timeout 30 \
     --output "${out_dir}/mutants-lash-core-model-targeted" \
-    -- --locked model
+    -- --locked -p lash-internal-core-llm --lib llm_profile
 }
 
 run_authority_rebind_mutation_evidence() {
@@ -2435,7 +2436,7 @@ run_authority_rebind_mutation_evidence() {
     cargo mutants \
     -p lash-internal-core-execution \
     --file crates/lash-core-execution/src/runtime/effect/tool_child.rs \
-    --re 'ToolChildScope::validate|ToolChildRequest::validate|with_enclosing_process|retry_policy|manifest|grant' \
+    --re 'ToolChildScope::validate|ToolChildRequest::validate|enclosing_process|retry_policy|manifest|grant' \
     --baseline skip \
     --cargo-arg=--features=testing \
     --jobs "$mutation_jobs" \
@@ -3039,7 +3040,7 @@ print_plan() {
   printf 'Coverage scope: %s\n' "$coverage_scope"
   printf 'Artifacts: %s\n' "$out_dir"
   if [ "$lane" = "mutation" ]; then
-    printf 'Would run core replay/commit mutations: %s\n' "${area_mutation_file_args[*]}"
+    printf 'Would run core replay/commit mutations for %s: %s\n' "${selected_packages[*]}" "${area_mutation_file_args[*]}"
     return
   fi
   printf 'Would run:\n'
@@ -3089,7 +3090,8 @@ fi
 if [ "$lane" = "mutation" ]; then
   bootstrap_tools
   # Every mutation in the targeted files, using the same weekly runner.
-  export LASH_AREA_MUTATION_SHARD=1/1
+  # cargo-mutants counts shards from zero: 0/1 is the whole space.
+  export LASH_AREA_MUTATION_SHARD=0/1
   run_area_targeted_mutation_evidence
   finalize_mutation_gate
   exit 0
