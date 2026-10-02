@@ -677,10 +677,8 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
     // The "absent id creates no store" bound is the SQLite session
     // factory's, read here through the double's SQLite store set.
     let backend = double_backend().await;
-    let factory = latest_double()
-        .expect("the backend runs on its held double")
-        .stores()
-        .session_store_factory();
+    let double = latest_double().expect("the backend runs on its held double");
+    let factory = double.stores().session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_model(mock_provider(), mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
@@ -702,6 +700,11 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
     crate::tests::create_catalog_session(&core, "sqlite-metadata-only").await?;
     let metadata_only = core.session("sqlite-metadata-only").durable().await?;
     assert!(metadata_only.exists().await?);
+    // Acceptance does not keep an input pending: hold its engine drive for
+    // the queue read, as well as the checkpointed queue read below.
+    let _metadata_drive = double
+        .hold_session_drive(&SessionId::from("sqlite-metadata-only"))
+        .await;
     metadata_only
         .send(TurnInput::text("queued on sqlite metadata"))
         .id("sqlite-metadata-input")
@@ -720,6 +723,12 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
         .output()
         .await?;
     drop(session);
+    // The answer precedes scope cleanup. Finish that drive before holding
+    // the next input pending through the queue read and physical deletion.
+    settle_session_drive(&core, "sqlite-checkpointed").await;
+    let _checkpointed_drive = double
+        .hold_session_drive(&SessionId::from("sqlite-checkpointed"))
+        .await;
     let checkpointed = core.session("sqlite-checkpointed").durable().await?;
     assert!(checkpointed.exists().await?);
     checkpointed
@@ -729,6 +738,8 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
         .await?;
     assert_eq!(checkpointed.pending_turn_inputs().await?.len(), 1);
 
+    core.await_turn_cancel_closures(&SessionId::from("sqlite-checkpointed"))
+        .await?;
     lash_core::SessionCatalogStore::delete_session(
         factory.as_ref(),
         &SessionId::from("sqlite-checkpointed"),
