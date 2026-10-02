@@ -41,6 +41,8 @@ services:
   restate:
     image: restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b
     labels: *gate-labels
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       RESTATE_ADMIN__BIND_PORT: "9070"
       RESTATE_INGRESS__BIND_PORT: "8080"
@@ -56,10 +58,19 @@ services:
     entrypoint: ["/usr/local/bin/lash-e2e-process-operations-worker"]
     environment:
       DATABASE_URL: "postgres://lash:lash@127.0.0.1:${LASH_PROCESS_OPERATIONS_POSTGRES_PORT:?run via the e2e script}/lash"
+      RESTATE_INGRESS_URL: "http://127.0.0.1:${LASH_PROCESS_OPERATIONS_RESTATE_INGRESS_PORT:?run via the e2e script}"
+      RESTATE_ADMIN_URL: "http://127.0.0.1:${LASH_PROCESS_OPERATIONS_RESTATE_ADMIN_PORT:?run via the e2e script}"
+      RESTATE_AUTHORITY_ID: "process-operations-${LASH_GATE_WORKTREE_SLUG:?run via the e2e script}"
+      LASH_PROCESS_OPERATIONS_ENDPOINT: "0.0.0.0:${LASH_PROCESS_OPERATIONS_ENDPOINT_PORT:?run via the e2e script}"
+      LASH_PROCESS_OPERATIONS_ADVERTISED_ENDPOINT: "http://host.docker.internal:${LASH_PROCESS_OPERATIONS_ENDPOINT_PORT:?run via the e2e script}"
+      LASH_PROCESS_OPERATIONS_ARTIFACT_DIR: /artifacts
     network_mode: host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ${LASH_PROCESS_OPERATIONS_BIN_DIR:?run via `just process-operations-e2e`}/lash-e2e-process-operations-worker:/usr/local/bin/lash-e2e-process-operations-worker:ro
       - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
+      - ${LASH_PROCESS_OPERATIONS_ARTIFACT_DIR:?run via the e2e script}:/artifacts
     profiles:
       - crash
 

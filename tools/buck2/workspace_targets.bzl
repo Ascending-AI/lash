@@ -281,6 +281,7 @@ WORKSPACE_COMPILE_TARGETS = [
     "//runbooks/restate-postgres-workers:lash-loadtest-driver__bin",
     "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin",
     "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin",
+    "//runbooks/restate-postgres-workers:process_operations_replacement__test",
     "//runbooks/restate-postgres-workers:provider_stream_bounds__test",
     "//runbooks/restate-postgres-workers:restate-postgres-workers",
     "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test",
@@ -569,6 +570,7 @@ WORKSPACE_CLIPPY_TARGETS = [
     "//runbooks/restate-postgres-workers:lash-loadtest-driver__bin",
     "//runbooks/restate-postgres-workers:lash-loadtest-ledger-contract__bin",
     "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin",
+    "//runbooks/restate-postgres-workers:process_operations_replacement__test",
     "//runbooks/restate-postgres-workers:provider_stream_bounds__test",
     "//runbooks/restate-postgres-workers:restate-postgres-workers",
     "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test",
@@ -871,6 +873,7 @@ WORKSPACE_RUNNABLE_TEST_TARGETS = [
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
     "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__unit_test",
     "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test",
+    "//runbooks/restate-postgres-workers:process_operations_replacement__test",
     "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",
 ]
@@ -1026,6 +1029,7 @@ WORKSPACE_TEST_SUITE_LABELS = [
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
     "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__unit_test",
     "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test",
+    "//runbooks/restate-postgres-workers:process_operations_replacement__test",
     "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",
 ]
@@ -1172,6 +1176,7 @@ WORKSPACE_DEV_SUITE_LABELS = [
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
     "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__unit_test",
     "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test",
+    "//runbooks/restate-postgres-workers:process_operations_replacement__test",
     "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",
 ]
@@ -1373,6 +1378,7 @@ WORKSPACE_DEV_TEST_TARGETS = [
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
     "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__unit_test",
     "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test",
+    "//runbooks/restate-postgres-workers:process_operations_replacement__test",
     "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",
 ]
@@ -1582,6 +1588,7 @@ WORKSPACE_TEST_TARGETS = [
     "//examples/workflow-graph-roundtrip:workflow_graph__test",
     "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__unit_test",
     "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test",
+    "//runbooks/restate-postgres-workers:process_operations_replacement__test",
     "//runbooks/restate-postgres-workers:provider_stream_bounds__test",
     "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",

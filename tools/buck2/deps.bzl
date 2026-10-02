@@ -1155,6 +1155,7 @@ PACKAGE_DEPS = {
             "lash_lashlang_runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime",
             "lash_plugin_mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp",
             "lash_plugin_process_controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls",
+            "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
             "lash_protocol_rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm",
             "lash_protocol_standard": "//crates/lash-protocol-standard:lash-protocol-standard",
             "lash_provider_openai": "//crates/lash-provider-openai:lash-provider-openai",

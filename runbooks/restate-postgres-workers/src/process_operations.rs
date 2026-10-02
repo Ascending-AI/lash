@@ -1,0 +1,360 @@
+//! The process-operations companion's public API checks across worker replacement.
+
+use std::num::NonZeroUsize;
+use std::sync::Arc;
+
+use anyhow::{Context, Result, ensure};
+use lash::plugins::{
+    PluginDeclaration, PluginError, PluginFactory, PluginRegistrar, PluginSessionContext,
+    PluginStateStore, SessionPlugin, SessionReadyContext,
+};
+use lash::process::{
+    Lifetime, ObservedProcessEvent, ProcessCursor, ProcessEventPageEvents, ProcessEventPageMore,
+    ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventSemanticsSpec, ProcessEventType,
+    ProcessEventsFrom, ProcessOriginator, ProcessRegistrationOutcome, ProcessSignal,
+    ProcessSignalIdentity, ProcessStartReceipt, ProcessStartRequest,
+};
+use lash::runtime::ScopedEffectController;
+use lash::{Backend, LashCore, SessionCreation, SessionSpec, TurnInput, TurnOutcome};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+
+const MODEL: &str = "process-operations-mock";
+pub const SESSION_ID: &str = "process-operations-plugin-state";
+const START_KEY: &str = "process-operations-replacement-start";
+const STATE_KEY: &str = "replacement-value";
+
+#[derive(Clone)]
+pub struct StatePlugin {
+    state: tokio::sync::watch::Sender<Option<PluginStateStore>>,
+}
+
+impl Default for StatePlugin {
+    fn default() -> Self {
+        Self {
+            state: tokio::sync::watch::channel(None).0,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StateEvidence {
+    pub value: Option<Value>,
+    pub generation: u64,
+}
+
+impl StatePlugin {
+    fn snapshot(&self) -> Result<StateEvidence> {
+        let state = self.state.borrow().clone().context("plugin is not ready")?;
+        Ok(StateEvidence {
+            value: state.get(STATE_KEY),
+            generation: state.generation(),
+        })
+    }
+}
+
+impl PluginFactory for StatePlugin {
+    fn id(&self) -> &'static str {
+        "process-operations-state"
+    }
+
+    fn declaration(&self) -> PluginDeclaration {
+        PluginDeclaration::initial(PluginFactory::id(self))
+    }
+
+    fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
+        Ok(Arc::new(self.clone()))
+    }
+}
+
+impl SessionPlugin for StatePlugin {
+    fn id(&self) -> &'static str {
+        PluginFactory::id(self)
+    }
+
+    fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
+        let state = reg.state();
+        reg.turn().before(Arc::new(move |_| {
+            let state = state.clone();
+            Box::pin(async move {
+                state.set(STATE_KEY, json!({"value": "survives replacement"}))?;
+                Ok(Vec::new())
+            })
+        }));
+        Ok(())
+    }
+
+    fn session_ready(&self, ctx: SessionReadyContext) -> Result<(), PluginError> {
+        self.state.send_replace(Some(ctx.state));
+        Ok(())
+    }
+}
+
+pub fn core(backend: Backend, plugin: StatePlugin) -> Result<LashCore> {
+    let provider = crate::scripted_provider::ScriptedProvider::builder()
+        .kind("process-operations-mock")
+        .complete(|_| async {
+            Ok(lash::provider::LlmResponse {
+                parts: vec![lash::direct::LlmOutputPart::Text {
+                    text: "plugin state committed".into(),
+                    response_meta: None,
+                }],
+                ..Default::default()
+            })
+        })
+        .build()
+        .into_handle();
+    Ok(LashCore::standard_builder(backend)
+        .commit_budget(lash::CommitBudget::bounded(4 * 1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(64))
+        .llm_profiles(Arc::new(
+            lash::LlmProfileRegistry::new().register(
+                MODEL,
+                lash::RegisteredLlmProfile::new(
+                    lash::LlmProfileMetadata::builder(MODEL)
+                        .context_window_tokens(200_000)
+                        .build()
+                        .map_err(anyhow::Error::msg)?,
+                    provider,
+                ),
+            )?,
+        ))
+        .plugin(Arc::new(plugin))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "process-operations",
+            format!("worker:{}", std::process::id()),
+        ))?)
+}
+
+fn start_request() -> ProcessStartRequest {
+    ProcessStartRequest::external(
+        ProcessOriginator::host(),
+        json!({"runbook": "process-operations", "phase": "replacement"}),
+        Lifetime::Detached,
+    )
+    .with_host_start_key(START_KEY)
+    .with_extra_event_types([ProcessEventType {
+        name: "signal.replacement".into(),
+        payload_schema: lash::triggers::JsonSchema::any(),
+        semantics: ProcessEventSemanticsSpec::default(),
+    }])
+}
+
+async fn signal(
+    core: &LashCore,
+    process: &lash::ProcessId,
+    id: &str,
+    scoped: ScopedEffectController<'_>,
+) -> Result<()> {
+    core.processes()
+        .signal(
+            ProcessSignal::new(
+                ProcessSignalIdentity::new(process.clone(), "replacement", id)?,
+                json!({"marker": id}),
+            ),
+            scoped,
+        )
+        .await?;
+    Ok(())
+}
+
+async fn events(
+    core: &LashCore,
+    mut from: ProcessEventsFrom,
+) -> Result<(Vec<ObservedProcessEvent>, ProcessCursor)> {
+    let mut events = Vec::new();
+    loop {
+        let read = core
+            .processes()
+            .events(from, NonZeroUsize::MIN, ProcessEventQueryMode::Full)
+            .await?;
+        let ProcessEventReadOutcome::Retained(page) = read.outcome else {
+            anyhow::bail!(
+                "replacement process history is not retained: {:?}",
+                read.outcome
+            );
+        };
+        let ProcessEventPageEvents::Full(page_events) = page.events else {
+            anyhow::bail!("full process read returned a lite page");
+        };
+        events.extend(page_events);
+        let cursor = read.cursor.context("retained history has no cursor")?;
+        match page.more {
+            ProcessEventPageMore::Complete => return Ok((events, cursor)),
+            ProcessEventPageMore::More { .. } => from = ProcessEventsFrom::After(cursor),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ReplacementBaseline {
+    pub first: ProcessStartReceipt,
+    pub repeated: ProcessStartReceipt,
+    pub cursor: ProcessCursor,
+    pub events: Vec<ObservedProcessEvent>,
+    pub state: StateEvidence,
+}
+
+pub async fn prepare(
+    core: &LashCore,
+    plugin: &StatePlugin,
+    scoped: ScopedEffectController<'_>,
+) -> Result<ReplacementBaseline> {
+    let first = core
+        .processes()
+        .start(start_request(), scoped.clone())
+        .await?;
+    let repeated = core
+        .processes()
+        .start(start_request(), scoped.clone())
+        .await?;
+    ensure!(first.disposition == ProcessRegistrationOutcome::Created);
+    ensure!(first.start_key.is_some());
+    ensure!(
+        repeated
+            == ProcessStartReceipt {
+                disposition: ProcessRegistrationOutcome::Existing,
+                ..first.clone()
+            },
+        "the same start key did not return the first process handle"
+    );
+    for id in ["before-1", "before-2"] {
+        signal(core, &first.process_id, id, scoped.clone()).await?;
+    }
+    let (events, cursor) = events(core, ProcessEventsFrom::Start(first.process_id.clone())).await?;
+    ensure!(
+        events.len() == 3 && cursor.sequence() == 3,
+        "expected the start reference and two pre-replacement signals"
+    );
+    ensure!(
+        events[0].event_type == "process.external_ref_set"
+            && events[0].payload["external_ref"]["backend"] == "restate"
+            && events[0].payload["external_ref"]["segment_ordinal"] == 0,
+        "start did not record its Restate reference"
+    );
+    core.session(SESSION_ID)
+        .create(SessionCreation::root(SessionSpec::new(
+            MODEL,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(8),
+        )))
+        .await?;
+    let session = core.session(SESSION_ID).open().await?;
+    let output = session
+        .send(TurnInput::text("write plugin state"))
+        .id("replacement-write")
+        .output()
+        .await?;
+    ensure!(matches!(output.result.outcome, TurnOutcome::Finished(_)));
+    let state = plugin.snapshot()?;
+    ensure!(state.value == Some(json!({"value": "survives replacement"})) && state.generation > 0);
+    let baseline = ReplacementBaseline {
+        first,
+        repeated,
+        cursor,
+        events,
+        state,
+    };
+    println!(
+        "{}",
+        json!({"checkpoint": "replacement_prepared", "evidence": baseline})
+    );
+    Ok(baseline)
+}
+
+pub async fn recover(
+    core: &LashCore,
+    plugin: &StatePlugin,
+    before: &ReplacementBaseline,
+    scoped: ScopedEffectController<'_>,
+) -> Result<()> {
+    let repeated = core
+        .processes()
+        .start(start_request(), scoped.clone())
+        .await?;
+    ensure!(
+        repeated == before.repeated,
+        "replacement changed the start-key receipt"
+    );
+    let distinct_process_ids = [&before.first, &before.repeated, &repeated]
+        .map(|receipt| &receipt.process_id)
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>()
+        .len();
+    println!(
+        "{}",
+        json!({
+            "checkpoint": "start_key_reused_after_replacement",
+            "first": before.first, "second": before.repeated, "after": repeated,
+            "distinct_process_ids": distinct_process_ids,
+        })
+    );
+
+    for id in ["after-1", "after-2"] {
+        signal(core, &repeated.process_id, id, scoped.clone()).await?;
+    }
+    let saved_cursor: ProcessCursor =
+        serde_json::from_str(&serde_json::to_string(&before.cursor)?)?;
+    let (tail, cursor) = events(core, ProcessEventsFrom::After(saved_cursor)).await?;
+    ensure!(
+        tail.len() == 2,
+        "expected exactly two post-replacement events"
+    );
+    let after_count = tail.len();
+    let mut all = before.events.clone();
+    all.extend(tail);
+    ensure!(
+        all.iter().map(|event| event.sequence).eq(1..=5),
+        "event feed has a gap or duplicate"
+    );
+    ensure!(
+        all[1..]
+            .iter()
+            .zip(["before-1", "before-2", "after-1", "after-2"])
+            .all(|(event, id)| event.event_type == "signal.replacement"
+                && event.payload == json!({"marker": id})),
+        "event feed changed or reordered its payloads"
+    );
+    ensure!(cursor.sequence() == 5);
+    let (empty, end) = events(core, ProcessEventsFrom::After(cursor.clone())).await?;
+    ensure!(
+        empty.is_empty() && end.sequence() == cursor.sequence(),
+        "cursor did not stay at the feed end"
+    );
+    println!(
+        "{}",
+        json!({
+            "checkpoint": "process_feed_resumed_after_replacement",
+            "process_id": repeated.process_id, "saved_cursor": before.cursor,
+            "resumed_cursor": cursor, "events": all, "before_count": before.events.len(),
+            "after_count": after_count, "total_count": all.len(), "end_count": empty.len(),
+        })
+    );
+
+    let session = core.session(SESSION_ID).open().await?;
+    let restored = plugin.snapshot()?;
+    ensure!(
+        restored == before.state,
+        "replacement lost plugin value or generation"
+    );
+    let output = session
+        .send(TurnInput::text("advance plugin generation"))
+        .id("replacement-next-write")
+        .output()
+        .await?;
+    ensure!(matches!(output.result.outcome, TurnOutcome::Finished(_)));
+    let next = plugin.snapshot()?;
+    ensure!(
+        next.value == before.state.value && next.generation > restored.generation,
+        "the next accepted plugin write did not advance its generation"
+    );
+    println!(
+        "{}",
+        json!({
+            "checkpoint": "plugin_state_survived_replacement", "session_id": SESSION_ID,
+            "plugin_id": PluginFactory::id(plugin), "before": before.state,
+            "restored": restored, "next": next,
+        })
+    );
+    Ok(())
+}

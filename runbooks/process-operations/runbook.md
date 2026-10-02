@@ -9,14 +9,15 @@
 > same-configuration restart is `scripts/agent-workbench-dev.sh restart` (no flag), wrapped by
 > `just agent-workbench-restart <port>`. It keeps the Restate journals and the application data
 > and is no longer blocked: FIG-3035 landed it, and it is the required path for every
-> worker-replacement step below. See the
+> Agent Workbench replacement in the FIG-1293 rows below. The companion replaces its own
+> worker containers. See the
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
 > never substitute the destructive `agent-workbench-reset`.
 
 **Purpose.** Prove that an operator can inspect and act on the process-operations surface on
 real Restate, PostgreSQL, and S3 (Garage) geometry: typed wake failures, redrive, retargeting,
-visibility policy, wake-turn policy, crash recovery, process-id reuse, and retention all remain
-truthful in durable state.
+visibility policy, wake-turn policy, crash recovery, process-id reuse, retention, start-key
+idempotency, process event cursors, and plugin state all remain truthful in durable state.
 
 **Deterministic companion.** Run with a fresh artifact directory:
 
@@ -28,7 +29,7 @@ The companion owns isolated Restate, PostgreSQL, and S3 ports derived from the w
 kills a real worker container at the named crash checkpoint, and removes every container and
 volume it owns on exit. PostgreSQL uses the worktree block's `+46` offset unless
 `LASH_PROCESS_OPERATIONS_POSTGRES_PORT` overrides it.
-It emits `process-operations e2e passed: scenarios=7` only after all exact assertions pass. The
+It emits `process-operations e2e passed: scenarios=10` only after all exact assertions pass. The
 artifacts are the backend truth for this judged runbook.
 
 Each phase's typed outcome is written into its named artifact as a one-line JSON
@@ -141,17 +142,16 @@ Abort/RCA under `RULES.md`.
 
 ## Phase 0 — Boot and establish durable geometry
 
-Run the deterministic companion. It prints `process-operations e2e passed: scenarios=7` on
-success; that is the index of the last scenario, and nine scenarios (0 through 8) actually run —
-require one `scenario <n> evidence:` line for every index 0-8, not eight lines. Require all of
-these before judging later phases:
+Run the deterministic companion. It prints `process-operations e2e passed: scenarios=10` on
+success after seven existing scenarios and the three replacement checks in Phases 8-10.
+Phase 0 establishes the services; Phase 11 scores and tears down. Require the typed checkpoints
+named by each phase and all of these before judging later phases:
 
 - `00-live-services.json` contains running Restate, PostgreSQL and S3 (Garage) services;
 - `00-postgres-service.json` identifies the service publishing the assigned port;
 - `00-postgres.json` reports that same assigned port;
-- `restate-deployments.json` is a successful Restate Admin response. The companion registers no
-  service deployment of its own, so `{"deployments": []}` is the expected passing body; gate the
-  successful response, never a non-empty list; and
+- `restate-deployments.json` is a successful Restate Admin response taken before the replacement
+  worker registers its endpoint. `{"deployments": []}` is a valid preflight body; and
 - `00-s3-conformance.log` reports a passing S3-store conformance run.
 
 **Fail if:** any service is absent, PostgreSQL is exposed on another host port, S3 object
@@ -275,10 +275,74 @@ unrelated delivery, recovery resurrects pruned trigger work, compaction orphans 
 trigger-store survey failure permits compaction, or deleted-session receipt cascading occurs
 before permanent deletion and the final-delivery fence.
 
-## Phase 8 — Teardown and score
+## Phase 8 — A host start key returns one process across replacement
+
+The companion starts an external process twice through `core.processes().start(..)` with the
+same host start key. `08-replacement-prepare.jsonl` carries `replacement_prepared`, including
+the first `Created` receipt and the second `Existing` receipt. Both must name the same minted
+process id and start key. The first worker then exits. The replacement container builds a fresh
+core over the same PostgreSQL store, checkpoint bytes and Restate journals and repeats the start
+from a new workflow execution.
+
+Read `start_key_reused_after_replacement` in `08-replacement-recovered.jsonl`. Its `after`
+receipt must equal `second`, including `Existing`, and `distinct_process_ids` must be `1`.
+The process is externally owned, so this phase proves registration idempotency without executing
+its body. ADR 0107 owns the start-key contract; ADR 0110 owns execution recovery.
+
+**Fail if:** either retry mints another id, changes the start key, or answers `Created`.
+
+## Phase 9 — The saved process event cursor resumes across replacement
+
+Before replacement the worker sends the `before-1` and `before-2` signals through the facade
+and reads their durable history through `core.processes().events(..)` with a page size of one.
+It saves the returned cursor in `08-replacement-baseline.json`, outside the worker's memory.
+After replacement it sends `after-1` and `after-2` and resumes from that serialized cursor.
+
+Read `process_feed_resumed_after_replacement` in `08-replacement-recovered.jsonl`. Require
+`before_count = 3`, `after_count = 2`, `total_count = 5`, and `end_count = 0`. Sequence `1`
+records `process.external_ref_set` with the Restate backend and segment ordinal `0`.
+Sequences `2, 3, 4, 5` carry `signal.replacement` and the four named marker payloads in order.
+The saved cursor's sequence is `3`; the resumed cursor's sequence is `5`; one more read from it is empty
+and keeps that sequence. Every page must be typed `Retained` with Full events. This is the
+durable feed; a replacement of the best-effort live publisher has its own gap contract.
+
+**Fail if:** history is unavailable, an event is missing, duplicated or reordered, or the final
+cursor rereads an event or moves backwards.
+
+## Phase 10 — Plugin value and generation survive replacement
+
+The worker creates an explicit `SessionSpec` with `max_tool_calls = 8`. Its plugin writes
+`replacement-value` through the bound `PluginStateStore` during the before-turn hook. The host
+calls `send()` and awaits a finished turn before recording the value and generation. Generation
+alone is an acceptance token; the normal runtime commit supplies durability, per ADR 0078.
+
+Read `plugin_state_survived_replacement` in `08-replacement-recovered.jsonl`. The replacement
+opens the existing session before sending any new turn. Require `restored = before`, including
+the value `{"value":"survives replacement"}` and a positive generation. Registration and
+readiness only expose the store and never seed that value. A subsequent `send()` writes the same
+value and commits it; require `next.value = restored.value` and
+`next.generation > restored.generation`. All reads use recorded state, without a live config
+lookup. This pairs with FIG-4633's hydration and monotonic-generation ruling.
+
+**Fail if:** replacement loses the value, resets the generation, silently seeds missing state,
+or the next accepted write fails to advance its generation.
+
+The three replacement phases also share a focused SQLite/in-process Restate double law:
+
+```sh
+kiln test //runbooks/restate-postgres-workers:process_operations_replacement__test \
+  --test_arg=start_key_feed_and_plugin_state_survive_worker_replacement \
+  --test_arg=--exact --test_arg=--nocapture --test_output=all
+```
+
+Expect exactly one executed passing test and all three post-replacement checkpoints. It runs
+the same phase functions and replaces the double's worker deployment over the same stores;
+it does not substitute for the live companion's PostgreSQL evidence when judging this runbook.
+
+## Phase 11 — Teardown and score
 
 Require the companion's final `panic gate: clean` and
-`process-operations e2e passed: scenarios=7` lines. Confirm its compose project and named crash
+`process-operations e2e passed: scenarios=10` lines. Confirm its compose project and named crash
 container no longer exist.
 Because the companion's own banners no longer print the literal, `grep -F 'panicked at'
 <artifact-dir>/process-operations-e2e.log` returning nothing is an independent check rather than
@@ -294,6 +358,9 @@ a match on the gate's own output; require that too.
 | Worker crash recovery | kill at named seam; one receiver turn after restart | | `05-crash-*.jsonl`, `05-killed-exit-code.txt` |
 | Process-id reuse | fresh monotone sequence delivered; rewind typed and non-blocking | | `01-wake-delivery.log` |
 | Retention | receipts retained; delivery reconciliation; guard blocks compaction | | `07-retention.log` |
+| Start-key idempotency | first `Created`, two `Existing`; one minted process id and start key across replacement | | `08-replacement-prepare.jsonl`, `08-replacement-recovered.jsonl`, checkpoint `start_key_reused_after_replacement` |
+| Process change feed | saved sequence 3 resumes at 4; start reference plus four ordered signals, zero gaps or duplicates; sequence 5 returns zero events | | `08-replacement-baseline.json`, `08-replacement-recovered.jsonl`, checkpoint `process_feed_resumed_after_replacement` |
+| Plugin state | value and positive generation equal before/restored; next accepted write increases generation | | `08-replacement-recovered.jsonl`, checkpoint `plugin_state_survived_replacement` |
 | Teardown | panic gate clean; no owned containers or volumes remain | | `process-operations-e2e.log`, container inventory |
 
 **Aggregate:** did the live durable substrate expose enough typed, actionable evidence for an

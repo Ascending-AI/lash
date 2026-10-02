@@ -51,6 +51,7 @@ s3_port="${LASH_PROCESS_OPERATIONS_S3_PORT:-$((LASH_E2E_PORT_BASE + 41))}"
 restate_admin_port="${LASH_PROCESS_OPERATIONS_RESTATE_ADMIN_PORT:-$((LASH_E2E_PORT_BASE + 43))}"
 restate_ingress_port="${LASH_PROCESS_OPERATIONS_RESTATE_INGRESS_PORT:-$((LASH_E2E_PORT_BASE + 44))}"
 restate_node_port="${LASH_PROCESS_OPERATIONS_RESTATE_NODE_PORT:-$((LASH_E2E_PORT_BASE + 45))}"
+export LASH_PROCESS_OPERATIONS_ENDPOINT_PORT="${LASH_PROCESS_OPERATIONS_ENDPOINT_PORT:-$((LASH_E2E_PORT_BASE + 47))}"
 export LASH_PROCESS_OPERATIONS_POSTGRES_PORT="$postgres_port"
 export LASH_PROCESS_OPERATIONS_S3_PORT="$s3_port"
 # The S3 service's image, credentials and bucket, which the compose file reads.
@@ -65,6 +66,8 @@ else
   artifact_dir="$(mktemp -d "${TMPDIR:-/tmp}/lash-process-operations-${LASH_GATE_WORKTREE_SLUG}.XXXXXX")"
 fi
 mkdir -p "$artifact_dir"
+artifact_dir="$(cd "$artifact_dir" && pwd)"
+export LASH_PROCESS_OPERATIONS_ARTIFACT_DIR="$artifact_dir"
 crash_container="${compose_project}-crash-window"
 test_output="$artifact_dir/process-operations-e2e.log"
 
@@ -266,9 +269,20 @@ if recovered["receiver_batch_id"] != window["batch_id"]:
 PY
 echo "scenario 5 evidence: worker killed after receiver enqueue and before sender mark; restart retained exactly one receiver turn" | tee -a "$test_output"
 
+"${compose[@]}" --profile crash run --rm crash-worker replacement-prepare \
+  2>&1 | tee "$artifact_dir/08-replacement-prepare.jsonl" | tee -a "$test_output"
+require_checkpoints "$artifact_dir/08-replacement-prepare.jsonl" replacement_prepared
+# A new container builds a fresh core and plugin over the same stores and
+# Restate journals. The first worker has exited; no resident state is shared.
+"${compose[@]}" --profile crash run --rm crash-worker replacement-recover \
+  2>&1 | tee "$artifact_dir/08-replacement-recovered.jsonl" | tee -a "$test_output"
+require_checkpoints "$artifact_dir/08-replacement-recovered.jsonl" \
+  start_key_reused_after_replacement process_feed_resumed_after_replacement \
+  plugin_state_survived_replacement
+
 if grep -Fn 'panicked at' "$test_output" >&2; then
   echo "panic gate: FAILED (a Rust panic marker found in process-operations E2E output)" >&2
   exit 1
 fi
 echo "panic gate: clean (no Rust panic markers in process-operations E2E output)" | tee -a "$test_output"
-echo "process-operations e2e passed: scenarios=7 artifacts=$artifact_dir" | tee -a "$test_output"
+echo "process-operations e2e passed: scenarios=10 artifacts=$artifact_dir" | tee -a "$test_output"

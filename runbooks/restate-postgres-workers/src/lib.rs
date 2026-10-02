@@ -7,6 +7,7 @@ pub use e2e_llm_profile::{E2E_PROFILE_KEY, e2e_llm_profile_metadata, e2e_session
 pub mod load;
 pub mod local_restate;
 pub mod overflow_recovery_evidence;
+pub mod process_operations;
 mod schema;
 pub use schema::ensure_e2e_schema;
 pub mod scripted_provider;
