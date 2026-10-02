@@ -140,8 +140,29 @@ tokio::task_local! {
 /// runs under no lash handler: a host's own handler (a host workflow that
 /// sends turns, starts processes or opens effect scopes through its own
 /// controller). Set by [`crate::RestateEngine::endpoint_builder`].
-static HOST_FLEET: std::sync::RwLock<Option<std::sync::Weak<dyn lash_core::FleetFormatStore>>> =
-    std::sync::RwLock::new(None);
+static HOST_FLEET: std::sync::Mutex<Option<HostFleet>> = std::sync::Mutex::new(None);
+
+struct HostFleet {
+    store: Option<std::sync::Weak<dyn lash_core::FleetFormatStore>>,
+    last_observed: lash_core::FleetFormat,
+}
+
+impl HostFleet {
+    fn new(fleet: crate::object_state::FleetView) -> Self {
+        Self {
+            store: fleet.weak_store(),
+            last_observed: fleet.fleet_format(),
+        }
+    }
+
+    fn fleet_format(&mut self) -> lash_core::FleetFormat {
+        if let Some(store) = self.store.as_ref().and_then(std::sync::Weak::upgrade) {
+            self.last_observed = store.fleet_format();
+        }
+        // Releasing a store cannot advance the wire a host journal selected.
+        self.last_observed
+    }
+}
 
 impl DeploymentWire {
     /// A deployment reading `reads` under `fleet`.
@@ -168,17 +189,16 @@ impl DeploymentWire {
     /// selects, like a lash handler's: N+1 states N's version until finalize
     /// (FIG-3805).
     ///
-    /// A process that serves no deployment (a library host that only
+    /// A process that has never served a deployment (a library host that only
     /// submits work) has no store epoch to read, and explicitly speaks this
     /// build's own epoch `F_self`, logging that once. In a mixed fleet such a
     /// host must run the build whose `F_self` is the recorded `F`.
     pub(crate) fn host() -> Self {
         let registered = HOST_FLEET
-            .read()
+            .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .as_ref()
-            .and_then(std::sync::Weak::upgrade)
-            .map(|store| store.fleet_format());
+            .as_mut()
+            .map(HostFleet::fleet_format);
         let fleet = registered.unwrap_or_else(|| {
             static UNBOUND: std::sync::Once = std::sync::Once::new();
             UNBOUND.call_once(|| {
@@ -199,8 +219,8 @@ impl DeploymentWire {
     /// run ([`Self::host`]).
     pub(crate) fn serve_host_fleet(fleet: crate::object_state::FleetView) {
         *HOST_FLEET
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = fleet.weak_store();
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(HostFleet::new(fleet));
     }
 
     /// Run `handler` under this wire.

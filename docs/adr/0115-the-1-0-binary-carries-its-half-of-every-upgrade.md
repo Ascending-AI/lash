@@ -249,8 +249,10 @@ the wire version its deployment's fleet epoch selects, so replay-equivalent
 builds record the same call under that epoch
 (`crates/lash-restate/src/compat.rs:49`, `:82`). A host handler's journaled
 call reads the same epoch: the engine registers its store's fleet view when it
-builds its endpoint. A process serving no deployment states its build's own
-epoch and warns `restate.host_wire_unbound` once
+builds its endpoint. The host cache holds that store weakly and keeps its last
+observed epoch after the store is released, so resource teardown cannot change
+the bytes a host journal replays. A process that has never served a deployment
+states its build's own epoch and warns `restate.host_wire_unbound` once
 (`crates/lash-restate/src/compat.rs:110`, `:128`, `:152`,
 `crates/lash-restate/src/engine.rs:210`).
 Session and turn requests rely on this wire contract rather than a request

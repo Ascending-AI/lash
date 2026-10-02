@@ -212,6 +212,14 @@ pub(super) async fn start_store_fault_law<S: lash_core::StoreSet + ?Sized>(
                     )
                     .await;
                 returned.lock_recover().push(result.map(|_| ()));
+                if crash && (fault == Fault::Transient || step == Step::Settle) {
+                    // Release a later endpoint's fleet view before this journal
+                    // replays its send. Its lifetime cannot select a new wire.
+                    let unrelated = lash_restate_test::backend(0x4749_0000, server_config())
+                        .await
+                        .expect("an unrelated endpoint over the same fleet epoch");
+                    drop(unrelated);
+                }
                 assert!(!crash, "redrive after the start step recorded its answer");
             })
         })
