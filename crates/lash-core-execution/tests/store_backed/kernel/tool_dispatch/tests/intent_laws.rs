@@ -1407,8 +1407,7 @@ async fn crash_after_delivery_start_neither_re_emits_nor_changes_the_recorded_ou
         json!([{
             "occurrence_id": occurrence_id,
             "subscription_id": subscription.subscription_id,
-            "process_id": deliveries[0].process_id,
-            "outcome": "started",
+            "outcome": {"started": {"process_id": deliveries[0].process_id}},
         }]),
         "the recorded outcome states what every drive did, not which drive reserved first"
     );

@@ -202,10 +202,10 @@ async fn controller_owned_non_tool_trigger_reemission_answers_its_bound_process_
 
     assert_eq!(first.deliveries.len(), 1);
     assert_eq!(redrive.deliveries.len(), 1);
-    assert_eq!(
+    assert!(matches!(
         first.deliveries[0].outcome,
-        lash_core::facade_support::TriggerDeliveryEmitOutcome::Started
-    );
+        lash_core::facade_support::TriggerDeliveryEmitOutcome::Started { .. }
+    ));
     assert_eq!(
         redrive, first,
         "the redrive reports the delivery the first emission started (FIG-4272)"

@@ -633,3 +633,103 @@ mod obligation_constraint_cases;
 async fn postgres_obligation_checks_reject_incomplete_variants() {
     obligation_constraint_cases::postgres_obligation_checks_reject_incomplete_variants().await;
 }
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL"]
+async fn trigger_retention_uses_typed_outcomes() {
+    use lash_core_execution::{
+        TriggerOccurrenceOutcome, TriggerOccurrenceRequest, TriggerStore as _,
+    };
+    let database = lash_postgres_store::testing::IsolatedDatabase::create(
+        &lash_postgres_store::testing::required_database_url(),
+    )
+    .await;
+    let storage = PostgresStorage::connect(database.url())
+        .await
+        .expect("open isolated PostgreSQL");
+    let store = storage.trigger_store();
+    for (key, outcome) in [
+        ("fired", TriggerOccurrenceOutcome::Fired),
+        (
+            "dropped",
+            TriggerOccurrenceOutcome::Dropped {
+                reason: "audit".into(),
+            },
+        ),
+    ] {
+        store
+            .ingest_occurrence(
+                TriggerOccurrenceRequest::new("source", "key", serde_json::json!({}), key)
+                    .with_outcome(outcome),
+            )
+            .await
+            .expect("ingest occurrence");
+    }
+    sqlx::query("UPDATE lash_trigger_occurrences SET record_json = '{broken'")
+        .execute(storage.pool())
+        .await
+        .expect("corrupt presentation bytes");
+    let report = store
+        .reclaim_trigger_occurrences(u64::MAX)
+        .await
+        .expect("reclaim must never decode record_json");
+    assert_eq!(report.reclaimed_occurrence_count, 1);
+    assert_eq!(report.audit_retained_count, 1);
+    assert_eq!(
+        store
+            .prune_non_fired_occurrences(u64::MAX)
+            .await
+            .expect("prune must never decode record_json"),
+        1
+    );
+    let tombstones: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM lash_trigger_occurrence_tombstones")
+            .fetch_one(storage.pool())
+            .await
+            .expect("tombstone count");
+    assert_eq!(tombstones, 2);
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL"]
+async fn dropped_trigger_occurrences_cannot_be_reclaimed_or_have_deliveries() {
+    use lash_core_execution::{
+        TriggerOccurrenceOutcome, TriggerOccurrenceRequest, TriggerStore as _,
+    };
+    let database = lash_postgres_store::testing::IsolatedDatabase::create(
+        &lash_postgres_store::testing::required_database_url(),
+    )
+    .await;
+    let storage = PostgresStorage::connect(database.url())
+        .await
+        .expect("open isolated PostgreSQL");
+    let record = storage
+        .trigger_store()
+        .ingest_occurrence(
+            TriggerOccurrenceRequest::new("source", "key", serde_json::json!({}), "dropped")
+                .with_outcome(TriggerOccurrenceOutcome::Dropped {
+                    reason: "audit".into(),
+                }),
+        )
+        .await
+        .expect("dropped occurrence")
+        .occurrence;
+    assert!(
+        sqlx::query(
+            "UPDATE lash_trigger_occurrences SET reclaimable_at_ms = 0 WHERE occurrence_id = $1"
+        )
+        .bind(&record.occurrence_id)
+        .execute(storage.pool())
+        .await
+        .is_err(),
+        "dropped rows cannot arm reclamation"
+    );
+    assert!(sqlx::query("INSERT INTO lash_trigger_deliveries (occurrence_id, subscription_id, subscription_incarnation, subscription_revision, subscription_snapshot_json, created_at_ms) VALUES ($1, 'sub', 'incarnation', 1, '{}', 0)").bind(&record.occurrence_id).execute(storage.pool()).await.is_err(), "dropped rows cannot reserve a delivery");
+    assert!(
+        sqlx::query("UPDATE lash_trigger_occurrences SET outcome_kind = 'unknown'")
+            .execute(storage.pool())
+            .await
+            .is_err(),
+        "outcome vocabulary is closed"
+    );
+}

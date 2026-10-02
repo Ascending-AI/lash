@@ -1614,8 +1614,7 @@ pub(super) async fn fig806_reserved_trigger_redrive_replays_the_process_start_pr
     assert!(matches!(
         report.deliveries.as_slice(),
         [lash_core::facade_support::TriggerDeliveryEmitReceipt {
-            outcome: lash_core::facade_support::TriggerDeliveryEmitOutcome::Started,
-            process_id: Some(_),
+            outcome: lash_core::facade_support::TriggerDeliveryEmitOutcome::Started { .. },
             ..
         }]
     ));
@@ -1832,16 +1831,17 @@ pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_s
         report
             .deliveries
             .iter()
-            .map(|delivery| (delivery.subscription_id.as_str(), &delivery.outcome,))
+            .map(|delivery| (
+                delivery.subscription_id.as_str(),
+                matches!(
+                    delivery.outcome,
+                    lash_core::facade_support::TriggerDeliveryEmitOutcome::Started { .. }
+                ),
+            ))
             .collect::<Vec<_>>(),
         expected_subscription_ids
             .into_iter()
-            .map(|subscription_id| {
-                (
-                    subscription_id,
-                    &lash_core::facade_support::TriggerDeliveryEmitOutcome::Started,
-                )
-            })
+            .map(|subscription_id| { (subscription_id, true,) })
             .collect::<Vec<_>>()
     );
     assert_eq!(
@@ -1924,7 +1924,7 @@ pub(super) async fn fig811_independent_client_retry_reports_the_started_delivery
     assert!(matches!(
         first.deliveries.as_slice(),
         [lash_core::facade_support::TriggerDeliveryEmitReceipt {
-            outcome: lash_core::facade_support::TriggerDeliveryEmitOutcome::Started,
+            outcome: lash_core::facade_support::TriggerDeliveryEmitOutcome::Started { .. },
             ..
         }]
     ));

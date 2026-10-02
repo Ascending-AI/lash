@@ -11,9 +11,11 @@ use serde::{Deserialize, Serialize};
 /// held is the call's own fact, reported beside the report by
 /// [`crate::StoreRealization`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum TriggerDeliveryEmitOutcome {
-    Started,
+    Started {
+        process_id: ProcessId,
+    },
     /// A recorded refusal: typed `code` for classification, `reason` for diagnostics.
     Failed {
         code: crate::RuntimeErrorCode,
@@ -22,13 +24,21 @@ pub enum TriggerDeliveryEmitOutcome {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TriggerDeliveryEmitReceipt {
     pub occurrence_id: String,
     pub subscription_id: String,
-    /// The process the delivery started; absent when it failed to start.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub process_id: Option<ProcessId>,
     pub outcome: TriggerDeliveryEmitOutcome,
+}
+
+impl TriggerDeliveryEmitReceipt {
+    /// The process named by a successfully started delivery.
+    pub fn process_id(&self) -> Option<&ProcessId> {
+        match &self.outcome {
+            TriggerDeliveryEmitOutcome::Started { process_id } => Some(process_id),
+            TriggerDeliveryEmitOutcome::Failed { .. } => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,8 +64,10 @@ impl TriggerEmitReport {
     pub fn started_process_ids(&self) -> Vec<ProcessId> {
         self.deliveries
             .iter()
-            .filter(|delivery| delivery.outcome == TriggerDeliveryEmitOutcome::Started)
-            .filter_map(|delivery| delivery.process_id.clone())
+            .filter_map(|delivery| match &delivery.outcome {
+                TriggerDeliveryEmitOutcome::Started { process_id } => Some(process_id.clone()),
+                TriggerDeliveryEmitOutcome::Failed { .. } => None,
+            })
             .collect()
     }
 }

@@ -305,10 +305,10 @@ mod tests {
             )
             .await
             .expect("emit on-contract");
-        assert_eq!(
+        assert!(matches!(
             on_contract.deliveries[0].outcome,
-            TriggerDeliveryEmitOutcome::Started
-        );
+            TriggerDeliveryEmitOutcome::Started { .. }
+        ));
         drop(scoped);
         handler.close().await.expect("close the emit handler");
     }
@@ -387,7 +387,7 @@ mod tests {
                 delivery.outcome
             );
             assert!(
-                delivery.process_id.is_none(),
+                delivery.process_id().is_none(),
                 "a refused route must not start the target process"
             );
             assert_eq!(
@@ -416,12 +416,12 @@ mod tests {
                 .expect("retry emit");
             // The refused attempt started nothing; the retry realizes the same
             // reservation under its start key (ADR 0107).
-            assert_eq!(delivery.process_id, None);
-            assert!(retry.deliveries[0].process_id.is_some());
-            assert_eq!(
+            assert_eq!(delivery.process_id(), None);
+            assert!(retry.deliveries[0].process_id().is_some());
+            assert!(matches!(
                 retry.deliveries[0].outcome,
-                TriggerDeliveryEmitOutcome::Started
-            );
+                TriggerDeliveryEmitOutcome::Started { .. }
+            ));
             drop(scoped);
         }
         handler.close().await.expect("close the emit handler");
@@ -718,12 +718,14 @@ mod tests {
         let delivery = &report.deliveries[0];
         assert_eq!(delivery.occurrence_id, report.occurrence_id);
         assert_eq!(delivery.subscription_id, subscription.subscription_id);
-        assert_eq!(delivery.outcome, TriggerDeliveryEmitOutcome::Started);
+        assert!(matches!(
+            delivery.outcome,
+            TriggerDeliveryEmitOutcome::Started { .. }
+        ));
         let record = registry
             .get_process(
                 delivery
-                    .process_id
-                    .as_ref()
+                    .process_id()
                     .expect("the delivery started a process"),
             )
             .await
@@ -793,8 +795,7 @@ mod tests {
             .await
             .expect("emit session trigger");
         let process_id = report.deliveries[0]
-            .process_id
-            .as_ref()
+            .process_id()
             .expect("the delivery started a process");
         assert!(
             crate::ProcessObserverRegistry::is_observer(
@@ -1024,12 +1025,12 @@ mod tests {
         assert_eq!(
             (
                 report.deliveries[0].outcome.clone(),
-                report.deliveries[0].process_id.clone(),
                 report.deliveries[0].subscription_id.clone(),
             ),
             (
-                TriggerDeliveryEmitOutcome::Started,
-                Some(child.id.clone()),
+                TriggerDeliveryEmitOutcome::Started {
+                    process_id: child.id.clone()
+                },
                 subscription.subscription_id.clone(),
             ),
             "the delivery reports the child its first attempt registered"

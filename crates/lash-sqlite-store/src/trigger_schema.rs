@@ -43,8 +43,12 @@ CREATE TABLE IF NOT EXISTS trigger_occurrences (
     source_type      TEXT NOT NULL,
     source_key       TEXT NOT NULL,
     occurred_at_ms   INTEGER NOT NULL,
+    outcome_kind TEXT NOT NULL,
     reclaimable_at_ms INTEGER,
-    record_json      TEXT NOT NULL
+    record_json      TEXT NOT NULL,
+    CONSTRAINT ck_trigger_occurrences_outcome_kind CHECK (outcome_kind IN ('fired', 'dropped')),
+    CONSTRAINT ck_trigger_occurrences_reclaimable CHECK (outcome_kind = 'fired' OR reclaimable_at_ms IS NULL),
+    UNIQUE (occurrence_id, outcome_kind)
 );
 
 CREATE INDEX IF NOT EXISTS idx_trigger_occurrences_source
@@ -56,7 +60,7 @@ CREATE INDEX IF NOT EXISTS idx_trigger_occurrences_reclaimable
 
 -- An occurrence retention reclaimed (FIG-4513): written with the delete, so
 -- an ingest that presents the identity again writes nothing back. The
--- occurrence reclaim pass compacts it once it is older than the pass's cutoff.
+-- host explicitly forgets it once its source will not redeliver (FIG-4610).
 CREATE TABLE IF NOT EXISTS trigger_occurrence_tombstones (
     occurrence_id    TEXT PRIMARY KEY,
     reclaimed_at_ms  INTEGER NOT NULL
@@ -67,6 +71,7 @@ CREATE INDEX IF NOT EXISTS idx_trigger_occurrence_tombstones_reclaimed
 
 CREATE TABLE IF NOT EXISTS trigger_deliveries (
     occurrence_id    TEXT NOT NULL,
+    occurrence_outcome_kind TEXT NOT NULL DEFAULT 'fired' CHECK (occurrence_outcome_kind = 'fired'),
     subscription_id  TEXT NOT NULL,
     process_id       TEXT,
     subscription_incarnation TEXT NOT NULL,
@@ -83,7 +88,7 @@ CREATE TABLE IF NOT EXISTS trigger_deliveries (
     obligation_settled_at_ms INTEGER,
     CONSTRAINT ck_trigger_deliveries_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     PRIMARY KEY (occurrence_id, subscription_id),
-    FOREIGN KEY (occurrence_id) REFERENCES trigger_occurrences(occurrence_id) ON DELETE CASCADE
+    FOREIGN KEY (occurrence_id, occurrence_outcome_kind) REFERENCES trigger_occurrences(occurrence_id, outcome_kind) ON DELETE CASCADE
 );
 
 -- A reserved delivery owes its start (ADR 0109, ADR 0021): its obligation id,

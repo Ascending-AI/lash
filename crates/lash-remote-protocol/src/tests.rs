@@ -808,8 +808,9 @@ fn remote_trigger_dtos_json_round_trip() {
         deliveries: vec![RemoteTriggerDeliveryEmitReceipt {
             occurrence_id: "occurrence:1".to_string(),
             subscription_id: "subscription:1".to_string(),
-            process_id: Some(lash_sansio::ProcessId::fixture("process:1")),
-            outcome: RemoteTriggerDeliveryEmitOutcome::Started,
+            outcome: RemoteTriggerDeliveryEmitOutcome::Started {
+                process_id: lash_sansio::ProcessId::fixture("process:1"),
+            },
         }],
     };
     report.validate().expect("valid report");
@@ -817,8 +818,10 @@ fn remote_trigger_dtos_json_round_trip() {
         serde_json::from_value(serde_json::to_value(&report).expect("serialize report"))
             .expect("deserialize report");
     assert_eq!(
-        decoded.deliveries[0].process_id,
-        Some(lash_sansio::ProcessId::fixture("process:1"))
+        decoded.deliveries[0].outcome,
+        RemoteTriggerDeliveryEmitOutcome::Started {
+            process_id: lash_sansio::ProcessId::fixture("process:1")
+        }
     );
 
     let mut filter = RemoteTriggerSubscriptionFilter::for_source_type("ui.button.pressed");
@@ -1005,6 +1008,7 @@ fn session_scoped_trigger_occurrence_has_pinned_wire_shape() {
             "idempotency_key": "button-blue-1",
             "source": { "id": "blue" },
             "session_id": "session-blue",
+            "outcome": { "kind": "fired" },
         })
     );
 }
@@ -2411,4 +2415,42 @@ fn remote_trigger_registration_refuses_non_engine_target() {
     draft
         .validate()
         .expect("an Engine target passes wire registration");
+}
+
+#[test]
+fn trigger_emit_receipts_reject_impossible_process_outcomes() {
+    for value in [
+        serde_json::json!({"occurrence_id": "occ", "subscription_id": "sub", "outcome": "started"}),
+        serde_json::json!({"occurrence_id": "occ", "subscription_id": "sub", "process_id": "process", "outcome": {"failed": {"code": "trigger_route_revoked", "reason": "revoked"}}}),
+    ] {
+        assert!(serde_json::from_value::<RemoteTriggerDeliveryEmitReceipt>(value).is_err());
+    }
+    for value in [
+        serde_json::json!({"occurrence_id": "occ", "subscription_id": "sub", "outcome": "started"}),
+        serde_json::json!({"occurrence_id": "occ", "subscription_id": "sub", "process_id": "process", "outcome": {"failed": {"code": "trigger_route_revoked", "reason": "revoked"}}}),
+    ] {
+        assert!(
+            serde_json::from_value::<lash_core::facade_support::TriggerDeliveryEmitReceipt>(value)
+                .is_err()
+        );
+    }
+}
+
+#[test]
+fn trigger_occurrences_always_record_their_outcome() {
+    let remote = RemoteTriggerOccurrenceRequest::new("source", "key", serde_json::json!({}), "id");
+    let core =
+        lash_core::TriggerOccurrenceRequest::new("source", "key", serde_json::json!({}), "id");
+    for mut value in [
+        serde_json::to_value(remote).expect("remote occurrence"),
+        serde_json::to_value(core).expect("core occurrence"),
+    ] {
+        assert_eq!(value["outcome"], serde_json::json!({"kind": "fired"}));
+        value
+            .as_object_mut()
+            .expect("occurrence object")
+            .remove("outcome");
+        assert!(serde_json::from_value::<RemoteTriggerOccurrenceRequest>(value.clone()).is_err());
+        assert!(serde_json::from_value::<lash_core::TriggerOccurrenceRequest>(value).is_err());
+    }
 }

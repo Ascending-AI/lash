@@ -458,8 +458,9 @@ fn trigger_dtos_round_trip_core_values() {
         deliveries: vec![lash_core::facade_support::TriggerDeliveryEmitReceipt {
             occurrence_id: "occurrence:1".to_string(),
             subscription_id: "subscription:1".to_string(),
-            process_id: Some(lash_sansio::ProcessId::fixture("process:1")),
-            outcome: lash_core::facade_support::TriggerDeliveryEmitOutcome::Started,
+            outcome: lash_core::facade_support::TriggerDeliveryEmitOutcome::Started {
+                process_id: lash_sansio::ProcessId::fixture("process:1"),
+            },
         }],
     };
     let remote = RemoteTriggerEmitReport::from(report.clone());

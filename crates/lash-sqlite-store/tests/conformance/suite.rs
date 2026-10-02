@@ -586,8 +586,8 @@ impl lash_conformance::TriggerOccurrenceListingFaultInjector
         conn.execute(
             "INSERT INTO trigger_occurrences (
                 occurrence_id, idempotency_key, source_type, source_key,
-                occurred_at_ms, record_json
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                occurred_at_ms, outcome_kind, record_json
+             ) VALUES (?1, ?2, ?3, ?4, ?5, 'fired', ?6)",
             rusqlite::params![
                 "occurrence-listing-malformed",
                 "occurrence-listing-malformed",

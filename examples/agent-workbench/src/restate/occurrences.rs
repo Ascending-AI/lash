@@ -29,14 +29,16 @@ pub(crate) fn trigger_delivery_trace(
             .iter()
             .map(|delivery| {
                 let (outcome, code, reason) = match &delivery.outcome {
-                    lash::triggers::TriggerDeliveryEmitOutcome::Started => ("started", None, None),
+                    lash::triggers::TriggerDeliveryEmitOutcome::Started { .. } => {
+                        ("started", None, None)
+                    }
                     lash::triggers::TriggerDeliveryEmitOutcome::Failed { code, reason } => {
                         ("failed", Some(code), Some(reason))
                     }
                 };
                 json!({
                     "subscription_id": delivery.subscription_id,
-                    "process_id": delivery.process_id,
+                    "process_id": delivery.process_id(),
                     "outcome": outcome,
                     "code": code,
                     "reason": reason,

@@ -393,14 +393,16 @@ pub async fn bound_trigger_duplicate_after_child_prune_returns_original_process(
         emitted.cancelled().await;
         let report = first_emission.only();
         assert_eq!(report.deliveries.len(), 1, "one subscription matches");
-        assert_eq!(
-            report.deliveries[0].outcome,
-            TriggerDeliveryEmitOutcome::Started,
+        assert!(
+            matches!(
+                report.deliveries[0].outcome,
+                TriggerDeliveryEmitOutcome::Started { .. }
+            ),
             "the first emission started its delivery: {report:?}"
         );
         let p1 = report.deliveries[0]
-            .process_id
-            .clone()
+            .process_id()
+            .cloned()
             .expect("the first emission names its process");
         let occurrence_id = report.occurrence_id.clone();
         let reservation = rig.bound_delivery(&occurrence_id, &p1).await;
@@ -443,8 +445,9 @@ pub async fn bound_trigger_duplicate_after_child_prune_returns_original_process(
             vec![crate::TriggerDeliveryEmitReceipt {
                 occurrence_id: occurrence_id.clone(),
                 subscription_id: subscription_id.clone(),
-                process_id: Some(p1.clone()),
-                outcome: TriggerDeliveryEmitOutcome::Started,
+                outcome: TriggerDeliveryEmitOutcome::Started {
+                    process_id: p1.clone()
+                },
             }],
             "the duplicate returns the process its delivery is bound to"
         );
@@ -463,8 +466,9 @@ pub async fn bound_trigger_duplicate_after_child_prune_returns_original_process(
         vec![crate::TriggerDeliveryEmitReceipt {
             occurrence_id: occurrence_id.clone(),
             subscription_id,
-            process_id: Some(p1.clone()),
-            outcome: TriggerDeliveryEmitOutcome::Started,
+            outcome: TriggerDeliveryEmitOutcome::Started {
+                process_id: p1.clone()
+            },
         }],
         "the replayed emission consumed its recorded start and answers P1"
     );
@@ -563,14 +567,16 @@ pub async fn trigger_emission_held_across_a_bind_and_prune_returns_the_bound_pro
             .await;
         let report = binding.only();
         assert_eq!(report.deliveries.len(), 1, "one subscription matches");
-        assert_eq!(
-            report.deliveries[0].outcome,
-            TriggerDeliveryEmitOutcome::Started,
+        assert!(
+            matches!(
+                report.deliveries[0].outcome,
+                TriggerDeliveryEmitOutcome::Started { .. }
+            ),
             "the binding emission started its delivery: {report:?}"
         );
         let p1 = report.deliveries[0]
-            .process_id
-            .clone()
+            .process_id()
+            .cloned()
             .expect("the binding emission names its process");
         let occurrence_id = report.occurrence_id.clone();
         let reservation = rig.bound_delivery(&occurrence_id, &p1).await;
@@ -598,8 +604,9 @@ pub async fn trigger_emission_held_across_a_bind_and_prune_returns_the_bound_pro
             vec![crate::TriggerDeliveryEmitReceipt {
                 occurrence_id: occurrence_id.clone(),
                 subscription_id: subscription_id.clone(),
-                process_id: Some(p1.clone()),
-                outcome: TriggerDeliveryEmitOutcome::Started,
+                outcome: TriggerDeliveryEmitOutcome::Started {
+                    process_id: p1.clone()
+                },
             }],
             "the held emission returns the process the delivery was bound to while it was held"
         );
@@ -618,8 +625,9 @@ pub async fn trigger_emission_held_across_a_bind_and_prune_returns_the_bound_pro
         vec![crate::TriggerDeliveryEmitReceipt {
             occurrence_id: occurrence_id.clone(),
             subscription_id,
-            process_id: Some(p1.clone()),
-            outcome: TriggerDeliveryEmitOutcome::Started,
+            outcome: TriggerDeliveryEmitOutcome::Started {
+                process_id: p1.clone()
+            },
         }],
         "the replayed held emission serves its recorded steps and answers P1"
     );

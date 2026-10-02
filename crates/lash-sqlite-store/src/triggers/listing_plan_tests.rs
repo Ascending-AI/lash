@@ -39,11 +39,11 @@ const FIXTURE: &str = "WITH RECURSIVE n(i) AS (
      )
      INSERT INTO trigger_occurrences (
          occurrence_id, idempotency_key, source_type, source_key,
-         occurred_at_ms, record_json
+         occurred_at_ms, outcome_kind, record_json
      )
      SELECT printf('occurrence-%05d', i), printf('idempotency-%05d', i),
             printf('source-type-%02d', i % 20), printf('source-key-%02d', i % 7),
-            i, '{}'
+            i, 'fired', '{}'
      FROM n;
      ANALYZE;";
 

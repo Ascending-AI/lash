@@ -241,8 +241,8 @@ async fn reclaimed_matched_occurrence(
         .expect("the first delivery emits");
     assert_eq!(report.deliveries.len(), 1, "one subscription matches");
     let process_id = report.deliveries[0]
-        .process_id
-        .clone()
+        .process_id()
+        .cloned()
         .expect("the delivery started its process");
 
     // The process ends and is pruned; retention reclaims the delivery and
@@ -607,7 +607,7 @@ pub(super) async fn a_forgotten_redelivery_starts_again_while_a_retained_one_is_
         .expect("forgotten redelivery emits again");
     assert_eq!(report.deliveries.len(), 1);
     assert!(
-        report.deliveries[0].process_id.is_some(),
+        report.deliveries[0].process_id().is_some(),
         "the forgotten redelivery starts a process"
     );
     let after = held(&handles).await;

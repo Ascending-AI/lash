@@ -73,7 +73,10 @@ fn drain_area_witnesses() {
     });
     // W0025: lash::triggers::TriggerDeliveryEmitOutcome::Started [variant]
     variant_witness(|value: &lash::triggers::TriggerDeliveryEmitOutcome| {
-        matches!(value, lash::triggers::TriggerDeliveryEmitOutcome::Started)
+        matches!(
+            value,
+            lash::triggers::TriggerDeliveryEmitOutcome::Started { .. }
+        )
     });
     // W0026: lash::triggers::TriggerDeliveryEmitReceipt [struct]
     type_witness::<lash::triggers::TriggerDeliveryEmitReceipt>();
@@ -85,9 +88,11 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::triggers::TriggerDeliveryEmitReceipt| {
         let _ = &value.outcome;
     });
-    // W0029: lash::triggers::TriggerDeliveryEmitReceipt::process_id [field]
-    field_witness(|value: &lash::triggers::TriggerDeliveryEmitReceipt| {
-        let _ = &value.process_id;
+    // W0029: lash::triggers::TriggerDeliveryEmitOutcome::Started::process_id [field]
+    field_witness(|value: &lash::triggers::TriggerDeliveryEmitOutcome| {
+        if let lash::triggers::TriggerDeliveryEmitOutcome::Started { process_id } = value {
+            let _ = process_id;
+        }
     });
     // W0030: lash::triggers::TriggerDeliveryEmitReceipt::subscription_id [field]
     field_witness(|value: &lash::triggers::TriggerDeliveryEmitReceipt| {

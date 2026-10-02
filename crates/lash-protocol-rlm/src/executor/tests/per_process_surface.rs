@@ -275,7 +275,7 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
     let process_id = report
         .deliveries
         .into_iter()
-        .find_map(|delivery| delivery.process_id)
+        .find_map(|delivery| delivery.process_id().cloned())
         .expect("the occurrence's delivery started its process");
     let terminal = tokio::time::timeout(
         std::time::Duration::from_secs(30),

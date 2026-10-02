@@ -568,19 +568,15 @@ impl TriggerRouter {
                 Err(DeliveryStartFault::Attempt(fault)) => return Err(fault.into()),
                 Err(DeliveryStartFault::Delivery(err)) => {
                     let error = crate::RuntimeEffectControllerError::from(err);
-                    deliveries.push(reservation.emit_report(
-                        None,
-                        TriggerDeliveryEmitOutcome::Failed {
-                            code: error.code,
-                            reason: error.message,
-                        },
-                    ));
+                    deliveries.push(reservation.emit_report(TriggerDeliveryEmitOutcome::Failed {
+                        code: error.code,
+                        reason: error.message,
+                    }));
                     continue;
                 }
             };
-            deliveries.push(
-                reservation.emit_report(Some(process_id), TriggerDeliveryEmitOutcome::Started),
-            );
+            deliveries
+                .push(reservation.emit_report(TriggerDeliveryEmitOutcome::Started { process_id }));
         }
         Ok((
             TriggerEmitReport::new(occurrence.occurrence_id, deliveries),

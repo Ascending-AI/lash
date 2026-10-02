@@ -157,9 +157,10 @@ pub async fn trigger_emit(kind: StorageKind, live: bool) {
         "raa-trigger",
         operation,
         async |recorded: &Value| {
-            let delivered: ProcessId =
-                serde_json::from_value(recorded["deliveries"][0]["process_id"].clone())
-                    .expect("the emit started one delivery");
+            let delivered: ProcessId = serde_json::from_value(
+                recorded["deliveries"][0]["outcome"]["started"]["process_id"].clone(),
+            )
+            .expect("the emit started one delivery");
             world.end_and_prune(&delivered, true).await;
         },
     )
@@ -309,9 +310,10 @@ pub async fn trigger_route_revoked_after_start(kind: StorageKind, live: bool) {
         "raa-route-revoked",
         operation,
         async |recorded: &Value| {
-            assert_eq!(
-                recorded["deliveries"][0]["outcome"],
-                json!("started"),
+            assert!(
+                recorded["deliveries"][0]["outcome"]["started"]["process_id"]
+                    .as_str()
+                    .is_some(),
                 "the first emission started its delivery: {recorded}"
             );
             assert_eq!(probe.calls(), 1, "the fresh start restored its route once");

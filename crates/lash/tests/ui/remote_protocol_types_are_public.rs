@@ -45,8 +45,9 @@ fn main() {
         deliveries: vec![lash::remote::triggers::RemoteTriggerDeliveryEmitReceipt {
             occurrence_id: "occurrence:1".to_string(),
             subscription_id: "subscription:1".to_string(),
-            process_id: Some(ProcessId::parse("p_0192a3b4c5d670008000000000000001").unwrap()),
-            outcome: lash::remote::triggers::RemoteTriggerDeliveryEmitOutcome::Started,
+            outcome: lash::remote::triggers::RemoteTriggerDeliveryEmitOutcome::Started {
+                process_id: ProcessId::parse("p_0192a3b4c5d670008000000000000001").unwrap(),
+            },
         }],
     };
     report.validate().unwrap();

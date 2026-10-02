@@ -494,6 +494,7 @@ table lash_trigger_deliveries
   column obligation_stall_reason text nullable
   column obligation_state text nullable
   column occurrence_id text not-null
+  column occurrence_outcome_kind text not-null default
   column process_id text nullable
   column subscription_id text not-null
   column subscription_incarnation text not-null
@@ -501,7 +502,7 @@ table lash_trigger_deliveries
   column subscription_snapshot_json text not-null
   unique (obligation_id)
   primary-key (occurrence_id, subscription_id)
-  foreign-key (occurrence_id) references lash_trigger_occurrences (occurrence_id) on delete cascade
+  foreign-key (occurrence_id, occurrence_outcome_kind) references lash_trigger_occurrences (occurrence_id, outcome_kind) on delete cascade
 table lash_trigger_mutation_receipts
   column created_at_ms bigint not-null
   column operation_id text not-null
@@ -518,11 +519,13 @@ table lash_trigger_occurrences
   column idempotency_key text not-null
   column occurred_at_ms bigint not-null
   column occurrence_id text not-null
+  column outcome_kind text not-null
   column reclaimable_at_ms bigint nullable
   column record_json text not-null
   column source_key text not-null
   column source_type text not-null
   unique (idempotency_key)
+  unique (occurrence_id, outcome_kind)
   primary-key (occurrence_id)
 table lash_trigger_subscriptions
   column created_at_ms bigint not-null

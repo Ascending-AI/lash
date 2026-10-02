@@ -110,13 +110,13 @@ lash_store_sql::statements! {
         /// Delete every fired occurrence no delivery references, leaving each
         /// one's tombstone at `?1` (FIG-4513).
         ///
-        /// PostgreSQL reads the outcome with `jsonb #>>`, SQLite with
-        /// `json_extract`. PostgreSQL deletes and tombstones in one statement,
+        /// Both backends read the typed outcome column. PostgreSQL deletes
+        /// and tombstones in one statement,
         /// so no concurrent ingest sees the row gone and its tombstone absent;
         /// SQLite issues the two under its single writer.
         delete_orphan_fired = "WITH reclaimed AS (
                  DELETE FROM trigger_occurrences AS occurrence
-                 WHERE COALESCE(occurrence.record_json::jsonb #>> '{outcome,kind}', 'fired') = 'fired'
+                 WHERE occurrence.outcome_kind = 'fired'
                    AND NOT EXISTS (
                        SELECT 1 FROM trigger_deliveries AS delivery
                        WHERE delivery.occurrence_id = occurrence.occurrence_id
@@ -129,7 +129,7 @@ lash_store_sql::statements! {
         arm_reclaimable_for_candidates = "UPDATE trigger_occurrences AS occurrence
              SET reclaimable_at_ms = ?2
              WHERE occurrence.reclaimable_at_ms IS NULL
-               AND COALESCE(occurrence.record_json::jsonb #>> '{outcome,kind}', 'fired') = 'fired'
+               AND occurrence.outcome_kind = 'fired'
                AND occurrence.occurrence_id = ANY(?1::TEXT[])
                AND NOT EXISTS (
                    SELECT 1 FROM trigger_deliveries AS delivery
@@ -145,14 +145,14 @@ lash_store_sql::statements! {
                  SELECT COUNT(*) AS inspected_count,
                         COUNT(*) FILTER (
                             WHERE reclaimable_at_ms IS NULL
-                              AND COALESCE(record_json::jsonb #>> '{outcome,kind}', 'fired') = 'fired'
+                              AND outcome_kind = 'fired'
                         ) AS live_fan_out_count,
                         COUNT(*) FILTER (
-                            WHERE COALESCE(record_json::jsonb #>> '{outcome,kind}', 'fired') != 'fired'
+                            WHERE outcome_kind != 'fired'
                         ) AS audit_retained_count,
                         COUNT(*) FILTER (
                             WHERE reclaimable_at_ms > ?1
-                              AND COALESCE(record_json::jsonb #>> '{outcome,kind}', 'fired') = 'fired'
+                              AND outcome_kind = 'fired'
                         ) AS grace_deferred_count
                  FROM trigger_occurrences
              ), candidates AS (
@@ -160,7 +160,7 @@ lash_store_sql::statements! {
                  FROM trigger_occurrences
                  WHERE reclaimable_at_ms IS NOT NULL
                    AND reclaimable_at_ms <= ?1
-                   AND COALESCE(record_json::jsonb #>> '{outcome,kind}', 'fired') = 'fired'
+                   AND outcome_kind = 'fired'
              )
              SELECT scope.inspected_count,
                     scope.live_fan_out_count,
@@ -180,7 +180,7 @@ lash_store_sql::statements! {
                  WHERE occurrence.occurrence_id = ?1
                    AND occurrence.reclaimable_at_ms IS NOT NULL
                    AND occurrence.reclaimable_at_ms <= ?2
-                   AND COALESCE(occurrence.record_json::jsonb #>> '{outcome,kind}', 'fired') = 'fired'
+                   AND occurrence.outcome_kind = 'fired'
                    AND NOT EXISTS (
                        SELECT 1 FROM trigger_deliveries AS delivery
                        WHERE delivery.occurrence_id = occurrence.occurrence_id
@@ -195,7 +195,7 @@ lash_store_sql::statements! {
         prune_non_fired = "WITH reclaimed AS (
                  DELETE FROM trigger_occurrences AS occurrence
                  WHERE occurrence.occurred_at_ms < ?1
-                   AND COALESCE(occurrence.record_json::jsonb #>> '{outcome,kind}', 'fired') <> 'fired'
+                   AND occurrence.outcome_kind <> 'fired'
                  RETURNING occurrence.occurrence_id
              )
              INSERT INTO trigger_occurrence_tombstones (occurrence_id, reclaimed_at_ms)
@@ -722,6 +722,7 @@ impl TriggerStore for PostgresTriggerStore {
                 .bind(&occurrence.source_type)
                 .bind(&occurrence.source_key)
                 .bind(occurrence.occurred_at_ms as i64)
+                .bind(occurrence.outcome.kind())
                 .bind(serde_json::to_string(&occurrence).map_err(process_decode_error)?)
                 .execute(&mut **tx)
                 .await

@@ -155,8 +155,7 @@ impl TriggerEventCatalog {
 
 /// Terminal fate of one observed trigger occurrence.
 ///
-/// `Fired` is the legacy/default shape and is omitted from serialized records,
-/// preserving the bytes of existing fired occurrences. Non-fired outcomes are
+/// Every record carries its outcome explicitly. Non-fired outcomes are
 /// durable audit records: they never reserve trigger deliveries and are exempt
 /// from delivery-fan-out reclamation.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -173,8 +172,12 @@ pub enum TriggerOccurrenceOutcome {
 }
 
 impl TriggerOccurrenceOutcome {
-    fn is_fired(&self) -> bool {
-        matches!(self, Self::Fired)
+    /// The durable SQL discriminant used for delivery and retention eligibility.
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::Fired => "fired",
+            Self::Dropped { .. } => "dropped",
+        }
     }
 }
 
@@ -191,7 +194,6 @@ pub struct TriggerOccurrenceRequest {
     /// registered by this session can reserve deliveries for the occurrence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<SessionId>,
-    #[serde(default, skip_serializing_if = "TriggerOccurrenceOutcome::is_fired")]
     pub outcome: TriggerOccurrenceOutcome,
 }
 
@@ -247,7 +249,6 @@ pub struct TriggerOccurrenceRecord {
     pub source: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<SessionId>,
-    #[serde(default, skip_serializing_if = "TriggerOccurrenceOutcome::is_fired")]
     pub outcome: TriggerOccurrenceOutcome,
     pub occurred_at_ms: u64,
 }
@@ -1785,15 +1786,10 @@ pub fn sort_trigger_delivery_reservations(reservations: &mut [TriggerDeliveryRes
 }
 
 impl TriggerDeliveryReservation {
-    fn emit_report(
-        &self,
-        process_id: Option<ProcessId>,
-        outcome: TriggerDeliveryEmitOutcome,
-    ) -> TriggerDeliveryEmitReceipt {
+    fn emit_report(&self, outcome: TriggerDeliveryEmitOutcome) -> TriggerDeliveryEmitReceipt {
         TriggerDeliveryEmitReceipt {
             occurrence_id: self.occurrence.occurrence_id.clone(),
             subscription_id: self.subscription.subscription_id.clone(),
-            process_id,
             outcome,
         }
     }

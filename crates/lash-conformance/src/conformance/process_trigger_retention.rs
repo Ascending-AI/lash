@@ -2254,7 +2254,7 @@ async fn captured_delivery_refusals(handles: ProcessTriggerRetentionHandles) {
         report.deliveries[0].outcome,
         crate::TriggerDeliveryEmitOutcome::Failed { .. }
     ));
-    assert!(report.deliveries[0].process_id.is_none());
+    assert!(report.deliveries[0].process_id().is_none());
 }
 
 /// A controller that runs each step's body in place and journals nothing.

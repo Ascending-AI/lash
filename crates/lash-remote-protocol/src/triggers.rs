@@ -21,12 +21,6 @@ pub enum RemoteTriggerOccurrenceOutcome {
     },
 }
 
-impl RemoteTriggerOccurrenceOutcome {
-    fn is_fired(&self) -> bool {
-        matches!(self, Self::Fired)
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTriggerOccurrenceRequest {
     pub source_type: String,
@@ -38,10 +32,6 @@ pub struct RemoteTriggerOccurrenceRequest {
     pub source: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<SessionId>,
-    #[serde(
-        default,
-        skip_serializing_if = "RemoteTriggerOccurrenceOutcome::is_fired"
-    )]
     pub outcome: RemoteTriggerOccurrenceOutcome,
 }
 
@@ -119,10 +109,6 @@ pub struct RemoteTriggerOccurrenceRecord {
     pub source: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<SessionId>,
-    #[serde(
-        default,
-        skip_serializing_if = "RemoteTriggerOccurrenceOutcome::is_fired"
-    )]
     pub outcome: RemoteTriggerOccurrenceOutcome,
     pub occurred_at_ms: u64,
 }
@@ -138,9 +124,11 @@ pub enum RemoteTriggerDeliveryFailureCode {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum RemoteTriggerDeliveryEmitOutcome {
-    Started,
+    Started {
+        process_id: ProcessId,
+    },
     Failed {
         code: RemoteTriggerDeliveryFailureCode,
         reason: String,
@@ -148,12 +136,10 @@ pub enum RemoteTriggerDeliveryEmitOutcome {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RemoteTriggerDeliveryEmitReceipt {
     pub occurrence_id: String,
     pub subscription_id: String,
-    /// The process the delivery started; absent when it failed to start.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub process_id: Option<ProcessId>,
     pub outcome: RemoteTriggerDeliveryEmitOutcome,
 }
 

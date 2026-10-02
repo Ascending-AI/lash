@@ -224,7 +224,9 @@ impl From<lash_core::facade_support::TriggerDeliveryEmitOutcome>
 {
     fn from(value: lash_core::facade_support::TriggerDeliveryEmitOutcome) -> Self {
         match value {
-            lash_core::facade_support::TriggerDeliveryEmitOutcome::Started => Self::Started,
+            lash_core::facade_support::TriggerDeliveryEmitOutcome::Started { process_id } => {
+                Self::Started { process_id }
+            }
             lash_core::facade_support::TriggerDeliveryEmitOutcome::Failed { code, reason } => {
                 Self::Failed {
                     code: code.into(),
@@ -240,7 +242,9 @@ impl From<RemoteTriggerDeliveryEmitOutcome>
 {
     fn from(value: RemoteTriggerDeliveryEmitOutcome) -> Self {
         match value {
-            RemoteTriggerDeliveryEmitOutcome::Started => Self::Started,
+            RemoteTriggerDeliveryEmitOutcome::Started { process_id } => {
+                Self::Started { process_id }
+            }
             RemoteTriggerDeliveryEmitOutcome::Failed { code, reason } => Self::Failed {
                 code: code.into(),
                 reason,
@@ -256,13 +260,11 @@ impl From<lash_core::facade_support::TriggerDeliveryEmitReceipt>
         let lash_core::facade_support::TriggerDeliveryEmitReceipt {
             occurrence_id,
             subscription_id,
-            process_id,
             outcome,
         } = value;
         Self {
             occurrence_id,
             subscription_id,
-            process_id,
             outcome: outcome.into(),
         }
     }
@@ -275,13 +277,11 @@ impl From<RemoteTriggerDeliveryEmitReceipt>
         let RemoteTriggerDeliveryEmitReceipt {
             occurrence_id,
             subscription_id,
-            process_id,
             outcome,
         } = value;
         Self {
             occurrence_id,
             subscription_id,
-            process_id,
             outcome: outcome.into(),
         }
     }
