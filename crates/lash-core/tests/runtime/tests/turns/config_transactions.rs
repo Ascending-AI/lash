@@ -94,13 +94,7 @@ pub(super) async fn a_transaction_publishes_every_command_with_one_commit_and_on
     let request = lash_core::engine::DriveRequest {
         session: SessionId::from("root"),
         request: lash_core::engine::DriveRequestId::new("config-transaction"),
-        build_generation: runtime
-            .host
-            .core
-            .backend()
-            .build_generation()
-            .expect("the engine's generation is bound")
-            .clone(),
+        intended_lane: None,
     };
     let handler = double
         .open_handler(AdmittedScope::turn(

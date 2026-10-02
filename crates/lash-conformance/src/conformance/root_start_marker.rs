@@ -168,7 +168,7 @@ pub async fn fresh_execution_of_started_root_is_substrate_lost(
     let request = DriveRequest {
         session: session_id.clone(),
         request: DriveRequestId::new(format!("{prefix}-root-start-marker")),
-        build_generation: lash_core::engine::BuildGeneration::for_test("conformance-law"),
+        intended_lane: None,
     };
 
     let admission_scope =

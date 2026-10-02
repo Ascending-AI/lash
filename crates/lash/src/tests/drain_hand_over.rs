@@ -629,7 +629,7 @@ async fn a_drive_on_a_draining_build_hands_over_after_its_current_root(
     let mut leg = DriveRequest {
         session: session_id.clone(),
         request,
-        build_generation: old_generation.clone(),
+        intended_lane: None,
     };
     loop {
         let ended = engine.leg(&session_id, &leg.request).await;

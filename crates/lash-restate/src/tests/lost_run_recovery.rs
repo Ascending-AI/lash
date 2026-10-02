@@ -170,6 +170,7 @@ impl lash_core::SessionDriver for RecoveryDriver {
         &self,
         _: ScopedEffectController<'_>,
         _: &lash_core::engine::DriveRequest,
+        _admitting_generation: &lash_core::engine::BuildGeneration,
         _: u32,
         _: Option<&lash_core::engine::BuildGeneration>,
     ) -> Result<lash_core::engine::AdmitVerdict, lash_core::engine::DriveAbort> {

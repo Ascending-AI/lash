@@ -378,6 +378,7 @@ pub async fn admit_drive_on_store(
     store: crate::store::SessionStore,
     controller: &ScopedEffectController<'_>,
     request: &DriveRequest,
+    admitting_generation: &crate::engine::BuildGeneration,
     ordinal: u32,
     draining: Option<&crate::engine::BuildGeneration>,
 ) -> Result<AdmitVerdict, DriveAbort> {
@@ -388,23 +389,31 @@ pub async fn admit_drive_on_store(
         store,
         controller,
         request,
+        AdmissionAuthority {
+            generation: admitting_generation,
+            admitter: admission::Admitter::engine(),
+        },
         ordinal,
         draining,
-        admission::Admitter::engine(),
     )
     .await
 }
 
-/// [`admit_drive_on_store`] for `admitter`, the execution that runs the
+struct AdmissionAuthority<'a> {
+    generation: &'a crate::engine::BuildGeneration,
+    admitter: admission::Admitter,
+}
+
+/// [`admit_drive_on_store`] for `authority`, the execution that runs the
 /// roots the drive admits.
 async fn admit_on_store(
     host: &crate::RuntimeHostConfig,
     store: crate::store::SessionStore,
     controller: &ScopedEffectController<'_>,
     request: &DriveRequest,
+    authority: AdmissionAuthority<'_>,
     ordinal: u32,
     draining: Option<&crate::engine::BuildGeneration>,
-    admitter: admission::Admitter,
 ) -> Result<AdmitVerdict, DriveAbort> {
     // A generation this build cannot run is refused typed before anything
     // is admitted (FIG-3619): the recorded step's first read is that same
@@ -420,6 +429,7 @@ async fn admit_on_store(
     emit_admission_step(
         &admission_controller,
         request,
+        authority,
         ordinal,
         Some(store),
         host.session_store_factory(),
@@ -427,7 +437,6 @@ async fn admit_on_store(
             marks: host.backend().generation_drain(),
             generation: generation.clone(),
         }),
-        admitter,
     )
     .await
 }
@@ -441,11 +450,11 @@ async fn admit_on_store(
 async fn emit_admission_step(
     controller: &ScopedEffectController<'_>,
     request: &DriveRequest,
+    authority: AdmissionAuthority<'_>,
     ordinal: u32,
     store: Option<crate::store::SessionStore>,
     stores: Arc<dyn crate::DeploymentStore>,
     drain: Option<admission::DrainRead>,
-    admitter: admission::Admitter,
 ) -> Result<AdmitVerdict, DriveAbort> {
     let scope = drive_admission_scope(&request.session, &request.request);
     let invocation = RuntimeEffectInvocation::new(
@@ -460,7 +469,7 @@ async fn emit_admission_step(
     let admit_request = AdmitRequest {
         session: request.session.clone(),
         request: request.request.clone(),
-        build_generation: request.build_generation.clone(),
+        build_generation: authority.generation.clone(),
     };
     controller
         .execute_effect(
@@ -477,7 +486,7 @@ async fn emit_admission_step(
                     request: admit_request,
                     ordinal,
                     drain,
-                    admitter,
+                    admitter: authority.admitter,
                 }),
                 None,
             ),
@@ -499,6 +508,7 @@ async fn emit_admission_step(
 pub async fn admit_drive_retired(
     controller: &ScopedEffectController<'_>,
     request: &DriveRequest,
+    admitting_generation: &crate::engine::BuildGeneration,
     ordinal: u32,
     stores: Arc<dyn crate::DeploymentStore>,
 ) -> Result<AdmitVerdict, DriveAbort> {
@@ -506,11 +516,14 @@ pub async fn admit_drive_retired(
     emit_admission_step(
         controller,
         request,
+        AdmissionAuthority {
+            generation: admitting_generation,
+            admitter: admission::Admitter::engine(),
+        },
         ordinal,
         None,
         stores,
         None,
-        admission::Admitter::engine(),
     )
     .await
 }
@@ -944,14 +957,24 @@ impl LashRuntime {
         // session; the root's recorded admission, taken under the lease on a
         // head refreshed there, is the head the root runs on (FIG-3682).
         let store = self.drive_store()?;
+        let admitting_generation = self
+            .host
+            .core
+            .backend()
+            .build_generation()
+            .map_err(|error| DriveAbort::Refused(error.into()))?
+            .clone();
         Box::pin(admit_on_store(
             &self.host.core,
             store,
             controller,
             request,
+            AdmissionAuthority {
+                generation: &admitting_generation,
+                admitter,
+            },
             ordinal,
             draining,
-            admitter,
         ))
         .await
     }

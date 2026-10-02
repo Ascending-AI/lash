@@ -183,16 +183,16 @@ impl SimEngine {
 
     async fn attach_input_drive(&self, session: &lash::LashSession, input: &lash::InputId) {
         // No generation means no drive was sent: there is nothing to wait on.
-        let Ok(build_generation) = self.restate.lash_backend().build_generation().cloned() else {
+        if self.restate.lash_backend().build_generation().is_err() {
             return;
-        };
+        }
         let mut leg = lash_core::engine::DriveRequest {
             session: session.session_id(),
             request: lash_core::drive::ingress_drive_request(
                 input.as_str(),
                 lash_core::drive::FIRST_INGRESS_ATTEMPT,
             ),
-            build_generation,
+            intended_lane: None,
         };
         loop {
             match self

@@ -534,7 +534,7 @@ async fn pinned_older_drive_root_runs_on_the_newer_build() {
     let session_stamped = lash_sansio::SessionId::from("compat-stamped");
     roll.driver.accept(&session_stamped, "s1");
     let mut body =
-        serde_json::to_value(SessionRoll::drive_body(&session_stamped, "r-stamped", &gn))
+        serde_json::to_value(SessionRoll::drive_body(&session_stamped, "r-stamped", None))
             .expect("encode the drive");
     body["drive_version"] = serde_json::json!(crate::LASH_SESSION_DRIVE_VERSION + 7);
     let stamped = roll

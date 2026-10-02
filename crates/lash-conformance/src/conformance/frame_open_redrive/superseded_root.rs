@@ -85,14 +85,7 @@ fn path_attempt(
                         )
                     })
                 }),
-                SupersededRootPath::Engine => {
-                    match parts.host.backend().build_generation().cloned() {
-                        Ok(generation) => {
-                            Box::pin(engine_root(&mut runtime, &scope, generation)).await
-                        }
-                        Err(unbound) => Err(unbound.into()),
-                    }
-                }
+                SupersededRootPath::Engine => Box::pin(engine_root(&mut runtime, &scope)).await,
             };
             let _ = result_tx.send(end);
             crate::ConformanceTurnEnd::Settled
@@ -105,12 +98,11 @@ fn path_attempt(
 async fn engine_root(
     runtime: &mut crate::LashRuntime,
     scope: &crate::ScopedEffectController<'_>,
-    build_generation: lash_core::engine::BuildGeneration,
 ) -> DriveEnd {
     let request = lash_core::engine::DriveRequest {
         session: runtime.export_state().session_id.clone(),
         request: lash_core::engine::DriveRequestId::new(scope.scope_id()),
-        build_generation,
+        intended_lane: None,
     };
     let admitted = match lash_core::drive::admit_drive(runtime, scope, &request, 0, None)
         .await

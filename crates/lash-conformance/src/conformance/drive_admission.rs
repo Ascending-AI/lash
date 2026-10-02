@@ -189,7 +189,7 @@ impl DriveParts {
         DriveRequest {
             session: self.session_id.clone(),
             request: DriveRequestId::new(id),
-            build_generation: lash_core::engine::BuildGeneration::for_test("conformance-law"),
+            intended_lane: None,
         }
     }
 
@@ -1155,7 +1155,12 @@ pub async fn fence_is_not_in_the_envelope_hash(
                 request: Box::new(lash_core::engine::AdmitRequest {
                     session: request.session.clone(),
                     request: request.request.clone(),
-                    build_generation: request.build_generation.clone(),
+                    build_generation: parts
+                        .host
+                        .backend()
+                        .build_generation()
+                        .expect("the engine generation is bound")
+                        .clone(),
                 }),
             },
         ),

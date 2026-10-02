@@ -15,10 +15,7 @@ pub(super) async fn a_retired_sessions_drive_admission_step_records_the_retireme
     let request = lash_core::engine::DriveRequest {
         session: session.clone(),
         request: lash_core::engine::DriveRequestId::new("retired-drive"),
-        build_generation: backend
-            .build_generation()
-            .expect("the engine's generation is bound")
-            .clone(),
+        intended_lane: None,
     };
     let recorder = RecordingEffectController::default().with_strict_replay_by_address();
     let scope = layered_scope(
@@ -28,9 +25,17 @@ pub(super) async fn a_retired_sessions_drive_admission_step_records_the_retireme
     );
     let stores = backend.session_store_factory();
 
-    let abort = lash_core::drive::admit_drive_retired(&scope, &request, 0, Arc::clone(&stores))
-        .await
-        .expect_err("a session whose store cannot open refuses its admission");
+    let abort = lash_core::drive::admit_drive_retired(
+        &scope,
+        &request,
+        backend
+            .build_generation()
+            .expect("the engine generation is bound"),
+        0,
+        Arc::clone(&stores),
+    )
+    .await
+    .expect_err("a session whose store cannot open refuses its admission");
     assert!(
         matches!(
             abort,
@@ -47,9 +52,17 @@ pub(super) async fn a_retired_sessions_drive_admission_step_records_the_retireme
 
     // A redrive of the same admission decodes the recorded retirement rather
     // than running the body against the retired store again (ADR 0104 O1).
-    let replayed = lash_core::drive::admit_drive_retired(&scope, &request, 0, stores)
-        .await
-        .expect_err("the replayed admission decodes the recorded retirement");
+    let replayed = lash_core::drive::admit_drive_retired(
+        &scope,
+        &request,
+        backend
+            .build_generation()
+            .expect("the engine generation is bound"),
+        0,
+        stores,
+    )
+    .await
+    .expect_err("the replayed admission decodes the recorded retirement");
     assert!(
         matches!(
             replayed,

@@ -264,11 +264,15 @@ async fn pump(engine: RestateSessionWork, session: SessionId, mut drive: Arc<Dri
 /// drive that answered with a failure has ended too. An attach that failed
 /// in transit (the attach deadline of a long drive included) is retried.
 async fn drive_ended(engine: &RestateSessionWork, session: &SessionId, request: &DriveRequestId) {
-    let mut leg = request.clone();
+    let mut leg = lash_core::engine::DriveRequest {
+        session: session.clone(),
+        request: request.clone(),
+        intended_lane: None,
+    };
     let mut pause = ATTACH_PAUSE_FLOOR;
     loop {
-        match engine.attach_drive(session, leg.clone()).await {
-            Ok(outcome) => match engine.continuation(session, &leg, &outcome) {
+        match engine.attach_drive_request(&leg).await {
+            Ok(outcome) => match engine.continuation(&leg, &outcome) {
                 Some(next) => {
                     leg = next;
                     pause = ATTACH_PAUSE_FLOOR;

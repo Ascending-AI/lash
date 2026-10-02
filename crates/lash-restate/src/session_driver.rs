@@ -124,7 +124,7 @@ mod asks;
 mod continuation;
 
 pub use continuation::SendDriveError;
-use continuation::{admits, continuation_generation, drain_answered, session_drive_continuation};
+use continuation::{continuation_generation, drain_answered, session_drive_continuation};
 
 /// The generation of the session driver's journaled command prefix
 /// (ADR 0105 §12): a drain surface, and so an input to the build's drain
@@ -381,11 +381,12 @@ impl SessionDriver for InstalledSessionDriver {
         &self,
         controller: lash_core::ScopedEffectController<'_>,
         request: &DriveRequest,
+        admitting_generation: &lash_core::engine::BuildGeneration,
         ordinal: u32,
         draining: Option<&BuildGeneration>,
     ) -> Result<AdmitVerdict, DriveAbort> {
         self.driver
-            .admit(controller, request, ordinal, draining)
+            .admit(controller, request, admitting_generation, ordinal, draining)
             .await
     }
 
@@ -478,8 +479,7 @@ impl std::fmt::Debug for RestateSessionDriverSlot {
 pub struct RestateSessionWork {
     ingress: RestateIngressClient,
     slot: RestateSessionDriverSlot,
-    /// The drain generation of the build scheduling drives: every drive
-    /// request it sends is stamped with it.
+    /// The scheduling engine is bound after the core registers its plugins.
     generation: lash_core::engine::EngineGeneration,
     /// The namespace the deployment's session services are named in
     /// (FIG-3898).
@@ -519,7 +519,7 @@ impl RestateSessionWork {
 
     /// Send `request`'s drive to `LashSession_g<G>/{session}`: the resume of
     /// a drive pinned to drain generation `G` (FIG-3795). The request is
-    /// stamped with `G`, which the resume-only lane holds it to, and the
+    /// directed to `G`, which the resume-only lane holds it to, and the
     /// request id is the send's idempotency key under that service name, as
     /// on the stable lane. The drain sends it; a host never does — new work
     /// goes to the stable lane.
@@ -536,7 +536,7 @@ impl RestateSessionWork {
             request: DriveRequest {
                 session: session.clone(),
                 request: request.clone(),
-                build_generation: generation.clone(),
+                intended_lane: Some(generation.clone()),
             },
             handed_off: None,
         };
@@ -573,12 +573,9 @@ impl RestateSessionWork {
 
     /// One leg of `SessionWorkEngine::await_drive`: the attach, the
     /// released-root refusal read-back and the refusal decode.
-    async fn attach_drive_leg(
-        &self,
-        session: &SessionId,
-        request: &DriveRequestId,
-    ) -> Result<DriveOutcome, DriveAbort> {
-        let error = match self.attach_drive(session, request.clone()).await {
+    async fn attach_drive_leg(&self, request: &DriveRequest) -> Result<DriveOutcome, DriveAbort> {
+        let session = &request.session;
+        let error = match self.attach_drive_request(request).await {
             Ok(outcome) => {
                 for ran in &outcome.ran {
                     if let lash_core::engine::RootOutcome::Released { root } = ran
@@ -600,7 +597,7 @@ impl RestateSessionWork {
             lash_core::RuntimeErrorCode::EngineTurnTerminalAttach,
             format!(
                 "attach to drive `{}` of session `{session}`: {error}",
-                request.as_str()
+                request.request.as_str()
             ),
         )))
     }
@@ -706,7 +703,7 @@ impl SessionWorkEngine for RestateSessionWork {
         session: &SessionId,
         request: &DriveRequestId,
     ) -> Result<DriveOutcome, DriveAbort> {
-        let mut leg = match self.asks.joined(session, request) {
+        let leg = match self.asks.joined(session, request) {
             Some(drive) => match drive.sent().await {
                 asks::Sent::Accepted => drive.request().clone(),
                 asks::Sent::Failed(error) => {
@@ -721,21 +718,12 @@ impl SessionWorkEngine for RestateSessionWork {
             },
             None => request.clone(),
         };
-        let mut ran = Vec::new();
-        loop {
-            let outcome = self.attach_drive_leg(session, &leg).await?;
-            let next = self.continuation(session, &leg, &outcome);
-            ran.extend(outcome.ran);
-            match next {
-                Some(next) => leg = next,
-                None => {
-                    return Ok(DriveOutcome {
-                        ran,
-                        stop: outcome.stop,
-                    });
-                }
-            }
-        }
+        self.await_drive_request(&DriveRequest {
+            session: session.clone(),
+            request: leg,
+            intended_lane: None,
+        })
+        .await
     }
 }
 
@@ -1032,29 +1020,17 @@ async fn drive_session_journal(
             request.session
         )));
     }
-    if let Some(recorded) = continuation_generation(&request.request)
-        && route.lane() != &crate::services::Lane::Generation(recorded.clone())
-    {
-        return Err(misaddressed(format!(
-            "drive continuation `{}` of session `{}` belongs to generation lane `{recorded}`, not `{route}`",
-            request.request.as_str(),
-            request.session,
-        )));
-    }
-    // The generation lane is resume-only (FIG-3795): it serves a drive whose
-    // request was stamped for exactly this generation. A request naming
-    // another generation, sent there by error, is refused before any command
-    // — it is the sender's error, journaled nowhere.
-    if let crate::services::Lane::Generation(lane) = route.lane()
-        && request.build_generation != *lane
-    {
+    let intended = match continuation_generation(&request) {
+        Some(generation) => crate::services::Lane::Generation(generation),
+        None => crate::services::Lane::Stable,
+    };
+    if route.lane() != &intended {
         return Err(misrouted(
             route,
             &format!(
-                "drive `{}` of session `{}` was stamped for generation `{}`",
+                "drive `{}` of session `{}` intended lane `{intended:?}`",
                 request.request.as_str(),
                 request.session,
-                request.build_generation
             ),
         ));
     }
@@ -1136,7 +1112,7 @@ async fn drive_admissions(
             .map_err(refused_scope)?;
         let draining = drain_answered(route, &request.request, ordinal).then_some(generation);
         let verdict = driver
-            .admit(scoped, &admits(&request, generation), ordinal, draining)
+            .admit(scoped, &request, generation, ordinal, draining)
             .await
             .map_err(abort_failure)?;
         // The leg's stop, and what it hands the rest of the drive to when it
@@ -1254,7 +1230,10 @@ async fn drive_admissions(
             AdmitVerdict::Draining { generation } => (
                 Some((
                     route.namespace().stable(LashService::SessionDriver),
-                    lash_core::engine::drive_continuation_request(&request),
+                    session_drive_continuation(
+                        &request,
+                        &route.namespace().stable(LashService::SessionDriver),
+                    ),
                 )),
                 DriveStop::Draining { generation },
             ),
@@ -1265,7 +1244,7 @@ async fn drive_admissions(
                 (None, DriveStop::RootTerminal { root, kind, commit })
             }
         };
-        let Some((next_route, next_request)) = next else {
+        let Some((next_route, continuation)) = next else {
             return Ok(DriveOutcome { ran, stop });
         };
         // The send is a journaled Restate command. Its request is distinct
@@ -1277,11 +1256,6 @@ async fn drive_admissions(
         // root admission names again right after it ran must stop the drive
         // in the leg that meets it rather than be run there again. A leg
         // that ran no root passes on what it was handed.
-        let continuation = DriveRequest {
-            session: request.session.clone(),
-            request: next_request,
-            build_generation: request.build_generation.clone(),
-        };
         let continuation_id = continuation.request.as_str().to_owned();
         let remembered = if ran.is_empty() {
             rules
@@ -1462,6 +1436,7 @@ mod tests {
             &self,
             _controller: lash_core::ScopedEffectController<'_>,
             _request: &DriveRequest,
+            _admitting_generation: &lash_core::engine::BuildGeneration,
             _ordinal: u32,
             _draining: Option<&lash_core::engine::BuildGeneration>,
         ) -> Result<AdmitVerdict, DriveAbort> {
@@ -1567,7 +1542,7 @@ mod tests {
         let request = DriveRequest {
             session: SessionId::from("s"),
             request: DriveRequestId::new("r"),
-            build_generation: BuildGeneration::for_test("t0"),
+            intended_lane: None,
         };
         let mut encoded = serde_json::to_value(RestateSessionDriveRequest {
             request: request.clone(),

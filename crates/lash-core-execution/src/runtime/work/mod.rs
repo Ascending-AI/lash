@@ -165,10 +165,10 @@ pub trait SessionDriver: Send + Sync {
     /// an admission never waits for a root running in this process
     /// (FIG-4755).
     ///
-    /// `request.build_generation` is the generation of the build that
+    /// `admitting_generation` is the generation of the build that
     /// admits, which the admitted root is stamped with (FIG-4742): an engine
-    /// whose drive requests cross builds names the build serving the
-    /// admission, not the one that sent the request.
+    /// whose drive requests cross builds supplies its own generation independently
+    /// of the request's intended lane.
     ///
     /// `draining` is the build generation whose drain this admission hands
     /// over for (FIG-4639, ADR 0106 §1): the generation of the build the
@@ -183,6 +183,7 @@ pub trait SessionDriver: Send + Sync {
         &self,
         controller: crate::ScopedEffectController<'_>,
         request: &crate::engine::DriveRequest,
+        admitting_generation: &crate::engine::BuildGeneration,
         ordinal: u32,
         draining: Option<&crate::engine::BuildGeneration>,
     ) -> Result<crate::engine::AdmitVerdict, crate::engine::DriveAbort>;
@@ -519,6 +520,7 @@ mod tests {
             &self,
             _controller: crate::ScopedEffectController<'_>,
             _request: &crate::engine::DriveRequest,
+            _admitting_generation: &crate::engine::BuildGeneration,
             _ordinal: u32,
             _draining: Option<&crate::engine::BuildGeneration>,
         ) -> Result<crate::engine::AdmitVerdict, crate::engine::DriveAbort> {

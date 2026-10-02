@@ -133,7 +133,12 @@ impl RollDriver {
 
     /// The admission body the journaled `AdmitDrive` step wraps: the oldest
     /// open item is the root, or nothing is.
-    async fn admission(&self, request: &DriveRequest, ordinal: u32) -> AdmitVerdict {
+    async fn admission(
+        &self,
+        request: &DriveRequest,
+        admitting_generation: &lash_core::engine::BuildGeneration,
+        ordinal: u32,
+    ) -> AdmitVerdict {
         if let Some(gate) = self.gate_for(request, ordinal) {
             gate.reached.notify_one();
             gate.release.notified().await;
@@ -147,7 +152,7 @@ impl RollDriver {
             self.stamps
                 .lock_recover()
                 .entry(request.request.as_str().to_owned())
-                .or_insert_with(|| request.build_generation.clone());
+                .or_insert_with(|| admitting_generation.clone());
         }
         let next = self
             .ledgers
@@ -164,7 +169,7 @@ impl RollDriver {
                     request.request.as_str()
                 )),
                 0,
-                request.build_generation.clone(),
+                admitting_generation.clone(),
                 lash_core::engine::AdmittedWork::Queued {
                     head: lash_core::BatchId::from("scripted-batch"),
                 },
@@ -184,6 +189,7 @@ impl SessionDriver for RollDriver {
         &self,
         controller: ScopedEffectController<'_>,
         request: &DriveRequest,
+        admitting_generation: &lash_core::engine::BuildGeneration,
         ordinal: u32,
         _draining: Option<&lash_core::engine::BuildGeneration>,
     ) -> Result<AdmitVerdict, DriveAbort> {
@@ -198,11 +204,11 @@ impl SessionDriver for RollDriver {
                 request: Box::new(lash_core::engine::AdmitRequest {
                     session: request.session.clone(),
                     request: request.request.clone(),
-                    build_generation: request.build_generation.clone(),
+                    build_generation: admitting_generation.clone(),
                 }),
             },
         );
-        let verdict = self.admission(request, ordinal).await;
+        let verdict = self.admission(request, admitting_generation, ordinal).await;
         controller
             .execute_effect(
                 envelope,
@@ -418,13 +424,13 @@ impl SessionRoll {
     pub(super) fn drive_body(
         session: &SessionId,
         request: &str,
-        stamp: &lash_core::engine::BuildGeneration,
+        stamp: Option<&lash_core::engine::BuildGeneration>,
     ) -> RestateSessionDriveRequest {
         RestateSessionDriveRequest {
             request: DriveRequest {
                 session: session.clone(),
                 request: DriveRequestId::new(request),
-                build_generation: stamp.clone(),
+                intended_lane: stamp.cloned(),
             },
             handed_off: None,
         }
@@ -444,7 +450,11 @@ impl SessionRoll {
                 &route.name(),
                 session.as_str(),
                 "drive",
-                &crate::Call::new(Self::drive_body(session, request, stamp)),
+                &crate::Call::new(Self::drive_body(
+                    session,
+                    request,
+                    matches!(route.lane(), crate::services::Lane::Generation(_)).then_some(stamp),
+                )),
                 request,
             )
             .await
@@ -466,7 +476,12 @@ impl SessionRoll {
                     &route.name(),
                     session.as_str(),
                     "drive",
-                    &crate::Call::new(Self::drive_body(session, request, stamp)),
+                    &crate::Call::new(Self::drive_body(
+                        session,
+                        request,
+                        matches!(route.lane(), crate::services::Lane::Generation(_))
+                            .then_some(stamp),
+                    )),
                     request,
                 ),
         )

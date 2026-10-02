@@ -40,5 +40,30 @@ pub enum UpgradePolicy {
 pub struct DriveRequest {
     pub session: SessionId,
     pub request: DriveRequestId,
-    pub build_generation: BuildGeneration,
+    /// The generation lane this request must use, or the stable lane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intended_lane: Option<BuildGeneration>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_drive_request_carries_no_admitting_generation() {
+        let request = DriveRequest {
+            session: SessionId::from("s"),
+            request: DriveRequestId::new("r"),
+            intended_lane: Some(BuildGeneration::for_test("sender")),
+        };
+        let encoded = serde_json::to_value(&request).expect("encode drive request");
+        assert!(
+            encoded.get("build_generation").is_none(),
+            "a wire request cannot supply the admitting build's generation: {encoded}",
+        );
+        assert_eq!(
+            serde_json::from_value::<DriveRequest>(encoded).expect("decode drive request"),
+            request
+        );
+    }
 }

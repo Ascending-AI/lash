@@ -54,6 +54,7 @@ fn redrive_unsettled() -> lash_core::RuntimeError {
 async fn recorded_admission<Fut>(
     controller: &lash_core::ScopedEffectController<'_>,
     request: &DriveRequest,
+    admitting_generation: &lash_core::engine::BuildGeneration,
     ordinal: u32,
     decide: impl FnOnce() -> Fut + Send,
 ) -> Result<AdmitVerdict, DriveAbort>
@@ -75,7 +76,7 @@ where
             request: Box::new(AdmitRequest {
                 session: request.session.clone(),
                 request: request.request.clone(),
-                build_generation: request.build_generation.clone(),
+                build_generation: admitting_generation.clone(),
             }),
         },
     );
@@ -102,6 +103,7 @@ impl Driver {
     async fn decide_admission(
         &self,
         request: &DriveRequest,
+        admitting_generation: &lash_core::engine::BuildGeneration,
         ordinal: u32,
     ) -> Result<AdmitVerdict, lash_core::RuntimeError> {
         self.admits.fetch_add(1, Ordering::SeqCst);
@@ -146,7 +148,7 @@ impl Driver {
             request.request.clone(),
             AdmissionId::new(format!("{}#{ordinal}", request.request.as_str())),
             0,
-            request.build_generation.clone(),
+            admitting_generation.clone(),
             AdmittedWork::Input {
                 head: self.input.clone(),
             },
@@ -159,11 +161,12 @@ impl SessionDriver for Driver {
         &self,
         controller: lash_core::ScopedEffectController<'_>,
         request: &DriveRequest,
+        admitting_generation: &lash_core::engine::BuildGeneration,
         ordinal: u32,
         _draining: Option<&lash_core::engine::BuildGeneration>,
     ) -> Result<AdmitVerdict, DriveAbort> {
-        recorded_admission(&controller, request, ordinal, || {
-            self.decide_admission(request, ordinal)
+        recorded_admission(&controller, request, admitting_generation, ordinal, || {
+            self.decide_admission(request, admitting_generation, ordinal)
         })
         .await
     }
@@ -247,7 +250,7 @@ async fn attach_whole_drive(
         session: session.clone(),
         request,
         // A continuation's request id names its session and request alone.
-        build_generation: lash_core::engine::BuildGeneration::for_test("unread"),
+        intended_lane: None,
     };
     let mut ran = Vec::new();
     loop {
@@ -1482,6 +1485,7 @@ impl SessionDriver for TickingDriver {
         &self,
         _: lash_core::ScopedEffectController<'_>,
         _: &DriveRequest,
+        _admitting_generation: &lash_core::engine::BuildGeneration,
         _: u32,
         _: Option<&lash_core::engine::BuildGeneration>,
     ) -> Result<AdmitVerdict, DriveAbort> {
@@ -1680,6 +1684,7 @@ impl SessionDriver for CadenceDriver {
         &self,
         _: lash_core::ScopedEffectController<'_>,
         _: &DriveRequest,
+        _admitting_generation: &lash_core::engine::BuildGeneration,
         _: u32,
         _: Option<&lash_core::engine::BuildGeneration>,
     ) -> Result<AdmitVerdict, DriveAbort> {
@@ -1901,6 +1906,7 @@ impl StartedRootDriver {
     async fn decide_admission(
         &self,
         request: &DriveRequest,
+        admitting_generation: &lash_core::engine::BuildGeneration,
         ordinal: u32,
     ) -> Result<AdmitVerdict, lash_core::RuntimeError> {
         self.admits.fetch_add(1, Ordering::SeqCst);
@@ -1919,7 +1925,7 @@ impl StartedRootDriver {
             request.request.clone(),
             AdmissionId::new(format!("{}#{ordinal}", request.request.as_str())),
             0,
-            request.build_generation.clone(),
+            admitting_generation.clone(),
             AdmittedWork::Input {
                 head: self.input.clone(),
             },
@@ -1932,11 +1938,12 @@ impl SessionDriver for StartedRootDriver {
         &self,
         controller: lash_core::ScopedEffectController<'_>,
         request: &DriveRequest,
+        admitting_generation: &lash_core::engine::BuildGeneration,
         ordinal: u32,
         _draining: Option<&lash_core::engine::BuildGeneration>,
     ) -> Result<AdmitVerdict, DriveAbort> {
-        recorded_admission(&controller, request, ordinal, || {
-            self.decide_admission(request, ordinal)
+        recorded_admission(&controller, request, admitting_generation, ordinal, || {
+            self.decide_admission(request, admitting_generation, ordinal)
         })
         .await
     }

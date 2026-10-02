@@ -211,6 +211,7 @@ impl ScriptedDriver {
     async fn admission(
         &self,
         request: &DriveRequest,
+        admitting_generation: &lash_core::engine::BuildGeneration,
         ordinal: u32,
         draining: Option<&lash_core::engine::BuildGeneration>,
     ) -> Result<AdmitVerdict, RuntimeError> {
@@ -261,7 +262,7 @@ impl ScriptedDriver {
                     request.request.as_str()
                 )),
                 0,
-                request.build_generation.clone(),
+                admitting_generation.clone(),
                 lash_core::engine::AdmittedWork::Queued {
                     head: lash_core::BatchId::from("scripted-batch"),
                 },
@@ -281,6 +282,7 @@ impl SessionDriver for ScriptedDriver {
         &self,
         controller: ScopedEffectController<'_>,
         request: &DriveRequest,
+        admitting_generation: &lash_core::engine::BuildGeneration,
         ordinal: u32,
         draining: Option<&lash_core::engine::BuildGeneration>,
     ) -> Result<AdmitVerdict, DriveAbort> {
@@ -295,12 +297,12 @@ impl SessionDriver for ScriptedDriver {
                 request: Box::new(lash_core::engine::AdmitRequest {
                     session: request.session.clone(),
                     request: request.request.clone(),
-                    build_generation: request.build_generation.clone(),
+                    build_generation: admitting_generation.clone(),
                 }),
             },
         );
         let verdict = self
-            .admission(request, ordinal, draining)
+            .admission(request, admitting_generation, ordinal, draining)
             .await
             .map_err(DriveAbort::Retry)?;
         controller
@@ -619,6 +621,35 @@ async fn a_busy_session_drive_hands_off_before_its_journal_grows_without_bound()
     no_drive_failed(&backend);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_stable_drive_identity_cannot_select_a_generation_lane() {
+    let (backend, _driver, _installation) = fixture(0x4795).await;
+    let session = SessionId::from("typed-drive-lane");
+    let id = request(&format!(
+        "{}{}:g{}",
+        lash_core::engine::DRIVE_CONTINUATION_PREFIX,
+        "a".repeat(64),
+        backend
+            .restate()
+            .build_generation()
+            .expect("the engine generation is bound")
+    ));
+    let outcome = backend
+        .restate()
+        .session_work_engine()
+        .attach_drive(&session, id)
+        .await
+        .unwrap();
+    assert_eq!(outcome.stop, DriveStop::Idle);
+    let drives = session_drives(&backend);
+    assert_eq!(drives.len(), 1);
+    assert!(
+        drives[0]
+            .target
+            .starts_with(&format!("LashSession/{session}/"))
+    );
+}
+
 async fn held_generation_continuation() -> (
     RestateTestBackend,
     Arc<ScriptedDriver>,
@@ -665,6 +696,18 @@ async fn held_generation_continuation() -> (
     let call: Call<RestateSessionDriveRequest> = serde_json::from_slice(&send.parameter).unwrap();
     let continuation = call.body;
     assert_eq!(
+        continuation.request.intended_lane.as_ref(),
+        Some(generation)
+    );
+    assert_eq!(
+        continuation.request.request,
+        lash_core::engine::drive_continuation_request(&DriveRequest {
+            session: session.clone(),
+            request: request("initial"),
+            intended_lane: Some(generation.clone()),
+        })
+    );
+    assert_eq!(
         send.idempotency_key.as_deref(),
         Some(continuation.request.request.as_str())
     );
@@ -686,7 +729,7 @@ async fn an_attach_joins_a_generation_lane_continuation_without_starting_a_stabl
     let next = backend.restate().sibling_build(next_generation);
     let attached = next
         .session_work_engine()
-        .await_drive(&session, &continuation.request.request);
+        .await_drive_request(&continuation.request);
     tokio::pin!(attached);
     let outcome = tokio::time::timeout(Duration::from_secs(20), async {
         tokio::select! {
@@ -896,7 +939,27 @@ async fn a_drive_resumed_on_a_draining_generation_lane_hands_the_rest_to_the_new
             if request == "resumed" && *ordinal == 0 {
                 continue;
             }
-            let lane_leg = request == "resumed" || request.ends_with(&format!(":g{generation}"));
+            let lane_leg = request == "resumed"
+                || on_lane.iter().any(|view| {
+                    backend
+                        .server()
+                        .journal(&view.id)
+                        .unwrap()
+                        .iter()
+                        .any(|entry| {
+                            entry.name.as_deref()
+                                == Some(
+                                    format!(
+                                        "lash:{}",
+                                        drive_admission_replay_key(
+                                            &DriveRequestId::new(request),
+                                            *ordinal
+                                        )
+                                    )
+                                    .as_str(),
+                                )
+                        })
+                });
             let expected = match (lane_leg, *ordinal) {
                 (true, _) => Some(generation.clone()),
                 (false, 0) => None,
@@ -1398,7 +1461,7 @@ async fn a_call_on_a_wire_this_build_does_not_read_is_refused_before_any_journal
                     request: DriveRequest {
                         session: session.clone(),
                         request: request("newer-wire"),
-                        build_generation: lash_core::engine::BuildGeneration::for_test("any"),
+                        intended_lane: None,
                     },
                     handed_off: None,
                 },
@@ -1526,11 +1589,7 @@ async fn a_released_root_admitted_again_after_a_handoff_stops_the_drive() {
     let next = lash_core::engine::drive_continuation_request(&DriveRequest {
         session: session.clone(),
         request: request("r1"),
-        build_generation: backend
-            .lash_backend()
-            .build_generation()
-            .expect("the engine's generation is bound")
-            .clone(),
+        intended_lane: None,
     });
     let second = attach(&backend, &session, next.as_str()).await;
     assert_eq!(second.ran, [], "the root is not called again");
@@ -1819,10 +1878,7 @@ fn schedule_continuation_case(
     let initial = DriveRequest {
         session: session.clone(),
         request: request("bounded-crash"),
-        build_generation: backend
-            .build_generation()
-            .expect("the engine's generation is bound")
-            .clone(),
+        intended_lane: None,
     };
     let successor = lash_core::engine::drive_continuation_request(&initial);
     backend

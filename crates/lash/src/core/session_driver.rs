@@ -401,6 +401,7 @@ impl lash_core::SessionDriver for CoreSessionDriver {
         &self,
         controller: lash_core::ScopedEffectController<'_>,
         request: &lash_core::engine::DriveRequest,
+        admitting_generation: &lash_core::engine::BuildGeneration,
         ordinal: u32,
         draining: Option<&lash_core::engine::BuildGeneration>,
     ) -> std::result::Result<lash_core::engine::AdmitVerdict, lash_core::engine::DriveAbort> {
@@ -428,6 +429,7 @@ impl lash_core::SessionDriver for CoreSessionDriver {
                     return lash_core::drive::admit_drive_retired(
                         &controller,
                         request,
+                        admitting_generation,
                         ordinal,
                         Arc::clone(&self.config.store_factory),
                     )
@@ -441,6 +443,7 @@ impl lash_core::SessionDriver for CoreSessionDriver {
             store,
             &controller,
             request,
+            admitting_generation,
             ordinal,
             draining,
         )

@@ -1,5 +1,5 @@
-//! A continuation retains the lane its recorded send names, so an attach
-//! joins that invocation across build rolls and later handoffs.
+//! A continuation retains its intended lane as typed request data, so an
+//! attach joins that invocation across build rolls and later handoffs.
 
 use super::*;
 use lash_core::engine::{DRIVE_CONTINUATION_PREFIX, drive_continuation_request};
@@ -7,8 +7,8 @@ use lash_core::engine::{DRIVE_CONTINUATION_PREFIX, drive_continuation_request};
 /// Why a drive was neither sent nor attached to.
 #[derive(Debug, thiserror::Error)]
 pub enum SendDriveError {
-    /// No core has bound the engine's generation yet, so there is nothing to
-    /// stamp the drive with.
+    /// No core has bound the engine's generation yet, so the deployment
+    /// cannot serve the drive.
     #[error(transparent)]
     GenerationUnbound(#[from] lash_core::engine::GenerationUnbound),
     /// Restate did not accept the send.
@@ -38,43 +38,27 @@ impl crate::session_control::ControlFailure for SendDriveError {
     }
 }
 
-/// Retain a generation continuation's lane in its journaled request identity.
-/// The core owns the hash; stable continuations keep its spelling.
 pub(super) fn session_drive_continuation(
     request: &DriveRequest,
     route: &crate::services::ServiceRoute,
-) -> DriveRequestId {
-    let next = drive_continuation_request(request);
-    match route.lane() {
-        crate::services::Lane::Stable => next,
-        crate::services::Lane::Generation(generation) => {
-            DriveRequestId::new(format!("{}:g{generation}", next.as_str()))
-        }
+) -> DriveRequest {
+    DriveRequest {
+        session: request.session.clone(),
+        request: drive_continuation_request(request),
+        intended_lane: match route.lane() {
+            crate::services::Lane::Stable => None,
+            crate::services::Lane::Generation(generation) => Some(generation.clone()),
+        },
     }
 }
 
-pub(super) fn continuation_generation(request: &DriveRequestId) -> Option<BuildGeneration> {
-    let (digest, generation) = request
-        .as_str()
-        .strip_prefix(DRIVE_CONTINUATION_PREFIX)?
-        .split_once(":g")?;
-    (digest.len() == 64
-        && digest
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))
-    .then(|| BuildGeneration::parse(generation).ok())
-    .flatten()
+pub(super) fn continuation_generation(request: &DriveRequest) -> Option<BuildGeneration> {
+    request.intended_lane.clone()
 }
 
-/// Whether admission `ordinal` of `request`, on `route`, answers to its
-/// build's drain (FIG-4639): every admission after the root the drive started
-/// on does, so a drive whose build is draining admits no further root. The
-/// drive's first admission answers to none, so the root it took always runs.
-/// A continuation's first admission is the drive's next root: on a
-/// generation lane it answers to the drain too, or a drive resumed there
-/// would run its whole backlog in one-root legs on the draining build. Under
-/// the stable name a new invocation is the newest build's, so its first root
-/// runs.
+/// Every admission after the first answers the pinned build's drain. A
+/// continuation on a generation lane answers it at its first admission too;
+/// a newly resumed drive runs its first root before handing over.
 pub(super) fn drain_answered(
     route: &crate::services::ServiceRoute,
     request: &DriveRequestId,
@@ -82,22 +66,7 @@ pub(super) fn drain_answered(
 ) -> bool {
     ordinal > 0
         || matches!(route.lane(), crate::services::Lane::Generation(_))
-            && continuation_generation(request).is_some()
-}
-
-/// The request the admissions of `request`'s drive run under on the build
-/// of `generation`, the one its invocation is pinned to. A root is stamped
-/// with the generation of the build that admits it (FIG-4742), never the
-/// request's: a continuation crosses builds under the stable name, and its
-/// request keeps the generation that first sent the drive only as
-/// provenance. Stamped with that one, a root the newest build admits from a
-/// hand-off would count in, and park under, a generation it never ran on.
-pub(super) fn admits(request: &DriveRequest, generation: &BuildGeneration) -> DriveRequest {
-    DriveRequest {
-        session: request.session.clone(),
-        request: request.request.clone(),
-        build_generation: generation.clone(),
-    }
+            && request.as_str().starts_with(DRIVE_CONTINUATION_PREFIX)
 }
 
 #[expect(
@@ -116,11 +85,12 @@ impl RestateSessionWork {
         session: &SessionId,
         request: DriveRequestId,
     ) -> Result<crate::RestateInvocationId, SendDriveError> {
+        self.generation.get()?;
         let body = RestateSessionDriveRequest {
             request: DriveRequest {
                 session: session.clone(),
                 request: request.clone(),
-                build_generation: self.generation.get()?.clone(),
+                intended_lane: None,
             },
             handed_off: None,
         };
@@ -136,74 +106,88 @@ impl RestateSessionWork {
             .await?)
     }
 
-    /// Attach to `request`'s drive of `session` and return how it ended,
-    /// sending it first if nothing sent it yet: the same idempotency key as
-    /// [`send_drive`](Self::send_drive), so the call and an earlier send name
-    /// one invocation. A continuation retains its generation lane in the
-    /// recorded request id, so an attach joins that lane across build rolls.
+    /// Attach to a drive under the stable name, sending it if necessary.
     pub async fn attach_drive(
         &self,
         session: &SessionId,
         request: DriveRequestId,
-    ) -> Result<DriveOutcome, super::SendDriveError> {
-        let generation = continuation_generation(&request);
-        let route = match &generation {
+    ) -> Result<DriveOutcome, SendDriveError> {
+        self.attach_drive_request(&DriveRequest {
+            session: session.clone(),
+            request,
+            intended_lane: None,
+        })
+        .await
+    }
+
+    /// Attach to the lane retained by a drive request. A continuation's
+    /// recorded request retains this lane across build rolls.
+    pub async fn attach_drive_request(
+        &self,
+        request: &DriveRequest,
+    ) -> Result<DriveOutcome, SendDriveError> {
+        self.generation.get()?;
+        let route = match continuation_generation(request) {
             Some(generation) => self
                 .namespace
-                .generation(LashService::SessionDriver, generation.clone()),
+                .generation(LashService::SessionDriver, generation),
             None => self.namespace.stable(LashService::SessionDriver),
         };
         let body = RestateSessionDriveRequest {
-            request: DriveRequest {
-                session: session.clone(),
-                request: request.clone(),
-                build_generation: match generation {
-                    Some(generation) => generation,
-                    None => self.generation.get()?.clone(),
-                },
-            },
+            request: request.clone(),
             handed_off: None,
         };
         Ok(self
             .ingress
             .call_object_json_idempotent::<_, Reply<DriveOutcome>>(
                 &route.name(),
-                session.as_str(),
+                request.session.as_str(),
                 DRIVE_HANDLER,
                 &Call::new(body),
-                request.as_str(),
+                request.request.as_str(),
             )
             .await
             .map(Reply::into_body)?)
     }
-    /// The leg a drive continues on after `leg` ended with `outcome`, when
-    /// `leg` handed the drive on: at a root boundary, to its own lane, or
-    /// because its build is draining, to the stable name.
+
+    /// Follow every leg on its retained lane until the whole drive ends.
+    pub async fn await_drive_request(
+        &self,
+        request: &DriveRequest,
+    ) -> Result<DriveOutcome, DriveAbort> {
+        let mut leg = request.clone();
+        let mut ran = Vec::new();
+        loop {
+            let outcome = self.attach_drive_leg(&leg).await?;
+            let next = self.continuation(&leg, &outcome);
+            ran.extend(outcome.ran);
+            match next {
+                Some(next) => leg = next,
+                None => {
+                    return Ok(DriveOutcome {
+                        ran,
+                        stop: outcome.stop,
+                    });
+                }
+            }
+        }
+    }
+
     pub(super) fn continuation(
         &self,
-        session: &SessionId,
-        leg: &DriveRequestId,
+        leg: &DriveRequest,
         outcome: &DriveOutcome,
-    ) -> Option<DriveRequestId> {
-        // A leg ended, so a core bound the generation before it was sent.
-        let build_generation = self.generation.get().ok()?.clone();
-        let leg = DriveRequest {
-            session: session.clone(),
-            request: leg.clone(),
-            build_generation,
+    ) -> Option<DriveRequest> {
+        let route = match outcome.stop {
+            DriveStop::HandedOff { .. } => match continuation_generation(leg) {
+                Some(generation) => self
+                    .namespace
+                    .generation(LashService::SessionDriver, generation),
+                None => self.namespace.stable(LashService::SessionDriver),
+            },
+            DriveStop::Draining { .. } => self.namespace.stable(LashService::SessionDriver),
+            _ => return None,
         };
-        match outcome.stop {
-            DriveStop::HandedOff { .. } => {
-                let route = match continuation_generation(&leg.request) {
-                    Some(generation) => self
-                        .namespace
-                        .generation(LashService::SessionDriver, generation),
-                    None => self.namespace.stable(LashService::SessionDriver),
-                };
-                Some(session_drive_continuation(&leg, &route))
-            }
-            DriveStop::Draining { .. } => Some(drive_continuation_request(&leg)),
-            _ => None,
-        }
+        Some(session_drive_continuation(leg, &route))
     }
 }

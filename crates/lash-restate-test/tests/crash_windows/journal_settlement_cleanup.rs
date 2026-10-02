@@ -35,6 +35,7 @@ impl SessionDriver for HeldDriver {
         &self,
         _controller: lash_core::ScopedEffectController<'_>,
         request: &DriveRequest,
+        admitting_generation: &lash_core::engine::BuildGeneration,
         ordinal: u32,
         _draining: Option<&lash_core::engine::BuildGeneration>,
     ) -> Result<AdmitVerdict, DriveAbort> {
@@ -46,7 +47,7 @@ impl SessionDriver for HeldDriver {
                     request.request.clone(),
                     AdmissionId::new("awaited#0"),
                     u64::from(ordinal),
-                    request.build_generation.clone(),
+                    admitting_generation.clone(),
                     lash_core::engine::AdmittedWork::Input {
                         head: "awaited-input".into(),
                     },
@@ -228,7 +229,7 @@ async fn law(storage: Storage, live: bool, kind: JournalKind) {
                                 request: DriveRequest {
                                     session: session.clone(),
                                     request: DriveRequestId::new("drain-drive"),
-                                    build_generation: generation,
+                                    intended_lane: None,
                                 },
                                 handed_off: None,
                             }),

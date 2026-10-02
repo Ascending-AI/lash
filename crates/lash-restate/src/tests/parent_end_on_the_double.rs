@@ -207,7 +207,7 @@ impl World {
         let request = DriveRequest {
             session: self.session_id.clone(),
             request: DriveRequestId::new(format!("parent-end-drive-{}", self.nonce)),
-            build_generation: lash_core::engine::BuildGeneration::for_test("parent-end-laws"),
+            intended_lane: None,
         };
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let world = Arc::clone(self);

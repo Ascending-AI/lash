@@ -104,6 +104,7 @@ impl SessionDriver for HeldDriver {
         &self,
         controller: ScopedEffectController<'_>,
         request: &DriveRequest,
+        _admitting_generation: &lash_core::engine::BuildGeneration,
         ordinal: u32,
         _draining: Option<&lash_core::engine::BuildGeneration>,
     ) -> Result<AdmitVerdict, DriveAbort> {
@@ -355,7 +356,7 @@ async fn a_session_drive_replayed_under_another_generation_parks_at_its_leg_star
                 request: DriveRequest {
                     session: session.clone(),
                     request: request.clone(),
-                    build_generation: lash_core::engine::BuildGeneration::for_test("G_a"),
+                    intended_lane: None,
                 },
                 handed_off: None,
             }),
@@ -381,7 +382,7 @@ async fn a_session_drive_replayed_under_another_generation_parks_at_its_leg_star
                 request: DriveRequest {
                     session: session.clone(),
                     request: request.clone(),
-                    build_generation: lash_core::engine::BuildGeneration::for_test("G_a"),
+                    intended_lane: None,
                 },
                 handed_off: None,
             }),

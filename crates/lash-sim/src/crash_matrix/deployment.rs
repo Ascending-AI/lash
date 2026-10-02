@@ -437,12 +437,13 @@ impl SessionDriver for DriverProxy {
         &self,
         controller: lash_core::ScopedEffectController<'_>,
         request: &lash_core::engine::DriveRequest,
+        admitting_generation: &lash_core::engine::BuildGeneration,
         ordinal: u32,
         draining: Option<&lash_core::engine::BuildGeneration>,
     ) -> Result<lash_core::engine::AdmitVerdict, lash_core::engine::DriveAbort> {
         self.live()
             .await
-            .admit(controller, request, ordinal, draining)
+            .admit(controller, request, admitting_generation, ordinal, draining)
             .await
     }
 

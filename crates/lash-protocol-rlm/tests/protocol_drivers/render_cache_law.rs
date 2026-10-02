@@ -246,20 +246,13 @@ async fn drive_with_run_spec(
         ))
         .await
         .expect("open drive handler");
-    let build_generation = runtime
-        .host
-        .core
-        .backend()
-        .build_generation()
-        .expect("the engine's generation is bound")
-        .clone();
     let outcome = lash_core::drive::drive_session(
         runtime,
         &handler.scoped(),
         &lash_core::engine::DriveRequest {
             session: session_id.clone(),
             request: lash_core::engine::DriveRequestId::new("rlm-render-law-run-spec"),
-            build_generation,
+            intended_lane: None,
         },
     )
     .await
