@@ -144,6 +144,8 @@ pub struct TranscriptToolOutput {
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct TranscriptSession {
     pub session: String,
+    /// Committed conversation messages on the active path, oldest first.
+    pub messages: Vec<(String, String)>,
     pub calls: Vec<TranscriptCall>,
     pub results: Vec<TranscriptToolOutput>,
 }
@@ -453,9 +455,9 @@ impl StoreSnapshot {
         Ok(())
     }
 
-    /// Read every session's committed transcript back through `stores`'
-    /// session factory. A session the factory cannot reopen as a root (a
-    /// child or process-owned session) has no transcript here.
+    /// Read every session's committed messages, including child sessions.
+    /// Root sessions reopened through the factory also expose tool calls
+    /// and results to the tool checkers.
     pub async fn read_transcripts(
         &mut self,
         stores: &lash_sqlite_store::SqliteStoreSet,
@@ -465,19 +467,25 @@ impl StoreSnapshot {
         let sessions = read(
             stores,
             SqliteDatabase::DurableCore,
-            "SELECT session_id FROM session_meta WHERE relation_kind = 'root' \
-             ORDER BY session_id",
+            "SELECT session_id FROM session_meta ORDER BY session_id",
         )?;
         for session in sessions.iter().map(|row| required(row, "session_id")) {
+            let messages = crate::crash_matrix::invariants::transcript_from(
+                factory.as_ref(),
+                &lash_core::SessionId::from(session.as_str()),
+            )
+            .await?;
+            let mut transcript = TranscriptSession {
+                session: session.clone(),
+                messages,
+                ..Default::default()
+            };
             let Ok(Some(reopened)) =
                 crate::content_oracle::reopen_session(factory.as_ref(), usage.as_ref(), &session)
                     .await
             else {
+                self.transcripts.push(transcript);
                 continue;
-            };
-            let mut transcript = TranscriptSession {
-                session: session.clone(),
-                ..TranscriptSession::default()
             };
             for (message, committed) in reopened.assistant_messages.iter().enumerate() {
                 for (index, call) in committed.tool_calls.iter().enumerate() {

@@ -9,7 +9,7 @@
 //! final durable rows of every store the run wrote ([`StoreSnapshot`]). Each
 //! [`HistoryChecker`] reads a history and returns its [`Violation`]s;
 //! [`CHECKERS`] is the one registry [`check`] runs. Adding a checker is one
-//! file in this module and one line in [`CHECKERS`].
+//! file in this module and one entry in `checkers!`.
 //!
 //! Where each checker's facts come from:
 //!
@@ -23,6 +23,8 @@
 //! | [`input_settlement`] | `pending_turn_inputs`, `queued_work_batches`, `session_roots` and `session_root_inputs` |
 //! | [`start_originator`] | the host's process starts, each with the originator it requested and the one the answered process carries ([`Fact::ProcessStartAnswered`]) |
 //! | [`frame_lineage`] | `graph_nodes` and `session_head` |
+//! | [`host_admission`] | typed host send outcomes, raw input rows and committed input/answer markers |
+//! | [`transcript_order`] | sequential Known host sends and their committed user-message positions |
 //!
 //! Store rows are read raw, through the SQLite store's test-only
 //! `read_rows_for_testing` (`lash-sqlite-store`, `testing` feature), the
@@ -42,16 +44,28 @@
 //! A violation a known runtime defect causes is [`quarantine`]d by name: it is
 //! still printed with its seed and excerpt, and it no longer fails the run.
 
-mod artifact_reachability;
-mod completion_ownership;
-mod effect_window;
-mod frame_lineage;
-mod input_settlement;
-mod obligations_settled;
+macro_rules! checkers {
+    ($($module:ident => $checker:ident),+ $(,)?) => {
+        $(mod $module;)+
+        /// Every checker [`check`] runs, in report order.
+        pub static CHECKERS: &[&dyn HistoryChecker] = &[$(&$module::$checker),+];
+    };
+}
+
+checkers! {
+    completion_ownership => CompletionOwnership,
+    effect_window => EffectWindow,
+    obligations_settled => ObligationsSettled,
+    artifact_reachability => ArtifactReachability,
+    tool_call_identity => ToolCallIdentity,
+    input_settlement => InputSettlement,
+    start_originator => StartOriginator,
+    frame_lineage => FrameLineage,
+    host_admission => HostAdmission,
+    transcript_order => TranscriptOrder,
+}
 pub mod quarantine;
 mod snapshot;
-mod start_originator;
-mod tool_call_identity;
 
 #[cfg(test)]
 mod tests;
@@ -194,10 +208,60 @@ pub struct CallRef {
     pub identity: CallIdentity,
 }
 
+/// A sequential host request, recorded once after its keyed retries finish.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostOp {
+    Send,
+    SendBatch,
+    Delete,
+    Cancel,
+    Redrive,
+}
+
+/// Whether the host heard its operation accepted.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostOutcome {
+    Known,
+    Maybe,
+    Refused { code: HostRefusalCode },
+}
+
+/// Refusal identities retained without parsing an error's display text.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostRefusalCode {
+    Runtime(lash_core::RuntimeErrorCode),
+    UnknownSession,
+}
+
+/// A fault or deployment transition at a harness seam.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FaultKind {
+    Kill,
+    EngineCut,
+    HostCrash,
+    Refusal,
+    LeaseLoss,
+    Roll,
+}
+
 /// One trace fact.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "fact", rename_all = "snake_case")]
 pub enum Fact {
+    HostOp {
+        op: HostOp,
+        session: String,
+        roots: Vec<String>,
+        outcome: HostOutcome,
+    },
+    Fault {
+        kind: FaultKind,
+        detail: String,
+    },
     /// A scheduler boundary the run delivered.
     Boundary {
         boundary_id: String,
@@ -219,7 +283,10 @@ pub enum Fact {
         failed_attempts_before: u64,
     },
     /// A deferring call registered its completion key.
-    CompletionRegistered { key: String, call: CallRef },
+    CompletionRegistered {
+        key: String,
+        call: CallRef,
+    },
     /// The host resolved `key`; the committed result that carries it reads
     /// as `result_digest`.
     CompletionResolved {
@@ -255,8 +322,10 @@ impl Fact {
             Self::ToolExecuted { call, .. } | Self::CompletionRegistered { call, .. } => {
                 Some(&call.session)
             }
-            Self::CompletionResolved { session, .. } => Some(session),
-            Self::EffectRan { .. } | Self::ProcessStartAnswered { .. } => None,
+            Self::CompletionResolved { session, .. } | Self::HostOp { session, .. } => {
+                Some(session)
+            }
+            Self::EffectRan { .. } | Self::ProcessStartAnswered { .. } | Self::Fault { .. } => None,
         }
     }
 }
@@ -437,18 +506,6 @@ pub trait HistoryChecker: Sync {
     fn observed(&self, history: &History) -> usize;
 }
 
-/// Every checker [`check`] runs, in report order.
-pub static CHECKERS: &[&dyn HistoryChecker] = &[
-    &completion_ownership::CompletionOwnership,
-    &effect_window::EffectWindow,
-    &obligations_settled::ObligationsSettled,
-    &artifact_reachability::ArtifactReachability,
-    &tool_call_identity::ToolCallIdentity,
-    &input_settlement::InputSettlement,
-    &start_originator::StartOriginator,
-    &frame_lineage::FrameLineage,
-];
-
 /// Every checker's verdict on one history.
 #[derive(Clone, Debug, Serialize)]
 pub struct Report {
@@ -456,6 +513,8 @@ pub struct Report {
     pub seed: u64,
     /// Each checker's invariant and how many facts it judged.
     pub observed: Vec<(&'static str, usize)>,
+    /// Host operations whose session deletion erased its durable evidence.
+    pub downgraded: usize,
     /// Violations no quarantine entry covers: these fail the run.
     pub violations: Vec<Violation>,
     /// Violations a quarantine entry covers, with the entry's name.
@@ -473,6 +532,26 @@ impl Report {
         self.violations.is_empty()
     }
 
+    /// Reject a confidence run that gave any registered checker no facts.
+    pub fn require_observed(&mut self) {
+        for (invariant, observed) in &self.observed {
+            if *observed == 0 {
+                let violation = Violation::new(invariant, "checker observed zero facts");
+                let rendered = self.history.as_ref().map_or_else(
+                    || {
+                        format!(
+                            "{} seed {:#018x}: {} observed zero facts",
+                            self.scenario, self.seed, invariant
+                        )
+                    },
+                    |history| render(history, &violation),
+                );
+                self.rendered.insert(self.violations.len(), rendered);
+                self.violations.push(violation);
+            }
+        }
+    }
+
     /// One line per checker: what it judged.
     #[must_use]
     pub fn summary(&self) -> String {
@@ -483,11 +562,12 @@ impl Report {
             .collect::<Vec<_>>()
             .join(" ");
         format!(
-            "{} seed {:#018x}: {} violation(s), {} quarantined; judged {counts}",
+            "{} seed {:#018x}: {} violation(s), {} quarantined; judged {counts}; {} deletion downgrade(s)",
             self.scenario,
             self.seed,
             self.violations.len(),
-            self.quarantined.len()
+            self.quarantined.len(),
+            self.downgraded,
         )
     }
 
@@ -530,7 +610,14 @@ impl Report {
 /// Run every registered checker over `history`.
 #[must_use]
 pub fn check(history: &History) -> Report {
-    check_with(history, CHECKERS)
+    let mut report = check_with(history, CHECKERS);
+    if history.scenario == "chaos-soak"
+        && report.observed.iter().any(|(_, observed)| *observed == 0)
+    {
+        // The smoke may reject a vacuous pass; retain its diagnostic history.
+        report.history = Some(history.clone());
+    }
+    report
 }
 
 /// Run `checkers` over `history`: [`check`] with a chosen registry.
@@ -559,6 +646,7 @@ pub fn check_with(history: &History, checkers: &[&dyn HistoryChecker]) -> Report
         scenario: history.scenario.clone(),
         seed: history.seed,
         observed,
+        downgraded: host_admission::downgraded(history),
         violations,
         quarantined,
         rendered,
@@ -583,24 +671,36 @@ pub fn render(history: &History, violation: &Violation) -> String {
         .into_iter()
         .filter_map(|at| history.records.get(at))
         .collect::<Vec<_>>();
-    let excerpt: Vec<&Record> = if named.is_empty() {
-        match &violation.session {
-            Some(session) => {
-                let mut tail = history
-                    .records
-                    .iter()
-                    .rev()
-                    .filter(|record| record.fact.session() == Some(session.as_str()))
-                    .take(EXCERPT_RECORDS)
-                    .collect::<Vec<_>>();
-                tail.reverse();
-                tail
+    let excerpt: Vec<&Record> =
+        if matches!(violation.invariant, "host-admission" | "transcript-order")
+            && let Some(session) = &violation.session
+        {
+            history
+                .records
+                .iter()
+                .filter(|record| {
+                    record.fact.session() == Some(session.as_str())
+                        || matches!(record.fact, Fact::Fault { .. })
+                })
+                .collect()
+        } else if named.is_empty() {
+            match &violation.session {
+                Some(session) => {
+                    let mut tail = history
+                        .records
+                        .iter()
+                        .rev()
+                        .filter(|record| record.fact.session() == Some(session.as_str()))
+                        .take(EXCERPT_RECORDS)
+                        .collect::<Vec<_>>();
+                    tail.reverse();
+                    tail
+                }
+                None => Vec::new(),
             }
-            None => Vec::new(),
-        }
-    } else {
-        named
-    };
+        } else {
+            named
+        };
     if !excerpt.is_empty() {
         out.push_str("  trace excerpt:\n");
         for record in excerpt {
@@ -689,8 +789,23 @@ pub async fn check_crash_world(
     world: &crate::crash_matrix::world::CrashWorld,
     scenario: &str,
 ) -> Vec<String> {
+    match report_crash_world(world, scenario).await {
+        Ok(Some(report)) => {
+            report.print_quarantined();
+            report.rendered[..report.violations.len()].to_vec()
+        }
+        Ok(None) => Vec::new(),
+        Err(error) => vec![error],
+    }
+}
+
+/// The final recovered history and its checker counts.
+pub async fn report_crash_world(
+    world: &crate::crash_matrix::world::CrashWorld,
+    scenario: &str,
+) -> Result<Option<Report>, String> {
     let Some(stores) = world.sqlite_stores() else {
-        return Vec::new();
+        return Ok(None);
     };
     // One more recovery pass, so the history ends after the relay had its
     // chance at everything the run armed, its last step's writes included.
@@ -699,7 +814,7 @@ pub async fn check_crash_world(
     world.quiesce().await;
     let mut history = match capture_crash_world(world, stores, scenario, relayed).await {
         Ok(history) => history,
-        Err(error) => return vec![error],
+        Err(error) => return Err(error),
     };
     // A claim still held once every pass has quiesced is a dead claimant's:
     // its deployment died inside the pass that took it. Nobody may retake it
@@ -725,12 +840,10 @@ pub async fn check_crash_world(
         world.quiesce().await;
         history = match capture_crash_world(world, stores, scenario, relayed).await {
             Ok(history) => history,
-            Err(error) => return vec![error],
+            Err(error) => return Err(error),
         };
     }
-    let report = check(&history);
-    report.print_quarantined();
-    report.rendered[..report.violations.len()].to_vec()
+    Ok(Some(check(&history)))
 }
 
 /// `world`'s stores as they stand now, as a history of `scenario`.

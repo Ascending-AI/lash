@@ -89,7 +89,7 @@ pub(super) async fn expected(world: &CrashWorld, ledger: &Ledger) -> Result<Expe
     let mut deleted = Vec::new();
     let mut live = Vec::new();
     for slot in &ledger.sessions {
-        let fate = match slot.deleted {
+        let fate = match slot.deleted.clone() {
             Some(admission) => delete_fate(world, &slot.id, admission).await?,
             None => DeleteFate::Live,
         };

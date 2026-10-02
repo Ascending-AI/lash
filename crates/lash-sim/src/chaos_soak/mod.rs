@@ -14,7 +14,8 @@
 //!   with an engine waiter on their terminal.
 //! - **Faults.** The deployment killed where it stands, a first attempt of a
 //!   lash invocation cut at a seeded journal command, the host killed at one
-//!   of the crash matrix's seam boundaries, the recovery leader lease taken by
+//!   of the crash matrix's seam boundaries, typed one-shot admission refusals,
+//!   the recovery leader lease taken by
 //!   another holder for a few ticks, and rolling deploys: build N+1 is
 //!   registered, the deployment moves onto it, generation N is drained from
 //!   it and N's build is removed once N holds nothing.
@@ -30,6 +31,9 @@
 //! took effect at most once, every engine waiter was answered, every root's
 //! scope close delivered, and every retired generation holds nothing. A live
 //! session must then still drive a fresh input.
+//! Each epoch also completes one real deferred tool through `ToolProvider`.
+//! The smoke law requires evidence for every registered global checker;
+//! host outcomes and fault facts remain in its diagnostic history.
 //!
 //! **Replay.** An epoch's plan is a function of its seed alone, and epoch 0's
 //! seed is the soak's. A failed epoch prints its seed and the trace of the
@@ -44,6 +48,7 @@ pub mod findings;
 pub mod host;
 pub mod plan;
 mod progress;
+mod witness;
 
 use std::time::{Duration, Instant};
 
@@ -51,7 +56,7 @@ use crate::crash_matrix::invariants;
 
 /// The recovery ticks an epoch's end may take to reach its end state: a
 /// quarter hour of virtual time, past every §1.8 bound but the attempt
-/// ceiling (which a soak without refusals never meets).
+/// ceiling (which one-shot admission refusals do not meet).
 const FINAL_TICKS: usize = 90;
 
 /// Leave time for diagnostics and shutdown before the 600s CI action limit.
@@ -162,6 +167,8 @@ pub struct EpochReport {
     /// Stalled obligations at the end, and what the epoch drew.
     pub notes: Vec<String>,
     pub counts: driver::Counts,
+    /// The global checker verdicts and their observation counts.
+    pub invariants: Option<crate::invariants::Report>,
     pub inputs: usize,
     pub held: usize,
     pub processes: usize,
@@ -484,6 +491,9 @@ async fn finish_with_progress(
         }
     }
     if held {
+        if let Err(error) = driver.witness().await {
+            report.violations.push(format!("checker witness: {error}"));
+        }
         progress.record("live-session probes and global invariants");
         report
             .notes
@@ -506,12 +516,31 @@ async fn finish_with_progress(
                 .collect(),
             ..invariants::Expected::default()
         };
+        for session in &probed.live_sessions {
+            if let Err(error) = driver.send_probe(session).await {
+                report.violations.push(error);
+            }
+        }
         report
             .violations
             .extend(invariants::probe_live_sessions(&driver.world, &probed, 6).await);
-        report
-            .violations
-            .extend(crate::invariants::check_crash_world(&driver.world, "chaos-soak").await);
+        match crate::invariants::report_crash_world(&driver.world, "chaos-soak").await {
+            Ok(Some(history)) => {
+                history.print_quarantined();
+                report.notes.push(history.summary());
+                report
+                    .violations
+                    .extend(history.rendered[..history.violations.len()].iter().cloned());
+                if !history.passed() {
+                    report.notes.push(history.failure());
+                }
+                report.invariants = Some(history);
+            }
+            Ok(None) => report
+                .violations
+                .push("the soak captured no history".to_owned()),
+            Err(error) => report.violations.push(error),
+        }
     } else {
         report.violations.push(format!(
             "the end state never held within {FINAL_TICKS} recovery ticks"
@@ -802,6 +831,12 @@ mod tests {
             .id("held-first")
             .await
             .expect("accept held input");
+        driver.record_host(
+            crate::invariants::HostOp::Send,
+            &session,
+            vec!["held-first".to_owned()],
+            driver::Admission::Known,
+        );
         driver.ledger.held.push(driver::HeldRoot {
             session: session.clone(),
             root: "held-first".to_owned(),
@@ -814,6 +849,12 @@ mod tests {
             .id("held-withdrawn")
             .await
             .expect("accept the input to withdraw");
+        driver.record_host(
+            crate::invariants::HostOp::Send,
+            &session,
+            vec!["held-withdrawn".to_owned()],
+            driver::Admission::Known,
+        );
         let withdrawn = lash_core::InputId::from(lash_core::PendingTurnInputDraft::keyed_input_id(
             &session,
             "held-withdrawn",
@@ -822,6 +863,12 @@ mod tests {
             .cancel(lash::CancelTarget::Input(withdrawn.clone()))
             .await
             .expect("withdraw the queued input");
+        driver.record_host(
+            crate::invariants::HostOp::Cancel,
+            &session,
+            vec!["held-withdrawn".to_owned()],
+            driver::Admission::Known,
+        );
         assert!(
             matches!(receipt, lash::CancelReceipt::Withdrawn(_)),
             "the input is withdrawn while the drive is held: {receipt:?}"
@@ -923,6 +970,12 @@ mod tests {
                 .id(input)
                 .await
                 .expect("accept held input");
+            driver.record_host(
+                crate::invariants::HostOp::Send,
+                &session,
+                vec![input.to_owned()],
+                driver::Admission::Known,
+            );
             driver.ledger.held.push(driver::HeldRoot {
                 session: session.clone(),
                 root: input.to_owned(),

@@ -73,6 +73,101 @@ fn assert_caught(history: &History, invariant: &str) -> Report {
     report
 }
 
+#[test]
+fn soak_history_host_admission_catches_unrequested_input_rows() {
+    let mut history = History::new("chaos-soak", SEED);
+    history.stores.push(StoreSnapshot {
+        label: "engine".to_owned(),
+        inputs: vec![InputRow {
+            table: "pending_turn_inputs".to_owned(),
+            session: "s".to_owned(),
+            id: "phantom".to_owned(),
+            state: Some("completed".to_owned()),
+            admitted_root: Some("phantom".to_owned()),
+            obligation_state: None,
+        }],
+        ..StoreSnapshot::default()
+    });
+    assert_caught(&history, "host-admission");
+    let clean = host_history();
+    assert!(check_with(&clean, &[checker("host-admission")]).passed());
+    let mut history = clean.clone();
+    history.stores[0].inputs.pop();
+    assert_caught(&history, "host-admission");
+    for outcome in [
+        HostOutcome::Known,
+        HostOutcome::Maybe,
+        HostOutcome::Refused {
+            code: HostRefusalCode::Runtime(lash_core::RuntimeErrorCode::WriterFenced),
+        },
+    ] {
+        let mut history = clean.clone();
+        if let Fact::HostOp {
+            outcome: recorded, ..
+        } = &mut history.records[0].fact
+        {
+            *recorded = outcome;
+        }
+        let duplicate = history.stores[0].inputs[0].clone();
+        history.stores[0].inputs.push(duplicate);
+        assert_caught(&history, "host-admission");
+    }
+    let mut refused = clean.clone();
+    if let Fact::HostOp { outcome, .. } = &mut refused.records[0].fact {
+        *outcome = HostOutcome::Refused {
+            code: HostRefusalCode::Runtime(lash_core::RuntimeErrorCode::WriterFenced),
+        };
+    }
+    assert_caught(&refused, "host-admission");
+    refused.stores[0].inputs.remove(0);
+    assert_caught(&refused, "host-admission");
+    refused.stores[0].transcripts[0].messages.remove(0);
+    refused.stores[0].transcripts[0]
+        .messages
+        .last_mut()
+        .expect("answer")
+        .1 = "answer:b;".to_owned();
+    assert!(check_with(&refused, &[checker("host-admission")]).passed());
+    let mut history = clean.clone();
+    history.stores[0].transcripts[0]
+        .messages
+        .push(("user".to_owned(), "input:phantom;".to_owned()));
+    assert_caught(&history, "host-admission");
+    let mut history = clean.clone();
+    history.stores[0].transcripts[0].messages[0].1 = "input:a;input:a;answer:a;".to_owned();
+    assert_caught(&history, "host-admission");
+    let mut history = clean;
+    history.push(Fact::HostOp {
+        op: HostOp::Delete,
+        session: "s".to_owned(),
+        roots: Vec::new(),
+        outcome: HostOutcome::Known,
+    });
+    history.stores[0].inputs.clear();
+    history.stores[0].transcripts.clear();
+    let report = check_with(&history, &[checker("host-admission")]);
+    assert!(report.passed(), "{}", report.failure());
+    assert_eq!(report.downgraded, 2);
+}
+
+#[test]
+fn soak_history_transcript_order_catches_reversed_markers() {
+    let mut history = host_history();
+    let report = check_with(&history, &[checker("transcript-order")]);
+    assert!(report.passed(), "{}", report.failure());
+    assert_eq!(report.observed, [("transcript-order", 1)]);
+    history.stores[0].transcripts[0].messages.swap(0, 1);
+    let report = assert_caught(&history, "transcript-order");
+    assert!(report.failure().contains("host_op"));
+    assert!(report.failure().contains("fault"));
+    // Both inputs may be in one user message. Byte order remains observable.
+    history.stores[0].transcripts[0].messages =
+        vec![("user".to_owned(), "input:b;input:a;".to_owned())];
+    assert_caught(&history, "transcript-order");
+    history.stores[0].transcripts[0].messages[0].1 = "input:a;input:b;".to_owned();
+    assert!(check_with(&history, &[checker("transcript-order")]).passed());
+}
+
 fn tool_run(history: &History) -> (usize, CallRef, u32, u64) {
     history
         .records
@@ -96,9 +191,11 @@ fn the_clean_history_keeps_every_invariant_and_gives_each_facts() {
     for (invariant, observed) in &report.observed {
         if *invariant == "artifact-reachable-or-collected"
             || *invariant == "an-existing-start-is-answered-only-to-its-originator"
+            || *invariant == "host-admission"
+            || *invariant == "transcript-order"
         {
             // The pending-tool turn stores no artifact and makes no host
-            // start; each red fixture adds its own.
+            // start or sequential host sends; each red fixture adds its own.
             continue;
         }
         assert!(
@@ -585,4 +682,56 @@ fn failure_artifact_keeps_seed_history_and_checker() {
             .unwrap()
             .contains("effect-at-least-once-window")
     }));
+}
+
+#[test]
+fn soak_history_empty_history_cannot_pass_vacuously() {
+    let mut report = check(&History::new("chaos-soak", SEED));
+    report.require_observed();
+    assert!(!report.passed(), "{}", report.summary());
+}
+
+fn host_history() -> History {
+    let mut history = History::new("chaos-soak", SEED);
+    for root in ["a", "b"] {
+        history.push(Fact::HostOp {
+            op: HostOp::Send,
+            session: "s".to_owned(),
+            roots: vec![root.to_owned()],
+            outcome: HostOutcome::Known,
+        });
+    }
+    history.push(Fact::Fault {
+        kind: FaultKind::Kill,
+        detail: "fixture crash".to_owned(),
+    });
+    history.stores.push(StoreSnapshot {
+        label: "engine".to_owned(),
+        inputs: ["a", "b"]
+            .into_iter()
+            .map(|root| InputRow {
+                table: "pending_turn_inputs".to_owned(),
+                session: "s".to_owned(),
+                id: lash_core::PendingTurnInputDraft::keyed_input_id(
+                    &lash_core::SessionId::from("s"),
+                    root,
+                )
+                .to_string(),
+                state: Some("completed".to_owned()),
+                admitted_root: Some(root.to_owned()),
+                obligation_state: None,
+            })
+            .collect(),
+        transcripts: vec![TranscriptSession {
+            session: "s".to_owned(),
+            messages: vec![
+                ("user".to_owned(), "input:a;".to_owned()),
+                ("user".to_owned(), "input:b;".to_owned()),
+                ("assistant".to_owned(), "answer:a;answer:b;".to_owned()),
+            ],
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    history
 }

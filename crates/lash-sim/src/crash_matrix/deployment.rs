@@ -115,6 +115,8 @@ impl Trip {
 /// host process can die.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum HostSite {
+    /// Before host inputs are admitted to the store.
+    AdmitInputsBefore,
     /// The engine share is prepared, before the frame SQL transaction.
     FrameCommitBefore,
     /// The frame SQL transaction committed, before its caller hears the receipt.
@@ -167,6 +169,7 @@ struct Arm {
 pub struct HostFaults {
     arms: Mutex<Vec<Arm>>,
     trip: Arc<Trip>,
+    recorder: Mutex<Option<crate::invariants::HistoryRecorder>>,
 }
 
 impl HostFaults {
@@ -175,7 +178,18 @@ impl HostFaults {
         Self {
             arms: Mutex::new(Vec::new()),
             trip,
+            recorder: Mutex::new(None),
         }
+    }
+
+    /// Observe faults taken by the trait decorators.
+    pub fn observe(&self, recorder: crate::invariants::HistoryRecorder) {
+        *self.recorder.lock_recover() = Some(recorder);
+    }
+
+    /// Refuse the next call at the site, leaving later calls unaffected.
+    pub fn refuse_once(&self, site: HostSite) {
+        self.arm(site, ArmEffect::Refuse, Some(1), None);
     }
 
     /// Crash the host the next time a call reaches `site`.
@@ -266,6 +280,16 @@ impl HostFaults {
         let effect = arm.effect;
         let retryable_cut = arm.retryable_cut.take();
         drop(arms);
+        if let Some(recorder) = self.recorder.lock_recover().as_ref() {
+            recorder.record(crate::invariants::Fact::Fault {
+                kind: if effect == ArmEffect::Crash {
+                    crate::invariants::FaultKind::HostCrash
+                } else {
+                    crate::invariants::FaultKind::Refusal
+                },
+                detail: format!("taken {effect:?} at {site:?}: {detail}"),
+            });
+        }
         if let Some(cut) = retryable_cut {
             self.trip.fire(cut);
         }
@@ -602,6 +626,26 @@ impl lash_core::store::RuntimeStoreDecorator for CrashSessionFactory {
 
     fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
+    }
+
+    async fn admit_pending_turn_inputs(
+        &self,
+        batch: lash_core::PendingTurnInputBatch,
+        ingress_claim_ttl_ms: u64,
+    ) -> StoreResult<lash_core::store::TurnInputAdmission> {
+        match self.faults.take(HostSite::AdmitInputsBefore, "host inputs") {
+            Some(ArmEffect::Crash) => die().await,
+            Some(ArmEffect::Refuse) => Err(lash_core::StoreError::WriterFenced {
+                recorded: 2,
+                writable: lash_core::compat::VersionRange::exactly(1),
+            }),
+            Some(ArmEffect::FailRetryable) => Err(lash_core::StoreError::Contended),
+            None => {
+                self.inner
+                    .admit_pending_turn_inputs(batch, ingress_claim_ttl_ms)
+                    .await
+            }
+        }
     }
 
     async fn commit_runtime_state(

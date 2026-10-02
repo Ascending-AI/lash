@@ -69,6 +69,8 @@ pub enum Step {
     ArmEngineCut { service: &'static str, index: usize },
     /// Crash the host the next time a call reaches `site`.
     ArmHostCrash { site: HostSite },
+    /// Refuse the next host admission through its store seam.
+    ArmHostRefusal { site: HostSite },
     /// Another holder takes the recovery leader lease for `ticks` ticks and
     /// then gives it up.
     LeaseLoss { ticks: u32 },
@@ -95,6 +97,7 @@ impl Step {
             Self::Kill => "kill",
             Self::ArmEngineCut { .. } => "engine_cut",
             Self::ArmHostCrash { .. } => "host_crash",
+            Self::ArmHostRefusal { .. } => "host_refusal",
             Self::LeaseLoss { .. } => "lease_loss",
             Self::Roll => "roll",
         }
@@ -103,7 +106,7 @@ impl Step {
 
 /// The step kinds a triage run may leave out: every kind but the ones that
 /// open sessions, send, or move time, which later steps build on.
-pub const OPTIONAL_KINDS: [&str; 11] = [
+pub const OPTIONAL_KINDS: [&str; 12] = [
     "send_batch",
     "command",
     "cancel_held",
@@ -113,6 +116,7 @@ pub const OPTIONAL_KINDS: [&str; 11] = [
     "kill",
     "engine_cut",
     "host_crash",
+    "host_refusal",
     "lease_loss",
     "roll",
 ];
@@ -277,8 +281,11 @@ pub fn plan(seed: u64, steps: usize, without: &[String]) -> Vec<Step> {
                     index: 1 + rng.u64(0..commands) as usize,
                 }
             }
-            90..=93 => Step::ArmHostCrash {
+            90..=91 => Step::ArmHostCrash {
                 site: HOST_SITES[rng.usize(0..HOST_SITES.len())],
+            },
+            92..=93 => Step::ArmHostRefusal {
+                site: HostSite::AdmitInputsBefore,
             },
             94..=96 => Step::LeaseLoss {
                 ticks: rng.u32(1..6),
@@ -321,6 +328,6 @@ mod tests {
     fn every_step_kind_is_drawn() {
         let steps = plan(7, 2_000, &[]);
         let kinds: std::collections::BTreeSet<&str> = steps.iter().map(Step::kind).collect();
-        assert_eq!(kinds.len(), 15, "{kinds:?}");
+        assert_eq!(kinds.len(), 16, "{kinds:?}");
     }
 }

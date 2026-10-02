@@ -180,6 +180,12 @@ async fn missing_unstarted_root_runs_once_from_its_ingress() {
         .id(root)
         .await
         .expect("accept the input");
+    driver.record_host(
+        crate::invariants::HostOp::Send,
+        &session,
+        vec![root.to_owned()],
+        driver::Admission::Known,
+    );
     driver.ledger.inputs.push(driver::SentInput {
         session: session.clone(),
         root: root.to_owned(),

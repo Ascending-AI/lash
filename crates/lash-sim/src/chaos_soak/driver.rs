@@ -52,16 +52,8 @@ const OPEN_ATTEMPTS: u32 = 3;
 /// delete unanswered.
 const DELETE_UNANSWERED_RETRIES: u32 = 2;
 
-/// Whether the host saw an admission answered.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Admission {
-    /// The host saw it accepted: it must take effect exactly once.
-    Known,
-    /// The host died inside the call: it took effect at most once, and
-    /// exactly once if its commit landed.
-    Maybe,
-}
-
+pub use crate::invariants::HostOutcome as Admission;
+use crate::invariants::{Fact, FaultKind, HostOp, HostRefusalCode};
 /// An input the host sent, and whether it saw the acceptance.
 #[derive(Clone, Debug)]
 pub struct SentInput {
@@ -133,6 +125,7 @@ pub(super) fn soak_core(
     reached: Reached,
     rank: Arc<AtomicI64>,
     drain: lash::DrainMode,
+    tool: Arc<super::witness::WitnessTool>,
 ) -> CoreBuild {
     Arc::new(move |backend, owner| {
         let model = process::model_spec()?;
@@ -149,6 +142,7 @@ pub(super) fn soak_core(
             timings: soak_lease_timings(),
         })
         .serve_test_model(soak_provider(Arc::clone(&reached)), model)
+        .tools(tool.clone() as Arc<dyn lash_core::ToolProvider>)
         .plugin(Arc::new(processes))
         .build(owner)
         .map_err(|error| format!("build the lash core: {error}"))
@@ -175,14 +169,22 @@ fn soak_provider(reached: Reached) -> lash_core::facade_support::ProviderHandle 
         .complete(move |request: lash_core::llm::types::LlmRequest| {
             let reached = Arc::clone(&reached);
             async move {
-                let latest_user = request
+                let (input_at, roots) = request
                     .messages
                     .iter()
+                    .enumerate()
                     .rev()
-                    .find(|message| matches!(message.role, lash_core::llm::types::LlmRole::User))
-                    .and_then(|message| serde_json::to_string(message).ok())
+                    .find_map(|(at, message)| {
+                        if !matches!(message.role, lash_core::llm::types::LlmRole::User) {
+                            return None;
+                        }
+                        let roots: Vec<_> = message.blocks.iter().flat_map(|block| match block {
+                            lash_core::llm::types::LlmContentBlock::Text { text, .. } => input_roots(text),
+                            _ => Vec::new(),
+                        }).collect();
+                        (!roots.is_empty()).then_some((at, roots))
+                    })
                     .unwrap_or_default();
-                let roots = input_roots(&latest_user);
                 let held: Vec<String> = roots
                     .iter()
                     .filter(|root| root.starts_with("held-"))
@@ -195,6 +197,26 @@ fn soak_provider(reached: Reached) -> lash_core::facade_support::ProviderHandle 
                 #[cfg(test)]
                 if roots.iter().any(|root| root.starts_with("slow-")) {
                     tokio::time::sleep(SLOW_ANSWER).await;
+                }
+                let tool_done = request
+                    .messages
+                    .iter()
+                    .skip(input_at + 1)
+                    .flat_map(|message| message.blocks.iter())
+                    .any(|block| matches!(block,
+                        lash_core::llm::types::LlmContentBlock::ToolResult { tool_name: Some(name), .. }
+                        if name == "soak_witness"
+                    ));
+                if roots.iter().any(|root| root == "tool-witness") && !tool_done {
+                    return Ok(lash_core::llm::types::LlmResponse {
+                        parts: vec![lash_core::llm::types::LlmOutputPart::ToolCall {
+                            call_id: "witness-call".to_owned(),
+                            tool_name: "soak_witness".to_owned(),
+                            input_json: "{}".to_owned(),
+                            replay: None,
+                        }],
+                        ..Default::default()
+                    });
                 }
                 Ok::<_, lash_core::llm::transport::LlmTransportError>(
                     lash_core::llm::types::LlmResponse {
@@ -311,6 +333,7 @@ pub(super) struct Driver {
     published: std::collections::BTreeMap<u64, lash_core::ProcessStartRequest>,
     /// Where a multi-part step stands, for the report of one that hung.
     phase: String,
+    tool: Arc<super::witness::WitnessTool>,
 }
 
 impl Driver {
@@ -340,9 +363,15 @@ impl Driver {
             time: lash_restate_test::TimeMode::Manual,
             ..lash_restate_test::ServerConfig::default()
         };
+        let tool = Arc::new(super::witness::WitnessTool::default());
         let world = CrashWorld::on_server(
             seed,
-            soak_core(Arc::clone(&reached), Arc::clone(&rank), drain),
+            soak_core(
+                Arc::clone(&reached),
+                Arc::clone(&rank),
+                drain,
+                Arc::clone(&tool),
+            ),
             true,
             config,
         )
@@ -358,6 +387,11 @@ impl Driver {
             .into_iter()
             .next()
             .ok_or_else(|| "the world registered no build".to_owned())?;
+        tool.observe(crate::invariants::ToolObserver::new(
+            world.history().clone(),
+            Some(world.double()?.server().clone()),
+        ));
+        world.faults().observe(world.history().clone());
         world.replay_host_handlers();
         world.restart().await?;
         Ok(Self {
@@ -372,6 +406,7 @@ impl Driver {
             starts: 0,
             published: std::collections::BTreeMap::new(),
             phase: String::new(),
+            tool,
         })
     }
 
@@ -497,6 +532,21 @@ impl Driver {
     async fn run_step(&mut self, seed: u64, step: &Step) -> Result<String, String> {
         self.phase.clear();
         self.settle_crash().await?;
+        let kind = match step {
+            Step::Kill => Some(FaultKind::Kill),
+            Step::ArmEngineCut { .. } => Some(FaultKind::EngineCut),
+            Step::ArmHostCrash { .. } => Some(FaultKind::HostCrash),
+            Step::ArmHostRefusal { .. } => Some(FaultKind::Refusal),
+            Step::LeaseLoss { .. } => Some(FaultKind::LeaseLoss),
+            Step::Roll => Some(FaultKind::Roll),
+            _ => None,
+        };
+        if let Some(kind) = kind {
+            self.world.history().record(Fact::Fault {
+                kind,
+                detail: format!("step {step:?}"),
+            });
+        }
         match step {
             Step::Open {
                 session,
@@ -553,34 +603,24 @@ impl Driver {
             Step::Send { session, root } => {
                 let id = self.slot(*session)?.id.clone();
                 let admission = self.send(&id, vec![root.clone()]).await?;
-                Ok(match admission {
-                    Some(admission) => {
-                        self.ledger.inputs.push(SentInput {
-                            session: id,
-                            root: root.clone(),
-                            admission,
-                        });
-                        format!("{admission:?}")
-                    }
-                    None => "refused".to_owned(),
-                })
+                self.ledger.inputs.push(SentInput {
+                    session: id,
+                    root: root.clone(),
+                    admission: admission.clone(),
+                });
+                Ok(format!("{admission:?}"))
             }
             Step::SendBatch { session, roots } => {
                 let id = self.slot(*session)?.id.clone();
                 let admission = self.send(&id, roots.clone()).await?;
-                Ok(match admission {
-                    Some(admission) => {
-                        for root in roots {
-                            self.ledger.inputs.push(SentInput {
-                                session: id.clone(),
-                                root: root.clone(),
-                                admission,
-                            });
-                        }
-                        format!("{admission:?}")
-                    }
-                    None => "refused".to_owned(),
-                })
+                for root in roots {
+                    self.ledger.inputs.push(SentInput {
+                        session: id.clone(),
+                        root: root.clone(),
+                        admission: admission.clone(),
+                    });
+                }
+                Ok(format!("{admission:?}"))
             }
             Step::Command { session, key } => {
                 let id = self.slot(*session)?.id.clone();
@@ -669,19 +709,23 @@ impl Driver {
                 self.world.faults().crash_once(*site);
                 Ok(String::new())
             }
+            Step::ArmHostRefusal { site } => {
+                self.world.faults().refuse_once(*site);
+                Ok(String::new())
+            }
             Step::LeaseLoss { ticks } => self.lose_lease(*ticks).await,
             Step::Roll => self.roll().await,
         }
     }
 
     /// Accept `roots` on `session` as one request (one input, or a batch).
-    /// `None` when the session refused it; the admission otherwise. A
-    /// retryable refusal is retried, as a host retries it.
-    async fn send(
-        &mut self,
-        session: &SessionId,
-        roots: Vec<String>,
-    ) -> Result<Option<Admission>, String> {
+    /// Keyed retry attempts share one final host fact, including refusals.
+    async fn send(&mut self, session: &SessionId, roots: Vec<String>) -> Result<Admission, String> {
+        let op = if roots.len() == 1 {
+            HostOp::Send
+        } else {
+            HostOp::SendBatch
+        };
         for _ in 0..20 {
             let core = self.world.core()?;
             let id = session.clone();
@@ -710,19 +754,101 @@ impl Driver {
                     }
                 })
                 .await?;
-            match sent {
-                (Some(Ok(())), false) => return Ok(Some(Admission::Known)),
-                // The host saw the acceptance, but a crash raced it: the
-                // commit still landed.
-                (Some(Ok(())), true) => return Ok(Some(Admission::Known)),
-                (None, _) => return Ok(Some(Admission::Maybe)),
+            let outcome = match sent {
+                (Some(Ok(())), _) => Admission::Known,
+                (None, _) => Admission::Maybe,
                 (Some(Err(error)), _) if error.is_retryable() => {
                     tokio::time::sleep(Duration::from_millis(50)).await;
+                    continue;
                 }
-                (Some(Err(_)), _) => return Ok(None),
-            }
+                (Some(Err(error)), _) => Admission::Refused {
+                    code: refusal_code(&error)?,
+                },
+            };
+            self.record_host(op, session, roots, outcome.clone());
+            return Ok(outcome);
         }
+        self.record_host(op, session, roots, Admission::Maybe);
         Err(format!("`{session}` refused a send retryably twenty times"))
+    }
+
+    pub(super) fn record_host(
+        &self,
+        op: HostOp,
+        session: &SessionId,
+        roots: Vec<String>,
+        outcome: Admission,
+    ) {
+        self.world.history().record(Fact::HostOp {
+            op,
+            session: session.to_string(),
+            roots,
+            outcome,
+        });
+    }
+
+    pub(super) async fn send_probe(&mut self, session: &SessionId) -> Result<(), String> {
+        let root = format!("probe-{}", self.world.seed() % 100_000);
+        self.send(session, vec![root]).await.map(|_| ())
+    }
+
+    /// One real deferred tool round trip gives the existing tool checkers facts.
+    pub(super) async fn witness(&mut self) -> Result<(), String> {
+        let id = SessionId::from(format!("soak-{:016x}-witness", self.world.seed()));
+        self.world
+            .core()?
+            .session(id.clone())
+            .create(Default::default())
+            .await
+            .map_err(|error| error.to_string())?;
+        self.send(&id, vec!["tool-witness".to_owned()]).await?;
+        let key = tokio::time::timeout(HELD_WAIT, async {
+            loop {
+                if let Some(key) = self.tool.take_key() {
+                    break key;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .map_err(|_| "the witness tool never registered its completion".to_owned())?;
+        let payload = serde_json::json!({"soak_witness": true});
+        self.world.history().record(Fact::CompletionResolved {
+            key: crate::invariants::completion_key_label(&key),
+            session: id.to_string(),
+            result_digest: crate::invariants::result_digest(
+                &crate::content_oracle::ToolResultContent::from_tool_value(
+                    "",
+                    "soak_witness",
+                    &payload,
+                )
+                .content,
+            ),
+        });
+        self.world
+            .core()?
+            .completions()
+            .resolve(key, lash_core::Resolution::Ok(payload))
+            .await
+            .map_err(|error| error.to_string())?;
+        let expected = crate::crash_matrix::invariants::Expected {
+            inputs: vec![crate::crash_matrix::invariants::AcceptedInput {
+                session: id,
+                root: lash_core::TurnId::from("tool-witness"),
+            }],
+            ..Default::default()
+        };
+        for _ in 0..6 {
+            self.world.quiesce().await;
+            if crate::crash_matrix::invariants::check(&self.world, &expected)
+                .await
+                .is_empty()
+            {
+                return Ok(());
+            }
+            self.tick().await?;
+        }
+        Err("the deferred witness did not finish".to_owned())
     }
 
     /// Whether the held root `root` reached its model call.
@@ -757,14 +883,14 @@ impl Driver {
         child: bool,
     ) -> Result<Admission, String> {
         let root = root.to_owned();
-        let admission = self
-            .send(session, vec![root.clone()])
-            .await?
-            .unwrap_or(Admission::Maybe);
+        let admission = self.send(session, vec![root.clone()]).await?;
+        if matches!(admission, Admission::Refused { .. }) {
+            return Ok(admission);
+        }
         self.ledger.held.push(HeldRoot {
             session: session.clone(),
             root: root.clone(),
-            admission,
+            admission: admission.clone(),
         });
         let deadline = tokio::time::Instant::now() + HELD_WAIT;
         while !self.reached(&root) {
@@ -864,6 +990,12 @@ impl Driver {
                 .await?;
             match cancelled {
                 (Some(Ok(receipt)), _) => {
+                    self.record_host(
+                        HostOp::Cancel,
+                        session,
+                        vec![root.clone()],
+                        Admission::Known,
+                    );
                     return Ok(match receipt {
                         lash::CancelReceipt::Withdrawn(_) => "withdrawn".to_owned(),
                         lash::CancelReceipt::Requested { .. } => "requested".to_owned(),
@@ -873,6 +1005,14 @@ impl Driver {
                     });
                 }
                 (Some(Err(error)), _) if !error.is_retryable() => {
+                    self.record_host(
+                        HostOp::Cancel,
+                        session,
+                        vec![root.clone()],
+                        Admission::Refused {
+                            code: refusal_code(&error)?,
+                        },
+                    );
                     return Err(format!("the cancel of `{root}` was refused: {error}"));
                 }
                 (Some(Err(error)), _) => {
@@ -882,6 +1022,12 @@ impl Driver {
                 (None, _) => last = "the host died inside the cancel".to_owned(),
             }
         }
+        self.record_host(
+            HostOp::Cancel,
+            session,
+            vec![root.clone()],
+            Admission::Maybe,
+        );
         Err(format!("the cancel of `{root}` never answered: {last}"))
     }
 
@@ -920,7 +1066,8 @@ impl Driver {
                 }
             }
         };
-        self.ledger.sessions[session].deleted = Some(admission);
+        self.record_host(HostOp::Delete, &id, Vec::new(), admission.clone());
+        self.ledger.sessions[session].deleted = Some(admission.clone());
         let mut outcome = format!("{admission:?}");
         if unanswered > 0 {
             outcome.push_str(&format!(" after {unanswered} unanswered attempt(s)"));
@@ -1250,6 +1397,20 @@ pub(super) async fn register_child(
         .map_err(|error| format!("register a child of `{parent}`: {error}"))
 }
 
+fn refusal_code(error: &lash::EmbedError) -> Result<HostRefusalCode, String> {
+    let code = match error {
+        lash::EmbedError::Runtime(error)
+        | lash::EmbedError::Plugin(lash_core::PluginError::Runtime(error)) => error.code.clone(),
+        lash::EmbedError::Store(error) => lash_core::RuntimeErrorCode::of_store_error(error),
+        lash::EmbedError::UnknownSession { .. } => return Ok(HostRefusalCode::UnknownSession),
+        lash::EmbedError::SessionCreationUnrecorded { .. } => {
+            lash_core::RuntimeErrorCode::SessionCreationUnrecorded
+        }
+        _ => return Err(format!("unclassified host refusal: {error:?}")),
+    };
+    Ok(HostRefusalCode::Runtime(code))
+}
+
 fn input_id(session: &SessionId, key: &str) -> lash_core::InputId {
     lash_core::InputId::from(lash_core::PendingTurnInputDraft::keyed_input_id(
         session, key,
@@ -1351,205 +1512,4 @@ fn invocation_input(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A rolling deploy's drain charges its ticks to time, never to work
-    /// (FIG-4624). One drive of the first build is calling a backlog of roots
-    /// when the build is rolled, and each root takes wall time: more of it,
-    /// in all, than thirty quiesce budgets. The drive needs no tick to end,
-    /// so the generation drains within [`DRAIN_TICKS`] however long the
-    /// roots take.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn a_drain_charges_no_tick_to_roots_the_old_build_is_still_driving() {
-        const ROOTS: usize = 32;
-        let seed = 0x4624;
-        let mut driver = Driver::new(seed).await.expect("world");
-        driver
-            .step(
-                seed,
-                &Step::Open {
-                    session: 0,
-                    lane: Lane::Plain,
-                    parent: None,
-                },
-            )
-            .await
-            .expect("open the session");
-        for root in 0..ROOTS {
-            driver
-                .step(
-                    seed,
-                    &Step::Send {
-                        session: 0,
-                        root: format!("slow-{root}"),
-                    },
-                )
-                .await
-                .expect("send a slow root");
-        }
-        let old = driver.deployment.clone();
-        let drive = format!("LashSession/{}/drive running", driver.ledger.sessions[0].id);
-        assert!(
-            pinned_open(&driver.world, &old).contains(&drive),
-            "the first build's drive is still calling the backlog"
-        );
-
-        let rolled = driver
-            .step(seed, &Step::Roll)
-            .await
-            .expect("the old generation drains");
-
-        assert!(pinned_open(&driver.world, &old).is_empty(), "{rolled}");
-        assert_eq!(driver.ledger.retired.len(), 1, "{rolled}");
-        let backend = driver.world.backend();
-        for root in 0..ROOTS {
-            let root = lash_core::TurnId::from(format!("slow-{root}"));
-            assert!(
-                backend
-                    .session_store_factory()
-                    .root_terminal(&driver.ledger.sessions[0].id, &root)
-                    .await
-                    .expect("read the root's terminal")
-                    .is_some(),
-                "`{root}` ran to its terminal before the build was removed"
-            );
-        }
-    }
-
-    /// A drive attempt that replays while the root it called is still
-    /// running waits for that root on the engine, as its first attempt did
-    /// (FIG-4729). The drive's attempt is dropped under a held root, whose
-    /// run goes on in the same process on the runtime the drive held. The
-    /// replay re-serves its recorded admission and waits on its recorded
-    /// call; it does not wait in the process for the runtime the root runs
-    /// on, which a root that never answers never gives back. So a rolling
-    /// deploy's drain, which ticks once the engine's work has settled, ends
-    /// the deleted session's root and retires the old build.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn a_drive_replayed_under_its_running_root_waits_on_the_engine() {
-        let seed = 0x4729;
-        let mut driver = Driver::new(seed).await.expect("world");
-        driver
-            .step(
-                seed,
-                &Step::Open {
-                    session: 0,
-                    lane: Lane::Held,
-                    parent: None,
-                },
-            )
-            .await
-            .expect("open the session");
-        let id = driver.ledger.sessions[0].id.clone();
-        driver
-            .send_held(&id, "held-0", false)
-            .await
-            .expect("send the held root");
-        assert!(driver.reached("held-0"), "the root is in its model call");
-        let target = format!("LashSession/{id}/drive");
-        let drive = |driver: &Driver| {
-            driver
-                .world
-                .double()
-                .expect("double")
-                .server()
-                .invocations()
-                .into_iter()
-                .find(|view| view.target == target)
-                .expect("the session's drive")
-        };
-        let first = drive(&driver);
-        assert_eq!((first.status, first.attempts), ("running", 1), "{first:?}");
-        assert!(
-            driver.world.drop_attempt(&first.id).expect("double"),
-            "the drive's first attempt was running"
-        );
-
-        let settled = tokio::time::Instant::now() + Duration::from_secs(10);
-        while driver.works().expect("double") && tokio::time::Instant::now() < settled {
-            driver.world.quiesce().await;
-        }
-        let replayed = drive(&driver);
-        assert_eq!(
-            (
-                replayed.status,
-                replayed.attempts,
-                replayed.blocked_on_server
-            ),
-            ("running", 2, Some(true)),
-            "the replayed drive waits on the engine for the root it called: {replayed:?}"
-        );
-        assert!(driver.reached("held-0"), "the root runs on");
-
-        let old = driver.deployment.clone();
-        let deleted = driver.delete(0).await.expect("delete the session");
-        let rolled = driver
-            .step(seed, &Step::Roll)
-            .await
-            .expect("the old generation drains");
-        assert!(
-            pinned_open(&driver.world, &old).is_empty(),
-            "{deleted}; {rolled}"
-        );
-        assert_eq!(driver.ledger.retired.len(), 1, "{deleted}; {rolled}");
-        driver.world.finish().await;
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn a_host_answer_drives_its_manual_time_retry() {
-        let mut driver = Driver::new(0x4402).await.expect("world");
-        let engine = driver.world.double().expect("double").clone();
-        let server = engine.server().clone();
-        let before = server.now_ms();
-        let result = tokio::time::timeout(
-            Duration::from_secs(2),
-            driver.host(async move {
-                engine
-                    .run_crashed_then_redriven(
-                        lash_core::AdmittedScope::runtime_operation("retry-budget"),
-                        Arc::new(|_| Box::pin(async { panic!("first host attempt fails") })),
-                        Arc::new(|_| Box::pin(async {})),
-                    )
-                    .await
-            }),
-        )
-        .await;
-        let timers = server.timers();
-        let advanced = server.now_ms().saturating_sub(before);
-        driver.world.finish().await;
-        assert!(result.is_ok(), "host waits for virtual retry: {timers:?}");
-        assert_eq!(
-            result.expect("bounded answer").expect("host"),
-            (Some(Ok(())), false)
-        );
-        assert!(
-            advanced >= 500,
-            "preserve the retry's backoff: {advanced}ms"
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn a_crash_before_host_admission_is_not_missed() {
-        let mut driver = Driver::new(0x4402).await.expect("world");
-        driver
-            .world
-            .trip()
-            .fire("between the step and host admission");
-        let result = tokio::time::timeout(
-            Duration::from_secs(1),
-            driver.host(std::future::pending::<()>()),
-        )
-        .await;
-        driver.world.finish().await;
-        assert!(
-            result.is_ok(),
-            "an already-fired crash must interrupt host work instead of waiting for another crash"
-        );
-        assert_eq!(
-            result.expect("bounded host call").expect("restart"),
-            (None, true)
-        );
-        assert_eq!(driver.counts.crashes, 1);
-    }
-}
+mod tests;

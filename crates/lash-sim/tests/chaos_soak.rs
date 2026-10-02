@@ -50,7 +50,22 @@ async fn chaos_soak_smoke() {
             config.without.push(kind);
         }
     }
-    let report = Box::pin(chaos_soak::run(config)).await;
+    let mut report = Box::pin(chaos_soak::run(config)).await;
+    assert!(!report.epochs.is_empty(), "the smoke executed no epochs");
+    for epoch in &mut report.epochs {
+        let history = epoch
+            .invariants
+            .as_mut()
+            .expect("the smoke captured its checker report");
+        assert_eq!(history.observed.len(), lash_sim::invariants::CHECKERS.len());
+        history.require_observed();
+        assert!(
+            history.passed(),
+            "{}\n{}",
+            history.summary(),
+            history.failure()
+        );
+    }
     assert_green(&report);
 }
 

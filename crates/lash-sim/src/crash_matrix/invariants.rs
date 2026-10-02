@@ -507,6 +507,14 @@ pub(crate) async fn transcript(
     session: &SessionId,
 ) -> Result<Vec<(String, String)>, String> {
     let factory = world.backend().session_store_factory();
+    transcript_from(factory.as_ref(), session).await
+}
+
+/// Read an active transcript directly from its store, including child sessions.
+pub(crate) async fn transcript_from(
+    factory: &dyn lash_core::DeploymentStore,
+    session: &SessionId,
+) -> Result<Vec<(String, String)>, String> {
     if !matches!(
         factory
             .lookup_session(session)
