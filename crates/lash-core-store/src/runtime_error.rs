@@ -1731,7 +1731,8 @@ impl RuntimeEffectControllerError {
     }
 
     /// Only the host derivations — the before-LLM-call and assistant-response hooks,
-    /// execution-environment sync, execution-environment load, presentation
+    /// execution-environment sync, a checkpoint's store admission (FIG-4651),
+    /// execution-environment load, presentation
     /// whose recorded renderer is unavailable, and a presentation or language
     /// value whose output retention faulted (FIG-1643) — and a
     /// drive's admission and seal, a root's resolution (its spec read and its
@@ -1761,6 +1762,7 @@ impl RuntimeEffectControllerError {
             RuntimeEffectKind::BeforeLlmCall
                 | RuntimeEffectKind::AssistantResponseHooks
                 | RuntimeEffectKind::SyncExecutionEnvironment
+                | RuntimeEffectKind::Checkpoint
                 | RuntimeEffectKind::LoadExecutionEnv
                 | RuntimeEffectKind::PresentToolResult
                 | RuntimeEffectKind::LanguageRuntimeValue

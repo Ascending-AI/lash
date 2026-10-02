@@ -625,7 +625,8 @@ impl LiveTurnRunner {
     /// Returns once the turn settled (the invocation completed) or aborted
     /// (the invocation stays open for the law's next run of the scope). An
     /// attempt that repeats on retry instead runs on every retry until the
-    /// invocation pauses, and the runner returns how many runs aborted.
+    /// invocation pauses, and the runner returns how many runs returned an
+    /// abort (a run the engine ended inside a step returns nothing).
     async fn run_attempts(
         &self,
         admitted: lash_core::AdmittedScope,
@@ -740,16 +741,17 @@ impl LiveTurnRunner {
                         crash.fired().await;
                     }
                 }, if crash.is_some() && !crash_fired => crash_fired = true,
-                _ = poll.tick(), if (until_paused && aborted > 0) || crash_fired => {
+                _ = poll.tick(), if until_paused || crash_fired => {
                     if crash_fired && !execution_live(&key) {
                         self.open.lock().await.insert(scope, OpenInvocation { key: key.clone(), call });
                         crashed = true;
                         break;
                     }
                     // A paused invocation runs nothing more until an operator
-                    // resumes it; the law is done with it.
+                    // resumes it; the law is done with it. A run whose step
+                    // failed its attempt inside the engine never returned to
+                    // report an abort, so the pause alone ends the wait.
                     if until_paused
-                        && aborted > 0
                         && self.admin.workflow_paused("ConformanceTurnProbe", &key).await
                     {
                         pending_turns()

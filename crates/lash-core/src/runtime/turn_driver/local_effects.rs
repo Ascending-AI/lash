@@ -160,16 +160,18 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     result: Box::new(result),
                 })
             }
-            RuntimeEffectCommand::Checkpoint { checkpoint } => Ok(runner
-                .driver
-                .execute_checkpoint_locally(
-                    runner.messages.clone(),
-                    runner.protocol_iteration,
-                    checkpoint,
-                    envelope.invocation.effect_replay_key(),
-                    &runner.event_tx,
-                )
-                .await),
+            RuntimeEffectCommand::Checkpoint { checkpoint } => {
+                runner
+                    .driver
+                    .execute_checkpoint_locally(
+                        runner.messages.clone(),
+                        runner.protocol_iteration,
+                        checkpoint,
+                        envelope.invocation.effect_replay_key(),
+                        &runner.event_tx,
+                    )
+                    .await
+            }
             RuntimeEffectCommand::SyncExecutionEnvironment => {
                 // A live fault rebuilding the environment (a store fault) is
                 // not the sync's outcome: the step stays unrecorded and the

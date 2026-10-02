@@ -371,11 +371,24 @@ impl RuntimeTurnDriver<'_> {
                     authority.subagent.as_ref(),
                     &tool_surface,
                 )
+                // The install pins the live registry and runs the catalog
+                // contributors again, as the sync's step body did, so their
+                // failures are classified the same way (FIG-4651): a live
+                // cause aborts the attempt under its own code, and only a
+                // deterministic catalog defect ends the turn as one.
                 .map_err(|error| {
-                    RuntimeError::new(
-                        RuntimeErrorCode::ToolCatalogResolutionFailed,
-                        format!("the recorded tool surface could not be installed: {error}"),
-                    )
+                    let message =
+                        format!("the recorded tool surface could not be installed: {error}");
+                    match super::tool_catalog::SyncFailure::of_plugin_error(
+                        crate::sansio::ExecutionEnvironmentSyncFailureKind::ToolSurface,
+                        error,
+                    ) {
+                        super::tool_catalog::SyncFailure::Live(fault) => fault,
+                        super::tool_catalog::SyncFailure::Recorded(_) => RuntimeError::new(
+                            RuntimeErrorCode::ToolCatalogResolutionFailed,
+                            message,
+                        ),
+                    }
                 })?;
         }
         self.handle_machine_response(machine, Response::ExecutionEnvironmentSynced { id, result })?;

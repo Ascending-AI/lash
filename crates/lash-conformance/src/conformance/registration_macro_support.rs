@@ -23,6 +23,7 @@ pub use super::frame_open_redrive::*;
 pub use super::frame_switch_redrive::*;
 pub use super::hostile_input::*;
 pub use super::lineage::*;
+pub use super::live_fault_park::*;
 pub use super::live_replay::*;
 pub use super::migrated_tools_redrive::*;
 pub use super::model_call_drift_park::*;

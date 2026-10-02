@@ -39,6 +39,9 @@ filters = [
   "tests::conformance_and_poison::",
   # FIG-4236: the usage accounting engine laws on a live server.
   "tests::usage_accounting_on_the_double::live::",
+  # FIG-4651: the live-fault park laws on a live server and on the double
+  # over PostgreSQL.
+  "tests::live_fault_park_on_the_double::",
   "tests::batch_oracle::postgres_recorded_batch_boundaries_on_double",
   "tests::batch_oracle::postgres_late_seat_cancellation_on_double",
 ]

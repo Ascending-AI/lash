@@ -290,6 +290,7 @@ mod generation_sentinel_on_the_double;
 mod guarded_surface_tests;
 mod journal_cut_runner;
 mod layered_effect_host_on_the_double;
+mod live_fault_park_on_the_double;
 mod live_turn_probe;
 mod obligation_relay_on_the_double;
 mod parent_end_on_the_double;

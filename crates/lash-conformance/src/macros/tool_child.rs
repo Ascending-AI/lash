@@ -357,6 +357,35 @@ macro_rules! model_call_drift_park_tests {
     };
 }
 
+/// Register the live-fault park laws (FIG-4651): a contributor's live fault
+/// while a recorded tool surface is installed, and a store that does not
+/// answer a checkpoint's admission, each abort the attempt under their own
+/// code; the engine retries the turn and rests it while the fault lasts, and
+/// the retry completes it once the fault clears. The fixture hands back a
+/// guard, a prefix, the tier's effect host, the store set under test, its
+/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner), whose engine
+/// retries a turn that aborted on a live fault, and a release awaited after
+/// the law: each law deliberately leaves a rested turn behind, which a tier
+/// that accounts for unfinished work ends there.
+#[macro_export]
+macro_rules! live_fault_park_tests {
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::live_fault_park_tests!(@law [$(#[$attr])*] $fixture;
+            (a_live_fault_installing_a_recorded_tool_surface_parks_the_root, "install-live-fault-park"));
+        $crate::live_fault_park_tests!(@law [$(#[$attr])*] $fixture;
+            (a_store_fault_at_checkpoint_admission_parks_the_root, "checkpoint-admission-fault-park"));
+    };
+    (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
+        $($attr)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $law() {
+            let (_guard, prefix, host, stores, runner, release) = $fixture;
+            $crate::registration_macro_support::$law(&prefix, host, stores, runner).await;
+            release().await;
+        }
+    };
+}
+
 /// Register the cell binding-drift law (FIG-3587): a redriven RLM cell links
 /// against its journaled binding set, completing from the journal when the
 /// drifted tool's result was recorded and parking when it would reach the

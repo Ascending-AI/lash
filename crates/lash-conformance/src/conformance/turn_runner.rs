@@ -199,7 +199,9 @@ pub trait ConformanceTurnRunner: Send + Sync {
     /// runs once. On Restate every retry of the open invocation re-runs it,
     /// and the turn handler's retry policy pauses the invocation after its
     /// attempt budget: the runner returns once the invocation is paused, and
-    /// panics when a run settled instead of parking.
+    /// panics when a run settled instead of parking. Only a run that returned
+    /// is counted: an engine that fails an attempt inside a step ends that
+    /// run beneath the attempt, which then reports nothing.
     async fn run_parking_turn_until_rested(
         &self,
         admitted: crate::AdmittedScope,

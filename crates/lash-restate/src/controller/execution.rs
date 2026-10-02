@@ -167,7 +167,6 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::RecordCompactionBase { .. }
         | RuntimeEffectCommand::RenderCompactionPrompt { .. }
         | RuntimeEffectCommand::ResolveConfigTransaction { .. }
-        | RuntimeEffectCommand::Checkpoint { .. }
         | RuntimeEffectCommand::IncorporateGroupSettlements { .. }) => {
             RestateEffectExecution::JournaledRun {
                 envelope: RuntimeEffectEnvelope {
@@ -213,8 +212,12 @@ pub(crate) fn restate_effect_execution(
         // fault precedes the call, so it is never the call's recorded result
         // (FIG-4404). A tool attempt's marked VM host fault likewise retries
         // its pure derivation without recording a refusal (FIG-4707).
+        // A checkpoint's store admission is the same: a store that did not
+        // answer it ends the attempt, and the checkpoint's own outcome, a
+        // hook's failure included, is recorded as ever (FIG-4651).
         command @ (RuntimeEffectCommand::ToolAttempt { .. }
         | RuntimeEffectCommand::LoadExecutionEnv { .. }
+        | RuntimeEffectCommand::Checkpoint { .. }
         | RuntimeEffectCommand::AdmitDrive { .. }
         | RuntimeEffectCommand::SealDriveAdmission { .. }
         | RuntimeEffectCommand::AdmitRoot { .. }
