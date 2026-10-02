@@ -741,10 +741,6 @@ impl lash_core::facade_support::SessionPlugin for SurfacePlugin {
         "surface_test"
     }
 
-    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial(self.id())
-    }
-
     fn register(
         &self,
         reg: &mut lash_core::facade_support::PluginRegistrar,
