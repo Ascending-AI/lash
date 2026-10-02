@@ -679,6 +679,7 @@ impl LoadWorker {
         {
             lash::SessionDeletion::Deleted(_) => DeletionOutcome::Deleted,
             lash::SessionDeletion::AlreadyDeleted { .. } => DeletionOutcome::AlreadyDeleted,
+            lash::SessionDeletion::Absent { .. } => DeletionOutcome::Absent,
             lash::SessionDeletion::Closing(closing) => {
                 closing_waits = Some(format!("{:?}", closing.waiting));
                 DeletionOutcome::Closing

@@ -29,6 +29,13 @@
 //! then the obligation stalls, surfaced like any other stall (ADR 0109
 //! §1.5). The caller never retries a deletion to finish it.
 //!
+//! **No close, no delete.** An id that never materialized a session has
+//! nothing to close, so its deletion is a no-op (ADR 0049): the physical
+//! delete runs only as the delivery of the obligation an acknowledged close
+//! armed. Cleaning up on the close's "no durable record" answer would retire
+//! the id's usage owner and revoke its waits while the id stays creatable,
+//! and would delete a session a concurrent create made after that answer.
+//!
 //! [`StoreError::SessionClosing`]: crate::store::StoreError::SessionClosing
 
 use std::sync::{Arc, Mutex};
@@ -154,6 +161,9 @@ pub enum SessionDeletion {
     /// The session is closed and its physical delete had already run: a
     /// repeated deletion.
     AlreadyDeleted { session_id: SessionId },
+    /// The id never materialized a session (ADR 0049): nothing was closed,
+    /// nothing is owed and nothing was cleaned up. The id stays creatable.
+    Absent { session_id: SessionId },
     /// The session is closing: it refuses new work, and its physical delete
     /// is still owed.
     Closing(SessionClosing),
@@ -165,7 +175,7 @@ impl SessionDeletion {
     pub fn deleted(&self) -> Option<&SessionDeleteReport> {
         match self {
             Self::Deleted(report) => Some(report),
-            Self::AlreadyDeleted { .. } | Self::Closing(_) => None,
+            Self::AlreadyDeleted { .. } | Self::Absent { .. } | Self::Closing(_) => None,
         }
     }
 }
@@ -202,49 +212,37 @@ pub enum SessionDeleteWait {
     Obligation(ObligationState),
 }
 
-/// Why a deletion did not close its session, or a session with no durable
-/// record did not delete. Nothing was closed and the caller may retry.
+/// Why a deletion did not close its session. Nothing was closed and the
+/// caller may retry.
 #[derive(Debug, thiserror::Error)]
 pub enum SessionDeleteError {
     #[error(transparent)]
     Close(#[from] SessionCloseError),
     #[error(transparent)]
     Store(#[from] StoreError),
-    /// A session with no durable record owes no obligation, so its cleanup
-    /// runs in the call, and it failed.
-    #[error("session `{session_id}` delete: {failure}")]
-    Unrecorded {
-        session_id: SessionId,
-        failure: SessionDeleteFailure,
-    },
 }
 
 /// Delete the session `context` deletes (ADR 0109 §4): close it, then
 /// attempt the physical delete its close armed.
 ///
-/// A session with no durable record has nothing to close and owes no
-/// obligation; what it may still have left behind — process state,
-/// subscriptions, waits — is deleted in the call.
+/// An id that never materialized a session has nothing to close and owes no
+/// obligation: its deletion is a no-op (ADR 0049), answered
+/// [`SessionDeletion::Absent`]. Nothing is cleaned up without an accepted
+/// close, so the id stays creatable and a session created under it, also one
+/// a concurrent create makes, is untouched.
 ///
 /// # Errors
 ///
-/// A refusal or fault of the close (nothing was closed), a store that did
-/// not answer, or an unrecorded session's failed cleanup. A failed physical
-/// delete is not an error: the session is closing and its obligation is
-/// retried.
+/// A refusal or fault of the close (nothing was closed), or a store that did
+/// not answer. A failed physical delete is not an error: the session is
+/// closing and its obligation is retried.
 pub async fn delete_session(
     context: &SessionDeleteContext<'_>,
 ) -> Result<SessionDeletion, SessionDeleteError> {
     let session_id = context.session_id().clone();
     let administration = context.administration();
     let Some(closed) = close_session(context).await? else {
-        return physically_delete(administration, &session_id)
-            .await
-            .map(SessionDeletion::Deleted)
-            .map_err(|failure| SessionDeleteError::Unrecorded {
-                session_id: session_id.clone(),
-                failure,
-            });
+        return Ok(SessionDeletion::Absent { session_id });
     };
     if !matches!(closed.applied, ControlIntentState::Acknowledged { .. }) {
         return Ok(SessionDeletion::Closing(SessionClosing {
@@ -316,7 +314,9 @@ pub async fn delete_session(
     }
 }
 
-/// Physically delete session `session_id`, the last step of its deletion.
+/// Physically delete session `session_id`, the last step of its deletion:
+/// the delivery of the `SessionDelete` obligation its acknowledged close
+/// armed, and nothing else (ADR 0049: no close, no cleanup).
 /// Every step is idempotent; the storage delete, which removes the row the
 /// session's delete obligation lives on, is last.
 ///

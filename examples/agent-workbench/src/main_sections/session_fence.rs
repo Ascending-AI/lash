@@ -256,7 +256,9 @@ pub(crate) fn physically_deleted(
 ) -> Result<Option<lash::SessionDeleteReport>, AppError> {
     match deletion {
         lash::SessionDeletion::Deleted(report) => Ok(Some(report)),
-        lash::SessionDeletion::AlreadyDeleted { .. } => Ok(None),
+        lash::SessionDeletion::AlreadyDeleted { .. } | lash::SessionDeletion::Absent { .. } => {
+            Ok(None)
+        }
         lash::SessionDeletion::Closing(closing) => Err(AppError::retryable_internal(format!(
             "session `{session_id}` is closing; its delete waits on {:?}",
             closing.waiting

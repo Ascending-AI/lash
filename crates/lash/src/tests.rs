@@ -1182,6 +1182,7 @@ pub(crate) use harness::{
     sqlite_memory_store_backend, sqlite_memory_store_set, store_backend_with_clock, test_catalog,
     turn_input_states,
 };
+mod absent_session_delete;
 #[cfg(feature = "rlm")]
 mod adr_claims;
 mod agent_scenarios;

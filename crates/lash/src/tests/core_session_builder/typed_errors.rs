@@ -488,38 +488,13 @@ async fn cleanup_law(postgres: bool) -> Result<()> {
                         }
                         failure
                     }
-                    Err(error) if !recorded => {
-                        if step == 4 {
-                            let EmbedError::SessionDeleteStorage {
-                                session_id,
-                                failure,
-                            } = error
-                            else {
-                                panic!("storage cleanup carrier: {error:?}");
-                            };
-                            assert_eq!(session_id, id);
-                            assert_eq!(failure.partial, partial);
-                        }
-                        if step < 4 {
-                            let EmbedError::SessionDeleteCleanup {
-                                session_id,
-                                failure,
-                            } = error
-                            else {
-                                panic!("typed cleanup carrier: {error:?}");
-                            };
-                            assert_eq!(session_id, id);
-                            assert!(matches!(
-                                (step, failure.as_ref()),
-                                (0, crate::SessionDeleteFailure::Process { .. })
-                                    | (1, crate::SessionDeleteFailure::Triggers { .. })
-                                    | (2, crate::SessionDeleteFailure::Waits { .. })
-                                    | (3, crate::SessionDeleteFailure::Journal { .. })
-                            ));
-                            assert_eq!(error.is_retryable(), transient);
-                            assert_eq!(error.is_terminal(), !transient);
-                        }
-                        error
+                    Ok(crate::SessionDeletion::Absent { session_id }) if !recorded => {
+                        // No close, no cleanup (ADR 0049): the faulted step
+                        // never ran, so nothing of it surfaces.
+                        assert_eq!(session_id, id);
+                        drop(execution);
+                        handler.close().await.expect("close handler");
+                        continue;
                     }
                     other => panic!(
                         "cleanup transport recorded={recorded} step={step} transient={transient}: {other:?}"

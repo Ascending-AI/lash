@@ -339,6 +339,11 @@ delete removes the owning obligation row. Every preceding step is idempotent;
 a failed attempt leaves the obligation owed for another relay attempt.
 The permanent `CloseSession` tombstone is retained, per ADR 0108 §5a.
 
+Physical delete is only ever this obligation's delivery. Deleting an id that
+never materialized a session closes nothing, arms nothing and cleans up
+nothing: it answers `SessionDeletion::Absent` and the id stays creatable
+(ADR 0049).
+
 `SessionDeletion::Closing` means accepted deletion remains owed, with a typed
 reason: an unacknowledged close, cleanup counts, a failed delivery or the
 obligation's standing. Hosts await `LashCore::await_session_deletion` instead

@@ -43,14 +43,14 @@ const NODE_BUDGET: usize = 16;
 const INITIAL_NODES: usize = 4 * NODE_BUDGET;
 
 #[derive(Clone, Copy, Debug)]
-enum Storage {
+pub(super) enum Storage {
     SqliteMemory,
     SqliteFile,
     Postgres,
 }
 
 /// The double over `storage`, with what its stores need to outlive it.
-async fn double_over(
+pub(super) async fn double_over(
     storage: Storage,
 ) -> Option<(
     lash_restate_test::RestateTestBackend,

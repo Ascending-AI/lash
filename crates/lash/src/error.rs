@@ -63,17 +63,6 @@ pub enum EmbedError {
     )]
     /// Returned when queued-work batching has not been configured.
     MissingQueuedWorkBatching,
-    /// Session-store deletion stopped after witnessing some reclaim progress.
-    ///
-    /// The typed failure preserves the partial storage report required by ADR
-    /// 0067 so hosts can distinguish witnessed progress from an empty scope.
-    #[error("failed to delete store for session `{session_id}`: {failure}")]
-    SessionDeleteStorage {
-        /// Session whose durable storage deletion stopped.
-        session_id: SessionId,
-        /// Typed stop reason and the reclaim counters witnessed before it.
-        failure: Box<lash_core::MaintenanceFailure<lash_core::SessionBlobReclaimReport>>,
-    },
     #[error("session store operation failed: {0}")]
     Store(#[from] lash_core::StoreError),
     #[error(
@@ -112,13 +101,6 @@ pub enum EmbedError {
     },
     #[error("invalid work cadence: {0}")]
     WorkCadence(#[from] lash_core::WorkCadenceError),
-    /// Cleanup of an unrecorded session stopped at the retained step.
-    #[error("failed to clean up session `{session_id}`: {failure}")]
-    SessionDeleteCleanup {
-        session_id: SessionId,
-        #[source]
-        failure: Box<lash_core::session_delete::SessionDeleteFailure>,
-    },
     /// A ToolAdmin reconfiguration was refused before changing its catalog.
     #[error("tool reconfiguration: {0}")]
     Reconfigure(#[from] lash_core::facade_support::ReconfigureError),
@@ -305,7 +287,6 @@ impl EmbedError {
         match self {
             Self::Runtime(err) => err.is_retryable(),
             Self::Plugin(err) | Self::Session(SessionError::Plugin(err)) => err.is_retryable(),
-            Self::SessionDeleteCleanup { failure, .. } => failure.is_retryable(),
             Self::Reconfigure(_) => false,
             // A store error is retried here exactly when the engine retries
             // it: when it is a fault of the storage substrate.
@@ -328,7 +309,6 @@ impl EmbedError {
             | Self::MissingMaxToolCalls
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
-            | Self::SessionDeleteStorage { .. }
             | Self::SessionCreationUnrecorded { .. }
             | Self::WorkCadence(_)
             | Self::SessionStillInUse
@@ -391,7 +371,6 @@ impl EmbedError {
             Self::Store(err) => store_error_is_terminal(err),
             Self::Runtime(err) => err.is_terminal(),
             Self::Plugin(err) | Self::Session(SessionError::Plugin(err)) => err.is_terminal(),
-            Self::SessionDeleteCleanup { failure, .. } => failure.is_terminal(),
             Self::Reconfigure(
                 lash_core::facade_support::ReconfigureError::Validation(_)
                 | lash_core::facade_support::ReconfigureError::UnknownSource(_),
@@ -405,8 +384,7 @@ impl EmbedError {
             | Self::Session(SessionError::ModelUnknown { .. })
             | Self::Session(SessionError::CodeExecutionUnavailable) => true,
             Self::Session(SessionError::Store { source, .. }) => store_error_is_terminal(source),
-            Self::SessionDeleteStorage { .. }
-            | Self::SessionStillInUse
+            Self::SessionStillInUse
             | Self::TraceFlush(_)
             | Self::RemoteProtocol(_)
             | Self::ProtocolTurnOptions(_)

@@ -355,6 +355,8 @@ pub struct CronTickReport {
 pub enum DeletionOutcome {
     Deleted,
     AlreadyDeleted,
+    /// The id never materialized a session: the delete was a no-op.
+    Absent,
     Closing,
 }
 

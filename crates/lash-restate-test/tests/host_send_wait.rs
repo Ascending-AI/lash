@@ -751,6 +751,9 @@ where
                 );
                 return;
             }
+            Ok(lash::SessionDeletion::Absent { .. }) => {
+                panic!("`{session_id}` was never created, so nothing was deleted")
+            }
             Err(error) => panic!("`{session_id}` could not be deleted: {error:?}"),
         }
     }

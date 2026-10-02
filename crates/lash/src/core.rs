@@ -698,6 +698,10 @@ impl LashCore {
     /// A pre-close `TurnCancelClosureLifecyclePinned` refusal can be followed
     /// with [`await_turn_cancel_closures`](Self::await_turn_cancel_closures)
     /// before a new close attempt.
+    ///
+    /// Deleting an id that never materialized a session is a no-op (ADR
+    /// 0049), answered [`SessionDeletion::Absent`]: nothing is closed or
+    /// cleaned up, and the id stays creatable.
     pub async fn delete_session(
         context: lash_core::SessionDeleteContext<'_>,
     ) -> Result<SessionDeletion> {
@@ -713,20 +717,6 @@ impl LashCore {
                 lash_core::session_delete::SessionDeleteError::Close(
                     lash_core::session_close::SessionCloseError::Runtime(error),
                 ) => EmbedError::from(error),
-                lash_core::session_delete::SessionDeleteError::Unrecorded {
-                    session_id,
-                    failure: lash_core::session_delete::SessionDeleteFailure::Storage(failure),
-                } => EmbedError::SessionDeleteStorage {
-                    session_id,
-                    failure,
-                },
-                lash_core::session_delete::SessionDeleteError::Unrecorded {
-                    session_id,
-                    failure,
-                } => EmbedError::SessionDeleteCleanup {
-                    session_id,
-                    failure: Box::new(failure),
-                },
             })
     }
 
