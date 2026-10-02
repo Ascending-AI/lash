@@ -117,26 +117,14 @@ impl SessionBuilder {
         self
     }
 
-    /// Declare that this open will not run a turn — the host is opening the
-    /// session only to enqueue input or take a commit, possibly on a core that
-    /// does not carry the session's tool sources at all.
+    /// Open for enqueueing or host commands while preserving the recorded tools.
     ///
-    /// The open skips the persisted-tool reconcile and catalog rebuild: the
-    /// durable `ToolState` is not installed, no generation bumps, no
-    /// [`ToolRestoreReport`](lash_core::ToolRestoreReport) is produced and no
-    /// lost-tools warning fires. Commits the open takes carry the persisted
-    /// surface forward byte-for-byte instead of restamping an unreconciled
-    /// registry, so the session's tools are still catalog members on the next
-    /// ordinary open.
-    ///
-    /// The declaration is enforced, not advisory: because the surface was
-    /// never reconciled and no [`ToolSourcePolicy`](lash_core::ToolSourcePolicy)
-    /// was enforced, [`turn`](LashSession::turn),
-    /// [`queued_turn`](LashSession::queued_turn) and every other
-    /// turn-execution entry fail with
-    /// [`RuntimeErrorCode::TurnExecutionRequiresReconciledToolSurface`](lash_core::RuntimeErrorCode)
-    /// before admission. Reopen without `enqueue_only` to run a turn. See
-    /// [`ToolSurfaceOpenMode::PreservePersisted`](lash_core::ToolSurfaceOpenMode).
+    /// This open skips tool reconciliation and the catalog rebuild, preserving
+    /// the persisted tool state on subsequent host command commits. The opened
+    /// runtime cannot execute a turn with an unreconciled tool surface.
+    /// Submit input through [`LashSession::send`]; the engine reconciles the
+    /// tools in its own execution runtime.
+    /// See [`ToolSurfaceOpenMode::PreservePersisted`](lash_core::ToolSurfaceOpenMode).
     pub fn enqueue_only(mut self) -> Self {
         self.tool_surface_open_mode = Some(lash_core::ToolSurfaceOpenMode::PreservePersisted);
         self

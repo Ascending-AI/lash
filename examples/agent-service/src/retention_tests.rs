@@ -8,8 +8,8 @@ use lash::persistence::{
     PendingTurnInputDraft, SessionCreationHead, SessionRelation, SessionStoreCreateRequest,
     TurnInputIngress, TurnInputStateKind,
 };
+use lash::sqlite::{BlobArtifactDescriptor, SqliteStoreSet};
 use lash::{TurnBudget, TurnInput, runtime::SessionPolicy};
-use lash_sqlite_store::{BlobArtifactDescriptor, SqliteStoreSet};
 
 use crate::retention::{
     StoreRetentionTargets, run_store_retention_pass, scheduled_attachment_policy,

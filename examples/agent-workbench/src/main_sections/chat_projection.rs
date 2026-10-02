@@ -232,7 +232,7 @@ pub(crate) fn committed_chat_text(message: &lash::messages::Message) -> String {
 }
 
 pub(crate) fn is_durable_internal_rlm_message(message: &lash::messages::Message) -> bool {
-    lash_protocol_rlm::is_rlm_protocol_output(message.origin.as_ref())
+    lash::rlm::is_rlm_protocol_output(message.origin.as_ref())
 }
 
 /// The protocol's system copies — finish reminders, retry copy, cell diagnostics — never can
@@ -348,10 +348,10 @@ pub(crate) fn durable_rlm_reasoning_rows(message: &lash::messages::Message) -> V
         .collect()
 }
 
-pub(crate) fn transcript_tool(call: lash_rlm_types::RlmExecutedCall) -> TranscriptTool {
+pub(crate) fn transcript_tool(call: lash::rlm::RlmExecutedCall) -> TranscriptTool {
     let status = match call.outcome {
-        lash_rlm_types::RlmExecutedCallOutcome::Ok => "success",
-        lash_rlm_types::RlmExecutedCallOutcome::Err => "failure",
+        lash::rlm::RlmExecutedCallOutcome::Ok => "success",
+        lash::rlm::RlmExecutedCallOutcome::Err => "failure",
     };
     TranscriptTool::DurableSummary {
         operation: call.operation,
@@ -360,7 +360,7 @@ pub(crate) fn transcript_tool(call: lash_rlm_types::RlmExecutedCall) -> Transcri
 }
 
 pub(crate) fn transcript_tools(
-    calls: Vec<lash_rlm_types::RlmExecutedCall>,
+    calls: Vec<lash::rlm::RlmExecutedCall>,
     calls_omitted: usize,
 ) -> Vec<TranscriptTool> {
     let mut tools = calls.into_iter().map(transcript_tool).collect::<Vec<_>>();
@@ -404,8 +404,8 @@ pub(crate) fn transcript_rows_from_committed(
                 vec![TranscriptRow::Message { message }]
             }
             lash::persistence::ChronologicalPayload::ProtocolEvent(event) => {
-                match lash_protocol_rlm::decode_rlm_protocol_event(&event) {
-                    Some(lash_rlm_types::RlmProtocolEvent::RlmAssistantContent(content))
+                match lash::rlm::decode_rlm_protocol_event(&event) {
+                    Some(lash::rlm::RlmProtocolEvent::RlmAssistantContent(content))
                         if !content.reasoning.trim().is_empty() =>
                     {
                         vec![TranscriptRow::Reasoning {
@@ -413,7 +413,7 @@ pub(crate) fn transcript_rows_from_committed(
                             text: content.reasoning,
                         }]
                     }
-                    Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step))
+                    Some(lash::rlm::RlmProtocolEvent::RlmTrajectoryEntry(step))
                         if !step.code.trim().is_empty() =>
                     {
                         let mut output = match &step.output_archive {

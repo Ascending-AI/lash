@@ -2,7 +2,7 @@ use std::path::Path;
 
 use axum::http::StatusCode;
 use lash::TurnEvent;
-use lash_remote_protocol::RemoteTurnEvent;
+use lash::remote::usage::RemoteTurnEvent;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::json;

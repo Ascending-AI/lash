@@ -110,8 +110,8 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner()
     assert!(
         matches!(
             admitted_a.status,
-            lash_restate::RestateInvocationLifecycle::Running
-                | lash_restate::RestateInvocationLifecycle::Suspended
+            lash::restate::RestateInvocationLifecycle::Running
+                | lash::restate::RestateInvocationLifecycle::Suspended
         ),
         "fixture A must be executing when its journal prefix is captured: {admitted_a:#?}"
     );
@@ -383,10 +383,10 @@ print("fixture A journal prefix committed");
 
 async fn wait_for_invocation_deployment(
     admin_url: &str,
-    invocation_id: &lash_restate::RestateInvocationId,
+    invocation_id: &lash::restate::RestateInvocationId,
     deployment_id: &str,
     timeout: Duration,
-) -> lash_restate::RestateInvocationStatus {
+) -> lash::restate::RestateInvocationStatus {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         let status = restate_invocation_status_with_deployment(admin_url, invocation_id).await;
@@ -405,13 +405,13 @@ async fn wait_for_invocation_deployment(
 
 async fn wait_for_restate_invocation_success_admin(
     admin_url: &str,
-    invocation_id: &lash_restate::RestateInvocationId,
+    invocation_id: &lash::restate::RestateInvocationId,
     timeout: Duration,
     failure: &str,
 ) {
     let deadline = tokio::time::Instant::now() + timeout;
     let admin =
-        lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::new(admin_url));
+        lash::restate::RestateAdminClient::new(lash::restate::RestateConnection::new(admin_url));
     loop {
         let status = admin
             .invocation_status(invocation_id)

@@ -2,7 +2,7 @@ use super::*;
 use lash::SessionId;
 
 async fn register_cron_test_subscription(
-    trigger_store: &lash_sqlite_store::SqliteTriggerStore,
+    trigger_store: &lash::sqlite::SqliteTriggerStore,
     session_id: &SessionId,
     source_key: &str,
 ) {
@@ -16,7 +16,7 @@ async fn register_cron_test_subscription(
 }
 
 async fn register_cron_test_subscription_record(
-    trigger_store: &lash_sqlite_store::SqliteTriggerStore,
+    trigger_store: &lash::sqlite::SqliteTriggerStore,
     session_id: &SessionId,
     subscription_key: &str,
     source_key: &str,
@@ -32,7 +32,7 @@ async fn register_cron_test_subscription_record(
 }
 
 async fn register_test_subscription_record(
-    trigger_store: &lash_sqlite_store::SqliteTriggerStore,
+    trigger_store: &lash::sqlite::SqliteTriggerStore,
     session_id: &SessionId,
     subscription_key: &str,
     source_type: &str,
@@ -70,7 +70,7 @@ async fn register_test_subscription_record(
 }
 
 async fn disable_cron_test_subscription(
-    trigger_store: &lash_sqlite_store::SqliteTriggerStore,
+    trigger_store: &lash::sqlite::SqliteTriggerStore,
     record: &lash::triggers::TriggerSubscriptionRecord,
 ) {
     lash::triggers::TriggerStore::execute_command(
@@ -89,7 +89,7 @@ async fn disable_cron_test_subscription(
 }
 
 async fn delete_cron_test_subscription(
-    trigger_store: &lash_sqlite_store::SqliteTriggerStore,
+    trigger_store: &lash::sqlite::SqliteTriggerStore,
     record: &lash::triggers::TriggerSubscriptionRecord,
 ) {
     let filter = lash::triggers::TriggerSubscriptionFilter {
@@ -207,7 +207,7 @@ async fn spawn_scripted_cron_object_surface(surface: ScriptedCronObjectSurface) 
 }
 
 async fn register_fig1067_cron_subscription(
-    trigger_store: &lash_sqlite_store::SqliteTriggerStore,
+    trigger_store: &lash::sqlite::SqliteTriggerStore,
     session_id: &SessionId,
 ) -> lash::triggers::TriggerSubscriptionRecord {
     let source_key = "cron-source:fig1067";
@@ -231,7 +231,7 @@ async fn register_fig1067_cron_subscription(
                 lash::process::ProcessIdentity::new("cron-test-engine"),
             )
             .with_source(
-                lashlang::HostDescriptor::encode(
+                lash::rlm::lang::HostDescriptor::encode(
                     crate::CRON_SCHEDULE_SOURCE_TYPE,
                     serde_json::json!({
                         "expr": "*/10 * * * * *",
@@ -273,7 +273,7 @@ fn fig1067_cron_registration(
         name: None,
         source_type: crate::CRON_SCHEDULE_SOURCE_TYPE.to_string(),
         source_key: source_key.to_string(),
-        source: lashlang::HostDescriptor::encode(
+        source: lash::rlm::lang::HostDescriptor::encode(
             crate::CRON_SCHEDULE_SOURCE_TYPE,
             serde_json::json!({ "expr": "*/10 * * * * *", "tz": "UTC" }),
         )
@@ -300,7 +300,7 @@ fn fig1067_cron_registration(
 }
 
 async fn register_fig1067_button_subscription(
-    trigger_store: &lash_sqlite_store::SqliteTriggerStore,
+    trigger_store: &lash::sqlite::SqliteTriggerStore,
     session_id: &SessionId,
 ) -> lash::triggers::TriggerSubscriptionRecord {
     let source_key = lash::triggers::empty_trigger_source_key(crate::BUTTON_TRIGGER_SOURCE_TYPE)
@@ -927,12 +927,12 @@ async fn a_failed_delete_cancel_preserves_the_registration() {
 }
 
 struct MetaLossDeploymentStore {
-    inner: Arc<lash_sqlite_store::SqliteStore>,
+    inner: Arc<lash::sqlite::SqliteStore>,
     absent_session_ids: std::sync::Mutex<std::collections::HashSet<SessionId>>,
 }
 
 struct ContendedDeploymentStore {
-    inner: Arc<lash_sqlite_store::SqliteStore>,
+    inner: Arc<lash::sqlite::SqliteStore>,
     contend: Arc<std::sync::atomic::AtomicBool>,
     contended_attempts: Arc<std::sync::atomic::AtomicUsize>,
 }
@@ -1483,9 +1483,9 @@ async fn a_cron_schedule_registered_without_a_timezone_is_not_refused_for_its_so
     // The contract the registration captures is the constructor's own, not the
     // permissive `untyped()` capture the other fixtures use — that permissive
     // capture is exactly why this defect reached a live workbench.
-    let config_schema = lash::triggers::JsonSchema::admit(lashlang::type_expr_to_json_schema(
-        &crate::cron_schedule_config_type(),
-    ))
+    let config_schema = lash::triggers::JsonSchema::admit(
+        lash::rlm::lang::type_expr_to_json_schema(&crate::cron_schedule_config_type()),
+    )
     .expect("valid declared payload schema");
     let source_capture = lash::triggers::TriggerSourceCapture::resident(
         crate::CRON_SCHEDULE_SOURCE_TYPE.split('.'),
@@ -1519,7 +1519,7 @@ async fn a_cron_schedule_registered_without_a_timezone_is_not_refused_for_its_so
             )
             .with_source_capture(source_capture)
             .with_source(
-                lashlang::HostDescriptor::encode(
+                lash::rlm::lang::HostDescriptor::encode(
                     crate::CRON_SCHEDULE_SOURCE_TYPE,
                     // Registered exactly as `cron.Schedule({ expr })` does.
                     serde_json::json!({ "expr": "*/30 * * * * *" }),

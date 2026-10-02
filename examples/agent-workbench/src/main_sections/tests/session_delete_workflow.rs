@@ -25,7 +25,7 @@ pub(crate) trait WorkbenchTestSessionDelete {
 }
 
 struct WorkbenchTestSessionDeleteImpl {
-    administration: lash_restate::RestateSessionAdministration,
+    administration: lash::restate::RestateSessionAdministration,
     attempt: SessionDeleteAttempt,
 }
 
@@ -52,13 +52,13 @@ pub(crate) async fn run_session_delete_in_handler(
     session_id: &SessionId,
     attempt: SessionDeleteAttempt,
 ) -> Result<(), String> {
-    let authority = lash_restate::RestateAuthorityId::new(format!(
+    let authority = lash::restate::RestateAuthorityId::new(format!(
         "lash-restate-test-{}",
         double.server().config().seed
     ))
     .map_err(|error| error.to_string())?;
     let workflow = WorkbenchTestSessionDeleteImpl {
-        administration: lash_restate::RestateSessionAdministration::new(
+        administration: lash::restate::RestateSessionAdministration::new(
             core.session_administration().await,
             double.connection(),
             authority,

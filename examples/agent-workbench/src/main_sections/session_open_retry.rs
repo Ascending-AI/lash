@@ -59,7 +59,7 @@ where
                 }
                 return Ok(session);
             }
-            Err(error) if error.is_retryable() => {
+            Err(error) if error.is_contended() => {
                 trace(
                     "session.open.contended",
                     json!({

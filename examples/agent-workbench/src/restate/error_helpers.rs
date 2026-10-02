@@ -3,14 +3,14 @@ use lash::SessionId;
 use lash::TurnId;
 
 pub(super) fn configured_restate_authority_id()
--> Result<lash_restate::RestateAuthorityId, TerminalError> {
+-> Result<lash::restate::RestateAuthorityId, TerminalError> {
     let value = std::env::var("RESTATE_AUTHORITY_ID")
         .map_err(|_| TerminalError::new("RESTATE_AUTHORITY_ID is required"))?;
-    lash_restate::RestateAuthorityId::new(value).map_err(TerminalError::from_error)
+    lash::restate::RestateAuthorityId::new(value).map_err(TerminalError::from_error)
 }
 
 impl super::WorkbenchCronJobImpl {
-    pub(super) fn authority_id(&self) -> Result<lash_restate::RestateAuthorityId, TerminalError> {
+    pub(super) fn authority_id(&self) -> Result<lash::restate::RestateAuthorityId, TerminalError> {
         #[cfg(test)]
         if let Some(authority_id) = &self.authority_id {
             return Ok(authority_id.clone());
@@ -54,8 +54,8 @@ pub(super) fn session_delete_handler_error(err: AppError) -> HandlerError {
 pub(super) fn settlement_handler_error(err: AppError) -> HandlerError {
     match err.verdict {
         AppErrorVerdict::Retryable => HandlerError::from(err),
-        // A parked turn keeps its invocation's journal (lash_restate::turn_service).
-        AppErrorVerdict::Parked => lash_restate::parked_turn_failure(err.message),
+        // A parked turn keeps its invocation's journal (lash::restate::turn_service).
+        AppErrorVerdict::Parked => lash::restate::parked_turn_failure(err.message),
         AppErrorVerdict::Terminal => terminal_handler_error(err),
         AppErrorVerdict::Ambiguous => {
             // Ambiguous settlement failures remain retryable.

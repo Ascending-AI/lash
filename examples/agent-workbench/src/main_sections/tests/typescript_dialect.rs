@@ -173,11 +173,11 @@ fn typescript_prompt_programs() -> Vec<String> {
 /// here. The tool modules are stated at the paths the real bindings produce —
 /// `with_tool_binding` writes the binding at the same path a TypeScript call
 /// uses.
-fn workbench_link_environment() -> lashlang::LashlangHostEnvironment {
+fn workbench_link_environment() -> lash::rlm::lang::LashlangHostEnvironment {
     let mut resources = workbench_lashlang_resources();
-    lashlang::add_trigger_resource_operations(&mut resources)
+    lash::rlm::lang::add_trigger_resource_operations(&mut resources)
         .expect("trigger resource operations are unique");
-    lashlang::add_trigger_register_tool_binding(&mut resources)
+    lash::rlm::lang::add_trigger_register_tool_binding(&mut resources)
         .expect("trigger register tool binding is unique");
     let modules: [(&[&str], &str, &[&str]); 4] = [
         (&["agents"], "Agents", &["spawn"]),
@@ -195,13 +195,16 @@ fn workbench_link_environment() -> lashlang::LashlangHostEnvironment {
                     resource_type,
                     *operation,
                     format!("tool:{}/{operation}", path.join("/")),
-                    &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
+                    &lash::rlm::lang::OperationContract::new(
+                        serde_json::json!({}),
+                        serde_json::json!({}),
+                    ),
                 )
                 .expect("workbench tutorial tool binding");
         }
     }
     add_process_control_operations(&mut resources);
-    lashlang::LashlangHostEnvironment::new(resources, workbench_lashlang_abilities())
+    lash::rlm::lang::LashlangHostEnvironment::new(resources, workbench_lashlang_abilities())
 }
 
 /// The `processes` module the workbench's process-controls plugin binds.
@@ -210,35 +213,32 @@ fn workbench_link_environment() -> lashlang::LashlangHostEnvironment {
 /// sees it only because `bootstrap` installs
 /// `SessionProcessAdminPluginFactory`, so this fixture declares exactly the
 /// operations that plugin binds, each carrying the shipped tool's own contract.
-fn add_process_control_operations(resources: &mut lashlang::LashlangHostCatalog) {
+fn add_process_control_operations(resources: &mut lash::rlm::lang::LashlangHostCatalog) {
     for (operation, definition) in [
         (
             "start",
-            lash_plugin_process_controls::process_start_tool_definition(),
+            lash::process_controls::process_start_tool_definition(),
         ),
         (
             "signal",
-            lash_plugin_process_controls::process_signal_tool_definition(),
+            lash::process_controls::process_signal_tool_definition(),
         ),
         (
             "emit",
-            lash_plugin_process_controls::process_emit_tool_definition(),
+            lash::process_controls::process_emit_tool_definition(),
         ),
-        (
-            "get",
-            lash_plugin_process_controls::process_get_tool_definition(),
-        ),
+        ("get", lash::process_controls::process_get_tool_definition()),
         (
             "list",
-            lash_plugin_process_controls::process_list_tool_definition(),
+            lash::process_controls::process_list_tool_definition(),
         ),
         (
             "await",
-            lash_plugin_process_controls::process_await_tool_definition(),
+            lash::process_controls::process_await_tool_definition(),
         ),
         (
             "cancel",
-            lash_plugin_process_controls::process_cancel_tool_definition(),
+            lash::process_controls::process_cancel_tool_definition(),
         ),
     ] {
         let contract = definition.contract();
@@ -248,7 +248,7 @@ fn add_process_control_operations(resources: &mut lashlang::LashlangHostCatalog)
                 "Processes",
                 operation,
                 definition.manifest().id.to_string(),
-                &lashlang::OperationContract::new(
+                &lash::rlm::lang::OperationContract::new(
                     contract.input_schema.canonical().clone(),
                     contract.output_schema.canonical().clone(),
                 ),
@@ -272,7 +272,7 @@ fn the_workbench_typescript_tutorials_link() {
     );
     let mut hits = Vec::new();
     for (index, program) in programs.iter().enumerate() {
-        if let Err(error) = lash_typescript::link(program, &environment) {
+        if let Err(error) = lash::typescript::link(program, &environment) {
             hits.push(format!("tutorial {}: {error}", index + 1));
         }
     }
@@ -283,7 +283,7 @@ fn the_workbench_typescript_tutorials_link() {
 
     // The linker must be able to reject, or an empty hit list proves nothing.
     assert!(
-        lash_typescript::link("class Unsupported {} finish(1);", &environment).is_err(),
+        lash::typescript::link("class Unsupported {} finish(1);", &environment).is_err(),
         "the control must be refused"
     );
 }
@@ -297,7 +297,7 @@ fn the_workbench_typescript_tutorials_link() {
 /// workbench (FIG-3211). So every tutorial is *run*, not just linked, and the
 /// control below proves this harness can still see that placeholder.
 struct TutorialHost {
-    environment: lashlang::LashlangHostEnvironment,
+    environment: lash::rlm::lang::LashlangHostEnvironment,
 }
 
 /// The one subscription key the tutorial host hands back.
@@ -356,20 +356,20 @@ fn tutorial_process_handle() -> serde_json::Value {
 
 /// The locally spelled handle record still is one, by the runtime's own parse.
 ///
-/// `lashlang::is_process_handle` is the public face of
-/// `lashlang::runtime::access::parse_handle_record`, the runtime's single
+/// `lash::rlm::lang::is_process_handle` is the public face of
+/// `lash::rlm::lang::runtime::access::parse_handle_record`, the runtime's single
 /// handle authority: it reads `HANDLE_MARKER_FIELD` and `id` and asks
 /// `lash-sansio` to parse them. If either field name or the kind string moves,
 /// this fails here rather than turning the process-starting tutorial's `await`
 /// into a silent refusal inside the run below.
 #[test]
 fn the_tutorial_process_handle_is_what_the_runtime_parses() {
-    let value = lashlang::from_json(tutorial_process_handle());
-    let lashlang::Value::Record(record) = &value else {
+    let value = lash::rlm::lang::from_json(tutorial_process_handle());
+    let lash::rlm::lang::Value::Record(record) = &value else {
         panic!("a handle record is a record, got {value:?}");
     };
     assert!(
-        lashlang::is_process_handle(record),
+        lash::rlm::lang::is_process_handle(record),
         "the handle record spelling drifted from the runtime's own parse: {value:?}"
     );
 }
@@ -386,72 +386,74 @@ impl TutorialHost {
     /// surfaces as an unanswered operation instead of falling into a default.
     fn resource_result(
         &self,
-        call: &lashlang::ResourceOperation,
-    ) -> Result<lashlang::Value, lashlang::ExecutionHostError> {
-        let lashlang::Value::Resource(receiver) = &call.receiver else {
-            return Err(lashlang::ExecutionHostError::new(format!(
+        call: &lash::rlm::lang::ResourceOperation,
+    ) -> Result<lash::rlm::lang::Value, lash::rlm::lang::ExecutionHostError> {
+        let lash::rlm::lang::Value::Resource(receiver) = &call.receiver else {
+            return Err(lash::rlm::lang::ExecutionHostError::new(format!(
                 "`{}` was called on something that is not a module authority",
                 call.operation
             )));
         };
-        let host_operation = lash_lashlang_runtime::resolve_lashlang_module_operation(
+        let host_operation = lash::rlm::resolve_lashlang_module_operation(
             &self.environment,
             receiver,
             &call.operation,
         )?;
-        let process_start = lash_plugin_process_controls::process_start_tool_definition()
+        let process_start = lash::process_controls::process_start_tool_definition()
             .manifest()
             .id
             .to_string();
-        if host_operation == lashlang::REGISTER_TRIGGER_TOOL_ID {
-            return Ok(lashlang::from_json(tutorial_trigger_handle()));
+        if host_operation == lash::rlm::lang::REGISTER_TRIGGER_TOOL_ID {
+            return Ok(lash::rlm::lang::from_json(tutorial_trigger_handle()));
         }
-        if host_operation == lashlang::TriggerHostOperation::List.host_operation() {
-            return Ok(lashlang::from_json(serde_json::json!([
+        if host_operation == lash::rlm::lang::TriggerHostOperation::List.host_operation() {
+            return Ok(lash::rlm::lang::from_json(serde_json::json!([
                 tutorial_trigger_handle()
             ])));
         }
         if host_operation == process_start {
-            return Ok(lashlang::from_json(tutorial_process_handle()));
+            return Ok(lash::rlm::lang::from_json(tutorial_process_handle()));
         }
-        Err(lashlang::ExecutionHostError::new(format!(
+        Err(lash::rlm::lang::ExecutionHostError::new(format!(
             "the workbench tutorials reached an unanswered host operation `{host_operation}`"
         )))
     }
 }
 
-impl lashlang::ExecutionHost for TutorialHost {
+impl lash::rlm::lang::ExecutionHost for TutorialHost {
     async fn perform(
         &self,
-        op: lashlang::AbilityOp,
-    ) -> Result<lashlang::AbilityOutcome, lashlang::ExecutionHostError> {
+        op: lash::rlm::lang::AbilityOp,
+    ) -> Result<lash::rlm::lang::AbilityOutcome, lash::rlm::lang::ExecutionHostError> {
         match op {
-            lashlang::AbilityOp::ResourceOperation(call) => self
+            lash::rlm::lang::AbilityOp::ResourceOperation(call) => self
                 .resource_result(&call)
-                .map(lashlang::AbilityOutcome::Value),
+                .map(lash::rlm::lang::AbilityOutcome::Value),
             // The one tutorial that awaits a process awaits a subagent branch,
             // whose declared output is `{ summary, key_metrics }`.
-            lashlang::AbilityOp::Await(_) => Ok(lashlang::AbilityOutcome::Value(
-                lashlang::from_json(serde_json::json!({
+            lash::rlm::lang::AbilityOp::Await(_) => Ok(lash::rlm::lang::AbilityOutcome::Value(
+                lash::rlm::lang::from_json(serde_json::json!({
                     "summary": "what the branch found",
                     "key_metrics": ["first metric", "second metric"]
                 })),
             )),
-            lashlang::AbilityOp::Finish(value) => Ok(lashlang::AbilityOutcome::Value(value)),
-            lashlang::AbilityOp::Print(_) => Ok(lashlang::AbilityOutcome::Unit),
-            other => Err(lashlang::ExecutionHostError::new(format!(
+            lash::rlm::lang::AbilityOp::Finish(value) => {
+                Ok(lash::rlm::lang::AbilityOutcome::Value(value))
+            }
+            lash::rlm::lang::AbilityOp::Print(_) => Ok(lash::rlm::lang::AbilityOutcome::Unit),
+            other => Err(lash::rlm::lang::ExecutionHostError::new(format!(
                 "the workbench tutorials should not reach {other:?}"
             ))),
         }
     }
 }
 
-async fn run_tutorial(source: &str) -> Result<lashlang::ExecutionOutcome, String> {
+async fn run_tutorial(source: &str) -> Result<lash::rlm::lang::ExecutionOutcome, String> {
     let host = TutorialHost::new();
-    let linked = lash_typescript::link(source, &host.environment)
+    let linked = lash::typescript::link(source, &host.environment)
         .map_err(|error| format!("does not link: {error}"))?;
-    let compiled = lashlang::testing::harness::compile_linked_main(&linked);
-    lashlang::execute(&compiled, &mut lashlang::State::new(), &host)
+    let compiled = lash::rlm::lang::testing::harness::compile_linked_main(&linked);
+    lash::rlm::lang::execute(&compiled, &mut lash::rlm::lang::State::new(), &host)
         .await
         .map_err(|error| format!("{error:?}"))
 }
@@ -473,7 +475,7 @@ async fn the_workbench_typescript_tutorials_run_without_a_dialect_refusal() {
     let mut hits = Vec::new();
     for (index, program) in programs.iter().enumerate() {
         match run_tutorial(program).await {
-            Ok(lashlang::ExecutionOutcome::Finished(_)) => {}
+            Ok(lash::rlm::lang::ExecutionOutcome::Finished(_)) => {}
             Ok(other) => hits.push(format!("tutorial {}: {other:?}", index + 1)),
             Err(problem) => hits.push(format!("tutorial {}: {problem}", index + 1)),
         }
@@ -626,7 +628,7 @@ fn every_scripted_dev_provider_reply_is_a_cell_of_the_hosts_dialect() {
                 .trim_end()
                 .trim_end_matches(close)
                 .trim();
-            if let Err(error) = lash_typescript::link(code, &environment) {
+            if let Err(error) = lash::typescript::link(code, &environment) {
                 hits.push(format!("{label}: {error}"));
             }
         }

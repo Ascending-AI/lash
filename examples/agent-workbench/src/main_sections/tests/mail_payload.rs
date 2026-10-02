@@ -58,16 +58,16 @@ async fn inject_message_scopes_emission_to_requested_session() {
     //
     // ADR 0096 retired the Lashlang front-end, so the fixture states its AST.
     let module = {
-        use lashlang::testing::ast_builders as b;
+        use lash::rlm::lang::testing::ast_builders as b;
 
         b::module(
             vec![b::process_returning(
                 "mail_listener",
                 vec![b::param(
                     "event",
-                    lashlang::TypeExpr::Ref("mail.Received".into()),
+                    lash::rlm::lang::TypeExpr::Ref("mail.Received".into()),
                 )],
-                lashlang::TypeExpr::Str,
+                lash::rlm::lang::TypeExpr::Str,
                 b::finish(b::field(b::var("event"), "title")),
             )],
             Vec::new(),
@@ -83,7 +83,7 @@ async fn inject_message_scopes_emission_to_requested_session() {
         .publish_module(&pin, &linked.artifact)
         .await
         .expect("publish mail-listener module");
-    let process_input = lash_lashlang_runtime::LashlangProcessInput {
+    let process_input = lash::process::LashlangProcessInput {
         module_ref: linked.artifact.module_ref().clone(),
         process_ref: linked
             .artifact

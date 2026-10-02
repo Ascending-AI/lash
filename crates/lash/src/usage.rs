@@ -70,3 +70,4 @@ pub mod sources {
 pub use lash_core::usage_accounting::{
     UsageEffectKey, UsageFactIdentity, UsageFactKind, UsageMeterId,
 };
+pub use lash_core_store::UsageOwnerRetired;

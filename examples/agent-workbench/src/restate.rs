@@ -150,7 +150,7 @@ impl WorkbenchButtonTriggerWorkflow for WorkbenchButtonTriggerWorkflowImpl {
         ctx: WorkflowContext<'_>,
         Json(request): Json<WorkbenchButtonTriggerWorkflowRequest>,
     ) -> HandlerResult<Json<()>> {
-        let controller = lash_restate::RestateRuntimeEffectController::new(
+        let controller = lash::restate::RestateRuntimeEffectController::new(
             ctx,
             configured_restate_authority_id()?,
             self.state.core.build_generation().clone(),
@@ -185,7 +185,7 @@ impl WorkbenchMailReceivedWorkflow for WorkbenchMailReceivedWorkflowImpl {
         ctx: WorkflowContext<'_>,
         Json(request): Json<WorkbenchMailReceivedWorkflowRequest>,
     ) -> HandlerResult<Json<()>> {
-        let controller = lash_restate::RestateRuntimeEffectController::new(
+        let controller = lash::restate::RestateRuntimeEffectController::new(
             ctx,
             configured_restate_authority_id()?,
             self.state.core.build_generation().clone(),
@@ -204,7 +204,7 @@ pub(crate) trait WorkbenchSessionDeleteWorkflow {
 
 pub(crate) struct WorkbenchSessionDeleteWorkflowImpl {
     state: AppState,
-    administration: tokio::sync::OnceCell<lash_restate::RestateSessionAdministration>,
+    administration: tokio::sync::OnceCell<lash::restate::RestateSessionAdministration>,
 }
 
 impl WorkbenchSessionDeleteWorkflowImpl {
@@ -226,9 +226,9 @@ impl WorkbenchSessionDeleteWorkflow for WorkbenchSessionDeleteWorkflowImpl {
             .administration
             .get_or_try_init(|| async {
                 let administration = self.state.core.session_administration().await;
-                Ok::<_, AppError>(lash_restate::RestateSessionAdministration::new(
+                Ok::<_, AppError>(lash::restate::RestateSessionAdministration::new(
                     administration,
-                    lash_restate::RestateConnection::with_client(
+                    lash::restate::RestateConnection::with_client(
                         self.state.restate_ingress_url.clone(),
                         self.state.restate_http.clone(),
                     ),
@@ -267,7 +267,7 @@ impl WorkbenchProcessCancelWorkflow for WorkbenchProcessCancelWorkflowImpl {
         ctx: WorkflowContext<'_>,
         Json(request): Json<WorkbenchProcessCancelWorkflowRequest>,
     ) -> HandlerResult<Json<()>> {
-        let controller = lash_restate::RestateRuntimeEffectController::new(
+        let controller = lash::restate::RestateRuntimeEffectController::new(
             ctx,
             configured_restate_authority_id()?,
             self.state.core.build_generation().clone(),
@@ -291,7 +291,7 @@ trait WorkbenchCronJob {
 pub(crate) struct WorkbenchCronJobImpl {
     state: AppState,
     #[cfg(test)]
-    authority_id: Option<lash_restate::RestateAuthorityId>,
+    authority_id: Option<lash::restate::RestateAuthorityId>,
 }
 
 mod cron;
@@ -379,7 +379,7 @@ impl WorkbenchCronJob for WorkbenchCronJobImpl {
                 .await?;
             CronTickBasis::from_journal_value(&journal_value)?
         };
-        let controller = lash_restate::RestateRuntimeEffectController::new(
+        let controller = lash::restate::RestateRuntimeEffectController::new(
             ctx,
             self.authority_id()?,
             self.state.core.build_generation().clone(),
@@ -476,7 +476,7 @@ pub(crate) use endpoint_host::spawn_restate_endpoint;
 pub(crate) async fn submit_button_trigger(
     state: &AppState,
     request: WorkbenchButtonTriggerWorkflowRequest,
-) -> Result<lash_restate::RestateInvocationId, AppError> {
+) -> Result<lash::restate::RestateInvocationId, AppError> {
     submit_restate_workflow_json(
         &state.restate_http,
         &state.restate_ingress_url,
@@ -490,7 +490,7 @@ pub(crate) async fn submit_button_trigger(
 pub(crate) async fn submit_mail_received(
     state: &AppState,
     request: WorkbenchMailReceivedWorkflowRequest,
-) -> Result<lash_restate::RestateInvocationId, AppError> {
+) -> Result<lash::restate::RestateInvocationId, AppError> {
     submit_mail_received_with_client(&state.restate_http, &state.restate_ingress_url, request).await
 }
 
@@ -498,7 +498,7 @@ pub(crate) async fn submit_mail_received_with_client(
     restate_http: &reqwest::Client,
     restate_ingress_url: &str,
     request: WorkbenchMailReceivedWorkflowRequest,
-) -> Result<lash_restate::RestateInvocationId, AppError> {
+) -> Result<lash::restate::RestateInvocationId, AppError> {
     submit_restate_workflow_json(
         restate_http,
         restate_ingress_url,
@@ -513,7 +513,7 @@ pub(crate) async fn submit_mail_received_with_client(
 pub(crate) async fn submit_session_delete(
     state: &AppState,
     request: WorkbenchSessionDeleteWorkflowRequest,
-) -> Result<lash_restate::RestateInvocationId, AppError> {
+) -> Result<lash::restate::RestateInvocationId, AppError> {
     submit_restate_workflow_json(
         &state.restate_http,
         &state.restate_ingress_url,
@@ -527,7 +527,7 @@ pub(crate) async fn submit_session_delete(
 pub(crate) async fn submit_process_cancel(
     state: &AppState,
     request: WorkbenchProcessCancelWorkflowRequest,
-) -> Result<lash_restate::RestateInvocationId, AppError> {
+) -> Result<lash::restate::RestateInvocationId, AppError> {
     submit_restate_workflow_json(
         &state.restate_http,
         &state.restate_ingress_url,
@@ -613,7 +613,7 @@ pub(crate) async fn workbench_turn_input(
 async fn run_button_trigger(
     state: AppState,
     request: WorkbenchButtonTriggerWorkflowRequest,
-    controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
+    controller: &lash::restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
 ) -> Result<(), AppError> {
     journaled_session_admission(
         &state,
@@ -668,7 +668,7 @@ async fn run_button_trigger(
 async fn run_mail_received(
     state: AppState,
     request: WorkbenchMailReceivedWorkflowRequest,
-    controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
+    controller: &lash::restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
 ) -> Result<(), AppError> {
     journaled_session_admission(
         &state,
@@ -723,7 +723,7 @@ async fn run_mail_received(
 async fn run_session_delete(
     state: AppState,
     request: WorkbenchSessionDeleteWorkflowRequest,
-    execution: &lash_restate::RestateSessionDeleteExecution<'_, '_, WorkflowContext<'_>>,
+    execution: &lash::restate::RestateSessionDeleteExecution<'_, '_, WorkflowContext<'_>>,
 ) -> Result<(), AppError> {
     // The workflow fences the session itself, so a delete submitted without
     // going through the route (or replayed after the route's process died)
@@ -739,7 +739,7 @@ async fn run_session_delete(
 async fn run_session_delete_attempt(
     state: &AppState,
     request: WorkbenchSessionDeleteWorkflowRequest,
-    execution: &lash_restate::RestateSessionDeleteExecution<'_, '_, WorkflowContext<'_>>,
+    execution: &lash::restate::RestateSessionDeleteExecution<'_, '_, WorkflowContext<'_>>,
 ) -> Result<(), AppError> {
     let controller = execution.controller();
     // Pin the first attempt's wait obligation in the journal. A prior attempt
@@ -810,7 +810,7 @@ async fn run_session_delete_attempt(
 async fn run_process_cancel(
     state: AppState,
     request: WorkbenchProcessCancelWorkflowRequest,
-    controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
+    controller: &lash::restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
 ) -> Result<(), AppError> {
     let scoped_effect_controller = controller
         .scoped_effect_controller(lash::runtime::AdmittedScope::runtime_operation(format!(
@@ -882,7 +882,7 @@ pub(crate) async fn terminalize_turn_execution(
                         "error": err.message,
                     }),
                 );
-                Err(lash_restate::parked_turn_failure(err.message))
+                Err(lash::restate::parked_turn_failure(err.message))
             }
             AppErrorVerdict::Terminal => {
                 let message = err.message.clone();
@@ -1123,8 +1123,8 @@ fn cron_request_from_registration(
     if source_type != CRON_SCHEDULE_SOURCE_TYPE {
         return Err(format!("unexpected source type `{source_type}`"));
     }
-    let source =
-        lashlang::HostDescriptor::decode(&registration.source).map_err(|err| err.to_string())?;
+    let source = lash::rlm::lang::HostDescriptor::decode(&registration.source)
+        .map_err(|err| err.to_string())?;
     if source.source_type != source_type {
         return Err(format!(
             "registration source type `{source_type}` does not match host descriptor `{}`",
@@ -1167,7 +1167,7 @@ enum JournaledSessionAdmission {
 /// outcome so replays are deterministic. A refusal is the typed conflict.
 async fn journaled_session_admission(
     state: &AppState,
-    controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
+    controller: &lash::restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
     session_id: &SessionId,
     surface: &'static str,
 ) -> Result<(), AppError> {

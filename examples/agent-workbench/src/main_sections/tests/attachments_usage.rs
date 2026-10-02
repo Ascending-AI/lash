@@ -46,7 +46,7 @@ fn attachment_usage_gate() {
         // over them. Two handles on that engine: the first core and the core
         // the resumed web process builds over the same stores.
         let stores: Arc<dyn lash::StoreSet> = Arc::new(
-            lash_sqlite_store::SqliteStoreSet::open(data_dir.join("lash-sessions"))
+            lash::sqlite::SqliteStoreSet::open(data_dir.join("lash-sessions"))
                 .await
                 .expect("open the gate's SQLite store set"),
         );

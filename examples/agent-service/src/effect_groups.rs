@@ -6,14 +6,14 @@
 use axum::Json;
 use axum::extract::{Path as AxumPath, State};
 use lash::CancellationToken;
+use lash::restate::{
+    Call, EffectGroupReadRankRequest, EffectGroupReadRankResponse, EffectGroupSettlementTerminal,
+    Reply, RestateIngressClient, RestateRuntimeEffectController,
+};
 use lash::runtime::{
     EffectAddress, ExecutionScope, GroupExecutors, GroupWakePolicy, LoserPolicy,
     RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectEnvelope,
     RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-};
-use lash_restate::{
-    Call, EffectGroupReadRankRequest, EffectGroupReadRankResponse, EffectGroupSettlementTerminal,
-    Reply, RestateIngressClient, RestateRuntimeEffectController,
 };
 use serde::{Deserialize, Serialize};
 
@@ -100,7 +100,7 @@ impl AgentServiceEffectGroupWorkflow for AgentServiceEffectGroupWorkflowImpl {
             .map_err(restate_sdk::errors::TerminalError::from_error)?;
         let group_key = group.group_key().to_string();
         let authority_id =
-            lash_restate::RestateAuthorityId::new(std::env::var("RESTATE_AUTHORITY_ID").map_err(
+            lash::restate::RestateAuthorityId::new(std::env::var("RESTATE_AUTHORITY_ID").map_err(
                 |_| restate_sdk::errors::TerminalError::new("RESTATE_AUTHORITY_ID is required"),
             )?)
             .map_err(restate_sdk::errors::TerminalError::from_error)?;

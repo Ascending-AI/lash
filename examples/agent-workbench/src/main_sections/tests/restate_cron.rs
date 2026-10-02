@@ -133,7 +133,7 @@ impl LiveRestateCronScenario {
             "kill_open requires a nonempty, one-line reason",
         );
         let admin =
-            lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::with_client(
+            lash::restate::RestateAdminClient::new(lash::restate::RestateConnection::with_client(
                 &self.state.restate_admin_url,
                 self.state.restate_http.clone(),
             ));
@@ -154,7 +154,7 @@ impl LiveRestateCronScenario {
                 eprintln!("kill_open: {reason}\n{open:#?}");
                 for row in open {
                     admin
-                        .kill_invocation(&lash_restate::RestateInvocationId::new(row.id))
+                        .kill_invocation(&lash::restate::RestateInvocationId::new(row.id))
                         .await
                         .expect("kill the deliberately scheduled cron job");
                 }
@@ -465,7 +465,7 @@ pub(crate) async fn retire_cron_session_and_assert_zombie(
     .expect("submit cron session retirement");
     wait_for_restate_invocation_success(state, &delete_invocation_id, Duration::from_secs(20))
         .await;
-    lash_restate::RestateIngressClient::new(lash_restate::RestateConnection::with_client(
+    lash::restate::RestateIngressClient::new(lash::restate::RestateConnection::with_client(
         &state.restate_ingress_url,
         state.restate_http.clone(),
     ))

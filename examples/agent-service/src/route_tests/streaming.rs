@@ -31,15 +31,7 @@ finish("done through route");
         .into_handle();
     let double = crate::state::test_support::test_double().await;
     let backend = double.lash_backend();
-    let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        lash::rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash::rlm::RlmChannel::Cell)
-            .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
-            .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
-            .build(),
-        std::sync::Arc::new(lash::rlm::TypescriptDialect),
-        &backend,
-    );
+    let factory = crate::rlm_factory(&backend);
     let core = LashCore::rlm_builder(backend, factory)
         .serve_test_llm_profile(
             provider,

@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 impl super::WorkbenchCronJobImpl {
     pub(crate) fn new_for_test(
         state: crate::AppState,
-        authority_id: lash_restate::RestateAuthorityId,
+        authority_id: lash::restate::RestateAuthorityId,
     ) -> Self {
         Self {
             state,
@@ -152,7 +152,7 @@ impl lash::runtime::RuntimeEffectController for JournalLaneEffectController {
 }
 
 struct OccurrenceFailureTriggerStore {
-    inner: Arc<lash_sqlite_store::SqliteTriggerStore>,
+    inner: Arc<lash::sqlite::SqliteTriggerStore>,
     occurrence_failure: Option<lash::plugins::PluginError>,
     list_subscriptions_failure: Option<lash::plugins::PluginError>,
     list_subscription_calls: Arc<std::sync::atomic::AtomicUsize>,
@@ -716,16 +716,16 @@ async fn cron_occurrence_redrive_reemits_the_reserved_process_start() {
 async fn turn_control_binding_routes_foreground_turns_through_the_configured_host() {
     let data_dir = tempfile::tempdir().expect("turn control binding tempdir");
 
-    let restate = Arc::new(lash_restate::RestateEngine::new(
+    let restate = Arc::new(lash::restate::RestateEngine::new(
         Arc::new(
-            lash_sqlite_store::SqliteStoreSet::open(data_dir.path().join("lash-sessions"))
+            lash::sqlite::SqliteStoreSet::open(data_dir.path().join("lash-sessions"))
                 .await
                 .expect("open the SQLite store set"),
         ),
         lash::restate::RestateConfig::new(
-            lash_restate::RestateConnection::new("http://127.0.0.1:8080"),
-            lash_restate::RestateConnection::new("http://127.0.0.1:9070"),
-            lash_restate::RestateAuthorityId::new("agent-workbench-tests").unwrap(),
+            lash::restate::RestateConnection::new("http://127.0.0.1:8080"),
+            lash::restate::RestateConnection::new("http://127.0.0.1:9070"),
+            lash::restate::RestateAuthorityId::new("agent-workbench-tests").unwrap(),
         ),
     ));
     let durable_host: Arc<dyn lash::durability::EffectHost> = restate.restate_effect_host();
@@ -753,13 +753,13 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
             })
             .build()
             .into_handle();
-        let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+        let factory = lash::rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash::rlm::RlmChannel::Cell)
                 .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build(),
-            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
+            std::sync::Arc::new(lash::rlm::TypescriptDialect),
             &backend,
         );
         lash::LashCore::rlm_builder(backend, factory)

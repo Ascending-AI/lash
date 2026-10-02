@@ -650,7 +650,7 @@ impl ChannelBot {
         } else {
             match self.open_session(&record.channel_id).await {
                 Ok(session) => (session, None),
-                Err(error) if error.is_retryable() => {
+                Err(error) if error.is_contended() => {
                     Self::log_turn_deferral(record, "the session lane is held elsewhere");
                     return Ok(DeliveryOutcome::Deferred {
                         event_id: record.event_id.clone(),

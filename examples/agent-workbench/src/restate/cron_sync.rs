@@ -15,7 +15,7 @@ trait CronJobSyncSurface {
 }
 
 struct IngressCronJobSyncSurface {
-    client: lash_restate::RestateIngressClient,
+    client: lash::restate::RestateIngressClient,
 }
 
 #[async_trait::async_trait]
@@ -49,8 +49,8 @@ pub(crate) async fn sync_cron_jobs_after_turn(
     reason: &str,
 ) -> Result<(), AppError> {
     let surface = IngressCronJobSyncSurface {
-        client: lash_restate::RestateIngressClient::new(
-            lash_restate::RestateConnection::with_client(
+        client: lash::restate::RestateIngressClient::new(
+            lash::restate::RestateConnection::with_client(
                 &state.restate_ingress_url,
                 state.restate_http.clone(),
             ),
@@ -77,8 +77,8 @@ pub(crate) async fn sync_cron_jobs_after_trigger_mutation(
         .or_default()
         .insert(cron_job_key(session_id, &affected_registration.source_key));
     let surface = IngressCronJobSyncSurface {
-        client: lash_restate::RestateIngressClient::new(
-            lash_restate::RestateConnection::with_client(
+        client: lash::restate::RestateIngressClient::new(
+            lash::restate::RestateConnection::with_client(
                 &state.restate_ingress_url,
                 state.restate_http.clone(),
             ),
@@ -100,8 +100,8 @@ pub(crate) async fn cancel_cron_job_before_trigger_delete(
     }
     let job_key = cron_job_key(session_id, &affected_registration.source_key);
     let surface = IngressCronJobSyncSurface {
-        client: lash_restate::RestateIngressClient::new(
-            lash_restate::RestateConnection::with_client(
+        client: lash::restate::RestateIngressClient::new(
+            lash::restate::RestateConnection::with_client(
                 &state.restate_ingress_url,
                 state.restate_http.clone(),
             ),
@@ -251,7 +251,7 @@ pub(super) async fn emit_cron_occurrence(
     state: AppState,
     request: WorkbenchCronRequest,
     fired_at: String,
-    controller: &lash_restate::RestateRuntimeEffectController<'_, ObjectContext<'_>>,
+    controller: &lash::restate::RestateRuntimeEffectController<'_, ObjectContext<'_>>,
 ) -> HandlerResult<Json<CronEmitReport>> {
     let scoped_effect_controller = controller
         .scoped_effect_controller(lash::runtime::AdmittedScope::runtime_operation(format!(

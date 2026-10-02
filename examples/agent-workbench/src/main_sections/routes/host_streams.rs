@@ -2,7 +2,10 @@
 
 use super::*;
 use axum::http::HeaderMap;
-use lash_remote_protocol::{Negotiated, Negotiation, REMOTE_PROTOCOL, answer};
+use lash::remote::Negotiated;
+use lash::remote::Negotiation;
+use lash::remote::REMOTE_PROTOCOL;
+use lash::remote::answer;
 
 const REMOTE_HELLO_HEADER: &str = "x-lash-protocol-hello";
 

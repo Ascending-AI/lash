@@ -138,7 +138,7 @@ pub async fn open_thread_session(
         let (fork_revision, channel) = loop {
             let channel = match open_channel_session(core, session_spec, &record.channel_id).await {
                 Ok(session) => session,
-                Err(error) if error.is_retryable() => {
+                Err(error) if error.is_contended() => {
                     #[cfg(test)]
                     root_wait.observe_missing_root();
                     let elapsed = started.elapsed();
@@ -230,7 +230,7 @@ pub async fn open_thread_session(
     } else {
         match open_channel_session(core, session_spec, &record.channel_id).await {
             Ok(session) => session,
-            Err(error) if error.is_retryable() => {
+            Err(error) if error.is_contended() => {
                 return Ok(ThreadSessionOpen::AdmissionContended);
             }
             Err(error) => return Err(error).context("open the channel session"),
@@ -243,7 +243,7 @@ pub async fn open_thread_session(
         .await
     {
         Ok(session) => session,
-        Err(error) if error.is_retryable() => {
+        Err(error) if error.is_contended() => {
             return Ok(ThreadSessionOpen::AdmissionContended);
         }
         Err(lash::EmbedError::Store(StoreError::SessionDeleted { .. })) => {
@@ -283,7 +283,7 @@ async fn root_route(
         // committed while this thread reply was waiting.
         let repair_view = match open_channel_session(core, session_spec, &record.channel_id).await {
             Ok(session) => session,
-            Err(error) if error.is_retryable() => {
+            Err(error) if error.is_contended() => {
                 return Ok(RootRoute::Pending);
             }
             Err(error) => {

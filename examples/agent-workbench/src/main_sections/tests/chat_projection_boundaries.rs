@@ -62,7 +62,7 @@ fn probe_plugin_prose(message_id: &str, prose: &str) -> lash::messages::Message 
             lash::messages::Part::prose(format!("{message_id}.p1"), prose.to_string(), None),
         ]),
         origin: Some(lash::messages::MessageOrigin::Plugin {
-            plugin_id: lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+            plugin_id: lash::rlm::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,
         }),
         reply_marker: None,

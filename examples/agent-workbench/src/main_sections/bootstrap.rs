@@ -19,7 +19,7 @@ const WORKBENCH_SEARCH_MCP_URL: &str = "https://search.parallel.ai/mcp";
 pub(crate) fn configure_workbench_plugins(
     plugins: &mut lash::PluginStack,
     mail_world: mail::MailWorld,
-    subagent_registry: Arc<lash_subagents::CapabilityRegistry>,
+    subagent_registry: Arc<lash::subagents::CapabilityRegistry>,
     deferred_tools: deferred_tools::WorkbenchDeferredTools,
     approvals: approvals::WorkbenchApprovals,
     mcp: Arc<dyn PluginFactory>,
@@ -31,12 +31,12 @@ pub(crate) fn configure_workbench_plugins(
             .with_approvals(approvals),
     ));
     plugins.push(Arc::new(
-        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+        lash::process_controls::SessionProcessAdminPluginFactory::new(
             lash::process::lifetime::session_or_starter,
         ),
     ));
     plugins.push(Arc::new(
-        lash_subagents::SubagentsPluginFactory::new(
+        lash::subagents::SubagentsPluginFactory::new(
             subagent_registry,
             lash::process::lifetime::starter,
         )
@@ -48,14 +48,12 @@ pub(crate) fn configure_workbench_plugins(
 /// Construction is deliberately infallible for an unreachable server: only a
 /// configuration error fails, while a down server stays registered and
 /// reconnects in the background.
-pub(crate) async fn build_search_mcp(
-    url: &str,
-) -> AnyhowResult<Arc<lash_plugin_mcp::McpPluginFactory>> {
+pub(crate) async fn build_search_mcp(url: &str) -> AnyhowResult<Arc<lash::mcp::McpPluginFactory>> {
     Ok(Arc::new(
-        lash_plugin_mcp::McpPluginFactory::builder(BTreeMap::from([(
+        lash::mcp::McpPluginFactory::builder(BTreeMap::from([(
             WORKBENCH_SEARCH_MCP_SERVER.to_string(),
-            lash_plugin_mcp::McpServerConfig::streamable_http(
-                lash_plugin_mcp::McpStreamableHttpTransport::new(url),
+            lash::mcp::McpServerConfig::streamable_http(
+                lash::mcp::McpStreamableHttpTransport::new(url),
             ),
         )]))
         .build()
@@ -79,20 +77,20 @@ pub(crate) async fn register_deployment_command(endpoint_url: &str) -> AnyhowRes
     let ingress_url =
         std::env::var("RESTATE_INGRESS_URL").context("RESTATE_INGRESS_URL is required")?;
     let admin_url = std::env::var("RESTATE_ADMIN_URL").context("RESTATE_ADMIN_URL is required")?;
-    let authority = lash_restate::RestateAuthorityId::new(
+    let authority = lash::restate::RestateAuthorityId::new(
         std::env::var("RESTATE_AUTHORITY_ID").context("RESTATE_AUTHORITY_ID is required")?,
     )
     .map_err(|error| anyhow!("RESTATE_AUTHORITY_ID: {error}"))?;
-    let stores = lash_sqlite_store::SqliteStoreSet::memory()
+    let stores = lash::sqlite::SqliteStoreSet::memory()
         .await
         .context("open the registration engine's scratch store set")?;
-    let engine = lash_restate::RestateEngine::new(
+    let engine = lash::restate::RestateEngine::new(
         Arc::new(stores),
         lash::restate::RestateConfig::new(ingress_url, admin_url, authority),
     );
     match engine.register_deployment(endpoint_url).await {
         Ok(()) => Ok(()),
-        Err(error @ lash_restate::RestateRegistrationError::NameTaken { .. }) => {
+        Err(error @ lash::restate::RestateRegistrationError::NameTaken { .. }) => {
             eprintln!("{error}");
             std::process::exit(2)
         }
@@ -128,7 +126,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     let restate_ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
     let restate_authority_id =
-        lash_restate::RestateAuthorityId::new(std::env::var("RESTATE_AUTHORITY_ID").context(
+        lash::restate::RestateAuthorityId::new(std::env::var("RESTATE_AUTHORITY_ID").context(
             "RESTATE_AUTHORITY_ID is required and must remain stable for one Restate state",
         )?)?;
     let restate_admin_url =
@@ -194,14 +192,14 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     eprintln!("agent-workbench durable store: {}", stores.backend);
     let core_store_factory = stores.stores.session_store_factory();
     let trigger_store = stores.stores.trigger_store();
-    let subagent_registry = Arc::new(lash_subagents::default_registry(&BTreeMap::new()));
+    let subagent_registry = Arc::new(lash::subagents::default_registry(&BTreeMap::new()));
     let mail_world = mail::MailWorld::new();
     let sessions = WorkbenchSessions::persistent(data_dir.join("session-id"))?;
     // The boot session joins the roster so the selector lists it. A roster row
     // that already exists wins.
     sessions.ensure(&sessions.current());
     let event_tx = SessionEventRegistry::persistent(data_dir.join("product-events.json"), 1024)?;
-    let restate_http = lash_http_transport::build_http_client();
+    let restate_http = lash::http_transport::build_http_client();
     let active_turns = ActiveTurns::persistent(data_dir.join("active-turns.json"))?;
     let deferred_tools =
         deferred_tools::WorkbenchDeferredTools::open(data_dir.join("deferred-tool-grants.db"))
@@ -243,19 +241,19 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     // turns' effects, runs the background processes, whose appended events
     // reach the sink best-effort after their durable write, and executes each
     // session's accepted input through its `LashSession` service.
-    let backend = Arc::new(lash_restate::RestateEngine::new(
+    let backend = Arc::new(lash::restate::RestateEngine::new(
         Arc::clone(&stores.stores),
         lash::restate::RestateConfig::new(
-            lash_restate::RestateConnection::with_client_and_config(
+            lash::restate::RestateConnection::with_client_and_config(
                 restate_ingress_url.clone(),
                 restate_http.clone(),
-                lash_restate::RestateConnectionConfig {
+                lash::restate::RestateConnectionConfig {
                     control_timeout_ms: 30_000,
                     attach_ceiling_ms: 6 * 60 * 60 * 1_000,
-                    ..lash_restate::RestateConnectionConfig::default()
+                    ..lash::restate::RestateConnectionConfig::default()
                 },
             ),
-            lash_restate::RestateConnection::with_client(
+            lash::restate::RestateConnection::with_client(
                 restate_admin_url.clone(),
                 restate_http.clone(),
             ),
@@ -277,9 +275,9 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     let host_backend = lash::Backend::new(backend.clone());
     let tracing = lash::runtime::TraceRuntime::new(host_backend.clock())
         .with_product_observer(Arc::clone(&lashlang_execution_sink));
-    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+    let factory = lash::rlm::RlmProtocolPluginFactory::new(
         rlm_config,
-        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
+        std::sync::Arc::new(lash::rlm::TypescriptDialect),
         &host_backend,
     )
     .with_deferred_tool_resolver(deferred_tools.resolver());
@@ -589,7 +587,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 ingress_url: state.restate_ingress_url.clone(),
                 admin_url: state.restate_admin_url.clone(),
                 authority: restate_authority_id.clone(),
-                namespace: lash_restate::RestateNamespace::default(),
+                namespace: lash::restate::RestateNamespace::default(),
             }
             .in_namespace(crate::valid_empty_completion::NAMESPACE)?;
             app.route(

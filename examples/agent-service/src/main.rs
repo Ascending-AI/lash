@@ -4,11 +4,11 @@ use std::sync::{Arc, Mutex};
 
 use axum::Router;
 use axum::routing::get;
+use lash::openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 use lash::{
     provider::ProviderHandle,
     tracing::{JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceLevel, TraceSink},
 };
-use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 
 #[path = "../../shared/attachment_acceptance.rs"]
 mod attachment_acceptance;
@@ -166,7 +166,7 @@ const DEFAULT_TOKIO_THREAD_STACK_BYTES: usize = 2 * 1024 * 1024;
 /// version bump. The report names what it skipped, so the exit code is never
 /// justified by a silence.
 async fn preflight_or_exit(session_store_root: &std::path::Path) -> anyhow_like::Result<()> {
-    let handle = lash_sqlite_store::SqliteStorePreflight::for_store_root(session_store_root);
+    let handle = lash::sqlite::SqliteStorePreflight::for_store_root(session_store_root);
     let report =
         lash::preflight::probe_store(&handle, lash::preflight::PreflightOptions::summary())
             .await
@@ -192,6 +192,18 @@ async fn preflight_or_exit(session_store_root: &std::path::Path) -> anyhow_like:
         eprintln!("agent-service drain first: {}", blocker.detail);
     }
     Err(refusal)
+}
+
+fn rlm_factory(backend: &lash::Backend) -> lash::rlm::RlmProtocolPluginFactory {
+    lash::rlm::RlmProtocolPluginFactory::new(
+        lash::rlm::RlmProtocolPluginConfig::builder()
+            .channel(lash::rlm::RlmChannel::Cell)
+            .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+            .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+            .build(),
+        Arc::new(lash::rlm::TypescriptDialect),
+        backend,
+    )
 }
 
 fn main() -> anyhow_like::Result<()> {
@@ -274,7 +286,7 @@ async fn async_main() -> anyhow_like::Result<()> {
     // process registry, the triggers, the process environments and the
     // attachments; the Restate engine runs every turn and process over it
     // (ADR 0104).
-    let stores = lash_sqlite_store::SqliteStoreSet::open(&session_store_root)
+    let stores = lash::sqlite::SqliteStoreSet::open(&session_store_root)
         .await
         .map_err(|err| err.to_string())?;
     let attachment_store = stores.attachment_store() as Arc<dyn lash::persistence::AttachmentStore>;
@@ -294,15 +306,7 @@ async fn async_main() -> anyhow_like::Result<()> {
     let backend = lash::Backend::new(restate_backend.clone());
     let app_db = AppDb::open(&data_dir.join("app.db")).map_err(|err| err.to_string())?;
     let shared_db = Arc::new(Mutex::new(app_db));
-    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash::rlm::RlmChannel::Cell)
-            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-            .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-            .build(),
-        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
-        &backend,
-    );
+    let factory = crate::rlm_factory(&backend);
     let mut core_builder = lash::LashCore::rlm_builder(
         backend,
         factory,
@@ -319,7 +323,7 @@ async fn async_main() -> anyhow_like::Result<()> {
     // (ADR 0095): the served cells author `processes.start`, so the surface
     // exists only where this factory is installed.
     .plugin(Arc::new(
-        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter),
+        lash::process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter),
     ))
     // The board plugin is the core's: every chat session and every process
     // worker runs it, over the one app database.
@@ -341,7 +345,7 @@ async fn async_main() -> anyhow_like::Result<()> {
         // state, so host-scheduled retention runs through the same
         // `Processes::prune` lever every embedder uses.
         let retention_processes = core.processes();
-        let restate = lash_restate::RestateConnection::new(local_restate.ingress_url.clone());
+        let restate = lash::restate::RestateConnection::new(local_restate.ingress_url.clone());
         let chat_discard = AgentServiceChatDiscardImpl::new(
             &core,
             restate.clone(),

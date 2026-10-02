@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Require examples to consume Lash through its host-facing facade."""
+"""Require example and runbook hosts to consume Lash through its facade."""
 
 from __future__ import annotations
 
@@ -9,74 +9,93 @@ import sys
 import tomllib
 from typing import Any, Iterator
 
-
 REPO = Path(__file__).resolve().parents[1]
-EXAMPLES = REPO / "examples"
-ALWAYS_FORBIDDEN = re.compile(r"\b(?:lash_core|lash_sansio|lash_internal)::")
-LASHLANG = re.compile(r"\blashlang::")
 
-# These files are the source-level RLM contexts in Agent Workbench, which uses
-# them to describe and execute the RLM dialect. Keeping the exemption at file
-# granularity means a new `lashlang::` import elsewhere in the package fails
-# closed instead of inheriting a package-wide exemption.
-RLM_LASHLANG_SOURCES = frozenset(
+# The workers harness mixes host code with independent storage/journal evidence.
+# Ticket C1 of the runbooks sweep owns its facade cutover. Exempt exact existing
+# files only; new harness sources and every other runbook host fail closed.
+RUNBOOK_INTERNAL_SOURCES = frozenset(
     Path(path)
     for path in (
-        "agent-workbench/src/main_sections/plugins.rs",
-        "agent-workbench/src/main_sections/routes.rs",
-        "agent-workbench/src/main_sections/tests.rs",
-        "agent-workbench/src/main_sections/tests/session_isolation.rs",
-        "agent-workbench/src/main_sections/tests/typescript_dialect.rs",
-        "agent-workbench/src/main_sections/tests/mail_payload.rs",
-        "agent-workbench/src/restate.rs",
-        "agent-workbench/src/restate/tests/cron_tests.rs",
+        'runbooks/restate-postgres-workers/src/batch_journal.rs',
+        'runbooks/restate-postgres-workers/src/bin/await_event_helper.rs',
+        'runbooks/restate-postgres-workers/src/bin/context_overflow_recovery.rs',
+        'runbooks/restate-postgres-workers/src/bin/mock_provider/load.rs',
+        'runbooks/restate-postgres-workers/src/bin/process_operations_worker.rs',
+        'runbooks/restate-postgres-workers/src/bin/runner/control_scenarios.rs',
+        'runbooks/restate-postgres-workers/src/bin/runner/environment.rs',
+        'runbooks/restate-postgres-workers/src/bin/runner/process_assertions.rs',
+        'runbooks/restate-postgres-workers/src/bin/runner/queued_work_assertions.rs',
+        'runbooks/restate-postgres-workers/src/bin/runner/response_assertions.rs',
+        'runbooks/restate-postgres-workers/src/bin/runner/segment_one.rs',
+        'runbooks/restate-postgres-workers/src/bin/runner/tests.rs',
+        'runbooks/restate-postgres-workers/src/bin/runner.rs',
+        'runbooks/restate-postgres-workers/src/bin/session_operator.rs',
+        'runbooks/restate-postgres-workers/src/bin/worker.rs',
+        'runbooks/restate-postgres-workers/src/lib.rs',
+        'runbooks/restate-postgres-workers/src/load/behavior.rs',
+        'runbooks/restate-postgres-workers/src/load/behavior_tests.rs',
+        'runbooks/restate-postgres-workers/src/load/behaviors.rs',
+        'runbooks/restate-postgres-workers/src/load/behaviors_replay_tests.rs',
+        'runbooks/restate-postgres-workers/src/load/cleanup_tests.rs',
+        'runbooks/restate-postgres-workers/src/load/control.rs',
+        'runbooks/restate-postgres-workers/src/load/fault_verify.rs',
+        'runbooks/restate-postgres-workers/src/load/mod.rs',
+        'runbooks/restate-postgres-workers/src/load/provider_watch.rs',
+        'runbooks/restate-postgres-workers/src/load/tools.rs',
+        'runbooks/restate-postgres-workers/src/load/upgrade_verify.rs',
+        'runbooks/restate-postgres-workers/src/load/verify.rs',
+        'runbooks/restate-postgres-workers/src/load/worker.rs',
+        'runbooks/restate-postgres-workers/src/local_restate.rs',
+        'runbooks/restate-postgres-workers/src/overflow_recovery_evidence.rs',
+        'runbooks/restate-postgres-workers/src/schema_admission_tests.rs',
+        'runbooks/restate-postgres-workers/src/scripted_provider.rs',
     )
 )
 
+
 def dependency_tables(
     document: dict[str, Any],
-    sections: frozenset[str] = frozenset(
-        {"dependencies", "dev-dependencies", "build-dependencies"}
-    ),
+    sections: frozenset[str] = frozenset({"dependencies", "build-dependencies"}),
 ) -> Iterator[dict[str, Any]]:
     for key, value in document.items():
-        if key in sections:
-            if isinstance(value, dict):
-                yield value
+        if key in sections and isinstance(value, dict):
+            yield value
         elif isinstance(value, dict):
             yield from dependency_tables(value, sections)
 
 
-def dependency_features(spec: Any) -> set[str]:
-    if not isinstance(spec, dict):
-        return set()
-    features = spec.get("features", [])
-    return set(features) if isinstance(features, list) else set()
+def read_manifest(path: Path) -> dict[str, Any]:
+    with path.open("rb") as handle:
+        return tomllib.load(handle)
 
 
-def is_lashlang_context(source: Path, manifest: Path) -> bool:
-    """Whether this source is a ruled RLM or Lashlang-specific context."""
-    with manifest.open("rb") as handle:
-        document = tomllib.load(handle)
+def forbidden_crates() -> set[str]:
+    """The facade's first-party dependency closure, using Cargo's crate aliases."""
+    manifests = {}
+    for path in sorted((REPO / "crates").glob("*/Cargo.toml")):
+        document = read_manifest(path)
+        name = document.get("lib", {}).get("name", path.parent.name.replace("-", "_"))
+        manifests[name] = document
+    pending = [read_manifest(REPO / "crates/lash/Cargo.toml")]
+    forbidden: set[str] = set()
+    while pending:
+        for dependencies in dependency_tables(pending.pop()):
+            for alias in dependencies:
+                crate = alias.replace("-", "_")
+                # Workspace aliases retain the implementation crate name even
+                # when the published package is named lash-internal-*.
+                if crate in forbidden or not (crate.startswith("lash_") or crate == "lashlang"):
+                    continue
+                forbidden.add(crate)
+                if crate in manifests:
+                    pending.append(manifests[crate])
+    return forbidden
 
-    try:
-        source_path = source.relative_to(EXAMPLES)
-    except ValueError:
-        return False
 
-    rlm_enabled = False
-    for dependencies in dependency_tables(document, frozenset({"dependencies"})):
-        if "rlm" in dependency_features(dependencies.get("lash")):
-            rlm_enabled = True
-
-    if source_path in RLM_LASHLANG_SOURCES:
-        return rlm_enabled
-    return False
-
-
-def example_manifest(source: Path) -> Path | None:
-    for parent in (source.parent, *source.parents):
-        if parent == EXAMPLES.parent:
+def source_manifest(source: Path) -> Path | None:
+    for parent in source.parents:
+        if parent == REPO:
             break
         manifest = parent / "Cargo.toml"
         if manifest.is_file():
@@ -84,28 +103,59 @@ def example_manifest(source: Path) -> Path | None:
     return None
 
 
+def import_crates(source: Path, forbidden: set[str]) -> set[str]:
+    """Include renamed dependencies so a Cargo alias cannot bypass the gate."""
+    manifest = source_manifest(source)
+    if manifest is None:
+        return forbidden
+    aliases = set(forbidden)
+    for dependencies in dependency_tables(
+        read_manifest(manifest),
+        frozenset({"dependencies", "dev-dependencies", "build-dependencies"}),
+    ):
+        for alias, spec in dependencies.items():
+            package = spec.get("package", alias) if isinstance(spec, dict) else alias
+            package = package.removeprefix("lash-internal-")
+            if package != alias:
+                package = "lash-" + package if not package.startswith("lash-") else package
+            if package.replace("-", "_") in forbidden:
+                aliases.add(alias.replace("-", "_"))
+    return aliases
+
+
 def violations() -> list[tuple[Path, int, str]]:
+    forbidden = forbidden_crates()
+    sources = set((REPO / "examples").rglob("*.rs"))
+    for root in (REPO / "runbooks").glob("*/src"):
+        sources.update(root.rglob("*.rs"))
     found: list[tuple[Path, int, str]] = []
-    for source in sorted(EXAMPLES.rglob("*.rs")):
-        manifest = example_manifest(source)
-        lashlang_allowed = manifest is not None and is_lashlang_context(
-            source, manifest
+    for source in sorted(sources):
+        relative = source.relative_to(REPO)
+        if relative in RUNBOOK_INTERNAL_SOURCES:
+            continue
+        names = "|".join(re.escape(name) for name in sorted(import_crates(source, forbidden)))
+        if not names:
+            continue
+        pattern = re.compile(
+            r"\b(?:" + names + r")\s*::|\b(?:use|extern\s+crate)\s+(?:"
+            + names + r")\b(?!\s*::)"
         )
-        for line_number, line in enumerate(source.read_text().splitlines(), 1):
-            match = ALWAYS_FORBIDDEN.search(line)
-            if match is None and not lashlang_allowed:
-                match = LASHLANG.search(line)
+        for number, line in enumerate(source.read_text().splitlines(), 1):
+            match = pattern.search(line)
             if match is not None:
-                found.append((source.relative_to(REPO), line_number, match.group(0)))
+                # Keep the rejected crate path as the diagnostic, including
+                # imports written `use internal as alias` without a :: path.
+                imported = re.sub(r"^(?:use|extern\s+crate)\s+", "", match.group(0))
+                found.append((relative, number, imported))
     return found
 
 
 def main() -> int:
     found = violations()
     if not found:
-        print("example facade imports: no bypasses")
+        print("example and runbook facade imports: no bypasses")
         return 0
-    print("Examples must import host API through the lash facade:", file=sys.stderr)
+    print("Example and runbook hosts must import API through the lash facade:", file=sys.stderr)
     for path, line, import_path in found:
         print(f"  {path}:{line}: {import_path}", file=sys.stderr)
     return 1

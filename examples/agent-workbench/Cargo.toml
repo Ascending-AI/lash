@@ -27,19 +27,8 @@ chrono-tz = { workspace = true }
 croner = { workspace = true }
 dotenvy = "0.15"
 futures-util = { workspace = true }
-lash = { workspace = true, features = ["rlm", "restate"] }
-lash-http-transport = { workspace = true }
-lashlang = { workspace = true }
-lash-plugin-mcp = { workspace = true, features = ["lashlang"] }
-lash-plugin-process-controls = { workspace = true }
-lash-protocol-rlm = { workspace = true }
-lash-provider-openai = { workspace = true }
-lash-postgres-store = { workspace = true }
-lash-restate = { workspace = true }
-lash-remote-protocol = { workspace = true }
-lash-rlm-types = { workspace = true }
-lash-sqlite-store = { workspace = true }
-lash-subagents = { workspace = true }
+lash = { workspace = true, features = ["rlm", "restate", "sqlite", "postgres", "mcp", "subagents", "http-transport", "openai"] }
+# Opt-in provider wire test fixtures; never selected by the teaching host.
 lash-sim = { path = "../../crates/lash-sim", optional = true }
 percent-encoding = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
@@ -57,20 +46,13 @@ uuid = { workspace = true, features = ["v4"] }
 [dev-dependencies]
 http = "1"
 http-body-util = { version = "0.1", features = ["channel"] }
-lash-lashlang-runtime = { workspace = true }
-lash-core-execution = { workspace = true }
-lashlang = { workspace = true, features = ["testing"] }
-lash-llm-tools = { workspace = true }
-lash = { workspace = true, features = ["rlm", "testing"] }
-# `testing` is a dev-dependency on purpose: it arms the loud assertions that
+lash = { workspace = true, features = ["rlm", "testing", "typescript"] }
+# `testing` is a facade dev feature on purpose: it arms the loud assertions that
 # turn an accidentally-exhausted Lashlang execution bound into a test failure.
 # The judged host must not carry them — see `[profile.judged]` in the workspace
 # manifest and the build-geometry rule in `runbooks/RULES.md`.
-lash-protocol-rlm = { workspace = true, features = ["testing"] }
-lash-remote-protocol = { workspace = true, features = ["core-conversions"] }
 lash-restate-test = { workspace = true }
 lash-sim = { path = "../../crates/lash-sim" }
-lash-typescript = { workspace = true }
 sqlx = { workspace = true }
 tempfile = { workspace = true }
 

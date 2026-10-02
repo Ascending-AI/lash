@@ -50,9 +50,9 @@ pub(crate) fn sessions_root(data_dir: &std::path::Path) -> std::path::PathBuf {
 }
 
 /// The trigger store of a fresh SQLite memory store set.
-pub(crate) fn memory_trigger_store() -> Arc<lash_sqlite_store::SqliteTriggerStore> {
+pub(crate) fn memory_trigger_store() -> Arc<lash::sqlite::SqliteTriggerStore> {
     sync_await(async {
-        lash_sqlite_store::SqliteStoreSet::memory()
+        lash::sqlite::SqliteStoreSet::memory()
             .await
             .expect("open a SQLite memory store set")
             .trigger_store()
@@ -104,7 +104,7 @@ pub(crate) async fn open_session_once_released(
                 .await
             {
                 Ok(session) => return session,
-                Err(error) if error.is_retryable() => {
+                Err(error) if error.is_contended() => {
                     tokio::time::sleep(Duration::from_millis(20)).await;
                 }
                 Err(error) => panic!("open session `{session_id}`: {error:?}"),
@@ -276,13 +276,12 @@ pub(crate) async fn standalone_process_registry(
 ) -> Arc<dyn lash::process::ProcessRegistry> {
     let sessions = data_dir.join("lash-sessions");
     std::fs::create_dir_all(&sessions).expect("create the sessions root");
-    let registry =
-        lash_sqlite_store::SqliteProcessRegistry::open_standalone_with_clock_for_testing(
-            &sessions.join(format!("standalone-registry-{}.db", uuid::Uuid::new_v4())),
-            clock,
-        )
-        .await
-        .expect("open a standalone process registry");
+    let registry = lash::sqlite::SqliteProcessRegistry::open_standalone_with_clock_for_testing(
+        &sessions.join(format!("standalone-registry-{}.db", uuid::Uuid::new_v4())),
+        clock,
+    )
+    .await
+    .expect("open a standalone process registry");
     Arc::new(match wake_delivery {
         Some(config) => registry.with_wake_delivery_config(config),
         None => registry,
@@ -290,9 +289,9 @@ pub(crate) async fn standalone_process_registry(
 }
 
 /// The session catalog of a fresh SQLite memory store set.
-pub(crate) fn memory_session_store_factory() -> Arc<lash_sqlite_store::SqliteStore> {
+pub(crate) fn memory_session_store_factory() -> Arc<lash::sqlite::SqliteStore> {
     sync_await(async {
-        lash_sqlite_store::SqliteStoreSet::memory()
+        lash::sqlite::SqliteStoreSet::memory()
             .await
             .expect("open a SQLite memory store set")
             .session_store_factory()
@@ -301,7 +300,7 @@ pub(crate) fn memory_session_store_factory() -> Arc<lash_sqlite_store::SqliteSto
 
 pub(crate) fn detached_trigger_store() -> Arc<dyn lash::triggers::TriggerStore> {
     sync_await(async {
-        lash_sqlite_store::SqliteStoreSet::memory()
+        lash::sqlite::SqliteStoreSet::memory()
             .await
             .expect("open a SQLite memory store set")
             .trigger_store() as Arc<dyn lash::triggers::TriggerStore>

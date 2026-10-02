@@ -1502,7 +1502,7 @@ async fn a_pending_cancel_probes_the_runs_lash_turn_inner() {
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let session_id = SessionId::fixture(format!("probe-session-{}", uuid::Uuid::new_v4()));
     let turn_id = TurnId::from("plainly-named-turn");
-    let key = lash_restate::turn_workflow_key(&session_id, &turn_id);
+    let key = lash::restate::turn_workflow_key(&session_id, &turn_id);
     let (admin_url, probed) = spawn_restate_admin_recording_probes(key.clone()).await;
     let double = crate::tests::test_double_backend(0).await;
     let state = turn_cancel_test_state(&double, &data_dir, admin_url).await;

@@ -189,14 +189,14 @@ mod tool_loss_tests;
 /// A durable test core over `backend`, whose RLM factory keeps its Lashlang
 /// artifacts in that same backend.
 pub(super) fn explicit_durable_test_facets_on(backend: lash::Backend) -> lash::LashCoreBuilder {
-    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+    let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
+        std::sync::Arc::new(lash::rlm::TypescriptDialect),
         &backend,
     );
     lash::LashCore::rlm_builder(
@@ -210,7 +210,7 @@ pub(super) fn explicit_durable_test_facets_on(backend: lash::Backend) -> lash::L
         // so the surface exists only where this factory is installed. Every
         // durable test core gets it here, as `bootstrap` gives the real app.
         .plugin(Arc::new(
-            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter),
+            lash::process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter),
         ))
 }
 
@@ -656,7 +656,7 @@ finish("gap source");
             assert_eq!(observation.body.session_id, "workbench-observation-gap");
             assert_eq!(
                 gap.body.reason,
-                lash_remote_protocol::RemoteLiveReplayGapReason::Trimmed
+                lash::remote::observations::RemoteLiveReplayGapReason::Trimmed
             );
             saw_gap = true;
             break;
@@ -1272,14 +1272,14 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
     let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
     let event_tx = SessionEventRegistry::persistent(data_dir.join("product-events.json"), 1024)
         .expect("open durable product events");
-    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+    let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
+        std::sync::Arc::new(lash::rlm::TypescriptDialect),
         &backend,
     );
     let core = LashCore::rlm_builder(backend, factory)
@@ -1290,7 +1290,7 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
         // The `processes` module is catalogue presence, not an ability bit (ADR
         // 0095): the workbench's scripted sources author `processes.*`, so the
         // surface only exists when this factory is installed, as bootstrap does.
-        .plugin(Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter)))
+        .plugin(Arc::new(lash::process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter)))
         .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .build(crate::test_core_owner())
         .expect("build core");
@@ -1712,7 +1712,7 @@ async fn lash_turn_invocation(
     state: &AppState,
     turn: &WorkbenchTurn,
     timeout: Duration,
-) -> lash_restate::RestateInvocationId {
+) -> lash::restate::RestateInvocationId {
     lash_turn_invocation_at(
         &state.restate_admin_url,
         &lash::TurnAddress::new(&turn.session_id, &turn.turn_id),
@@ -1726,10 +1726,10 @@ pub(super) async fn lash_turn_invocation_at(
     admin_url: &str,
     address: &lash::TurnAddress,
     timeout: Duration,
-) -> lash_restate::RestateInvocationId {
+) -> lash::restate::RestateInvocationId {
     let admin =
-        lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::new(admin_url));
-    let key = lash_restate::turn_workflow_key(&address.session_id, &address.turn_id);
+        lash::restate::RestateAdminClient::new(lash::restate::RestateConnection::new(admin_url));
+    let key = lash::restate::turn_workflow_key(&address.session_id, &address.turn_id);
     let deadline = std::time::Instant::now() + timeout;
     loop {
         if let Some(status) = admin
@@ -1737,7 +1737,7 @@ pub(super) async fn lash_turn_invocation_at(
             .await
             .expect("query the LashTurn invocation")
         {
-            return lash_restate::RestateInvocationId::new(status.id);
+            return lash::restate::RestateInvocationId::new(status.id);
         }
         assert!(
             std::time::Instant::now() < deadline,
@@ -1749,11 +1749,11 @@ pub(super) async fn lash_turn_invocation_at(
 
 async fn wait_for_restate_invocation_success(
     state: &AppState,
-    invocation_id: &lash_restate::RestateInvocationId,
+    invocation_id: &lash::restate::RestateInvocationId,
     timeout: Duration,
 ) {
     let admin =
-        lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::with_client(
+        lash::restate::RestateAdminClient::new(lash::restate::RestateConnection::with_client(
             state.restate_admin_url.clone(),
             state.restate_http.clone(),
         ));
@@ -1766,7 +1766,7 @@ async fn wait_for_restate_invocation_success(
         {
             Some(status) if status.completed_successfully() => return,
             Some(status)
-                if status.status == lash_restate::RestateInvocationLifecycle::Completed =>
+                if status.status == lash::restate::RestateInvocationLifecycle::Completed =>
             {
                 panic!("Restate invocation {invocation_id} completed unsuccessfully: {status:#?}")
             }
@@ -1789,7 +1789,7 @@ async fn wait_for_restate_invocation_success(
 
 async fn assert_no_active_lash_restate_invocations(state: &AppState, timeout: Duration) {
     let admin =
-        lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::with_client(
+        lash::restate::RestateAdminClient::new(lash::restate::RestateConnection::with_client(
             state.restate_admin_url.clone(),
             state.restate_http.clone(),
         ));
@@ -1828,10 +1828,10 @@ struct LiveWorkbenchRestateHarness {
 /// does not match controller authority` reports.
 /// The literal stays as the fallback so the suites that run without the script keep their
 /// stable, self-consistent domain.
-fn live_restate_authority_id() -> lash_restate::RestateAuthorityId {
+fn live_restate_authority_id() -> lash::restate::RestateAuthorityId {
     let value = std::env::var("RESTATE_AUTHORITY_ID")
         .unwrap_or_else(|_| "agent-workbench-tests".to_string());
-    lash_restate::RestateAuthorityId::new(value).expect("valid Restate authority id")
+    lash::restate::RestateAuthorityId::new(value).expect("valid Restate authority id")
 }
 
 async fn live_workbench_restate_state_with_provider(
@@ -1910,14 +1910,14 @@ async fn live_workbench_restate_state_over_stores(
     let restate_http = reqwest::Client::new();
     let restate_admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
-    let backend = Arc::new(lash_restate::RestateEngine::new(
+    let backend = Arc::new(lash::restate::RestateEngine::new(
         store_set,
         lash::restate::RestateConfig::new(
-            lash_restate::RestateConnection::with_client(
+            lash::restate::RestateConnection::with_client(
                 restate_ingress_url.clone(),
                 restate_http.clone(),
             ),
-            lash_restate::RestateConnection::with_client(
+            lash::restate::RestateConnection::with_client(
                 restate_admin_url.clone(),
                 restate_http.clone(),
             ),
@@ -1927,14 +1927,14 @@ async fn live_workbench_restate_state_over_stores(
     let host_backend = lash::Backend::new(backend.clone());
     let tracing = lash::runtime::TraceRuntime::new(host_backend.clock())
         .with_product_observer(lashlang_execution_sink);
-    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+    let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
+        std::sync::Arc::new(lash::rlm::TypescriptDialect),
         &host_backend,
     );
     let core = LashCore::rlm_builder(host_backend, factory)
@@ -1947,9 +1947,9 @@ async fn live_workbench_restate_state_over_stores(
         // The `processes` module is catalogue presence, not an ability bit (ADR
         // 0095): the workbench's scripted sources author `processes.*`, so the
         // surface only exists when this factory is installed, as bootstrap does.
-        .plugin(Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter)))
+        .plugin(Arc::new(lash::process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter)))
         .plugin(Arc::new(WorkbenchPluginFactory::new()))
-        .plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()))
+        .plugin(Arc::new(lash::tools::LlmToolsPluginFactory::default()))
         .build(crate::test_core_owner())
         .expect("build core");
     let process_worker = lash::durability::DurableProcessWorker::new(
@@ -2163,14 +2163,14 @@ mod session_isolation_tests;
 fn test_workbench_core(backend: lash::Backend) -> LashCore {
     let provider = trigger_registration_provider();
     let model = test_llm_profile();
-    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+    let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
+        std::sync::Arc::new(lash::rlm::TypescriptDialect),
         &backend,
     );
     LashCore::rlm_builder(backend, factory)
@@ -2181,7 +2181,7 @@ fn test_workbench_core(backend: lash::Backend) -> LashCore {
         // The `processes` module is catalogue presence, not an ability bit (ADR
         // 0095): the workbench's scripted sources author `processes.*`, so the
         // surface only exists when this factory is installed, as bootstrap does.
-        .plugin(Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter)))
+        .plugin(Arc::new(lash::process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter)))
         .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .build(crate::test_core_owner())
         .expect("build core")

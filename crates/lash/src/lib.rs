@@ -19,7 +19,8 @@
 //!   [`EmbedError::SessionAlreadyExists`], always.
 //! * `core.session(id).open().await` — the **live session**
 //!   ([`LashSession`]). It builds a runtime: plugins, tool registry, protocol
-//!   restore, lifecycle events, process admission. Use it to run turns. It
+//!   restore, lifecycle events, process admission. Submit input through
+//!   [`LashSession::send`] and observe its handle; the engine executes the run. It
 //!   never creates: the session runs with the config it recorded.
 //! * `core.session(id).durable().await` — the **Durable Session**
 //!   ([`DurableSession`]). It builds nothing and creates nothing: the
@@ -416,6 +417,8 @@ pub mod triggers {
 /// [`AttemptContext::attempt_number`](crate::tools::AttemptContext::attempt_number)
 /// counts the runs apart from it.
 pub mod tools {
+    #[cfg(feature = "rlm")]
+    pub use lash_llm_tools::LlmToolsPluginFactory;
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::{GetDefinitionIntent, PublishDefinitionIntent, RegisterTriggerIntent};
     pub use lash_sansio::{ModelTool, ToolCallStatus};
@@ -481,6 +484,7 @@ pub mod tools {
         ToolBindingResolutionExt, ToolManifestBindingExt, catalogue_preview,
         catalogue_preview_entries_from_catalog_records, catalogue_preview_entries_from_manifests,
         catalogue_preview_entry_from_catalog_record, catalogue_preview_entry_from_manifest,
+        required_tool_binding,
     };
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{
@@ -1176,6 +1180,7 @@ pub mod remote {
 
     /// Token usage accounting and the streaming turn-activity vocabulary.
     pub mod usage {
+        pub use lash_remote_protocol::RemoteTurnActivitySink;
         // The vocabulary this module's signatures name (the facade-completeness rule).
         pub use lash_remote_protocol::{
             RemoteToolIntentExecutionOutcome, RemoteToolIntentKind, RemoteToolIntentRealized,

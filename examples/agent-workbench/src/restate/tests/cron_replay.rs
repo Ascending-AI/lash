@@ -377,7 +377,7 @@ fn cron_endpoint(state: crate::AppState) -> Endpoint {
         .bind(
             crate::restate::WorkbenchCronJobImpl::new_for_test(
                 state,
-                lash_restate::RestateAuthorityId::new("agent-workbench-cron-replay-tests")
+                lash::restate::RestateAuthorityId::new("agent-workbench-cron-replay-tests")
                     .expect("valid cron replay test authority"),
             )
             .serve(),
@@ -683,7 +683,7 @@ async fn unfinished_basis_run_replay_reissues_the_same_run_identity() {
 }
 
 async fn register_then_disable(
-    trigger_store: &lash_sqlite_store::SqliteTriggerStore,
+    trigger_store: &lash::sqlite::SqliteTriggerStore,
     session_id: &SessionId,
     source_key: &str,
 ) {

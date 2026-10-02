@@ -1,7 +1,10 @@
 //! HTTP bootstrap for the example host's remote observation streams.
 
 use axum::http::HeaderMap;
-use lash_remote_protocol::{Negotiated, Negotiation, REMOTE_PROTOCOL, answer};
+use lash::remote::Negotiated;
+use lash::remote::Negotiation;
+use lash::remote::REMOTE_PROTOCOL;
+use lash::remote::answer;
 
 use crate::state::{AppError, AppResult};
 

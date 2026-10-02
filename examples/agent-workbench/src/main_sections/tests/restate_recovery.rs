@@ -755,11 +755,11 @@ async fn submit_workbench_turn_via_restate(
 
 async fn wait_for_restate_invocation_completion(
     state: &AppState,
-    invocation_id: &lash_restate::RestateInvocationId,
+    invocation_id: &lash::restate::RestateInvocationId,
     timeout: Duration,
-) -> lash_restate::RestateInvocationStatus {
+) -> lash::restate::RestateInvocationStatus {
     let admin =
-        lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::with_client(
+        lash::restate::RestateAdminClient::new(lash::restate::RestateConnection::with_client(
             state.restate_admin_url.clone(),
             state.restate_http.clone(),
         ));
@@ -769,7 +769,7 @@ async fn wait_for_restate_invocation_completion(
             .invocation_status(invocation_id)
             .await
             .expect("query Restate invocation status")
-            && status.status == lash_restate::RestateInvocationLifecycle::Completed
+            && status.status == lash::restate::RestateInvocationLifecycle::Completed
         {
             return status;
         }
@@ -1967,13 +1967,13 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> 
     let stores = WorkbenchStores::open(&data_dir, database_url.as_deref())
         .await
         .expect("reopen recovery session catalog");
-    let driver = lash_restate::RestateEngine::new(
+    let driver = lash::restate::RestateEngine::new(
         Arc::clone(&stores.stores),
         lash::restate::RestateConfig::new(
             ingress_url,
             std::env::var("RESTATE_ADMIN_URL")
                 .unwrap_or_else(|_| "http://127.0.0.1:19071".to_string()),
-            lash_restate::RestateAuthorityId::new(
+            lash::restate::RestateAuthorityId::new(
                 std::env::var("RESTATE_AUTHORITY_ID").expect("Restate authority id"),
             )
             .expect("valid Restate authority id"),
@@ -2073,7 +2073,7 @@ async fn wait_for_restate_deployment_and_unpinned_invocations_drained(
     timeout: Duration,
 ) {
     let admin =
-        lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::new(admin_url));
+        lash::restate::RestateAdminClient::new(lash::restate::RestateConnection::new(admin_url));
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         let open = admin
@@ -2287,11 +2287,11 @@ async fn wait_for_provider_owner(data_dir: &std::path::Path, expected_pid: u32, 
 
 async fn wait_for_workbench_restate_invocation_suspended(
     state: &AppState,
-    invocation_id: &lash_restate::RestateInvocationId,
+    invocation_id: &lash::restate::RestateInvocationId,
     timeout: Duration,
 ) {
     let admin =
-        lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::with_client(
+        lash::restate::RestateAdminClient::new(lash::restate::RestateConnection::with_client(
             state.restate_admin_url.clone(),
             state.restate_http.clone(),
         ));
@@ -2302,7 +2302,7 @@ async fn wait_for_workbench_restate_invocation_suspended(
             .await
             .expect("query Restate invocation status");
         if last_status.as_ref().is_some_and(|status| {
-            status.status == lash_restate::RestateInvocationLifecycle::Suspended
+            status.status == lash::restate::RestateInvocationLifecycle::Suspended
         }) {
             return;
         }
@@ -2341,7 +2341,7 @@ async fn session_shift_epoch(
             // take whichever `.db` the directory lists first.
             let database_path = data_dir
                 .join("lash-sessions")
-                .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name());
+                .join(lash::sqlite::SqliteDatabase::DurableCore.file_name());
             rusqlite::Connection::open_with_flags(
                 &database_path,
                 rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,

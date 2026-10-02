@@ -294,6 +294,22 @@ impl EmbedError {
         }
     }
 
+    /// Whether opening or writing the session met store contention.
+    ///
+    /// Unlike [`is_retryable`](Self::is_retryable), this excludes other
+    /// transient storage faults and engine retries. Hosts can use it for a
+    /// bounded admission retry without retrying unrelated failures.
+    pub fn is_contended(&self) -> bool {
+        matches!(
+            self,
+            Self::Store(lash_core::StoreError::Contended)
+                | Self::Session(SessionError::Store {
+                    source: lash_core::StoreError::Contended,
+                    ..
+                })
+        )
+    }
+
     /// True only when a typed signal says the failed operation is safe to
     /// retry as-is; `false` means "no typed retryable signal", not "known
     /// permanent" (see [`is_terminal`](Self::is_terminal) for that).
@@ -586,6 +602,31 @@ mod tests {
         for error in errors {
             assert!(error.is_retryable(), "{error}");
             assert!(!error.is_terminal(), "{error}");
+        }
+    }
+
+    #[test]
+    fn contention_predicate_excludes_other_retryable_causes() {
+        for error in [
+            EmbedError::Store(StoreError::Contended),
+            EmbedError::Session(SessionError::Store {
+                context: "open session".to_string(),
+                source: StoreError::Contended,
+            }),
+        ] {
+            assert!(error.is_contended(), "{error}");
+        }
+        for error in [
+            runtime_error(RuntimeErrorCode::StoreCommitContended),
+            runtime_error(RuntimeErrorCode::SessionExecutionLaneBusy),
+            EmbedError::Plugin(PluginError::RuntimeEffectController(
+                RuntimeEffectControllerError::from(StoreError::Contended),
+            )),
+            EmbedError::UnknownSession {
+                session_id: SessionId::from("unknown"),
+            },
+        ] {
+            assert!(!error.is_contended(), "{error}");
         }
     }
 

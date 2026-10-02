@@ -46,7 +46,8 @@ use lash::provider::{
     GenerationRetryGuarantee, LlmRequest, LlmTransportError, ProviderFailureKind, ProviderOptions,
     ProviderReliability, TransportRetryVerdict,
 };
-use lash_remote_protocol::{RemoteSessionObservationEventPayload, RemoteTurnEvent};
+use lash::remote::observations::RemoteSessionObservationEventPayload;
+use lash::remote::usage::RemoteTurnEvent;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -831,7 +832,7 @@ async fn trimmed_gap_recovery_replaces_the_same_output_identity() {
     }
     assert_eq!(
         gap_reason,
-        Some(lash_remote_protocol::RemoteLiveReplayGapReason::Trimmed),
+        Some(lash::remote::observations::RemoteLiveReplayGapReason::Trimmed),
         "a trimmed persisted cursor must answer with a trimmed gap"
     );
     assert_eq!(

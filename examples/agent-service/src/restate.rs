@@ -36,9 +36,9 @@ mod restate_tests {
     use axum::routing::{get, post};
     use lash::direct::LlmOutputPart;
     use lash::provider::LlmResponse;
+    use lash::restate::RestateEffectHost;
     use lash::runtime::{AwaitEventResolver, ExecutionScope};
     use lash::{AwaitEventWaitIdentity, CancellationToken, LashCore, Resolution, ResolveOutcome};
-    use lash_restate::RestateEffectHost;
 
     const STACK_BUDGET_BYTES: usize = 2 * 1024 * 1024;
 
@@ -310,7 +310,7 @@ mod restate_tests {
         // second await returns immediately, and a late completion cannot win.
         let wait_host = RestateEffectHost::outside_deployment(
             ingress_url,
-            lash_restate::RestateAuthorityId::new("agent-service-effect-group-test").unwrap(),
+            lash::restate::RestateAuthorityId::new("agent-service-effect-group-test").unwrap(),
         );
         let wait_scope = ExecutionScope::turn(
             lash::SessionId::fixture(format!(
@@ -409,7 +409,7 @@ mod restate_tests {
     struct LiveRestateTestHarness {
         state: AppStateData,
         process_worker: lash::durability::DurableProcessWorker,
-        backend: Arc<lash_restate::RestateEngine>,
+        backend: Arc<lash::restate::RestateEngine>,
         chat_discard: crate::chat_discard::AgentServiceChatDiscardImpl,
     }
 
@@ -448,15 +448,15 @@ finish("done via Restate E2E");
             })
             .build()
             .into_handle();
-        let stores = lash_sqlite_store::SqliteStoreSet::open(data_dir.join("lash-sessions"))
+        let stores = lash::sqlite::SqliteStoreSet::open(data_dir.join("lash-sessions"))
             .await
             .expect("open the SQLite store set");
-        let backend = Arc::new(lash_restate::RestateEngine::new(
+        let backend = Arc::new(lash::restate::RestateEngine::new(
             Arc::new(stores),
             lash::restate::RestateConfig::new(
                 ingress_url.clone(),
                 admin_url,
-                lash_restate::RestateAuthorityId::new("agent-service-restate-test").unwrap(),
+                lash::restate::RestateAuthorityId::new("agent-service-restate-test").unwrap(),
             ),
         ));
         // The worked example keeps its Sleep-only resolver as the deployment's
@@ -467,15 +467,7 @@ finish("done via Restate E2E");
             .register_group_executors(Arc::new(AgentServiceEffectGroupExecutors))
             .expect("register worked effect-group resolver");
         let lash_backend = lash::Backend::new(backend.clone());
-        let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash::rlm::RlmChannel::Cell)
-                .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-                .build(),
-            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
-            &lash_backend,
-        );
+        let factory = crate::rlm_factory(&backend);
         let core = LashCore::rlm_builder(
             lash_backend,
             factory,
@@ -487,7 +479,7 @@ finish("done via Restate E2E");
             // The `processes` module is catalogue presence, not an ability bit
             // (ADR 0095): the scripted cell below authors `processes.start`.
             .plugin(Arc::new(
-                lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter),
+                lash::process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter),
             ))
             .plugin(Arc::new(DemoPluginFactory::new(Arc::clone(&app_db))))
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -500,11 +492,11 @@ finish("done via Restate E2E");
                 .expect("process worker config"),
         )
         .expect("valid test native substrate config");
-        let restate = lash_restate::RestateConnection::new(ingress_url);
+        let restate = lash::restate::RestateConnection::new(ingress_url);
         let chat_discard = crate::chat_discard::AgentServiceChatDiscardImpl::new(
             &core,
             restate.clone(),
-            lash_restate::RestateAuthorityId::new("agent-service-restate-test").unwrap(),
+            lash::restate::RestateAuthorityId::new("agent-service-restate-test").unwrap(),
         )
         .await;
         let state = AppStateData::new(core, app_db, "mock-model".to_string(), None, restate);

@@ -7,14 +7,14 @@ async fn approval_test_core(
     provider: ProviderHandle,
     approvals: approvals::WorkbenchApprovals,
 ) -> LashCore {
-    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+    let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
+        std::sync::Arc::new(lash::rlm::TypescriptDialect),
         backend,
     );
     LashCore::rlm_builder(backend.clone(), factory)
@@ -25,7 +25,7 @@ async fn approval_test_core(
         // The `processes` module is catalogue presence, not an ability bit (ADR
         // 0095): the workbench's scripted sources author `processes.*`, so the
         // surface only exists when this factory is installed, as bootstrap does.
-        .plugin(Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter)))
+        .plugin(Arc::new(lash::process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter)))
         .plugin(Arc::new(
             WorkbenchPluginFactory::new().with_approvals(approvals),
         ))

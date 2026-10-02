@@ -78,13 +78,13 @@ pub(crate) async fn call_session_delete(
     request: WorkbenchSessionDeleteWorkflowRequest,
 ) -> Result<(), AppError> {
     let session_id = request.session_id.clone();
-    let call = lash_restate::RestateIngressClient::new(
-        lash_restate::RestateConnection::with_client_and_config(
+    let call = lash::restate::RestateIngressClient::new(
+        lash::restate::RestateConnection::with_client_and_config(
             &state.restate_ingress_url,
             state.restate_http.clone(),
-            lash_restate::RestateConnectionConfig {
+            lash::restate::RestateConnectionConfig {
                 attach_ceiling_ms: session_delete_attach_ceiling_ms(),
-                ..lash_restate::RestateConnectionConfig::default()
+                ..lash::restate::RestateConnectionConfig::default()
             },
         ),
     )
@@ -100,8 +100,8 @@ pub(crate) async fn call_session_delete(
     };
     let call_is_definitive = matches!(
         &call_error,
-        lash_restate::RestateHttpError::Status { status: 409, .. }
-            | lash_restate::RestateHttpError::Encode { .. }
+        lash::restate::RestateHttpError::Status { status: 409, .. }
+            | lash::restate::RestateHttpError::Encode { .. }
     );
     let durable = match state.core.session(session_id.clone()).durable().await {
         Ok(durable) => durable,

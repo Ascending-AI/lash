@@ -239,7 +239,7 @@ async fn record_cron_tick_outcome(
     request: WorkbenchCronRequest,
     scheduled_for: String,
     outcome: lash::triggers::TriggerOccurrenceOutcome,
-    controller: &lash_restate::RestateRuntimeEffectController<'_, ObjectContext<'_>>,
+    controller: &lash::restate::RestateRuntimeEffectController<'_, ObjectContext<'_>>,
 ) -> HandlerResult<String> {
     let scoped_effect_controller = controller
         .scoped_effect_controller(lash::runtime::AdmittedScope::runtime_operation(format!(
@@ -274,13 +274,13 @@ pub(super) trait CronTickCancelSurface: Sync {
 
 pub(super) struct RestateCronTickCancelSurface<'run, 'ctx> {
     app_state: AppState,
-    controller: &'run lash_restate::RestateRuntimeEffectController<'ctx, ObjectContext<'ctx>>,
+    controller: &'run lash::restate::RestateRuntimeEffectController<'ctx, ObjectContext<'ctx>>,
 }
 
 impl<'run, 'ctx> RestateCronTickCancelSurface<'run, 'ctx> {
     pub(crate) fn new(
         app_state: AppState,
-        controller: &'run lash_restate::RestateRuntimeEffectController<'ctx, ObjectContext<'ctx>>,
+        controller: &'run lash::restate::RestateRuntimeEffectController<'ctx, ObjectContext<'ctx>>,
     ) -> Self {
         Self {
             app_state,

@@ -7,9 +7,9 @@ use axum::Json;
 use axum::extract::{Path as AxumPath, State};
 use axum::http::{HeaderMap, HeaderValue};
 use axum::response::Response;
+use lash::remote::usage::RemoteTurnActivitySink;
 use lash::rlm::RlmSendBuilderExt as _;
 use lash::{TurnActivityFanout, TurnActivitySink, TurnInput};
-use lash_remote_protocol::RemoteTurnActivitySink;
 use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::mpsc;
@@ -190,7 +190,8 @@ mod tests {
     use lash::LashCore;
     use lash::direct::LlmOutputPart;
     use lash::provider::LlmResponse;
-    use lash_remote_protocol::{RemoteTurnActivity, RemoteTurnEvent};
+    use lash::remote::usage::RemoteTurnActivity;
+    use lash::remote::usage::RemoteTurnEvent;
 
     use super::*;
     use crate::db::AppDb;
@@ -295,15 +296,7 @@ finish("done through raw activities");
             .build()
             .into_handle();
         let backend = double.lash_backend();
-        let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash::rlm::RlmChannel::Cell)
-                .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-                .build(),
-            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
-            &backend,
-        );
+        let factory = crate::rlm_factory(&backend);
         let core = LashCore::rlm_builder(backend, factory)
             .serve_test_llm_profile(
                 provider,

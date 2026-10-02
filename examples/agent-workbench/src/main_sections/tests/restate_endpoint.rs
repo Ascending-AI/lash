@@ -160,7 +160,7 @@ impl LiveRestateEndpoint {
         timeout: Duration,
     ) {
         let admin =
-            lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::with_client(
+            lash::restate::RestateAdminClient::new(lash::restate::RestateConnection::with_client(
                 state.restate_admin_url.clone(),
                 state.restate_http.clone(),
             ));
@@ -501,12 +501,12 @@ async fn fixture_deployment_id(admin_url: &str, endpoint_url: &str) -> String {
 
 pub(crate) async fn restate_invocation_status_with_deployment(
     admin_url: &str,
-    invocation_id: &lash_restate::RestateInvocationId,
-) -> Option<lash_restate::RestateInvocationStatus> {
+    invocation_id: &lash::restate::RestateInvocationId,
+) -> Option<lash::restate::RestateInvocationStatus> {
     let escaped_id = invocation_id.as_str().replace('\'', "''");
     let mut rows =
-        lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::new(admin_url))
-            .query_json::<lash_restate::RestateInvocationStatus>(&format!(
+        lash::restate::RestateAdminClient::new(lash::restate::RestateConnection::new(admin_url))
+            .query_json::<lash::restate::RestateInvocationStatus>(&format!(
                 "SELECT id, target, target_service_name, target_service_key, \
          target_handler_name, status, completion_result, completion_failure, \
          pinned_deployment_id FROM sys_invocation WHERE id = '{escaped_id}'"

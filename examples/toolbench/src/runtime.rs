@@ -3,10 +3,10 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use lash::openai::{OpenAiCompat, OpenAiCompatibleProvider};
 use lash::provider::{ProviderHandle, ProviderOptions};
 use lash::rlm::RlmSendBuilderExt as _;
 use lash::{LashCore, TurnEvent, TurnInput};
-use lash_provider_openai::{OpenAiCompat, OpenAiCompatibleProvider};
 
 use crate::grading::RunEvidence;
 use crate::tasks::Task;

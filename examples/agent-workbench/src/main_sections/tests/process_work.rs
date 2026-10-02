@@ -355,7 +355,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
         SessionScope,
     };
     let registry_dir = tempfile::tempdir().expect("process registry tempdir");
-    let stores = lash_sqlite_store::SqliteStoreSet::open(registry_dir.path())
+    let stores = lash::sqlite::SqliteStoreSet::open(registry_dir.path())
         .await
         .expect("open a durable registry store set");
     let registry: Arc<dyn lash::process::ProcessRegistry> = stores.process_registry();
@@ -1201,12 +1201,12 @@ fn watched_process_work(
     Arc<dyn lash::process::ProcessRegistry>,
     lash::process::ProcessWorkWiring,
 ) {
-    let authority = lash_restate::RestateAuthorityId::new(format!(
+    let authority = lash::restate::RestateAuthorityId::new(format!(
         "lash-restate-test-{}",
         double.server().config().seed
     ))
     .expect("the double's authority id");
-    let wiring = lash_restate::RestateProcessDeployment::new_with_sink(
+    let wiring = lash::restate::RestateProcessDeployment::new_with_sink(
         double.connection(),
         authority,
         double.engine_stores().process_registry(),

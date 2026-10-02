@@ -13,7 +13,7 @@
 
 use axum::http::StatusCode;
 use lash::LashCore;
-use lash_restate::{
+use lash::restate::{
     RestateAuthorityId, RestateConnection, RestateIngressClient, RestateSessionAdministration,
 };
 use restate_sdk::context::WorkflowContext;

@@ -1,12 +1,12 @@
 use super::*;
 use lash::persistence::{SessionCatalogStore as _, TurnInputStore as _};
 
-async fn open_catalog(root: impl AsRef<std::path::Path>) -> Arc<lash_sqlite_store::SqliteStore> {
+async fn open_catalog(root: impl AsRef<std::path::Path>) -> Arc<lash::sqlite::SqliteStore> {
     let root = root.as_ref();
     std::fs::create_dir_all(root).expect("create Restate closure catalog root");
     Arc::new(
-        lash_sqlite_store::SqliteStore::open(
-            &root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
+        lash::sqlite::SqliteStore::open(
+            &root.join(lash::sqlite::SqliteDatabase::DurableCore.file_name()),
         )
         .await
         .expect("open Restate closure catalog"),
@@ -21,7 +21,7 @@ fn live_restate_admission(scope: &lash::runtime::ExecutionScope) -> lash::runtim
 
 async fn authorize_restate_completion_closure(
     host: &Arc<dyn lash::durability::EffectHost>,
-    factory: &Arc<lash_sqlite_store::SqliteStore>,
+    factory: &Arc<lash::sqlite::SqliteStore>,
     session: &str,
     physical_scope: &lash::runtime::ExecutionScope,
 ) -> (
@@ -129,7 +129,7 @@ async fn consume_closure_by_commit(
 
 async fn settle_and_release_restate_completion_closure(
     effect_host: Arc<dyn lash::durability::EffectHost>,
-    factory: &Arc<lash_sqlite_store::SqliteStore>,
+    factory: &Arc<lash::sqlite::SqliteStore>,
     scope: &lash::runtime::ExecutionScope,
     store: Arc<dyn lash::persistence::RuntimeStore>,
     lease: lash::persistence::ShiftFence,
@@ -161,7 +161,7 @@ enum RestateParticipantCrashBoundary {
 }
 
 struct RestateParticipantCrashHost {
-    inner: Arc<lash_restate::RestateEffectHost>,
+    inner: Arc<lash::restate::RestateEffectHost>,
     boundary: RestateParticipantCrashBoundary,
     marker: std::path::PathBuf,
 }
@@ -185,15 +185,15 @@ impl lash::runtime::AwaitEventResolver for RestateParticipantCrashHost {
 impl lash::durability::EffectHost for RestateParticipantCrashHost {
     async fn drain_usage_accounting(
         &self,
-        owner: &lash_core_execution::RuntimeOwner,
-    ) -> Result<lash_core_execution::UsageOwnerRetired, lash::runtime::RuntimeError> {
+        owner: &lash::RuntimeOwner,
+    ) -> Result<lash::usage::UsageOwnerRetired, lash::runtime::RuntimeError> {
         self.inner.drain_usage_accounting(owner).await
     }
 
     async fn retire_usage_execution(
         &self,
-        owner: &lash_core_execution::RuntimeOwner,
-        scope: &lash_core_execution::ExecutionScope,
+        owner: &lash::RuntimeOwner,
+        scope: &lash::runtime::ExecutionScope,
     ) -> Result<u64, lash::runtime::RuntimeError> {
         self.inner.retire_usage_execution(owner, scope).await
     }
@@ -201,7 +201,7 @@ impl lash::durability::EffectHost for RestateParticipantCrashHost {
     async fn journal_replay(
         &self,
         journal: &lash::durability::EffectJournalIdentity,
-    ) -> Result<lash_core_execution::JournalReplay, lash::runtime::RuntimeError> {
+    ) -> Result<lash::durability::JournalReplay, lash::runtime::RuntimeError> {
         self.inner.journal_replay(journal).await
     }
 
@@ -256,10 +256,10 @@ impl lash::durability::EffectHost for RestateParticipantCrashHost {
     }
 }
 
-fn live_restate_participant_host(ingress_url: String) -> Arc<lash_restate::RestateEffectHost> {
-    Arc::new(lash_restate::RestateEffectHost::outside_deployment(
-        lash_restate::RestateConnection::with_client(ingress_url, reqwest::Client::new()),
-        lash_restate::RestateAuthorityId::new("agent-workbench-tests")
+fn live_restate_participant_host(ingress_url: String) -> Arc<lash::restate::RestateEffectHost> {
+    Arc::new(lash::restate::RestateEffectHost::outside_deployment(
+        lash::restate::RestateConnection::with_client(ingress_url, reqwest::Client::new()),
+        lash::restate::RestateAuthorityId::new("agent-workbench-tests")
             .expect("valid live Restate authority"),
     ))
 }
@@ -363,7 +363,7 @@ fn kill_live_restate_participant_child(
 }
 
 async fn prove_live_restate_participant_crash_windows(
-    host: &Arc<lash_restate::RestateEffectHost>,
+    host: &Arc<lash::restate::RestateEffectHost>,
     effect_host: &Arc<dyn lash::durability::EffectHost>,
     data_dir: &std::path::Path,
 ) {
@@ -515,9 +515,9 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
                 harness.process_worker,
             )
             .await;
-            let host = Arc::new(lash_restate::RestateEffectHost::outside_deployment(
-                lash_restate::RestateConnection::with_client(ingress_url, reqwest::Client::new()),
-                lash_restate::RestateAuthorityId::new("agent-workbench-tests")
+            let host = Arc::new(lash::restate::RestateEffectHost::outside_deployment(
+                lash::restate::RestateConnection::with_client(ingress_url, reqwest::Client::new()),
+                lash::restate::RestateAuthorityId::new("agent-workbench-tests")
                     .expect("valid live Restate authority"),
             ));
             let effect_host: Arc<dyn lash::durability::EffectHost> = host.clone();

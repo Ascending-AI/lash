@@ -25,8 +25,7 @@ futures-util = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 dotenvy = "0.15"
-lash = { workspace = true, features = ["restate", "rlm", "sqlite"] }
-lash-provider-openai = { workspace = true }
+lash = { workspace = true, features = ["restate", "rlm", "sqlite", "openai"] }
 reqwest = { workspace = true, features = ["json", "rustls", "stream"] }
 restate-sdk = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

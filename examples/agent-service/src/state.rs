@@ -19,7 +19,7 @@ pub(crate) struct AppStateData {
     db: Arc<Mutex<AppDb>>,
     default_profile: String,
     default_profile_variant: Option<String>,
-    restate: lash_restate::RestateConnection,
+    restate: lash::restate::RestateConnection,
 }
 
 impl AppStateData {
@@ -28,7 +28,7 @@ impl AppStateData {
         db: Arc<Mutex<AppDb>>,
         default_profile: String,
         default_profile_variant: Option<String>,
-        restate: lash_restate::RestateConnection,
+        restate: lash::restate::RestateConnection,
     ) -> Self {
         let core = Arc::new(core);
         db.lock_recover().context_core = Arc::downgrade(&core);
@@ -98,8 +98,8 @@ impl AppStateData {
     }
 
     /// The Restate ingress the service's own workflows are reached through.
-    pub(crate) fn restate_ingress(&self) -> lash_restate::RestateIngressClient {
-        lash_restate::RestateIngressClient::new(self.restate.clone())
+    pub(crate) fn restate_ingress(&self) -> lash::restate::RestateIngressClient {
+        lash::restate::RestateIngressClient::new(self.restate.clone())
     }
 
     pub(crate) async fn open_session(
@@ -393,7 +393,7 @@ pub(crate) mod test_support {
     ) {
         use crate::chat_discard::AgentServiceChatDiscard as _;
 
-        let authority = lash_restate::RestateAuthorityId::new(format!(
+        let authority = lash::restate::RestateAuthorityId::new(format!(
             "lash-restate-test-{}",
             double.server().config().seed
         ))
@@ -481,15 +481,7 @@ pub(crate) mod test_support {
         board: Option<Arc<Mutex<AppDb>>>,
     ) -> LashCore {
         let backend = double.lash_backend();
-        let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash::rlm::RlmChannel::Cell)
-                .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-                .build(),
-            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
-            &backend,
-        );
+        let factory = crate::rlm_factory(&backend);
         let mut builder = LashCore::rlm_builder(backend, factory)
             .tool_source_policy(tool_source_policy)
             .llm_profiles(Arc::new(crate::OpenRouterLlmProfiles { provider }));

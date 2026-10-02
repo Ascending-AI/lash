@@ -1378,8 +1378,8 @@ pub(crate) async fn enqueue_mail_received_trigger_command(
         .context("emit mail received trigger occurrence")
 }
 
-pub(crate) fn workbench_lashlang_abilities() -> lashlang::LashlangAbilities {
-    lashlang::LashlangAbilities::default().with_sleep()
+pub(crate) fn workbench_lashlang_abilities() -> lash::rlm::lang::LashlangAbilities {
+    lash::rlm::lang::LashlangAbilities::default().with_sleep()
 }
 
 #[cfg(test)]

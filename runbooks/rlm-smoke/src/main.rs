@@ -7,6 +7,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail, ensure};
 use async_trait::async_trait;
 use clap::Parser;
+use lash::openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 use lash::provider::ProviderHandle;
 use lash::rlm::RlmSendBuilderExt as _;
 use lash::tools::{
@@ -14,7 +15,6 @@ use lash::tools::{
     ToolDefinition, ToolDefinitionBindingExt as _, ToolOutcome, ToolProvider,
 };
 use lash::{LashCore, TurnEvent, TurnInput};
-use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::process::Command;
@@ -471,7 +471,7 @@ async fn main() -> Result<()> {
     // and the compiled Lashlang artifacts; the local restate-server's engine
     // journals every turn over it (ADR 0104).
     let restate = local_restate::LocalRestate::from_env()?;
-    let stores = lash_sqlite_store::SqliteStoreSet::open(args.data_dir.join("sessions"))
+    let stores = lash::sqlite::SqliteStoreSet::open(args.data_dir.join("sessions"))
         .await
         .context("open the RLM smoke SQLite store set")?;
     let engine = restate.engine(Arc::new(stores));

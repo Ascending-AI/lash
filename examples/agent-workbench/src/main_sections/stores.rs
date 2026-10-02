@@ -2,7 +2,7 @@ use super::*;
 
 /// The workbench's Restate backend: the Restate engine host over a store set
 /// that also keeps the RLM factory's Lashlang artifacts.
-pub(crate) type WorkbenchRestateBackend = lash_restate::RestateEngine;
+pub(crate) type WorkbenchRestateBackend = lash::restate::RestateEngine;
 
 /// The SQL store set the workbench runs its Restate backend over: SQLite
 /// under the data directory, or PostgreSQL when a database URL is configured.
@@ -23,7 +23,7 @@ impl WorkbenchStores {
     }
 
     pub(crate) async fn open_sqlite(data_dir: &std::path::Path) -> AnyhowResult<Self> {
-        let stores = lash_sqlite_store::SqliteStoreSet::open(data_dir.join("lash-sessions"))
+        let stores = lash::sqlite::SqliteStoreSet::open(data_dir.join("lash-sessions"))
             .await
             .context("open the SQLite store set")?;
         Ok(Self {
@@ -40,10 +40,10 @@ impl WorkbenchStores {
             !database_url.trim().is_empty(),
             "AGENT_WORKBENCH_DATABASE_URL must not be empty"
         );
-        let storage = lash_postgres_store::PostgresStorage::connect(database_url)
+        let storage = lash::postgres::PostgresStorage::connect(database_url)
             .await
             .context("open Postgres workbench storage")?;
-        let stores = lash_postgres_store::PostgresStoreSet::new(
+        let stores = lash::postgres::PostgresStoreSet::new(
             &storage,
             Arc::new(lash::persistence::FileAttachmentStore::new(
                 data_dir.join("attachments"),

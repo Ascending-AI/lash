@@ -74,7 +74,7 @@ async fn run_fixture(
     // on the same restate-server in a namespace of its own (ADR 0111), over a
     // fresh SQLite memory store set (ADR 0104). Each run re-registers the
     // namespace's names under the same authority.
-    let stores = lash_sqlite_store::SqliteStoreSet::memory()
+    let stores = lash::sqlite::SqliteStoreSet::memory()
         .await
         .map_err(|error| error.to_string())?;
     let engine = restate.engine(Arc::new(stores));

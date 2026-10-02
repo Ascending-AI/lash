@@ -107,7 +107,7 @@ pub(crate) async fn recoverable_chat_test_state_with_dependencies_and_context(
 }
 
 struct RetiringSubscriptionListTriggerStore {
-    pub(super) inner: Arc<lash_sqlite_store::SqliteTriggerStore>,
+    pub(super) inner: Arc<lash::sqlite::SqliteTriggerStore>,
     pub(super) store_factory: Arc<dyn lash::persistence::DeploymentStore>,
     pub(super) session_to_retire: Mutex<Option<String>>,
 }
@@ -877,9 +877,9 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         .expect("persist multi-attachment state before durable tool fixture");
     persisted
         .session_graph
-        .append_protocol_event(lash_protocol_rlm::rlm_protocol_event(
-            lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(
-                lash_rlm_types::RlmTrajectoryEntry {
+        .append_protocol_event(lash::rlm::rlm_protocol_event(
+            lash::rlm::RlmProtocolEvent::RlmTrajectoryEntry(
+                lash::rlm::RlmTrajectoryEntry {
                     id: "durable-tool-trajectory".to_string(),
                     protocol_iteration: 1,
                     code: "durable.tool_projection()".to_string(),
@@ -906,7 +906,7 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
                         },
                     ],
                     calls_omitted: 3,
-                    ..lash_rlm_types::RlmTrajectoryEntry::default()
+                    ..lash::rlm::RlmTrajectoryEntry::default()
                 },
             ),
         ));

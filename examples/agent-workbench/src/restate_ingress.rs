@@ -8,8 +8,8 @@ pub(crate) async fn submit_restate_workflow_json<T: Serialize>(
     workflow: &str,
     workflow_key: &str,
     body: &T,
-) -> Result<lash_restate::RestateInvocationId, AppError> {
-    lash_restate::RestateIngressClient::new(lash_restate::RestateConnection::with_client(
+) -> Result<lash::restate::RestateInvocationId, AppError> {
+    lash::restate::RestateIngressClient::new(lash::restate::RestateConnection::with_client(
         restate_ingress_url,
         restate_http.clone(),
     ))
@@ -25,7 +25,7 @@ pub(crate) async fn submit_restate_empty(
     object_key: &str,
     handler: &str,
 ) -> Result<(), AppError> {
-    lash_restate::RestateIngressClient::new(lash_restate::RestateConnection::with_client(
+    lash::restate::RestateIngressClient::new(lash::restate::RestateConnection::with_client(
         &state.restate_ingress_url,
         state.restate_http.clone(),
     ))

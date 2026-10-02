@@ -16,9 +16,7 @@ workspace = true
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
-lash = { workspace = true, features = ["restate", "rlm"] }
-lash-provider-openai = { workspace = true }
-lash-sqlite-store = { workspace = true }
+lash = { workspace = true, features = ["restate", "rlm", "sqlite", "openai"] }
 restate-sdk = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

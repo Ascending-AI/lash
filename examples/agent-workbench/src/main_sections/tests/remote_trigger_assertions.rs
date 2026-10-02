@@ -11,7 +11,8 @@ pub(crate) async fn assert_remote_trigger_subscription_records_round_trip(
     session_id: &SessionId,
 ) -> Vec<lash::triggers::TriggerSubscriptionRecord> {
     let filter = lash::triggers::TriggerSubscriptionFilter::for_session(session_id);
-    let remote_filter = lash_remote_protocol::RemoteTriggerSubscriptionFilter::from(filter.clone());
+    let remote_filter =
+        lash::remote::triggers::RemoteTriggerSubscriptionFilter::from(filter.clone());
     remote_filter
         .validate()
         .expect("remote trigger subscription filter should validate");
@@ -25,7 +26,7 @@ pub(crate) async fn assert_remote_trigger_subscription_records_round_trip(
         .await
         .expect("list persisted trigger subscriptions for remote DTO round trip");
     let remote_list =
-        lash_remote_protocol::RemoteTriggerListSubscriptionsResponse::try_from(records.clone())
+        lash::remote::triggers::RemoteTriggerListSubscriptionsResponse::try_from(records.clone())
             .expect("remote trigger subscription list");
     remote_list
         .validate()
@@ -37,7 +38,7 @@ pub(crate) async fn assert_remote_trigger_subscription_records_round_trip(
 
     for record in &records {
         let remote_record =
-            lash_remote_protocol::RemoteTriggerSubscriptionRecord::try_from(record.clone())
+            lash::remote::triggers::RemoteTriggerSubscriptionRecord::try_from(record.clone())
                 .expect("remote trigger subscription record");
         remote_record
             .validate("WorkbenchTriggerSubscription")
@@ -48,7 +49,7 @@ pub(crate) async fn assert_remote_trigger_subscription_records_round_trip(
         assert_eq!(&round_trip_record, record);
 
         let remote_result =
-            lash_remote_protocol::RemoteTriggerRegisterSubscriptionReceipt::try_from(
+            lash::remote::triggers::RemoteTriggerRegisterSubscriptionReceipt::try_from(
                 record.clone(),
             )
             .expect("remote trigger register result");
@@ -67,7 +68,7 @@ pub(crate) async fn assert_remote_trigger_subscription_records_round_trip(
 pub(crate) fn assert_remote_trigger_emit_report_round_trip(
     report: &lash::triggers::TriggerEmitReport,
 ) {
-    let remote = lash_remote_protocol::RemoteTriggerEmitReport::from(report.clone());
+    let remote = lash::remote::triggers::RemoteTriggerEmitReport::from(report.clone());
     remote
         .validate()
         .expect("remote trigger emit report should validate");
@@ -93,8 +94,9 @@ pub(crate) async fn assert_remote_started_process_surface(
         .list(&filter)
         .await
         .expect("list observed processes for remote DTO round trip");
-    let remote_list = lash_remote_protocol::RemoteProcessListResponse::try_from(observed.clone())
-        .expect("observed process list should convert to remote DTO");
+    let remote_list =
+        lash::remote::processes::RemoteProcessListResponse::try_from(observed.clone())
+            .expect("observed process list should convert to remote DTO");
     remote_list
         .validate()
         .expect("remote process list should validate");
@@ -115,7 +117,7 @@ pub(crate) async fn assert_remote_started_process_surface(
         .session_snapshot(session_id)
         .await
         .expect("capture process work snapshot for remote DTO round trip");
-    let remote_snapshot = lash_remote_protocol::RemoteProcessWorkSnapshot::try_from(snapshot)
+    let remote_snapshot = lash::remote::processes::RemoteProcessWorkSnapshot::try_from(snapshot)
         .expect("process work snapshot should convert to remote DTO");
     remote_snapshot
         .validate()
@@ -131,7 +133,7 @@ pub(crate) async fn assert_remote_started_process_surface(
             .await
             .expect("process read should succeed")
             .expect("started process record should exist");
-        let remote_record = lash_remote_protocol::RemoteProcessRecord::try_from(record)
+        let remote_record = lash::remote::processes::RemoteProcessRecord::try_from(record)
             .expect("started process record should convert to remote DTO");
         remote_record
             .validate("WorkbenchStartedProcessRecord")
@@ -168,7 +170,7 @@ pub(crate) async fn assert_remote_started_process_surface(
             page_events.last().map_or(0, |event| event.sequence),
         )
         .expect("workbench cursor");
-        let remote_events = lash_remote_protocol::RemoteProcessEventsResponse::try_from((
+        let remote_events = lash::remote::processes::RemoteProcessEventsResponse::try_from((
             process_id.clone(),
             outcome,
             cursor.clone(),

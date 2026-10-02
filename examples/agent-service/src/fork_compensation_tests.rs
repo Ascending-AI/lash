@@ -81,7 +81,7 @@ async fn a_failed_fork_leaves_no_pending_marker_or_orphaned_session() {
     let catalog = rusqlite::Connection::open(
         double
             .stores()
-            .database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
+            .database_uri(lash::sqlite::SqliteDatabase::DurableCore),
     )
     .expect("open the session catalog");
     let leftovers: i64 = catalog

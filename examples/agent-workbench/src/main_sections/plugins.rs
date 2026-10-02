@@ -452,8 +452,8 @@ pub(crate) fn workbench_note_summary(state: &lash::persistence::SessionReadView)
     reason = "the three workbench trigger source types register against distinct split type \
               names and event types built here from valid object shapes"
 )]
-pub(crate) fn workbench_lashlang_resources() -> lashlang::LashlangHostCatalog {
-    let mut resources = lashlang::LashlangHostCatalog::new();
+pub(crate) fn workbench_lashlang_resources() -> lash::rlm::lang::LashlangHostCatalog {
+    let mut resources = lash::rlm::lang::LashlangHostCatalog::new();
     resources
         .add_trigger_source_constructor(
             CRON_SCHEDULE_SOURCE_TYPE.split('.'),
@@ -464,14 +464,14 @@ pub(crate) fn workbench_lashlang_resources() -> lashlang::LashlangHostCatalog {
     resources
         .add_trigger_source_constructor(
             BUTTON_TRIGGER_SOURCE_TYPE.split('.'),
-            lashlang::TypeExpr::Object(vec![]),
+            lash::rlm::lang::TypeExpr::Object(vec![]),
             button_pressed_event_type(),
         )
         .expect("valid button trigger source");
     resources
         .add_trigger_source_constructor(
             MAIL_RECEIVED_SOURCE_TYPE.split('.'),
-            lashlang::TypeExpr::Object(vec![]),
+            lash::rlm::lang::TypeExpr::Object(vec![]),
             mail_received_event_type(),
         )
         .expect("valid mail trigger source");
@@ -482,16 +482,16 @@ pub(crate) fn workbench_lashlang_resources() -> lashlang::LashlangHostCatalog {
 /// contract a registration captures and `start_delivery` checks every emitted
 /// occurrence source against. `tz` is optional, so an occurrence for a schedule
 /// registered without one must omit the key rather than send `null`.
-pub(crate) fn cron_schedule_config_type() -> lashlang::TypeExpr {
-    lashlang::TypeExpr::Object(vec![
-        lashlang::TypeField {
+pub(crate) fn cron_schedule_config_type() -> lash::rlm::lang::TypeExpr {
+    lash::rlm::lang::TypeExpr::Object(vec![
+        lash::rlm::lang::TypeField {
             name: "expr".into(),
-            ty: lashlang::TypeExpr::Str,
+            ty: lash::rlm::lang::TypeExpr::Str,
             optional: false,
         },
-        lashlang::TypeField {
+        lash::rlm::lang::TypeField {
             name: "tz".into(),
-            ty: lashlang::TypeExpr::Str,
+            ty: lash::rlm::lang::TypeExpr::Str,
             optional: true,
         },
     ])
@@ -501,13 +501,13 @@ pub(crate) fn cron_schedule_config_type() -> lashlang::TypeExpr {
     clippy::expect_used,
     reason = "`ui.button.Pressed` and its all-string fields satisfy NamedDataType::object's validation"
 )]
-pub(crate) fn button_pressed_event_type() -> lashlang::NamedDataType {
-    lashlang::NamedDataType::object(
+pub(crate) fn button_pressed_event_type() -> lash::rlm::lang::NamedDataType {
+    lash::rlm::lang::NamedDataType::object(
         "ui.button.Pressed",
         vec![
-            field("button", lashlang::TypeExpr::Str),
-            field("message", lashlang::TypeExpr::Str),
-            field("pressed_at", lashlang::TypeExpr::Str),
+            field("button", lash::rlm::lang::TypeExpr::Str),
+            field("message", lash::rlm::lang::TypeExpr::Str),
+            field("pressed_at", lash::rlm::lang::TypeExpr::Str),
         ],
     )
     .expect("valid button pressed event type")
@@ -517,13 +517,13 @@ pub(crate) fn button_pressed_event_type() -> lashlang::NamedDataType {
     clippy::expect_used,
     reason = "`mail.Received` and its all-string fields satisfy NamedDataType::object's validation"
 )]
-pub(crate) fn mail_received_event_type() -> lashlang::NamedDataType {
-    lashlang::NamedDataType::object(
+pub(crate) fn mail_received_event_type() -> lash::rlm::lang::NamedDataType {
+    lash::rlm::lang::NamedDataType::object(
         "mail.Received",
         vec![
-            field("account", lashlang::TypeExpr::Str),
-            field("title", lashlang::TypeExpr::Str),
-            field("text", lashlang::TypeExpr::Str),
+            field("account", lash::rlm::lang::TypeExpr::Str),
+            field("title", lash::rlm::lang::TypeExpr::Str),
+            field("text", lash::rlm::lang::TypeExpr::Str),
         ],
     )
     .expect("valid mail received event type")
@@ -565,8 +565,8 @@ pub(crate) fn button_trigger_payload_schema() -> lash::triggers::JsonSchema {
     .expect("valid declared payload schema")
 }
 
-pub(crate) fn field(name: &str, ty: lashlang::TypeExpr) -> lashlang::TypeField {
-    lashlang::TypeField {
+pub(crate) fn field(name: &str, ty: lash::rlm::lang::TypeExpr) -> lash::rlm::lang::TypeField {
+    lash::rlm::lang::TypeField {
         name: name.into(),
         ty,
         optional: false,
@@ -698,12 +698,12 @@ pub(crate) fn connected_accounts_prompt(mail_world: &mail::MailWorld) -> String 
     clippy::expect_used,
     reason = "`cron.Tick` and its single string field satisfy NamedDataType::object's validation"
 )]
-pub(crate) fn cron_tick_event_type() -> lashlang::NamedDataType {
-    lashlang::NamedDataType::object(
+pub(crate) fn cron_tick_event_type() -> lash::rlm::lang::NamedDataType {
+    lash::rlm::lang::NamedDataType::object(
         "cron.Tick",
-        vec![lashlang::TypeField {
+        vec![lash::rlm::lang::TypeField {
             name: "fired_at".into(),
-            ty: lashlang::TypeExpr::Str,
+            ty: lash::rlm::lang::TypeExpr::Str,
             optional: false,
         }],
     )

@@ -498,11 +498,11 @@ impl AppState {
         address: &lash::TurnAddress,
     ) -> AnyhowResult<bool> {
         let admin =
-            lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::with_client(
+            lash::restate::RestateAdminClient::new(lash::restate::RestateConnection::with_client(
                 self.restate_admin_url.clone(),
                 self.restate_http.clone(),
             ));
-        let key = lash_restate::turn_workflow_key(&address.session_id, &address.turn_id);
+        let key = lash::restate::turn_workflow_key(&address.session_id, &address.turn_id);
         Ok(admin
             .workflow_invocation_status("LashTurn", &key, "run")
             .await?
@@ -1373,7 +1373,7 @@ impl AppError {
             log_deleted_session_refusal(session_id, context);
             return Self::conflict(deleted_session_message(session_id));
         }
-        if error.is_retryable() {
+        if error.is_contended() {
             return temporarily_unavailable_session_open();
         }
         if let lash::EmbedError::UnknownSession { session_id } = &error {
@@ -1433,18 +1433,13 @@ impl AppError {
             };
         }
         // `SessionError::Store` is minted only by `load_persisted_state_admitted`,
-        // so scoping the retryable check to the two store shapes keeps this
-        // gate open-only; mid-turn contention arrives as
+        // so this contention-only check keeps the gate open-only; mid-turn
+        // contention arrives as
         // `EmbedError::Runtime(StoreCommitContended)` and does not match. If a
-        // future non-open path mints a retryable `EmbedError::Store`, durable
-        // turn failures would present as "session temporarily busy", which a
-        // Restate caller reads as license to rerun the provider call.
-        if matches!(
-            error,
-            lash::EmbedError::Store(_)
-                | lash::EmbedError::Session(lash::SessionError::Store { .. })
-        ) && error.is_retryable()
-        {
+        // future non-open path mints `EmbedError::Store(Contended)`, durable turn
+        // failures would flip from Ambiguous to Retryable and Restate would rerun
+        // the provider call.
+        if error.is_contended() {
             return temporarily_unavailable_session_open();
         }
         eprintln!("agent-workbench runtime request failure: {error}");
