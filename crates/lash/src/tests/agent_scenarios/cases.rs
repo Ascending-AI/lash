@@ -277,7 +277,7 @@ finish(result);"#,
         root         commit    checkpoint.commit       rev=0->1
         root                     turn_state            stored logical=255B
         root                     tool_state            stored logical=<opaque>
-        root                     plugin_state          stored {"embed_tools":{"generation":0,"values":{}},"lash.triggers":{"generation":0,"values":{}},"processes":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}}}
+        root                     plugin_state          stored {"embed_tools":{"format_version":1,"generation":0,"values":{}},"lash.triggers":{"format_version":1,"generation":0,"values":{}},"processes":{"format_version":1,"generation":0,"values":{}},"rlm_protocol":{"format_version":1,"generation":0,"values":{}}}
         root                     execution_state       stored logical=unknown
         process-001  outcome   process.completed       label="-" kind="lashlang" terminal=true
         "#);
@@ -412,12 +412,12 @@ finish(result);"#,
         root         commit    checkpoint.commit       rev=0->1
         root                     turn_state            stored logical=131B
         root                     tool_state            stored logical=<opaque>
-        root                     plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"processes":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"subagents":{"generation":0,"values":{}}}
+        root                     plugin_state          stored {"lash.triggers":{"format_version":1,"generation":0,"values":{}},"processes":{"format_version":1,"generation":0,"values":{}},"rlm_protocol":{"format_version":1,"generation":0,"values":{}},"subagents":{"format_version":1,"generation":0,"values":{}}}
         root                     execution_state       stored logical=unknown
         session-001  commit    checkpoint.commit       rev=0->1
         session-001              turn_state            stored logical=131B
         session-001              tool_state            stored logical=<opaque>
-        session-001              plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"processes":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"subagents":{"generation":0,"values":{}}}
+        session-001              plugin_state          stored {"lash.triggers":{"format_version":1,"generation":0,"values":{}},"processes":{"format_version":1,"generation":0,"values":{}},"rlm_protocol":{"format_version":1,"generation":0,"values":{}},"subagents":{"format_version":1,"generation":0,"values":{}}}
         session-001  commit    checkpoint.commit       rev=1->2
         session-001              turn_state            stored logical=131B
         session-001              tool_state            ref (unchanged)
@@ -480,7 +480,7 @@ finish(result);"#,
         root         commit    checkpoint.commit       rev=0->1
         root                     turn_state            stored logical=131B
         root                     tool_state            stored logical=<opaque>
-        root                     plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"processes":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}}}
+        root                     plugin_state          stored {"lash.triggers":{"format_version":1,"generation":0,"values":{}},"processes":{"format_version":1,"generation":0,"values":{}},"rlm_protocol":{"format_version":1,"generation":0,"values":{}}}
         root                     execution_state       stored logical=unknown
         process-001  outcome   process.completed       label="-" kind="lashlang" terminal=true
         process-002  outcome   process.completed       label="-" kind="lashlang" terminal=true
@@ -549,12 +549,12 @@ finish(result);"#,
         root         commit    checkpoint.commit       rev=0->1
         root                     turn_state            stored logical=131B
         root                     tool_state            stored logical=<opaque>
-        root                     plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"subagents":{"generation":0,"values":{}}}
+        root                     plugin_state          stored {"lash.triggers":{"format_version":1,"generation":0,"values":{}},"rlm_protocol":{"format_version":1,"generation":0,"values":{}},"subagents":{"format_version":1,"generation":0,"values":{}}}
         root                     execution_state       stored logical=unknown
         session-001  commit    checkpoint.commit       rev=0->1
         session-001              turn_state            stored logical=131B
         session-001              tool_state            stored logical=<opaque>
-        session-001              plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"subagents":{"generation":0,"values":{}}}
+        session-001              plugin_state          stored {"lash.triggers":{"format_version":1,"generation":0,"values":{}},"rlm_protocol":{"format_version":1,"generation":0,"values":{}},"subagents":{"format_version":1,"generation":0,"values":{}}}
         session-001  commit    checkpoint.commit       rev=1->2
         session-001              turn_state            stored logical=131B
         session-001              tool_state            ref (unchanged)
@@ -658,7 +658,7 @@ finish({ joined: [leftValue, rightValue] });"#,
         root         commit    checkpoint.commit       rev=0->1
         root                     turn_state            stored logical=131B
         root                     tool_state            stored logical=<opaque>
-        root                     plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"processes":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}}}
+        root                     plugin_state          stored {"lash.triggers":{"format_version":1,"generation":0,"values":{}},"processes":{"format_version":1,"generation":0,"values":{}},"rlm_protocol":{"format_version":1,"generation":0,"values":{}}}
         root                     execution_state       stored logical=unknown
         process-001  outcome   process.completed       label="-" kind="lashlang" terminal=true
         process-002  outcome   process.completed       label="-" kind="lashlang" terminal=true

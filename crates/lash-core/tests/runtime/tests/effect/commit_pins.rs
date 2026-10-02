@@ -24,6 +24,11 @@
 //! sealed-partial field. Removing that field from each ADR 0116 pin's masked
 //! commit reproduces the new digest; the code-cell pin is unchanged.
 
+//! Re-pinned for FIG-4745 under the version freeze: removing the namespace
+//! format headers reproduces the cancelled-turn digests. The code-cell fixture
+//! also materializes its factory ID, `test_protocol`, before callbacks;
+//! removing that empty namespace reproduces its previous digest.
+
 use super::*;
 use crate::runtime_support::commit_pins::assert_commit_pins;
 use lash_core::testing::TestTurnDrive as _;
@@ -102,7 +107,7 @@ async fn code_execution_turn_commits_the_pinned_bytes() {
     assert_commit_pins(
         "code execution",
         &commits,
-        &["29dedb650cc965f6b512fb228ea06f0bd09b1d16281126c6c80d7815f55be893"],
+        &["74dddb003782087dc350ea933127fd08b588c28affd816e6bec3b88a256da057"],
     );
 }
 
@@ -125,7 +130,7 @@ async fn cancel_observed_after_the_model_call_commits_the_pinned_bytes() {
     assert_commit_pins(
         "cancel after the model call",
         &commits,
-        &["a4cbfcd9c68000e456dff08e489e05fa978384590fdc518cda7bbdcadc629fcf"],
+        &["a28ad37e72b7a65dd903df47dc8f37050b48ce80c445eac1b10c60403a26a04e"],
     );
 }
 
@@ -149,6 +154,6 @@ async fn after_step_cancel_at_the_step_boundary_commits_the_pinned_bytes() {
     assert_commit_pins(
         "after-step cancel",
         &commits,
-        &["45da811768dcedbfbe0a98540a394f35bdb5c5156734ace35aafcd73a14dd383"],
+        &["bcfe7b9c19d488e7f8e64a57148f894713084ce394a947c942d01b25863cf3ab"],
     );
 }

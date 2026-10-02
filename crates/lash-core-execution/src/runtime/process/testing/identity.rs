@@ -85,8 +85,8 @@ fn process_execution_env_identity_golden_corpus() {
                 "process-env:v6:blake3:359aa9b669b4a7fb3a7a471a622a7d316cda72d3c5f9adbb8f48738103447383".to_string(),
             ),
             (
-                r#"{"plugin_config":{"revision":3,"config":{"protocol":"protocol","namespaces":{"a:b":{"enabled":true}}}},"policy":{"model":{"model":{"key":"rich-key","metadata":{"wire_model":"model:rich","limits":{"context_window_tokens":8192,"output_token_capacity":2048},"capability":{"instruction_role":"developer","native_mid_conversation_system":true,"cache_control":"anthropic","stream_termination":"eof_tolerated","sampling":"pinned","reasoning":{"efforts":["low","high"],"encoding":{"budget":{"high":1024,"low":256}},"disable":true,"mandatory":true}}}},"reasoning":{"effort":"high"}},"session_id":"session","autonomous":true,"turn_budget":{"bounded":1},"max_tool_calls":1024,"generation":{"output_token_cap":1024,"temperature":0.25,"seed":-7}}}"#.to_string(),
-                "process-env:v6:blake3:525e11a6358a1b3b8a441680283f8900be425932cc9e929e0410ba83425dfa04".to_string(),
+                r#"{"plugin_config":{"revision":3,"config":{"protocol":"protocol","namespaces":{"a:b":{"format_version":1,"value":{"enabled":true}}}}},"policy":{"model":{"model":{"key":"rich-key","metadata":{"wire_model":"model:rich","limits":{"context_window_tokens":8192,"output_token_capacity":2048},"capability":{"instruction_role":"developer","native_mid_conversation_system":true,"cache_control":"anthropic","stream_termination":"eof_tolerated","sampling":"pinned","reasoning":{"efforts":["low","high"],"encoding":{"budget":{"high":1024,"low":256}},"disable":true,"mandatory":true}}}},"reasoning":{"effort":"high"}},"session_id":"session","autonomous":true,"turn_budget":{"bounded":1},"max_tool_calls":1024,"generation":{"output_token_cap":1024,"temperature":0.25,"seed":-7}}}"#.to_string(),
+                "process-env:v6:blake3:941fc994f65ac26fe5da636106bfd9082c3d40e3e654a0f20934481e3e3245c7".to_string(),
             ),
         ]
     );

@@ -26,6 +26,23 @@
       "oneOf": [
         {
           "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "format",
+              "type": "string"
+            },
+            "refusal": {
+              "$ref": "#/$defs/RemoteFormatRefusal"
+            }
+          },
+          "required": [
+            "kind",
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "The owner refused: `refusal` is in the shape of its registered\nrefusal schema, and `message` is that refusal's display text.",
           "properties": {
             "kind": {
@@ -121,6 +138,40 @@
         "refusal"
       ],
       "type": "string"
+    },
+    "RemoteFormatNamespace": {
+      "enum": [
+        "state",
+        "config"
+      ],
+      "type": "string"
+    },
+    "RemoteFormatRefusal": {
+      "properties": {
+        "namespace": {
+          "$ref": "#/$defs/RemoteFormatNamespace"
+        },
+        "plugin": {
+          "type": "string"
+        },
+        "readable": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "stored": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "plugin",
+        "namespace",
+        "stored",
+        "readable"
+      ],
+      "type": "object"
     },
     "RemoteRefusalSite": {
       "description": "Where a config refusal was raised.",

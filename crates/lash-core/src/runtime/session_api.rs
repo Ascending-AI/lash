@@ -137,6 +137,10 @@ impl LashRuntime {
     /// published to the live plugin session. No durable publication and no
     /// plugin or tool-state hydration.
     #[cfg(any(test, feature = "testing"))]
+    #[expect(
+        clippy::expect_used,
+        reason = "test edits must leave config readable by the installed factories"
+    )]
     pub fn edit_resident_state_for_test(&mut self, edit: impl FnOnce(&mut RuntimeSessionState)) {
         let mut state = self.state.clone();
         edit(&mut state);

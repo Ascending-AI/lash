@@ -450,7 +450,7 @@ async fn create_options_naming_a_dialect_fail_during_session_creation() -> Resul
     let mut options = lash_core::PluginOptions::default();
     options.insert_versioned(
         lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID.to_string(),
-        crate::plugin::FormatVersion::ONE,
+        crate::plugins::FormatVersion::ONE,
         serde_json::json!({ "dialect": "python" }),
     );
 

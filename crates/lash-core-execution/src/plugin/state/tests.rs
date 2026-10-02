@@ -1,5 +1,4 @@
 use super::*;
-use crate::PluginFactory;
 use crate::plugin::PluginSessionRequest;
 
 #[derive(Clone)]

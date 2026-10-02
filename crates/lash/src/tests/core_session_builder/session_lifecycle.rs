@@ -1019,7 +1019,7 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()>
     };
     plugin_options.insert_versioned(
         lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID.to_string(),
-        crate::plugin::FormatVersion::ONE,
+        crate::plugins::FormatVersion::ONE,
         serde_json::json!({
             "termination": {
                 "kind": "unknown"

@@ -5,6 +5,8 @@ use std::sync::Arc;
 use crate::runtime::AssembledTurn;
 use crate::{MessageRole, SessionPolicy, ToolManifest, ToolOutcome, ToolProvider};
 
+pub use lash_core_store::plugin_state::{FormatNamespace, FormatRefusal, PluginConfigNamespace};
+
 pub use lash_sansio::{CheckpointKind, PluginMessage, PluginRuntimeEvent, ToolCatalogContribution};
 
 mod actions;
@@ -989,5 +991,3 @@ mod tests {
         );
     }
 }
-
-pub use lash_core_store::plugin_state::{FormatNamespace, FormatRefusal, PluginConfigNamespace};

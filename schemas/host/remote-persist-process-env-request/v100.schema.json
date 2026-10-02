@@ -410,6 +410,23 @@
       ],
       "type": "string"
     },
+    "RemotePluginConfigNamespace": {
+      "additionalProperties": false,
+      "description": "A recorded plugin config namespace, including its declared format stamp.",
+      "properties": {
+        "format_version": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "value": true
+      },
+      "required": [
+        "format_version",
+        "value"
+      ],
+      "type": "object"
+    },
     "RemoteProcessExecutionEnvSpec": {
       "additionalProperties": false,
       "properties": {
@@ -519,7 +536,9 @@
       "description": "Wire mirror of the plugin configuration a process captured, at its\nsession config revision (FIG-4379).",
       "properties": {
         "namespaces": {
-          "additionalProperties": true,
+          "additionalProperties": {
+            "$ref": "#/$defs/RemotePluginConfigNamespace"
+          },
           "type": "object"
         },
         "protocol": {

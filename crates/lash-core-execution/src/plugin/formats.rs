@@ -158,28 +158,28 @@ pub(super) fn decode_config_for(
     config: &PluginConfig,
 ) -> Result<PluginConfig, FormatRefusal> {
     for factory in factories {
-        if let Some(namespace) = config.namespace(factory.id()) {
-            if namespace.format_version > factory.declaration().format_version {
-                return Err(FormatRefusal {
-                    plugin: factory.id().into(),
-                    namespace: FormatNamespace::Config,
-                    stored: namespace.format_version,
-                    readable: factory.declaration().format_version,
-                });
-            }
+        if let Some(namespace) = config.namespace(factory.id())
+            && namespace.format_version > factory.declaration().format_version
+        {
+            return Err(FormatRefusal {
+                plugin: factory.id().into(),
+                namespace: FormatNamespace::Config,
+                stored: namespace.format_version,
+                readable: factory.declaration().format_version,
+            });
         }
     }
     let mut decoded = config.clone();
     for factory in factories {
-        if let Some(namespace) = config.namespace(factory.id()) {
-            if namespace.format_version != factory.declaration().format_version {
-                let value = factory.migrate_format(
-                    namespace.format_version,
-                    FormatNamespace::Config,
-                    namespace.value.clone(),
-                )?;
-                decoded.insert_versioned(factory.id(), factory.declaration().format_version, value);
-            }
+        if let Some(namespace) = config.namespace(factory.id())
+            && namespace.format_version != factory.declaration().format_version
+        {
+            let value = factory.migrate_format(
+                namespace.format_version,
+                FormatNamespace::Config,
+                namespace.value.clone(),
+            )?;
+            decoded.insert_versioned(factory.id(), factory.declaration().format_version, value);
         }
     }
     Ok(decoded)

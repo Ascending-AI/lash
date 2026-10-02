@@ -822,7 +822,7 @@ fn settings_resources(field_type: lashlang::TypeExpr) -> lashlang::LashlangHostC
 
 fn resource_factory(field_type: lashlang::TypeExpr) -> Arc<dyn PluginFactory> {
     Arc::new(lash_core::plugin::PluginSpecFactory::new(
-        "settings-resources",
+        lash_core::plugin::PluginDeclaration::initial("settings-resources"),
         Arc::new(move |_| {
             Ok(
                 lash_core::plugin::PluginSpec::new().with_extension_contribution(

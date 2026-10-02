@@ -806,7 +806,8 @@ pub mod plugins {
     /// and the formats it reads and writes. The build generation is computed
     /// from every registered factory's declaration, in hook order.
     pub use lash_core::plugin::{
-        BehaviorRevision, FormatVersion, PluginDeclaration, PluginDeclarationError, PluginId,
+        BehaviorRevision, FormatVersion, PluginComposition, PluginDeclaration,
+        PluginDeclarationError, PluginId,
     };
     /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
     pub use lash_core::plugin::{
@@ -829,8 +830,8 @@ pub mod plugins {
     };
     /// Host-mediated JSON state, accepted in memory and persisted at boundary commits.
     pub use lash_core::plugin::{
-        FormatNamespace, FormatRefusal, FormatVersion, KeyRejection, PluginConfigNamespace,
-        PluginStateEdit, PluginStateError, PluginStateStore, SessionReadyContext,
+        FormatNamespace, FormatRefusal, KeyRejection, PluginConfigNamespace, PluginStateEdit,
+        PluginStateError, PluginStateStore, SessionReadyContext,
     };
     /// Plugin operations: the query / command / task vocabulary. A plugin
     /// author declares an operation by implementing [`PluginOperation`] plus

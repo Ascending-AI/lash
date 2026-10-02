@@ -197,7 +197,7 @@ impl World {
         let factories = crate::testing::test_standard_protocol_factories()
             .into_iter()
             .chain([Arc::new(crate::plugin::StaticPluginFactory::new(
-                "conformance-live-fault-park",
+                lash_core::plugin::PluginDeclaration::initial("conformance-live-fault-park"),
                 crate::facade_support::PluginSpec::new().with_tool_catalog_contributor(contributor),
             ))
                 as Arc<dyn crate::facade_support::PluginFactory>])
