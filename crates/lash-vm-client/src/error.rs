@@ -32,7 +32,10 @@ impl PoolError {
     /// Preserve the worker's cause and retry class at the plugin/host boundary.
     pub fn into_runtime_error(self) -> lash_core_execution::RuntimeError {
         let message = self.to_string();
-        let code = if matches!(self, Self::CheckoutTimedOut) {
+        let code = if matches!(&self, Self::Infrastructure(outcome) if outcome.deployment_fault().is_some())
+        {
+            lash_core_execution::RuntimeErrorCode::VmWorkerUnavailable
+        } else if matches!(self, Self::CheckoutTimedOut) {
             lash_core_execution::RuntimeErrorCode::WorkerCheckoutTimedOut
         } else {
             lash_core_execution::RuntimeErrorCode::VmWorkerFailed
@@ -51,10 +54,13 @@ impl PoolError {
     /// capacity answers it differently, so it fails the attempt and is never
     /// an execution's recorded outcome (FIG-4451, FIG-4459). Infrastructure
     /// faults use the same retryability classification during setup and
-    /// execution; only a limit of the run itself remains a recorded outcome.
+    /// execution. A deployment fault also aborts uncommitted work, but parks
+    /// instead of retrying. Only a limit of the run itself remains a recorded outcome.
     pub fn is_host_verdict(&self) -> bool {
         match self {
-            Self::Infrastructure(outcome) => outcome.is_retryable(),
+            Self::Infrastructure(outcome) => {
+                outcome.is_retryable() || outcome.deployment_fault().is_some()
+            }
             Self::Recovery { .. }
             | Self::QueueFull { .. }
             | Self::CheckoutTimedOut
@@ -111,6 +117,25 @@ impl PoolError {
         }
         .into()
     }
+    /// Classify failures of the configured executable at the shared spawn seam.
+    pub(crate) fn spawn(error: std::io::Error, executable: &std::path::Path) -> Self {
+        let fault = match error.kind() {
+            std::io::ErrorKind::NotFound => lash_vm_protocol::WorkerDeploymentFault::NotFound,
+            std::io::ErrorKind::PermissionDenied => {
+                lash_vm_protocol::WorkerDeploymentFault::NotExecutable
+            }
+            _ if error.raw_os_error() == Some(libc::ENOEXEC) => {
+                lash_vm_protocol::WorkerDeploymentFault::NotExecutable
+            }
+            _ => return Self::io(error),
+        };
+        InfrastructureOutcome::WorkerDeployment {
+            executable: executable.to_owned(),
+            fault,
+        }
+        .into()
+    }
+
     pub fn io(error: std::io::Error) -> Self {
         match error.kind() {
             std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock => {

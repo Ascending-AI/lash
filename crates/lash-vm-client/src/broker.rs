@@ -205,7 +205,8 @@ impl WorkerSlots for PoolSlots {
                                 let _ =
                                     outputs.blocking_send(WorkerRead::Unresponsive { silent_ms });
                             }
-                            outcome @ (InfrastructureOutcome::ProtocolViolation { .. }
+                            outcome @ (InfrastructureOutcome::WorkerDeployment { .. }
+                            | InfrastructureOutcome::ProtocolViolation { .. }
                             | InfrastructureOutcome::RunRefused { .. }) => {
                                 let _ = outputs.blocking_send(WorkerRead::Failed(outcome));
                             }

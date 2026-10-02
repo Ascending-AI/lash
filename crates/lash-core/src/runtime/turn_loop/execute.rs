@@ -418,7 +418,7 @@ impl LashRuntime {
             turn_graph_appends.clone(),
         )
         .with_definition_engines(self.host.core.process_engines.clone());
-        turn_pipeline
+        if let Err(error) = turn_pipeline
             .prepared_checkpoint(
                 turn_policy.clone(),
                 turn_index,
@@ -426,7 +426,15 @@ impl LashRuntime {
                 self.session.as_mut(),
             )
             .await
-            .map_err(super::runtime_error_from_store_commit)?;
+        {
+            let error = super::runtime_error_from_store_commit(error);
+            let root = self.park_root(
+                scoped_effect_controller.execution_scope().logical_root(),
+                &trace_turn_id,
+            );
+            self.record_turn_park_after_abort(&error, &root, None).await;
+            return Err(error);
+        }
         // The model binding is the turn's recorded config (D3 §2.1). Nothing
         // binds it here: the body of an unjournaled model call does, so a
         // fully journaled replay never asks this worker's models (FIG-4404).

@@ -552,6 +552,25 @@ pub(super) async fn run_final_value_turn(
     events: Arc<RuntimeProofRecordingEvents>,
     workers: Option<lash_vm_client::service::Service>,
 ) -> Result<lash::Result<lash::TurnOutput>, FixedScriptRunnerError> {
+    let (_core, session) = final_value_session(engine, workers).await?;
+    engine
+        .run_turn(
+            &session,
+            "sim-final-value-turn",
+            events,
+            Arc::new(|session: &lash::LashSession| {
+                session
+                    .send(lash::TurnInput::text("produce a semantic final value"))
+                    .require_finish()
+            }),
+        )
+        .await
+}
+
+pub(super) async fn final_value_session(
+    engine: &crate::backend::SimEngine,
+    workers: Option<lash_vm_client::service::Service>,
+) -> Result<(lash::LashCore, lash::LashSession), FixedScriptRunnerError> {
     let backend = engine.backend();
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -582,18 +601,7 @@ pub(super) async fn run_final_value_turn(
         crate::open_created_session("mock-rlm-final-value", &core, "sim-final-value-session")
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    engine
-        .run_turn(
-            &session,
-            "sim-final-value-turn",
-            events,
-            Arc::new(|session: &lash::LashSession| {
-                session
-                    .send(lash::TurnInput::text("produce a semantic final value"))
-                    .require_finish()
-            }),
-        )
-        .await
+    Ok((core, session))
 }
 
 pub(super) async fn prove_final_value_semantic_channel()

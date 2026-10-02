@@ -989,6 +989,7 @@ PACKAGE_DEPS = {
             "blake3": "//third-party/rust:p0030",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "rmp_serde": "//third-party/rust:p0304",
+            "schemars": "//third-party/rust:p0322",
             "serde": "//third-party/rust:p0331",
             "serde_bytes": "//third-party/rust:p0332",
             "thiserror": "//third-party/rust:p0392"

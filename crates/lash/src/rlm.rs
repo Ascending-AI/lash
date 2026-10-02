@@ -260,5 +260,5 @@ pub use lash_vm_client::{
     OpaqueStateRefusal, OwnerEpoch, PayloadKind, PoolCounters, PoolError, PoolFault,
     PoolMeasurements, ProcessMetadata, ProtocolBounds, ProtocolBreach, ProtocolVersionRefusal,
     RunInput, RunRefusal, SequenceFault, SupervisorEvidence, TransportSequence,
-    VmContractComponent, VmLimits, VmOwner, VmStateKind, WorkerLimit,
+    VmContractComponent, VmLimits, VmOwner, VmStateKind, WorkerDeploymentFault, WorkerLimit,
 };

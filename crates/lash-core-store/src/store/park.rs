@@ -297,6 +297,12 @@ pub struct TurnPark {
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ParkReason {
+    /// The deployment must supply the configured worker before redrive can run it.
+    WorkerDeployment {
+        executable: std::path::PathBuf,
+        fault: lash_vm_protocol::WorkerDeploymentFault,
+        message: String,
+    },
     /// A code cell's re-execution issued a command its journal does not hold
     /// where it was issued: the running build is not the one that wrote the
     /// journal.
@@ -411,6 +417,8 @@ impl ParkReason {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ParkReasonCode {
+    /// See [`ParkReason::WorkerDeployment`].
+    WorkerDeployment,
     /// See [`ParkReason::ReplayDivergence`].
     ReplayDivergence,
     /// See [`ParkReason::RetiredGeneration`].
@@ -429,6 +437,7 @@ impl ParkReasonCode {
     /// Every code, in declaration order. Metrics record each one — zero
     /// included — so a cleared reason drops to 0 instead of going stale.
     pub const ALL: &[Self] = &[
+        Self::WorkerDeployment,
         Self::ReplayDivergence,
         Self::RetiredGeneration,
         Self::BindingDrift,
@@ -442,6 +451,7 @@ impl ParkReasonCode {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::WorkerDeployment => "worker_deployment",
             Self::ReplayDivergence => "replay_divergence",
             Self::RetiredGeneration => "retired_generation",
             Self::BindingDrift => "binding_drift",
@@ -455,6 +465,7 @@ impl ParkReasonCode {
     #[must_use]
     pub fn from_code(code: &str) -> Option<Self> {
         match code {
+            "worker_deployment" => Some(Self::WorkerDeployment),
             "replay_divergence" => Some(Self::ReplayDivergence),
             "retired_generation" => Some(Self::RetiredGeneration),
             "binding_drift" => Some(Self::BindingDrift),
@@ -550,6 +561,15 @@ impl ParkReason {
     #[must_use]
     pub fn of_error(error: &RuntimeError) -> Option<Self> {
         let message = error.message.clone();
+        if let Some(crate::RuntimeErrorCause::VmWorker { outcome }) = &error.cause
+            && let Some((executable, fault)) = outcome.deployment_fault()
+        {
+            return Some(Self::WorkerDeployment {
+                executable: executable.to_owned(),
+                fault,
+                message,
+            });
+        }
         match error.code {
             RuntimeErrorCode::LashlangCellReplayDivergence => {
                 Some(Self::ReplayDivergence { message })
@@ -572,6 +592,7 @@ impl ParkReason {
     #[must_use]
     pub fn code(&self) -> ParkReasonCode {
         match self {
+            Self::WorkerDeployment { .. } => ParkReasonCode::WorkerDeployment,
             Self::ReplayDivergence { .. } => ParkReasonCode::ReplayDivergence,
             Self::RetiredGeneration { .. } => ParkReasonCode::RetiredGeneration,
             Self::BindingDrift { .. } => ParkReasonCode::BindingDrift,
@@ -597,7 +618,8 @@ impl ParkReason {
     #[must_use]
     pub fn message(&self) -> &str {
         match self {
-            Self::ReplayDivergence { message }
+            Self::WorkerDeployment { message, .. }
+            | Self::ReplayDivergence { message }
             | Self::RetiredGeneration { message, .. }
             | Self::BindingDrift { message }
             | Self::EffectReplayDivergence { message, .. }

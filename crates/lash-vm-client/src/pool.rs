@@ -1025,7 +1025,10 @@ pub mod runtime_ops {
                                 );
                             }
                             state.workers -= 1;
-                            self.0.failed(&mut state);
+                            if !matches!(&error, PoolError::Infrastructure(outcome) if outcome.deployment_fault().is_some())
+                            {
+                                self.0.failed(&mut state);
+                            }
                             self.0.available.notify_all();
                             return Err(if state.failed {
                                 PoolError::RestartStorm

@@ -338,9 +338,26 @@ pub enum WorkerRefusal {
     Run(RunRefusal),
 }
 
+/// Why this deployment cannot launch its configured worker executable.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerDeploymentFault {
+    #[error("the configured executable was not found")]
+    NotFound,
+    #[error("the configured file cannot be executed")]
+    NotExecutable,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InfrastructureOutcome {
+    #[error("the worker executable {executable:?} is unavailable: {fault}")]
+    WorkerDeployment {
+        executable: std::path::PathBuf,
+        fault: WorkerDeploymentFault,
+    },
     #[error("the worker crashed ({evidence:?})")]
     WorkerCrashed { evidence: SupervisorEvidence },
     #[error("the worker sent nothing for {silent_ms} ms")]
@@ -361,10 +378,18 @@ impl InfrastructureOutcome {
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::WorkerLimitExceeded { limit } => limit.is_host_verdict(),
-            Self::RunRefused { .. } => false,
+            Self::RunRefused { .. } | Self::WorkerDeployment { .. } => false,
             Self::WorkerCrashed { .. }
             | Self::WorkerUnresponsive { .. }
             | Self::ProtocolViolation { .. } => true,
+        }
+    }
+
+    /// The deployment fault, whose repair lets an operator redrive retained work.
+    pub fn deployment_fault(&self) -> Option<(&std::path::Path, WorkerDeploymentFault)> {
+        match self {
+            Self::WorkerDeployment { executable, fault } => Some((executable, *fault)),
+            _ => None,
         }
     }
 
@@ -428,7 +453,8 @@ impl WorkerRefusal {
             InfrastructureOutcome::RunRefused { refusal } => Some(crate::WorkerMessage::Refused {
                 refusal: Self::Run(refusal),
             }),
-            InfrastructureOutcome::WorkerCrashed { .. }
+            InfrastructureOutcome::WorkerDeployment { .. }
+            | InfrastructureOutcome::WorkerCrashed { .. }
             | InfrastructureOutcome::WorkerUnresponsive { .. } => None,
         }
     }

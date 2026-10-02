@@ -207,7 +207,8 @@ transport or pool:
   process terminal retains it in its structured failure data (FIG-4475,
   FIG-4476).
 - **Infrastructure outcomes.** `WorkerCrashed`, `WorkerUnresponsive`,
-  `ProtocolViolation`, `RunRefused` and `WorkerLimitExceeded` are kept
+  `ProtocolViolation`, `RunRefused`, `WorkerLimitExceeded` and the parent-side
+  `WorkerDeployment` are kept
   apart from guest errors. EOF or exit is supervisor evidence, never worker
   testimony; a fully received `Complete` wins over a later EOF; a partial
   frame is refused and the last committed checkpoint kept.
@@ -478,6 +479,16 @@ outcome's retryability classification. The cell records no Host failure for
 it, and its retry runs the same cell on a replacement worker (FIG-4459). A
 `RunRefused` is not retryable: the cell records its Host failure, since a
 retry would meet the same refusal (FIG-4645).
+
+A missing or unexecutable configured worker is a typed `WorkerDeployment`
+fault carrying the executable path. The shared spawn seam classifies ENOENT,
+EACCES and ENOEXEC; synchronous and async pool callers retain that cause.
+It is non-transient and records no guest result. The turn writes a durable
+`WorkerDeployment` park on its first refusal, and the standard park path
+pauses its engine invocation after eight attempts with its journal retained.
+No Lash transient retry budget is spent. Supplying an executable at that path
+lets an operator redrive the same root to completion (FIG-4776).
+
 
 An owned child also installs a kernel CPU ceiling before guest work, from its
 current process CPU and the configured execution CPU budget. It remains

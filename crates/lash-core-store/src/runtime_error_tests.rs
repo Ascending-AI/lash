@@ -38,6 +38,7 @@ first_party_codes! {
         Self::DefinitionRefused,
         Self::WorkerCheckoutTimedOut,
         Self::VmWorkerFailed,
+        Self::VmWorkerUnavailable,
         Self::EffectPanicked,
         Self::MissingExecutionScopeId,
         Self::ExecutionScopeTurnIdMismatch,
@@ -573,11 +574,12 @@ fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
             RuntimeErrorCode::RetiredGeneration,
             RuntimeErrorCode::LashlangCellBindingDrift,
             RuntimeErrorCode::EffectReplayDivergence,
+            RuntimeErrorCode::VmWorkerUnavailable,
         ]
         .iter()
         .map(RuntimeErrorCode::as_str)
         .collect::<std::collections::BTreeSet<_>>(),
-        "exactly the replay refusals park"
+        "replay and worker deployment refusals park"
     );
     // A foreign code carries the class its minting host chose on the error.
     for (cause, terminal) in [
@@ -707,8 +709,9 @@ fn replay_refusals_park_the_turn() {
                     | RuntimeErrorCode::RetiredGeneration
                     | RuntimeErrorCode::LashlangCellBindingDrift
                     | RuntimeErrorCode::EffectReplayDivergence
+                    | RuntimeErrorCode::VmWorkerUnavailable
             ),
-            "{code}: only the replay refusals park"
+            "{code}: only deployment and replay refusals park"
         );
     }
 }

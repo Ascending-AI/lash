@@ -21,7 +21,7 @@ pub use lash_vm_protocol::{
     HeaderRefusal, InfrastructureOutcome, OpaqueStateRefusal, OwnerEpoch, PayloadKind, PoolFault,
     ProtocolBounds, ProtocolBreach, ProtocolVersionRefusal, RunInput, RunRefusal, SequenceFault,
     SupervisorEvidence, TransportSequence, VmContractComponent, VmLimits, VmOwner, VmStateKind,
-    WorkerLimit,
+    WorkerDeploymentFault, WorkerLimit,
 };
 pub use measurements::{ExecutionClass, ExecutionReceipt, PoolCounters, PoolMeasurements};
 /// Runtime-only checkout on [`WorkerPool`]; the lash facade does not export it.

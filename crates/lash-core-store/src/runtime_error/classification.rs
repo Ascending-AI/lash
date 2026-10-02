@@ -83,6 +83,8 @@ impl RuntimeErrorCode {
             // a worker becomes available without changing the operation.
             Self::WorkerCheckoutTimedOut => Retryable,
             Self::VmWorkerFailed => Retryable,
+            // A deployment repair serves the retained work; retries cannot repair it.
+            Self::VmWorkerUnavailable => Parked,
             // a contained panic of the effect body; the same body panics the same way.
             Self::EffectPanicked => Terminal,
             // the effect names no execution scope; wiring, not the attempt.

@@ -1072,7 +1072,16 @@ async fn execute_code_in_worker_scope(
                     None,
                 );
             }
-            if error.is_retryable() {
+            let deployment = match &error {
+                lash_vm_broker::BrokerFailure::WorkerLost { outcome, .. }
+                | lash_vm_broker::BrokerFailure::Unavailable {
+                    refusal: lash_vm_broker::CheckoutRefusal::Infrastructure(outcome),
+                } if outcome.deployment_fault().is_some() => Some(outcome.clone()),
+                _ => None,
+            };
+            if let Some(outcome) = deployment {
+                fail_attempt_on_host_verdict(&ctx, &outcome.into());
+            } else if error.is_retryable() {
                 ctx.record_nested_effect_error(
                     lash_core::RuntimeEffectControllerError::retryable_response_derivation(
                         error.to_string(),

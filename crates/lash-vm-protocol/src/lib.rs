@@ -43,8 +43,8 @@ pub use message::{
 };
 pub use outcome::{
     BootstrapFault, Detail, Exchange, InfrastructureOutcome, PayloadKind, PoolFault,
-    ProtocolBreach, RunInput, RunRefusal, SequenceFault, SupervisorEvidence, WorkerFrameKind,
-    WorkerLimit, WorkerRefusal,
+    ProtocolBreach, RunInput, RunRefusal, SequenceFault, SupervisorEvidence, WorkerDeploymentFault,
+    WorkerFrameKind, WorkerLimit, WorkerRefusal,
 };
 pub use state::{
     OpaqueStateRefusal, OpaqueVmState, StateDigest, StateExpectation, VmOwner, VmStateKind,

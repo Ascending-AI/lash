@@ -50771,6 +50771,7 @@
         "blake3",
         "lash-internal-sansio",
         "rmp-serde",
+        "schemars",
         "serde",
         "serde_bytes",
         "serde_json",

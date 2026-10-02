@@ -2924,6 +2924,7 @@ dependencies = [
  "blake3",
  "lash-internal-sansio",
  "rmp-serde",
+ "schemars 1.2.2",
  "serde",
  "serde_bytes",
  "serde_json",

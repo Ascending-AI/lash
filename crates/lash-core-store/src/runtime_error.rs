@@ -47,6 +47,8 @@ pub enum RuntimeErrorCode {
     WorkerCheckoutTimedOut,
     /// A worker fault whose typed cause distinguishes a retry from a run refusal.
     VmWorkerFailed,
+    /// This deployment cannot launch its configured worker. Repair and redrive.
+    VmWorkerUnavailable,
     EffectPanicked,
     MissingExecutionScopeId,
     ExecutionScopeTurnIdMismatch,
@@ -728,6 +730,7 @@ impl RuntimeErrorCode {
             Self::DefinitionRefused => "definition_refused",
             Self::WorkerCheckoutTimedOut => "worker_checkout_timed_out",
             Self::VmWorkerFailed => "vm_worker_failed",
+            Self::VmWorkerUnavailable => "vm_worker_unavailable",
             Self::EffectPanicked => "effect_panicked",
             Self::MissingExecutionScopeId => "missing_execution_scope_id",
             Self::ExecutionScopeTurnIdMismatch => "execution_scope_turn_id_mismatch",
@@ -1023,6 +1026,7 @@ impl RuntimeErrorCode {
             "definition_refused" => Self::DefinitionRefused,
             "worker_checkout_timed_out" => Self::WorkerCheckoutTimedOut,
             "vm_worker_failed" => Self::VmWorkerFailed,
+            "vm_worker_unavailable" => Self::VmWorkerUnavailable,
             "effect_panicked" => Self::EffectPanicked,
             "missing_execution_scope_id" => Self::MissingExecutionScopeId,
             "execution_scope_turn_id_mismatch" => Self::ExecutionScopeTurnIdMismatch,

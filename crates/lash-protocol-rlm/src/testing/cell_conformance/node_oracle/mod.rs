@@ -397,16 +397,19 @@ fn run_session(mode: HarnessMode, names: &[String], sources: &[String]) -> Vec<L
 #[test]
 fn a_worker_launch_failure_preserves_the_original_cell_failure() {
     let scratch = tempfile::tempdir().expect("a scratch worker path");
+    let executable = scratch.path().join("missing-worker");
     let mut session = Session::open_with_workers(
         HarnessMode::Resident,
         &BTreeMap::new(),
-        lash_vm_client::service::Service::subprocess(scratch.path().join("missing-worker")),
+        lash_vm_client::service::Service::subprocess(&executable),
     );
     let observation = observe_cell(&mut session, "console.log(42);");
     let failure = observation.failure.as_ref().expect("the launch failed");
     assert_eq!(failure.kind, lash_core::CellFailureKind::Host);
     assert!(
-        failure.message.contains("No such file or directory"),
+        failure
+            .message
+            .contains(executable.to_string_lossy().as_ref()),
         "{failure:?}"
     );
     let json = serde_json::to_value(&observation).expect("the observation serializes");

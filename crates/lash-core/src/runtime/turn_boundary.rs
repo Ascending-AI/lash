@@ -1,7 +1,5 @@
 use super::turn_graph_editor::ReadProjectionDiagnostic;
-use super::{
-    RuntimeError, RuntimeErrorCode, RuntimeSessionState, TurnCommitDraft, TurnGraphAppendDraft,
-};
+use super::{RuntimeError, RuntimeSessionState, TurnCommitDraft, TurnGraphAppendDraft};
 use crate::TurnId;
 use crate::facade_support::AgentFrameReasonFacadeOps as _;
 use crate::facade_support::SessionGraphFacadeOps;
@@ -32,8 +30,20 @@ pub use recorded_assembly::classify_output_state;
 type FinalCommitResult = Result<crate::TurnCancelInputOutcome, StoreError>;
 
 fn execution_state_capture_error(err: crate::SessionError) -> StoreError {
-    StoreError::ExecutionStateCaptureFailed {
-        message: err.to_string(),
+    match err {
+        crate::SessionError::Plugin(crate::PluginError::Runtime(error)) => {
+            StoreError::TurnOutcomeMaterializationRefused {
+                error: Box::new(error),
+            }
+        }
+        crate::SessionError::Plugin(crate::PluginError::RuntimeEffectController(error)) => {
+            StoreError::TurnOutcomeMaterializationRefused {
+                error: Box::new(error.into_runtime_error()),
+            }
+        }
+        err => StoreError::ExecutionStateCaptureFailed {
+            message: err.to_string(),
+        },
     }
 }
 
@@ -300,10 +310,7 @@ impl TurnBoundary {
         probe_execution_state_capture(session)
             .await
             .map_err(|err| {
-                RuntimeError::new(
-                    RuntimeErrorCode::ExecutionStateCaptureFailed,
-                    format!("failed to snapshot dirty execution state: {err}"),
-                )
+                super::runtime_error_from_store_commit(execution_state_capture_error(err))
             })?;
         let plugins = Arc::clone(session.plugins());
         self.progress_boundary_with_snapshot(ProgressBoundarySnapshot {

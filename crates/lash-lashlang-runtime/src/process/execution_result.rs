@@ -124,7 +124,8 @@ pub(super) fn process_worker_failure(
             ))
         }
         InfrastructureOutcome::RunRefused { refusal } => Some(refused(refusal)),
-        InfrastructureOutcome::WorkerLimitExceeded { .. }
+        InfrastructureOutcome::WorkerDeployment { .. }
+        | InfrastructureOutcome::WorkerLimitExceeded { .. }
         | InfrastructureOutcome::WorkerCrashed { .. }
         | InfrastructureOutcome::WorkerUnresponsive { .. }
         | InfrastructureOutcome::ProtocolViolation { .. } => None,

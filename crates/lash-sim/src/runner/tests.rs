@@ -880,40 +880,114 @@ async fn fixed_script_timeout_proofs_preserve_timeout_envelopes() {
     }
 }
 
-/// A host whose VM worker executable is missing cannot capture a turn's
-/// execution state: the turn's handler fails every attempt and the engine
-/// pauses it. The harness reports the pause and its cause; it does not wait
-/// for a turn nothing will settle (FIG-4753).
+/// A deployment refusal retains the root on its first attempt, then redrives
+/// the same accepted work when the configured worker becomes executable.
 #[tokio::test]
-async fn rlm_turn_on_a_host_without_a_vm_worker_reports_the_paused_turn() {
+async fn a_missing_vm_worker_parks_without_transient_retries_and_redrives_after_repair() {
     let missing = tempfile::tempdir().expect("tempdir");
-    let workers =
-        lash_vm_client::service::Service::subprocess(missing.path().join("lash-vm-worker"));
-    let events = Arc::new(RuntimeProofRecordingEvents::default());
+    let path = missing.path().join("lash-vm-worker");
+    let workers = lash_vm_client::service::Service::subprocess(&path);
     let engine = crate::backend::SimEngine::new(RUNTIME_PROOF_SEED)
         .await
         .expect("engine");
-    let turn = Box::pin(run_final_value_turn(&engine, events, Some(workers)));
-    let ended = tokio::time::timeout(std::time::Duration::from_secs(60), turn)
+    let (core, session) = final_value_session(&engine, Some(workers))
         .await
-        .unwrap_or_else(|_| {
-            panic!(
-                "the turn did not end within 60s on a host without a VM worker; invocations: {:#?}",
-                engine.restate().server().invocations()
-            )
-        });
-
-    let Err(FixedScriptRunnerError::Runtime(message)) = ended else {
-        panic!("a host without a VM worker ran the turn: {ended:?}");
-    };
-    assert!(
-        message.contains("LashTurn/") && message.contains("paused after 8 attempt(s)"),
-        "{message}"
+        .expect("session");
+    let handle = session
+        .send(lash::TurnInput::text("produce a semantic final value"))
+        .require_finish()
+        .expect("finish contract")
+        .id("sim-final-value-turn")
+        .await
+        .expect("accept input");
+    let paused = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        loop {
+            if let Some(paused) = engine.restate().paused_session_work(&session.session_id()) {
+                break paused;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the standard park path pauses the root");
+    assert_eq!(
+        paused.attempts,
+        lash_restate::TURN_HANDLER_MAX_ATTEMPTS as u32,
+        "{paused:?}"
     );
-    assert!(
-        message.contains("execution_state_capture_failed")
-            && message.contains("No such file or directory"),
-        "{message}"
+    let journal = engine
+        .restate()
+        .server()
+        .journal(&paused.id)
+        .expect("retained journal");
+    assert!(!journal.is_empty());
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(1), handle.outcome())
+        .await
+        .unwrap_or_else(|_| panic!("no durable park after the engine paused: {paused:?}"))
+        .expect("outcome");
+    let lash::TurnStatus::Parked(park) = outcome.status() else {
+        panic!("missing worker did not park: {outcome:?}");
+    };
+    let reason = serde_json::to_value(&park.reason).expect("typed reason");
+    assert_eq!(reason["type"], "worker_deployment", "{reason}");
+    assert_eq!(reason["executable"], path.to_string_lossy().as_ref());
+    assert_eq!(reason["fault"], "not_found");
+    let invocations = engine.restate().server().invocations();
+    let roots: Vec<_> = invocations
+        .iter()
+        .filter(|view| view.target.starts_with("LashTurn") && view.target.ends_with("/run"))
+        .collect();
+    assert_eq!(roots.len(), 1, "{roots:?}");
+    assert_eq!(
+        roots[0].attempts,
+        lash_restate::TURN_HANDLER_MAX_ATTEMPTS as u32,
+        "the standard park path keeps the journal: {roots:?}"
+    );
+    std::os::unix::fs::symlink(
+        std::fs::canonicalize(std::env::var_os("LASH_VM_WORKER").expect("worker helper"))
+            .expect("helper path"),
+        &path,
+    )
+    .expect("repair configured path");
+    core.parked_work()
+        .redrive(
+            &lash::ParkedWorkRef::Turn {
+                session_id: session.session_id(),
+                turn_id: "sim-final-value-turn".into(),
+            },
+            park.park_id,
+        )
+        .await
+        .expect("redrive the parked root");
+    let report = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        loop {
+            let outcome = session
+                .root("sim-final-value-turn")
+                .outcome()
+                .await
+                .expect("redriven outcome");
+            if let Some(output) = outcome.into_output() {
+                break output;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the repaired root completes");
+    assert!(report.final_value().is_some(), "{report:?}");
+    let resumed = engine
+        .restate()
+        .server()
+        .journal(&paused.id)
+        .expect("resumed journal");
+    assert_eq!(
+        journal.iter().map(|entry| entry.digest).collect::<Vec<_>>(),
+        resumed
+            .iter()
+            .take(journal.len())
+            .map(|entry| entry.digest)
+            .collect::<Vec<_>>(),
+        "redrive preserves the existing journal prefix"
     );
 }
 

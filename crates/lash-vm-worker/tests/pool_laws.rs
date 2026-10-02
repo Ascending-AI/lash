@@ -1838,3 +1838,65 @@ fn a_large_effect_answer_is_encoded_once_by_the_parent() {
     assert_eq!(answered, 1);
     worker.release().expect("reset");
 }
+
+#[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the law exercises kernel executable permissions on its isolated temporary worker fixture"
+)]
+async fn missing_and_unexecutable_workers_are_deployment_faults_on_both_pool_seams() {
+    use lash_vm_client::service::{Service, runtime_ops::ServiceRuntimeOps as _};
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let directory = tempfile::tempdir().expect("tempdir");
+    for (name, contents, fault) in [
+        ("missing", None, "not_found"),
+        ("unexecutable", Some(b"worker".as_slice()), "not_executable"),
+    ] {
+        let path = directory.path().join(name);
+        if let Some(contents) = contents {
+            std::fs::write(&path, contents).expect("worker file");
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+                .expect("non-executable permissions");
+        }
+        let service = Service::subprocess(&path);
+        let sync = service.pool().err().expect("sync deployment refusal");
+        let asynchronous = service
+            .pool_accounted()
+            .await
+            .err()
+            .expect("async deployment refusal");
+        assert_eq!(
+            sync, asynchronous,
+            "both seams classify the same spawn failure"
+        );
+        for error in [sync, asynchronous] {
+            assert!(
+                error.is_host_verdict(),
+                "a deployment fault records no guest result"
+            );
+            let error = error.into_runtime_error();
+            assert!(!error.is_retryable(), "{error:?}");
+            assert!(!error.is_terminal(), "{error:?}");
+            assert_eq!(
+                error.turn_failure_cause(),
+                lash_core_execution::TurnFailureCause::Parked
+            );
+            let encoded = serde_json::to_value(&error).expect("typed worker error");
+            assert_eq!(encoded["cause"]["kind"], "vm_worker");
+            assert_eq!(
+                encoded["cause"]["outcome"]["worker_deployment"]["executable"],
+                path.to_string_lossy().as_ref()
+            );
+            assert_eq!(
+                encoded["cause"]["outcome"]["worker_deployment"]["fault"],
+                fault
+            );
+            let decoded: lash_core_execution::RuntimeError =
+                serde_json::from_value(encoded).expect("worker error round trip");
+            assert_eq!(decoded.cause, error.cause);
+            assert_eq!(decoded.code, error.code);
+            assert_eq!(decoded.turn_failure_cause(), error.turn_failure_cause());
+        }
+    }
+}
