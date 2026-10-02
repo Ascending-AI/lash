@@ -194,6 +194,7 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::Deployme
         )]
         .into(),
         origin: None,
+        reply_marker: None,
     }]);
     let partial_text = "provider-visible prefix before the stream failed";
     let failure_evidence = crate::TurnFailureEvidence {

@@ -631,7 +631,7 @@ impl TurnBoundary {
         let admitted_frame = state.current_frame_node_id.clone();
         let frame_carries = execution_state_update.carries();
         execution_state_update.apply(state)?;
-        materialize_terminal_output(
+        materialize_turn_reply(
             state,
             outcome,
             clock.as_ref(),

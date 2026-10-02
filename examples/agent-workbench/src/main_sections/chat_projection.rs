@@ -232,19 +232,7 @@ pub(crate) fn committed_chat_text(message: &lash::messages::Message) -> String {
 }
 
 pub(crate) fn is_durable_internal_rlm_message(message: &lash::messages::Message) -> bool {
-    matches!(
-        message.origin.as_ref(),
-        Some(lash::messages::MessageOrigin::Plugin {
-            plugin_id,
-            transient: false,
-        }) if plugin_id == lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID
-    ) || matches!(
-        message.origin.as_ref(),
-        Some(lash::messages::MessageOrigin::TurnOutput {
-            source: lash::messages::TurnOutputSource::Plugin { plugin_id },
-            ..
-        }) if plugin_id == lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID
-    )
+    lash_protocol_rlm::is_rlm_protocol_output(message.origin.as_ref())
 }
 
 /// The protocol's system copies — finish reminders, retry copy, cell diagnostics — never can

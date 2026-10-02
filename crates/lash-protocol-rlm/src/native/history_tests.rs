@@ -102,6 +102,7 @@ fn fig1123_native_history_marks_only_real_turn_inputs_as_segment_boundaries() {
                 turn_id: TurnId::from("turn"),
                 input_id: None,
             }),
+            reply_marker: None,
         }),
         SessionHistoryRecord::Conversation(lash_core::session_model::ConversationRecord {
             id: "synthetic".to_string(),
@@ -116,6 +117,7 @@ fn fig1123_native_history_marks_only_real_turn_inputs_as_segment_boundaries() {
                 plugin_id: "plugin".to_string(),
                 transient: false,
             }),
+            reply_marker: None,
         }),
     ];
 
@@ -168,6 +170,7 @@ fn terminal_suppression_is_atomic_only_after_transcript_commit() {
             turn_id: TurnId::from("turn"),
             source: lash_core::TurnOutputSource::Runtime,
         }),
+        reply_marker: None,
     };
     events.push(SessionHistoryRecord::Conversation(
         lash_core::session_model::ConversationRecord::from_message(message),
@@ -454,6 +457,7 @@ fn reloaded_null_finish_remains_terminal_in_reconstructed_history() {
                 turn_id: TurnId::from("turn"),
                 source: lash_core::TurnOutputSource::Runtime,
             }),
+            reply_marker: None,
         }),
     ));
     assert!(

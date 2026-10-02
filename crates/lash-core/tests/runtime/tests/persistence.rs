@@ -511,6 +511,24 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output() {
             value,
         } if name == "terminal_tool_0" && *value == json!("first")
     ));
+    // FIG-1493 §5.5: the runtime commits a value-finished turn's reply,
+    // rendering the value, and marks it as the turn's one reply.
+    let read_model = runtime.state().read_model();
+    let replies = read_model
+        .messages
+        .iter()
+        .filter(|message| message.reply_marker.is_some())
+        .collect::<Vec<_>>();
+    assert_eq!(replies.len(), 1, "one reply: {:?}", read_model.messages);
+    let reply = replies[0];
+    let marker = reply.reply_marker.as_ref().expect("marked");
+    assert_eq!(marker.turn_id().as_str(), "terminal-tool-finish-turn");
+    let part = reply
+        .parts
+        .iter()
+        .find(|part| part.id() == marker.part_id())
+        .expect("the marker names a part of its message");
+    assert_eq!(part.content(), "first");
 }
 
 #[tokio::test(flavor = "multi_thread")]

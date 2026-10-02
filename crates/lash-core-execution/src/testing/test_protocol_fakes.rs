@@ -391,6 +391,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                     role: MessageRole::Assistant,
                     parts: lash_sansio::shared_parts(parts_out),
                     origin: None,
+                    reply_marker: None,
                 })),
             ]));
             actions.push(DriverAction::Start(PendingWork::Checkpoint {
@@ -442,6 +443,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                     role: MessageRole::Assistant,
                     parts: lash_sansio::shared_parts(assistant_parts),
                     origin: None,
+                    reply_marker: None,
                 })),
             ]));
         }
@@ -518,6 +520,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                     role: MessageRole::User,
                     parts: lash_sansio::shared_parts(result_parts),
                     origin: None,
+                    reply_marker: None,
                 })),
             ]));
         }

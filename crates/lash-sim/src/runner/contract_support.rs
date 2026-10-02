@@ -596,6 +596,7 @@ pub(super) fn contract_user_message(content: &str) -> lash_core::Message {
         )]
         .into(),
         origin: None,
+        reply_marker: None,
     }
 }
 

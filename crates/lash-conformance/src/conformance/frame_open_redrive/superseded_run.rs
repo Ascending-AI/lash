@@ -184,6 +184,7 @@ impl LawSession {
             )]
             .into(),
             origin: None,
+            reply_marker: None,
         }]);
         let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
         commit.shift_fence = Some(Box::new(fence));

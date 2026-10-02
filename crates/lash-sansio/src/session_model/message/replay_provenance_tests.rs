@@ -51,6 +51,7 @@ fn replay_request_from_reopened_message(
             ),
         ]),
         origin: None,
+        reply_marker: None,
     }];
     let persisted = serde_json::to_vec(&history).expect("session history serializes");
     let reopened: Vec<Message> =

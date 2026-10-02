@@ -27,6 +27,7 @@ fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
         role,
         parts: vec![Part::text(format!("{id}.p0"), content.to_string(), None)].into(),
         origin: None,
+        reply_marker: None,
     }
 }
 

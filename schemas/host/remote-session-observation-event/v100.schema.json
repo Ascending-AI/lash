@@ -4399,6 +4399,19 @@
             "source"
           ],
           "type": "object"
+        },
+        {
+          "description": "An origin this protocol version does not model: the runtime's\n`MessageOrigin` is non-exhaustive, and a peer reading a newer\npeer's origin lands here instead of failing the whole message.",
+          "properties": {
+            "kind": {
+              "const": "unrecognized",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
         }
       ]
     },

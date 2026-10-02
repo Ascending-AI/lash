@@ -120,6 +120,7 @@ impl TurnCause {
                 None,
             )]),
             origin: Some(self.origin.clone()),
+            reply_marker: None,
         }
     }
 }

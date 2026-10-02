@@ -21,6 +21,7 @@ fn user_event(id: &str, text: &str) -> SessionHistoryRecord {
         role: MessageRole::User,
         parts: vec![Part::text(format!("{id}.p0"), text.to_string(), None)].into(),
         origin: None,
+        reply_marker: None,
     })
 }
 
@@ -82,6 +83,7 @@ fn assistant_prose_event(id: &str, text: &str) -> SessionHistoryRecord {
         role: MessageRole::Assistant,
         parts: vec![Part::text(format!("{id}.p0"), text.to_string(), None)].into(),
         origin: None,
+        reply_marker: None,
     })
 }
 
@@ -612,6 +614,7 @@ fn plugin_origin_is_not_rendered_in_history() {
             plugin_id: "test".to_string(),
             transient: false,
         }),
+        reply_marker: None,
     });
 
     let history = projector.format_history(&[event]);
@@ -636,6 +639,7 @@ fn process_wake_history_renders_as_chronological_event_context() {
                 wake_id: Some("wake:abc".to_string()),
                 caused_by: None,
             }),
+            reply_marker: None,
         });
     let events = [event];
 

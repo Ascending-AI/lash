@@ -23,6 +23,7 @@ pub fn plugin_message_to_message(plugin_message: &PluginMessage, fallback_id: &s
                 transient: false,
             })
         }),
+        reply_marker: None,
     }
 }
 

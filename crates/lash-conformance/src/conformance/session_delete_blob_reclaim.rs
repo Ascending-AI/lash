@@ -816,6 +816,7 @@ async fn attachment_prefix_retention(backend_name: &str, handles: SessionDeleteB
                 },
             }),
         )]),
+        reply_marker: None,
     });
     let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
     commit.committed_attachment_ids = vec![reference.id.clone()];

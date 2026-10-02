@@ -838,6 +838,7 @@ mod tests {
             role: MessageRole::User,
             parts: shared_parts(vec![Part::text(format!("{id}.p0"), text.to_string(), None)]),
             origin: None,
+            reply_marker: None,
         }
     }
 

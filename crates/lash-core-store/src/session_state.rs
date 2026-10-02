@@ -863,6 +863,29 @@ impl RuntimeSessionState {
         self.refresh_current_frame_projection();
     }
 
+    /// Marks the pending conversation node carrying `message_id` as its
+    /// turn's reply. A durable node is immutable history and is never
+    /// rewritten, so the marker lands only on a node this commit still
+    /// appends; returns whether it landed.
+    pub fn mark_pending_turn_reply(&mut self, message_id: &str, marker: crate::TurnReply) -> bool {
+        let Some(index) = self.session_graph.nodes.iter().position(|node| {
+            node.message_id() == Some(message_id)
+                && !self.persisted_node_ids.contains(&node.node_id)
+        }) else {
+            return false;
+        };
+        let record = self.session_graph.data_mut().node_mut(index);
+        let crate::session_graph::SessionNodePayload::Event {
+            event: crate::SessionHistoryRecord::Conversation(message),
+        } = &mut record.payload
+        else {
+            return false;
+        };
+        message.reply_marker = Some(marker);
+        self.refresh_current_frame_projection();
+        true
+    }
+
     pub fn read_view(&self) -> crate::SessionReadView {
         crate::SessionReadView::from_persisted_state(self)
     }

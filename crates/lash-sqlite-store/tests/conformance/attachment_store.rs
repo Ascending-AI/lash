@@ -79,6 +79,7 @@ fn state_referencing(session_id: &SessionId, reference: &AttachmentRef) -> Runti
                 },
             }),
         )]),
+        reply_marker: None,
     });
     state
 }

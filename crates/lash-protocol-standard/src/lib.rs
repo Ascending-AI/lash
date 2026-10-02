@@ -981,6 +981,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                         role: MessageRole::Assistant,
                         parts: shared_parts(assistant_parts),
                         origin: None,
+                        reply_marker: None,
                     },
                 )]));
             }
@@ -1002,6 +1003,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                     role: MessageRole::Assistant,
                     parts: shared_parts(assistant_parts),
                     origin: None,
+                    reply_marker: None,
                 },
             )]));
         }
@@ -1114,6 +1116,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                     role: MessageRole::User,
                     parts: shared_parts(parts),
                     origin: None,
+                    reply_marker: None,
                 },
             )]));
         }
@@ -1161,6 +1164,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                     role: MessageRole::User,
                     parts: shared_parts(result_parts),
                     origin: None,
+                    reply_marker: None,
                 },
             )]));
         }

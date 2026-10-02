@@ -446,6 +446,7 @@ mod tests {
                 role: MessageRole::Assistant,
                 parts: Arc::new(durable_parts),
                 origin: None,
+                reply_marker: None,
             },
             Message {
                 id: "google-regression.user".to_string(),
@@ -456,6 +457,7 @@ mod tests {
                     None,
                 )]),
                 origin: None,
+                reply_marker: None,
             },
         ];
         let durable_json = serde_json::to_string(&history).expect("history serializes");

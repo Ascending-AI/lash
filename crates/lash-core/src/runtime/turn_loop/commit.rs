@@ -979,6 +979,7 @@ impl LashRuntime {
                         turn_id: trace_turn_id.clone(),
                         input_id: None,
                     }),
+                    reply_marker: None,
                 }
             })
             .into_iter()

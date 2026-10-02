@@ -43,6 +43,7 @@ fn prose_message(
         role: MessageRole::Assistant,
         parts: shared_parts(parts),
         origin,
+        reply_marker: None,
     }
 }
 
@@ -63,6 +64,7 @@ pub(super) fn finish_required_reminder_message(
             plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,
         }),
+        reply_marker: None,
     }
 }
 
@@ -79,6 +81,7 @@ pub(super) fn finish_schema_mismatch_message(dialect: &SessionDialect, id: Strin
             plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,
         }),
+        reply_marker: None,
     }
 }
 
@@ -106,5 +109,6 @@ pub(super) fn no_progress_stop_message(id: String, attempts: usize) -> Message {
             plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,
         }),
+        reply_marker: None,
     }
 }

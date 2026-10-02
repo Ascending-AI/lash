@@ -281,6 +281,7 @@ impl LashRuntime {
                     turn_id: trace_turn_id.clone(),
                     input_id: turn_input_id.clone(),
                 }),
+                reply_marker: None,
             });
         }
         let mut initial_turn_input_applications = Vec::new();

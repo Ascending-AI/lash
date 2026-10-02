@@ -996,6 +996,7 @@ fn projection_text(id: &str) -> crate::Message {
             None,
         )]),
         origin: None,
+        reply_marker: None,
     }
 }
 

@@ -35,6 +35,7 @@ fn foreign_replay_message() -> Message {
             }),
         )]),
         origin: None,
+        reply_marker: None,
     }
 }
 

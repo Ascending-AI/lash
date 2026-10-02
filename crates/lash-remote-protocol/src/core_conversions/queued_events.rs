@@ -78,6 +78,7 @@ impl From<lash_core::MessageOrigin> for RemoteMessageOrigin {
                 turn_id,
                 source: source.into(),
             },
+            _ => Self::Unrecognized,
         }
     }
 }

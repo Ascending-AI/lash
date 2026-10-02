@@ -30,6 +30,7 @@ fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
             None,
         )]),
         origin: None,
+        reply_marker: None,
     }
 }
 #[test]
@@ -886,6 +887,7 @@ async fn a_skipped_boundary_keeps_queued_appends_for_the_next_one() {
             None,
         )]),
         origin: None,
+        reply_marker: None,
     };
     let (recording, store) = recording_session().await;
     let (mut pipeline, _lease) =
@@ -1299,6 +1301,7 @@ async fn gates_advance_after_an_attachment_bearing_tool_result() {
             None,
         )]),
         origin: None,
+        reply_marker: None,
     };
     let result = |message_id: &str, call_id: &str, content| Message {
         id: message_id.to_string(),
@@ -1310,6 +1313,7 @@ async fn gates_advance_after_an_attachment_bearing_tool_result() {
             "shot".to_string(),
         )]),
         origin: None,
+        reply_marker: None,
     };
     let image = crate::AttachmentSource::inline(
         crate::MediaType::parse("image/png").expect("png"),

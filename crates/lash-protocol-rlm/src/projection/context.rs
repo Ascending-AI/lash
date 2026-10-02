@@ -140,7 +140,7 @@ fn completed_turn_internal_indices(
                     terminal_step = None;
                 }
                 MessageRole::Assistant => {
-                    if is_internal_rlm_assistant(message) {
+                    if is_rlm_protocol_output(message.origin.as_ref()) {
                         assistant_content_indices.push(entry.index);
                     } else if history_item_from_message(message).is_some() {
                         if let Some(step_index) = terminal_step.take() {
@@ -171,20 +171,22 @@ fn completed_turn_internal_indices(
     suppressed
 }
 
-fn is_internal_rlm_assistant(message: &Message) -> bool {
-    matches!(
-        message.origin.as_ref(),
+/// Whether a message is the RLM protocol's own durable output, judged by its
+/// typed origin alone: the one classifier every RLM projection, prompt-side
+/// and render-side, asks. A host or another plugin writing on the same
+/// channel carries its own provenance and is never classified as internal.
+pub fn is_rlm_protocol_output(origin: Option<&lash_core::MessageOrigin>) -> bool {
+    match origin {
         Some(lash_core::MessageOrigin::Plugin {
             plugin_id,
             transient: false,
-        }) if plugin_id == crate::plugin::RLM_PROTOCOL_PLUGIN_ID
-    ) || matches!(
-        message.origin.as_ref(),
-        Some(lash_core::MessageOrigin::TurnOutput {
+        })
+        | Some(lash_core::MessageOrigin::TurnOutput {
             source: lash_core::TurnOutputSource::Plugin { plugin_id },
             ..
-        }) if plugin_id == crate::plugin::RLM_PROTOCOL_PLUGIN_ID
-    )
+        }) => plugin_id == crate::plugin::RLM_PROTOCOL_PLUGIN_ID,
+        _ => false,
+    }
 }
 
 pub fn rlm_history_projection(
@@ -473,6 +475,7 @@ mod tests {
                 None,
             )]),
             origin: None,
+            reply_marker: None,
         }
     }
 

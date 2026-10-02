@@ -145,12 +145,14 @@ fn committed_tool_results_agree_with_the_resume_safety_check() {
             role: MessageRole::Assistant,
             parts: shared_parts(calls),
             origin: None,
+            reply_marker: None,
         },
         Message {
             id: "m_results".to_string(),
             role: MessageRole::User,
             parts: shared_parts(results),
             origin: None,
+            reply_marker: None,
         },
     ];
 

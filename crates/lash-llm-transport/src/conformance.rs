@@ -488,6 +488,7 @@ fn standard_next_request_messages(parts: &[LlmOutputPart]) -> Vec<LlmMessage> {
             role: MessageRole::Assistant,
             parts: shared_parts(history_parts),
             origin: None,
+            reply_marker: None,
         },
         Message {
             id: "conformance.user".to_string(),
@@ -498,6 +499,7 @@ fn standard_next_request_messages(parts: &[LlmOutputPart]) -> Vec<LlmMessage> {
                 None,
             )]),
             origin: None,
+            reply_marker: None,
         },
     ];
     let encoded = serde_json::to_string(&history).expect("conformance history must serialize");

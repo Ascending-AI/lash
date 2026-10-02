@@ -555,6 +555,7 @@ pub(super) fn checkpoint_message(id: String, role: MessageRole, content: String)
         role,
         parts: shared_parts(vec![Part::text(format!("{id}.p0"), content, None)]),
         origin: None,
+        reply_marker: None,
     }
 }
 

@@ -98,8 +98,8 @@ pub(crate) use lash_sansio::{
     AttachmentId, AttachmentMaterializationNotice, AttachmentRef, AttachmentTypeMetadata, BatchId,
     BlankIdentity, CausalRef, CheckpointKind, EffectAddress, ExecutionScope, FrameKey, InputId,
     Message, MessageOrigin, MessageRole, NodeId, Part, PartKind, PluginMessage, ProcessId,
-    SessionAppendNode, SessionId, TokenUsage, TurnId, TurnOutputSource, render_turn_causes_prompt,
-    shared_parts,
+    SessionAppendNode, SessionId, TokenUsage, TurnId, TurnOutputSource, TurnReply,
+    render_turn_causes_prompt, shared_parts,
 };
 
 pub(crate) type SessionHistoryRecord =

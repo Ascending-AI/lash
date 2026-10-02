@@ -157,7 +157,7 @@ pub use session::{
     ExecResponse, ExecutedCall, ExecutedCallOutcome, ExecutedCallRecord, Observation,
     OmittedToolCalls, TextProjectionMetadata,
 };
-pub use session_model::message::{MessageOrigin, TurnOutputSource, same_message};
+pub use session_model::message::{MessageOrigin, TurnOutputSource, TurnReply, same_message};
 pub use session_model::{
     AcceptedInjectedTurnInput, BaseRenderCache, BoundaryReason, ConversationRecord, ErrorEnvelope,
     FailureCode, HostNamespace, InvalidNamespace, MaxToolCalls, Message, MessageRole,

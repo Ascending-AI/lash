@@ -60,7 +60,7 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
         ("resume-turn-one", "resume question one"),
         ("resume-turn-two", "resume question two"),
     ] {
-        let output = first_session
+        first_session
             .send(lash::TurnInput::text(text))
             .id(turn_id)
             .require_finish()
@@ -68,27 +68,7 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
             .output()
             .await
             .expect("commit pre-restart turn");
-        crate::commit_assistant_transcript(
-            &first_session,
-            &TurnId::from(turn_id),
-            output
-                .final_value()
-                .and_then(serde_json::Value::as_str)
-                .expect("string terminal value")
-                .to_string(),
-            None,
-        )
-        .await
-        .expect("commit assistant transcript");
     }
-    crate::commit_assistant_transcript(
-        &first_session,
-        &TurnId::from("resume-turn-one"),
-        "resume answer one".to_string(),
-        None,
-    )
-    .await
-    .expect("replay first assistant transcript after a later turn");
     let committed = first_session.read_view();
     let committed_sequence: lash::messages::MessageSequence = committed.messages().to_vec().into();
     let committed_sequence: lash::messages::MessageSequence = serde_json::from_value(
@@ -98,7 +78,17 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
     assert_eq!(
         committed_sequence.len(),
         4,
-        "turn replay must not append a duplicate assistant message"
+        "each turn commits its one reply and nothing else assistant-side"
+    );
+    // The runtime commits each value-finished turn's reply itself, marked
+    // with its turn (FIG-1493 §5.5); no host writer is involved.
+    assert_eq!(
+        committed_sequence
+            .iter()
+            .filter_map(|message| message.reply_marker.as_ref())
+            .map(|reply| reply.turn_id().to_string())
+            .collect::<Vec<_>>(),
+        vec!["resume-turn-one", "resume-turn-two"]
     );
     assert_eq!(
         committed_sequence
@@ -281,7 +271,7 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
         .open()
         .await
         .expect("open resumed session");
-    let resumed_output = resumed_session
+    resumed_session
         .send(lash::TurnInput::text("resume question three"))
         .id("resume-turn-three")
         .require_finish()
@@ -289,18 +279,6 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
         .output()
         .await
         .expect("commit resumed turn");
-    crate::commit_assistant_transcript(
-        &resumed_session,
-        &TurnId::from("resume-turn-three"),
-        resumed_output
-            .final_value()
-            .and_then(serde_json::Value::as_str)
-            .expect("string resumed terminal value")
-            .to_string(),
-        None,
-    )
-    .await
-    .expect("commit resumed assistant transcript");
     resumed_session
         .close()
         .await
@@ -357,6 +335,7 @@ fn committed_chat_projection_keeps_provider_reasoning_hidden() {
             ),
         ]),
         origin: None,
+        reply_marker: None,
     };
 
     assert_eq!(committed_chat_text(&message), "visible answer");

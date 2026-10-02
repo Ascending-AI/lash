@@ -23,6 +23,7 @@ fn transcript(content: Vec<ModelToolReturnPart>) -> Vec<Message> {
                 None,
             )]),
             origin: None,
+            reply_marker: None,
         },
         Message {
             id: "m2".into(),
@@ -34,6 +35,7 @@ fn transcript(content: Vec<ModelToolReturnPart>) -> Vec<Message> {
                 "shot".into(),
             )]),
             origin: None,
+            reply_marker: None,
         },
     ]
 }

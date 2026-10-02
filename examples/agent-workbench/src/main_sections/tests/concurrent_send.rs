@@ -296,10 +296,10 @@ async fn same_worker_successor_opens_after_abandoned_shift() {
 }
 
 /// FIG-4202: a host append is a session command the shift applies at a turn
-/// boundary, so two live writers' appends and a workbench reply commit made
-/// at the same moment never race a head CAS: each is queued, applied in
-/// order and settled, and none surfaces a conflict for its host to repair.
-/// The reply commit's stable message id makes it land exactly once.
+/// boundary, so two live writers' appends and a keyed append made at the
+/// same moment never race a head CAS: each is queued, applied in order and
+/// settled, and none surfaces a conflict for its host to repair. The keyed
+/// append's stable message id makes it land exactly once.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn concurrent_host_appends_settle_through_the_command_lane_exactly_once() {
     let provider = lash::testing::TestProvider::builder()
@@ -337,18 +337,25 @@ async fn concurrent_host_appends_settle_through_the_command_lane_exactly_once() 
     };
     let left_task = append(left, "fig4202-concurrent-left");
     let right_task = append(right, "fig4202-concurrent-right");
-    let turn_id = TurnId::from("fig4202-reply-commit");
-    let reply_id = crate::workbench_turn_assistant_message_id(&turn_id);
+    let reply_id = "fig4202-keyed-append".to_string();
     let reply_task = {
-        let turn_id = turn_id.clone();
+        let reply_id = reply_id.clone();
         tokio::spawn(async move {
-            crate::commit_assistant_transcript(
-                &reply_writer,
-                &turn_id,
-                "the settled assistant reply".to_string(),
-                None,
-            )
-            .await
+            reply_writer
+                .admin()
+                .state()
+                .append_session_nodes(lash::plugins::AppendSessionNodesRequest {
+                    operation_id: reply_id.clone(),
+                    nodes: vec![lash::plugins::SessionAppendNode::message(
+                        lash::plugins::PluginMessage::text(
+                            lash::messages::MessageRole::Assistant,
+                            "the keyed host append",
+                        )
+                        .with_id(reply_id),
+                    )],
+                    requires_ancestor_node_id: None,
+                })
+                .await
         })
     };
     let (left_result, right_result, reply_result) = tokio::join!(left_task, right_task, reply_task);
@@ -359,8 +366,8 @@ async fn concurrent_host_appends_settle_through_the_command_lane_exactly_once() 
         .expect("right append task")
         .expect("the right append settles applied");
     reply_result
-        .expect("reply commit task")
-        .expect("the reply commit settles applied");
+        .expect("keyed append task")
+        .expect("the keyed append settles applied");
 
     let fresh = crate::created_session(&state.core, session_id)
         .await
@@ -386,7 +393,7 @@ async fn concurrent_host_appends_settle_through_the_command_lane_exactly_once() 
             .filter(|message| message.id == reply_id)
             .count(),
         1,
-        "the reply commit lands exactly once"
+        "the keyed append lands exactly once"
     );
 }
 

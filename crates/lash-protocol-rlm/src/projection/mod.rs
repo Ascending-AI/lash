@@ -4,7 +4,8 @@ mod transport;
 
 pub use bindings::{RlmProjectedBindings, rlm_session_projection_extension};
 pub use context::{
-    RlmHistoryProjection, decode_rlm_protocol_event, rlm_history_projection, rlm_protocol_event,
+    RlmHistoryProjection, decode_rlm_protocol_event, is_rlm_protocol_output,
+    rlm_history_projection, rlm_protocol_event,
 };
 pub use transport::{RlmSeed, rlm_seed_initial_nodes};
 

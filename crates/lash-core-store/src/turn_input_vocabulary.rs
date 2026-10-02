@@ -1162,6 +1162,7 @@ async fn committed_message_from_pending_input(
             input_id: Some(pending.input_id.clone()),
         }),
         parts: crate::shared_parts(parts),
+        reply_marker: None,
     }))
 }
 pub fn ingress_message_id(input_id: &str) -> String {

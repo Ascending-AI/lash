@@ -47,6 +47,11 @@ pub enum RemoteMessageOrigin {
         turn_id: TurnId,
         source: RemoteTurnOutputSource,
     },
+    /// An origin this protocol version does not model: the runtime's
+    /// `MessageOrigin` is non-exhaustive, and a peer reading a newer
+    /// peer's origin lands here instead of failing the whole message.
+    #[serde(other)]
+    Unrecognized,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

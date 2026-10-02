@@ -23,6 +23,7 @@ fn probe_turn_input(turn_id: &TurnId, message_id: &str) -> lash::messages::Messa
             turn_id: turn_id.clone(),
             input_id: None,
         }),
+        reply_marker: None,
     }
 }
 
@@ -44,6 +45,7 @@ fn probe_turn_cause(message_id: &str) -> lash::messages::Message {
             wake_id: None,
             caused_by: None,
         }),
+        reply_marker: None,
     }
 }
 
@@ -63,6 +65,7 @@ fn probe_plugin_prose(message_id: &str, prose: &str) -> lash::messages::Message 
             plugin_id: lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,
         }),
+        reply_marker: None,
     }
 }
 
@@ -76,6 +79,7 @@ fn probe_runtime_assistant(message_id: &str, prose: &str) -> lash::messages::Mes
             None,
         )]),
         origin: None,
+        reply_marker: None,
     }
 }
 

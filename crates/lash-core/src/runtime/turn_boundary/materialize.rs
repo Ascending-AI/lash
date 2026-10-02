@@ -3,9 +3,10 @@ use crate::TurnId;
 use std::collections::BTreeSet;
 
 use crate::{
-    Message, MessageRole, OmittedToolCalls, Part, ToolCallRecord, TurnFinish, TurnOutcome,
-    shared_parts,
+    Message, MessageRole, OmittedToolCalls, Part, PartKind, ToolCallRecord, TurnFinish,
+    TurnOutcome, shared_parts,
 };
+use lash_sansio::core_support::TurnReplyCoreSupport;
 
 use super::RuntimeSessionState;
 
@@ -88,10 +89,23 @@ pub(super) fn committed_attachment_ids(
     attachment_ids.into_iter().collect()
 }
 
-/// Appends the runtime's terminal reply node unless the reply is already
-/// materialized: either the protocol appended it (identified through
-/// `protocol_output`) or this node already exists (identified by `message_id`).
-pub(super) fn materialize_terminal_output(
+/// The most characters a value reply renders. A turn's value is unbounded and
+/// already travels whole on the turn's outcome; the transcript's copy is for
+/// reading, so its spend against the commit budget is capped here, as policy.
+pub(super) const VALUE_REPLY_MAX_CHARS: usize = 16 * 1024;
+
+/// Commits the turn's one reply and marks it (FIG-1493 §5.1, §5.5).
+///
+/// Every finished turn has a reply, whatever finished it: prose the protocol
+/// already appended is marked where it stands, a turn that finished as an
+/// assistant message the protocol did not append gets the runtime's reply
+/// node, and a turn that finished with a final or tool value gets a runtime
+/// reply node rendering that value. A stopped turn has no reply.
+///
+/// The reply is keyed on the turn, never on the commit attempt: a turn whose
+/// reply is already in the transcript, marked or as the runtime's own node,
+/// mints nothing, so a redriven or re-executed turn commits one reply.
+pub(super) fn materialize_turn_reply(
     state: &mut RuntimeSessionState,
     outcome: &TurnOutcome,
     clock: &dyn crate::Clock,
@@ -99,31 +113,81 @@ pub(super) fn materialize_terminal_output(
     message_id: &str,
     protocol_output: &ProtocolTerminalOutput,
 ) {
-    let TurnOutcome::Finished(TurnFinish::AssistantMessage { text }) = outcome else {
+    let TurnOutcome::Finished(finish) = outcome else {
         return;
     };
-    if state
-        .read_model()
-        .messages
-        .iter()
-        .any(|message| message.id == message_id || protocol_output.names(&message.id))
-    {
+    let read_model = state.read_model();
+    if read_model.messages.iter().any(|message| {
+        message.id == message_id
+            || message
+                .reply_marker
+                .as_ref()
+                .is_some_and(|reply| reply.turn_id() == turn_id)
+    }) {
         return;
     }
-
+    let text = match finish {
+        TurnFinish::AssistantMessage { text } => {
+            let protocol_reply = read_model
+                .messages
+                .iter()
+                .rev()
+                .find(|message| protocol_output.names(&message.id));
+            if let Some(protocol_reply) = protocol_reply {
+                if let Some(part_id) = reply_part_id(protocol_reply) {
+                    let message_id = protocol_reply.id.clone();
+                    state.mark_pending_turn_reply(
+                        &message_id,
+                        crate::TurnReply::mint(turn_id.clone(), part_id),
+                    );
+                }
+                return;
+            }
+            text.clone()
+        }
+        TurnFinish::FinalValue { value } | TurnFinish::ToolValue { value, .. } => {
+            render_value_reply(value)
+        }
+    };
     let id = message_id.to_string();
+    let part_id = format!("{id}.p0");
     state.append_active_conversation_messages_with_clock(
         &[Message {
             id: id.clone(),
             role: MessageRole::Assistant,
-            parts: shared_parts(vec![Part::prose(format!("{id}.p0"), text.clone(), None)]),
+            parts: shared_parts(vec![Part::prose(part_id.clone(), text, None)]),
             origin: Some(crate::MessageOrigin::TurnOutput {
                 turn_id: turn_id.clone(),
                 source: crate::TurnOutputSource::Runtime,
             }),
+            reply_marker: Some(crate::TurnReply::mint(turn_id.clone(), part_id)),
         }],
         clock,
     );
+}
+
+/// The part of a protocol-authored reply that carries its text: the last
+/// prose or text part, so a reasoning-then-prose message resolves to prose.
+fn reply_part_id(message: &Message) -> Option<String> {
+    message
+        .parts
+        .iter()
+        .rev()
+        .find(|part| matches!(part.kind(), PartKind::Prose | PartKind::Text))
+        .map(|part| part.id().to_string())
+}
+
+/// A value reply's text: a string value as itself, any other value as compact
+/// JSON, capped at [`VALUE_REPLY_MAX_CHARS`].
+fn render_value_reply(value: &serde_json::Value) -> String {
+    let rendered = match value {
+        serde_json::Value::String(text) => text.clone(),
+        other => other.to_string(),
+    };
+    match rendered.char_indices().nth(VALUE_REPLY_MAX_CHARS) {
+        Some((cut, _)) => format!("{}…", &rendered[..cut]),
+        None => rendered,
+    }
 }
 
 #[cfg(test)]
@@ -160,6 +224,7 @@ mod tests {
                 }),
             )]),
             origin: None,
+            reply_marker: None,
         };
         state.session_graph = crate::SessionGraph::from_active_read_state(&[message]);
         let tool_calls = vec![crate::ToolCallRecord {
@@ -208,6 +273,7 @@ mod tests {
                 "oversized".to_string(),
             )]),
             origin: None,
+            reply_marker: None,
         };
         state.session_graph = crate::SessionGraph::from_active_read_state(&[message]);
 
@@ -259,6 +325,7 @@ mod tests {
                 None,
             )]),
             origin,
+            reply_marker: None,
         }
     }
 
@@ -316,7 +383,7 @@ mod tests {
         let mut protocol_output = ProtocolTerminalOutput::default();
         protocol_output.record(["m_standard_turn-1_0_assistant".to_string()]);
 
-        materialize_terminal_output(
+        materialize_turn_reply(
             &mut state,
             &reply("first response"),
             &crate::SystemClock,
@@ -361,7 +428,7 @@ mod tests {
             ),
         ]);
 
-        materialize_terminal_output(
+        materialize_turn_reply(
             &mut state,
             &reply("first response"),
             &crate::SystemClock,
@@ -411,7 +478,7 @@ mod tests {
             ),
         ]);
 
-        materialize_terminal_output(
+        materialize_turn_reply(
             &mut state,
             &reply("first response"),
             &crate::SystemClock,
@@ -426,12 +493,284 @@ mod tests {
         );
     }
 
+    fn turn() -> TurnId {
+        TurnId::from(TURN_ID)
+    }
+
+    fn reply_markers(state: &RuntimeSessionState) -> Vec<(String, crate::TurnReply)> {
+        state
+            .read_model()
+            .messages
+            .iter()
+            .filter_map(|message| {
+                message
+                    .reply_marker
+                    .clone()
+                    .map(|reply| (message.id.clone(), reply))
+            })
+            .collect()
+    }
+
+    fn mark_all_persisted(state: &mut RuntimeSessionState) {
+        let node_ids = state
+            .session_graph
+            .nodes
+            .iter()
+            .map(|node| node.node_id.clone())
+            .collect::<Vec<_>>();
+        for node_id in node_ids {
+            state.persisted_node_ids.insert(node_id);
+        }
+    }
+
+    fn materialize(state: &mut RuntimeSessionState, outcome: &TurnOutcome) {
+        materialize_turn_reply(
+            state,
+            outcome,
+            &crate::SystemClock,
+            &turn(),
+            TERMINAL_ID,
+            &ProtocolTerminalOutput::default(),
+        );
+    }
+
+    fn final_value(value: serde_json::Value) -> TurnOutcome {
+        TurnOutcome::Finished(TurnFinish::FinalValue { value })
+    }
+
+    /// FIG-1493 §5.5: a turn that finished with a value commits the runtime's
+    /// reply, rendering the value, and marks it as the turn's reply.
+    #[test]
+    fn a_value_finished_turn_commits_one_marked_reply() {
+        let mut state = after_turn_enqueue_state();
+
+        materialize(&mut state, &final_value(serde_json::json!("the answer")));
+
+        let messages = state.read_model().messages.clone();
+        let reply = messages.last().expect("the reply");
+        assert_eq!(reply.id, TERMINAL_ID);
+        assert_eq!(reply.role, MessageRole::Assistant);
+        assert_eq!(reply.parts[0].content(), "the answer");
+        assert_eq!(
+            reply.origin,
+            Some(crate::MessageOrigin::TurnOutput {
+                turn_id: turn(),
+                source: crate::TurnOutputSource::Runtime,
+            })
+        );
+        let marker = reply.reply_marker.as_ref().expect("the reply is marked");
+        assert_eq!(marker.turn_id(), &turn());
+        assert_eq!(marker.part_id(), reply.parts[0].id());
+        assert_eq!(reply_markers(&state).len(), 1);
+    }
+
+    #[test]
+    fn a_tool_value_reply_renders_a_non_string_value_as_compact_json() {
+        let mut state = after_turn_enqueue_state();
+
+        materialize(
+            &mut state,
+            &TurnOutcome::Finished(TurnFinish::ToolValue {
+                tool_name: "lookup".to_string(),
+                value: serde_json::json!({"rows": [1, 2]}),
+            }),
+        );
+
+        let messages = state.read_model().messages.clone();
+        let reply = messages.last().expect("the reply");
+        assert_eq!(reply.parts[0].content(), r#"{"rows":[1,2]}"#);
+        assert!(reply.reply_marker.is_some());
+    }
+
+    #[test]
+    fn a_value_reply_is_capped_at_the_stated_bound() {
+        let mut state = after_turn_enqueue_state();
+
+        materialize(
+            &mut state,
+            &final_value(serde_json::json!("é".repeat(VALUE_REPLY_MAX_CHARS + 10))),
+        );
+
+        let messages = state.read_model().messages.clone();
+        let text = messages.last().expect("the reply").parts[0]
+            .content()
+            .into_owned();
+        assert_eq!(text.chars().count(), VALUE_REPLY_MAX_CHARS + 1);
+        assert!(text.ends_with('…'));
+    }
+
+    /// The protocol's own reply is marked where it stands, on the part that
+    /// carries its prose, and the runtime appends nothing beside it.
+    #[test]
+    fn the_protocol_reply_is_marked_on_its_prose_part() {
+        let mut protocol_reply = message(
+            "m_standard_turn-1_0_assistant",
+            MessageRole::Assistant,
+            "first response",
+            None,
+        );
+        protocol_reply.parts = shared_parts(vec![
+            Part::reasoning(
+                "m_standard_turn-1_0_assistant.p0".to_string(),
+                "think".to_string(),
+                None,
+            ),
+            Part::prose(
+                "m_standard_turn-1_0_assistant.p1".to_string(),
+                "first response".to_string(),
+                None,
+            ),
+        ]);
+        let mut state = state_with_messages(&[
+            message("m_ingress", MessageRole::User, "first request", None),
+            protocol_reply,
+        ]);
+        let mut protocol_output = ProtocolTerminalOutput::default();
+        protocol_output.record(["m_standard_turn-1_0_assistant".to_string()]);
+
+        materialize_turn_reply(
+            &mut state,
+            &reply("first response"),
+            &crate::SystemClock,
+            &turn(),
+            TERMINAL_ID,
+            &protocol_output,
+        );
+
+        assert_eq!(
+            message_ids(&state),
+            vec!["m_ingress", "m_standard_turn-1_0_assistant"]
+        );
+        let markers = reply_markers(&state);
+        assert_eq!(markers.len(), 1);
+        assert_eq!(markers[0].0, "m_standard_turn-1_0_assistant");
+        assert_eq!(markers[0].1.turn_id(), &turn());
+        assert_eq!(markers[0].1.part_id(), "m_standard_turn-1_0_assistant.p1");
+    }
+
+    /// Red side (i): the same commit redriven through the same operation
+    /// materializes again over the state it already produced, and the turn
+    /// still has one reply.
+    #[test]
+    fn a_redriven_commit_keeps_one_reply() {
+        let mut state = after_turn_enqueue_state();
+        let outcome = final_value(serde_json::json!("the answer"));
+
+        materialize(&mut state, &outcome);
+        materialize(&mut state, &outcome);
+
+        assert_eq!(reply_markers(&state).len(), 1);
+        assert_eq!(
+            message_ids(&state)
+                .iter()
+                .filter(|id| id.as_str() == TERMINAL_ID)
+                .count(),
+            1
+        );
+    }
+
+    /// Red side (ii): a turn re-executed after a crash before its receipt, as
+    /// a fresh commit attempt, over history that already holds the turn's
+    /// durable reply (under another message id than the runtime's own)
+    /// mints no second reply: the key is the turn, not the attempt.
+    #[test]
+    fn a_reexecuted_turn_over_its_durable_reply_mints_no_second_reply() {
+        let mut durable_reply = message(
+            "m_proto_turn-1_0_assistant_response",
+            MessageRole::Assistant,
+            "the answer",
+            None,
+        );
+        durable_reply.reply_marker = Some(crate::TurnReply::mint(
+            turn(),
+            "m_proto_turn-1_0_assistant_response.p0".to_string(),
+        ));
+        let mut state = state_with_messages(&[
+            message("m_ingress", MessageRole::User, "first request", None),
+            durable_reply,
+        ]);
+        mark_all_persisted(&mut state);
+        let before = message_ids(&state);
+
+        materialize(&mut state, &final_value(serde_json::json!("the answer")));
+
+        assert_eq!(message_ids(&state), before);
+        assert_eq!(reply_markers(&state).len(), 1);
+    }
+
+    #[test]
+    fn a_fresh_commit_identity_reexecution_preserves_the_first_value_reply() {
+        let mut state = after_turn_enqueue_state();
+        let first = crate::OperationId::turn("root", turn(), "first-final");
+        let fresh = crate::OperationId::turn("root", turn(), "fresh-final");
+        assert_ne!(
+            first.storage_key().expect("first operation"),
+            fresh.storage_key().expect("fresh operation")
+        );
+        materialize_turn_reply(
+            &mut state,
+            &final_value(serde_json::json!("first answer")),
+            &crate::SystemClock,
+            &turn(),
+            "first-attempt-reply",
+            &ProtocolTerminalOutput::default(),
+        );
+        mark_all_persisted(&mut state);
+        let before = message_ids(&state);
+        materialize_turn_reply(
+            &mut state,
+            &final_value(serde_json::json!("reexecuted answer")),
+            &crate::SystemClock,
+            &turn(),
+            "fresh-attempt-reply",
+            &ProtocolTerminalOutput::default(),
+        );
+        assert_eq!(
+            reply_markers(&state).len(),
+            1,
+            "a fresh operation must retain the first turn reply"
+        );
+        assert_eq!(message_ids(&state), before);
+        assert!(
+            !state
+                .read_model()
+                .messages
+                .iter()
+                .any(|message| message.id == "fresh-attempt-reply")
+        );
+    }
+
+    /// A durable node is immutable history: a protocol reply that is already
+    /// durable is never rewritten to carry a marker.
+    #[test]
+    fn a_durable_protocol_reply_is_never_rewritten() {
+        let mut state = after_turn_enqueue_state();
+        mark_all_persisted(&mut state);
+        let mut protocol_output = ProtocolTerminalOutput::default();
+        protocol_output.record(["m_standard_turn-1_0_assistant".to_string()]);
+
+        materialize_turn_reply(
+            &mut state,
+            &reply("first response"),
+            &crate::SystemClock,
+            &turn(),
+            TERMINAL_ID,
+            &protocol_output,
+        );
+
+        assert!(reply_markers(&state).is_empty());
+        assert!(matches!(
+            state.pending_graph_commit(),
+            crate::GraphAppend::PreserveHead
+        ));
+    }
+
     #[test]
     fn terminal_output_ignores_non_reply_outcomes() {
         let mut state = after_turn_enqueue_state();
         let before = message_ids(&state);
 
-        materialize_terminal_output(
+        materialize_turn_reply(
             &mut state,
             &TurnOutcome::Stopped(crate::TurnStop::MaxTurns),
             &crate::SystemClock,

@@ -72,6 +72,7 @@ fn witness_message(id: &str, text: &str) -> Message {
         role: MessageRole::User,
         parts: shared_parts(vec![Part::text(format!("{id}.p0"), text.to_string(), None)]),
         origin: None,
+        reply_marker: None,
     }
 }
 
@@ -209,18 +210,21 @@ fn render_transcript_prompt_orders_turns_oldest_first() {
             role: MessageRole::User,
             parts: vec![part(PartKind::Text, "first")].into(),
             origin: None,
+            reply_marker: None,
         },
         Message {
             id: "m1".to_string(),
             role: MessageRole::Assistant,
             parts: vec![part(PartKind::Prose, "reply one")].into(),
             origin: None,
+            reply_marker: None,
         },
         Message {
             id: "m2".to_string(),
             role: MessageRole::User,
             parts: vec![part(PartKind::Text, "second")].into(),
             origin: None,
+            reply_marker: None,
         },
     ];
 
@@ -248,6 +252,7 @@ fn render_prompt_repl_preserves_message_boundaries() {
             role: MessageRole::User,
             parts: vec![part(PartKind::Text, "first")].into(),
             origin: None,
+            reply_marker: None,
         },
         Message {
             id: "m2".to_string(),
@@ -258,12 +263,14 @@ fn render_prompt_repl_preserves_message_boundaries() {
             ]
             .into(),
             origin: None,
+            reply_marker: None,
         },
         Message {
             id: "m3".to_string(),
             role: MessageRole::User,
             parts: vec![part(PartKind::Text, "second")].into(),
             origin: None,
+            reply_marker: None,
         },
     ];
 
@@ -283,6 +290,7 @@ fn render_structured_prompt_preserves_tool_protocol_and_user_images() {
             role: MessageRole::System,
             parts: vec![part(PartKind::Text, "note")].into(),
             origin: None,
+            reply_marker: None,
         },
         Message {
             id: "m1".to_string(),
@@ -293,6 +301,7 @@ fn render_structured_prompt_preserves_tool_protocol_and_user_images() {
             ]
             .into(),
             origin: None,
+            reply_marker: None,
         },
         Message {
             id: "m2".to_string(),
@@ -307,6 +316,7 @@ fn render_structured_prompt_preserves_tool_protocol_and_user_images() {
             )]
             .into(),
             origin: None,
+            reply_marker: None,
         },
         Message {
             id: "m3".to_string(),
@@ -319,6 +329,7 @@ fn render_structured_prompt_preserves_tool_protocol_and_user_images() {
             )]
             .into(),
             origin: None,
+            reply_marker: None,
         },
     ];
 
@@ -363,6 +374,7 @@ fn render_structured_prompt_preserves_empty_tool_results() {
             )]
             .into(),
             origin: None,
+            reply_marker: None,
         },
         Message {
             id: "m1".to_string(),
@@ -375,6 +387,7 @@ fn render_structured_prompt_preserves_empty_tool_results() {
             )]
             .into(),
             origin: None,
+            reply_marker: None,
         },
     ];
 
@@ -407,6 +420,7 @@ fn render_transcript_prompt_collects_attachments() {
         role: MessageRole::User,
         parts: vec![attachment_part(&[9, 8, 7])].into(),
         origin: None,
+        reply_marker: None,
     }];
 
     let rendered = render_transcript_prompt(&msgs);
@@ -423,18 +437,21 @@ fn render_transcript_prompt_omits_missing_assistant_placeholder_for_current_turn
             role: MessageRole::User,
             parts: vec![part(PartKind::Text, "first")].into(),
             origin: None,
+            reply_marker: None,
         },
         Message {
             id: "m1".to_string(),
             role: MessageRole::Assistant,
             parts: vec![part(PartKind::Prose, "reply one")].into(),
             origin: None,
+            reply_marker: None,
         },
         Message {
             id: "m2".to_string(),
             role: MessageRole::User,
             parts: vec![part(PartKind::Text, "second")].into(),
             origin: None,
+            reply_marker: None,
         },
     ];
 
@@ -453,6 +470,7 @@ fn render_transcript_prompt_preserves_tool_name_for_assistant_tool_calls() {
             role: MessageRole::User,
             parts: vec![part(PartKind::Text, "what time is it")].into(),
             origin: None,
+            reply_marker: None,
         },
         Message {
             id: "m1".to_string(),
@@ -467,6 +485,7 @@ fn render_transcript_prompt_preserves_tool_name_for_assistant_tool_calls() {
             )]
             .into(),
             origin: None,
+            reply_marker: None,
         },
     ];
 
@@ -483,6 +502,7 @@ fn render_transcript_prompt_omits_runtime_notes_section() {
         role: MessageRole::User,
         parts: vec![part(PartKind::Text, "hi")].into(),
         origin: None,
+        reply_marker: None,
     }];
 
     let rendered = render_transcript_prompt(&msgs);
@@ -506,6 +526,7 @@ fn prompt_resume_safety_accepts_completed_tool_history() {
             )]
             .into(),
             origin: None,
+            reply_marker: None,
         },
         Message {
             id: "m1".to_string(),
@@ -518,6 +539,7 @@ fn prompt_resume_safety_accepts_completed_tool_history() {
             )]
             .into(),
             origin: None,
+            reply_marker: None,
         },
     ];
 
@@ -541,6 +563,7 @@ fn reasoning_parts_survive_snapshot_but_never_reach_the_model() {
         ]
         .into(),
         origin: None,
+        reply_marker: None,
     }];
 
     // JSON round-trip preserves the reasoning part — the snapshot
@@ -582,6 +605,7 @@ fn reasoning_parts_survive_snapshot_but_never_reach_the_model() {
         role: MessageRole::Assistant,
         parts: vec![reasoning_part].into(),
         origin: None,
+        reply_marker: None,
     }];
     let rendered_only = render_structured_prompt(&reasoning_only);
     assert!(rendered_only.messages.is_empty());
@@ -602,6 +626,7 @@ fn prompt_resume_safety_rejects_unmatched_tool_calls() {
         )]
         .into(),
         origin: None,
+        reply_marker: None,
     }];
 
     assert!(!messages_are_prompt_resume_safe(&msgs));
@@ -636,6 +661,7 @@ fn reasoning_part_roundtrips_through_snapshot_serde() {
         role: MessageRole::Assistant,
         parts: vec![reasoning_part_fixture(Some("CIPHER=="))].into(),
         origin: None,
+        reply_marker: None,
     }];
     let serialized = serde_json::to_string(&msgs).expect("serialize");
     let deserialized: Vec<Message> = serde_json::from_str(&serialized).expect("deserialize");
@@ -661,12 +687,14 @@ fn message_sequence_serializes_as_flat_message_array() {
             role: MessageRole::Assistant,
             parts: vec![reasoning_part_fixture(None)].into(),
             origin: None,
+            reply_marker: None,
         },
         Message {
             id: "m1".to_string(),
             role: MessageRole::Assistant,
             parts: vec![reasoning_part_fixture(Some("CIPHER=="))].into(),
             origin: None,
+            reply_marker: None,
         },
     ];
     // Build via base+delta so the materialization path is exercised, not
@@ -699,6 +727,7 @@ fn reasoning_parts_never_flow_to_rendered_prompt_as_text() {
         role: MessageRole::Assistant,
         parts: vec![reasoning_part_fixture(None)].into(),
         origin: None,
+        reply_marker: None,
     }];
     let rendered = render_structured_prompt(&display_only);
     assert!(
@@ -713,6 +742,7 @@ fn reasoning_parts_never_flow_to_rendered_prompt_as_text() {
         role: MessageRole::Assistant,
         parts: vec![reasoning_part_fixture(Some("CIPHER=="))].into(),
         origin: None,
+        reply_marker: None,
     }];
     let rendered = render_structured_prompt(&replayable);
     assert_eq!(rendered.messages.len(), 1);
@@ -742,6 +772,7 @@ fn turn_input_origin_wire_shape_is_tagged_and_omits_an_absent_input_id() {
             turn_id: TurnId::from("t1"),
             input_id: None,
         }),
+        reply_marker: None,
     };
     assert_eq!(
         serde_json::to_value(&direct.origin).expect("serialize direct origin"),
@@ -757,6 +788,7 @@ fn turn_input_origin_wire_shape_is_tagged_and_omits_an_absent_input_id() {
             turn_id: TurnId::from("t1"),
             input_id: Some(crate::InputId::from("in-7")),
         }),
+        reply_marker: None,
     };
     assert_eq!(
         serde_json::to_value(&ingress.origin).expect("serialize ingress origin"),
@@ -798,6 +830,7 @@ fn fig1123_only_committed_turn_inputs_start_genuine_user_segments() {
                 turn_id: TurnId::from("turn"),
                 input_id: None,
             }),
+            reply_marker: None,
         },
         Message {
             id: "call".to_string(),
@@ -812,6 +845,7 @@ fn fig1123_only_committed_turn_inputs_start_genuine_user_segments() {
             )]
             .into(),
             origin: None,
+            reply_marker: None,
         },
         Message {
             id: "synthetic".to_string(),
@@ -827,6 +861,7 @@ fn fig1123_only_committed_turn_inputs_start_genuine_user_segments() {
                 plugin_id: "plugin".to_string(),
                 transient: false,
             }),
+            reply_marker: None,
         },
     ];
 
@@ -1079,12 +1114,14 @@ fn tool_result_attachments_are_counted_and_distinctly_identified() {
             )]
             .into(),
             origin: None,
+            reply_marker: None,
         },
         Message {
             id: "m1".into(),
             role: MessageRole::User,
             parts: vec![result].into(),
             origin: None,
+            reply_marker: None,
         },
     ];
     assert_eq!(render_prompt(&msgs).attachments(), vec![&first, &second]);

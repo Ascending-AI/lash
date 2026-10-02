@@ -511,6 +511,7 @@ pub async fn attachment_prefix_pin_keeps_the_session_edge_until_unpin(
                 source: AttachmentSource::stored(reference.clone()),
             }),
         )]),
+        reply_marker: None,
     });
     let commit = RuntimeCommit::persisted_state_for_test(&current)
         .with_committed_attachments([reference.id.clone()]);
@@ -593,6 +594,7 @@ pub async fn session_referrer_waits_for_graph_retirement(h: AttachmentReferrerHa
                 source: AttachmentSource::stored(reference.clone()),
             }),
         )]),
+        reply_marker: None,
     });
     let commit = RuntimeCommit::persisted_state_for_test(&current)
         .with_committed_attachments([reference.id.clone()]);

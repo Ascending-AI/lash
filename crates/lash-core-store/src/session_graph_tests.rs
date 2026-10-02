@@ -17,6 +17,7 @@ fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
             None,
         )]),
         origin: None,
+        reply_marker: None,
     }
 }
 

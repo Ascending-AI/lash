@@ -58,8 +58,8 @@ pub use plugin::{
     UnsetBound, UnsetChannel, rlm_lashlang_surface, rlm_protocol_config, rlm_session_config,
 };
 pub use projection::{
-    RlmHistoryProjection, RlmSeed, decode_rlm_protocol_event, rlm_history_projection,
-    rlm_protocol_event, rlm_seed_initial_nodes,
+    RlmHistoryProjection, RlmSeed, decode_rlm_protocol_event, is_rlm_protocol_output,
+    rlm_history_projection, rlm_protocol_event, rlm_seed_initial_nodes,
 };
 pub use projection::{RlmProjectedBindings, rlm_session_projection_extension};
 #[cfg(feature = "testing")]

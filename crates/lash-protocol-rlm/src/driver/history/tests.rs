@@ -46,6 +46,7 @@ fn assistant_reasoning_event(
             plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,
         }),
+        reply_marker: None,
     })
 }
 
@@ -330,6 +331,7 @@ fn protocol_feedback(id: &str, text: &str) -> SessionHistoryRecord {
             plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,
         }),
+        reply_marker: None,
     })
 }
 
@@ -401,6 +403,7 @@ fn a_failure_before_a_user_turn_survives_a_later_success() {
             )]
             .into(),
             origin: None,
+            reply_marker: None,
         }),
         step_event("print 1"),
     ]));
@@ -488,6 +491,7 @@ fn a_host_system_message_survives_the_scrub() {
                 plugin_id: "some-other-plugin".to_string(),
                 transient: false,
             }),
+            reply_marker: None,
         }),
         step_event("print 1"),
     ]));
@@ -520,6 +524,7 @@ fn a_surviving_cells_prose_is_not_taken_by_the_scrub() {
                 plugin_id: "some-other-plugin".to_string(),
                 transient: false,
             }),
+            reply_marker: None,
         }),
         step_event("print 1"),
     ]));
@@ -592,6 +597,7 @@ fn fig1123_cell_history_marks_only_real_turn_inputs_as_segment_boundaries() {
                 turn_id: lash_core::TurnId::from("turn"),
                 input_id: None,
             }),
+            reply_marker: None,
         }),
         SessionHistoryRecord::Conversation(ConversationRecord {
             id: "synthetic".to_string(),
@@ -606,6 +612,7 @@ fn fig1123_cell_history_marks_only_real_turn_inputs_as_segment_boundaries() {
                 plugin_id: "plugin".to_string(),
                 transient: false,
             }),
+            reply_marker: None,
         }),
     ];
     let dialect = crate::dialect::typescript_test_dialect();

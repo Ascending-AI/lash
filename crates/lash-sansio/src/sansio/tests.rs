@@ -76,6 +76,7 @@ fn user_message(content: &str) -> Message {
         role: MessageRole::User,
         parts: vec![Part::text("m0.p0".to_string(), content.to_string(), None)].into(),
         origin: None,
+        reply_marker: None,
     }
 }
 
@@ -90,6 +91,7 @@ fn text_message(role: MessageRole, content: impl Into<String>) -> Message {
         role,
         parts: vec![Part::text(format!("{id}.p0"), content.into(), None)].into(),
         origin: None,
+        reply_marker: None,
     }
 }
 
@@ -1061,6 +1063,7 @@ fn llm_request_includes_image_prompt_parts_for_attached_images() {
         ]
         .into(),
         origin: None,
+        reply_marker: None,
     }];
     let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
 

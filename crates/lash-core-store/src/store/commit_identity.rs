@@ -393,10 +393,13 @@ fn push_causal_ref(
     }
 }
 
+/// A host-appended origin this encoder generation has no projection for is
+/// refused rather than hashed by a guess: `MessageOrigin` is
+/// `#[non_exhaustive]`, and a new variant needs its own tag here.
 fn push_message_origin(
     identity: &mut crate::stable_identity::IdentityEncoder,
     origin: &crate::MessageOrigin,
-) {
+) -> Result<(), StoreError> {
     match origin {
         crate::MessageOrigin::Plugin {
             plugin_id,
@@ -436,7 +439,13 @@ fn push_message_origin(
                 }
             }
         }
+        unprojected => {
+            return Err(StoreError::Backend(format!(
+                "append request identity has no projection for message origin {unprojected:?}"
+            )));
+        }
     }
+    Ok(())
 }
 
 fn push_attachment_type_metadata(
@@ -632,7 +641,13 @@ fn append_node_identity_bytes(node: &crate::SessionAppendNode) -> Result<Vec<u8>
             identity.tag(0);
             identity.optional(id.as_ref(), |identity, value| identity.string(value));
             push_message_role(&mut identity, *role);
-            identity.optional(origin.as_ref(), push_message_origin);
+            match origin {
+                None => identity.tag(0),
+                Some(origin) => {
+                    identity.tag(1);
+                    push_message_origin(&mut identity, origin)?;
+                }
+            }
             identity.sequence(parts, push_part);
         }
         crate::SessionAppendNode::ProtocolEvent { event } => {

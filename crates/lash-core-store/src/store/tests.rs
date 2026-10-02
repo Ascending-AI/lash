@@ -97,6 +97,7 @@ fn intent_fixture() -> RuntimeCommit {
             None,
         )]),
         origin: None,
+        reply_marker: None,
     };
     let graph = GraphAppend::Extend {
         nodes: vec![crate::SessionNodeRecord {

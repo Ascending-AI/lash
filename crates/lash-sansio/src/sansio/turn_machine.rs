@@ -563,6 +563,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                         transient,
                     })
                 }),
+                reply_marker: None,
             });
         }
         if !appended.is_empty() {

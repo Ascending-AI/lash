@@ -79,6 +79,7 @@ fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
         role,
         parts: vec![Part::text(format!("{id}.p0"), content.to_string(), None)].into(),
         origin: None,
+        reply_marker: None,
     }
 }
 
@@ -102,6 +103,7 @@ fn image_message(id: &str, role: MessageRole, bytes: &[u8]) -> Message {
         )]
         .into(),
         origin: None,
+        reply_marker: None,
     }
 }
 
@@ -1057,6 +1059,7 @@ fn snapshot_with_nodes(nodes: &[lash_core::SessionAppendNode]) -> SessionSnapsho
                     role: message.role,
                     parts: message.parts.clone().into(),
                     origin: message.origin.clone(),
+                    reply_marker: None,
                 });
             }
             lash_core::SessionAppendNode::Plugin { plugin_type, body } => {

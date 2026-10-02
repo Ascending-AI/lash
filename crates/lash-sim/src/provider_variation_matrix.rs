@@ -1412,6 +1412,7 @@ fn assert_reasoning_rendered(parts: &[LlmOutputPart], dialect: &str, expected_re
         role: MessageRole::Assistant,
         parts: shared_parts(history_parts),
         origin: None,
+        reply_marker: None,
     }]);
     let rendered_reasoning = rendered
         .messages

@@ -243,6 +243,7 @@ impl lash::plugins::TurnContextTransform for WorkbenchContextBudget {
             )]
             .into(),
             origin: None,
+            reply_marker: None,
         });
         Ok(output)
     }

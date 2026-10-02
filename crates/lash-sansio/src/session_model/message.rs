@@ -26,6 +26,43 @@ pub struct Message {
     pub parts: Arc<Vec<Part>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<MessageOrigin>,
+    /// Present on the one message that is its turn's reply: the runtime mints
+    /// it at the turn's commit, for every way a turn finishes, and nothing
+    /// else can (FIG-1493 §5.1). Orthogonal to `origin`, which keeps naming
+    /// who wrote the message. A message committed before the marker existed
+    /// has none, and that absence is history, never backfilled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_marker: Option<TurnReply>,
+}
+
+/// Marks a message as the reply of one turn and names the part that carries
+/// the reply's text, so a reasoning-then-prose message resolves to its prose.
+///
+/// One turn has at most one reply: the runtime keys the mint on the turn,
+/// never on the commit attempt, so a redriven or re-executed turn finds its
+/// reply and mints no second one. Only the runtime constructs a marker; a
+/// host or plugin reads it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TurnReply {
+    turn_id: TurnId,
+    part_id: String,
+}
+
+impl TurnReply {
+    /// The turn this message replies for.
+    pub fn turn_id(&self) -> &TurnId {
+        &self.turn_id
+    }
+
+    /// The part of this message that carries the reply.
+    pub fn part_id(&self) -> &str {
+        &self.part_id
+    }
+
+    pub(crate) fn mint(turn_id: TurnId, part_id: String) -> Self {
+        Self { turn_id, part_id }
+    }
 }
 
 #[inline]
@@ -40,6 +77,7 @@ pub(crate) struct MessageContentRef<'a> {
     role: MessageRole,
     parts: &'a Arc<Vec<Part>>,
     origin: Option<&'a MessageOrigin>,
+    reply_marker: Option<&'a TurnReply>,
 }
 
 impl<'a> From<&'a Message> for MessageContentRef<'a> {
@@ -49,12 +87,14 @@ impl<'a> From<&'a Message> for MessageContentRef<'a> {
             role,
             parts,
             origin,
+            reply_marker,
         } = message;
         Self {
             id: id.as_str(),
             role: *role,
             parts,
             origin: origin.as_ref(),
+            reply_marker: reply_marker.as_ref(),
         }
     }
 }
@@ -66,12 +106,14 @@ impl<'a> From<&'a super::ConversationRecord> for MessageContentRef<'a> {
             role,
             parts,
             origin,
+            reply_marker,
         } = record;
         Self {
             id: id.as_str(),
             role: *role,
             parts,
             origin: origin.as_ref(),
+            reply_marker: reply_marker.as_ref(),
         }
     }
 }
@@ -103,6 +145,7 @@ pub(crate) fn message_content_equal<'left, 'right>(
     left.id == right.id
         && left.role == right.role
         && left.origin == right.origin
+        && left.reply_marker == right.reply_marker
         && (Arc::ptr_eq(left.parts, right.parts) || left.parts == right.parts)
 }
 
@@ -123,6 +166,7 @@ pub enum TurnOutputSource {
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum MessageOrigin {
     Plugin {
         plugin_id: String,

@@ -265,6 +265,30 @@ pub async fn a_final_commit_whose_reply_was_lost_replays_its_receipt_and_settles
             .is_none(),
         "the run ended"
     );
+    // FIG-1493 §5.5: the redrive through the same operation replays the
+    // commit that minted the turn's reply, so the turn has exactly one.
+    let state = crate::conformance::helpers::load_window_state(&reader, &identity.session_id)
+        .await
+        .expect("read the redriven run's state")
+        .expect("the run committed");
+    let read_model = state.session_graph.read_model();
+    let replies = read_model
+        .messages
+        .iter()
+        .filter_map(|message| {
+            let reply = message.reply_marker.as_ref()?;
+            let part = message
+                .parts
+                .iter()
+                .find(|part| part.id() == reply.part_id())?;
+            Some((reply.turn_id().clone(), part.content().into_owned()))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        replies,
+        vec![(identity.turn_id.clone(), "trace turn complete".to_string())],
+        "the turn has one marked reply"
+    );
 }
 
 /// N9 (c): the checkpoint admission's worker died after the store bound its

@@ -142,7 +142,6 @@ pub(crate) async fn start_user_turn(
         session,
         claim,
         FollowOrigin::UserTurn,
-        Some(request.model.model),
         FollowFrom::Send(Box::new(handle)),
     ))
 }
@@ -198,7 +197,6 @@ async fn resume_turn_follower(state: AppState, session_id: SessionId, turn_id: T
                     session,
                     claim,
                     FollowOrigin::UserTurn,
-                    None,
                     FollowFrom::Run,
                 ));
                 return;
@@ -260,7 +258,6 @@ fn spawn_turn_follower(
     session: lash::LashSession,
     claim: RunClaim,
     origin: FollowOrigin,
-    model: Option<String>,
     from: FollowFrom,
 ) -> tokio::task::JoinHandle<TurnSettlement> {
     tokio::spawn(async move {
@@ -270,12 +267,7 @@ fn spawn_turn_follower(
         let mut from = from;
         loop {
             let followed = AssertUnwindSafe(Box::pin(follow_once(
-                &state,
-                &session,
-                &turn_id,
-                origin,
-                model.as_deref(),
-                from,
+                &state, &session, &turn_id, origin, from,
             )))
             .catch_unwind()
             .await;
@@ -363,7 +355,6 @@ async fn follow_once(
     session: &lash::LashSession,
     turn_id: &TurnId,
     origin: FollowOrigin,
-    model: Option<&str>,
     from: FollowFrom,
 ) -> Result<(), AppError> {
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
@@ -384,14 +375,6 @@ async fn follow_once(
         lash::SendOutcome::Settled { output, .. } => output.result,
         outcome => return Err(unsettled_turn(&outcome.status())),
     };
-    let selected_llm_profile;
-    let model = match model {
-        Some(model) => Some(model),
-        None => {
-            selected_llm_profile = state.selected_llm_profile().model;
-            Some(selected_llm_profile.as_str())
-        }
-    };
     record_turn_output_for_profile(
         state,
         session,
@@ -402,7 +385,6 @@ async fn follow_once(
         output,
         turn_state,
         &format!("{}.completed", origin.reason()),
-        model,
     )
     .await
 }
@@ -550,7 +532,6 @@ async fn watch_until_idle(
             session.clone(),
             claim,
             FollowOrigin::QueuedTurn,
-            None,
             FollowFrom::Run,
         ));
     }

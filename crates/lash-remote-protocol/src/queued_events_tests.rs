@@ -177,3 +177,17 @@ fn legacy_queued_message_and_part_fields_are_rejected() {
     legacy["parts"][0]["prune_state"] = serde_json::json!("Intact");
     assert!(serde_json::from_value::<RemotePluginMessage>(legacy).is_err());
 }
+
+/// The runtime's `MessageOrigin` is non-exhaustive, so a peer reads an origin
+/// kind its protocol version does not model as `Unrecognized` rather than
+/// refusing the message that carries it.
+#[test]
+fn an_origin_kind_this_version_does_not_model_reads_as_unrecognized() {
+    let message: RemotePluginMessage = serde_json::from_value(serde_json::json!({
+        "role": "Assistant",
+        "origin": {"kind": "a_later_origin", "detail": 1},
+        "parts": [],
+    }))
+    .expect("an unknown origin kind still decodes the message");
+    assert_eq!(message.origin, Some(RemoteMessageOrigin::Unrecognized));
+}

@@ -59,6 +59,7 @@ mod tests {
                     plugin_id: "standard_compaction".to_string(),
                     transient: false,
                 }),
+                reply_marker: None,
             }),
         };
         assert!(!recovery_record(&prose, &json!({"kind": "pending"})));

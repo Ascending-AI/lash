@@ -106,6 +106,7 @@ pub(crate) fn user_message(content: &str) -> Message {
         role: MessageRole::User,
         parts: vec![Part::text("m0.p0".to_string(), content.to_string(), None)].into(),
         origin: None,
+        reply_marker: None,
     }
 }
 

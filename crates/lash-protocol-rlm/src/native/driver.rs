@@ -203,6 +203,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                         plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
                         transient: false,
                     }),
+                    reply_marker: None,
                 }));
             } else {
                 durable.push(super::transport::repair_event(

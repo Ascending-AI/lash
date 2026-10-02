@@ -33,10 +33,9 @@ use crate::{
     AppError, AppErrorVerdict, AppState, ButtonChoice, CRON_SCHEDULE_SOURCE_TYPE,
     ChannelTurnEvents, LlmProfileSelection, TurnStreamState,
     apply_llm_profile_selection_to_session, assistant_text_for_display,
-    commit_assistant_transcript, enqueue_button_trigger_command,
-    enqueue_mail_received_trigger_command,
+    enqueue_button_trigger_command, enqueue_mail_received_trigger_command,
     restate_ingress::{submit_restate_empty, submit_restate_workflow_json},
-    workbench_owns_committed_agent_reply, workbench_turn_assistant_message_id,
+    workbench_turn_assistant_message_id,
 };
 
 #[path = "restate_session_delete.rs"]
@@ -1013,7 +1012,6 @@ pub(crate) async fn record_turn_output(
     turn_state: Arc<Mutex<TurnStreamState>>,
     trace_name: &str,
 ) -> Result<(), AppError> {
-    let selected_llm_profile = state.selected_llm_profile();
     record_turn_output_for_profile(
         state,
         session,
@@ -1024,7 +1022,6 @@ pub(crate) async fn record_turn_output(
         output,
         turn_state,
         trace_name,
-        Some(&selected_llm_profile.model),
     )
     .await
 }
@@ -1041,7 +1038,6 @@ pub(crate) async fn record_turn_output_for_profile(
     output: lash::TurnReport,
     turn_state: Arc<Mutex<TurnStreamState>>,
     trace_name: &str,
-    model: Option<&str>,
 ) -> Result<(), AppError> {
     let streamed_prose = {
         let mut turn_state = turn_state.lock_recover();
@@ -1099,43 +1095,13 @@ pub(crate) async fn record_turn_output_for_profile(
             );
         }
         _ => {
-            if workbench_owns_committed_agent_reply(&output) {
-                commit_assistant_transcript(
-                    session,
-                    identity.turn_id,
-                    assistant_text.clone(),
-                    model,
-                )
-                .await?;
-            }
-            let live_turn_id = if output.assistant_message().is_some() {
-                session
-                    .read_view()
-                    .messages()
-                    .iter()
-                    .rev()
-                    .find_map(|message| {
-                        match (message.origin.as_ref(), lash::message_role(message)) {
-                            (
-                                Some(lash::messages::MessageOrigin::TurnOutput {
-                                    turn_id: committed_turn_id,
-                                    ..
-                                }),
-                                "assistant",
-                            ) if committed_turn_id == identity.durable_turn_id => {
-                                Some(committed_turn_id.clone())
-                            }
-                            _ => None,
-                        }
-                    })
-                    .unwrap_or_else(|| identity.durable_turn_id.clone())
-            } else {
-                identity.turn_id.clone()
-            };
+            // The runtime committed this turn's reply, marked with the
+            // durable turn, whatever finished it (FIG-1493 §5.5): the live
+            // row carries that turn so the committed copy supersedes it.
             state.push_assistant_message_for_turn(
                 &session.session_id(),
                 workbench_turn_assistant_message_id(identity.turn_id),
-                &live_turn_id,
+                identity.durable_turn_id,
                 assistant_text,
             );
         }

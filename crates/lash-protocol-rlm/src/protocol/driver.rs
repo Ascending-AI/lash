@@ -116,7 +116,7 @@ impl RlmDriver {
                         ("retry_unclosed_cell", self.dialect.cell_error_message(err))
                     }
                 };
-                return ReplyClass::Repair(RepairPrompt {
+                return ReplyClass::Repair(Box::new(RepairPrompt {
                     decision,
                     assistant_message: Some((reply.visible_prose, "assistant_response")),
                     correction: invalid_cell_message(
@@ -124,12 +124,12 @@ impl RlmDriver {
                         attempt.message_id("invalid_cell"),
                         &message,
                     ),
-                });
+                }));
             }
         }
 
         if terminal_reason == LlmTerminalReason::OutputLimit {
-            return ReplyClass::Repair(RepairPrompt {
+            return ReplyClass::Repair(Box::new(RepairPrompt {
                 decision: "retry_output_limit_prose",
                 assistant_message: Some((
                     reply.visible_assistant_text,
@@ -140,7 +140,7 @@ impl RlmDriver {
                     attempt.message_id("output_limit_retry"),
                     attempt.output_token_cap,
                 ),
-            });
+            }));
         }
         // A reply that opened a line with the active dialect's tag and still
         // produced no cell put a fence somewhere the grammar refuses. Read
@@ -157,7 +157,7 @@ impl RlmDriver {
         if !matches!(termination, RlmTermination::Natural)
             && malformed_cell_fence(reply.assistant_text, self.dialect.cell_tags())
         {
-            return ReplyClass::Repair(RepairPrompt {
+            return ReplyClass::Repair(Box::new(RepairPrompt {
                 decision: "retry_malformed_cell_fence",
                 assistant_message: Some((reply.visible_prose, "assistant_response")),
                 correction: invalid_cell_message(
@@ -165,7 +165,7 @@ impl RlmDriver {
                     attempt.message_id("malformed_cell_fence"),
                     &self.dialect.malformed_cell_fence_retry_copy(),
                 ),
-            });
+            }));
         }
         if matches!(termination, RlmTermination::Natural) {
             return ReplyClass::Finish;
@@ -180,7 +180,7 @@ impl RlmDriver {
         } else {
             None
         };
-        ReplyClass::Repair(RepairPrompt {
+        ReplyClass::Repair(Box::new(RepairPrompt {
             decision: "request_finish",
             assistant_message,
             correction: finish_required_reminder_message(
@@ -188,7 +188,7 @@ impl RlmDriver {
                 attempt.message_id("finish_reminder"),
                 schema.is_some(),
             ),
-        })
+        }))
     }
 
     /// The tail every stall-retry branch shares: the extraction diagnostic,
@@ -385,7 +385,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     &ctx,
                     &mut actions,
                     StallRetry {
-                        prompt,
+                        prompt: *prompt,
                         fingerprint: &fingerprint,
                         termination: &termination,
                         raw_text: &assistant_text,
@@ -1200,7 +1200,7 @@ enum ReplyClass<'a> {
     /// and the finish path in `handle_llm_success` renders it.
     Finish,
     /// A stall-repair round; `stall_retry_epilogue` renders the prompt.
-    Repair(RepairPrompt<'a>),
+    Repair(Box<RepairPrompt<'a>>),
 }
 
 /// One stall-retry round as the shared epilogue consumes it: the classified

@@ -172,6 +172,7 @@ fn assembler_falls_back_to_last_assistant_message_when_stream_output_is_empty() 
             role: MessageRole::Assistant,
             parts: vec![Part::prose("m0.p0".to_string(), "stored".to_string(), None)].into(),
             origin: None,
+            reply_marker: None,
         },
     );
     let mut assembler = RecordedTurnAssembly::default();
@@ -210,6 +211,7 @@ fn interrupted_assembler_does_not_reuse_assistant_before_latest_user_message() {
             )]
             .into(),
             origin: None,
+            reply_marker: None,
         },
     );
     append_message(
@@ -224,6 +226,7 @@ fn interrupted_assembler_does_not_reuse_assistant_before_latest_user_message() {
             )]
             .into(),
             origin: None,
+            reply_marker: None,
         },
     );
 
@@ -257,6 +260,7 @@ fn assembler_prefers_state_output_when_streamed_text_is_a_truncated_prefix() {
             )]
             .into(),
             origin: None,
+            reply_marker: None,
         },
     );
     let mut assembler = RecordedTurnAssembly::default();
@@ -315,6 +319,7 @@ fn assembler_state_output_excludes_tool_call_payload() {
             ]
             .into(),
             origin: None,
+            reply_marker: None,
         },
     );
     let assembler = RecordedTurnAssembly::default();
@@ -492,6 +497,7 @@ fn assembler_ignores_stale_max_turn_message() {
             )]
             .into(),
             origin: None,
+            reply_marker: None,
         },
     );
     let mut assembler = RecordedTurnAssembly::default();
@@ -524,6 +530,7 @@ fn assembler_uses_typed_max_turn_fact_despite_reworded_message() {
             )]
             .into(),
             origin: None,
+            reply_marker: None,
         },
     );
     let mut assembler = RecordedTurnAssembly::default();
@@ -709,6 +716,7 @@ fn recovered_output_producer_emits_advisory_severity() {
             )]
             .into(),
             origin: None,
+            reply_marker: None,
         },
     );
     let mut assembler = RecordedTurnAssembly::default();

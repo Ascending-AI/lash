@@ -77,6 +77,7 @@ impl<'a> BorrowedChronologicalMessage<'a> {
             role: self.role,
             parts: std::sync::Arc::new(self.parts.to_vec()),
             origin: self.origin.cloned(),
+            reply_marker: None,
         }
     }
 }
@@ -218,6 +219,7 @@ mod tests {
             role,
             parts: shared_parts(vec![Part::text(format!("{id}.p0"), text.to_string(), None)]),
             origin: None,
+            reply_marker: None,
         }
     }
 
@@ -232,6 +234,7 @@ mod tests {
                 "tool".to_string(),
             )]),
             origin: None,
+            reply_marker: None,
         }
     }
 

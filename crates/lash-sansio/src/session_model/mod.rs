@@ -249,6 +249,7 @@ impl Default for NoProgressBudget {
 
 use crate::MessageOrigin;
 use crate::ToolDefinition;
+use crate::TurnReply;
 use crate::llm::types::LlmToolSpec;
 use crate::plugin::{CheckpointKind, PluginMessage, PluginRuntimeEvent};
 
@@ -359,6 +360,8 @@ pub struct ConversationRecord {
     pub parts: Arc<Vec<Part>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<MessageOrigin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_marker: Option<TurnReply>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -375,6 +378,7 @@ impl ConversationRecord {
             role: message.role,
             parts: message.parts,
             origin: message.origin,
+            reply_marker: message.reply_marker,
         }
     }
 
@@ -384,6 +388,7 @@ impl ConversationRecord {
             role: self.role,
             parts: Arc::clone(&self.parts),
             origin: self.origin.clone(),
+            reply_marker: self.reply_marker.clone(),
         }
     }
 }

@@ -113,6 +113,19 @@ impl ModelEffortValidationCategoryCoreSupport for LlmProfileEffortValidationCate
     }
 }
 
+/// Mints a turn's reply marker. Only the runtime's commit names a turn's
+/// reply, so the constructor stays behind this seam.
+pub trait TurnReplyCoreSupport {
+    fn mint(turn_id: crate::TurnId, part_id: String) -> Self;
+}
+
+#[doc(hidden)]
+impl TurnReplyCoreSupport for crate::TurnReply {
+    fn mint(turn_id: crate::TurnId, part_id: String) -> Self {
+        crate::TurnReply::mint(turn_id, part_id)
+    }
+}
+
 pub trait MessageCoreSupport {
     fn content_equals(&self, other: &Message) -> bool;
 }

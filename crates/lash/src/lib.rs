@@ -961,7 +961,7 @@ pub mod messages {
 
     pub use lash_core::session_graph::SharedJsonValue;
     pub use lash_core::{
-        Message, MessageOrigin, MessageRole, Part, PartKind, TurnOutputSource,
+        Message, MessageOrigin, MessageRole, Part, PartKind, TurnOutputSource, TurnReply,
         facade_support::MessageSequence, session_model::message::PartAttachment,
     };
     /// JSON value in integrator signatures, without a second direct dependency.

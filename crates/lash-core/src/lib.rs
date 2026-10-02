@@ -549,7 +549,7 @@ pub use lash_sansio::{
     ToolFailureCause, ToolFailureClass, ToolFailureSource, ToolId, ToolIntentIdentity,
     ToolIntentKind, ToolManifest, ToolModule, ToolOutputContract, ToolRetryPolicy, ToolRetryStatus,
     ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnCause, TurnId, TurnOutputSource,
-    ValueMismatch,
+    TurnReply, ValueMismatch,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, build_turn, messages_are_prompt_resume_safe, visible_response_parts,

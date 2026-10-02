@@ -141,5 +141,6 @@ pub(super) fn text_message(role: lash_core::MessageRole, text: &str) -> lash_cor
             None,
         )]),
         origin: None,
+        reply_marker: None,
     }
 }

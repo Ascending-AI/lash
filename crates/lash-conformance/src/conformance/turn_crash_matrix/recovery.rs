@@ -138,6 +138,27 @@ pub(super) async fn run_crash_matrix_case(
         state.turn_index,
         "{scenario} ({entry:?}): every committed physical turn adds one terminal assistant output"
     );
+    // FIG-1493 §5.5: however the turn crashed, before its receipt or after,
+    // every committed physical turn has exactly one marked reply.
+    let reply_turns = read_model
+        .messages
+        .iter()
+        .filter_map(|message| message.reply_marker.as_ref())
+        .map(|reply| reply.turn_id().clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        reply_turns.len(),
+        state.turn_index,
+        "{scenario} ({entry:?}): every committed physical turn has one marked reply: {reply_turns:?}"
+    );
+    assert_eq!(
+        reply_turns
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        reply_turns.len(),
+        "{scenario} ({entry:?}): no turn has two replies: {reply_turns:?}"
+    );
     let wake_count = read_model
         .messages
         .iter()
