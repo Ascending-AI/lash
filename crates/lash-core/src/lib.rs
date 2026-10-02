@@ -588,9 +588,9 @@ pub use lash_core_execution::{
     SubscriptionRevisionId, UploadReferrerId, artifact_referrer_ended, trigger_incarnation,
 };
 pub use lash_core_execution::{
-    ArtifactPublicationPause, ArtifactStoreError, Backend, DurabilityTier, EffectEngine,
-    ModuleArtifactAstRefusal, ModuleArtifactCorruption, ModuleArtifactGeneration,
-    ModuleArtifactRefusal, ModuleArtifactStore, StoreBindingId, StoreSet,
+    ArtifactStoreError, Backend, DurabilityTier, EffectEngine, ModuleArtifactAstRefusal,
+    ModuleArtifactCorruption, ModuleArtifactGeneration, ModuleArtifactRefusal, ModuleArtifactStore,
+    StoreBindingId, StoreSet,
 };
 pub use lash_core_execution::{
     DriverAction, DriverContextView, Effect, HostTurnProtocol, PreparedTurnMachine,

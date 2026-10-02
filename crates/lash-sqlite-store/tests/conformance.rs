@@ -44,9 +44,9 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
 
     let dir = tempfile::tempdir().expect("process-event snapshot tempdir");
     let path = dir.path().join("process-event-snapshot.db");
-    let injector = lash_sqlite_store::testing::SqliteFaultInjector::default();
+    let pauses = lash_sqlite_store::testing::SqlitePauses::default();
     let reader = Arc::new(
-        SqliteProcessRegistry::open_with_fault_injector_for_testing(&path, injector.clone())
+        SqliteProcessRegistry::open_with_pauses_for_testing(&path, pauses.clone())
             .await
             .expect("open paused process registry reader"),
     );
@@ -110,7 +110,7 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
         panic!("fixture must leave a nonempty unread tail");
     };
 
-    let pause = injector.pause_process_event_page_after_identity();
+    let pause = pauses.pause_process_event_page_after_identity();
     let read_task = tokio::spawn({
         let reader = Arc::clone(&reader);
         let process_id = process_id.clone();

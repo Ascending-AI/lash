@@ -694,8 +694,6 @@ pub struct PostgresStorage {
 pub struct PostgresStore {
     #[cfg(any(test, feature = "testing"))]
     lease_clock_for_testing: Option<Arc<dyn lash_core_execution::Clock>>,
-    #[cfg(feature = "testing")]
-    fault_injector: Option<testing::PostgresFaultInjector>,
     pool: PgPool,
     catalog_id: Arc<str>,
     fence: guarded_tx::WriterFence,
@@ -773,7 +771,6 @@ impl PostgresTriggerStore {
 pub struct PostgresLashlangArtifactStore {
     pool: PgPool,
     fence: guarded_tx::WriterFence,
-    publication_pause: Arc<std::sync::Mutex<Option<lash_core_execution::ArtifactPublicationPause>>>,
 }
 
 /// Connection-pool and per-connection timeout knobs for [`PostgresStorage`].
@@ -1327,8 +1324,6 @@ impl PostgresStorage {
             fence: self.fence.clone(),
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
-            #[cfg(feature = "testing")]
-            fault_injector: None,
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
             #[cfg(any(test, feature = "testing"))]
@@ -1380,7 +1375,6 @@ impl PostgresStorage {
         PostgresLashlangArtifactStore {
             pool: self.pool.clone(),
             fence: self.fence.clone(),
-            publication_pause: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -1388,7 +1382,6 @@ impl PostgresStorage {
         PostgresLashlangArtifactStore {
             pool: self.pool.clone(),
             fence: self.fence.clone(),
-            publication_pause: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -1471,17 +1464,6 @@ impl PostgresStore {
         self.clock = clock;
         self
     }
-
-    /// Arm every session store this factory opens with one deterministic
-    /// substrate fault injector.
-    ///
-    /// Only compiled with the crate's `testing` feature; production factories
-    /// carry no injector and the write transactions carry no hook.
-    #[cfg(feature = "testing")]
-    pub fn with_fault_injector(mut self, injector: testing::PostgresFaultInjector) -> Self {
-        self.fault_injector = Some(injector);
-        self
-    }
 }
 
 impl PostgresStore {
@@ -1495,30 +1477,6 @@ impl PostgresStore {
         )
     }
 }
-
-// Fault points are syntax declarations in the write-transaction code. With the
-// `testing` feature disabled, the invocation and all of its arguments expand to
-// nothing, so production transactions carry no injector branch or state.
-#[cfg(feature = "testing")]
-macro_rules! pg_sim_fault {
-    ($injector:expr, $point:ident, $write_transaction_ordinal:expr) => {
-        if let Some(injector) = $injector.as_ref() {
-            injector.inject(
-                crate::testing::PostgresFaultPoint::$point,
-                $write_transaction_ordinal,
-            )?;
-        }
-    };
-}
-
-#[cfg(not(feature = "testing"))]
-macro_rules! pg_sim_fault {
-    ($($ignored:tt)*) => {};
-}
-
-#[cfg(feature = "testing")]
-#[path = "postgres/fault_injection.rs"]
-mod fault_injection;
 
 #[path = "postgres/artifact_store.rs"]
 mod artifact_store;

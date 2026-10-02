@@ -393,7 +393,7 @@ fn usage() -> String {
   lash-sim run --out <artifact-root> [--profile fast-random] [--seeds N | --seed U64 ...] [--max-boundaries N] [--shard I/N] [--mode evidence|search] [--salt TEXT | --corpus weekly-fixed-v1] [--time-budget SECONDS]
   lash-sim replay <trace> [--out <artifact-root>]
   lash-sim backend-contention --out <artifact-root>
-  lash-sim backend-faults --out <artifact-root> [--backend sqlite|postgres] [--seeds N | --seed U64 ...]
+  lash-sim backend-faults --out <artifact-root> [--backend sqlite|sqlite-memory|postgres] [--seeds N | --seed U64 ...]
                                  (alias: sqlite-faults)
   lash-sim stack-probe agent-contract --contract <semantic-oracle> --stack-bytes <bytes>
   lash-sim minimize <trace> --out <artifact-root>"

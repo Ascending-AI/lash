@@ -12,7 +12,7 @@ Runtime execution uses `SimEngine`: lash-restate handlers on the in-process Rest
 
 ## Fault boundaries
 
-Storage faults enter the real backend transaction interfaces through their testing features and the neutral `BackendFaultKind`, `BackendFaultPoint`, `BackendFaultArm` and `BackendFaultObservation` vocabulary. SQLite file, SQLite memory and PostgreSQL are storage variants. Host evidence distinguishes the server double, live Restate and the simulator's in-process effect host. Synthetic-next owns upgrade proofs.
+Storage faults are arms of a `Script` over the real store (ADR 0044), in the neutral `BackendFaultKind`, `BackendFault`, `BackendFaultArm` and `BackendFaultObservation` vocabulary: an arm refuses one `commit_runtime_state` call before the store or loses its reply, the same call on every backend. SQLite file, SQLite memory and PostgreSQL are storage variants. Host evidence distinguishes the server double, live Restate and the simulator's in-process effect host. Synthetic-next owns upgrade proofs.
 
 Commit-boundary failure is modeled. Half-transaction row persistence is rejected as a simulated state because the SQL backends commit atomically. A single virtual clock cannot prove disagreement between database and client clocks; database clock contracts require direct backend evidence. Simulation checks its recorded boundaries and actual runtime outcomes rather than inventing SQL execution leases.
 

@@ -55,12 +55,14 @@ kiln run //crates/lash-sim:lash-sim__bin -- run --out "$PWD/target/lash-sim/sear
   --shard 1/9 --mode search
 ```
 
-### Multi-arm SQLite fault witness
+### Multi-arm backend fault witness
 
-The SQLite transaction wrapper declares `AfterBegin`, `BeforeCommit`, and
-`CommitIo` through a `sim_fault!` macro that expands away when the store's
-`testing` feature is disabled. The testing injector accepts an ordered plan of
-one-shot arms, each targeting a one-based occurrence of one declared point.
+Backend faults are arms of a `Script` over the store (ADR 0044): the stores
+carry no fault point. An arm faults one `commit_runtime_state` call, either
+`refused` (the caller is answered a storage failure before the call enters the
+store) or `reply_lost` (the store commits and the reply is lost). A plan is an
+ordered list of one-shot arms; the kth arm faults the kth commit made through
+the script, so the same plan faults the same calls on every backend.
 
 Run the bounded composition witness with:
 
@@ -69,8 +71,9 @@ kiln run //crates/lash-sim:lash-sim__bin -- backend-faults --backend sqlite \
   --out /tmp/lash-sim-sqlite-faults --seed 140050432
 ```
 
-`--backend postgres` runs the same plan against the PostgreSQL injector when
-`LASH_POSTGRES_DATABASE_URL` is set, writing `postgres-faults.json` under
+`--backend sqlite-memory` runs the same plan on a SQLite memory store, and
+`--backend postgres` on PostgreSQL when `LASH_POSTGRES_DATABASE_URL` is set,
+writing `postgres-faults.json` under
 `lash.sim.postgres-substrate-faults.v2` with `sim.oracle.postgres-*` ids; every
 failure package and replay hint names the backend it was produced on.
 `sqlite-faults` remains a working alias of `backend-faults` for the SQLite
@@ -79,13 +82,14 @@ default, which is what the confidence gate invokes.
 Expect `/tmp/lash-sim-sqlite-faults/sqlite-faults.json` to use
 `lash.sim.sqlite-substrate-faults.v2`. Its `composition_witness.plan` records
 the generated workload seed and ID, the two source boundary IDs, arm order,
-point occurrences, and the two-attempt policy. The workload seed chooses among
-the three ordered pairs of distinct declared points, so a small seed set drives
-different fault schedules while replaying one seed keeps the same plan. The
-zero-arm control commits on its first attempt. Each single-arm control returns
-one injected storage failure and commits on retry. For the documented seed, the
-paired run fails first at `after_begin`, then at `commit_io`, exhausts the
-two-attempt policy, and leaves the reopened head at the prefix revision.
+and the two-attempt policy. The workload seed chooses among the four ordered
+pairs of the two faults, so a small seed set drives different fault schedules
+while replaying one seed keeps the same plan. The zero-arm control commits on
+its first attempt. Each single-arm control returns one injected storage failure
+and commits on retry. For the documented seed, the paired run's first attempt
+is `refused` and its second is `reply_lost`: the caller exhausts the
+two-attempt policy, and the reopened head stands one past the prefix revision,
+because the second attempt committed.
 `repeated_paired` must record the same arm identities, order, attempt outcomes,
 and final head. This is an injected operation failure under the recorded retry
 bound, not a discovered runtime invariant violation.
@@ -104,12 +108,12 @@ bound, not a discovered runtime invariant violation.
 - The fixed runtime proofs, the agent contracts and the provider, feedback
   and logical-turn laws run each turn on the same engine, under their own
   seeds with concurrent scheduling. SQLite and PostgreSQL appear only as stores.
-- The real SQLite transaction wrapper has a production-absent, `testing`
-  feature-gated fault controller. `lash-sim backend-faults` deterministically
-  injects aborts after `BEGIN IMMEDIATE` and before commit, a commit-boundary
-  `SQLITE_IOERR`, and a mid-sequence close/reopen. Each seed checks typed error
-  return, retention of the preceding committed head, rollback of failed work,
-  and idempotent operation-receipt replay; oracle failures persist an exact-seed
+- `lash-sim backend-faults` deterministically refuses a commit before the
+  store, loses a committed reply, and closes and reopens mid-sequence, through
+  a `Script` over the real store. Each seed checks typed error return,
+  retention of the preceding committed head, that a refused commit publishes
+  nothing and a lost-reply commit stands once, and idempotent
+  operation-receipt replay; oracle failures persist an exact-seed
   reproduction package before the command exits. The same command derives an
   explicit two-arm plan from the generated workload and records zero-, single-,
   paired-, and repeat-run evidence for its bounded composition oracle.

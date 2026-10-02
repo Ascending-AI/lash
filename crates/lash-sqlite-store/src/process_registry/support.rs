@@ -341,15 +341,15 @@ impl SqliteProcessRegistry {
 
     #[cfg(feature = "testing")]
     #[doc(hidden)]
-    pub async fn open_with_fault_injector_for_testing(
+    pub async fn open_with_pauses_for_testing(
         path: &Path,
-        fault_injector: crate::testing::SqliteFaultInjector,
+        pauses: crate::testing::SqlitePauses,
     ) -> tokio_rusqlite::Result<Self> {
         crate::location::validate_file_database_path(path, "SqliteProcessRegistry")?;
         Self::open_at(
             &DatabaseLocation::standalone_file(path),
             Arc::new(lash_core_execution::facade_support::SystemClock),
-            Some(fault_injector),
+            Some(pauses),
         )
         .await
     }
@@ -358,13 +358,13 @@ impl SqliteProcessRegistry {
     pub(crate) async fn open_at(
         location: &DatabaseLocation,
         clock: Arc<dyn lash_core_execution::Clock>,
-        #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
+        #[cfg(feature = "testing")] pauses: Option<crate::testing::SqlitePauses>,
     ) -> tokio_rusqlite::Result<Self> {
         #[cfg(feature = "testing")]
-        let conn = SqliteConnection::open_with_fault_injector(
+        let conn = SqliteConnection::open_with_pauses(
             location.target(),
             SqliteConnectionPolicy::default(),
-            fault_injector,
+            pauses,
         )
         .await?;
         #[cfg(not(feature = "testing"))]

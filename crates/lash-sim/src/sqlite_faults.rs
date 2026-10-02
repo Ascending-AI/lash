@@ -1,12 +1,12 @@
 use lash_sansio::SessionId;
 use std::collections::BTreeSet;
-use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::backend_fault::{
-    BackendFaultArm, BackendFaultKind, BackendFaultLane, BackendFaultObservation, BackendFaultPoint,
+    BackendFault, BackendFaultArm, BackendFaultKind, BackendFaultLane, BackendFaultObservation,
+    BackendFaultScript,
 };
 use lash_core::{
     DeploymentStore, OperationId, RuntimeCommit, RuntimeSessionState, RuntimeStore,
@@ -35,9 +35,8 @@ struct BackendFaultNaming {
     reopen_preserves_committed_work_oracle: crate::trace::OracleId<'static>,
     no_duplicate_effect_oracle: crate::trace::OracleId<'static>,
     multi_arm_composition_oracle: crate::trace::OracleId<'static>,
-    abort_after_begin_oracle: crate::trace::OracleId<'static>,
-    abort_before_commit_oracle: crate::trace::OracleId<'static>,
-    commit_io_oracle: crate::trace::OracleId<'static>,
+    refused_commit_oracle: crate::trace::OracleId<'static>,
+    lost_commit_reply_oracle: crate::trace::OracleId<'static>,
     reopen_mid_sequence_oracle: crate::trace::OracleId<'static>,
 }
 
@@ -60,13 +59,10 @@ const SQLITE_NAMING: BackendFaultNaming = BackendFaultNaming {
     multi_arm_composition_oracle: crate::trace::OracleId::real(
         "sim.oracle.sqlite-multi-arm-composition.v1",
     ),
-    abort_after_begin_oracle: crate::trace::OracleId::real(
-        "sim.oracle.sqlite-abort-after-begin.v1",
+    refused_commit_oracle: crate::trace::OracleId::real("sim.oracle.sqlite-refused-commit.v1"),
+    lost_commit_reply_oracle: crate::trace::OracleId::real(
+        "sim.oracle.sqlite-lost-commit-reply.v1",
     ),
-    abort_before_commit_oracle: crate::trace::OracleId::real(
-        "sim.oracle.sqlite-abort-before-commit.v1",
-    ),
-    commit_io_oracle: crate::trace::OracleId::real("sim.oracle.sqlite-commit-io.v1"),
     reopen_mid_sequence_oracle: crate::trace::OracleId::real(
         "sim.oracle.sqlite-reopen-mid-sequence.v1",
     ),
@@ -91,13 +87,10 @@ const POSTGRES_NAMING: BackendFaultNaming = BackendFaultNaming {
     multi_arm_composition_oracle: crate::trace::OracleId::real(
         "sim.oracle.postgres-multi-arm-composition.v1",
     ),
-    abort_after_begin_oracle: crate::trace::OracleId::real(
-        "sim.oracle.postgres-abort-after-begin.v1",
+    refused_commit_oracle: crate::trace::OracleId::real("sim.oracle.postgres-refused-commit.v1"),
+    lost_commit_reply_oracle: crate::trace::OracleId::real(
+        "sim.oracle.postgres-lost-commit-reply.v1",
     ),
-    abort_before_commit_oracle: crate::trace::OracleId::real(
-        "sim.oracle.postgres-abort-before-commit.v1",
-    ),
-    commit_io_oracle: crate::trace::OracleId::real("sim.oracle.postgres-commit-io.v1"),
     reopen_mid_sequence_oracle: crate::trace::OracleId::real(
         "sim.oracle.postgres-reopen-mid-sequence.v1",
     ),
@@ -105,7 +98,7 @@ const POSTGRES_NAMING: BackendFaultNaming = BackendFaultNaming {
 
 const fn naming(backend: BackendFaultKind) -> &'static BackendFaultNaming {
     match backend {
-        BackendFaultKind::Sqlite => &SQLITE_NAMING,
+        BackendFaultKind::SqliteMemory | BackendFaultKind::Sqlite => &SQLITE_NAMING,
         BackendFaultKind::Postgres => &POSTGRES_NAMING,
     }
 }
@@ -122,34 +115,30 @@ fn exact_replay_command(backend: BackendFaultKind, replay_root: &Path, seed: u64
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BackendFaultScenarioKind {
-    AbortAfterBegin,
-    AbortBeforeCommit,
-    CommitIo,
+    RefusedCommit,
+    LostCommitReply,
     ReopenMidSequence,
 }
 
 impl BackendFaultScenarioKind {
-    const ALL: [Self; 4] = [
-        Self::AbortAfterBegin,
-        Self::AbortBeforeCommit,
-        Self::CommitIo,
+    const ALL: [Self; 3] = [
+        Self::RefusedCommit,
+        Self::LostCommitReply,
         Self::ReopenMidSequence,
     ];
 
     fn for_seed(seed: u64) -> Self {
-        match seed % 4 {
-            0 => Self::AbortAfterBegin,
-            1 => Self::AbortBeforeCommit,
-            2 => Self::CommitIo,
+        match seed % 3 {
+            0 => Self::RefusedCommit,
+            1 => Self::LostCommitReply,
             _ => Self::ReopenMidSequence,
         }
     }
 
-    fn fault_point(self) -> Option<BackendFaultPoint> {
+    fn fault(self) -> Option<BackendFault> {
         match self {
-            Self::AbortAfterBegin => Some(BackendFaultPoint::AfterBegin),
-            Self::AbortBeforeCommit => Some(BackendFaultPoint::BeforeCommit),
-            Self::CommitIo => Some(BackendFaultPoint::CommitIo),
+            Self::RefusedCommit => Some(BackendFault::Refused),
+            Self::LostCommitReply => Some(BackendFault::ReplyLost),
             Self::ReopenMidSequence => None,
         }
     }
@@ -157,9 +146,8 @@ impl BackendFaultScenarioKind {
     fn oracle_id(self, backend: BackendFaultKind) -> crate::trace::OracleId<'static> {
         let names = naming(backend);
         match self {
-            Self::AbortAfterBegin => names.abort_after_begin_oracle,
-            Self::AbortBeforeCommit => names.abort_before_commit_oracle,
-            Self::CommitIo => names.commit_io_oracle,
+            Self::RefusedCommit => names.refused_commit_oracle,
+            Self::LostCommitReply => names.lost_commit_reply_oracle,
             Self::ReopenMidSequence => names.reopen_mid_sequence_oracle,
         }
     }
@@ -200,7 +188,7 @@ pub struct BackendFaultCompositionPlan {
     pub arms: Vec<GeneratedBackendFaultArm>,
 }
 
-/// One injector arm and the generated boundary that selected it.
+/// One script arm and the generated boundary that selected it.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct GeneratedBackendFaultArm {
     pub source_boundary_id: String,
@@ -252,7 +240,7 @@ pub struct BackendFaultScenarioReport {
     pub scenario: BackendFaultScenarioKind,
     pub prefix_commits: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub injected_fault: Option<BackendFaultPoint>,
+    pub injected_fault: Option<BackendFault>,
     pub injection_observations: Vec<BackendFaultObservation>,
     pub oracles: Vec<BackendFaultOracle>,
     pub replay_command: String,
@@ -276,7 +264,7 @@ struct BackendFaultFailurePackage<'a> {
     reason: &'a str,
     database_root: String,
     prefix_commits: usize,
-    injected_fault: Option<BackendFaultPoint>,
+    injected_fault: Option<BackendFault>,
     exact_replay_command: String,
 }
 
@@ -310,22 +298,6 @@ pub fn sqlite_fault_seeds(count: usize) -> Vec<u64> {
     (0..count)
         .map(|index| DEFAULT_SQLITE_FAULT_SEED_BASE.wrapping_add(index as u64))
         .collect()
-}
-
-/// Runs the commit-boundary fault scenarios against the real SQLite substrate.
-#[expect(
-    clippy::expect_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-pub async fn run_sqlite_fault_profile(
-    artifact_root: impl AsRef<Path>,
-    seeds: &[u64],
-) -> Result<BackendFaultProfileReport, String> {
-    Ok(
-        run_backend_fault_profile(BackendFaultKind::Sqlite, artifact_root, seeds)
-            .await?
-            .expect("the SQLite lane is always configured"),
-    )
 }
 
 pub async fn run_backend_fault_profile(
@@ -391,7 +363,7 @@ pub async fn run_backend_fault_profile(
             exercised_scenarios: exercised.into_iter().collect(),
             dropped_scenarios: dropped,
             bounded_prefix_commits_per_seed: "1..=8 selected deterministically by seed",
-            bounded_composition_policy: "zero arms, each single arm, both arms, and repeated both arms; at most two commit attempts per run",
+            bounded_composition_policy: "zero arms, each single arm, both arms, and repeated both arms; at most two commit attempts per run, the kth arm faulting the kth attempt",
         },
         report_path: report_path.clone(),
     };
@@ -399,10 +371,6 @@ pub async fn run_backend_fault_profile(
     Ok(Some(report))
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
 fn generated_multi_arm_plan(
     backend: BackendFaultKind,
     seed: u64,
@@ -417,46 +385,40 @@ fn generated_multi_arm_plan(
         .iter()
         .find(|boundary| {
             boundary.kind == crate::scheduler::BoundaryKind::BackendFailure
-                && boundary.payload.get("fault_point").and_then(Value::as_str)
-                    == Some("after_begin")
+                && boundary.payload.get("fault").and_then(Value::as_str)
+                    == Some(BackendFault::Refused.name())
         })
-        .ok_or_else(|| {
-            "generated workload has no after-begin backend-failure boundary".to_string()
-        })?;
+        .ok_or_else(|| "generated workload has no refused backend-failure boundary".to_string())?;
     let terminal = workload
         .boundaries
         .iter()
         .find(|boundary| {
             boundary.kind == crate::scheduler::BoundaryKind::BackendFailure
-                && boundary.payload.get("fault_point").and_then(Value::as_str) == Some("commit_io")
+                && boundary.payload.get("fault").and_then(Value::as_str)
+                    == Some(BackendFault::ReplyLost.name())
         })
         .ok_or_else(|| {
-            "generated workload has no commit-I/O backend-failure boundary".to_string()
+            "generated workload has no lost-reply backend-failure boundary".to_string()
         })?;
-    let points = match workload.seed % 3 {
-        0 => [
-            BackendFaultPoint::AfterBegin,
-            BackendFaultPoint::BeforeCommit,
-        ],
-        1 => [BackendFaultPoint::AfterBegin, BackendFaultPoint::CommitIo],
-        _ => [BackendFaultPoint::BeforeCommit, BackendFaultPoint::CommitIo],
+    let faults = match workload.seed % 4 {
+        0 => [BackendFault::Refused, BackendFault::ReplyLost],
+        1 => [BackendFault::ReplyLost, BackendFault::Refused],
+        2 => [BackendFault::Refused, BackendFault::Refused],
+        _ => [BackendFault::ReplyLost, BackendFault::ReplyLost],
     };
-    let occurrence = NonZeroU64::new(1).expect("one is non-zero");
     let arms = vec![
         GeneratedBackendFaultArm {
             source_boundary_id: retryable.boundary_id.clone(),
             arm: BackendFaultArm::new(
                 seed ^ retryable.at.rotate_left(17) ^ 0x4649_4731_3135_3501,
-                points[0],
-                occurrence,
+                faults[0],
             ),
         },
         GeneratedBackendFaultArm {
             source_boundary_id: terminal.boundary_id.clone(),
             arm: BackendFaultArm::new(
                 seed ^ terminal.at.rotate_left(17) ^ 0x4649_4731_3135_3502,
-                points[1],
-                occurrence,
+                faults[1],
             ),
         },
     ];
@@ -466,7 +428,7 @@ fn generated_multi_arm_plan(
         workload_profile: PROFILE.to_string(),
         workload_max_boundaries: MAX_BOUNDARIES,
         workload_id: workload.workload_id,
-        selection_policy: "the generated workload seed selects one of the three ordered pairs of distinct transaction points; its first after-begin and first commit-I/O backend boundaries supply arm identities; both target their first reached occurrence".to_string(),
+        selection_policy: "the generated workload seed selects one of the four ordered pairs of commit faults; its first refused and first lost-reply backend boundaries supply arm identities; the kth selected arm faults the kth commit attempt".to_string(),
         max_attempts: 2,
         arms,
     })
@@ -516,7 +478,7 @@ async fn run_composition_witness(
         oracle: BackendFaultOracle {
             oracle_id: naming(backend).multi_arm_composition_oracle,
             status: "passed",
-            assertion: "the generated two-arm plan exhausts a two-attempt operation while zero-arm and either single-arm controls commit, and repeating the seed reproduces fired identities, order, and storage outcome",
+            assertion: "the generated two-arm plan answers both attempts of a two-attempt operation a storage failure, publishing it once exactly when a reply was lost, while zero-arm and either single-arm controls commit, and repeating the seed reproduces fired identities, order, and storage outcome",
             evidence: Value::Null,
         },
         replay_command,
@@ -553,15 +515,15 @@ async fn run_composition_case(
         std::fs::remove_dir_all(&case_root).map_err(|error| error.to_string())?;
     }
     std::fs::create_dir_all(&case_root).map_err(|error| error.to_string())?;
-    let (factory, injector) = lane.armed_factory(&case_root).await?;
+    let factory = lane.store(&case_root).await?;
     let session_id = SessionId::from(format!(
         "lash-sim-{}-composition-{:016x}-{label}",
         lane.kind().name(),
         plan.workload_seed
     ));
 
-    // Creation and the durable prefix happen before arming so setup writes
-    // cannot consume an operation arm.
+    // Creation and the durable prefix go to the store itself; only the target
+    // operation's attempts run under the script.
     let store = create_store(backend, Arc::clone(&factory), &session_id)
         .await
         .map_err(|failure| failure.reason)?;
@@ -593,21 +555,22 @@ async fn run_composition_case(
                 .ok_or_else(|| format!("composition selected missing arm index {index}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    injector.arm_many(selected_arms);
+    let script = BackendFaultScript::arm(Arc::clone(&factory), selected_arms);
+    let scripted = script.store();
 
     let mut attempts = Vec::with_capacity(plan.max_attempts);
     let mut operation_failed = true;
     for attempt in 1..=plan.max_attempts {
-        let observations_before = injector.observations().len();
+        let observations_before = script.observations().len();
         let result = tokio::time::timeout(
             Duration::from_secs(5),
-            store.commit_runtime_state(target.clone()),
+            scripted.commit_runtime_state(target.clone()),
         )
         .await
         .map_err(|_| {
             format!("composition case `{label}` attempt {attempt} hung for five seconds")
         })?;
-        let observations = injector.observations();
+        let observations = script.observations();
         let fired_observations = observations[observations_before..].to_vec();
         match result {
             Ok(result) => {
@@ -639,12 +602,9 @@ async fn run_composition_case(
             }
         }
     }
-    if !injector.remaining_arms().is_empty() {
-        return Err(format!(
-            "composition case `{label}` did not consume every selected arm: {:?}",
-            injector.remaining_arms()
-        ));
-    }
+    let injection_observations = script.observations();
+    // Dropping the script fails the run when a selected arm never fired.
+    drop((scripted, script));
 
     drop(store);
     let reopened = open_store(backend, factory, &session_id)
@@ -663,7 +623,7 @@ async fn run_composition_case(
         failure_class: operation_failed.then(|| "retry_budget_exhausted".to_string()),
         durable_prefix_revision,
         final_reopened_head_revision: final_state.head_revision,
-        injection_observations: injector.observations(),
+        injection_observations,
     })
 }
 
@@ -720,10 +680,18 @@ fn validate_composition_witness(witness: &BackendFaultCompositionWitness) -> Res
                 observation.arm_index != arm_index
                     || !observation_matches_arm(observation, &planned.arm)
             })
-        || witness.paired.final_reopened_head_revision != witness.paired.durable_prefix_revision
+        || witness.paired.final_reopened_head_revision
+            != witness.paired.durable_prefix_revision
+                + u64::from(
+                    witness
+                        .paired
+                        .injection_observations
+                        .iter()
+                        .any(|observation| observation.fault.commit_stands()),
+                )
     {
         return Err(
-            "paired arms must exhaust both attempts in plan order without publishing the operation"
+            "paired arms must exhaust both attempts in plan order, publishing the operation once exactly when a reply was lost"
                 .to_string(),
         );
     }
@@ -738,8 +706,8 @@ fn validate_composition_witness(witness: &BackendFaultCompositionWitness) -> Res
 
 fn observation_matches_arm(observation: &BackendFaultObservation, arm: &BackendFaultArm) -> bool {
     observation.seed == arm.seed
-        && observation.point == arm.point
-        && observation.point_occurrence == arm.occurrence.get()
+        && observation.fault == arm.fault
+        && observation.operation == crate::backend_fault::FAULTED_OPERATION.name()
 }
 
 async fn run_seed(
@@ -757,8 +725,8 @@ async fn run_seed(
     }
     std::fs::create_dir_all(&seed_root)
         .map_err(|err| ScenarioFailure::harness(backend, format!("create seed root: {err}")))?;
-    let (factory, injector) = lane
-        .armed_factory(&seed_root)
+    let factory = lane
+        .store(&seed_root)
         .await
         .map_err(|error| ScenarioFailure::harness(backend, error))?;
     let session_id = SessionId::from(format!("lash-sim-{}-fault-{seed:016x}", backend.name()));
@@ -783,18 +751,17 @@ async fn run_seed(
     let mut target_state = state.clone();
     target_state.turn_index = prefix_commits;
     let target_commit = stamped_commit(backend, &target_state, "target")?;
-    let replay_command = format!(
-        "cargo run -p lash-sim -- sqlite-faults --out {} --seed {seed}",
-        artifact_root.join("replay").display()
-    );
+    let replay_command = exact_replay_command(backend, &artifact_root.join("replay"), seed);
 
     let mut oracles = Vec::new();
-    let injected_fault = scenario.fault_point();
-    if let Some(point) = injected_fault {
-        injector.arm(seed, point);
+    let mut injection_observations = Vec::new();
+    let injected_fault = scenario.fault();
+    if let Some(fault) = injected_fault {
+        let script =
+            BackendFaultScript::arm(Arc::clone(&factory), [BackendFaultArm::new(seed, fault)]);
         let injected = tokio::time::timeout(
             Duration::from_secs(5),
-            store.commit_runtime_state(target_commit.clone()),
+            script.store().commit_runtime_state(target_commit.clone()),
         )
         .await
         .map_err(|_| {
@@ -820,8 +787,8 @@ async fn run_seed(
                 ));
             }
         };
-        let observations = injector.observations();
-        if observations.len() != 1 || observations[0].seed != seed || observations[0].point != point
+        let observations = script.observations();
+        if observations.len() != 1 || observations[0].seed != seed || observations[0].fault != fault
         {
             return Err(ScenarioFailure::oracle(
                 backend,
@@ -829,10 +796,11 @@ async fn run_seed(
                 format!("fault did not fire exactly once as armed: {observations:?}"),
             ));
         }
+        injection_observations = observations;
         oracles.push(BackendFaultOracle {
             oracle_id: naming(backend).typed_error_oracle,
             status: "passed",
-            assertion: "the substrate fault returns StoreError::StorageFailure within the timeout rather than hanging or panicking",
+            assertion: "the scripted fault answers StoreError::StorageFailure within the timeout rather than hanging or panicking",
             evidence: json!({
                 "store_error_variant": "StorageFailure",
                 "message": error_message,
@@ -849,12 +817,14 @@ async fn run_seed(
             .ok_or_else(|| {
                 ScenarioFailure::oracle(backend, scenario, "committed prefix disappeared")
             })?;
-        if after_fault.head_revision != durable_prefix_revision {
+        let expected_head = durable_prefix_revision + u64::from(fault.commit_stands());
+        if after_fault.head_revision != expected_head {
             return Err(ScenarioFailure::oracle(
                 backend,
                 scenario,
                 format!(
-                    "fault changed durable head from {durable_prefix_revision} to {}",
+                    "a {} commit left the durable head at {}, expected {expected_head} over prefix {durable_prefix_revision}",
+                    fault.name(),
                     after_fault.head_revision
                 ),
             ));
@@ -862,11 +832,11 @@ async fn run_seed(
         oracles.push(BackendFaultOracle {
             oracle_id: naming(backend).preserves_committed_work_oracle,
             status: "passed",
-            assertion: "reopen retains every commit preceding the fault and publishes none of the failed transaction",
+            assertion: "reopen retains every commit preceding the fault; a refused commit publishes nothing and a commit whose reply was lost stands once",
             evidence: json!({
                 "prefix_head_revision": durable_prefix_revision,
                 "reopened_head_revision": after_fault.head_revision,
-                "failed_transaction_published": false,
+                "faulted_commit_published": fault.commit_stands(),
             }),
         });
     } else {
@@ -955,7 +925,7 @@ async fn run_seed(
     oracles.push(BackendFaultOracle {
         oracle_id: naming(backend).no_duplicate_effect_oracle,
         status: "passed",
-        assertion: "retrying the same durable operation returns its receipt and advances the head exactly once",
+        assertion: "retrying the same durable operation returns its receipt and advances the head exactly once, whether or not the faulted attempt committed",
         evidence: json!({
             "prefix_head_revision": durable_prefix_revision,
             "first_result_head_revision": first.head_revision,
@@ -967,7 +937,7 @@ async fn run_seed(
     oracles.push(BackendFaultOracle {
         oracle_id: scenario.oracle_id(backend),
         status: "passed",
-        assertion: "the seed-selected substrate fault preserves committed work, advances the retried operation exactly once, and returns any injected failure as a typed error",
+        assertion: "the seed-selected commit fault preserves committed work, advances the retried operation exactly once, and returns any injected failure as a typed error",
         evidence: json!({
             "scenario": scenario,
             "injected_fault": injected_fault,
@@ -982,7 +952,7 @@ async fn run_seed(
         scenario,
         prefix_commits,
         injected_fault,
-        injection_observations: injector.observations(),
+        injection_observations,
         oracles,
         replay_command,
     })
@@ -1075,7 +1045,7 @@ fn persist_failure(
             .display()
             .to_string(),
         prefix_commits: 1 + ((seed >> 2) as usize % 8),
-        injected_fault: BackendFaultScenarioKind::for_seed(seed).fault_point(),
+        injected_fault: BackendFaultScenarioKind::for_seed(seed).fault(),
         exact_replay_command: exact_replay_command(backend, &artifact_root.join("replay"), seed),
     };
     write_json(&path, &package)?;
@@ -1108,14 +1078,14 @@ mod tests {
         assert_eq!(repeated, plan);
         assert_eq!(plan.max_attempts, 2);
         assert_eq!(plan.arms.len(), 2);
-        assert_eq!(plan.arms[0].arm.point, BackendFaultPoint::AfterBegin);
-        assert_eq!(plan.arms[1].arm.point, BackendFaultPoint::CommitIo);
+        assert_eq!(plan.arms[0].arm.fault, BackendFault::Refused);
+        assert_eq!(plan.arms[1].arm.fault, BackendFault::ReplyLost);
         assert_ne!(
             plan.arms[0].source_boundary_id,
             plan.arms[1].source_boundary_id
         );
 
-        let schedules = (0..3)
+        let schedules = (0..4)
             .map(|offset| {
                 generated_multi_arm_plan(
                     BackendFaultKind::Sqlite,
@@ -1124,19 +1094,17 @@ mod tests {
                 .expect("generated multi-arm schedule")
                 .arms
                 .into_iter()
-                .map(|planned| planned.arm.point)
+                .map(|planned| planned.arm.fault)
                 .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
         assert_eq!(
             schedules,
             vec![
-                vec![BackendFaultPoint::AfterBegin, BackendFaultPoint::CommitIo],
-                vec![BackendFaultPoint::BeforeCommit, BackendFaultPoint::CommitIo],
-                vec![
-                    BackendFaultPoint::AfterBegin,
-                    BackendFaultPoint::BeforeCommit,
-                ],
+                vec![BackendFault::Refused, BackendFault::ReplyLost],
+                vec![BackendFault::ReplyLost, BackendFault::Refused],
+                vec![BackendFault::Refused, BackendFault::Refused],
+                vec![BackendFault::ReplyLost, BackendFault::ReplyLost],
             ]
         );
     }
@@ -1144,7 +1112,7 @@ mod tests {
     #[tokio::test]
     async fn generated_two_arm_witness_requires_both_arms_to_exhaust_retry_budget() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let lane = BackendFaultLane::open(BackendFaultKind::Sqlite)
+        let lane = BackendFaultLane::open(BackendFaultKind::SqliteMemory)
             .await
             .expect("open SQLite lane")
             .expect("the SQLite lane is always configured");
@@ -1174,18 +1142,23 @@ mod tests {
             vec![0],
         )
         .await
-        .expect("real SQLite run with omitted second injector arm");
+        .expect("real SQLite run with omitted second arm");
         let error = validate_composition_witness(&omitted_arm_witness)
-            .expect_err("the oracle must reject a real run missing its second injector arm");
+            .expect_err("the oracle must reject a real run missing its second arm");
         assert!(error.contains("paired arms must exhaust"), "{error}");
     }
 
     #[tokio::test]
     async fn bounded_seed_set_covers_every_sqlite_fault_and_oracle() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let report = run_sqlite_fault_profile(tmp.path(), &sqlite_fault_seeds(4))
-            .await
-            .expect("SQLite fault profile");
+        let report = run_backend_fault_profile(
+            BackendFaultKind::SqliteMemory,
+            tmp.path(),
+            &sqlite_fault_seeds(4),
+        )
+        .await
+        .expect("SQLite fault profile")
+        .expect("the SQLite lane is always configured");
         assert_eq!(report.status, "passed");
         assert!(report.coverage.dropped_scenarios.is_empty());
         assert_eq!(report.scenarios.len(), 4);
@@ -1203,9 +1176,8 @@ mod tests {
         }
     }
 
-    /// The same bounded seed set on a real PostgreSQL, proving the Postgres
-    /// injector reaches the production write transaction and that every
-    /// commit-boundary oracle holds there too.
+    /// The same bounded seed set on a real PostgreSQL: every commit-fault
+    /// oracle holds there too.
     ///
     /// Ignored without the service gate; an explicit run requires PostgreSQL.
     #[tokio::test]
@@ -1240,12 +1212,139 @@ mod tests {
         }
     }
 
+    /// What one arm did on one backend: every call the script saw, and the
+    /// session head the store kept after each step.
+    #[derive(Debug, Eq, PartialEq)]
+    struct ArmEffect {
+        calls: Vec<String>,
+        head_after_admission: u64,
+        head_after_fault: u64,
+        head_after_retry: u64,
+    }
+
+    /// Admit a session and commit once, all through a store armed with one
+    /// `fault`, then retry the commit.
+    async fn arm_effect(backend: BackendFaultKind, fault: BackendFault) -> ArmEffect {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let lane = BackendFaultLane::open(backend)
+            .await
+            .expect("open the lane")
+            .expect("the lane is configured");
+        let inner = lane.store(tmp.path()).await.expect("open the store");
+        let script = BackendFaultScript::arm(Arc::clone(&inner), [BackendFaultArm::new(7, fault)]);
+        let session_id = SessionId::from(format!("arm-scope-{}", fault.name()));
+        let head = || async {
+            inner
+                .load_session_head_meta(&session_id)
+                .await
+                .expect("read the session head")
+                .map_or(0, |meta| meta.head_revision)
+        };
+        // The admission is a write of its own: an arm on the commit leaves it alone.
+        let store = create_store(backend, script.store(), &session_id)
+            .await
+            .map_err(|failure| failure.reason)
+            .expect("admitting a session is not the armed commit");
+        let head_after_admission = head().await;
+        let state = RuntimeSessionState {
+            session_id: session_id.clone(),
+            ..RuntimeSessionState::new(SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            ))
+        };
+        let commit = stamped_commit(backend, &state, "armed")
+            .map_err(|failure| failure.reason)
+            .expect("stamp the commit");
+        let faulted = store
+            .commit_runtime_state(commit.clone())
+            .await
+            .expect_err("the armed commit is faulted");
+        assert!(
+            matches!(faulted, StoreError::StorageFailure { .. }),
+            "{faulted:?}"
+        );
+        let head_after_fault = head().await;
+        let retried = store
+            .commit_runtime_state(commit)
+            .await
+            .expect("the retried commit is answered");
+        assert_eq!(retried.head_revision, head().await);
+        ArmEffect {
+            calls: script.trace(),
+            head_after_admission,
+            head_after_fault,
+            head_after_retry: retried.head_revision,
+        }
+    }
+
+    /// The calls a one-arm script records for [`arm_effect`]'s workload.
+    fn expected_calls(fault: BackendFault) -> Vec<&'static str> {
+        let faulted_commit: &[&str] = match fault {
+            BackendFault::Refused => &["lash-sim:commit_runtime_state#1 before fail(transient)"],
+            BackendFault::ReplyLost => &[
+                "lash-sim:commit_runtime_state#1 before entered",
+                "lash-sim:commit_runtime_state#1 after fail(transient)",
+            ],
+        };
+        [
+            &[
+                "lash-sim:admit_session#1 before entered",
+                "lash-sim:admit_session#1 after returned",
+            ],
+            faulted_commit,
+            &[
+                "lash-sim:commit_runtime_state#2 before entered",
+                "lash-sim:commit_runtime_state#2 after returned",
+            ],
+        ]
+        .concat()
+    }
+
+    fn assert_arm_effect(fault: BackendFault, effect: &ArmEffect) {
+        assert_eq!(effect.calls, expected_calls(fault));
+        assert_eq!(
+            effect.head_after_fault,
+            effect.head_after_admission + u64::from(fault.commit_stands()),
+            "a {} commit is durable exactly when its reply was lost",
+            fault.name()
+        );
+        assert_eq!(effect.head_after_retry, effect.head_after_admission + 1);
+    }
+
+    /// FIG-4793: an arm names a call of `commit_runtime_state`, so it faults
+    /// that call and no other write, and the same one on every backend.
+    #[tokio::test]
+    async fn an_arm_faults_the_same_commit_on_sqlite_memory_and_file() {
+        for fault in [BackendFault::Refused, BackendFault::ReplyLost] {
+            let memory = arm_effect(BackendFaultKind::SqliteMemory, fault).await;
+            assert_arm_effect(fault, &memory);
+            let file = arm_effect(BackendFaultKind::Sqlite, fault).await;
+            assert_eq!(file, memory, "SQLite file and memory diverge on {fault:?}");
+        }
+    }
+
+    /// The PostgreSQL leg of the same law.
+    #[tokio::test]
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
+    async fn postgres_backend_fault_arm_faults_the_same_commit_as_sqlite() {
+        for fault in [BackendFault::Refused, BackendFault::ReplyLost] {
+            let postgres = arm_effect(BackendFaultKind::Postgres, fault).await;
+            assert_arm_effect(fault, &postgres);
+            let sqlite = arm_effect(BackendFaultKind::SqliteMemory, fault).await;
+            assert_eq!(
+                postgres, sqlite,
+                "PostgreSQL and SQLite diverge on {fault:?}"
+            );
+        }
+    }
+
     #[test]
     fn oracle_failure_is_persisted_with_exact_seed_replay() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let failure = ScenarioFailure::oracle(
             BackendFaultKind::Sqlite,
-            BackendFaultScenarioKind::CommitIo,
+            BackendFaultScenarioKind::LostCommitReply,
             "deliberate oracle failure",
         );
         let path = persist_failure(
@@ -1258,7 +1357,7 @@ mod tests {
         let body = std::fs::read_to_string(path).expect("failure package");
         assert!(body.contains("deliberate oracle failure"));
         assert!(body.contains("--seed 140050434"));
-        assert!(body.contains("sim.oracle.sqlite-commit-io.v1"));
+        assert!(body.contains("sim.oracle.sqlite-lost-commit-reply.v1"));
         assert!(body.contains("lash.sim.sqlite-substrate-fault-failure.v1"));
         assert!(body.contains("backend-faults --backend sqlite"));
     }
@@ -1268,7 +1367,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let failure = ScenarioFailure::oracle(
             BackendFaultKind::Postgres,
-            BackendFaultScenarioKind::CommitIo,
+            BackendFaultScenarioKind::LostCommitReply,
             "deliberate oracle failure",
         );
         let path = persist_failure(
@@ -1281,7 +1380,7 @@ mod tests {
         let body = std::fs::read_to_string(path).expect("failure package");
         assert!(body.contains("backend-faults --backend postgres"));
         assert!(body.contains("--seed 140050434"));
-        assert!(body.contains("sim.oracle.postgres-commit-io.v1"));
+        assert!(body.contains("sim.oracle.postgres-lost-commit-reply.v1"));
         assert!(body.contains("lash.sim.postgres-substrate-fault-failure.v1"));
         assert!(!body.contains("sqlite"));
     }

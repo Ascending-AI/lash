@@ -11,10 +11,7 @@ use std::sync::Arc;
 #[cfg(test)]
 use std::sync::Mutex;
 
-use lash_core_execution::{
-    ArtifactPublicationPause, ArtifactStoreError, DurabilityTier, ModuleArtifactStore,
-    ReferrerClaim,
-};
+use lash_core_execution::{ArtifactStoreError, DurabilityTier, ModuleArtifactStore, ReferrerClaim};
 pub use lash_core_execution::{
     ModuleArtifactAstRefusal, ModuleArtifactCorruption, ModuleArtifactGeneration,
     ModuleArtifactRefusal,
@@ -777,11 +774,6 @@ impl LashlangArtifacts {
         &self.store
     }
 
-    /// See [`ModuleArtifactStore::pause_next_publication_for_testing`].
-    pub fn pause_next_publication_for_testing(&self) -> Option<ArtifactPublicationPause> {
-        self.store.pause_next_publication_for_testing()
-    }
-
     /// The durability tier of the port.
     pub fn durability_tier(&self) -> DurabilityTier {
         self.store.durability_tier()
@@ -847,7 +839,6 @@ impl LashlangArtifacts {
 #[derive(Clone, Default)]
 pub(crate) struct InMemoryLashlangArtifactStore {
     state: Arc<Mutex<InMemoryArtifactState>>,
-    publication_pause: Arc<Mutex<Option<ArtifactPublicationPause>>>,
 }
 
 #[cfg(test)]
@@ -890,12 +881,6 @@ impl InMemoryLashlangArtifactStore {
 #[cfg(test)]
 #[async_trait::async_trait]
 impl ModuleArtifactStore for InMemoryLashlangArtifactStore {
-    fn pause_next_publication_for_testing(&self) -> Option<ArtifactPublicationPause> {
-        let pause = ArtifactPublicationPause::default();
-        *self.publication_pause.lock_recover() = Some(pause.clone());
-        Some(pause)
-    }
-
     async fn publish_module_artifact(
         &self,
         claim: &ReferrerClaim,
@@ -906,10 +891,6 @@ impl ModuleArtifactStore for InMemoryLashlangArtifactStore {
             return Err(ArtifactStoreError::Backend(
                 "invalid module reference".into(),
             ));
-        }
-        let publication_pause = self.publication_pause.lock_recover().take();
-        if let Some(pause) = publication_pause {
-            pause.pause().await;
         }
         let mut state = self.state.lock_recover();
         state.check_open(&claim.referrer())?;

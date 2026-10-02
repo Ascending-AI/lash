@@ -202,7 +202,6 @@ pub struct SqliteStore {
     decoded_graph_node_bodies: Arc<AtomicU64>,
     decoded_turn_receipt_bodies: Arc<AtomicU64>,
     clock: Arc<dyn lash_core_execution::Clock>,
-    artifact_publication_pause: Mutex<Option<lash_core_execution::ArtifactPublicationPause>>,
     options: StoreOptions,
     commit_count: AtomicU64,
     #[cfg(test)]

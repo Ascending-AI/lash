@@ -1,55 +1,59 @@
-//! Backend substrate faults for the simulator.
+//! Backend faults for the simulator, armed as a [`Script`] over the store
+//! (ADR 0044 §Simulation).
 //!
-//! One neutral fault vocabulary — [`BackendFaultKind`], [`BackendFaultPoint`],
-//! [`BackendFaultArm`], [`BackendFaultObservation`] — drives both real store
-//! injectors, so a single scenario plan runs against SQLite and PostgreSQL.
+//! An arm names one fault of `commit_runtime_state`: the call is refused
+//! before it enters the store, or the store commits and the reply is lost.
+//! The script sits at the store trait, so the same arm faults the same call
+//! of the same operation on every backend.
 
 use lash_sansio::SessionId;
 use std::collections::BTreeMap;
-use std::num::NonZeroU64;
 use std::sync::Arc;
 
+use lash_core::testing::{Outcome, Phase, Script, StoreOp};
 use lash_core::{
-    DeploymentStore, OperationId, RuntimeCommit, RuntimeSessionState, RuntimeStore,
-    SessionCreationHead, SessionPolicy, SessionRelation, SessionStoreCreateRequest, StoreError,
+    DeploymentStore, OperationId, RuntimeCommit, RuntimeSessionState, SessionCreationHead,
+    SessionPolicy, SessionRelation, SessionStoreCreateRequest, StoreError,
 };
-use lash_postgres_store::testing::{PostgresFaultArm, PostgresFaultInjector, PostgresFaultPoint};
-use lash_sqlite_store::testing::{SqliteFaultArm, SqliteFaultInjector, SqliteFaultPoint};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::runner::FixedScriptRunnerError;
 use crate::scheduler::BoundaryEvent;
 
+/// The operation every backend fault arms.
+pub const FAULTED_OPERATION: StoreOp = StoreOp::commit_runtime_state;
+
+/// What the script that injects every backend fault is.
+pub const FAULT_SCRIPT_IMPLEMENTATION: &str = "lash_core::testing::Script";
+
+/// The actor the faulted commits run as in the script's trace.
+const FAULTED_ACTOR: &str = "lash-sim";
+
 /// Which real store backend a fault plan is driving.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BackendFaultKind {
+    SqliteMemory,
     Sqlite,
     Postgres,
 }
 
 impl BackendFaultKind {
-    pub const ALL: [Self; 2] = [Self::Sqlite, Self::Postgres];
+    pub const ALL: [Self; 3] = [Self::SqliteMemory, Self::Sqlite, Self::Postgres];
 
     pub const fn name(self) -> &'static str {
         match self {
+            Self::SqliteMemory => "sqlite-memory",
             Self::Sqlite => "sqlite",
             Self::Postgres => "postgres",
-        }
-    }
-
-    pub const fn injector_implementation(self) -> &'static str {
-        match self {
-            Self::Sqlite => "lash_sqlite_store::testing::SqliteFaultInjector",
-            Self::Postgres => "lash_postgres_store::testing::PostgresFaultInjector",
         }
     }
 
     /// Name of the JSON report this backend's profile writes.
     pub const fn report_file_name(self) -> &'static str {
         match self {
-            Self::Sqlite => "sqlite-faults.json",
+            Self::SqliteMemory | Self::Sqlite => "sqlite-faults.json",
             Self::Postgres => "postgres-faults.json",
         }
     }
@@ -57,200 +61,158 @@ impl BackendFaultKind {
     /// The `lash-sim backend-faults` argument that selects this backend.
     pub const fn replay_backend_argument(self) -> &'static str {
         match self {
+            Self::SqliteMemory => "--backend sqlite-memory",
             Self::Sqlite => "--backend sqlite",
             Self::Postgres => "--backend postgres",
         }
     }
 
     pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "sqlite" => Some(Self::Sqlite),
-            "postgres" => Some(Self::Postgres),
-            _ => None,
-        }
+        Self::ALL.into_iter().find(|kind| kind.name() == value)
     }
 }
 
-/// Transaction boundary at which one armed fault is injected, in either backend.
+/// One fault of a `commit_runtime_state` call, as the script injects it.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum BackendFaultPoint {
-    AfterBegin,
-    BeforeCommit,
-    CommitIo,
+pub enum BackendFault {
+    /// The caller is answered a storage failure before the call enters the
+    /// store: nothing the call carried is durable.
+    Refused,
+    /// The store commits and the caller is answered a storage failure in
+    /// place of the reply: the commit stands.
+    ReplyLost,
 }
 
-impl BackendFaultPoint {
+impl BackendFault {
     pub const fn name(self) -> &'static str {
         match self {
-            Self::AfterBegin => "after_begin",
-            Self::BeforeCommit => "before_commit",
-            Self::CommitIo => "commit_io",
+            Self::Refused => "refused",
+            Self::ReplyLost => "reply_lost",
         }
     }
 
-    const fn sqlite(self) -> SqliteFaultPoint {
-        match self {
-            Self::AfterBegin => SqliteFaultPoint::AfterBegin,
-            Self::BeforeCommit => SqliteFaultPoint::BeforeCommit,
-            Self::CommitIo => SqliteFaultPoint::CommitIo,
-        }
+    /// Whether the faulted call's work is durable.
+    pub const fn commit_stands(self) -> bool {
+        matches!(self, Self::ReplyLost)
     }
 
-    const fn postgres(self) -> PostgresFaultPoint {
-        match self {
-            Self::AfterBegin => PostgresFaultPoint::AfterBegin,
-            Self::BeforeCommit => PostgresFaultPoint::BeforeCommit,
-            Self::CommitIo => PostgresFaultPoint::CommitIo,
-        }
-    }
-
-    const fn from_sqlite(point: SqliteFaultPoint) -> Self {
-        match point {
-            SqliteFaultPoint::AfterBegin | SqliteFaultPoint::AfterFence => Self::AfterBegin,
-            SqliteFaultPoint::BeforeCommit => Self::BeforeCommit,
-            SqliteFaultPoint::CommitIo => Self::CommitIo,
-        }
-    }
-
-    const fn from_postgres(point: PostgresFaultPoint) -> Self {
-        match point {
-            PostgresFaultPoint::AfterBegin => Self::AfterBegin,
-            PostgresFaultPoint::BeforeCommit => Self::BeforeCommit,
-            PostgresFaultPoint::CommitIo => Self::CommitIo,
+    const fn of_phase(phase: Phase) -> Self {
+        match phase {
+            Phase::Before => Self::Refused,
+            Phase::After => Self::ReplyLost,
         }
     }
 }
 
-/// One deterministic one-shot arm in a backend fault plan.
+/// One deterministic one-shot arm in a backend fault plan. `seed` is the
+/// arm's identity in reports and in the refusal it answers.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct BackendFaultArm {
     pub seed: u64,
-    pub point: BackendFaultPoint,
-    pub occurrence: NonZeroU64,
+    pub fault: BackendFault,
 }
 
 impl BackendFaultArm {
-    pub const fn new(seed: u64, point: BackendFaultPoint, occurrence: NonZeroU64) -> Self {
-        Self {
-            seed,
-            point,
-            occurrence,
-        }
-    }
-
-    const fn sqlite(self) -> SqliteFaultArm {
-        SqliteFaultArm::new(self.seed, self.point.sqlite(), self.occurrence)
-    }
-
-    const fn postgres(self) -> PostgresFaultArm {
-        PostgresFaultArm::new(self.seed, self.point.postgres(), self.occurrence)
+    pub const fn new(seed: u64, fault: BackendFault) -> Self {
+        Self { seed, fault }
     }
 }
 
-/// Evidence that an armed fault reached a real store's transaction seam.
+/// Evidence that an arm faulted a call: the call as the script's trace
+/// recorded it.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct BackendFaultObservation {
     pub arm_index: usize,
     pub seed: u64,
-    pub point: BackendFaultPoint,
-    pub point_occurrence: u64,
-    pub write_transaction_ordinal: u64,
+    pub fault: BackendFault,
+    pub operation: String,
+    /// The faulted call's one-based position among the script's calls of
+    /// `operation`.
+    pub call: u64,
 }
 
-/// The real fault injector of one backend, behind the neutral vocabulary.
-#[derive(Clone, Debug)]
-pub enum BackendFaultInjector {
-    Sqlite(SqliteFaultInjector),
-    Postgres(PostgresFaultInjector),
+/// A store under a plan of arms: the kth arm faults the kth
+/// `commit_runtime_state` made through [`Self::store`].
+///
+/// Dropping it fails the run when an arm never fired, as a [`Script`] does.
+pub struct BackendFaultScript {
+    script: Script,
+    arms: Vec<BackendFaultArm>,
+    store: Arc<dyn DeploymentStore>,
 }
 
-impl BackendFaultInjector {
-    pub fn kind(&self) -> BackendFaultKind {
-        match self {
-            Self::Sqlite(_) => BackendFaultKind::Sqlite,
-            Self::Postgres(_) => BackendFaultKind::Postgres,
-        }
-    }
-
-    pub fn arm(&self, seed: u64, point: BackendFaultPoint) {
-        match self {
-            Self::Sqlite(injector) => injector.arm(seed, point.sqlite()),
-            Self::Postgres(injector) => injector.arm(seed, point.postgres()),
-        }
-    }
-
-    pub fn arm_many(&self, arms: impl IntoIterator<Item = BackendFaultArm>) {
-        match self {
-            Self::Sqlite(injector) => {
-                injector.arm_many(arms.into_iter().map(BackendFaultArm::sqlite))
-            }
-            Self::Postgres(injector) => {
-                injector.arm_many(arms.into_iter().map(BackendFaultArm::postgres));
+impl BackendFaultScript {
+    pub fn arm(
+        inner: Arc<dyn DeploymentStore>,
+        arms: impl IntoIterator<Item = BackendFaultArm>,
+    ) -> Self {
+        let script = Script::new();
+        let arms = arms.into_iter().collect::<Vec<_>>();
+        for (index, arm) in arms.iter().enumerate() {
+            let rule = script.on(FAULTED_OPERATION).nth(index + 1);
+            match arm.fault {
+                BackendFault::Refused => {
+                    let seed = arm.seed;
+                    rule.before().fail(move || StoreError::StorageFailure {
+                        backend: "lash-sim",
+                        message: format!(
+                            "arm {seed} refused the commit before it entered the store"
+                        ),
+                    });
+                }
+                BackendFault::ReplyLost => rule.after().lose_reply(),
             }
         }
-    }
-
-    pub fn remaining_arms(&self) -> Vec<BackendFaultArm> {
-        match self {
-            Self::Sqlite(injector) => injector
-                .remaining_arms()
-                .into_iter()
-                .map(|arm| {
-                    BackendFaultArm::new(
-                        arm.seed,
-                        BackendFaultPoint::from_sqlite(arm.point),
-                        arm.occurrence,
-                    )
-                })
-                .collect(),
-            Self::Postgres(injector) => injector
-                .remaining_arms()
-                .into_iter()
-                .map(|arm| {
-                    BackendFaultArm::new(
-                        arm.seed,
-                        BackendFaultPoint::from_postgres(arm.point),
-                        arm.occurrence,
-                    )
-                })
-                .collect(),
+        let store = script.wrap(FAULTED_ACTOR, inner) as Arc<dyn DeploymentStore>;
+        Self {
+            script,
+            arms,
+            store,
         }
     }
 
+    /// The store whose commits the arms fault.
+    pub fn store(&self) -> Arc<dyn DeploymentStore> {
+        Arc::clone(&self.store)
+    }
+
+    /// Every phase of every call made through [`Self::store`], rendered as
+    /// the script's trace prints it.
+    pub fn trace(&self) -> Vec<String> {
+        self.script
+            .trace()
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    /// Every call an arm faulted so far, in the order they happened.
     pub fn observations(&self) -> Vec<BackendFaultObservation> {
-        match self {
-            Self::Sqlite(injector) => injector
-                .observations()
-                .into_iter()
-                .map(|observation| BackendFaultObservation {
-                    arm_index: observation.arm_index,
-                    seed: observation.seed,
-                    point: BackendFaultPoint::from_sqlite(observation.point),
-                    point_occurrence: observation.point_occurrence,
-                    write_transaction_ordinal: observation.write_transaction_ordinal,
+        self.script
+            .trace()
+            .into_iter()
+            .filter(|call| matches!(call.outcome, Outcome::Failed(_)))
+            .filter_map(|call| {
+                let arm_index = call.nth.checked_sub(1)?;
+                let arm = self.arms.get(arm_index)?;
+                Some(BackendFaultObservation {
+                    arm_index,
+                    seed: arm.seed,
+                    fault: BackendFault::of_phase(call.phase),
+                    operation: call.op.name().to_string(),
+                    call: call.nth as u64,
                 })
-                .collect(),
-            Self::Postgres(injector) => injector
-                .observations()
-                .into_iter()
-                .map(|observation| BackendFaultObservation {
-                    arm_index: observation.arm_index,
-                    seed: observation.seed,
-                    point: BackendFaultPoint::from_postgres(observation.point),
-                    point_occurrence: observation.point_occurrence,
-                    write_transaction_ordinal: observation.write_transaction_ordinal,
-                })
-                .collect(),
-        }
+            })
+            .collect()
     }
 }
 
 /// One backend lane a fault profile runs against.
 ///
-/// The SQLite lane needs nothing beyond a directory per case. The Postgres
-/// lane owns one throwaway database created from `LASH_POSTGRES_DATABASE_URL`
-/// and dropped with the lane, so concurrent suites that truncate the shared
+/// The SQLite lanes need nothing beyond a store per case. The Postgres lane
+/// owns one throwaway database created from `LASH_POSTGRES_DATABASE_URL` and
+/// dropped with the lane, so concurrent suites that truncate the shared
 /// database cannot delete a scenario's durable prefix mid-run.
 pub struct BackendFaultLane {
     kind: BackendFaultKind,
@@ -267,7 +229,7 @@ impl BackendFaultLane {
     /// An explicitly selected PostgreSQL lane requires a non-empty database URL.
     pub async fn open(kind: BackendFaultKind) -> Result<Option<Self>, String> {
         match kind {
-            BackendFaultKind::Sqlite => Ok(Some(Self {
+            BackendFaultKind::SqliteMemory | BackendFaultKind::Sqlite => Ok(Some(Self {
                 kind,
                 postgres: None,
             })),
@@ -294,52 +256,46 @@ impl BackendFaultLane {
         self.kind
     }
 
-    /// A fresh store factory armed with its own fault injector.
+    /// A fresh store of this lane's backend, as production opens it.
     ///
-    /// `case_root` is only used by the SQLite lane, whose database is a file.
+    /// `case_root` is only used by the SQLite file lane.
     #[expect(
         clippy::expect_used,
         reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
     )]
-    pub async fn armed_factory(
+    pub async fn store(
         &self,
         case_root: &std::path::Path,
-    ) -> Result<(Arc<dyn DeploymentStore>, BackendFaultInjector), String> {
+    ) -> Result<Arc<dyn DeploymentStore>, String> {
         match self.kind {
-            BackendFaultKind::Sqlite => {
-                let injector = SqliteFaultInjector::default();
-                let factory: Arc<dyn DeploymentStore> = Arc::new(
-                    lash_sqlite_store::SqliteStore::open_with_fault_injector_for_testing(
-                        &case_root.join("store"),
-                        injector.clone(),
-                    )
+            BackendFaultKind::SqliteMemory => Ok(lash_sqlite_store::SqliteStoreSet::memory()
+                .await
+                .map_err(|error| format!("open SQLite memory fault store: {error}"))?
+                .session_store_factory()),
+            BackendFaultKind::Sqlite => Ok(Arc::new(
+                lash_sqlite_store::SqliteStore::open(&case_root.join("store"))
                     .await
                     .map_err(|error| format!("open SQLite fault store: {error}"))?,
-                );
-                Ok((factory, BackendFaultInjector::Sqlite(injector)))
-            }
+            )),
             BackendFaultKind::Postgres => {
                 let lane = self
                     .postgres
                     .as_ref()
                     .expect("a PostgreSQL lane always opens its database");
-                let injector = PostgresFaultInjector::default();
-                let factory: Arc<dyn DeploymentStore> = Arc::new(
-                    lash_postgres_store::PostgresStore::new(&lane.storage)
-                        .with_fault_injector(injector.clone()),
-                );
-                Ok((factory, BackendFaultInjector::Postgres(injector)))
+                Ok(Arc::new(lash_postgres_store::PostgresStore::new(
+                    &lane.storage,
+                )))
             }
         }
     }
 }
 
+/// The generated runner's backend-failure boundary: one fresh SQLite memory
+/// session per boundary, whose one commit a one-arm script faults.
 pub(crate) struct GeneratedBackendFaultHarness {
     attempts_by_session_operation: BTreeMap<(String, String), usize>,
-    _root: tempfile::TempDir,
     factory: tokio::sync::OnceCell<Arc<dyn DeploymentStore>>,
-    injector: SqliteFaultInjector,
-    injector_enabled: bool,
+    script_armed: bool,
 }
 
 impl Default for GeneratedBackendFaultHarness {
@@ -349,25 +305,17 @@ impl Default for GeneratedBackendFaultHarness {
 }
 
 impl GeneratedBackendFaultHarness {
-    #[expect(
-        clippy::expect_used,
-        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-    )]
-    fn new(injector_enabled: bool) -> Self {
-        let root = tempfile::tempdir().expect("create generated SQLite fault root");
-        let injector = SqliteFaultInjector::default();
+    fn new(script_armed: bool) -> Self {
         Self {
             attempts_by_session_operation: BTreeMap::new(),
-            _root: root,
             factory: tokio::sync::OnceCell::new(),
-            injector,
-            injector_enabled,
+            script_armed,
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn with_injector_enabled(injector_enabled: bool) -> Self {
-        Self::new(injector_enabled)
+    pub(crate) fn with_script_armed(script_armed: bool) -> Self {
+        Self::new(script_armed)
     }
 
     pub(crate) async fn inject(
@@ -386,16 +334,11 @@ impl GeneratedBackendFaultHarness {
             .or_insert(0);
         *attempts += 1;
         let attempt = *attempts;
-        let point: BackendFaultPoint = serde_json::from_value(
-            event
-                .payload
-                .get("fault_point")
-                .cloned()
-                .unwrap_or(Value::Null),
-        )
-        .map_err(|error| {
-            FixedScriptRunnerError::Assertion(format!("backend fault point: {error}"))
-        })?;
+        let fault: BackendFault =
+            serde_json::from_value(event.payload.get("fault").cloned().unwrap_or(Value::Null))
+                .map_err(|error| {
+                    FixedScriptRunnerError::Assertion(format!("backend fault: {error}"))
+                })?;
         let seed = event.at ^ ((attempt as u64) << 32) ^ 0x4649_4731_3135_3300;
         let session_id = SessionId::from(format!(
             "sim-fault-{}",
@@ -411,7 +354,7 @@ impl GeneratedBackendFaultHarness {
                 })
                 .collect::<String>()
         ));
-        let store = self.create_store(&session_id).await?;
+        let factory = self.create_session(&session_id).await?;
         let state = RuntimeSessionState {
             session_id: session_id.clone(),
             ..RuntimeSessionState::new(SessionPolicy::new(
@@ -426,18 +369,17 @@ impl GeneratedBackendFaultHarness {
                 "final",
             ))
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-        let observations_before = self.injector.observations().len();
-        if self.injector_enabled {
-            self.injector.arm(seed, point.sqlite());
-        }
-        let result = store.commit_runtime_state(commit).await;
-        let observations = self.injector.observations();
-        let injected = observations.get(observations_before).cloned();
+        let arms = self
+            .script_armed
+            .then_some(BackendFaultArm::new(seed, fault));
+        let script = BackendFaultScript::arm(factory, arms);
+        let result = script.store().commit_runtime_state(commit).await;
+        let injected = script.observations().into_iter().next();
 
-        if !self.injector_enabled {
+        if !self.script_armed {
             let result = result.map_err(|err| {
                 FixedScriptRunnerError::Runtime(format!(
-                    "uninjected SQLite backend probe failed unexpectedly: {err}"
+                    "unscripted SQLite backend probe failed unexpectedly: {err}"
                 ))
             })?;
             return Ok(json!({
@@ -446,9 +388,9 @@ impl GeneratedBackendFaultHarness {
                 "operation": operation,
                 "commit_succeeded": true,
                 "head_revision": result.head_revision,
-                "fault_injector": {
-                    "enabled": false,
-                    "exercised": false,
+                "fault_script": {
+                    "armed": false,
+                    "fired": false,
                 },
             }));
         }
@@ -457,20 +399,20 @@ impl GeneratedBackendFaultHarness {
             Err(error @ StoreError::StorageFailure { .. }) => error,
             Err(other) => {
                 return Err(FixedScriptRunnerError::Assertion(format!(
-                    "SQLite fault `{}` returned non-storage error {other:?}",
+                    "backend fault `{}` returned non-storage error {other:?}",
                     event.boundary_id
                 )));
             }
             Ok(result) => {
                 return Err(FixedScriptRunnerError::Assertion(format!(
-                    "SQLite fault `{}` unexpectedly committed revision {}",
+                    "backend fault `{}` unexpectedly answered revision {}",
                     event.boundary_id, result.head_revision
                 )));
             }
         };
         let injected = injected.ok_or_else(|| {
             FixedScriptRunnerError::Assertion(format!(
-                "SQLite fault `{}` did not reach the armed injector",
+                "backend fault `{}` did not reach the armed script",
                 event.boundary_id
             ))
         })?;
@@ -480,31 +422,29 @@ impl GeneratedBackendFaultHarness {
             attempt,
             &error,
         );
-        observation["fault_injector"] = json!({
-            "enabled": true,
-            "exercised": true,
-            "implementation": "lash_sqlite_store::testing::SqliteFaultInjector",
+        observation["fault_script"] = json!({
+            "armed": true,
+            "fired": true,
+            "implementation": FAULT_SCRIPT_IMPLEMENTATION,
             "seed": injected.seed,
-            "point": injected.point,
-            "write_transaction_ordinal": injected.write_transaction_ordinal,
+            "fault": injected.fault,
+            "store_operation": injected.operation,
+            "call": injected.call,
         });
         Ok(observation)
     }
 
-    async fn create_store(
+    async fn create_session(
         &self,
         session_id: &SessionId,
-    ) -> Result<Arc<dyn RuntimeStore>, FixedScriptRunnerError> {
+    ) -> Result<Arc<dyn DeploymentStore>, FixedScriptRunnerError> {
         let factory = self
             .factory
             .get_or_try_init(|| async {
-                let store = lash_sqlite_store::SqliteStore::open_with_fault_injector_for_testing(
-                    &self._root.path().join("store"),
-                    self.injector.clone(),
-                )
-                .await
-                .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?;
-                let factory: Arc<dyn DeploymentStore> = Arc::new(store);
+                let stores = lash_sqlite_store::SqliteStoreSet::memory()
+                    .await
+                    .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?;
+                let factory: Arc<dyn DeploymentStore> = stores.session_store_factory();
                 Ok::<_, FixedScriptRunnerError>(factory)
             })
             .await?;
@@ -523,8 +463,7 @@ impl GeneratedBackendFaultHarness {
             })
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-        let store: Arc<dyn RuntimeStore> = factory.clone();
-        Ok(store)
+        Ok(Arc::clone(factory))
     }
 }
 
@@ -553,7 +492,7 @@ mod tests {
             json!({
                 "session": session,
                 "operation": "commit_runtime_state:001",
-                "fault_point": if retryable { BackendFaultPoint::AfterBegin } else { BackendFaultPoint::CommitIo },
+                "fault": if retryable { BackendFault::Refused } else { BackendFault::ReplyLost },
             }),
         )
     }
@@ -574,12 +513,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fig_4679_commit_io_uses_the_returned_store_error_class() {
+    async fn fig_4679_a_lost_reply_uses_the_returned_store_error_class() {
         let mut harness = GeneratedBackendFaultHarness::default();
         let observed = harness
             .inject(&event("classification", false, 1))
             .await
-            .expect("injected commit I/O fault");
+            .expect("injected lost reply");
         assert_eq!(
             observed["production_store_error"]["variant"],
             "StorageFailure"
@@ -592,11 +531,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn backend_failure_observation_depends_on_real_sqlite_injector() {
+    async fn backend_failure_observation_depends_on_the_armed_script() {
         let retry = event("session-001:backend-failure:001", true, 1);
         let terminal = event("session-001:backend-failure:002", false, 2);
 
-        let mut enabled = GeneratedBackendFaultHarness::with_injector_enabled(true);
+        let mut enabled = GeneratedBackendFaultHarness::with_script_armed(true);
         let enabled_events = vec![
             delivered(
                 &retry,
@@ -615,12 +554,12 @@ mod tests {
         assert!(enabled_events.iter().all(|event| {
             event
                 .observed
-                .pointer("/fault_injector/exercised")
+                .pointer("/fault_script/fired")
                 .and_then(Value::as_bool)
                 == Some(true)
         }));
 
-        let mut disabled = GeneratedBackendFaultHarness::with_injector_enabled(false);
+        let mut disabled = GeneratedBackendFaultHarness::with_script_armed(false);
         let disabled_events = vec![
             delivered(
                 &retry,
@@ -649,7 +588,7 @@ mod tests {
         let enabled_verdict = backend_failure_observed(&enabled_model.summary(), &enabled_events);
         assert!(
             enabled_verdict.is_passed(),
-            "real injector observations must satisfy the backend oracle: {}",
+            "scripted fault observations must satisfy the backend oracle: {}",
             enabled_verdict.message
         );
         assert_eq!(enabled_verdict.oracle_id, BACKEND_FAILURE_ORACLE);
@@ -663,7 +602,7 @@ mod tests {
             backend_failure_observed(&disabled_model.summary(), &disabled_events);
         assert!(
             !disabled_verdict.is_passed(),
-            "disabling the injector must change the oracle result"
+            "leaving the script unarmed must change the oracle result"
         );
     }
 
@@ -714,7 +653,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn generated_backend_failure_seed_records_real_injector_evidence() {
+    async fn generated_backend_failure_seed_records_script_evidence() {
         let workload = crate::generator::generate_workload(5, "fast-random", 24)
             .expect("seeded generated workload");
         let trace = crate::runner::run_generated_workload_for_fixture(workload, "bundle")
@@ -729,7 +668,7 @@ mod tests {
         assert!(backend_events.iter().all(|event| {
             event
                 .observed
-                .pointer("/fault_injector/exercised")
+                .pointer("/fault_script/fired")
                 .and_then(Value::as_bool)
                 == Some(true)
         }));
@@ -745,6 +684,6 @@ mod tests {
         );
         assert!(trace.oracle.is_passed(), "{}", trace.oracle.message);
         crate::replay::replay_trace(std::path::Path::new("generated-seed-5.json"), &trace)
-            .expect("model replay carries the recorded real injector observation");
+            .expect("model replay carries the recorded script observation");
     }
 }

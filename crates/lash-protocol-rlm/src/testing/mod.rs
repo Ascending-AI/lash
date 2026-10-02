@@ -185,10 +185,6 @@ impl TestModuleStore {
 
 #[async_trait::async_trait]
 impl lash_core::ModuleArtifactStore for TestModuleStore {
-    fn pause_next_publication_for_testing(&self) -> Option<lash_core::ArtifactPublicationPause> {
-        self.current().pause_next_publication_for_testing()
-    }
-
     fn durability_tier(&self) -> lash_core::DurabilityTier {
         self.current().durability_tier()
     }

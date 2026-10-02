@@ -145,30 +145,6 @@ impl SqliteStore {
         Ok(store)
     }
 
-    /// Open a durable-core catalog under `root` with deterministic write faults.
-    #[cfg(feature = "testing")]
-    pub async fn open_with_fault_injector_for_testing(
-        root: &Path,
-        injector: crate::testing::SqliteFaultInjector,
-    ) -> tokio_rusqlite::Result<Self> {
-        let constructor = "SqliteStore::open_with_fault_injector_for_testing";
-        let location = crate::backend::file_location(root, constructor)?;
-        let identity: Arc<str> = location.identity().into();
-        let core =
-            DatabaseLocation::in_backend(&location, &identity, SqliteDatabase::DurableCore, None);
-        let store = Self::open_at(
-            &core,
-            StoreOptions::default(),
-            Arc::new(lash_core_execution::facade_support::SystemClock),
-            None,
-            None,
-            lash_core_execution::FleetFormat::writable(),
-            Some(injector),
-        )
-        .await?;
-        Ok(store)
-    }
-
     /// Open the durable-core database admitting `writable` as the opening
     /// build's fleet-format writable range.
     ///
@@ -212,15 +188,12 @@ impl SqliteStore {
         process_registry: Option<&DatabaseTarget>,
         turn_cancel_closure_owner: Option<std::sync::Weak<dyn lash_core_execution::EffectHost>>,
         writable: lash_core_execution::compat::VersionRange,
-        #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
+        #[cfg(feature = "testing")] pauses: Option<crate::testing::SqlitePauses>,
     ) -> tokio_rusqlite::Result<Self> {
         #[cfg(feature = "testing")]
-        let conn = SqliteConnection::open_with_fault_injector(
-            core.target(),
-            options.connection_policy,
-            fault_injector,
-        )
-        .await?;
+        let conn =
+            SqliteConnection::open_with_pauses(core.target(), options.connection_policy, pauses)
+                .await?;
         #[cfg(not(feature = "testing"))]
         let conn =
             SqliteConnection::open_with_policy(core.target(), options.connection_policy).await?;
@@ -247,7 +220,6 @@ impl SqliteStore {
             decoded_graph_node_bodies: Arc::new(AtomicU64::new(0)),
             decoded_turn_receipt_bodies: Arc::new(AtomicU64::new(0)),
             clock,
-            artifact_publication_pause: Mutex::new(None),
             options,
             commit_count: AtomicU64::new(commit_count_entropy_seed()),
             #[cfg(test)]
@@ -276,7 +248,6 @@ impl SqliteStore {
             decoded_graph_node_bodies: Arc::new(AtomicU64::new(0)),
             decoded_turn_receipt_bodies: Arc::new(AtomicU64::new(0)),
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
-            artifact_publication_pause: Mutex::new(None),
             options: StoreOptions::default(),
             commit_count: AtomicU64::new(commit_count_entropy_seed()),
             #[cfg(test)]

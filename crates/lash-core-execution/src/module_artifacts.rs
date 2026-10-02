@@ -9,9 +9,6 @@
 //! port, and the artifacts an RLM session writes live in the storage that
 //! reopens the session.
 
-use std::sync::{Arc, Mutex};
-
-use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -199,14 +196,6 @@ fn module_artifact_refused(refusal: ModuleArtifactRefusal) -> crate::PluginError
 /// different bytes under a published reference is refused.
 #[async_trait::async_trait]
 pub trait ModuleArtifactStore: Send + Sync {
-    /// Arm a one-shot conformance pause immediately before this store's
-    /// publication serialization point. Production callers never use this
-    /// diagnostic seam; stores that participate in referrer conformance
-    /// return a handle and pause their next publish until it is resumed.
-    fn pause_next_publication_for_testing(&self) -> Option<ArtifactPublicationPause> {
-        None
-    }
-
     /// Durability tier this artifact store provides; defaults to [`DurabilityTier::Inline`].
     fn durability_tier(&self) -> DurabilityTier {
         DurabilityTier::Inline
@@ -246,46 +235,4 @@ pub trait ModuleArtifactStore: Send + Sync {
         &self,
         module_ref: &str,
     ) -> Result<Option<Vec<u8>>, ArtifactStoreError>;
-}
-
-/// A one-shot pause at a store's publication serialization point, armed by
-/// [`ModuleArtifactStore::pause_next_publication_for_testing`].
-#[derive(Clone, Default)]
-pub struct ArtifactPublicationPause {
-    state: Arc<Mutex<ArtifactPublicationPauseState>>,
-}
-
-#[derive(Default)]
-struct ArtifactPublicationPauseState {
-    reached: bool,
-    resumed: bool,
-    writer_waker: Option<std::task::Waker>,
-}
-
-impl ArtifactPublicationPause {
-    pub fn is_reached(&self) -> bool {
-        self.state.lock_recover().reached
-    }
-
-    pub fn resume(&self) {
-        let mut state = self.state.lock_recover();
-        state.resumed = true;
-        if let Some(waker) = state.writer_waker.take() {
-            waker.wake();
-        }
-    }
-
-    pub async fn pause(&self) {
-        std::future::poll_fn(|context| {
-            let mut state = self.state.lock_recover();
-            state.reached = true;
-            if state.resumed {
-                std::task::Poll::Ready(())
-            } else {
-                state.writer_waker = Some(context.waker().clone());
-                std::task::Poll::Pending
-            }
-        })
-        .await
-    }
 }

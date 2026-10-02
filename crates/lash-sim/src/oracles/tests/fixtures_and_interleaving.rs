@@ -320,7 +320,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             BoundaryKind::BackendFailure,
             json!({
                 "operation": "commit_runtime_state:001",
-                "fault_point": "after_begin",
+                "fault": "refused",
                 "runtime_completion": runtime_completion(RuntimeCompletionFamily::BackendRetryOrFailure, 15),
             }),
             json!({
@@ -331,7 +331,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
                                         "type": "lash_core::StoreError",
                     "variant": "StorageFailure"
                 },
-                "fault_injector": {"point": "after_begin", "exercised": true},
+                "fault_script": {"fault": "refused", "fired": true},
                 "transient": true
             }),
         ),
@@ -342,7 +342,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             BoundaryKind::BackendFailure,
             json!({
                 "operation": "commit_runtime_state:001",
-                "fault_point": "commit_io",
+                "fault": "reply_lost",
                 "runtime_completion": runtime_completion(RuntimeCompletionFamily::BackendRetryOrFailure, 16),
             }),
             json!({
@@ -353,7 +353,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
                                         "type": "lash_core::StoreError",
                     "variant": "StorageFailure"
                 },
-                "fault_injector": {"point": "commit_io", "exercised": true},
+                "fault_script": {"fault": "reply_lost", "fired": true},
                 "transient": true
             }),
         ),

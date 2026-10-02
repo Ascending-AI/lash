@@ -301,23 +301,17 @@ pub fn operational_coverage(
     {
         missing.push("durable effects");
     }
-    let backend_after_begin = events.iter().any(|event| {
-        event.kind == BoundaryKind::BackendFailure
-            && event
-                .payload
-                .get("fault_point")
-                .and_then(serde_json::Value::as_str)
-                == Some("after_begin")
-    });
-    let backend_commit_io = events.iter().any(|event| {
-        event.kind == BoundaryKind::BackendFailure
-            && event
-                .payload
-                .get("fault_point")
-                .and_then(serde_json::Value::as_str)
-                == Some("commit_io")
-    });
-    if !backend_after_begin || !backend_commit_io {
+    let backend_fault = |fault: &str| {
+        events.iter().any(|event| {
+            event.kind == BoundaryKind::BackendFailure
+                && event
+                    .payload
+                    .get("fault")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(fault)
+        })
+    };
+    if !backend_fault("refused") || !backend_fault("reply_lost") {
         missing.push("backend choices");
     }
     let backend_retry_attempt = events.iter().any(|event| {

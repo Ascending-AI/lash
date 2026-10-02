@@ -1,13 +1,10 @@
-//! Deterministic SQLite substrate faults for external test harnesses.
+//! SQLite inspection helpers and in-store pauses for external test harnesses.
 //!
 //! This module only exists behind the crate's `testing` feature. Production
-//! factories have no injector, and production builds do not compile the hook.
+//! factories arm no pause, and production builds do not compile the points.
 
 use lash_sansio::sync::{LockResultExt, MutexExt};
-use std::num::NonZeroU64;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-
-use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Condvar, Mutex};
 
 pub use crate::migration::{SqliteMigrationFault, SqliteMigrationHook, SqliteMigrationStep};
 
@@ -285,80 +282,6 @@ pub fn finalize_fleet_format(
     .map_err(crate::sqlite_error)
 }
 
-/// Transaction boundary at which one armed fault is injected.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SqliteFaultPoint {
-    /// Abort immediately after `BEGIN IMMEDIATE`, before the transaction body.
-    AfterBegin,
-    /// Abort, or pause, right after the writer fence (ADR 0115 §2.2), before
-    /// the transaction body: a paused writer holds the database's write lock
-    /// under the epoch its fence read.
-    AfterFence,
-    /// Abort after the transaction body, before SQLite is asked to commit.
-    BeforeCommit,
-    /// Surface `SQLITE_IOERR` at the commit boundary and roll the transaction back.
-    CommitIo,
-}
-
-impl SqliteFaultPoint {
-    const fn index(self) -> usize {
-        match self {
-            Self::AfterBegin => 0,
-            Self::AfterFence => 1,
-            Self::BeforeCommit => 2,
-            Self::CommitIo => 3,
-        }
-    }
-}
-
-/// One deterministic arm in a SQLite fault plan.
-///
-/// `occurrence` is one-based and counts only transactions that actually reach
-/// `point` after the plan is armed. An earlier fault can therefore prevent a
-/// later point from advancing until the next transaction attempt.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct SqliteFaultArm {
-    pub seed: u64,
-    pub point: SqliteFaultPoint,
-    pub occurrence: NonZeroU64,
-}
-
-impl SqliteFaultArm {
-    pub const fn new(seed: u64, point: SqliteFaultPoint, occurrence: NonZeroU64) -> Self {
-        Self {
-            seed,
-            point,
-            occurrence,
-        }
-    }
-}
-
-/// Evidence that an armed fault reached the real SQLite transaction seam.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct SqliteFaultObservation {
-    /// Zero-based position of this arm in the plan installed by `arm_many`.
-    pub arm_index: usize,
-    pub seed: u64,
-    pub point: SqliteFaultPoint,
-    /// One-based occurrence of `point` reached since the plan was armed.
-    pub point_occurrence: u64,
-    pub write_transaction_ordinal: u64,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct ArmedFault {
-    arm_index: usize,
-    arm: SqliteFaultArm,
-}
-
-#[derive(Clone, Debug)]
-struct ArmedPause {
-    point: SqliteFaultPoint,
-    remaining_matches: u64,
-    state: Arc<PauseState>,
-}
-
 #[derive(Debug, Default)]
 struct PauseState {
     state: Mutex<PauseProgress>,
@@ -367,67 +290,82 @@ struct PauseState {
 
 #[derive(Debug, Default)]
 struct PauseProgress {
-    reached_ordinal: Option<u64>,
+    reached: bool,
     released: bool,
 }
 
-/// One-shot deterministic pause at a real SQLite transaction boundary.
+impl PauseState {
+    /// Connection-thread side: mark the point reached and block until the
+    /// test releases it.
+    fn hold(&self) {
+        let mut progress = self.state.lock_recover();
+        progress.reached = true;
+        self.changed.notify_all();
+        while !progress.released {
+            progress = self.changed.wait(progress).recover();
+        }
+    }
+
+    fn release(&self) {
+        self.state.lock_recover().released = true;
+        self.changed.notify_all();
+    }
+}
+
+/// One-shot pause of a write transaction right after its writer fence
+/// (ADR 0115 §2.2), before the transaction body: the paused writer holds the
+/// database's write lock under the epoch its fence read.
 ///
-/// Tests use this to drop an awaiting future after tokio-rusqlite has accepted
-/// its closure but before the background connection thread commits it.
+/// The fence and the body are statements of one transaction on the
+/// connection thread, so no trait separates them; this is one of the in-store
+/// points ADR 0044 lists.
 #[derive(Clone, Debug)]
 pub struct SqliteTransactionPause {
     state: Arc<PauseState>,
 }
 
 impl SqliteTransactionPause {
-    /// Wait until the background SQLite thread reaches the armed boundary.
+    /// Wait until the background SQLite thread reaches the fence.
     /// Panic after ten seconds if no transaction reaches it.
-    pub async fn wait_until_reached(&self) -> u64 {
+    pub async fn wait_until_reached(&self) {
         self.wait_until_reached_for(std::time::Duration::from_secs(10))
-            .await
+            .await;
     }
 
     #[expect(
         clippy::expect_used,
-        reason = "test-harness helper: the loop only exits once `reached_ordinal` is `Some`, and a panicked waiter task must abort the test"
+        reason = "test-harness helper: a panicked waiter task must abort the test"
     )]
-    async fn wait_until_reached_for(&self, timeout: std::time::Duration) -> u64 {
+    async fn wait_until_reached_for(&self, timeout: std::time::Duration) {
         let state = Arc::clone(&self.state);
         tokio::task::spawn_blocking(move || {
             let progress = state.state.lock_recover();
             let (mut progress, _) = state
                 .changed
-                .wait_timeout_while(progress, timeout, |progress| {
-                    progress.reached_ordinal.is_none()
-                })
+                .wait_timeout_while(progress, timeout, |progress| !progress.reached)
                 .recover();
-            if progress.reached_ordinal.is_none() {
+            if !progress.reached {
                 progress.released = true;
                 state.changed.notify_all();
                 panic!("armed SQLite transaction pause was not reached within {timeout:?}");
             }
-            progress.reached_ordinal.expect("pause reached ordinal")
         })
         .await
-        .expect("SQLite pause waiter task")
+        .expect("SQLite pause waiter task");
     }
 
     /// Release the background SQLite transaction to continue to commit.
     pub fn release(&self) {
-        let mut progress = self.state.state.lock_recover();
-        progress.released = true;
-        self.state.changed.notify_all();
+        self.state.release();
     }
 }
 
 /// One-shot deterministic pause inside a read, between the statement that
 /// selects a parent row and the statement that hydrates its children.
 ///
-/// This is not a fault point: nothing is refused and no transaction is
-/// abandoned. The read simply waits inside its own snapshot while the test
-/// commits a competing write in that window, which is the only way to drive
-/// the window without load.
+/// Nothing is refused and no transaction is abandoned. The read simply waits
+/// inside its own snapshot while the test commits a competing write in that
+/// window, which is the only way to drive the window without load.
 #[derive(Clone, Debug)]
 pub struct SqliteReadPause {
     state: Arc<PauseState>,
@@ -439,7 +377,7 @@ impl SqliteReadPause {
         let state = Arc::clone(&self.state);
         let waited = tokio::task::spawn_blocking(move || {
             let mut progress = state.state.lock_recover();
-            while progress.reached_ordinal.is_none() {
+            while !progress.reached {
                 progress = state.changed.wait(progress).recover();
             }
         })
@@ -449,86 +387,32 @@ impl SqliteReadPause {
 
     /// Release the paused read so it finishes inside its snapshot.
     pub fn release(&self) {
-        let mut progress = self.state.state.lock_recover();
-        progress.released = true;
-        self.state.changed.notify_all();
+        self.state.release();
     }
 }
 
 #[derive(Debug, Default)]
-struct InjectorState {
-    armed: Vec<ArmedFault>,
-    point_occurrences: [u64; 4],
-    pause: Option<ArmedPause>,
-    read_pause: Option<Arc<PauseState>>,
-    process_event_page_read_pause: Option<Arc<PauseState>>,
-    write_transaction_ordinal: u64,
-    observations: Vec<SqliteFaultObservation>,
+struct ArmedPauses {
+    after_fence: Option<Arc<PauseState>>,
+    queued_work_hydration: Option<Arc<PauseState>>,
+    process_event_page_after_identity: Option<Arc<PauseState>>,
 }
 
-/// Per-factory deterministic fault controller.
-///
-/// Arming replaces every unconsumed arm. Each arm identifies a fault point and
-/// one reached occurrence, is consumed at most once, and records its plan
-/// position plus transaction ordinal for reproduction.
+/// The pauses a test arms inside one store's connection thread: the in-store
+/// points ADR 0044 lists for SQLite. Each holds a transaction or a read
+/// snapshot open at a point no trait seam reaches; none refuses a call or
+/// injects an error, which a law does with a `Script` over the store.
 #[derive(Clone, Debug, Default)]
-pub struct SqliteFaultInjector {
-    state: Arc<Mutex<InjectorState>>,
+pub struct SqlitePauses {
+    armed: Arc<Mutex<ArmedPauses>>,
 }
 
-impl SqliteFaultInjector {
-    /// This preserves the original replacement behavior: any unconsumed
-    /// single or multi-arm plan is discarded.
-    pub fn arm(&self, seed: u64, point: SqliteFaultPoint) {
-        self.arm_many([SqliteFaultArm::new(seed, point, NonZeroU64::MIN)]);
-    }
-
-    /// Replace the current plan with multiple deterministic one-shot arms.
-    ///
-    /// Occurrence counters start when this method is called. Observations retain
-    /// each arm's original plan position; their vector order follows execution.
-    pub fn arm_many(&self, arms: impl IntoIterator<Item = SqliteFaultArm>) {
-        let mut state = self.lock_state();
-        state.armed = arms
-            .into_iter()
-            .enumerate()
-            .map(|(arm_index, arm)| ArmedFault { arm_index, arm })
-            .collect();
-        state.point_occurrences = [0; 4];
-    }
-
-    pub fn remaining_arms(&self) -> Vec<SqliteFaultArm> {
-        self.lock_state()
-            .armed
-            .iter()
-            .map(|armed| armed.arm)
-            .collect()
-    }
-
-    /// Return all injection observations recorded so far.
-    pub fn observations(&self) -> Vec<SqliteFaultObservation> {
-        self.lock_state().observations.clone()
-    }
-
-    /// Pause the next transaction reaching `point` until the returned handle
-    /// is released.
-    pub fn pause(&self, point: SqliteFaultPoint) -> SqliteTransactionPause {
-        self.pause_after(point, 0)
-    }
-
-    /// Pause after `preceding_matches` earlier transactions pass the same
-    /// boundary. This targets a later write in a multi-transaction operation.
-    pub fn pause_after(
-        &self,
-        point: SqliteFaultPoint,
-        preceding_matches: u64,
-    ) -> SqliteTransactionPause {
+impl SqlitePauses {
+    /// Pause the next write transaction after its writer fence until the
+    /// returned handle is released.
+    pub fn pause_after_fence(&self) -> SqliteTransactionPause {
         let state = Arc::new(PauseState::default());
-        self.lock_state().pause = Some(ArmedPause {
-            point,
-            remaining_matches: preceding_matches,
-            state: Arc::clone(&state),
-        });
+        self.armed.lock_recover().after_fence = Some(Arc::clone(&state));
         SqliteTransactionPause { state }
     }
 
@@ -536,7 +420,7 @@ impl SqliteFaultInjector {
     /// their payloads, until the returned handle is released.
     pub fn pause_queued_work_hydration(&self) -> SqliteReadPause {
         let state = Arc::new(PauseState::default());
-        self.lock_state().read_pause = Some(Arc::clone(&state));
+        self.armed.lock_recover().queued_work_hydration = Some(Arc::clone(&state));
         SqliteReadPause { state }
     }
 
@@ -544,123 +428,48 @@ impl SqliteFaultInjector {
     /// and event query.
     pub fn pause_process_event_page_after_identity(&self) -> SqliteReadPause {
         let state = Arc::new(PauseState::default());
-        self.lock_state().process_event_page_read_pause = Some(Arc::clone(&state));
+        self.armed.lock_recover().process_event_page_after_identity = Some(Arc::clone(&state));
         SqliteReadPause { state }
+    }
+
+    /// Reach the writer fence of a write transaction, blocking the connection
+    /// thread while a pause armed by `pause_after_fence` is outstanding.
+    pub(crate) fn reach_after_fence(&self) {
+        let armed = self.armed.lock_recover().after_fence.take();
+        if let Some(pause) = armed {
+            pause.hold();
+        }
     }
 
     /// Reach the queued-work hydration seam, blocking the connection thread
     /// while a pause armed by `pause_queued_work_hydration` is outstanding.
     pub(crate) fn reach_queued_work_hydration(&self) {
-        let Some(pause) = self.lock_state().read_pause.take() else {
-            return;
-        };
-        let mut progress = pause.state.lock_recover();
-        progress.reached_ordinal = Some(0);
-        pause.changed.notify_all();
-        while !progress.released {
-            progress = pause.changed.wait(progress).recover();
+        let armed = self.armed.lock_recover().queued_work_hydration.take();
+        if let Some(pause) = armed {
+            pause.hold();
         }
     }
 
     pub(crate) fn reach_process_event_page_after_identity(&self) {
-        let Some(pause) = self.lock_state().process_event_page_read_pause.take() else {
-            return;
-        };
-        let mut progress = pause.state.lock_recover();
-        progress.reached_ordinal = Some(0);
-        pause.changed.notify_all();
-        while !progress.released {
-            progress = pause.changed.wait(progress).recover();
+        let armed = self
+            .armed
+            .lock_recover()
+            .process_event_page_after_identity
+            .take();
+        if let Some(pause) = armed {
+            pause.hold();
         }
-    }
-
-    pub(crate) fn begin_write(&self) -> u64 {
-        let mut state = self.lock_state();
-        state.write_transaction_ordinal += 1;
-        state.write_transaction_ordinal
-    }
-
-    pub(crate) fn inject(
-        &self,
-        point: SqliteFaultPoint,
-        write_transaction_ordinal: u64,
-    ) -> rusqlite::Result<()> {
-        let pause = {
-            let mut state = self.lock_state();
-            match state.pause.as_mut() {
-                Some(pause) if pause.point == point && pause.remaining_matches > 0 => {
-                    pause.remaining_matches -= 1;
-                    None
-                }
-                Some(pause) if pause.point == point => state.pause.take(),
-                _ => None,
-            }
-        };
-        if let Some(pause) = pause {
-            let mut progress = pause.state.state.lock_recover();
-            progress.reached_ordinal = Some(write_transaction_ordinal);
-            pause.state.changed.notify_all();
-            while !progress.released {
-                progress = pause.state.changed.wait(progress).recover();
-            }
-        }
-        let mut state = self.lock_state();
-        let point_occurrence = {
-            let occurrence = &mut state.point_occurrences[point.index()];
-            *occurrence += 1;
-            *occurrence
-        };
-        let Some(position) = state.armed.iter().position(|armed| {
-            armed.arm.point == point && armed.arm.occurrence.get() == point_occurrence
-        }) else {
-            return Ok(());
-        };
-        let armed = state.armed.remove(position);
-        state.observations.push(SqliteFaultObservation {
-            arm_index: armed.arm_index,
-            seed: armed.arm.seed,
-            point,
-            point_occurrence,
-            write_transaction_ordinal,
-        });
-        let code = match point {
-            SqliteFaultPoint::AfterBegin
-            | SqliteFaultPoint::AfterFence
-            | SqliteFaultPoint::BeforeCommit => rusqlite::ffi::SQLITE_ABORT,
-            SqliteFaultPoint::CommitIo => rusqlite::ffi::SQLITE_IOERR,
-        };
-        Err(rusqlite::Error::SqliteFailure(
-            rusqlite::ffi::Error::new(code),
-            Some(format!(
-                "injected SQLite {point:?} fault for seed {} at write transaction {write_transaction_ordinal}",
-                armed.arm.seed
-            )),
-        ))
-    }
-
-    fn lock_state(&self) -> MutexGuard<'_, InjectorState> {
-        self.state.lock_recover()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroU64;
-
     use super::*;
-
-    fn arm(seed: u64, point: SqliteFaultPoint, occurrence: u64) -> SqliteFaultArm {
-        SqliteFaultArm::new(
-            seed,
-            point,
-            NonZeroU64::new(occurrence).expect("non-zero occurrence"),
-        )
-    }
 
     #[tokio::test]
     async fn an_unreached_transaction_pause_fails_and_releases() {
-        let injector = SqliteFaultInjector::default();
-        let pause = injector.pause(SqliteFaultPoint::BeforeCommit);
+        let pauses = SqlitePauses::default();
+        let pause = pauses.pause_after_fence();
         let waiter = pause.clone();
         let failed = tokio::spawn(async move {
             waiter
@@ -671,81 +480,5 @@ mod tests {
         .expect_err("an unreached pause must fail");
         assert!(failed.is_panic());
         assert!(pause.state.state.lock_recover().released);
-    }
-
-    #[test]
-    fn multiple_arms_fire_once_in_reached_point_order() {
-        let injector = SqliteFaultInjector::default();
-        injector.arm_many([
-            arm(11, SqliteFaultPoint::AfterBegin, 1),
-            arm(22, SqliteFaultPoint::CommitIo, 1),
-        ]);
-
-        let first = injector.begin_write();
-        assert!(
-            injector
-                .inject(SqliteFaultPoint::AfterBegin, first)
-                .is_err()
-        );
-        // The abort above prevents this transaction from reaching CommitIo.
-        let second = injector.begin_write();
-        injector
-            .inject(SqliteFaultPoint::AfterBegin, second)
-            .expect("the first arm was consumed");
-        injector
-            .inject(SqliteFaultPoint::BeforeCommit, second)
-            .expect("no before-commit arm");
-        assert!(injector.inject(SqliteFaultPoint::CommitIo, second).is_err());
-
-        let third = injector.begin_write();
-        for point in [
-            SqliteFaultPoint::AfterBegin,
-            SqliteFaultPoint::BeforeCommit,
-            SqliteFaultPoint::CommitIo,
-        ] {
-            injector
-                .inject(point, third)
-                .expect("each arm is consumed at most once");
-        }
-
-        let observations = injector.observations();
-        assert_eq!(observations.len(), 2);
-        assert_eq!(observations[0].arm_index, 0);
-        assert_eq!(observations[0].point, SqliteFaultPoint::AfterBegin);
-        assert_eq!(observations[0].point_occurrence, 1);
-        assert_eq!(observations[1].arm_index, 1);
-        assert_eq!(observations[1].point, SqliteFaultPoint::CommitIo);
-        assert_eq!(observations[1].point_occurrence, 1);
-        assert!(injector.remaining_arms().is_empty());
-    }
-
-    #[test]
-    fn arm_replaces_an_unconsumed_multi_arm_plan() {
-        let injector = SqliteFaultInjector::default();
-        injector.arm_many([
-            arm(11, SqliteFaultPoint::AfterBegin, 1),
-            arm(22, SqliteFaultPoint::CommitIo, 1),
-        ]);
-        injector.arm(33, SqliteFaultPoint::BeforeCommit);
-
-        let ordinal = injector.begin_write();
-        injector
-            .inject(SqliteFaultPoint::AfterBegin, ordinal)
-            .expect("the replaced arm must not fire");
-        assert!(
-            injector
-                .inject(SqliteFaultPoint::BeforeCommit, ordinal)
-                .is_err()
-        );
-        assert_eq!(
-            injector.observations(),
-            vec![SqliteFaultObservation {
-                arm_index: 0,
-                seed: 33,
-                point: SqliteFaultPoint::BeforeCommit,
-                point_occurrence: 1,
-                write_transaction_ordinal: ordinal,
-            }]
-        );
     }
 }

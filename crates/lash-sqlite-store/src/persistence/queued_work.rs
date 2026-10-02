@@ -181,7 +181,7 @@ impl SqliteStore {
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
         #[cfg(feature = "testing")]
-        let hydration_pause = self.conn.fault_injector();
+        let hydration_pause = self.conn.pauses();
         // One snapshot for the batch rows and their item rows: see
         // `SqliteConnection::read`.
         self.conn
@@ -203,8 +203,8 @@ impl SqliteStore {
                     };
                     // Pause after fetching the complete rows, before decoding their payloads.
                     #[cfg(feature = "testing")]
-                    if let Some(injector) = hydration_pause.as_ref() {
-                        injector.reach_queued_work_hydration();
+                    if let Some(pauses) = hydration_pause.as_ref() {
+                        pauses.reach_queued_work_hydration();
                     }
                     rows.into_iter().map(queued_work_batch_from_row).collect()
                 })();
@@ -269,7 +269,7 @@ impl SqliteStore {
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
         #[cfg(feature = "testing")]
-        let hydration_pause = self.conn.fault_injector();
+        let hydration_pause = self.conn.pauses();
         // One snapshot for the batch rows and their item rows: see
         // `SqliteConnection::read`.
         self.conn
@@ -291,8 +291,8 @@ impl SqliteStore {
                     };
                     // Pause after fetching the complete rows, before decoding their payloads.
                     #[cfg(feature = "testing")]
-                    if let Some(injector) = hydration_pause.as_ref() {
-                        injector.reach_queued_work_hydration();
+                    if let Some(pauses) = hydration_pause.as_ref() {
+                        pauses.reach_queued_work_hydration();
                     }
                     rows.into_iter().map(queued_work_batch_from_row).collect()
                 })();

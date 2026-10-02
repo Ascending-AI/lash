@@ -417,14 +417,6 @@ impl PostgresStore {
         // of the commit (FIG-4746).
         tx.admit_plugin_writers(planner.plugin_publication())
             .await?;
-        // The simulator's backend-fault plan arms this transaction seam; the
-        // `testing` feature is off in production, where these expand to nothing.
-        #[cfg(feature = "testing")]
-        let write_transaction_ordinal = self
-            .fault_injector
-            .as_ref()
-            .map_or(0, crate::testing::PostgresFaultInjector::begin_write);
-        pg_sim_fault!(self.fault_injector, AfterBegin, write_transaction_ordinal);
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -546,8 +538,6 @@ impl PostgresStore {
                         .await
                         .map_err(store_sqlx_error)?;
                     }
-                    pg_sim_fault!(self.fault_injector, BeforeCommit, write_transaction_ordinal);
-                    pg_sim_fault!(self.fault_injector, CommitIo, write_transaction_ordinal);
                     tx.commit().await.map_err(store_sqlx_error)?;
                     return Ok(Ok(replay.into_result()));
                 }
@@ -1068,9 +1058,6 @@ impl PostgresStore {
             .map_err(store_sqlx_error)?;
         }
         // A plain-commit receipt writes three NULL append-identity columns.
-
-        pg_sim_fault!(self.fault_injector, BeforeCommit, write_transaction_ordinal);
-        pg_sim_fault!(self.fault_injector, CommitIo, write_transaction_ordinal);
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(Ok(result))
     }

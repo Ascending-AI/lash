@@ -381,11 +381,11 @@ async fn sqlite_migration_takes_every_database_exclusively_in_order() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_finalize_waits_for_a_writer_paused_after_its_fence() {
     let root = tempfile::tempdir().expect("store root");
-    let injector = crate::testing::SqliteFaultInjector::default();
+    let pauses = crate::testing::SqlitePauses::default();
     let set = SqliteStoreSet::open_with_options_and_clock(
         root.path(),
         crate::SqliteStoreSetOptions {
-            fault_injector: Some(injector.clone()),
+            pauses: Some(pauses.clone()),
             ..crate::SqliteStoreSetOptions::default()
         },
         std::sync::Arc::new(lash_core_execution::facade_support::SystemClock),
@@ -395,7 +395,7 @@ async fn sqlite_finalize_waits_for_a_writer_paused_after_its_fence() {
     let location = set.location().clone();
     let core = set.process_env_store();
 
-    let pause = injector.pause(crate::testing::SqliteFaultPoint::AfterFence);
+    let pause = pauses.pause_after_fence();
     let paused = tokio::spawn({
         let core = std::sync::Arc::clone(&core);
         async move {

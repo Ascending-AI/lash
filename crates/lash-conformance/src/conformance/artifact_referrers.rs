@@ -4,14 +4,16 @@
 //! uses freshly minted pins so no test relies on another test's rows.
 
 use crate::fused_artifact_store::ReopenableArtifactStore;
+use lash_core::testing::Gate;
 use lash_core::{
     ArtifactCarry, ArtifactName, ArtifactReferrer, ArtifactReferrerKind, ArtifactStoreError,
-    ArtifactStoreId, FrameEnvironmentId, HostArtifactPin, ReferrerClaim, ReferrerGuard,
-    ResolvedArtifactCleanup,
+    ArtifactStoreId, FrameEnvironmentId, HostArtifactPin, ModuleArtifactStore, ReferrerClaim,
+    ReferrerGuard, ResolvedArtifactCleanup,
 };
 use lashlang::testing::ast_builders as b;
 use lashlang::{ModuleArtifact, TypeExpr};
 use pretty_assertions::assert_eq;
+use std::sync::Arc;
 
 #[expect(clippy::expect_used, reason = "test fixture constructs a valid module")]
 fn module(name: &str) -> ModuleArtifact {
@@ -41,6 +43,54 @@ fn end(referrer: ArtifactReferrer) -> ResolvedArtifactCleanup {
     }
 }
 
+/// An artifact store whose every publication waits at `gate` before it
+/// enters the store (ADR 0044 §Simulation).
+struct HeldPublication {
+    inner: Arc<dyn ModuleArtifactStore>,
+    gate: Arc<Gate>,
+}
+
+#[async_trait::async_trait]
+impl ModuleArtifactStore for HeldPublication {
+    fn durability_tier(&self) -> lash_core::DurabilityTier {
+        self.inner.durability_tier()
+    }
+
+    async fn publish_module_artifact(
+        &self,
+        claim: &ReferrerClaim,
+        module_ref: &str,
+        bytes: &[u8],
+    ) -> Result<(), ArtifactStoreError> {
+        self.gate.pass().await;
+        self.inner
+            .publish_module_artifact(claim, module_ref, bytes)
+            .await
+    }
+
+    async fn acquire_module_artifact(
+        &self,
+        claim: &ReferrerClaim,
+        module_ref: &str,
+    ) -> Result<(), ArtifactStoreError> {
+        self.inner.acquire_module_artifact(claim, module_ref).await
+    }
+
+    async fn end_module_referrer(
+        &self,
+        cleanup: &ResolvedArtifactCleanup,
+    ) -> Result<(), ArtifactStoreError> {
+        self.inner.end_module_referrer(cleanup).await
+    }
+
+    async fn get_module_artifact(
+        &self,
+        module_ref: &str,
+    ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
+        self.inner.get_module_artifact(module_ref).await
+    }
+}
+
 /// ADR 0113 §7.5: a publication paused before its store transaction cannot
 /// acquire a frame that was fenced while it waited. Its execution claim can
 /// still publish the same immutable bytes.
@@ -61,11 +111,11 @@ where
         lash_core::FrameNodeId::new("frame-1").expect("frame node id"),
     ));
     let frame_claim = ReferrerClaim::unguarded(frame.clone()).expect("frame claim");
-    let pause = handles
-        .artifacts
-        .pause_next_publication_for_testing()
-        .expect("backend supports the publication pause");
-    let writer_store = handles.artifacts.clone();
+    let held = Arc::new(Gate::new("module publication"));
+    let writer_store = HeldPublication {
+        inner: Arc::clone(&handles.artifacts),
+        gate: Arc::clone(&held),
+    };
     let writer_key = key.clone();
     let writer_bytes = bytes.clone();
     let writer = tokio::spawn(async move {
@@ -73,19 +123,13 @@ where
             .publish_module_artifact(&frame_claim, &writer_key, &writer_bytes)
             .await
     });
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while !pause.is_reached() {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("publication reaches its pause");
+    held.reached(1).await;
     handles
         .artifacts
         .end_module_referrer(&end(frame.clone()))
         .await
         .expect("fence frame");
-    pause.resume();
+    held.open_all();
     let refusal = writer
         .await
         .expect("writer joins")

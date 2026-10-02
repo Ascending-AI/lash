@@ -573,17 +573,6 @@ impl PostgresLashlangArtifactStore {
 
 #[async_trait::async_trait]
 impl lash_core_execution::ModuleArtifactStore for PostgresLashlangArtifactStore {
-    fn pause_next_publication_for_testing(
-        &self,
-    ) -> Option<lash_core_execution::ArtifactPublicationPause> {
-        let pause = lash_core_execution::ArtifactPublicationPause::default();
-        *self
-            .publication_pause
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(pause.clone());
-        Some(pause)
-    }
-
     fn durability_tier(&self) -> lash_core_execution::DurabilityTier {
         lash_core_execution::DurabilityTier::Durable
     }
@@ -598,14 +587,6 @@ impl lash_core_execution::ModuleArtifactStore for PostgresLashlangArtifactStore 
             return Err(ArtifactStoreError::Encode(
                 "invalid module reference".into(),
             ));
-        }
-        let pause = self
-            .publication_pause
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .take();
-        if let Some(pause) = pause {
-            pause.pause().await;
         }
         self.write_namespaced(MODULE_ARTIFACT_NAMESPACE, module_ref, Some(bytes), claim)
             .await

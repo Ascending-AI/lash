@@ -632,7 +632,7 @@ pub(crate) fn backend_fault_classification_semantics(events: &[DeliveredBoundary
         let mut events = events.clone();
         events.sort_by_key(|event| event.sequence);
         let mut last_attempt = 0;
-        let mut points = BTreeSet::new();
+        let mut faults = BTreeSet::new();
         for event in events {
             let attempt = event
                 .observed
@@ -649,23 +649,23 @@ pub(crate) fn backend_fault_classification_semantics(events: &[DeliveredBoundary
                     != Some("StorageFailure")
                 || event
                     .observed
-                    .pointer("/fault_injector/exercised")
+                    .pointer("/fault_script/fired")
                     .and_then(Value::as_bool)
                     != Some(true)
             {
                 return false;
             }
             last_attempt = attempt;
-            let point = event
+            let fault = event
                 .observed
-                .pointer("/fault_injector/point")
+                .pointer("/fault_script/fault")
                 .and_then(Value::as_str);
-            if point != event.payload.get("fault_point").and_then(Value::as_str) {
+            if fault != event.payload.get("fault").and_then(Value::as_str) {
                 return false;
             }
-            points.insert(point);
+            faults.insert(fault);
         }
-        points.contains(&Some("after_begin")) && points.contains(&Some("commit_io"))
+        faults.contains(&Some("refused")) && faults.contains(&Some("reply_lost"))
     })
 }
 

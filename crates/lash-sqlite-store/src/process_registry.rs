@@ -547,7 +547,7 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
     > {
         let process_id = process_id.clone();
         #[cfg(feature = "testing")]
-        let read_pause = self.conn.fault_injector();
+        let read_pause = self.conn.pauses();
         self.conn
             .read(move |conn| {
                 Ok((|| {
@@ -569,8 +569,8 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
                         Err(error) => return Err(error),
                     }
                     #[cfg(feature = "testing")]
-                    if let Some(injector) = read_pause.as_ref() {
-                        injector.reach_process_event_page_after_identity();
+                    if let Some(pauses) = read_pause.as_ref() {
+                        pauses.reach_process_event_page_after_identity();
                     }
                     let after_sequence = i64::try_from(after_sequence).map_err(|_| {
                         lash_core_execution::PluginError::Session(

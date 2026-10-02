@@ -59,6 +59,25 @@ carries no test hook. An in-process race with no trait between its steps stays
 covered by real-timing laws and the soak; a law that must order it extracts
 that boundary as an injected trait first.
 
+A store may carry a pause or a step observer at a point inside one of its own
+transactions, snapshots or open-time procedures, where no trait can be drawn
+because both sides are statements on one connection. The list is closed:
+
+- the writer fence: PostgreSQL's `AfterFence` and SQLite's
+  `SqlitePauses::pause_after_fence` hold a transaction that has read the fleet
+  epoch and not yet written;
+- SQLite's two read-snapshot pauses, between a parent row's read and its
+  children's (`pause_queued_work_hydration`,
+  `pause_process_event_page_after_identity`);
+- SQLite's open-time migration steps (`SqliteMigrationHook`) and finalize's
+  per-database commits (`SqliteFinalizeHook`).
+
+Each compiles only under the store's `testing` feature or its own unit tests.
+None of them faults an operation of the store traits; a law that needs a store
+call to fail, lose its reply or wait arms the `Script`. The migration hook may
+crash or fail the step it observes, which is a step of open and not a store
+operation. Adding a point means adding it here.
+
 ## Deletions
 
 A claim that a test cannot fail needs mutation evidence: break the production
@@ -80,6 +99,7 @@ the oracle.
 ## Implementation
 
 - [Script](../../crates/lash-core-store/src/testing/script.rs) and [Gate](../../crates/lash-core-store/src/testing/gate.rs), over the [store](../../crates/lash-core-store/src/store/runtime_store_decorator.rs) and [deployment](../../crates/lash-core-execution/src/runtime/deployment_store_decorator.rs) operation lists.
+- [Simulator backend faults](../../crates/lash-sim/src/backend_fault.rs) as script arms, and the in-store points of [SQLite](../../crates/lash-sqlite-store/src/testing.rs) and [PostgreSQL](../../crates/lash-postgres-store/src/postgres/testing.rs).
 - [Effect replay invariant](../../crates/lash-sim/src/invariants/effect_window.rs) and [virtual clock](../../crates/lash-sim/src/clock.rs).
 - [Restate test host](../../crates/lash-restate-test/src/lib.rs) and [store gate matrix](../../scripts/ci/store-tests.sh).
 - [Mutation gate stages](../../scripts/ci/confidence-stage.sh) and [synthetic upgrade features](../../crates/lash-upgrade-harness/Cargo.toml).

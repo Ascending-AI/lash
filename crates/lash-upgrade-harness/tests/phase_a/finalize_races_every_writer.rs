@@ -39,7 +39,7 @@ use lash_core::{
 use lash_postgres_store::testing::IsolatedDatabase;
 use lash_postgres_store::testing::{AfterFence, HeldFinalize};
 use lash_postgres_store::{MigrationPhase, PostgresStorage, PostgresStoreConfig, PostgresStoreSet};
-use lash_sqlite_store::testing::{SqliteFaultInjector, SqliteFaultPoint, finalize_fleet_format};
+use lash_sqlite_store::testing::{SqlitePauses, finalize_fleet_format};
 use lash_sqlite_store::{SqliteDatabase, SqliteStoreSet, SqliteStoreSetOptions};
 use serde::Serialize;
 use sqlx::PgPool;
@@ -428,11 +428,11 @@ async fn sqlite_leg(scratch: &Path) -> Result<BackendEvidence> {
     let mut evidence = BackendEvidence::default();
     let root = scratch.join("sqlite-stores");
     std::fs::create_dir_all(&root)?;
-    let injector = SqliteFaultInjector::default();
+    let pauses = SqlitePauses::default();
     let stores = SqliteStoreSet::open_with_options_and_clock(
         &root,
         SqliteStoreSetOptions {
-            fault_injector: Some(injector.clone()),
+            pauses: Some(pauses.clone()),
             ..SqliteStoreSetOptions::default()
         },
         Arc::new(lash_core::facade_support::SystemClock),
@@ -442,7 +442,7 @@ async fn sqlite_leg(scratch: &Path) -> Result<BackendEvidence> {
 
     // 1. The paused writer is ordered before finalize, in the durable core
     // where the session writer runs; finalize holds every database.
-    let pause = injector.pause(SqliteFaultPoint::AfterFence);
+    let pause = pauses.pause_after_fence();
     let factory = stores.session_store_factory();
     let writer = tokio::spawn({
         let factory = Arc::clone(&factory);

@@ -66,26 +66,6 @@ use worker::Connection as AsyncConnection;
 use crate::SqliteDatabase;
 use crate::location::DatabaseTarget;
 
-// Fault points are syntax declarations in the transaction code. With the
-// `testing` feature disabled, the invocation and all of its arguments expand
-// to nothing, so production transactions carry no injector branch or state.
-#[cfg(feature = "testing")]
-macro_rules! sim_fault {
-    ($injector:expr, $point:ident, $write_transaction_ordinal:expr) => {
-        if let Some(injector) = $injector.as_ref() {
-            injector.inject(
-                crate::testing::SqliteFaultPoint::$point,
-                $write_transaction_ordinal,
-            )?;
-        }
-    };
-}
-
-#[cfg(not(feature = "testing"))]
-macro_rules! sim_fault {
-    ($($ignored:tt)*) => {};
-}
-
 /// Outcome a write flow returns to decide commit vs rollback while still
 /// handing a value back to the caller. Used for paths that compute a result
 /// *and* may discover mid-transaction that the work must not be persisted
@@ -525,14 +505,14 @@ pub(crate) struct SqliteConnection {
     checkpoint: Option<Arc<CheckpointState>>,
     fence: Arc<WriterFence>,
     #[cfg(feature = "testing")]
-    fault_injector: Option<crate::testing::SqliteFaultInjector>,
+    pauses: Option<crate::testing::SqlitePauses>,
 }
 
 impl SqliteConnection {
-    /// This connection's fault controller, when one was installed at open.
+    /// This connection's pause controller, when one was installed at open.
     #[cfg(feature = "testing")]
-    pub(crate) fn fault_injector(&self) -> Option<crate::testing::SqliteFaultInjector> {
-        self.fault_injector.clone()
+    pub(crate) fn pauses(&self) -> Option<crate::testing::SqlitePauses> {
+        self.pauses.clone()
     }
 
     #[cfg(test)]
@@ -564,12 +544,12 @@ impl SqliteConnection {
     }
 
     #[cfg(feature = "testing")]
-    pub(crate) async fn open_with_fault_injector(
+    pub(crate) async fn open_with_pauses(
         target: &DatabaseTarget,
         policy: SqliteConnectionPolicy,
-        fault_injector: Option<crate::testing::SqliteFaultInjector>,
+        pauses: Option<crate::testing::SqlitePauses>,
     ) -> tokio_rusqlite::Result<Self> {
-        Self::open_configured(target, policy, fault_injector).await
+        Self::open_configured(target, policy, pauses).await
     }
 
     /// One open path for every target: a `memdb` database answers the WAL
@@ -578,7 +558,7 @@ impl SqliteConnection {
     async fn open_configured(
         target: &DatabaseTarget,
         policy: SqliteConnectionPolicy,
-        #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
+        #[cfg(feature = "testing")] pauses: Option<crate::testing::SqlitePauses>,
     ) -> tokio_rusqlite::Result<Self> {
         let gate = write_gate(target);
         let reads = read_gate(target);
@@ -606,7 +586,7 @@ impl SqliteConnection {
             read_gate: reads,
             fence: WriterFence::new(),
             #[cfg(feature = "testing")]
-            fault_injector,
+            pauses,
         })
     }
 
@@ -638,7 +618,7 @@ impl SqliteConnection {
             checkpoint: None,
             fence: WriterFence::new(),
             #[cfg(feature = "testing")]
-            fault_injector: None,
+            pauses: None,
         })
     }
 
@@ -850,7 +830,7 @@ impl SqliteConnection {
         let checkpoint = self.checkpoint.clone();
         let fence = Arc::clone(&self.fence);
         #[cfg(feature = "testing")]
-        let fault_injector = self.fault_injector.clone();
+        let pauses = self.pauses.clone();
         flatten(
             self.inner
                 .call(move |c| {
@@ -868,13 +848,11 @@ impl SqliteConnection {
                     let holding_since = Instant::now();
                     let result = (|| {
                         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-                        #[cfg(feature = "testing")]
-                        let write_transaction_ordinal = fault_injector
-                            .as_ref()
-                            .map_or(0, crate::testing::SqliteFaultInjector::begin_write);
-                        sim_fault!(fault_injector, AfterBegin, write_transaction_ordinal);
                         let fleet = fence.check(&tx)?;
-                        sim_fault!(fault_injector, AfterFence, write_transaction_ordinal);
+                        #[cfg(feature = "testing")]
+                        if let Some(pauses) = pauses.as_ref() {
+                            pauses.reach_after_fence();
+                        }
                         let tx = FencedTx {
                             tx,
                             fleet,
@@ -883,8 +861,6 @@ impl SqliteConnection {
                         let outcome = f(&tx)?;
                         let value = match outcome {
                             TxOutcome::Commit(value) => {
-                                sim_fault!(fault_injector, BeforeCommit, write_transaction_ordinal);
-                                sim_fault!(fault_injector, CommitIo, write_transaction_ordinal);
                                 tx.tx.commit()?;
                                 value
                             }

@@ -34,10 +34,10 @@ pub struct SqliteStoreSetOptions {
     /// Where the open-time migration backs the store up before it changes
     /// it, and how many backups it keeps ([`crate::migration`]).
     pub migration_backup: crate::SqliteMigrationBackup,
-    /// Deterministic transaction faults, installed on every session store the
-    /// store set's factory opens.
+    /// In-store pauses, installed on every session store the store set's
+    /// factory opens.
     #[cfg(feature = "testing")]
-    pub fault_injector: Option<crate::testing::SqliteFaultInjector>,
+    pub pauses: Option<crate::testing::SqlitePauses>,
     /// Observes, pauses, crashes or fails the open-time migration at each of
     /// its steps.
     #[cfg(feature = "testing")]
@@ -238,7 +238,7 @@ impl SqliteStoreSet {
             None,
             lash_core_execution::FleetFormat::writable(),
             #[cfg(feature = "testing")]
-            options.fault_injector.clone(),
+            options.pauses.clone(),
         )
         .await?;
         // Each database carries its own copy of `F`, which its writer fence

@@ -73,8 +73,8 @@ pub fn replay_trace(
 
     for expected in &trace.events {
         let event = expected.as_event();
-        // A backend fault is produced by the REAL store injector at generation
-        // time, and a suspend resume by the real parked turn. The abstract
+        // A backend fault is produced by the script over the REAL store at
+        // generation time, and a suspend resume by the real parked turn. The abstract
         // ModelStore cannot re-derive either, so the model carries the recorded
         // observation rather than fabricating it.
         let observed = if event.kind == BoundaryKind::BackendFailure

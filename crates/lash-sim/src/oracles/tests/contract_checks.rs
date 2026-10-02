@@ -887,7 +887,7 @@ fn state_machine_semantic_oracle_checks_contract_outcomes_not_presence() {
     let mut retry_not_terminal = events;
     retry_not_terminal.retain(|event| {
         !(event.kind == BoundaryKind::BackendFailure
-            && event.payload.get("fault_point").and_then(Value::as_str) == Some("commit_io"))
+            && event.payload.get("fault").and_then(Value::as_str) == Some("reply_lost"))
     });
     let verdict = state_machine_semantic_invariants(&retry_not_terminal, &summary);
     assert_eq!(verdict.status, crate::trace::OracleStatus::Failed);

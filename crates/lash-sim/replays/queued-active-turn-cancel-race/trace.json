@@ -478,9 +478,9 @@
       "actor_alias": "session-001",
       "kind": "backend_failure",
       "at": 11,
-      "label": "backend.failure.after_begin",
+      "label": "backend.failure.refused",
       "payload": {
-        "fault_point": "after_begin",
+        "fault": "refused",
         "operation": "commit_runtime_state:001",
         "runtime_completion": {
           "actor_alias": "session-001",
@@ -505,17 +505,18 @@
       "observed": {
         "attempt": 1,
         "backend_failure": true,
-        "fault_injector": {
-          "enabled": true,
-          "exercised": true,
-          "implementation": "lash_sqlite_store::testing::SqliteFaultInjector",
-          "point": "after_begin",
+        "fault_script": {
+          "armed": true,
+          "call": 1,
+          "fault": "refused",
+          "fired": true,
+          "implementation": "lash_core::testing::Script",
           "seed": 5064657528264405771,
-          "write_transaction_ordinal": 2
+          "store_operation": "commit_runtime_state"
         },
         "operation": "commit_runtime_state:001",
         "production_store_error": {
-          "message": "sqlite storage failure: injected SQLite AfterBegin fault for seed 5064657528264405771 at write transaction 2",
+          "message": "lash-sim storage failure: arm 5064657528264405771 refused the commit before it entered the store",
           "type": "lash_core::StoreError",
           "variant": "StorageFailure"
         },
@@ -540,9 +541,9 @@
       "actor_alias": "session-001",
       "kind": "backend_failure",
       "at": 12,
-      "label": "backend.failure.after_begin",
+      "label": "backend.failure.refused",
       "payload": {
-        "fault_point": "after_begin",
+        "fault": "refused",
         "operation": "commit_runtime_state:001",
         "runtime_completion": {
           "actor_alias": "session-001",
@@ -567,17 +568,18 @@
       "observed": {
         "attempt": 2,
         "backend_failure": true,
-        "fault_injector": {
-          "enabled": true,
-          "exercised": true,
-          "implementation": "lash_sqlite_store::testing::SqliteFaultInjector",
-          "point": "after_begin",
+        "fault_script": {
+          "armed": true,
+          "call": 1,
+          "fault": "refused",
+          "fired": true,
+          "implementation": "lash_core::testing::Script",
           "seed": 5064657541149307660,
-          "write_transaction_ordinal": 4
+          "store_operation": "commit_runtime_state"
         },
         "operation": "commit_runtime_state:001",
         "production_store_error": {
-          "message": "sqlite storage failure: injected SQLite AfterBegin fault for seed 5064657541149307660 at write transaction 4",
+          "message": "lash-sim storage failure: arm 5064657541149307660 refused the commit before it entered the store",
           "type": "lash_core::StoreError",
           "variant": "StorageFailure"
         },
@@ -602,9 +604,9 @@
       "actor_alias": "session-001",
       "kind": "backend_failure",
       "at": 14,
-      "label": "backend.failure.commit_io",
+      "label": "backend.failure.reply_lost",
       "payload": {
-        "fault_point": "commit_io",
+        "fault": "reply_lost",
         "operation": "commit_runtime_state:001",
         "runtime_completion": {
           "actor_alias": "session-001",
@@ -629,17 +631,18 @@
       "observed": {
         "attempt": 3,
         "backend_failure": true,
-        "fault_injector": {
-          "enabled": true,
-          "exercised": true,
-          "implementation": "lash_sqlite_store::testing::SqliteFaultInjector",
-          "point": "commit_io",
+        "fault_script": {
+          "armed": true,
+          "call": 1,
+          "fault": "reply_lost",
+          "fired": true,
+          "implementation": "lash_core::testing::Script",
           "seed": 5064657536854340366,
-          "write_transaction_ordinal": 6
+          "store_operation": "commit_runtime_state"
         },
         "operation": "commit_runtime_state:001",
         "production_store_error": {
-          "message": "sqlite storage failure: injected SQLite CommitIo fault for seed 5064657536854340366 at write transaction 6",
+          "message": "script storage failure: the reply was lost",
           "type": "lash_core::StoreError",
           "variant": "StorageFailure"
         },
@@ -3715,9 +3718,9 @@
       "actor_alias": "session-001",
       "kind": "backend_failure",
       "at": 67,
-      "label": "backend.failure.commit_io",
+      "label": "backend.failure.reply_lost",
       "payload": {
-        "fault_point": "commit_io",
+        "fault": "reply_lost",
         "operation": "commit_runtime_state:004",
         "runtime_completion": {
           "actor_alias": "session-001",
@@ -3742,17 +3745,18 @@
       "observed": {
         "attempt": 1,
         "backend_failure": true,
-        "fault_injector": {
-          "enabled": true,
-          "exercised": true,
-          "implementation": "lash_sqlite_store::testing::SqliteFaultInjector",
-          "point": "commit_io",
+        "fault_script": {
+          "armed": true,
+          "call": 1,
+          "fault": "reply_lost",
+          "fired": true,
+          "implementation": "lash_core::testing::Script",
           "seed": 5064657528264405827,
-          "write_transaction_ordinal": 8
+          "store_operation": "commit_runtime_state"
         },
         "operation": "commit_runtime_state:004",
         "production_store_error": {
-          "message": "sqlite storage failure: injected SQLite CommitIo fault for seed 5064657528264405827 at write transaction 8",
+          "message": "script storage failure: the reply was lost",
           "type": "lash_core::StoreError",
           "variant": "StorageFailure"
         },
@@ -4110,173 +4114,149 @@
                         {
                           "name": "process.effect_outcome",
                           "payload_schema": {
-                            "schema": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "code": {
-                                  "minLength": 1,
-                                  "type": "string"
-                                },
-                                "node_id": {
-                                  "minLength": 1,
-                                  "type": "string"
-                                },
-                                "occurrence": {
-                                  "maximum": 8,
-                                  "minimum": 1,
-                                  "type": "integer"
-                                },
-                                "operation": {
-                                  "minLength": 1,
-                                  "type": "string"
-                                },
-                                "outcome_class": {
-                                  "enum": [
-                                    "success",
-                                    "failure",
-                                    "cancelled"
-                                  ],
-                                  "type": "string"
-                                },
-                                "replay_key": {
-                                  "minLength": 1,
-                                  "type": "string"
-                                },
-                                "vocabulary_version": {
-                                  "const": 1
-                                }
+                            "additionalProperties": false,
+                            "properties": {
+                              "code": {
+                                "minLength": 1,
+                                "type": "string"
                               },
-                              "required": [
-                                "vocabulary_version",
-                                "node_id",
-                                "occurrence",
-                                "operation",
-                                "outcome_class",
-                                "replay_key"
-                              ],
-                              "type": "object"
-                            }
+                              "node_id": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "occurrence": {
+                                "maximum": 8,
+                                "minimum": 1,
+                                "type": "integer"
+                              },
+                              "operation": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "outcome_class": {
+                                "enum": [
+                                  "success",
+                                  "failure",
+                                  "cancelled"
+                                ],
+                                "type": "string"
+                              },
+                              "replay_key": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "vocabulary_version": {
+                                "const": 1
+                              }
+                            },
+                            "required": [
+                              "vocabulary_version",
+                              "node_id",
+                              "occurrence",
+                              "operation",
+                              "outcome_class",
+                              "replay_key"
+                            ],
+                            "type": "object"
                           },
                           "semantics": {}
                         },
                         {
                           "name": "process.effect_omissions",
                           "payload_schema": {
-                            "schema": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "nodes": {
-                                  "additionalProperties": {
-                                    "additionalProperties": false,
-                                    "properties": {
-                                      "cancelled": {
-                                        "minimum": 0,
-                                        "type": "integer"
-                                      },
-                                      "failure": {
-                                        "minimum": 0,
-                                        "type": "integer"
-                                      },
-                                      "success": {
-                                        "minimum": 0,
-                                        "type": "integer"
-                                      }
+                            "additionalProperties": false,
+                            "properties": {
+                              "nodes": {
+                                "additionalProperties": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "cancelled": {
+                                      "minimum": 0,
+                                      "type": "integer"
                                     },
-                                    "required": [
-                                      "success",
-                                      "failure",
-                                      "cancelled"
-                                    ],
-                                    "type": "object"
+                                    "failure": {
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    },
+                                    "success": {
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    }
                                   },
-                                  "minProperties": 1,
+                                  "required": [
+                                    "success",
+                                    "failure",
+                                    "cancelled"
+                                  ],
                                   "type": "object"
                                 },
-                                "occurrence_cap": {
-                                  "const": 8
-                                },
-                                "vocabulary_version": {
-                                  "const": 1
-                                }
+                                "minProperties": 1,
+                                "type": "object"
                               },
-                              "required": [
-                                "vocabulary_version",
-                                "occurrence_cap",
-                                "nodes"
-                              ],
-                              "type": "object"
-                            }
+                              "occurrence_cap": {
+                                "const": 8
+                              },
+                              "vocabulary_version": {
+                                "const": 1
+                              }
+                            },
+                            "required": [
+                              "vocabulary_version",
+                              "occurrence_cap",
+                              "nodes"
+                            ],
+                            "type": "object"
                           },
                           "semantics": {}
                         },
                         {
                           "name": "process.cancel_requested",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.first_started",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.waiting",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.resumed",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.external_ref_set",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.caller_departed",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.observer_added",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.observer_removed",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.subscription_retargeted",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.completed",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {
                             "terminal": {
                               "await_output": {
@@ -4288,9 +4268,7 @@
                         },
                         {
                           "name": "process.failed",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {
                             "terminal": {
                               "await_output": {
@@ -4302,9 +4280,7 @@
                         },
                         {
                           "name": "process.cancelled",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {
                             "terminal": {
                               "await_output": {
@@ -4316,9 +4292,7 @@
                         },
                         {
                           "name": "process.abandoned",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {
                             "terminal": {
                               "await_output": {
@@ -6454,9 +6428,9 @@
       "actor_alias": "session-001",
       "kind": "backend_failure",
       "at": 92,
-      "label": "backend.failure.after_begin",
+      "label": "backend.failure.refused",
       "payload": {
-        "fault_point": "after_begin",
+        "fault": "refused",
         "operation": "commit_runtime_state:005",
         "runtime_completion": {
           "actor_alias": "session-001",
@@ -6481,17 +6455,18 @@
       "observed": {
         "attempt": 1,
         "backend_failure": true,
-        "fault_injector": {
-          "enabled": true,
-          "exercised": true,
-          "implementation": "lash_sqlite_store::testing::SqliteFaultInjector",
-          "point": "after_begin",
+        "fault_script": {
+          "armed": true,
+          "call": 1,
+          "fault": "refused",
+          "fired": true,
+          "implementation": "lash_core::testing::Script",
           "seed": 5064657528264405852,
-          "write_transaction_ordinal": 10
+          "store_operation": "commit_runtime_state"
         },
         "operation": "commit_runtime_state:005",
         "production_store_error": {
-          "message": "sqlite storage failure: injected SQLite AfterBegin fault for seed 5064657528264405852 at write transaction 10",
+          "message": "lash-sim storage failure: arm 5064657528264405852 refused the commit before it entered the store",
           "type": "lash_core::StoreError",
           "variant": "StorageFailure"
         },
@@ -6659,173 +6634,149 @@
                         {
                           "name": "process.effect_outcome",
                           "payload_schema": {
-                            "schema": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "code": {
-                                  "minLength": 1,
-                                  "type": "string"
-                                },
-                                "node_id": {
-                                  "minLength": 1,
-                                  "type": "string"
-                                },
-                                "occurrence": {
-                                  "maximum": 8,
-                                  "minimum": 1,
-                                  "type": "integer"
-                                },
-                                "operation": {
-                                  "minLength": 1,
-                                  "type": "string"
-                                },
-                                "outcome_class": {
-                                  "enum": [
-                                    "success",
-                                    "failure",
-                                    "cancelled"
-                                  ],
-                                  "type": "string"
-                                },
-                                "replay_key": {
-                                  "minLength": 1,
-                                  "type": "string"
-                                },
-                                "vocabulary_version": {
-                                  "const": 1
-                                }
+                            "additionalProperties": false,
+                            "properties": {
+                              "code": {
+                                "minLength": 1,
+                                "type": "string"
                               },
-                              "required": [
-                                "vocabulary_version",
-                                "node_id",
-                                "occurrence",
-                                "operation",
-                                "outcome_class",
-                                "replay_key"
-                              ],
-                              "type": "object"
-                            }
+                              "node_id": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "occurrence": {
+                                "maximum": 8,
+                                "minimum": 1,
+                                "type": "integer"
+                              },
+                              "operation": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "outcome_class": {
+                                "enum": [
+                                  "success",
+                                  "failure",
+                                  "cancelled"
+                                ],
+                                "type": "string"
+                              },
+                              "replay_key": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "vocabulary_version": {
+                                "const": 1
+                              }
+                            },
+                            "required": [
+                              "vocabulary_version",
+                              "node_id",
+                              "occurrence",
+                              "operation",
+                              "outcome_class",
+                              "replay_key"
+                            ],
+                            "type": "object"
                           },
                           "semantics": {}
                         },
                         {
                           "name": "process.effect_omissions",
                           "payload_schema": {
-                            "schema": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "nodes": {
-                                  "additionalProperties": {
-                                    "additionalProperties": false,
-                                    "properties": {
-                                      "cancelled": {
-                                        "minimum": 0,
-                                        "type": "integer"
-                                      },
-                                      "failure": {
-                                        "minimum": 0,
-                                        "type": "integer"
-                                      },
-                                      "success": {
-                                        "minimum": 0,
-                                        "type": "integer"
-                                      }
+                            "additionalProperties": false,
+                            "properties": {
+                              "nodes": {
+                                "additionalProperties": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "cancelled": {
+                                      "minimum": 0,
+                                      "type": "integer"
                                     },
-                                    "required": [
-                                      "success",
-                                      "failure",
-                                      "cancelled"
-                                    ],
-                                    "type": "object"
+                                    "failure": {
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    },
+                                    "success": {
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    }
                                   },
-                                  "minProperties": 1,
+                                  "required": [
+                                    "success",
+                                    "failure",
+                                    "cancelled"
+                                  ],
                                   "type": "object"
                                 },
-                                "occurrence_cap": {
-                                  "const": 8
-                                },
-                                "vocabulary_version": {
-                                  "const": 1
-                                }
+                                "minProperties": 1,
+                                "type": "object"
                               },
-                              "required": [
-                                "vocabulary_version",
-                                "occurrence_cap",
-                                "nodes"
-                              ],
-                              "type": "object"
-                            }
+                              "occurrence_cap": {
+                                "const": 8
+                              },
+                              "vocabulary_version": {
+                                "const": 1
+                              }
+                            },
+                            "required": [
+                              "vocabulary_version",
+                              "occurrence_cap",
+                              "nodes"
+                            ],
+                            "type": "object"
                           },
                           "semantics": {}
                         },
                         {
                           "name": "process.cancel_requested",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.first_started",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.waiting",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.resumed",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.external_ref_set",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.caller_departed",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.observer_added",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.observer_removed",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.subscription_retargeted",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.completed",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {
                             "terminal": {
                               "await_output": {
@@ -6837,9 +6788,7 @@
                         },
                         {
                           "name": "process.failed",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {
                             "terminal": {
                               "await_output": {
@@ -6851,9 +6800,7 @@
                         },
                         {
                           "name": "process.cancelled",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {
                             "terminal": {
                               "await_output": {
@@ -6865,9 +6812,7 @@
                         },
                         {
                           "name": "process.abandoned",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {
                             "terminal": {
                               "await_output": {
@@ -8006,9 +7951,9 @@
       "actor_alias": "session-003",
       "kind": "backend_failure",
       "at": 117,
-      "label": "backend.failure.after_begin",
+      "label": "backend.failure.refused",
       "payload": {
-        "fault_point": "after_begin",
+        "fault": "refused",
         "operation": "commit_runtime_state:002",
         "runtime_completion": {
           "actor_alias": "session-003",
@@ -8033,17 +7978,18 @@
       "observed": {
         "attempt": 1,
         "backend_failure": true,
-        "fault_injector": {
-          "enabled": true,
-          "exercised": true,
-          "implementation": "lash_sqlite_store::testing::SqliteFaultInjector",
-          "point": "after_begin",
+        "fault_script": {
+          "armed": true,
+          "call": 1,
+          "fault": "refused",
+          "fired": true,
+          "implementation": "lash_core::testing::Script",
           "seed": 5064657528264405877,
-          "write_transaction_ordinal": 12
+          "store_operation": "commit_runtime_state"
         },
         "operation": "commit_runtime_state:002",
         "production_store_error": {
-          "message": "sqlite storage failure: injected SQLite AfterBegin fault for seed 5064657528264405877 at write transaction 12",
+          "message": "lash-sim storage failure: arm 5064657528264405877 refused the commit before it entered the store",
           "type": "lash_core::StoreError",
           "variant": "StorageFailure"
         },
@@ -8188,173 +8134,149 @@
                         {
                           "name": "process.effect_outcome",
                           "payload_schema": {
-                            "schema": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "code": {
-                                  "minLength": 1,
-                                  "type": "string"
-                                },
-                                "node_id": {
-                                  "minLength": 1,
-                                  "type": "string"
-                                },
-                                "occurrence": {
-                                  "maximum": 8,
-                                  "minimum": 1,
-                                  "type": "integer"
-                                },
-                                "operation": {
-                                  "minLength": 1,
-                                  "type": "string"
-                                },
-                                "outcome_class": {
-                                  "enum": [
-                                    "success",
-                                    "failure",
-                                    "cancelled"
-                                  ],
-                                  "type": "string"
-                                },
-                                "replay_key": {
-                                  "minLength": 1,
-                                  "type": "string"
-                                },
-                                "vocabulary_version": {
-                                  "const": 1
-                                }
+                            "additionalProperties": false,
+                            "properties": {
+                              "code": {
+                                "minLength": 1,
+                                "type": "string"
                               },
-                              "required": [
-                                "vocabulary_version",
-                                "node_id",
-                                "occurrence",
-                                "operation",
-                                "outcome_class",
-                                "replay_key"
-                              ],
-                              "type": "object"
-                            }
+                              "node_id": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "occurrence": {
+                                "maximum": 8,
+                                "minimum": 1,
+                                "type": "integer"
+                              },
+                              "operation": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "outcome_class": {
+                                "enum": [
+                                  "success",
+                                  "failure",
+                                  "cancelled"
+                                ],
+                                "type": "string"
+                              },
+                              "replay_key": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "vocabulary_version": {
+                                "const": 1
+                              }
+                            },
+                            "required": [
+                              "vocabulary_version",
+                              "node_id",
+                              "occurrence",
+                              "operation",
+                              "outcome_class",
+                              "replay_key"
+                            ],
+                            "type": "object"
                           },
                           "semantics": {}
                         },
                         {
                           "name": "process.effect_omissions",
                           "payload_schema": {
-                            "schema": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "nodes": {
-                                  "additionalProperties": {
-                                    "additionalProperties": false,
-                                    "properties": {
-                                      "cancelled": {
-                                        "minimum": 0,
-                                        "type": "integer"
-                                      },
-                                      "failure": {
-                                        "minimum": 0,
-                                        "type": "integer"
-                                      },
-                                      "success": {
-                                        "minimum": 0,
-                                        "type": "integer"
-                                      }
+                            "additionalProperties": false,
+                            "properties": {
+                              "nodes": {
+                                "additionalProperties": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "cancelled": {
+                                      "minimum": 0,
+                                      "type": "integer"
                                     },
-                                    "required": [
-                                      "success",
-                                      "failure",
-                                      "cancelled"
-                                    ],
-                                    "type": "object"
+                                    "failure": {
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    },
+                                    "success": {
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    }
                                   },
-                                  "minProperties": 1,
+                                  "required": [
+                                    "success",
+                                    "failure",
+                                    "cancelled"
+                                  ],
                                   "type": "object"
                                 },
-                                "occurrence_cap": {
-                                  "const": 8
-                                },
-                                "vocabulary_version": {
-                                  "const": 1
-                                }
+                                "minProperties": 1,
+                                "type": "object"
                               },
-                              "required": [
-                                "vocabulary_version",
-                                "occurrence_cap",
-                                "nodes"
-                              ],
-                              "type": "object"
-                            }
+                              "occurrence_cap": {
+                                "const": 8
+                              },
+                              "vocabulary_version": {
+                                "const": 1
+                              }
+                            },
+                            "required": [
+                              "vocabulary_version",
+                              "occurrence_cap",
+                              "nodes"
+                            ],
+                            "type": "object"
                           },
                           "semantics": {}
                         },
                         {
                           "name": "process.cancel_requested",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.first_started",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.waiting",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.resumed",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.external_ref_set",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.caller_departed",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.observer_added",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.observer_removed",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.subscription_retargeted",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.completed",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {
                             "terminal": {
                               "await_output": {
@@ -8366,9 +8288,7 @@
                         },
                         {
                           "name": "process.failed",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {
                             "terminal": {
                               "await_output": {
@@ -8380,9 +8300,7 @@
                         },
                         {
                           "name": "process.cancelled",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {
                             "terminal": {
                               "await_output": {
@@ -8394,9 +8312,7 @@
                         },
                         {
                           "name": "process.abandoned",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {
                             "terminal": {
                               "await_output": {
@@ -8470,9 +8386,9 @@
       "actor_alias": "session-003",
       "kind": "backend_failure",
       "at": 117,
-      "label": "backend.failure.after_begin",
+      "label": "backend.failure.refused",
       "payload": {
-        "fault_point": "after_begin",
+        "fault": "refused",
         "operation": "commit_runtime_state:001",
         "runtime_completion": {
           "actor_alias": "session-003",
@@ -8497,17 +8413,18 @@
       "observed": {
         "attempt": 1,
         "backend_failure": true,
-        "fault_injector": {
-          "enabled": true,
-          "exercised": true,
-          "implementation": "lash_sqlite_store::testing::SqliteFaultInjector",
-          "point": "after_begin",
+        "fault_script": {
+          "armed": true,
+          "call": 1,
+          "fault": "refused",
+          "fired": true,
+          "implementation": "lash_core::testing::Script",
           "seed": 5064657528264405877,
-          "write_transaction_ordinal": 14
+          "store_operation": "commit_runtime_state"
         },
         "operation": "commit_runtime_state:001",
         "production_store_error": {
-          "message": "sqlite storage failure: injected SQLite AfterBegin fault for seed 5064657528264405877 at write transaction 14",
+          "message": "lash-sim storage failure: arm 5064657528264405877 refused the commit before it entered the store",
           "type": "lash_core::StoreError",
           "variant": "StorageFailure"
         },
@@ -9432,173 +9349,149 @@
                         {
                           "name": "process.effect_outcome",
                           "payload_schema": {
-                            "schema": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "code": {
-                                  "minLength": 1,
-                                  "type": "string"
-                                },
-                                "node_id": {
-                                  "minLength": 1,
-                                  "type": "string"
-                                },
-                                "occurrence": {
-                                  "maximum": 8,
-                                  "minimum": 1,
-                                  "type": "integer"
-                                },
-                                "operation": {
-                                  "minLength": 1,
-                                  "type": "string"
-                                },
-                                "outcome_class": {
-                                  "enum": [
-                                    "success",
-                                    "failure",
-                                    "cancelled"
-                                  ],
-                                  "type": "string"
-                                },
-                                "replay_key": {
-                                  "minLength": 1,
-                                  "type": "string"
-                                },
-                                "vocabulary_version": {
-                                  "const": 1
-                                }
+                            "additionalProperties": false,
+                            "properties": {
+                              "code": {
+                                "minLength": 1,
+                                "type": "string"
                               },
-                              "required": [
-                                "vocabulary_version",
-                                "node_id",
-                                "occurrence",
-                                "operation",
-                                "outcome_class",
-                                "replay_key"
-                              ],
-                              "type": "object"
-                            }
+                              "node_id": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "occurrence": {
+                                "maximum": 8,
+                                "minimum": 1,
+                                "type": "integer"
+                              },
+                              "operation": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "outcome_class": {
+                                "enum": [
+                                  "success",
+                                  "failure",
+                                  "cancelled"
+                                ],
+                                "type": "string"
+                              },
+                              "replay_key": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "vocabulary_version": {
+                                "const": 1
+                              }
+                            },
+                            "required": [
+                              "vocabulary_version",
+                              "node_id",
+                              "occurrence",
+                              "operation",
+                              "outcome_class",
+                              "replay_key"
+                            ],
+                            "type": "object"
                           },
                           "semantics": {}
                         },
                         {
                           "name": "process.effect_omissions",
                           "payload_schema": {
-                            "schema": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "nodes": {
-                                  "additionalProperties": {
-                                    "additionalProperties": false,
-                                    "properties": {
-                                      "cancelled": {
-                                        "minimum": 0,
-                                        "type": "integer"
-                                      },
-                                      "failure": {
-                                        "minimum": 0,
-                                        "type": "integer"
-                                      },
-                                      "success": {
-                                        "minimum": 0,
-                                        "type": "integer"
-                                      }
+                            "additionalProperties": false,
+                            "properties": {
+                              "nodes": {
+                                "additionalProperties": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "cancelled": {
+                                      "minimum": 0,
+                                      "type": "integer"
                                     },
-                                    "required": [
-                                      "success",
-                                      "failure",
-                                      "cancelled"
-                                    ],
-                                    "type": "object"
+                                    "failure": {
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    },
+                                    "success": {
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    }
                                   },
-                                  "minProperties": 1,
+                                  "required": [
+                                    "success",
+                                    "failure",
+                                    "cancelled"
+                                  ],
                                   "type": "object"
                                 },
-                                "occurrence_cap": {
-                                  "const": 8
-                                },
-                                "vocabulary_version": {
-                                  "const": 1
-                                }
+                                "minProperties": 1,
+                                "type": "object"
                               },
-                              "required": [
-                                "vocabulary_version",
-                                "occurrence_cap",
-                                "nodes"
-                              ],
-                              "type": "object"
-                            }
+                              "occurrence_cap": {
+                                "const": 8
+                              },
+                              "vocabulary_version": {
+                                "const": 1
+                              }
+                            },
+                            "required": [
+                              "vocabulary_version",
+                              "occurrence_cap",
+                              "nodes"
+                            ],
+                            "type": "object"
                           },
                           "semantics": {}
                         },
                         {
                           "name": "process.cancel_requested",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.first_started",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.waiting",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.resumed",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.external_ref_set",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.caller_departed",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.observer_added",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.observer_removed",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.subscription_retargeted",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {}
                         },
                         {
                           "name": "process.completed",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {
                             "terminal": {
                               "await_output": {
@@ -9610,9 +9503,7 @@
                         },
                         {
                           "name": "process.failed",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {
                             "terminal": {
                               "await_output": {
@@ -9624,9 +9515,7 @@
                         },
                         {
                           "name": "process.cancelled",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {
                             "terminal": {
                               "await_output": {
@@ -9638,9 +9527,7 @@
                         },
                         {
                           "name": "process.abandoned",
-                          "payload_schema": {
-                            "schema": {}
-                          },
+                          "payload_schema": {},
                           "semantics": {
                             "terminal": {
                               "await_output": {
@@ -10064,9 +9951,9 @@
       "actor_alias": "session-004",
       "kind": "backend_failure",
       "at": 135,
-      "label": "backend.failure.after_begin",
+      "label": "backend.failure.refused",
       "payload": {
-        "fault_point": "after_begin",
+        "fault": "refused",
         "operation": "commit_runtime_state:001",
         "runtime_completion": {
           "actor_alias": "session-004",
@@ -10091,17 +9978,18 @@
       "observed": {
         "attempt": 1,
         "backend_failure": true,
-        "fault_injector": {
-          "enabled": true,
-          "exercised": true,
-          "implementation": "lash_sqlite_store::testing::SqliteFaultInjector",
-          "point": "after_begin",
+        "fault_script": {
+          "armed": true,
+          "call": 1,
+          "fault": "refused",
+          "fired": true,
+          "implementation": "lash_core::testing::Script",
           "seed": 5064657528264405895,
-          "write_transaction_ordinal": 16
+          "store_operation": "commit_runtime_state"
         },
         "operation": "commit_runtime_state:001",
         "production_store_error": {
-          "message": "sqlite storage failure: injected SQLite AfterBegin fault for seed 5064657528264405895 at write transaction 16",
+          "message": "lash-sim storage failure: arm 5064657528264405895 refused the commit before it entered the store",
           "type": "lash_core::StoreError",
           "variant": "StorageFailure"
         },
@@ -10182,9 +10070,9 @@
       "actor_alias": "session-004",
       "kind": "backend_failure",
       "at": 135,
-      "label": "backend.failure.after_begin",
+      "label": "backend.failure.refused",
       "payload": {
-        "fault_point": "after_begin",
+        "fault": "refused",
         "operation": "commit_runtime_state:001",
         "runtime_completion": {
           "actor_alias": "session-004",
@@ -10209,17 +10097,18 @@
       "observed": {
         "attempt": 2,
         "backend_failure": true,
-        "fault_injector": {
-          "enabled": true,
-          "exercised": true,
-          "implementation": "lash_sqlite_store::testing::SqliteFaultInjector",
-          "point": "after_begin",
+        "fault_script": {
+          "armed": true,
+          "call": 1,
+          "fault": "refused",
+          "fired": true,
+          "implementation": "lash_core::testing::Script",
           "seed": 5064657541149307783,
-          "write_transaction_ordinal": 18
+          "store_operation": "commit_runtime_state"
         },
         "operation": "commit_runtime_state:001",
         "production_store_error": {
-          "message": "sqlite storage failure: injected SQLite AfterBegin fault for seed 5064657541149307783 at write transaction 18",
+          "message": "lash-sim storage failure: arm 5064657541149307783 refused the commit before it entered the store",
           "type": "lash_core::StoreError",
           "variant": "StorageFailure"
         },
@@ -15019,7 +14908,11 @@
                 "code": "finish({ missing: true });",
                 "error": {
                   "kind": "program",
-                  "message": "\"ok\" is a required property"
+                  "message": "\"ok\" is a required property",
+                  "value_mismatch": {
+                    "instance_path": "",
+                    "message": "\"ok\" is a required property"
+                  }
                 },
                 "id": "lashlang_step_rlm-contract-turn_0",
                 "output": [],
@@ -15032,9 +14925,9 @@
           "source": {
             "kind": "fixed_dst_api_execution",
             "path": "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-            "result_sha256": "7cbafaa6524dce419916fde5d601bdbf5c27b5c441babd7ae017650c70689030",
+            "result_sha256": "8654aa07c22ba742e8782bfa6e92775b020b9eb2cdff7a27c1941a4baa68e4fd",
             "scenario": "rlm_protocol_scenario_typed_schema_mismatch_loops_with_feedback",
-            "source_hash": "698ea5664f4c96a69288d33fa8f834a6be5eb22c8b61b8c9eb3963af57136ccf"
+            "source_hash": "739652ed3a073dcb6d7c7f142365885dda1140b2db24a487603b790a8bd067c1"
           }
         },
         "session": "session-001",
@@ -15114,7 +15007,11 @@
                 "code": "finish({ missing: true });",
                 "error": {
                   "kind": "program",
-                  "message": "\"ok\" is a required property"
+                  "message": "\"ok\" is a required property",
+                  "value_mismatch": {
+                    "instance_path": "",
+                    "message": "\"ok\" is a required property"
+                  }
                 },
                 "id": "lashlang_step_rlm-contract-turn_0",
                 "output": [],
@@ -15127,9 +15024,9 @@
           "source": {
             "kind": "fixed_dst_api_execution",
             "path": "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-            "result_sha256": "7cbafaa6524dce419916fde5d601bdbf5c27b5c441babd7ae017650c70689030",
+            "result_sha256": "8654aa07c22ba742e8782bfa6e92775b020b9eb2cdff7a27c1941a4baa68e4fd",
             "scenario": "rlm_protocol_scenario_typed_schema_mismatch_loops_with_feedback",
-            "source_hash": "698ea5664f4c96a69288d33fa8f834a6be5eb22c8b61b8c9eb3963af57136ccf"
+            "source_hash": "739652ed3a073dcb6d7c7f142365885dda1140b2db24a487603b790a8bd067c1"
           }
         },
         "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:rlm-typed-schema-mismatch-repair-loop",
@@ -15230,7 +15127,11 @@
                 "code": "finish(true);",
                 "error": {
                   "kind": "program",
-                  "message": "true is not valid under any of the schemas listed in the 'anyOf' keyword"
+                  "message": "true is not valid under any of the schemas listed in the 'anyOf' keyword",
+                  "value_mismatch": {
+                    "instance_path": "",
+                    "message": "true is not valid under any of the schemas listed in the 'anyOf' keyword"
+                  }
                 },
                 "id": "lashlang_step_rlm-contract-turn_0",
                 "output": [],
@@ -15243,9 +15144,9 @@
           "source": {
             "kind": "fixed_dst_api_execution",
             "path": "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-            "result_sha256": "3e1437b98319b5256b1c2323a5f235e353d943f56092f60d0184838e1f8be65e",
+            "result_sha256": "f9349e6ae302c7807afb6a1dcc01df610e56eabc4d0916900c13033b99c0e426",
             "scenario": "rlm_protocol_scenario_typed_schema_mismatch_checks_any_of",
-            "source_hash": "b0fda188617d5712a922525a401d0e2fd7dd6a9e9c3e5c560cf057d9fd610082"
+            "source_hash": "fe5f7a694dae02b2614114fffbbb5c05295a44a1c2a79cc017cd0f4f3a62e05b"
           }
         },
         "session": "session-001",
@@ -15324,7 +15225,11 @@
                 "code": "finish(true);",
                 "error": {
                   "kind": "program",
-                  "message": "true is not valid under any of the schemas listed in the 'anyOf' keyword"
+                  "message": "true is not valid under any of the schemas listed in the 'anyOf' keyword",
+                  "value_mismatch": {
+                    "instance_path": "",
+                    "message": "true is not valid under any of the schemas listed in the 'anyOf' keyword"
+                  }
                 },
                 "id": "lashlang_step_rlm-contract-turn_0",
                 "output": [],
@@ -15337,9 +15242,9 @@
           "source": {
             "kind": "fixed_dst_api_execution",
             "path": "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-            "result_sha256": "3e1437b98319b5256b1c2323a5f235e353d943f56092f60d0184838e1f8be65e",
+            "result_sha256": "f9349e6ae302c7807afb6a1dcc01df610e56eabc4d0916900c13033b99c0e426",
             "scenario": "rlm_protocol_scenario_typed_schema_mismatch_checks_any_of",
-            "source_hash": "b0fda188617d5712a922525a401d0e2fd7dd6a9e9c3e5c560cf057d9fd610082"
+            "source_hash": "fe5f7a694dae02b2614114fffbbb5c05295a44a1c2a79cc017cd0f4f3a62e05b"
           }
         },
         "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:rlm-typed-schema-any-of-mismatch",
@@ -17424,7 +17329,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "session-001",
                   "turn_budget": "unbounded"
                 }
               },
@@ -17432,7 +17336,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/5f2128c8900ab9384be2b740623e84decfe316f98d0299ffc1e80fdd838ee751",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:23.433955595+00:00"
+              "timestamp": "2026-10-02T11:48:01.164958474+00:00"
             },
             {
               "event": {
@@ -17544,7 +17448,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "session-001",
                   "turn_budget": "unbounded"
                 }
               },
@@ -17552,7 +17455,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/5f2128c8900ab9384be2b740623e84decfe316f98d0299ffc1e80fdd838ee751",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:23.433955595+00:00"
+              "timestamp": "2026-10-02T11:48:01.164958474+00:00"
             },
             {
               "event": {
@@ -17776,7 +17679,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "sim-agent-foreground-tool-contract",
                   "turn_budget": "unbounded"
                 }
               },
@@ -17784,7 +17686,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/dd169c5fec9bfe9e2ac41a241ae05c1649149e331619f45910aaf13b1a4c5c68",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:25.154859347+00:00"
+              "timestamp": "2026-10-02T11:48:02.304347389+00:00"
             },
             {
               "event": {
@@ -17945,7 +17847,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "sim-agent-foreground-tool-contract",
                   "turn_budget": "unbounded"
                 }
               },
@@ -17953,7 +17854,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/dd169c5fec9bfe9e2ac41a241ae05c1649149e331619f45910aaf13b1a4c5c68",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:25.154859347+00:00"
+              "timestamp": "2026-10-02T11:48:02.304347389+00:00"
             },
             {
               "event": {
@@ -18198,7 +18099,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "sim-agent-started-process-tool-contract",
                   "turn_budget": "unbounded"
                 }
               },
@@ -18206,7 +18106,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/50396f7734a16457129eb4e00143f72ef940bfa98ae05dc4d6d0dfb79af6bec9",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:25.305386043+00:00"
+              "timestamp": "2026-10-02T11:48:02.443147279+00:00"
             },
             {
               "event": {
@@ -18367,7 +18267,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "sim-agent-started-process-tool-contract",
                   "turn_budget": "unbounded"
                 }
               },
@@ -18375,7 +18274,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/50396f7734a16457129eb4e00143f72ef940bfa98ae05dc4d6d0dfb79af6bec9",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:25.305386043+00:00"
+              "timestamp": "2026-10-02T11:48:02.443147279+00:00"
             },
             {
               "event": {
@@ -18624,7 +18523,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "sim-agent-durable-input-contract",
                   "turn_budget": "unbounded"
                 }
               },
@@ -18632,7 +18530,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/7a9c995692155c49599e37d2bb675c468d6cab9e13b4d19207f35282c3b68775",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:25.601321676+00:00"
+              "timestamp": "2026-10-02T11:48:02.722692331+00:00"
             },
             {
               "event": {
@@ -18791,7 +18689,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "sim-agent-durable-input-contract",
                   "turn_budget": "unbounded"
                 }
               },
@@ -18799,7 +18696,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/7a9c995692155c49599e37d2bb675c468d6cab9e13b4d19207f35282c3b68775",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:25.601321676+00:00"
+              "timestamp": "2026-10-02T11:48:02.722692331+00:00"
             },
             {
               "event": {
@@ -19055,7 +18952,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "session:process:p_00000000000070008000000000000002",
                   "turn_budget": "unbounded"
                 }
               },
@@ -19175,7 +19071,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "session:process:p_00000000000070008000000000000002",
                   "turn_budget": "unbounded"
                 }
               },
@@ -19351,7 +19246,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "sim-agent-started-process-subagent-contract",
                   "turn_budget": "unbounded"
                 }
               },
@@ -19359,7 +19253,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/80d6070f56591ba27f5d5c08db3a3d28da9a4cbfd6da521a2516dbca9d1debc8",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:25.929953930+00:00"
+              "timestamp": "2026-10-02T11:48:03.016792143+00:00"
             },
             {
               "event": {
@@ -19520,7 +19414,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "sim-agent-started-process-subagent-contract",
                   "turn_budget": "unbounded"
                 }
               },
@@ -19528,7 +19421,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/80d6070f56591ba27f5d5c08db3a3d28da9a4cbfd6da521a2516dbca9d1debc8",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:25.929953930+00:00"
+              "timestamp": "2026-10-02T11:48:03.016792143+00:00"
             },
             {
               "event": {
@@ -19772,7 +19665,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "sim-agent-nested-process-contract",
                   "turn_budget": "unbounded"
                 }
               },
@@ -19780,7 +19672,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/1c3c01cf92aff7832bc9acae785d5fd684944ff93b494643bfb8e58d6f4b2cdd",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:26.416340894+00:00"
+              "timestamp": "2026-10-02T11:48:03.473769022+00:00"
             },
             {
               "event": {
@@ -19941,7 +19833,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "sim-agent-nested-process-contract",
                   "turn_budget": "unbounded"
                 }
               },
@@ -19949,7 +19840,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/1c3c01cf92aff7832bc9acae785d5fd684944ff93b494643bfb8e58d6f4b2cdd",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:26.416340894+00:00"
+              "timestamp": "2026-10-02T11:48:03.473769022+00:00"
             },
             {
               "event": {
@@ -20197,7 +20088,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "sim-agent-session-turn-process-child-contract",
                   "turn_budget": "unbounded"
                 }
               },
@@ -20205,7 +20095,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/f33c7a09e9b4c1c49eeaf1a6a8add194fe8566cf69937bf80992a0d6d54efbbb",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:26.833144779+00:00"
+              "timestamp": "2026-10-02T11:48:03.938101649+00:00"
             },
             {
               "event": {
@@ -20370,7 +20260,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "sim-agent-session-turn-process-child-contract",
                   "turn_budget": "unbounded"
                 }
               },
@@ -20378,7 +20267,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/f33c7a09e9b4c1c49eeaf1a6a8add194fe8566cf69937bf80992a0d6d54efbbb",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:26.833144779+00:00"
+              "timestamp": "2026-10-02T11:48:03.938101649+00:00"
             },
             {
               "event": {
@@ -20636,7 +20525,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "session:process:p_00000000000070008000000000000001",
                   "turn_budget": {
                     "bounded": 1
                   }
@@ -20737,7 +20625,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "session:process:p_00000000000070008000000000000001",
                   "turn_budget": {
                     "bounded": 1
                   }
@@ -20894,7 +20781,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "sim-agent-failed-child-contract",
                   "turn_budget": {
                     "bounded": 1
                   }
@@ -20904,7 +20790,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/1c98e507119a99cb217909500982abf5bc87f8f1d633751af885b79c0aac3e91",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:27.107375522+00:00"
+              "timestamp": "2026-10-02T11:48:04.187461275+00:00"
             },
             {
               "event": {
@@ -21062,7 +20948,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "sim-agent-failed-child-contract",
                   "turn_budget": {
                     "bounded": 1
                   }
@@ -21072,7 +20957,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/1c98e507119a99cb217909500982abf5bc87f8f1d633751af885b79c0aac3e91",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:27.107375522+00:00"
+              "timestamp": "2026-10-02T11:48:04.187461275+00:00"
             },
             {
               "event": {
@@ -21317,7 +21202,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "sim-agent-parallel-spawn-join-contract",
                   "turn_budget": "unbounded"
                 }
               },
@@ -21325,7 +21209,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/05098316e02a842fc1c5cf44e498f67514aeabdf42d63417a82e5248c9cb8725",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:27.494025158+00:00"
+              "timestamp": "2026-10-02T11:48:04.522086920+00:00"
             },
             {
               "event": {
@@ -21501,7 +21385,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "sim-agent-parallel-spawn-join-contract",
                   "turn_budget": "unbounded"
                 }
               },
@@ -21509,7 +21392,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/05098316e02a842fc1c5cf44e498f67514aeabdf42d63417a82e5248c9cb8725",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:27.494025158+00:00"
+              "timestamp": "2026-10-02T11:48:04.522086920+00:00"
             },
             {
               "event": {
@@ -21763,7 +21646,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "sim-agent-tuple-json-array-contract",
                   "turn_budget": "unbounded"
                 }
               },
@@ -21771,7 +21653,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/69bcbfd656f2d52e00499a6df571856319496b9d0f0c2b047443262a38bcf32d",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:28.059143023+00:00"
+              "timestamp": "2026-10-02T11:48:04.828992650+00:00"
             },
             {
               "event": {
@@ -21943,7 +21825,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "sim-agent-tuple-json-array-contract",
                   "turn_budget": "unbounded"
                 }
               },
@@ -21951,7 +21832,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/69bcbfd656f2d52e00499a6df571856319496b9d0f0c2b047443262a38bcf32d",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:28.059143023+00:00"
+              "timestamp": "2026-10-02T11:48:04.828992650+00:00"
             },
             {
               "event": {
@@ -22229,7 +22110,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "session-001",
                   "turn_budget": "unbounded"
                 }
               },
@@ -22237,7 +22117,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/5f2128c8900ab9384be2b740623e84decfe316f98d0299ffc1e80fdd838ee751",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:23.433955595+00:00"
+              "timestamp": "2026-10-02T11:48:01.164958474+00:00"
             },
             {
               "event": {
@@ -22615,7 +22495,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "session:process:p_00000000000070008000000000000002",
                   "turn_budget": "unbounded"
                 }
               },
@@ -22969,7 +22848,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "session:process:p_00000000000070008000000000000001",
                   "turn_budget": {
                     "bounded": 1
                   }
@@ -23191,7 +23069,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "session-002",
                   "turn_budget": "unbounded"
                 }
               },
@@ -23199,7 +23076,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/bcfe463b3e1da263bd3a87142e0f0dfe9f05815783c4d1556a3a097eee45e146",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:23.502829489+00:00"
+              "timestamp": "2026-10-02T11:48:01.217289250+00:00"
             },
             {
               "event": {
@@ -23321,7 +23198,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "session-002",
                   "turn_budget": "unbounded"
                 }
               },
@@ -23329,7 +23205,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/bcfe463b3e1da263bd3a87142e0f0dfe9f05815783c4d1556a3a097eee45e146",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:23.502829489+00:00"
+              "timestamp": "2026-10-02T11:48:01.217289250+00:00"
             },
             {
               "event": {
@@ -23606,7 +23482,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "session-002",
                   "turn_budget": "unbounded"
                 }
               },
@@ -23614,7 +23489,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/bcfe463b3e1da263bd3a87142e0f0dfe9f05815783c4d1556a3a097eee45e146",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:23.502829489+00:00"
+              "timestamp": "2026-10-02T11:48:01.217289250+00:00"
             },
             {
               "event": {
@@ -23922,7 +23797,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "session-003",
                   "turn_budget": "unbounded"
                 }
               },
@@ -23930,7 +23804,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/5b3890d1ee8fa2212cfadae15a2ce0d7c05a35d52f974a0ff448df7ae05c7d21",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:23.601448608+00:00"
+              "timestamp": "2026-10-02T11:48:01.282044927+00:00"
             },
             {
               "event": {
@@ -24045,7 +23919,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "session-003",
                   "turn_budget": "unbounded"
                 }
               },
@@ -24053,7 +23926,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/5b3890d1ee8fa2212cfadae15a2ce0d7c05a35d52f974a0ff448df7ae05c7d21",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:23.601448608+00:00"
+              "timestamp": "2026-10-02T11:48:01.282044927+00:00"
             },
             {
               "event": {
@@ -24303,7 +24176,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "session-003",
                   "turn_budget": "unbounded"
                 }
               },
@@ -24311,7 +24183,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/5b3890d1ee8fa2212cfadae15a2ce0d7c05a35d52f974a0ff448df7ae05c7d21",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:23.601448608+00:00"
+              "timestamp": "2026-10-02T11:48:01.282044927+00:00"
             },
             {
               "event": {
@@ -24631,7 +24503,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "session-003",
                   "turn_budget": "unbounded"
                 }
               },
@@ -24639,7 +24510,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/5b3890d1ee8fa2212cfadae15a2ce0d7c05a35d52f974a0ff448df7ae05c7d21",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:23.601448608+00:00"
+              "timestamp": "2026-10-02T11:48:01.282044927+00:00"
             },
             {
               "event": {
@@ -24974,7 +24845,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "session-004",
                   "turn_budget": "unbounded"
                 }
               },
@@ -24982,7 +24852,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/884656ca38d43f2fb1e93edd668ead0d85ec0c230849df2aafd84adcaed302fb",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:23.688085829+00:00"
+              "timestamp": "2026-10-02T11:48:01.332139644+00:00"
             },
             {
               "event": {
@@ -25094,7 +24964,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "session-004",
                   "turn_budget": "unbounded"
                 }
               },
@@ -25102,7 +24971,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/884656ca38d43f2fb1e93edd668ead0d85ec0c230849df2aafd84adcaed302fb",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:23.688085829+00:00"
+              "timestamp": "2026-10-02T11:48:01.332139644+00:00"
             },
             {
               "event": {
@@ -25349,7 +25218,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "session-004",
                   "turn_budget": "unbounded"
                 }
               },
@@ -25357,7 +25225,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/884656ca38d43f2fb1e93edd668ead0d85ec0c230849df2aafd84adcaed302fb",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:23.688085829+00:00"
+              "timestamp": "2026-10-02T11:48:01.332139644+00:00"
             },
             {
               "event": {
@@ -25674,7 +25542,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "session-004",
                   "turn_budget": "unbounded"
                 }
               },
@@ -25682,7 +25549,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/884656ca38d43f2fb1e93edd668ead0d85ec0c230849df2aafd84adcaed302fb",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:23.688085829+00:00"
+              "timestamp": "2026-10-02T11:48:01.332139644+00:00"
             },
             {
               "event": {
@@ -26069,7 +25936,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "session-004",
                   "turn_budget": "unbounded"
                 }
               },
@@ -26077,7 +25943,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/884656ca38d43f2fb1e93edd668ead0d85ec0c230849df2aafd84adcaed302fb",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:23.688085829+00:00"
+              "timestamp": "2026-10-02T11:48:01.332139644+00:00"
             },
             {
               "event": {
@@ -26487,7 +26353,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "suspend-durable-effect",
                   "turn_budget": "unbounded"
                 }
               },
@@ -26495,7 +26360,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/0ce499e3253231fe5a37e7963f3f4ab0ece09c347c162764418b023cf073ec2d",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:23.859462914+00:00"
+              "timestamp": "2026-10-02T11:48:01.441797813+00:00"
             },
             {
               "event": {
@@ -26648,7 +26513,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "suspend-durable-effect",
                   "turn_budget": "unbounded"
                 }
               },
@@ -26656,7 +26520,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/0ce499e3253231fe5a37e7963f3f4ab0ece09c347c162764418b023cf073ec2d",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:23.859462914+00:00"
+              "timestamp": "2026-10-02T11:48:01.441797813+00:00"
             },
             {
               "event": {
@@ -26929,7 +26793,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "suspend-exec-code",
                   "turn_budget": "unbounded"
                 }
               },
@@ -26937,7 +26800,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/80837f7413f19b9ad3b02ee1e4305fdd93d313761b442632854bcc3b7af88dcf",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:23.933380336+00:00"
+              "timestamp": "2026-10-02T11:48:01.504305117+00:00"
             },
             {
               "event": {
@@ -27090,7 +26953,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "suspend-exec-code",
                   "turn_budget": "unbounded"
                 }
               },
@@ -27098,7 +26960,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/80837f7413f19b9ad3b02ee1e4305fdd93d313761b442632854bcc3b7af88dcf",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:23.933380336+00:00"
+              "timestamp": "2026-10-02T11:48:01.504305117+00:00"
             },
             {
               "event": {
@@ -27371,7 +27233,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "suspend-tool",
                   "turn_budget": "unbounded"
                 }
               },
@@ -27379,7 +27240,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/ac05290cbb5b481dc281e62ba6776b33814f2a862b7cca709c85f07a28ec6a40",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:23.767787365+00:00"
+              "timestamp": "2026-10-02T11:48:01.383022454+00:00"
             },
             {
               "event": {
@@ -27532,7 +27393,6 @@
                     },
                     "reasoning": "provider_default"
                   },
-                  "session_id": "suspend-tool",
                   "turn_budget": "unbounded"
                 }
               },
@@ -27540,7 +27400,7 @@
               "kind": "frame_open",
               "node_id": "frame-node/v3/ac05290cbb5b481dc281e62ba6776b33814f2a862b7cca709c85f07a28ec6a40",
               "reason": "initial",
-              "timestamp": "2026-10-02T09:49:23.767787365+00:00"
+              "timestamp": "2026-10-02T11:48:01.383022454+00:00"
             },
             {
               "event": {

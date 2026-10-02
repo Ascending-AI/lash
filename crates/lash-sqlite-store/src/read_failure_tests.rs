@@ -320,7 +320,7 @@ enum QueuedWorkRead {
 async fn queued_work_read_survives_a_consume_mid_hydration(session_id: &str, read: QueuedWorkRead) {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("queued-work-snapshot.db");
-    let injector = crate::testing::SqliteFaultInjector::default();
+    let pauses = crate::testing::SqlitePauses::default();
     let store = Arc::new(
         SqliteStore::open_at(
             &crate::location::DatabaseLocation::standalone_file(&path),
@@ -329,7 +329,7 @@ async fn queued_work_read_survives_a_consume_mid_hydration(session_id: &str, rea
             None,
             None,
             lash_core_execution::FleetFormat::writable(),
-            Some(injector.clone()),
+            Some(pauses.clone()),
         )
         .await
         .expect("open store with a read seam"),
@@ -346,7 +346,7 @@ async fn queued_work_read_survives_a_consume_mid_hydration(session_id: &str, rea
         .await
         .expect("enqueue queued work");
 
-    let pause = injector.pause_queued_work_hydration();
+    let pause = pauses.pause_queued_work_hydration();
     let reader = tokio::spawn({
         let store = Arc::clone(&store);
         let session_id = session_id.clone();

@@ -532,11 +532,11 @@ pub(crate) fn model_only_boundary_reviews() -> Vec<ModelOnlyBoundaryReview> {
         },
         ModelOnlyBoundaryReview {
             boundary_kind: "backend_failure",
-            status: "real_sqlite_fault_injector_observation",
-            production_abstraction_used: "lash_sqlite_store::testing::SqliteFaultInjector armed at AfterBegin and CommitIo around real RuntimeStore::commit_runtime_state calls",
-            model_only_scope: "the generated lane exercises SQLite transaction faults directly; Postgres connection faults remain in the separate backend-contention lane",
+            status: "real_sqlite_store_under_fault_script",
+            production_abstraction_used: "real RuntimeStore::commit_runtime_state calls on a SQLite memory store under lash_core::testing::Script, each refused before the store or answered a lost reply",
+            model_only_scope: "the generated lane faults the commit at the store trait on SQLite memory; faults inside a transaction are not modelled, and Postgres connection faults remain in the separate backend-contention lane",
             oracle_id: crate::oracles::BACKEND_FAILURE_ORACLE,
-            artifact_evidence: "backend failure events include StoreError::StorageFailure plus fault_injector.enabled, exercised, seed, point, and write_transaction_ordinal; disabling the injector changes the oracle result",
+            artifact_evidence: "backend failure events include StoreError::StorageFailure plus fault_script.armed, fired, seed, fault, store_operation, and call; leaving the script unarmed changes the oracle result",
         },
         ModelOnlyBoundaryReview {
             boundary_kind: "provider_mutation",

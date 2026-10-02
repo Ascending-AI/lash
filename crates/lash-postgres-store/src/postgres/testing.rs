@@ -113,13 +113,6 @@ pub async fn read_stored_cells_for_testing(
     Ok(cells)
 }
 
-/// Deterministic PostgreSQL substrate fault injection, the twin of
-/// `lash_sqlite_store::testing`'s injector.
-#[cfg(feature = "testing")]
-pub use crate::fault_injection::{
-    PostgresFaultArm, PostgresFaultInjector, PostgresFaultObservation, PostgresFaultPoint,
-};
-
 /// The `AfterFence` seam (ADR 0115 §6): pauses a guarded transaction right
 /// after its writer fence, while it holds the fleet-format row `FOR SHARE`.
 ///

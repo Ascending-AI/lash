@@ -705,9 +705,8 @@ pub mod persistence {
     };
     /// The Lashlang module-artifact port a backend's store set supplies.
     pub use lash_core::{
-        ArtifactPublicationPause, ArtifactStoreError, DurabilityTier, ModuleArtifactAstRefusal,
-        ModuleArtifactCorruption, ModuleArtifactGeneration, ModuleArtifactRefusal,
-        ModuleArtifactStore,
+        ArtifactStoreError, DurabilityTier, ModuleArtifactAstRefusal, ModuleArtifactCorruption,
+        ModuleArtifactGeneration, ModuleArtifactRefusal, ModuleArtifactStore,
     };
     pub use lash_core::{
         BlobRef, CURRENT_SESSION_STATE_VERSION, DurableItem, DurablePayload, DurableScan,

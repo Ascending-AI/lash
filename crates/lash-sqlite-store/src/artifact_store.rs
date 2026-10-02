@@ -23,7 +23,6 @@ use lash_store_sql::artifact::referrer_edges::ReferrerEdgeStatements;
 use lash_store_sql::artifact::referrer_fences::ReferrerFenceStatements;
 
 use super::*;
-use lash_sansio::sync::MutexExt;
 
 lash_store_sql::statements! {
     /// `artifact_refs` statements only SQLite issues.
@@ -595,14 +594,6 @@ impl SqliteStore {
 
 #[async_trait::async_trait]
 impl lash_core_execution::ModuleArtifactStore for SqliteStore {
-    fn pause_next_publication_for_testing(
-        &self,
-    ) -> Option<lash_core_execution::ArtifactPublicationPause> {
-        let pause = lash_core_execution::ArtifactPublicationPause::default();
-        *self.artifact_publication_pause.lock_recover() = Some(pause.clone());
-        Some(pause)
-    }
-
     fn durability_tier(&self) -> lash_core_execution::DurabilityTier {
         lash_core_execution::DurabilityTier::Durable
     }
@@ -617,10 +608,6 @@ impl lash_core_execution::ModuleArtifactStore for SqliteStore {
             return Err(ArtifactStoreError::Encode(
                 "invalid module reference".into(),
             ));
-        }
-        let publication_pause = self.artifact_publication_pause.lock_recover().take();
-        if let Some(pause) = publication_pause {
-            pause.pause().await;
         }
         self.publish_artifact_ref_blob(
             MODULE_ARTIFACT_NAMESPACE,
