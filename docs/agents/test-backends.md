@@ -43,6 +43,16 @@ ignored, and select them with `--include-ignored` inside the service gate.
 PostgreSQL and always-replay variants. Use `pg-model-keys` for that focused
 suite with the same wrapper.
 
+The facade's remaining PostgreSQL-only laws -- ignored tests spread across
+`//crates/lash:lash__unit_test` and the integration binaries -- run in the
+same job as `pg-facade-laws`, which selects them by name: a law a pg16
+container alone satisfies carries `postgres` in its libtest path. A law that
+also needs a live Restate or a managed service is named and skipped there;
+its own suite owns it.
+`scripts/check_postgres_gate_coverage.py` fails if a PostgreSQL-gated ignored
+test lands in a binary no Postgres suite runs, or is named so the filter
+misses it.
+
 `just store-contract-soak` and `just runtime-persistence-soak` increase the
 property-case budgets on SQLite memory, SQLite file and PostgreSQL. Their
 PostgreSQL leg still requires a service. The storage differential is

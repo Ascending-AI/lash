@@ -296,6 +296,7 @@ class StoreGateTests(Fixture):
         "pg-pool-wait": ["postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads"],
         "pg-sim-backend-faults": ["postgres_backend_fault_seed_set_covers_every_fault_and_oracle"],
         "pg-model-keys": ["two_keys_sharing_a_provider_kind_select_their_own_transport::postgres"],
+        "pg-facade-laws": ["a_facade_law_on_postgres"],
         "s3-attachment-differential": ["attachment_blob_store_differential_agrees"],
         "pg-rlm-frame-open": ["restate_double_postgres::law"],
     }
@@ -347,6 +348,7 @@ class CargoStoreGateTests(Fixture):
                                      "a_compatible_expansion_still_reports_column_drift"],
         "s3-attachment-differential": ["attachment_blob_store_differential_agrees"],
         "pg-rlm-frame-open": ["restate_double_postgres::law"],
+        "pg-facade-laws": ["a_facade_law_on_postgres"],
     }
 
     def test_pg_s3_restate_untrusted_selector_rename_fails(self):
@@ -364,7 +366,10 @@ class CargoStoreGateTests(Fixture):
     def test_pg_s3_restate_untrusted_empty_execution_fails(self):
         for suite, names in self.SUITES.items():
             with self.subTest(suite=suite):
-                self.env.update(FIXTURE_CASES=json.dumps([[name, False] for name in names]),
+                # An ignored-only suite needs an ignored fixture case to reach
+                # the execution check at all.
+                ignored = suite == "pg-facade-laws"
+                self.env.update(FIXTURE_CASES=json.dumps([[name, ignored] for name in names]),
                                 FIXTURE_EMPTY_EXECUTION="1")
                 self.assert_failed(self.gate(suite, trusted=False),
                                    "no non-ignored test execution observed in the selected union")

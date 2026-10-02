@@ -3209,6 +3209,7 @@ derive_mutation_jobs() {{
 
         flag_dialects = {
             "include-ignored": ("--test_arg=--include-ignored", ("--run-ignored all", "--include-ignored")),
+            "ignored-only": ("--test_arg=--ignored", ("--run-ignored ignored-only", " --ignored")),
             "single-threaded": ("--test_arg=--test-threads=1", ("-j1", "--test-threads=1")),
             "nocapture": ("--test_arg=--nocapture", ("--no-capture", "--nocapture")),
         }
@@ -3226,12 +3227,18 @@ derive_mutation_jobs() {{
 
         for suite, row in sorted(uniform.items()):
             with self.subTest(suite=suite):
-                label, test_filter, package, target, runner, flags = row.split("|")
+                labels, test_filter, package, target, runner, flags = row.split("|")
                 buck2, cargo = store_suite_branches(suite)
                 invocation_count = len(test_filter.split(","))
-                self.assertEqual(invocation_count, len(buck2.splitlines()))
+                # Buck2 runs every label per filter; Cargo's `target` selects
+                # their union, so it runs each filter once.
+                self.assertEqual(
+                    invocation_count * len(labels.split(",")),
+                    len(buck2.splitlines()),
+                )
                 self.assertEqual(invocation_count, len(cargo.splitlines()))
-                self.assertIn(label, buck2)
+                for label in labels.split(","):
+                    self.assertIn(label, buck2)
                 self.assertIn(f"-p {package}", cargo)
                 if target:
                     self.assertIn(target, cargo)

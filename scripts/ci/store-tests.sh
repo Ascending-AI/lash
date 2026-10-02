@@ -144,24 +144,36 @@ postgres_slot_test() {
 # One test selection per uniform suite, rendered into both dialects below.
 # Fields are
 #
-#   Buck2 label|comma-separated test filters|cargo package|cargo target|cargo runner|flags
+#   comma-separated Buck2 labels|comma-separated test filters|cargo package|cargo target|cargo runner|flags
 #
 # `skip=<filter>` excludes an explicitly unresolved ignored law from a
 # cargo-test suite that otherwise includes its service-only ignored tests.
 # Each filter runs separately in either dialect. An empty filter runs the
 # whole target.
 #
-# `flags` is a comma list of intents -- include-ignored, single-threaded,
-# nocapture -- that each renderer spells in its own dialect, so the translation
-# table that used to be a comment above `pg-cross-backend` is code. `runner` is
-# the Cargo side's test driver, kept per suite because `--profile ci` and
-# nextest-vs-libtest are execution settings, not test selection.
+# `flags` is a comma list of intents -- include-ignored, ignored-only,
+# single-threaded, nocapture -- that each renderer spells in its own dialect,
+# so the translation table that used to be a comment above `pg-cross-backend`
+# is code. `runner` is the Cargo side's test driver, kept per suite because
+# `--profile ci` and nextest-vs-libtest are execution settings, not test
+# selection.
+#
+# A multi-label row is how a suite selects the same cases from several
+# binaries: Buck2 runs each label; Cargo runs the filter once against
+# `target`, which must therefore name the union of the labels' test targets
+# (an empty `target` selects the whole package's).
 #
 # Three suites are deliberately absent and stay explicit arms below:
 # `pg-catalog-compatibility` runs different targets; `pg-store` and
 # `s3-store` take a generated label file rather than one label. Forcing a shape
 # variation into the table for those buys nothing.
 declare -A uniform_store_suites=(
+  # The facade's PostgreSQL-only laws: every `#[ignore]`d test in
+  # //crates/lash that a pg16 container alone satisfies. The `postgres` name
+  # filter derives them -- scripts/check_postgres_gate_coverage.py fails on a
+  # PostgreSQL-gated law whose name or binary escapes it -- and the skips name
+  # the laws that also need a second service, which their own suites own.
+  [pg-facade-laws]="//crates/lash:lash__unit_test,//crates/lash:facade_host_wrappers__test,//crates/lash:integration__test,//crates/lash:replay_after_advance__test,//crates/lash:seam_proof_dialect__test|postgres|lash-runtime|--lib --bins --test facade_host_wrappers --test integration --test replay_after_advance --test seam_proof_dialect --features restate,rlm,sqlite,testing,typescript|cargo-test|ignored-only,nocapture,skip=postgres_live_restate,skip=live_postgres,skip=native_restate,skip=catalog_storm"
   [pg-rlm-frame-open]="//crates/lash-protocol-rlm:frame_open_redrive__test|restate_double_postgres::|lash-internal-protocol-rlm|--test frame_open_redrive|cargo-test|include-ignored,nocapture"
   [pg-rlm-tool-call-limit]="//crates/lash-protocol-rlm:tool_batch_parallelism__test|restate_double_postgres::|lash-internal-protocol-rlm|--test tool_batch_parallelism|cargo-test|include-ignored,nocapture"
   [pg-artifact-referrers]="//crates/lash:artifact_referrers_evidence__test||lash-runtime|--test artifact_referrers_evidence --features rlm,restate,sqlite,testing|cargo-test|nocapture"
@@ -188,6 +200,7 @@ render_buck2_suite() {
   local args=()
   [ -n "$filter" ] && args+=("--test_arg=${filter}")
   suite_has_flag "$flags" include-ignored && args+=(--test_arg=--include-ignored)
+  suite_has_flag "$flags" ignored-only && args+=(--test_arg=--ignored)
   suite_has_flag "$flags" single-threaded && args+=(--test_arg=--test-threads=1)
   suite_has_flag "$flags" nocapture && args+=(--test_arg=--nocapture)
   local flag
@@ -224,6 +237,7 @@ render_cargo_suite() {
     local libtest=()
     suite_has_flag "$flags" nocapture && libtest+=(--nocapture)
     suite_has_flag "$flags" include-ignored && libtest+=(--include-ignored)
+    suite_has_flag "$flags" ignored-only && libtest+=(--ignored)
     suite_has_flag "$flags" single-threaded && libtest+=(--test-threads=1)
     local flag
     local -a selections
@@ -238,6 +252,7 @@ render_cargo_suite() {
     suite_has_flag "$flags" single-threaded && cmd+=(-j1)
     suite_has_flag "$flags" nocapture && cmd+=(--no-capture)
     suite_has_flag "$flags" include-ignored && cmd+=(--run-ignored all)
+    suite_has_flag "$flags" ignored-only && cmd+=(--run-ignored ignored-only)
     [ -n "$filter" ] && cmd+=(-E "test(${filter})")
   fi
   if [ "$runner" = cargo-test ]; then
@@ -248,28 +263,34 @@ render_cargo_suite() {
 }
 
 run_uniform_store_suite() {
-  local label filter_list filter package target runner flags
-  local filters=()
-  IFS='|' read -r label filter_list package target runner flags \
+  local label_list filter_list filter package target runner flags
+  local labels=() filters=()
+  IFS='|' read -r label_list filter_list package target runner flags \
     <<<"${uniform_store_suites[$1]}"
+  IFS=',' read -r -a labels <<<"$label_list"
   if [ -n "$filter_list" ]; then
     IFS=',' read -r -a filters <<<"$filter_list"
   else
     filters=("")
   fi
-  for filter in "${filters[@]}"; do
-    if [ "${trusted}" = true ]; then
-      render_buck2_suite "$label" "$filter" "$flags"
-    else
+  if [ "${trusted}" = true ]; then
+    local label
+    for label in "${labels[@]}"; do
+      for filter in "${filters[@]}"; do
+        render_buck2_suite "$label" "$filter" "$flags"
+      done
+    done
+  else
+    for filter in "${filters[@]}"; do
       render_cargo_suite "$filter" "$package" "$target" "$runner" "$flags"
-    fi
-  done
+    done
+  fi
 }
 
 # Every label a suite executes, for the build that precedes the service.
 suite_labels() {
   if [ -n "${uniform_store_suites[$1]+set}" ]; then
-    echo "${uniform_store_suites[$1]%%|*}"
+    tr ',' ' ' <<<"${uniform_store_suites[$1]%%|*}"
     return
   fi
   local listed

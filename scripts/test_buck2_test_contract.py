@@ -477,6 +477,7 @@ class WorkflowTests(unittest.TestCase):
                 "pg-artifact-referrers",
                 "pg-attachment-referrers",
                 "pg-model-keys",
+                "pg-facade-laws",
                 "pg-rlm-frame-open",
                 "pg-rlm-tool-call-limit",
                 "pg-pool-wait",

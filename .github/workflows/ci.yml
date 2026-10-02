@@ -532,6 +532,8 @@ jobs:
           python3 scripts/test_check_workflow_graph_model.py
           python3 scripts/test_check_dialect_boundary.py && python3 scripts/test_check_vm_parent_paths.py
           python3 scripts/test_check_service_gate_pinning.py
+          python3 scripts/check_postgres_gate_coverage.py
+          python3 scripts/test_check_postgres_gate_coverage.py
           python3 scripts/test_check_substrate_boundary.py
           python3 scripts/test_check_writer_stamps.py
           python3 scripts/test_check_guarded_transactions.py
@@ -1605,6 +1607,7 @@ jobs:
             pg-artifact-referrers \
             pg-attachment-referrers \
             pg-model-keys \
+            pg-facade-laws \
             pg-rlm-frame-open \
             pg-rlm-tool-call-limit \
             pg-pool-wait \
@@ -1658,6 +1661,19 @@ jobs:
         run: |
           bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
             bash scripts/ci/store-tests.sh pg-model-keys
+
+      # The facade's PostgreSQL-only laws are `#[ignore]`d tests across five
+      # //crates/lash binaries; before FIG-4743 no CI job selected them and
+      # they only ran by hand. The suite derives the cases by name -- every
+      # law a pg16 container alone satisfies carries `postgres` in its libtest
+      # path -- and skips the ones that also need a live Restate or managed
+      # service, which their own suites own.
+      # scripts/check_postgres_gate_coverage.py fails the checks job if a new
+      # PostgreSQL-gated test in the crate escapes the selection.
+      - name: Test facade laws on Postgres
+        run: |
+          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
+            bash scripts/ci/store-tests.sh pg-facade-laws
 
       - name: Test RLM frame-open replay and live reset on Postgres
         run: |
