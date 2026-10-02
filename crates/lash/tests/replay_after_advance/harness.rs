@@ -307,7 +307,16 @@ impl World {
         } else {
             Engine::double(&storage, 4324).await
         };
-        let backend = engine.backend();
+        let session_work = match &engine {
+            Engine::Double(backend) => backend.explicit_reconcile_session_work(),
+            Engine::Live(backend) => backend.explicit_reconcile_session_work(),
+        };
+        // Only the law advances state between its receipts. A deployment's
+        // immediate recovery tick can otherwise recover a reservation or
+        // publish a terminal beside the replay being measured.
+        let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(engine.backend())
+            .with_session_work(session_work)
+            .into_backend();
         let provider = lash_core::testing::TestProvider::builder()
             .kind("replay-after-advance")
             .complete(|_| async {

@@ -66,6 +66,33 @@ struct OwnershipTools {
     steer: Mutex<Option<(Arc<dyn crate::RuntimeStore>, TurnId)>>,
 }
 
+struct ProbeEvidence<'a>(&'a OwnershipTools);
+
+impl Drop for ProbeEvidence<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            eprintln!(
+                "ownership probe for {}: captures={:?}, children={:?}, pending_steer={:?}",
+                self.0.session_id,
+                self.0
+                    .captures
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                self.0
+                    .children
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                self.0
+                    .steer
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .as_ref()
+                    .map(|(_, root)| root),
+            );
+        }
+    }
+}
+
 impl OwnershipTools {
     fn new(registry: Arc<dyn crate::ProcessRegistry>, session_id: SessionId) -> Arc<Self> {
         Arc::new(Self {
@@ -280,6 +307,7 @@ fn drive_attempt(
         let request = request.clone();
         let tx = tx.clone();
         Box::pin(async move {
+            let _evidence = ProbeEvidence(&tools);
             let mut runtime = runtime_with(&parts, &tools).await;
             let outcome = lash_core::drive::drive_session(&mut runtime, &scope, &request)
                 .await
@@ -305,6 +333,7 @@ async fn drive_with(
     tools: &Arc<OwnershipTools>,
     request: &str,
 ) -> DriveOutcome {
+    let _evidence = ProbeEvidence(tools);
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     // A drive that diverged from its journal never ends: the tier retries it
     // until it rests. Bound the wait so the divergence fails the law.
@@ -396,6 +425,7 @@ async fn assert_owned(
     probes: usize,
     kind: RootTerminalKind,
 ) {
+    let _evidence = ProbeEvidence(tools);
     let turn = crate::ScopeId::turn(parts.session_id.clone(), root.clone());
     let owned = Capture {
         starter: turn.clone(),

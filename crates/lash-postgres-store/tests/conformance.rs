@@ -1954,6 +1954,28 @@ lash_conformance::retention_tests!({
 // FIG-3607 contract 4 (FIG-4489): every logical turn a drive runs, a
 // recovered follow-on's included, is owned by `Turn(logical root)`, on the
 // Restate double over PostgreSQL stores.
+struct OwnershipDatabaseEvidence {
+    database: IsolatedDatabase,
+    pool: sqlx::PgPool,
+    engine: lash_restate_test::RestateTestBackend,
+}
+
+impl Drop for OwnershipDatabaseEvidence {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            eprintln!(
+                "ownership database {}: pool_closed={}, connections={}, idle={}, limit={}, invocations={:#?}",
+                self.database.database_name(),
+                self.pool.is_closed(),
+                self.pool.size(),
+                self.pool.num_idle(),
+                self.pool.options().get_max_connections(),
+                self.engine.server().invocations(),
+            );
+        }
+    }
+}
+
 mod driver_turn_ownership {
     use super::*;
     lash_conformance::driver_turn_ownership_tests!({
@@ -1962,8 +1984,13 @@ mod driver_turn_ownership {
         };
         reset(storage.pool()).await;
         let ((attachments, double), stores, host, runner) = double_law_backend(&storage).await;
+        let evidence = OwnershipDatabaseEvidence {
+            database: lock,
+            pool: storage.pool().clone(),
+            engine: double.clone(),
+        };
         (
-            (lock, storage, attachments, double),
+            (evidence, storage, attachments, double),
             "pg-driver-ownership",
             host,
             stores,
@@ -1988,8 +2015,13 @@ mod driver_turn_ownership_under_replay {
             lash_restate_test::ServerConfig::default().always_replay(true),
         )
         .await;
+        let evidence = OwnershipDatabaseEvidence {
+            database: lock,
+            pool: storage.pool().clone(),
+            engine: double.clone(),
+        };
         (
-            (lock, storage, attachments, double),
+            (evidence, storage, attachments, double),
             "pg-driver-ownership-replay",
             host,
             stores,
