@@ -20,7 +20,7 @@ pub struct Fixture {
 enum Database {
     Sqlite(String),
     Postgres {
-        storage: PostgresStorage,
+        storage: Box<PostgresStorage>,
         _database: IsolatedDatabase,
         _attachments: tempfile::TempDir,
     },
@@ -82,7 +82,7 @@ impl Fixture {
             Self {
                 double,
                 database: Database::Postgres {
-                    storage,
+                    storage: Box::new(storage),
                     _database: database,
                     _attachments: attachments,
                 },

@@ -126,7 +126,10 @@ pub(super) struct Keep {
 pub(super) enum Opening {
     SqliteMemory,
     SqliteFile(std::path::PathBuf),
-    Postgres(lash_postgres_store::PostgresStorage, std::path::PathBuf),
+    Postgres(
+        Box<lash_postgres_store::PostgresStorage>,
+        std::path::PathBuf,
+    ),
 }
 
 /// The PostgreSQL URL required by the PostgreSQL legs.
@@ -161,7 +164,7 @@ pub(super) async fn prepare(storage: Storage) -> (Opening, Keep) {
             let files = tempfile::tempdir().expect("an attachment directory");
             let attachments = files.path().to_owned();
             (
-                Opening::Postgres(storage, attachments),
+                Opening::Postgres(Box::new(storage), attachments),
                 Keep {
                     _files: Some(files),
                     _database: Some(database),

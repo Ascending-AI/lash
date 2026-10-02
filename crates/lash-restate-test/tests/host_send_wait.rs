@@ -324,7 +324,7 @@ enum Storage {
         _root: tempfile::TempDir,
     },
     Postgres {
-        _storage: lash_postgres_store::PostgresStorage,
+        _storage: Box<lash_postgres_store::PostgresStorage>,
         _database: lash_postgres_store::testing::IsolatedDatabase,
         _attachments: tempfile::TempDir,
     },
@@ -409,7 +409,7 @@ async fn backend_over(
             Some((
                 backend,
                 Storage::Postgres {
-                    _storage: storage,
+                    _storage: Box::new(storage),
                     _database: database,
                     _attachments: attachments,
                 },
