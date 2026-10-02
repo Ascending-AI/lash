@@ -317,6 +317,10 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
     def test_every_cut_law_is_discovered_with_its_synthetic_next_target(self):
         laws = cut_laws.discover(ROOT)
         self.assertEqual(cut_laws.undiscovered(ROOT, laws), [])
+        if not baseline.mismatches(baseline.inventory(ROOT)):
+            # The reset unmarked every cut-only law: it runs with its suite.
+            self.assertEqual(laws, [])
+            return
         targets = {row["law"]: row["targets"] for row in laws}
         for law, default in [
             ("tests::the_build_states_every_version_at_the_release_baseline", "//crates/lashctl:lashctl__unit_test"),
@@ -333,7 +337,10 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
                          ["scripts/test_release_baseline.py"])
 
     def test_the_reset_runs_every_cut_law_on_each_of_its_targets(self):
-        laws = cut_laws.discover(ROOT)
+        laws = [dict(kind="rust", ticket="FIG-1", source="crates/demo/src/lib.rs", law="tests::at_baseline",
+                     targets=["//crates/demo:demo__unit_test", "//crates/demo:demo__unit_test__fv_0123abcd"]),
+                dict(kind="python", ticket="FIG-1", source="scripts/test_demo.py",
+                     law="DemoTests.test_at_baseline", targets=["scripts/test_demo.py"])]
         with patch.object(cut_laws.subprocess, "run") as run:
             run.return_value = subprocess.CompletedProcess([], 0, "", "Ran 1 test in 0.1s\n\nOK\n")
             cut_laws.run(ROOT, laws)
@@ -491,8 +498,10 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
         # that reads the tables.
         pins = (ROOT / "crates/lash-core-store/src/store/synthetic_next.rs").read_text()
         self.assertEqual(re.findall(r"[(,]\s*\d+\s*[,)]", pins), [], "a version passed as a literal")
+        # A domain in use cannot be retired.
+        rows = baseline.inventory(ROOT)
         with self.assertRaises(baseline.BaselineError):
-            baseline.generated_tables(baseline.inventory(ROOT), ["lash-stable-identity/v2"])
+            baseline.generated_tables(rows, baseline.hash_domains(rows)[:1])
 
     def test_scratch_reset_plan_covers_changes_and_retained_old_value_is_red(self):
         scratch_root = ROOT / ".buck2/release-baseline-tests"
