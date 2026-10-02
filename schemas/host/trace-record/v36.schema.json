@@ -698,23 +698,14 @@
       "type": "string"
     },
     "ToolFailureSource": {
-      "oneOf": [
-        {
-          "enum": [
-            "runtime",
-            "tool",
-            "plugin",
-            "policy",
-            "cancellation"
-          ],
-          "type": "string"
-        },
-        {
-          "const": "unknown_legacy",
-          "description": "Provenance was not persisted by a legacy wire or durable payload.",
-          "type": "string"
-        }
-      ]
+      "enum": [
+        "runtime",
+        "tool",
+        "plugin",
+        "policy",
+        "cancellation"
+      ],
+      "type": "string"
     },
     "ToolRetryStatus": {
       "oneOf": [
@@ -765,19 +756,6 @@
           "required": [
             "type",
             "attempts"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "Retry status was not persisted by a legacy wire or durable payload.",
-          "properties": {
-            "type": {
-              "const": "unknown_legacy",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
           ],
           "type": "object"
         }

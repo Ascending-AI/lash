@@ -442,7 +442,6 @@ impl From<lash_core::ToolFailureSource> for RemoteProcessToolFailureSource {
             lash_core::ToolFailureSource::Plugin => Self::Plugin,
             lash_core::ToolFailureSource::Policy => Self::Policy,
             lash_core::ToolFailureSource::Cancellation => Self::Cancellation,
-            lash_core::ToolFailureSource::UnknownLegacy => Self::UnknownLegacy,
         }
     }
 }
@@ -455,7 +454,6 @@ impl From<RemoteProcessToolFailureSource> for lash_core::ToolFailureSource {
             RemoteProcessToolFailureSource::Plugin => Self::Plugin,
             RemoteProcessToolFailureSource::Policy => Self::Policy,
             RemoteProcessToolFailureSource::Cancellation => Self::Cancellation,
-            RemoteProcessToolFailureSource::UnknownLegacy => Self::UnknownLegacy,
         }
     }
 }
@@ -466,7 +464,6 @@ impl From<lash_core::ToolRetryStatus> for RemoteProcessToolRetryStatus {
             lash_core::ToolRetryStatus::Never => Self::Never,
             lash_core::ToolRetryStatus::Safe { after_ms } => Self::Safe { after_ms },
             lash_core::ToolRetryStatus::Exhausted { attempts } => Self::Exhausted { attempts },
-            lash_core::ToolRetryStatus::UnknownLegacy => Self::UnknownLegacy,
         }
     }
 }
@@ -477,7 +474,6 @@ impl From<RemoteProcessToolRetryStatus> for lash_core::ToolRetryStatus {
             RemoteProcessToolRetryStatus::Never => Self::Never,
             RemoteProcessToolRetryStatus::Safe { after_ms } => Self::Safe { after_ms },
             RemoteProcessToolRetryStatus::Exhausted { attempts } => Self::Exhausted { attempts },
-            RemoteProcessToolRetryStatus::UnknownLegacy => Self::UnknownLegacy,
         }
     }
 }

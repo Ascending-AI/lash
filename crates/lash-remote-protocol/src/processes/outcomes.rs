@@ -158,7 +158,6 @@ pub enum RemoteProcessToolFailureSource {
     Plugin,
     Policy,
     Cancellation,
-    UnknownLegacy,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -172,7 +171,6 @@ pub enum RemoteProcessToolRetryStatus {
     Exhausted {
         attempts: u32,
     },
-    UnknownLegacy,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

@@ -1227,7 +1227,6 @@ pub(crate) fn tool_failure_fields(error: &ExecutionHostError) -> Option<Record> 
         lash_sansio::ToolFailureSource::Plugin => "plugin",
         lash_sansio::ToolFailureSource::Policy => "policy",
         lash_sansio::ToolFailureSource::Cancellation => "cancellation",
-        lash_sansio::ToolFailureSource::UnknownLegacy => "unknown_legacy",
     };
     let retry = match error.tool_failure_retry()? {
         lash_sansio::ToolRetryStatus::Never => {
@@ -1247,11 +1246,6 @@ pub(crate) fn tool_failure_fields(error: &ExecutionHostError) -> Option<Record> 
             let mut retry = record_with_capacity(2);
             retry.insert_constant("type", Value::String("exhausted".into()));
             retry.insert_constant("attempts", Value::Number((*attempts).into()));
-            retry
-        }
-        lash_sansio::ToolRetryStatus::UnknownLegacy => {
-            let mut retry = record_with_capacity(1);
-            retry.insert_constant("type", Value::String("unknown_legacy".into()));
             retry
         }
     };

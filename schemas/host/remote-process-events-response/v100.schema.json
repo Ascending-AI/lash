@@ -1397,8 +1397,7 @@
         "tool",
         "plugin",
         "policy",
-        "cancellation",
-        "unknown_legacy"
+        "cancellation"
       ],
       "type": "string"
     },
@@ -1451,18 +1450,6 @@
           "required": [
             "type",
             "attempts"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "type": {
-              "const": "unknown_legacy",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
           ],
           "type": "object"
         }

@@ -295,7 +295,7 @@ pub fn terminal_append_request(
         .with_replay_key(format!("process:{process_id}:terminal:{event_type}"))
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ProcessAwaitOutput {
     Settled {
@@ -315,117 +315,6 @@ pub enum ProcessAwaitOutput {
         terminal_label: RetiredProcessStatus,
         pruned_at_ms: u64,
     },
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum ProcessAwaitOutputDecode {
-    Settled {
-        output: crate::ToolCallOutput,
-    },
-    Success {
-        value: serde_json::Value,
-        #[serde(default)]
-        control: Option<crate::ToolControl>,
-    },
-    Failure {
-        class: crate::ToolFailureClass,
-        code: String,
-        message: String,
-        #[serde(default)]
-        raw: Option<serde_json::Value>,
-        #[serde(default)]
-        control: Option<crate::ToolControl>,
-    },
-    Cancelled {
-        message: String,
-        #[serde(default)]
-        raw: Option<serde_json::Value>,
-        #[serde(default)]
-        control: Option<crate::ToolControl>,
-    },
-    Abandoned {
-        evidence: Box<AbandonEvidence>,
-        #[serde(default)]
-        control: Option<crate::ToolControl>,
-    },
-    NoLongerRetained {
-        terminal_label: RetiredProcessStatus,
-        pruned_at_ms: u64,
-    },
-}
-
-impl<'de> Deserialize<'de> for ProcessAwaitOutput {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Ok(match ProcessAwaitOutputDecode::deserialize(deserializer)? {
-            ProcessAwaitOutputDecode::Settled { output } => Self::from_tool_output(output),
-            ProcessAwaitOutputDecode::Success { value, control } => {
-                let mut output = match decode_process_tool_value(value, "legacy success value") {
-                    Ok(value) => crate::ToolCallOutput::success_tool_value(value),
-                    Err(failure) => crate::ToolCallOutput::failure(*failure),
-                };
-                output.control = control;
-                Self::from_tool_output(output)
-            }
-            ProcessAwaitOutputDecode::Failure {
-                class,
-                code,
-                message,
-                raw,
-                control,
-            } => {
-                let mut output = match raw
-                    .map(|value| decode_process_tool_value(value, "legacy failure raw value"))
-                    .transpose()
-                {
-                    Ok(raw) => crate::ToolCallOutput::failure(crate::ToolFailure {
-                        class,
-                        code,
-                        message,
-                        source: crate::ToolFailureSource::UnknownLegacy,
-                        retry: crate::ToolRetryStatus::UnknownLegacy,
-                        raw,
-                    }),
-                    Err(failure) => crate::ToolCallOutput::failure(*failure),
-                };
-                output.control = control;
-                Self::from_tool_output(output)
-            }
-            ProcessAwaitOutputDecode::Cancelled {
-                message,
-                raw,
-                control,
-            } => {
-                let mut output = match raw
-                    .map(|value| decode_process_tool_value(value, "legacy cancellation raw value"))
-                    .transpose()
-                {
-                    Ok(raw) => crate::ToolCallOutput::cancelled(crate::ToolCancellation {
-                        origin: None,
-                        message,
-                        source: crate::ToolFailureSource::UnknownLegacy,
-                        raw,
-                    }),
-                    Err(failure) => crate::ToolCallOutput::failure(*failure),
-                };
-                output.control = control;
-                Self::from_tool_output(output)
-            }
-            ProcessAwaitOutputDecode::Abandoned { evidence, control } => {
-                Self::Abandoned { evidence, control }
-            }
-            ProcessAwaitOutputDecode::NoLongerRetained {
-                terminal_label,
-                pruned_at_ms,
-            } => Self::NoLongerRetained {
-                terminal_label,
-                pruned_at_ms,
-            },
-        })
-    }
 }
 
 impl ProcessAwaitOutput {
@@ -676,19 +565,6 @@ impl<'de> Deserialize<'de> for ProcessTerminal {
         Self::try_from(ProcessAwaitOutput::deserialize(deserializer)?)
             .map_err(serde::de::Error::custom)
     }
-}
-
-fn decode_process_tool_value(
-    value: serde_json::Value,
-    field: &str,
-) -> Result<crate::ToolValue, Box<crate::ToolFailure>> {
-    serde_json::from_value(value).map_err(|error| {
-        Box::new(crate::ToolFailure::runtime(
-            crate::ToolFailureClass::Internal,
-            "tool_value_decode_failed",
-            format!("malformed {field} in process output: {error}"),
-        ))
-    })
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1473,34 +1349,43 @@ mod cancellation_identity_tests {
     }
 
     #[test]
-    fn legacy_failure_row_decodes_with_unknown_provenance_and_retry_status() {
-        let legacy = serde_json::json!({
-            "type": "failure",
-            "class": "external",
-            "code": "legacy_plugin_failure",
-            "message": "the old row omitted provenance and retry status",
-            "raw": {
-                "$lash_tool_value": "untrusted_json",
-                "value": {"status": 503}
-            }
-        });
+    fn process_output_rejects_pre_change_settled_shapes_with_a_data_error() {
+        let legacy_outputs = [
+            serde_json::json!({
+                "type": "failure",
+                "class": "external",
+                "code": "legacy_plugin_failure",
+                "message": "the old row omitted provenance and retry status",
+                "raw": {
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {"status": 503}
+                }
+            }),
+            serde_json::json!({
+                "type": "success",
+                "value": {
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {"status": 200}
+                }
+            }),
+            serde_json::json!({
+                "type": "cancelled",
+                "message": "the old row omitted provenance",
+                "raw": {
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {"status": 499}
+                }
+            }),
+        ];
 
-        let restored: ProcessAwaitOutput =
-            serde_json::from_value(legacy).expect("decode the pre-change persisted failure row");
-        let ProcessAwaitOutput::Settled { output } = restored else {
-            panic!("a legacy settled row must normalize to the settled arm");
-        };
-        let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
-            panic!("the legacy failure row must remain a failure");
-        };
-        assert_eq!(failure.class, crate::ToolFailureClass::External);
-        assert_eq!(failure.code, "legacy_plugin_failure");
-        assert_eq!(failure.source, crate::ToolFailureSource::UnknownLegacy);
-        assert_eq!(failure.retry, crate::ToolRetryStatus::UnknownLegacy);
-        assert_eq!(
-            failure.raw.map(|raw| raw.to_json_value()),
-            Some(serde_json::json!({"status": 503}))
-        );
+        for legacy in legacy_outputs {
+            let await_error = serde_json::from_value::<ProcessAwaitOutput>(legacy.clone())
+                .expect_err("pre-change process outputs must fail decode");
+            assert_eq!(await_error.classify(), serde_json::error::Category::Data);
+            let terminal_error = serde_json::from_value::<ProcessTerminal>(legacy)
+                .expect_err("pre-change process terminals must fail decode");
+            assert_eq!(terminal_error.classify(), serde_json::error::Category::Data);
+        }
     }
 
     #[test]

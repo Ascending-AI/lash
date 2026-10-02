@@ -704,8 +704,6 @@ pub enum ToolFailureSource {
     Plugin,
     Policy,
     Cancellation,
-    /// Provenance was not persisted by a legacy wire or durable payload.
-    UnknownLegacy,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -719,8 +717,6 @@ pub enum ToolRetryStatus {
     Exhausted {
         attempts: u32,
     },
-    /// Retry status was not persisted by a legacy wire or durable payload.
-    UnknownLegacy,
 }
 
 /// The runtime or actor decision that requested cancellation of a process.

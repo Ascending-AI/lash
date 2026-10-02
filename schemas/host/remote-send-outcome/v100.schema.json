@@ -5691,8 +5691,7 @@
         "tool",
         "plugin",
         "policy",
-        "cancellation",
-        "unknown_legacy"
+        "cancellation"
       ],
       "type": "string"
     },
@@ -5745,18 +5744,6 @@
           "required": [
             "type",
             "attempts"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "type": {
-              "const": "unknown_legacy",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
           ],
           "type": "object"
         }
@@ -10557,23 +10544,14 @@
       ]
     },
     "ToolFailureSource": {
-      "oneOf": [
-        {
-          "enum": [
-            "runtime",
-            "tool",
-            "plugin",
-            "policy",
-            "cancellation"
-          ],
-          "type": "string"
-        },
-        {
-          "const": "unknown_legacy",
-          "description": "Provenance was not persisted by a legacy wire or durable payload.",
-          "type": "string"
-        }
-      ]
+      "enum": [
+        "runtime",
+        "tool",
+        "plugin",
+        "policy",
+        "cancellation"
+      ],
+      "type": "string"
     },
     "ToolIntentCommandFailure": {
       "description": "The typed command cause retained by a tool intent and carried to the host.",
@@ -12177,19 +12155,6 @@
           "required": [
             "type",
             "attempts"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "Retry status was not persisted by a legacy wire or durable payload.",
-          "properties": {
-            "type": {
-              "const": "unknown_legacy",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
           ],
           "type": "object"
         }

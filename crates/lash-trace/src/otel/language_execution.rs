@@ -380,7 +380,6 @@ pub(super) fn language_execution_attributes(
                 lash_sansio::ToolFailureSource::Plugin => "plugin",
                 lash_sansio::ToolFailureSource::Policy => "policy",
                 lash_sansio::ToolFailureSource::Cancellation => "cancellation",
-                lash_sansio::ToolFailureSource::UnknownLegacy => "unknown_legacy",
             };
             attrs.push(KeyValue::new(
                 attr::LASH_LANGUAGE_EXECUTION_FAILURE_SOURCE,
@@ -404,7 +403,6 @@ pub(super) fn language_execution_attributes(
                     ));
                     "exhausted"
                 }
-                lash_sansio::ToolRetryStatus::UnknownLegacy => "unknown_legacy",
             };
             attrs.push(KeyValue::new(
                 attr::LASH_LANGUAGE_EXECUTION_FAILURE_RETRY,

@@ -311,9 +311,7 @@ pub fn tool_failure_code(failure: &crate::ToolFailure) -> lash_sansio::FailureCo
         | crate::ToolFailureSource::Cancellation => {
             lash_sansio::FailureCode::lash(lash_sansio::TurnFailureCode::from_wire(&failure.code))
         }
-        crate::ToolFailureSource::Tool
-        | crate::ToolFailureSource::Plugin
-        | crate::ToolFailureSource::UnknownLegacy => {
+        crate::ToolFailureSource::Tool | crate::ToolFailureSource::Plugin => {
             lash_sansio::FailureCode::from_foreign_wire(&failure.code)
         }
     }
