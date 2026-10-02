@@ -423,6 +423,8 @@ impl From<String> for RestateConnection {
 #[derive(Clone, Debug)]
 pub struct RestateIngressClient {
     connection: RestateConnection,
+    /// Per-operation transport context supplied by the retained scope's owner.
+    pub(crate) transport_context: Option<lash_trace::TraceCarrier>,
 }
 
 #[allow(
@@ -433,7 +435,23 @@ impl RestateIngressClient {
     pub fn new(connection: impl Into<RestateConnection>) -> Self {
         Self {
             connection: connection.into(),
+            transport_context: None,
         }
+    }
+
+    async fn send_request(
+        &self,
+        class: RestateRequestClass,
+        operation: &'static str,
+        mut request: HttpRequest,
+    ) -> Result<RestateHttpResponse, RestateHttpError> {
+        if let Some(context) = &self.transport_context {
+            request = request.with_header("traceparent", context.traceparent());
+            if !context.tracestate().as_str().is_empty() {
+                request = request.with_header("tracestate", context.tracestate().as_str());
+            }
+        }
+        send_request(&self.connection, class, operation, request).await
     }
 
     pub fn ingress_url(&self) -> &str {
@@ -550,13 +568,13 @@ impl RestateIngressClient {
         if let Some(idempotency_key) = idempotency_key {
             request = request.with_header("idempotency-key", idempotency_key);
         }
-        let response = send_request(
-            &self.connection,
-            RestateRequestClass::Attach,
-            "Restate workflow call",
-            request,
-        )
-        .await?;
+        let response = self
+            .send_request(
+                RestateRequestClass::Attach,
+                "Restate workflow call",
+                request,
+            )
+            .await?;
         if !response.is_success() {
             return Err(status_error("Restate workflow call", url, response).await);
         }
@@ -576,13 +594,13 @@ impl RestateIngressClient {
             self.connection.ingress_url(),
             &format!("restate/workflow/{workflow}/{workflow_key}/attach"),
         );
-        let response = send_request(
-            &self.connection,
-            RestateRequestClass::Attach,
-            "Restate workflow attach",
-            HttpRequest::new(HttpMethod::Get, &url, ""),
-        )
-        .await?;
+        let response = self
+            .send_request(
+                RestateRequestClass::Attach,
+                "Restate workflow attach",
+                HttpRequest::new(HttpMethod::Get, &url, ""),
+            )
+            .await?;
         if !response.is_success() {
             return Err(status_error("Restate workflow attach", url, response).await);
         }
@@ -603,13 +621,13 @@ impl RestateIngressClient {
         let handler = restate_path_component(handler);
         let path = format!("{workflow}/{workflow_key}/{handler}");
         let url = format_restate_url(self.connection.ingress_url(), &path);
-        let response = send_request(
-            &self.connection,
-            RestateRequestClass::Control,
-            "Restate workflow call",
-            HttpRequest::post(&url, ""),
-        )
-        .await?;
+        let response = self
+            .send_request(
+                RestateRequestClass::Control,
+                "Restate workflow call",
+                HttpRequest::post(&url, ""),
+            )
+            .await?;
         if !response.is_success() {
             return Err(status_error("Restate workflow call", url, response).await);
         }
@@ -653,13 +671,13 @@ impl RestateIngressClient {
         let handler = restate_path_component(handler);
         let path = format!("{object}/{object_key}/{handler}");
         let url = format_restate_url(self.connection.ingress_url(), &path);
-        let response = send_request(
-            &self.connection,
-            RestateRequestClass::Control,
-            "Restate object call",
-            HttpRequest::post(&url, ""),
-        )
-        .await?;
+        let response = self
+            .send_request(
+                RestateRequestClass::Control,
+                "Restate object call",
+                HttpRequest::post(&url, ""),
+            )
+            .await?;
         if !response.is_success() {
             return Err(status_error("Restate object call", url, response).await);
         }
@@ -713,15 +731,15 @@ impl RestateIngressClient {
             url: url.clone(),
             source,
         })?;
-        let response = send_request(
-            &self.connection,
-            RestateRequestClass::Control,
-            "Restate /send",
-            HttpRequest::post(&url, encoded)
-                .with_header("content-type", "application/json")
-                .with_header("idempotency-key", idempotency_key),
-        )
-        .await?;
+        let response = self
+            .send_request(
+                RestateRequestClass::Control,
+                "Restate /send",
+                HttpRequest::post(&url, encoded)
+                    .with_header("content-type", "application/json")
+                    .with_header("idempotency-key", idempotency_key),
+            )
+            .await?;
         if !response.is_success() {
             return Err(status_error("Restate /send", url, response).await);
         }
@@ -793,15 +811,15 @@ impl RestateIngressClient {
             url: url.clone(),
             source,
         })?;
-        let response = send_request(
-            &self.connection,
-            RestateRequestClass::Attach,
-            "Restate object call",
-            HttpRequest::post(&url, encoded)
-                .with_header("content-type", "application/json")
-                .with_header("idempotency-key", idempotency_key),
-        )
-        .await?;
+        let response = self
+            .send_request(
+                RestateRequestClass::Attach,
+                "Restate object call",
+                HttpRequest::post(&url, encoded)
+                    .with_header("content-type", "application/json")
+                    .with_header("idempotency-key", idempotency_key),
+            )
+            .await?;
         if !response.is_success() {
             return Err(status_error("Restate object call", url, response).await);
         }
@@ -819,8 +837,7 @@ impl RestateIngressClient {
             url: url.to_string(),
             source,
         })?;
-        send_request(
-            &self.connection,
+        self.send_request(
             RestateRequestClass::Control,
             operation,
             HttpRequest::post(url, body).with_header("content-type", "application/json"),
@@ -1529,110 +1546,8 @@ pub struct DeploymentOpenInvocations {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        DeploymentOpenInvocations, RestateInvocationLifecycle, RestateInvocationStatus,
-        open_invocation_statuses_sql,
-    };
+mod tests;
 
-    #[test]
-    fn an_unrecognized_status_decodes_to_unknown_and_reports_open() {
-        let row: RestateInvocationStatus = serde_json::from_str(
-            r#"{
-                "id": "invocation-1",
-                "target": "service/handler",
-                "target_service_name": "service",
-                "target_handler_name": "handler",
-                "status": "zombie-from-a-future-restate"
-            }"#,
-        )
-        .expect("an unrecognized status must not fail decoding");
-
-        assert_eq!(
-            row.status,
-            RestateInvocationLifecycle::Unknown("zombie-from-a-future-restate".to_string())
-        );
-        assert!(
-            row.is_still_active(),
-            "an unknown status is open: a drain must not declare itself complete on it"
-        );
-        assert_eq!(row.status.as_str(), "zombie-from-a-future-restate");
-    }
-
-    #[test]
-    fn the_open_status_sql_filter_names_exactly_the_known_open_variants() {
-        assert_eq!(
-            open_invocation_statuses_sql(),
-            "status IN ('pending', 'ready', 'running', 'backing-off', 'suspended', 'paused')"
-        );
-        for status in [
-            RestateInvocationLifecycle::Pending,
-            RestateInvocationLifecycle::Ready,
-            RestateInvocationLifecycle::Running,
-            RestateInvocationLifecycle::BackingOff,
-            RestateInvocationLifecycle::Suspended,
-            RestateInvocationLifecycle::Paused,
-        ] {
-            assert!(status.is_open(), "{status} is a known open status");
-        }
-        for status in [
-            RestateInvocationLifecycle::Completed,
-            RestateInvocationLifecycle::Failed,
-        ] {
-            assert!(!status.is_open(), "{status} is terminal");
-        }
-    }
-
-    #[test]
-    fn invocation_status_deserializes_captured_rows_with_and_without_deployment() {
-        let pinned: RestateInvocationStatus = serde_json::from_str(
-            r#"{
-                "id": "invocation-1",
-                "target": "service/handler",
-                "target_service_name": "service",
-                "pinned_deployment_id": "deployment-a",
-                "target_service_key": null,
-                "target_handler_name": "handler",
-                "status": "running",
-                "completion_result": null,
-                "completion_failure": null
-            }"#,
-        )
-        .expect("pinned invocation row should deserialize");
-        assert_eq!(pinned.pinned_deployment_id.as_deref(), Some("deployment-a"));
-
-        let legacy: RestateInvocationStatus = serde_json::from_str(
-            r#"{
-                "id": "invocation-2",
-                "target": "service/handler",
-                "target_service_name": "service",
-                "target_handler_name": "handler",
-                "status": "pending"
-            }"#,
-        )
-        .expect("row without a deployment column should deserialize");
-        assert_eq!(legacy.pinned_deployment_id, None);
-    }
-
-    #[test]
-    fn deployment_counts_deserialize_unpinned_rows_without_filtering_them() {
-        let rows: Vec<DeploymentOpenInvocations> = serde_json::from_str(
-            r#"[
-                {"pinned_deployment_id": "deployment-a", "open_count": 2},
-                {"pinned_deployment_id": null, "open_count": 1}
-            ]"#,
-        )
-        .expect("deployment count rows should deserialize");
-
-        assert_eq!(
-            rows[0].pinned_deployment_id.as_deref(),
-            Some("deployment-a")
-        );
-        assert_eq!(rows[0].open_count, 2);
-        assert_eq!(rows[1].pinned_deployment_id, None);
-        assert_eq!(rows[1].open_count, 1);
-    }
-}
 fn format_restate_url(base_url: &str, path: &str) -> String {
     format!(
         "{}/{}",

@@ -10,9 +10,12 @@
 //! here, with `TCP_NODELAY` set on every connection it accepts.
 
 use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
-use hyper::body::Incoming;
+use hyper::body::{Body, Frame, Incoming, SizeHint};
 use hyper::server::conn::http2;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -22,6 +25,75 @@ mod message_limits;
 use message_limits::MessageBody;
 pub use message_limits::RestateEndpointLimits;
 use tokio::net::TcpListener;
+
+tokio::task_local! {
+    static ATTEMPT_CONTEXT: Option<Arc<lash_trace::AttemptObservation>>;
+}
+
+pub(crate) fn current_attempt_observation() -> Option<lash_trace::AttemptObservation> {
+    ATTEMPT_CONTEXT
+        .try_with(|attempt| attempt.as_deref().cloned())
+        .ok()
+        .flatten()
+}
+
+#[cfg(test)]
+pub(crate) fn current_attempt_context() -> Option<lash_trace::TraceCarrier> {
+    current_attempt_observation().and_then(|attempt| attempt.context)
+}
+
+fn delivery_attempt(headers: &hyper::HeaderMap) -> Option<Arc<lash_trace::AttemptObservation>> {
+    let mut parents = headers.get_all("traceparent").iter();
+    let parent = parents.next().and_then(|value| value.to_str().ok());
+    let parent = parent.filter(|_| parents.next().is_none());
+    let state = headers
+        .get_all("tracestate")
+        .iter()
+        .map(|value| value.to_str())
+        .collect::<Result<Vec<_>, _>>()
+        .ok()
+        .map(|members| members.join(","));
+    let context = lash_trace::TraceCarrier::extract_w3c(parent, state.as_deref());
+    let invocation_id = headers
+        .get("x-restate-invocation-id")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    (context.is_some() || invocation_id.is_some()).then(|| {
+        Arc::new(lash_trace::AttemptObservation {
+            context,
+            invocation_id,
+        })
+    })
+}
+
+struct AttemptBody {
+    inner: restate_sdk::endpoint::ResponseBody,
+    attempt: Option<Arc<lash_trace::AttemptObservation>>,
+}
+
+impl Body for AttemptBody {
+    type Data = bytes::Bytes;
+    type Error = <restate_sdk::endpoint::ResponseBody as Body>::Error;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        let body = self.get_mut();
+        ATTEMPT_CONTEXT.sync_scope(body.attempt.clone(), || {
+            Pin::new(&mut body.inner).poll_frame(cx)
+        })
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
+    }
+}
 
 /// How long a shut-down server waits for its open connections to finish:
 /// the SDK server's own grace.
@@ -98,17 +170,20 @@ fn handle_endpoint<B>(
     endpoint: &Endpoint,
     request: hyper::Request<B>,
     limits: RestateEndpointLimits,
-) -> hyper::Response<restate_sdk::endpoint::ResponseBody>
+) -> hyper::Response<AttemptBody>
 where
     B: hyper::body::Body<Data = bytes::Bytes> + Unpin + Send + 'static,
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>> + Send,
 {
-    endpoint.handle_with_options(
-        request.map(|body| MessageBody::new(body, limits)),
-        HandleOptions {
-            protocol_mode: ProtocolMode::BidiStream,
-        },
-    )
+    let attempt = delivery_attempt(request.headers());
+    endpoint
+        .handle_with_options(
+            request.map(|body| MessageBody::new(body, limits)),
+            HandleOptions {
+                protocol_mode: ProtocolMode::BidiStream,
+            },
+        )
+        .map(|inner| AttemptBody { inner, attempt })
 }
 
 #[cfg(test)]

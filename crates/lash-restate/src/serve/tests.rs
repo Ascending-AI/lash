@@ -8,6 +8,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use http_body::{Body, Frame};
 use http_body_util::BodyExt;
+use lash_core::RuntimeEffectController;
 use lash_restate_test::protocol::generated::{InputCommandMessage, StartMessage, Value};
 use lash_restate_test::protocol::{MessageType, ProtocolVersion, encode_message};
 use restate_sdk::endpoint::Endpoint;
@@ -360,4 +361,161 @@ async fn live_restate_bounded_endpoint_serves_many_messages() {
     assert_eq!(response.json::<u32>().await.expect("durable result"), 128);
     let _ = stop.send(());
     server.await.expect("shutdown");
+}
+
+struct AttemptSample {
+    label: String,
+    attempt: Option<lash_trace::AttemptObservation>,
+}
+
+#[derive(Clone)]
+struct AttemptProbe {
+    seen: Arc<std::sync::Mutex<Vec<AttemptSample>>>,
+}
+
+#[restate_sdk::service]
+impl AttemptProbe {
+    #[handler]
+    async fn run(&self, ctx: Context<'_>, input: Bytes) -> HandlerResult<Bytes> {
+        let controller = crate::RestateRuntimeEffectController::new_for_test(ctx);
+        let captured = controller.attempt_observation();
+        let retained = captured.clone();
+        let copied = tokio::spawn(async move {
+            assert_eq!(super::current_attempt_observation(), None);
+            retained
+        })
+        .await
+        .expect("copied attempt");
+        assert_eq!(copied, captured);
+        let label = String::from_utf8(input.to_vec()).expect("probe label");
+        for _ in 0..2 {
+            assert_eq!(super::current_attempt_observation(), captured);
+            self.seen
+                .lock()
+                .expect("probe observations")
+                .push(AttemptSample {
+                    label: label.clone(),
+                    attempt: controller.attempt_observation(),
+                });
+            tokio::task::yield_now().await;
+        }
+        Ok(input)
+    }
+}
+
+fn attempt_request(
+    label: &'static str,
+    parent: Option<&str>,
+    state: &[&str],
+) -> http::Request<http_body_util::Full<Bytes>> {
+    let input = encode_message(
+        MessageType::InputCommand,
+        &InputCommandMessage {
+            value: Some(Value {
+                content: Bytes::from_static(label.as_bytes()),
+            }),
+            headers: vec![lash_restate_test::protocol::generated::Header {
+                key: "traceparent".into(),
+                value: "00-cccccccccccccccccccccccccccccccc-dddddddddddddddd-01".into(),
+            }],
+            ..Default::default()
+        },
+    );
+    let mut request = http::Request::builder()
+        .uri("/invoke/AttemptProbe/run")
+        .header("content-type", ProtocolVersion::V6.content_type())
+        .header("x-restate-invocation-id", format!("inv-{label}"));
+    if let Some(parent) = parent {
+        request = request.header("traceparent", parent);
+    }
+    for state in state {
+        request = request.header("tracestate", *state);
+    }
+    request
+        .body(http_body_util::Full::new(Bytes::from(
+            [prefix().as_ref(), input.as_ref()].concat(),
+        )))
+        .expect("attempt request")
+}
+
+#[tokio::test]
+async fn attempt_context_is_scoped_to_each_response_body_poll() {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let endpoint = Endpoint::builder()
+        .bind(AttemptProbe { seen: seen.clone() })
+        .build();
+    let parent_a = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+    let parent_b = "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-00";
+    let limits = super::RestateEndpointLimits::new(1024, 1032);
+    let mut a = super::handle_endpoint(
+        &endpoint,
+        attempt_request("a", Some(parent_a), &["rojo=1", "congo=2"]),
+        limits,
+    )
+    .into_body();
+    let mut b = super::handle_endpoint(
+        &endpoint,
+        attempt_request("b", Some(parent_b), &["invalid"]),
+        limits,
+    )
+    .into_body();
+    let mut absent =
+        super::handle_endpoint(&endpoint, attempt_request("absent", None, &[]), limits).into_body();
+    let mut malformed = super::handle_endpoint(
+        &endpoint,
+        attempt_request("malformed", Some("broken"), &[]),
+        limits,
+    )
+    .into_body();
+    assert!(
+        seen.lock().expect("observations").is_empty(),
+        "SDK executes only when response bodies are polled"
+    );
+    std::future::poll_fn(|cx| {
+        for body in [&mut a, &mut b, &mut absent, &mut malformed] {
+            let _ = Pin::new(body).poll_frame(cx);
+            assert_eq!(
+                super::current_attempt_context(),
+                None,
+                "poll leaked context"
+            );
+        }
+        Poll::Ready(())
+    })
+    .await;
+    let (a, b, absent, malformed) = tokio::join!(
+        a.collect(),
+        b.collect(),
+        absent.collect(),
+        malformed.collect()
+    );
+    for output in [a, b, absent, malformed] {
+        output.expect("completed probe");
+    }
+    let seen = seen.lock().expect("observations");
+    assert_eq!(seen.len(), 8, "each handler ran across two polls");
+    for AttemptSample {
+        label,
+        attempt: context,
+    } in seen.iter()
+    {
+        let expected = match label.as_str() {
+            "a" => lash_trace::TraceCarrier::extract_w3c(Some(parent_a), Some("rojo=1,congo=2")),
+            "b" => lash_trace::TraceCarrier::extract_w3c(Some(parent_b), None),
+            "absent" | "malformed" => None,
+            _ => panic!("unexpected probe label"),
+        };
+        assert_eq!(
+            context.as_ref().and_then(|attempt| attempt.context.clone()),
+            expected,
+            "wrong delivery context for {label}"
+        );
+        assert_eq!(
+            context
+                .as_ref()
+                .and_then(|attempt| attempt.invocation_id.as_deref()),
+            Some(format!("inv-{label}").as_str())
+        );
+    }
+    assert_eq!(super::current_attempt_context(), None);
 }

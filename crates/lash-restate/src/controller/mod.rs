@@ -336,6 +336,7 @@ where
 /// This type is intentionally handler-scoped.
 pub struct RestateRuntimeEffectController<'ctx, C> {
     context: C,
+    attempt: Option<lash_trace::AttemptObservation>,
     authority_id: RestateAuthorityId,
     options: RestateEffectControllerOptions,
     trace: Option<RestateTraceObserver>,
@@ -398,6 +399,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
     ) -> Self {
         Self {
             context,
+            attempt: crate::serve::current_attempt_observation(),
             authority_id,
             options,
             trace: None,
@@ -997,6 +999,10 @@ impl<'ctx, C> RuntimeEffectController for RestateRuntimeEffectController<'ctx, C
 where
     C: RestateControllerContext<'ctx>,
 {
+    fn attempt_observation(&self) -> Option<lash_trace::AttemptObservation> {
+        self.attempt.clone()
+    }
+
     fn owns_commit_backpressure(&self) -> bool {
         true
     }
