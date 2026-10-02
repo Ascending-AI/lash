@@ -13,7 +13,7 @@ use super::*;
 
 /// Allocate one turn park feed sequence.
 pub(crate) async fn allocate_turn_park_seq_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
 ) -> Result<i64, StoreError> {
     sqlx::query_scalar::<_, i64>(
         crate::turn_ingress::turn_ingress_sql()
@@ -21,7 +21,7 @@ pub(crate) async fn allocate_turn_park_seq_tx(
             .bump_returning
             .sql(),
     )
-    .fetch_one(&mut **tx)
+    .fetch_one(&mut *tx)
     .await
     .map_err(store_sqlx_error)
 }
@@ -30,7 +30,7 @@ pub(crate) async fn allocate_turn_park_seq_tx(
 /// transitioned in `session_id`'s turn `turn_id` at `at_ms`.
 #[allow(clippy::too_many_arguments)]
 async fn insert_turn_park_event_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     seq: i64,
     session_id: &SessionId,
     turn_id: &str,
@@ -55,7 +55,7 @@ async fn insert_turn_park_event_tx(
     .bind(reason_json)
     .bind(i64::try_from(at_ms).unwrap_or(i64::MAX))
     .bind(build_generation)
-    .execute(&mut **tx)
+    .execute(&mut *tx)
     .await
     .map_err(store_sqlx_error)?;
     Ok(())
@@ -66,7 +66,7 @@ async fn insert_turn_park_event_tx(
 /// drain generation of the build whose checkpoint the park resumes
 /// (FIG-3795).
 pub(crate) async fn log_turn_parked_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
     turn_id: &str,
     reason: &lash_core_execution::store::ParkReason,
@@ -94,7 +94,7 @@ pub(crate) async fn log_turn_parked_tx(
 /// the park `park_id` the delete returned. A closing transition names no
 /// checkpoint, so its `park_build_generation` is NULL.
 pub(crate) async fn log_turn_park_closed_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
     turn_id: &str,
     park_id: i64,

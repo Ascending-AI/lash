@@ -125,6 +125,10 @@ pub(crate) fn root_terminal_conn(
 /// the rows it still holds (FIG-3927): after whatever settlement its caller
 /// wrote, every row still bound to the root is released open at its own
 /// position. No row stays bound to a root that has terminal evidence.
+///
+/// Here too is where the root's park ends (FIG-4780): a root with terminal
+/// evidence holds no park, whatever kind of root it is, so the write that
+/// ends the root clears its park and appends the feed event its cause names.
 pub(crate) fn write_root_terminal_conn(
     tx: &Connection,
     terminal: &RootTerminal,
@@ -174,6 +178,13 @@ pub(crate) fn write_root_terminal_conn(
             root: terminal.root.clone(),
         },
         columns.at_ms,
+    )?;
+    crate::persistence::turn_park::end_root_park_conn(
+        tx,
+        &terminal.session_id,
+        &terminal.root,
+        &terminal.cause,
+        terminal.at_ms,
     )?;
     release_root_rows_conn(tx, &terminal.session_id, &terminal.root, terminal.at_ms)
 }

@@ -1487,6 +1487,7 @@ macro_rules! session_store_factory_tests {
             (session_meta_records_the_process_that_owns_it, "session-meta-owning-process"),
             (a_closing_session_lists_as_closing_never_as_live, "catalog-closing-entry"),
             (a_control_raise_answers_no_seal_as_sealed, "control-raise-seal"),
+            (a_command_roots_end_unparks_it, "command-root-end-unparks"),
             (concurrent_session_admissions_preserve_one_relation, "concurrent-session-relation"),
             (ingress_follow_on_fork_and_command_run_matrix, "ingress-follow-on-fork-commands"),
             (turn_cancel_exact_replay_preserves_different_pending_authorization, "turn-cancel-exact-replay"),

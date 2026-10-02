@@ -699,6 +699,10 @@ pub enum UnparkCause {
     TurnCommitted,
     /// A different turn parked over it in the same session.
     Superseded,
+    /// The parked command root applied the session's command lane until it
+    /// was empty and ended: a command root commits no turn, so its end is
+    /// what settles its park (FIG-4780).
+    CommandsApplied,
     /// The parked process appended a lifecycle fact past its refusal: a rerun
     /// got past replay and made progress (NOW-B).
     ProcessProgressed,
@@ -735,6 +739,18 @@ pub enum ParkCancelCause {
         intent: super::ControlIntentId,
         /// The root the held inputs drive under.
         new_root: Option<TurnId>,
+    },
+    /// The engine ended the parked root's only run without a Lash outcome,
+    /// and the root ended with it (FIG-4780).
+    RootLost {
+        /// The cancellation request the root had recorded, when it had one.
+        cancelled_by: Option<String>,
+    },
+    /// The parked root's run ended with a typed refusal no retry could
+    /// change, and the root ended with it (FIG-4780).
+    RootRefused {
+        /// The refusal's code.
+        code: RuntimeErrorCode,
     },
 }
 
@@ -808,6 +824,44 @@ impl ParkCancelCause {
 }
 
 impl ParkEventKind {
+    /// The event that ends a root's park when the root ends with `cause`
+    /// (FIG-4780). A root's terminal write is what ends its park, whatever
+    /// kind of root it is and however it ended, so every cause names one
+    /// event: a root that settled its work unparks, and a root whose work
+    /// was cancelled cancels the park.
+    #[must_use]
+    pub fn ending_root_park(cause: &super::RootTerminalCause) -> Self {
+        use super::RootTerminalCause as End;
+        match cause {
+            End::Committed { .. } => Self::Unparked {
+                cause: UnparkCause::TurnCommitted,
+            },
+            End::CommandsApplied => Self::Unparked {
+                cause: UnparkCause::CommandsApplied,
+            },
+            End::OperatorCancelled { intent } => Self::Cancelled {
+                cause: ParkCancelCause::Operator { intent: *intent },
+            },
+            End::Forked { intent, new_root } => Self::Cancelled {
+                cause: ParkCancelCause::Forked {
+                    intent: *intent,
+                    new_root: new_root.clone(),
+                },
+            },
+            End::SessionDeleted { .. } => Self::Cancelled {
+                cause: ParkCancelCause::SessionDeleted,
+            },
+            End::SubstrateLost { cancelled_by } => Self::Cancelled {
+                cause: ParkCancelCause::RootLost {
+                    cancelled_by: cancelled_by.clone(),
+                },
+            },
+            End::Refused { code, .. } => Self::Cancelled {
+                cause: ParkCancelCause::RootRefused { code: code.clone() },
+            },
+        }
+    }
+
     /// The stored `kind` column value.
     #[must_use]
     pub fn kind_code(&self) -> &'static str {

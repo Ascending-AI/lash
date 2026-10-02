@@ -643,6 +643,97 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
     );
 }
 
+/// L3b (FIG-4780): a root's end is what ends its park, whatever kind of root
+/// it is. A command root commits no turn, so its `CommandsApplied` end clears
+/// its park and writes exactly one `Unparked{CommandsApplied}` naming that
+/// park; a replay of the end writes nothing more.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_command_roots_end_unparks_it(factory: Arc<dyn crate::store::ConformanceDeployment>) {
+    let session = SessionId::from("park-feed-command-root");
+    let store = create_bound_store(&factory, &session).await;
+    let fence = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
+        &store,
+        &session,
+        "command-root-owner",
+    )
+    .await;
+    let root = TurnId::from("drive-commands:park-feed-command-root");
+    let park = store
+        .record_turn_park(&park_write(
+            &session,
+            root.as_str(),
+            divergence("commands"),
+            10,
+        ))
+        .await
+        .expect("park the command root");
+
+    let crate::store::RootEnd::Ended(terminal) = store
+        .end_command_root(&fence, &root, 20)
+        .await
+        .expect("end the command root")
+    else {
+        panic!("the command root's run owns the session and ends its root");
+    };
+    assert_eq!(
+        terminal.cause,
+        crate::store::RootTerminalCause::CommandsApplied
+    );
+    assert!(
+        store
+            .load_turn_park(&session)
+            .await
+            .expect("read the park after the root's end")
+            .is_none(),
+        "a root with terminal evidence holds no park"
+    );
+    let feed = factory
+        .turn_park_feed(crate::store::ParkFeedCursor::initial(), limit(100))
+        .await
+        .expect("read the feed after the root's end");
+    let kinds: Vec<&crate::store::ParkEventKind> =
+        feed.events.iter().map(|event| &event.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            &crate::store::ParkEventKind::Parked {
+                reason: divergence("commands"),
+            },
+            &crate::store::ParkEventKind::Unparked {
+                cause: crate::store::UnparkCause::CommandsApplied,
+            },
+        ],
+        "the command root's end writes exactly one unparked event"
+    );
+    let closed = &feed.events[1];
+    assert_eq!(closed.park_id, park.park_id, "the event names the park");
+    assert_eq!(closed.target.session_id, session);
+    assert_eq!(closed.target.turn_id, root);
+    assert_eq!(closed.at_ms, 20, "the park ends at the root's end");
+
+    assert!(
+        matches!(
+            store
+                .end_command_root(&fence, &root, 30)
+                .await
+                .expect("replay the command root's end"),
+            crate::store::RootEnd::AlreadyEnded(_)
+        ),
+        "a replayed end answers the stored terminal"
+    );
+    let replayed = factory
+        .turn_park_feed(crate::store::ParkFeedCursor::initial(), limit(100))
+        .await
+        .expect("read the feed after the replay");
+    assert_eq!(
+        replayed.events, feed.events,
+        "a replayed end writes no park event"
+    );
+}
+
 /// L4: a commit that rolls back — here a head-revision CAS conflict — leaves
 /// both the park row and the feed untouched.
 #[expect(

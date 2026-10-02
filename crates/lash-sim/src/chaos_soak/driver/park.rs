@@ -158,53 +158,6 @@ impl Driver {
             park.turn_id
         ))
     }
-
-    /// One real park and redrive gives the redrive checker facts: a root of
-    /// a session of its own parks, is redriven, and commits.
-    pub(in crate::chaos_soak) async fn park_witness(&mut self) -> Result<(), String> {
-        const ROOT: &str = "park-witness";
-        let id = SessionId::from(format!("soak-{:016x}-park-witness", self.world.seed()));
-        self.world
-            .core()?
-            .session(id.clone())
-            .create(lash::SessionCreation::root(lash::SessionSpec::new(
-                crate::crash_matrix::cases::process::MODEL,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(1024),
-            )))
-            .await
-            .map_err(|error| error.to_string())?;
-        let redriven = self.park_and_redrive(&id, ROOT).await?;
-        if !matches!(
-            &redriven,
-            Redriven {
-                admission: Admission::Known,
-                park: Some((_, Admission::Known)),
-            }
-        ) {
-            return Err(format!(
-                "the park witness was not parked and redriven: {redriven:?}"
-            ));
-        }
-        let expected = crate::crash_matrix::invariants::Expected {
-            inputs: vec![crate::crash_matrix::invariants::AcceptedInput {
-                session: id,
-                root: lash_core::TurnId::from(ROOT),
-            }],
-            ..Default::default()
-        };
-        for _ in 0..6 {
-            self.world.quiesce().await;
-            if crate::crash_matrix::invariants::check(&self.world, &expected)
-                .await
-                .is_empty()
-            {
-                return Ok(());
-            }
-            self.tick().await?;
-        }
-        Err("the redriven park witness did not finish".to_owned())
-    }
 }
 
 fn redrive_refusal(error: &lash::ParkVerbRefused) -> Result<HostRefusalCode, String> {

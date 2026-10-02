@@ -164,7 +164,8 @@ pub(crate) async fn open_root_intent_tx(
         }
     }
     // The verb settles the root's own input and batches first; its terminal
-    // write then releases whatever else the root still held (FIG-3927).
+    // write then releases whatever else the root still held (FIG-3927) and
+    // ends its park, as every root's end does (FIG-4780).
     write_root_terminal_conn(
         tx,
         &RootTerminal {
@@ -183,29 +184,6 @@ pub(crate) async fn open_root_intent_tx(
             return Err(StoreError::Contended.into());
         }
     }
-    sqlx::query(park_sql.delete_for_turn_returning.sql())
-        .bind(session.as_str())
-        .bind(request.root.as_str())
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    let cause = if request.verb == RootVerb::Fork {
-        ParkCancelCause::Forked {
-            intent: intent.id,
-            new_root,
-        }
-    } else {
-        ParkCancelCause::Operator { intent: intent.id }
-    };
-    crate::runtime_persistence::turn_park_feed::log_turn_park_closed_tx(
-        tx,
-        session,
-        request.root.as_str(),
-        request.park.feed_sequence() as i64,
-        &ParkEventKind::Cancelled { cause },
-        at_ms,
-    )
-    .await?;
     sqlx::query(sql.raise_epoch.sql())
         .bind(session.as_str())
         .bind(close_admission(intent.id).as_str())

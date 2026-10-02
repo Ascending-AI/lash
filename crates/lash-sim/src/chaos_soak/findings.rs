@@ -38,37 +38,11 @@ impl Finding {
 }
 
 /// Every defect the soak found that `main` still has.
-pub const OPEN: &[Finding] = &[
-    // FIG-4718, fix tracked as FIG-4780: a park ends when a turn commit names its root, and a
-    // command root commits no turn, so the park of one that was redriven and
-    // ran outlives it. Found by the redrive checker's first replay of S1's
-    // seed with park steps in its plan.
-    Finding {
-        id: "FIG-4718 S6",
-        summary: "a queued-command root whose run stops retrying is parked, and its \
-                  redrive is acknowledged and resumes it, but nothing ends the park: the \
-                  command applies and the session drives its later inputs while the turn \
-                  park feed never records `unparked` for the command root",
-        exposed_by: &["park_redrive"],
-        seed: 0x4299_608a_2be8_dd17,
-        steps: 40,
-        without: &[
-            "cancel_held",
-            "delete_held",
-            "delete",
-            "start_process",
-            "kill",
-            "engine_cut",
-            "host_crash",
-            "lease_loss",
-            "roll",
-        ],
-    },
-];
+pub const OPEN: &[Finding] = &[];
 
 /// The defects the soak found that `main` has fixed: each replay must pass.
-/// Each was found before the plan drew park steps, and leaves them out, so
-/// its replay is the plan it was found on.
+/// Each `FIG-3873` finding was found before the plan drew park steps, and
+/// leaves them out, so its replay is the plan it was found on.
 pub const FIXED: &[Finding] = &[
     // FIG-3892: a session command enqueued between an input root's
     // admission and its run held the admission back, so the root retried an
@@ -164,6 +138,33 @@ pub const FIXED: &[Finding] = &[
             "delete_held",
             "lease_loss",
             "park_redrive",
+        ],
+    },
+    // FIG-4780 (found by FIG-4718): a park ended only when a turn commit
+    // named its root, and a command root commits no turn, so the park of one
+    // that was redriven and ran outlived it. A root's terminal write now ends
+    // its park, whatever kind of root it is. Found by the redrive checker's
+    // first replay of S1's seed with park steps in its plan, so its replay
+    // draws them.
+    Finding {
+        id: "FIG-4718 S6",
+        summary: "a queued-command root whose run stops retrying is parked, and its \
+                  redrive is acknowledged and resumes it, but nothing ends the park: the \
+                  command applies and the session drives its later inputs while the turn \
+                  park feed never records `unparked` for the command root",
+        exposed_by: &["park_redrive"],
+        seed: 0x4299_608a_2be8_dd17,
+        steps: 40,
+        without: &[
+            "cancel_held",
+            "delete_held",
+            "delete",
+            "start_process",
+            "kill",
+            "engine_cut",
+            "host_crash",
+            "lease_loss",
+            "roll",
         ],
     },
 ];

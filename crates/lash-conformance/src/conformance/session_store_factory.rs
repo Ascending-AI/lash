@@ -17,6 +17,7 @@ mod admission;
 mod identity_claims;
 pub use identity_claims::*;
 mod lifecycle_states;
+pub use super::turn_park_feed::a_command_roots_end_unparks_it;
 pub use lifecycle_states::{
     a_closing_session_lists_as_closing_never_as_live, a_control_raise_answers_no_seal_as_sealed,
 };

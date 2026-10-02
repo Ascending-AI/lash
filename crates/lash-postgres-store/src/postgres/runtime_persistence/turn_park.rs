@@ -353,3 +353,41 @@ pub(crate) async fn set_resume_intent_tx(
     .map_err(store_sqlx_error)?;
     Ok(())
 }
+
+/// End `root`'s park on `conn` (inside the transaction that writes the
+/// root's terminal), with the feed event its end `cause` names (FIG-4780).
+/// A root's end is what ends its park, whatever kind of root it is: a
+/// command root commits no turn, so no commit would. A session parked on
+/// another root, or on none, is left as it is and appends nothing.
+pub(crate) async fn end_root_park_conn(
+    conn: &mut PgConnection,
+    session_id: &SessionId,
+    root: &lash_sansio::TurnId,
+    cause: &lash_core_execution::store::RootTerminalCause,
+    at_ms: u64,
+) -> Result<(), StoreError> {
+    let ended = sqlx::query(
+        crate::turn_ingress::turn_ingress_sql()
+            .turn_parks
+            .delete_for_turn_returning
+            .sql(),
+    )
+    .bind(session_id.as_str())
+    .bind(root.as_str())
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(store_sqlx_error)?;
+    let Some(ended) = ended else {
+        return Ok(());
+    };
+    let park_id: i64 = ended.try_get(1).map_err(store_sqlx_error)?;
+    log_turn_park_closed_tx(
+        conn,
+        session_id,
+        root.as_str(),
+        park_id,
+        &ParkEventKind::ending_root_park(cause),
+        at_ms,
+    )
+    .await
+}

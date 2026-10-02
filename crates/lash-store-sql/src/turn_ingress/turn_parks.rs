@@ -93,8 +93,8 @@ crate::statements! {
              RETURNING turn_id, park_id";
 
         /// Clear session `?1`'s park when it is root `?2`'s: one of that
-        /// root's physical turns committed, so it is no longer parked. The
-        /// returned row feeds the `Unparked{TurnCommitted}` event.
+        /// root's physical turns committed, or the root ended, so it is no
+        /// longer parked. The returned row feeds the closing event.
         delete_for_turn_returning = "DELETE FROM turn_parks
              WHERE session_id = ?1 AND turn_id = ?2
              RETURNING turn_id, park_id";

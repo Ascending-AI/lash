@@ -367,6 +367,39 @@ pub(crate) fn record_turn_park_conn(
     })
 }
 
+/// End `root`'s park on `conn` (inside the transaction that writes the
+/// root's terminal), with the feed event its end `cause` names (FIG-4780).
+/// A root's end is what ends its park, whatever kind of root it is: a
+/// command root commits no turn, so no commit would. A session parked on
+/// another root, or on none, is left as it is and appends nothing.
+pub(crate) fn end_root_park_conn(
+    conn: &Connection,
+    session_id: &SessionId,
+    root: &lash_sansio::TurnId,
+    cause: &lash_core_execution::store::RootTerminalCause,
+    at_ms: u64,
+) -> Result<(), StoreError> {
+    let ended: Option<(String, i64)> = conn
+        .query_row(
+            turn_parks().delete_for_turn_returning.sql(),
+            params![session_id.as_str(), root.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    let Some((ended_root, park_id)) = ended else {
+        return Ok(());
+    };
+    log_turn_park_closed_conn(
+        conn,
+        session_id,
+        &ended_root,
+        park_id,
+        &ParkEventKind::ending_root_park(cause),
+        crate::clamp_epoch_ms(at_ms),
+    )
+}
+
 /// Record redrive `intent` on session `session_id`'s park `park_id`, on
 /// `conn` (inside the redrive's store half).
 #[expect(

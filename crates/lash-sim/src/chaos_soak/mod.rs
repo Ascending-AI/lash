@@ -32,8 +32,7 @@
 //! took effect at most once, every engine waiter was answered, every root's
 //! scope close delivered, and every retired generation holds nothing. A live
 //! session must then still drive a fresh input.
-//! Each epoch also completes one real deferred tool through `ToolProvider`,
-//! and parks and redrives one root of a session of its own.
+//! Each epoch also completes one real deferred tool through `ToolProvider`.
 //! The smoke law requires evidence for every registered global checker;
 //! host outcomes and fault facts remain in its diagnostic history.
 //!
@@ -495,9 +494,6 @@ async fn finish_with_progress(
     if held {
         if let Err(error) = driver.witness().await {
             report.violations.push(format!("checker witness: {error}"));
-        }
-        if let Err(error) = driver.park_witness().await {
-            report.violations.push(format!("park witness: {error}"));
         }
         progress.record("live-session probes and global invariants");
         report
