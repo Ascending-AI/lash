@@ -534,12 +534,12 @@ async fn child_settled(scenario: &Scenario) {
             Ok(Some(record)) => format!(
                 "`{child_id}`: status {:?}, started {:?}, external reference {:?}, cancel \
                  request {:?}, park {:?}, outcome {:?}",
-                record.status,
+                record.status(),
                 record.first_started,
                 record.external_ref,
                 record.cancel_request,
-                record.park,
-                record.outcome
+                record.park(),
+                record.outcome()
             ),
             Ok(None) => format!("`{child_id}` has no row"),
             Err(error) => format!("`{child_id}`, unreadable: {error}"),
