@@ -53,6 +53,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio-util = { workspace = true, features = ["rt"] }
 futures-util = { workspace = true }
+libc = { workspace = true }
 
 [dev-dependencies]
 # `sqlite_memory_store_backend`: a store-only backend over the recording effect host

@@ -149,6 +149,7 @@ PACKAGE_DEPS = {
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lash_trace": "//crates/lash-trace:lash-trace",
+            "libc": "//third-party/rust:p0201",
             "rmp_serde": "//third-party/rust:p0304",
             "schemars": "//third-party/rust:p0322",
             "serde": "//third-party/rust:p0331",
