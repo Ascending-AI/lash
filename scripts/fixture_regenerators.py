@@ -1,4 +1,5 @@
-"""Discover fixture-writing tests from Rust modules and Cargo target roots.
+"""Discover ignored Rust tests by their ignore reason, from Rust modules and
+Cargo target roots.
 
 Generators declare #[ignore = "regenerates <repository-relative path>"] and
 require LASH_REGENERATE=1. Normal fixture checks remain separate tests.
@@ -11,6 +12,7 @@ import tomllib
 
 import release_baseline as baseline
 
+REGENERATES = re.compile(r'#\[ignore\s*=\s*"regenerates ([^"\n]+)"\]')
 TOKEN = re.compile(r'''r(?P<hashes>\#*)".*?"(?P=hashes)|"(?:\\.|[^"\\])*"|'(?:\\(?:u\{[0-9a-fA-F]+\}|x[0-9a-fA-F]{2}|.)|[^'\\])'|//[^\n]*|/\*|[A-Za-z_][A-Za-z_0-9]*|\S''', re.DOTALL)
 
 
@@ -33,8 +35,10 @@ def without_comments(text: str) -> str:
     return "".join(result)
 
 
-def discover(repo: Path) -> list[dict]:
-    generators = []
+def ignored_tests(repo: Path, reason: re.Pattern) -> list[dict]:
+    """Every test whose `#[ignore = ...]` attribute matches `reason`, as
+    `{target, law, source, reason}` with `reason` the attribute's match."""
+    found = []
     visited = set()
 
     def file(path, modules, target, module_dir):
@@ -81,16 +85,12 @@ def discover(repo: Path) -> list[dict]:
                     continue
                 if value == "fn" and at + 1 < end:
                     declaration = "\n".join(attrs)
-                    ignore = re.search(r'#\[ignore\s*=\s*"regenerates ([^"\n]+)"\]', declaration)
+                    ignore = reason.search(declaration)
                     if ignore:
-                        output = ignore[1]
-                        if Path(output).is_absolute() or ".." in Path(output).parts:
-                            raise baseline.BaselineError(f"invalid regenerator output: {output}")
                         if not re.search(r'#\[(?:tokio::)?test(?:\(|\])', declaration):
-                            raise baseline.BaselineError(f"regenerator is not a test: {path}")
-                        generators.append(dict(target=target, law="::".join([*names, tokens[at + 1][0]]),
-                                               output=output, source=str(path.relative_to(repo)),
-                                               environment={"LASH_REGENERATE": "1"}))
+                            raise baseline.BaselineError(f"{ignore[0]} is not on a test: {path}")
+                        found.append(dict(target=target, law="::".join([*names, tokens[at + 1][0]]),
+                                          source=str(path.relative_to(repo)), reason=ignore))
                     attrs = []
                 elif value not in ("pub", "async", "unsafe"):
                     attrs = []
@@ -114,16 +114,29 @@ def discover(repo: Path) -> list[dict]:
 
     for manifest in sorted((repo / "crates").glob("*/Cargo.toml")):
         package = manifest.parent
-        if not any(re.search(r'#\[ignore\s*=\s*"regenerates ', path.read_text())
-                   for path in package.rglob("*.rs")):
+        if not any(reason.search(path.read_text()) for path in package.rglob("*.rs")):
             continue
         config = tomllib.loads(manifest.read_text())
         lib = package / config.get("lib", {}).get("path", "src/lib.rs")
         label = f"//{package.relative_to(repo)}:"
         file(lib, [], label + package.name + "__unit_test", lib.parent)
+        # A binary-only package's unit tests are its main.rs's.
+        main = package / "src/main.rs"
+        if not lib.is_file() and main.is_file():
+            file(main, [], label + package.name + "__unit_test", main.parent)
         tests = {path.stem: path for path in (package / "tests").glob("*.rs")}
         tests.update({test["name"]: package / test.get("path", f'tests/{test["name"]}.rs')
                       for test in config.get("test", [])})
         for name, path in sorted(tests.items()):
             file(path, [], label + name + "__test", path.parent)
-    return sorted(generators, key=lambda row: (row["target"], row["law"]))
+    return sorted(found, key=lambda row: (row["target"], row["law"]))
+
+
+def discover(repo: Path) -> list[dict]:
+    generators = []
+    for test in ignored_tests(repo, REGENERATES):
+        output = test.pop("reason")[1]
+        if Path(output).is_absolute() or ".." in Path(output).parts:
+            raise baseline.BaselineError(f"invalid regenerator output: {output}")
+        generators.append(dict(test, output=output, environment={"LASH_REGENERATE": "1"}))
+    return generators

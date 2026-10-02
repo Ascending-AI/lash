@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Inventory source-declared constants, check the 1.0 baseline,
-or write the value tables generated from the inventory.
+"""Inventory source-declared constants, check the 1.0 baseline, hold a
+compiled operator's versions to the inventory, or write the value tables
+generated from the inventory.
 
 The resolver accepts literal counters, string identities and local constant
 aliases with integer addition/subtraction. It evaluates cfg(feature =
@@ -15,6 +16,8 @@ import ast
 import json
 from pathlib import Path
 import re
+import shutil
+import subprocess
 import sys
 import tomllib
 
@@ -323,6 +326,33 @@ def postgres_stamp_mismatches(repo: Path):
     return errors + catalog_mismatches(POSTGRES_CATALOG, "expand", constant, value, rows)
 
 
+CATALOG_ROW = re.compile(
+    r"(?m)^[ \t]*" + CFG + r"(?P<kind>ExpandMigration|BackfillMigration|ContractMigration|SqliteMigration)\s*\{"
+)
+
+
+def production_catalog_mismatches(repo: Path):
+    """Each step a production catalog carries.
+
+    1.0 provisions every store fresh at its baseline, so the default build's
+    PostgreSQL expand, backfill and contract catalogs and its SQLite catalog
+    carry no step: any step there moves a store from a pre-1.0 version. Only
+    the synthetic-next build's adjacent steps remain, under their cfg.
+    """
+    errors = []
+    for path in (POSTGRES_CATALOG, SQLITE_CATALOG):
+        text = without_comments((repo / path).read_text())
+        rows = list(CATALOG_ROW.finditer(text))
+        if not rows:
+            raise BaselineError(f"cannot read the catalog rows of {path}")
+        for row in rows:
+            if enabled(row["attrs"], False):
+                line = text.count("\n", 0, row.start("kind")) + 1
+                errors.append(f"{path}:{line}: the production catalog carries a {row['kind']} step; "
+                              "1.0 carries no pre-1.0 predecessor step")
+    return errors
+
+
 def postgres_schema_at(text: str, version: int):
     """`schema.sql` restated at `version`: its header and its seed row's stamp."""
     header, seed = POSTGRES_HEADER.match(text), POSTGRES_SEED.search(text)
@@ -443,6 +473,28 @@ def verify_build(rows: list[dict], report: Path, synthetic: bool):
     print(f"build probe agrees on {len(actual)} durable formats and 2 lashctl wires", file=sys.stderr)
 
 
+PROBE_TARGET = "//crates/lashctl:lashctl__unit_test"
+PROBE_LAW = "tests::release_inventory_build_probe"
+
+
+def probe(repo: Path, rows: list[dict]):
+    """Build the operator in the default and synthetic-next tiers, run its
+    build probe, and hold the versions each build reports to the inventory."""
+    from release_cut_laws import synthetic_variant
+    for synthetic, label in ((False, PROBE_TARGET), (True, synthetic_variant(repo, PROBE_TARGET))):
+        if label is None:
+            raise BaselineError(f"{PROBE_TARGET} has no synthetic-next variant")
+        output = repo / ".buck2/release-probe" / label.rsplit(":", 1)[1]
+        shutil.rmtree(output, ignore_errors=True)
+        subprocess.run(["kiln", "test", label, "--no-test-cache", "--test_arg=--exact",
+                        f"--test_arg={PROBE_LAW}", "--test_arg=--nocapture",
+                        "--test-output-dir", str(output)], cwd=repo, check=True)
+        logs = list(output.rglob("test.log"))
+        if len(logs) != 1:
+            raise BaselineError(f"{label}: expected one probe log under {output}, found {len(logs)}")
+        verify_build(rows, logs[0], synthetic)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=ROOT)
@@ -451,6 +503,7 @@ def main():
     inventory_command.add_argument("--build-report", type=Path)
     inventory_command.add_argument("--synthetic", action="store_true")
     commands.add_parser("check")
+    commands.add_parser("probe")
     tables_command = commands.add_parser("tables")
     tables_command.add_argument("--write", action="store_true")
     args = parser.parse_args()
@@ -464,23 +517,29 @@ def main():
             if errors:
                 print("\n".join(errors), file=sys.stderr)
             return 1 if errors else 0
+        if args.command == "probe":
+            probe(args.repo, rows)
+            return 0
         if args.command == "inventory":
             if args.build_report is not None:
                 verify_build(rows, args.build_report, args.synthetic)
             print(json.dumps(rows, indent=2))
             return 0
         errors = (mismatches(rows) + sqlite_stamp_mismatches(args.repo)
-                  + postgres_stamp_mismatches(args.repo) + table_mismatches(args.repo, rows))
+                  + postgres_stamp_mismatches(args.repo) + production_catalog_mismatches(args.repo)
+                  + table_mismatches(args.repo, rows))
         if errors:
             print("\n".join(errors), file=sys.stderr)
             return 1
         print(
             f"release baseline: {len(rows)} surfaces, zero mismatches; "
             "SQLite and PostgreSQL catalogs and artifacts are in their compat.rs versions; "
+            "production catalogs carry no step; "
             "generated tables are current"
         )
         return 0
-    except (BaselineError, OSError, KeyError, tomllib.TOMLDecodeError, json.JSONDecodeError) as error:
+    except (BaselineError, OSError, KeyError, tomllib.TOMLDecodeError, json.JSONDecodeError,
+            subprocess.CalledProcessError) as error:
         print(f"release baseline error: {error}", file=sys.stderr)
         return 1
 

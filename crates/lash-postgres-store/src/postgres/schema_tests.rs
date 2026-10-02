@@ -111,3 +111,44 @@ fn version_mismatch_refusal_derives_direction_and_range() {
         );
     }
 }
+
+/// FIG-4493: the 1.0 cut restarts every counter, so a stamp above this build's
+/// range on a store an older release wrote is pre-release state, not a newer
+/// build's catalog. A stamp above the range that this release or none wrote
+/// is still a newer build's.
+#[test]
+fn a_stamp_above_the_range_an_older_release_wrote_is_pre_release() {
+    let refused = version_mismatch_error(
+        Some("public"),
+        Some(SCHEMA_VERSION + 140),
+        Some("0.0.0-alpha"),
+    );
+    let StoreError::Incompatible {
+        refusal:
+            lash_core_execution::compat::CompatRefusal::PreRelease {
+                component,
+                writing_release,
+            },
+    } = &refused
+    else {
+        panic!("a pre-release store must be refused as pre-release state: {refused:?}")
+    };
+    assert_eq!(component, "postgres");
+    assert_eq!(writing_release.as_deref(), Some("0.0.0-alpha"));
+    for release in [None, Some(crate::release_stamp::BUILD_RELEASE)] {
+        let newer = version_mismatch_error(Some("public"), Some(SCHEMA_VERSION + 140), release);
+        assert!(
+            newer.to_string().contains("provisioned by a newer build"),
+            "{newer}"
+        );
+    }
+    let older = version_mismatch_error(
+        Some("public"),
+        Some(SCHEMA_VERSION - 1),
+        Some("0.0.0-alpha"),
+    );
+    assert!(
+        older.to_string().contains("older or skipped release"),
+        "{older}"
+    );
+}

@@ -475,11 +475,30 @@ fn recreate_trust_domain_remedy() -> String {
 /// `SchemaCheck::WarnOnly` sentence — is produced byte-identically, and a
 /// database with no readable stamp produces the message unchanged rather than a
 /// hedge about an unknown release.
+///
+/// A stamp above this build's range on a store an older release wrote can
+/// only predate the 1.0 counter restart, so it is refused as pre-release
+/// state, the way the open refuses it, never as a newer build's catalog
+/// (FIG-4819).
 pub(crate) fn version_mismatch_error(
     installed_schema: Option<&str>,
     found: Option<i32>,
     writing_release: Option<&str>,
 ) -> StoreError {
+    let older_release = writing_release.is_some_and(|writing| {
+        lash_core_execution::compare_releases(writing, crate::release_stamp::BUILD_RELEASE)
+            == Some(std::cmp::Ordering::Less)
+    });
+    if older_release && found.is_some_and(|version| version > SCHEMA_VERSION) {
+        return StoreError::Incompatible {
+            refusal: lash_core_execution::compat::CompatRefusal::PreRelease {
+                component: lash_core_execution::compat::ComponentId::POSTGRES
+                    .as_str()
+                    .to_owned(),
+                writing_release: writing_release.map(str::to_owned),
+            },
+        };
+    }
     let range = format!("{MIN_SUPPORTED_SCHEMA_VERSION}..={SCHEMA_VERSION}");
     let (stamp, explanation) = match found {
         Some(version) if version < MIN_SUPPORTED_SCHEMA_VERSION => (

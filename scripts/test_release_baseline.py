@@ -2,7 +2,6 @@
 """Release-cut inventory and reset laws."""
 
 import json
-import os
 import re
 from pathlib import Path
 import re
@@ -14,10 +13,14 @@ import unittest
 from unittest.mock import patch
 
 import release_baseline as baseline
+import release_cut_laws as cut_laws
 import release_reset as reset
 from fixture_regenerators import without_comments
 
 ROOT = Path(__file__).resolve().parents[1]
+# The cut-law marker, spelled so that this module's own text carries only its
+# real marker.
+CUT = "release cut" + ": FIG-1"
 
 
 class ReleaseBaselineTests(unittest.TestCase):
@@ -85,7 +88,8 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
                 reset.discover(repo)
 
     def test_reset_runs_every_discovered_generator_with_exact_selection(self):
-        rows = reset.discover(ROOT)
+        rows = reset.generation_order(ROOT, reset.discover(ROOT))
+        self.assertCountEqual(rows, reset.discover(ROOT))
         with patch.object(reset, "run") as run:
             reset.regenerate_fixtures(ROOT)
         self.assertEqual(run.call_count, len(rows))
@@ -97,6 +101,14 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
                              f"--test_arg={row['law']}", "--test_env=LASH_REGENERATE=1",
                              f"--test_env=BUILD_WORKSPACE_DIRECTORY={ROOT}"):
                 self.assertIn(argument, argv)
+
+    def test_an_artifact_a_build_compiles_in_is_regenerated_before_the_other_fixtures(self):
+        # The durable-read fixture's test compiles the shape artifact in, and
+        # refuses one stamped for another version before it writes anything.
+        self.assertIn("crates/lash-postgres-store/schema-shape.txt", reset.compiled_inputs(ROOT))
+        order = [row["output"] for row in reset.generation_order(ROOT, reset.discover(ROOT))]
+        self.assertLess(order.index("crates/lash-postgres-store/schema-shape.txt"),
+                        order.index("fixtures/durable-read/v1/postgres"))
 
     def command(self, *args):
         return subprocess.run(
@@ -195,7 +207,7 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
                      "SQLITE_TRIGGERS_SCHEMA_VERSION", "compat.rs:POSTGRES_SCHEMA_VERSION"]:
             self.assertIn(name, result.stderr)
 
-    @unittest.skipUnless(os.environ.get("LASH_RELEASE_CUT") == "1", "FIG-4485: release baseline activates at the 1.0 cut")
+    @unittest.skip("release cut: FIG-4485")
     def test_release_values_match_declared_baseline(self):
         result = self.command("check")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -260,6 +272,115 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
         with self.assertRaises(baseline.BaselineError):
             baseline.baseline_of("unversioned")
 
+    def test_cut_laws_are_discovered_on_both_tiers_and_unmarked_by_the_reset(self):
+        scratch_root = ROOT / ".buck2/release-baseline-tests"
+        scratch_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=scratch_root) as temporary:
+            repo = Path(temporary)
+            package = repo / "crates/demo"
+            (package / "src").mkdir(parents=True)
+            (repo / "scripts").mkdir()
+            (package / "Cargo.toml").write_text('[package]\nname = "demo"\nversion = "1.0.0"\n')
+            law = f'mod tests {{\n    #[test]\n    #[ignore = "{CUT}"]\n    fn at_baseline() {{}}\n}}\n'
+            (package / "src/lib.rs").write_text(law)
+            (package / "BUCK").write_text(
+                'lash_rust_unit_test(\n    name = "demo__unit_test",\n    crate_features = [],\n)\n\n'
+                'lash_rust_feature_test(\n    name = "demo__unit_test__fv_0123abcd",\n'
+                '    crate_features = [\n        "synthetic-next",\n    ],\n)\n\n'
+                'lash_rust_feature_test(\n    name = "demo__unit_test__fv_4567cdef",\n'
+                '    crate_features = [\n        "otel",\n        "synthetic-next",\n    ],\n)\n')
+            script = repo / "scripts/test_demo.py"
+            script.write_text(f'import unittest\n\nclass DemoTests(unittest.TestCase):\n'
+                              f'    @unittest.skip("{CUT}")\n    def test_at_baseline(self):\n        pass\n')
+            laws = cut_laws.discover(repo)
+            self.assertEqual([(row["kind"], row["law"], row["targets"]) for row in laws], [
+                ("rust", "tests::at_baseline",
+                 ["//crates/demo:demo__unit_test", "//crates/demo:demo__unit_test__fv_0123abcd"]),
+                ("python", "DemoTests.test_at_baseline", ["scripts/test_demo.py"]),
+            ])
+            self.assertEqual(cut_laws.undiscovered(repo, laws), [])
+            unmarked = cut_laws.unmarked(law, ".rs")
+            self.assertEqual(unmarked, law.replace(f'    #[ignore = "{CUT}"]\n', ""))
+            self.assertNotIn(CUT, cut_laws.unmarked(script.read_text(), ".py"))
+            # A marker the reset cannot remove whole, or one on no test, would
+            # leave a law ignored after the cut.
+            (package / "src/lib.rs").write_text(law.replace(
+                f'    #[ignore = "{CUT}"]\n    fn', f'    #[ignore = "{CUT}"] fn'))
+            self.assertTrue(cut_laws.undiscovered(repo, cut_laws.discover(repo)))
+            (package / "src/lib.rs").write_text(law + f'#[ignore = "{CUT}"]\nconst X: u8 = 1;\n')
+            self.assertTrue(cut_laws.undiscovered(repo, cut_laws.discover(repo)))
+            (package / "src/lib.rs").write_text(law)
+            (package / "BUCK").write_text("")
+            with self.assertRaises(baseline.BaselineError):
+                cut_laws.discover(repo)
+
+    def test_every_cut_law_is_discovered_with_its_synthetic_next_target(self):
+        laws = cut_laws.discover(ROOT)
+        self.assertEqual(cut_laws.undiscovered(ROOT, laws), [])
+        targets = {row["law"]: row["targets"] for row in laws}
+        for law, default in [
+            ("tests::the_build_states_every_version_at_the_release_baseline", "//crates/lashctl:lashctl__unit_test"),
+            ("migrate::tests::catalogs_hold_no_pre_release_transition",
+             "//crates/lash-postgres-store:lash-postgres-store__unit_test"),
+            ("a_fresh_1_0_store_records_only_its_version_1_bootstrap_and_opens",
+             "//crates/lash-postgres-store:migrate__test"),
+            ("migration::release_catalog_tests::catalog_holds_no_pre_release_transition",
+             "//crates/lash-sqlite-store:lash-sqlite-store__unit_test"),
+        ]:
+            self.assertEqual(targets[law][0], default, law)
+            self.assertEqual(len(targets[law]), 2, f"{law} runs on its synthetic-next variant too")
+        self.assertEqual(targets["ReleaseBaselineTests.test_release_values_match_declared_baseline"],
+                         ["scripts/test_release_baseline.py"])
+
+    def test_the_reset_runs_every_cut_law_on_each_of_its_targets(self):
+        laws = cut_laws.discover(ROOT)
+        with patch.object(cut_laws.subprocess, "run") as run:
+            run.return_value = subprocess.CompletedProcess([], 0, "", "Ran 1 test in 0.1s\n\nOK\n")
+            cut_laws.run(ROOT, laws)
+        calls = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(len(calls), sum(len(row["targets"]) for row in laws))
+        for row in laws:
+            for target in row["targets"]:
+                if row["kind"] == "rust":
+                    self.assertIn(["kiln", "test", target, "--test_arg=--exact", f"--test_arg={row['law']}",
+                                   "--runs_per_test=1"], calls)
+                else:
+                    self.assertIn([sys.executable, target, row["law"], "-v"], calls)
+        # A Python law the run skipped or never selected did not pass.
+        for stderr in ("Ran 1 test in 0.1s\n\nOK (skipped=1)\n", "Ran 0 tests in 0.0s\n\nOK\n"):
+            with patch.object(cut_laws.subprocess, "run") as run, self.assertRaises(baseline.BaselineError):
+                run.return_value = subprocess.CompletedProcess([], 0, "", stderr)
+                cut_laws.run(ROOT, [row for row in laws if row["kind"] == "python"])
+
+    def test_production_catalogs_carry_no_step_and_a_predecessor_step_is_red(self):
+        self.assertEqual(baseline.production_catalog_mismatches(ROOT), [])
+        scratch_root = ROOT / ".buck2/release-baseline-tests"
+        scratch_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=scratch_root) as temporary:
+            repo = Path(temporary)
+            self.scratch(repo)
+            expand = repo / baseline.POSTGRES_CATALOG
+            current = expand.read_text()
+            table = "static EXPAND_MIGRATIONS: &[ExpandMigration] = &["
+            step = ("\n    ExpandMigration {\n        id: \"0141-predecessor\",\n        from_version: 140,\n"
+                    "        to_version: 141,\n        statements: \"\",\n    },")
+            expand.write_text(current.replace(table, table + '\n    #[cfg(feature = "synthetic-next")]' + step, 1))
+            self.assertEqual(baseline.production_catalog_mismatches(repo), [])
+            expand.write_text(current.replace(table, table + step, 1))
+            errors = baseline.production_catalog_mismatches(repo)
+            self.assertEqual(len(errors), 1, errors)
+            self.assertIn("ExpandMigration", errors[0])
+            # The reset refuses it rather than deleting it.
+            with self.assertRaises(baseline.BaselineError):
+                reset.plan(repo)
+            expand.write_text(current)
+            catalog = repo / baseline.SQLITE_CATALOG
+            catalog.write_text(catalog.read_text().replace(
+                '    #[cfg(feature = "synthetic-next")]\n    SqliteMigration {', "    SqliteMigration {", 1))
+            errors = baseline.production_catalog_mismatches(repo)
+            self.assertEqual(len(errors), 1, errors)
+            self.assertIn("SqliteMigration", errors[0])
+
     def scratch(self, repo: Path):
         """Copy every file the reset reads into `repo`; return their bytes."""
         paths = {row["constant_path"] for row in baseline.surfaces(ROOT)}
@@ -304,9 +425,7 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
             references = dict(public["schema_renames"])
             references.update({old.removesuffix(".schema.json"): new.removesuffix(".schema.json")
                                for old, new in public["schema_renames"].items()})
-            # FIG-4493 owns the production catalog's predecessor rows.
-            exempt = {str(baseline.POSTGRES_CATALOG), str(baseline.BLAKE3_DOMAIN_TABLE),
-                      str(baseline.PREDECESSOR_TABLE)}
+            exempt = {str(baseline.BLAKE3_DOMAIN_TABLE), str(baseline.PREDECESSOR_TABLE)}
 
             def masked(text, names):
                 found = baseline.definitions(text)

@@ -2,9 +2,10 @@
 """Plan or apply the 1.0 baseline reset, including schema and fixture generation.
 
 Run through `kiln gate` in an isolated fork. Dry-run emits every source edit,
-schema rename, and generator output. Apply executes that plan, regenerates
-schemas and retained current-tree fixtures through their owning generators,
-and checks the declared baseline. It does not capture a tagged release corpus.
+schema rename, generator output and cut-only law. Apply executes that plan,
+regenerates schemas and retained current-tree fixtures through their owning
+generators, checks the declared baseline and the production catalogs, and runs
+every cut-only law it unmarked. It does not capture a tagged release corpus.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import subprocess
 import sys
 
 import release_baseline as baseline
+import release_cut_laws as cut_laws
 from fixture_regenerators import discover
 
 SCHEMA_GENERATORS = [
@@ -29,7 +31,14 @@ SCHEMA_GENERATORS = [
 
 
 def plan(repo: Path):
+    # The freeze changes stored shapes in place, so no production catalog
+    # gains a step before the cut, and the reset deletes none: a step there
+    # is a pre-1.0 predecessor the release must not carry.
+    catalog = baseline.production_catalog_mismatches(repo)
+    if catalog:
+        raise baseline.BaselineError("\n".join(catalog))
     fixture_generators = discover(repo)
+    laws = cut_laws.discover(repo)
     rows = baseline.inventory(repo)
     declared = {row["key"]: baseline.baseline_of(row["default"]) for row in rows}
     edits = {}
@@ -84,30 +93,6 @@ def plan(repo: Path):
         if not path.is_file() or text != path.read_text():
             edits[path] = text
 
-    # Delete the production predecessor chain, preserving cfg-gated N+1 rows.
-    path = repo / baseline.POSTGRES_CATALOG
-    text = path.read_text()
-    for table, item in [("EXPAND_MIGRATIONS", "ExpandMigration"),
-                        ("BACKFILL_MIGRATIONS", "BackfillMigration"),
-                        ("CONTRACT_MIGRATIONS", "ContractMigration")]:
-        pattern = r"(static " + table + r":.*?= &\[)(.*?)(\s*\];)"
-        match = re.search(pattern, text, re.DOTALL)
-        if match is None:
-            raise baseline.BaselineError(f"cannot find {table}")
-        # A cfg attribute belongs to the following row: only unconditional
-        # rows are the production chain.
-        body = re.sub(r'(?m)^(    #\[cfg\([^\n]*\)\]\n)?    ' + item + r' \{.*?\n    \},\n?',
-                      lambda row: row[0] if row[1] else "", match[2], flags=re.DOTALL)
-        # Unconditional rows are removed only from EXPAND; the other current
-        # catalogs are N+1.
-        if table != "EXPAND_MIGRATIONS":
-            body = match[2]
-            if body.strip() and '#[cfg(feature = "synthetic-next")]' not in body:
-                raise baseline.BaselineError(f"unrecognized production rows in {table}")
-        text = text[:match.start(2)] + body + text[match.end(2):]
-    if text != path.read_text():
-        edits[path] = text
-
     # schema.sql states the PostgreSQL schema version in its header and in
     # the stamp its seed row writes; both follow the constant.
     path = repo / baseline.POSTGRES_SCHEMA
@@ -116,6 +101,13 @@ def plan(repo: Path):
     text = baseline.postgres_schema_at(path.read_text(), version)
     if text != path.read_text():
         edits[path] = text
+
+    # From the cut on, a cut-only law runs with its suite.
+    for law in laws:
+        path = repo / law["source"]
+        text = cut_laws.unmarked(edits.get(path, path.read_text()), path.suffix)
+        if text != path.read_text():
+            edits[path] = text
 
     # Generator-owned schema documents are renamed by regeneration. Rewrite
     # references, including include_str! paths, before compiling the cut tree.
@@ -151,7 +143,8 @@ def plan(repo: Path):
               "fixture_paths": sorted(set(fixtures)),
               "build_inventory_paths": ["BUCK", "tools/buck2/target-inventory.json"],
               "schema_generators": SCHEMA_GENERATORS,
-              "fixture_generators": fixture_generators}
+              "fixture_generators": fixture_generators,
+              "cut_laws": laws}
     return public, edits
 
 
@@ -159,8 +152,35 @@ def run(repo: Path, argv: list[str], environment=None):
     subprocess.run(argv, cwd=repo, env={**os.environ, **(environment or {})}, check=True)
 
 
+INCLUDE = re.compile(r'\binclude_(?:str|bytes)!\(\s*"([^"\n]+)"\s*\)')
+
+
+def compiled_inputs(repo: Path):
+    """The repository files Rust compiles in through `include_str!` or
+    `include_bytes!`, relative to the repository."""
+    inputs = set()
+    for path in (repo / "crates").rglob("*.rs"):
+        for literal in INCLUDE.findall(path.read_text()):
+            target = os.path.normpath(path.parent / literal)
+            if target.startswith(str(repo) + os.sep):
+                inputs.add(os.path.relpath(target, repo))
+    return inputs
+
+
+def generation_order(repo: Path, generators: list[dict]):
+    """`generators`, those whose output another build compiles in first: a
+    generator that compiles a stale artifact in fails before it writes."""
+    compiled = compiled_inputs(repo)
+
+    def compiled_in(generator):
+        output = generator["output"]
+        return any(path == output or path.startswith(output.rstrip("/") + "/") for path in compiled)
+
+    return sorted(generators, key=lambda generator: not compiled_in(generator))
+
+
 def regenerate_fixtures(repo: Path):
-    for generator in discover(repo):
+    for generator in generation_order(repo, discover(repo)):
         run(repo, ["kiln", "test", generator["target"], "--local-test-execution", "--no-test-cache",
                    "--test_arg=--ignored", "--test_arg=--exact", f"--test_arg={generator['law']}",
                    "--test_env=LASH_REGENERATE=1", f"--test_env=BUILD_WORKSPACE_DIRECTORY={repo}",
@@ -199,6 +219,9 @@ def main():
         print(json.dumps(public, indent=2), flush=True)
         if public["hardcoded_workflow_schema_paths_after_reset"]:
             raise baseline.BaselineError("hard-coded workflow schema version paths remain after reset")
+        undiscovered = cut_laws.undiscovered(repo, public["cut_laws"])
+        if undiscovered:
+            raise baseline.BaselineError("cut-only laws the reset cannot run:\n" + "\n".join(undiscovered))
         if args.dry_run:
             return 0
         if not args.source_only and not os.environ.get("LASH_POSTGRES_DATABASE_URL"):
@@ -211,9 +234,12 @@ def main():
         errors = baseline.mismatches(rows)
         errors += baseline.sqlite_stamp_mismatches(repo)
         errors += baseline.postgres_stamp_mismatches(repo)
+        errors += baseline.production_catalog_mismatches(repo)
         errors += baseline.table_mismatches(repo, rows)
         if errors:
             raise baseline.BaselineError("\n".join(errors))
+        if not args.source_only:
+            cut_laws.run(repo, public["cut_laws"])
         return 0
     except (baseline.BaselineError, OSError, KeyError, subprocess.CalledProcessError) as error:
         print(f"release reset error: {error}", file=sys.stderr)

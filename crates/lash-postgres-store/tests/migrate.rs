@@ -573,6 +573,117 @@ async fn fresh_release_ledger_has_only_baseline_bootstrap_evidence() {
     drop_scratch_schema(&database_url, &schema).await;
 }
 
+/// FIG-4493: a fresh 1.0 store's ledger holds no pre-1.0 transition: its
+/// bootstrap provisions the release baseline 1, and only the synthetic-next
+/// build's step carries it to 2. The store then opens.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "release cut: FIG-4493"]
+async fn a_fresh_1_0_store_records_only_its_version_1_bootstrap_and_opens() {
+    let database = migrator_database()
+        .await
+        .expect("the ledger law requires PostgreSQL");
+    let database_url = database.url().to_string();
+    let schema = create_scratch_schema(&database_url).await;
+    let url = scratch_url(&database_url, &schema);
+    PostgresStorage::migrate(&url, MigrationPhase::Expand)
+        .await
+        .expect("provision the release baseline");
+    let mut expected = vec![("expand".to_string(), "bootstrap-1".to_string(), None, 1)];
+    expected.extend(component_expand_rows());
+    let rows = ledger_rows(&url).await;
+    assert_eq!(rows, expected);
+    assert!(
+        rows.iter()
+            .all(|(_, _, from, to)| from.is_none_or(|from| from == 1) && (1..=2).contains(to)),
+        "a ledger row outside the release baseline 1 and its successor: {rows:?}"
+    );
+    let newest = written_version();
+    assert_eq!(compat_stamp(&url).await.0, newest);
+    PostgresStorage::connect(&url)
+        .await
+        .expect("a fresh 1.0 store opens");
+    drop_scratch_schema(&database_url, &schema).await;
+}
+
+/// FIG-4493: the cut restarts every counter at 1, so a store a pre-1.0 build
+/// populated carries a stamp above every version this build reads and a
+/// release stamp older than this build's. Open, plan and migrate refuse it
+/// as pre-release state, typed, and change no schema, stamp or ledger row.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_store_a_pre_release_build_populated_is_refused_unchanged() {
+    let Some(database) = migrator_database().await else {
+        return;
+    };
+    let database_url = database.url().to_string();
+    let schema = create_scratch_schema(&database_url).await;
+    let url = scratch_url(&database_url, &schema);
+    PostgresStorage::migrate(&url, MigrationPhase::Expand)
+        .await
+        .expect("provision the store a pre-release build populated");
+    // The last pre-1.0 PostgreSQL schema was 141.
+    stamp_component(&database_url, &schema, written_version() + 140).await;
+    let mut admin = PgConnection::connect(&database_url)
+        .await
+        .expect("connect scratch provisioner");
+    sqlx::query(&format!(
+        "UPDATE {schema}.lash_release_stamp SET release_version = '0.0.0-alpha'
+         WHERE singleton = TRUE"
+    ))
+    .execute(&mut admin)
+    .await
+    .expect("stamp the store as a pre-release build's");
+    admin.close().await.expect("close scratch provisioner");
+    let ledger_before = ledger_rows(&url).await;
+    let stamp_before = compat_stamp(&url).await;
+    let catalog_before = catalog_definitions(&url).await;
+
+    let pre_release = |error: &lash_core_execution::StoreError| {
+        matches!(
+            error,
+            lash_core_execution::StoreError::Incompatible {
+                refusal: lash_core_execution::compat::CompatRefusal::PreRelease { component, .. }
+            } if component == lash_core_execution::compat::ComponentId::POSTGRES.as_str()
+        )
+    };
+    let opened = PostgresStorage::connect(&url)
+        .await
+        .err()
+        .expect("a pre-release store must not open");
+    assert!(
+        pre_release(&opened),
+        "the open refusal stays typed: {opened:?}"
+    );
+    for (what, refused) in [
+        (
+            "plan",
+            PostgresStorage::plan_migrations(&url, MigrationPhase::Expand)
+                .await
+                .map(|_| ()),
+        ),
+        (
+            "migrate",
+            PostgresStorage::migrate(&url, MigrationPhase::Expand)
+                .await
+                .map(|_| ()),
+        ),
+    ] {
+        let error = refused.expect_err("a pre-release store must not migrate");
+        assert!(
+            matches!(&error, MigrateError::Store(store) if pre_release(store)),
+            "the {what} refusal names pre-release state: {error:?}"
+        );
+    }
+    assert_eq!(compat_stamp(&url).await, stamp_before);
+    assert_eq!(catalog_definitions(&url).await, catalog_before);
+    assert_eq!(
+        ledger_rows(&url).await,
+        ledger_before,
+        "a refused migrate records no step"
+    );
+    drop_scratch_schema(&database_url, &schema).await;
+    drop(database);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn later_phases_refuse_an_uninstalled_catalog_and_wait_for_finalize() {
     let Some(database) = migrator_database().await else {

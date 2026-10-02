@@ -129,6 +129,30 @@ mod release_catalog_tests {
             }
         }
     }
+
+    /// FIG-4493: the 1.0 catalog holds no transition from a pre-1.0 version.
+    /// Every database starts at the release baseline 1, and the synthetic-next
+    /// build's steps carry it to 2.
+    #[test]
+    #[ignore = "release cut: FIG-4493"]
+    fn catalog_holds_no_pre_release_transition() {
+        for database in SqliteDatabase::ALL {
+            let descriptor = compat::descriptor(database.component()).expect("descriptor");
+            assert_eq!(
+                descriptor.reads.min(),
+                1,
+                "{database:?} reads from the release baseline"
+            );
+        }
+        let steps: Vec<_> = CATALOG
+            .iter()
+            .map(|step| (format!("{:?}", step.database), step.from, step.to))
+            .collect();
+        assert!(
+            steps.iter().all(|(_, from, to)| (*from, *to) == (1, 2)),
+            "a step outside the release baseline 1 and its successor: {steps:?}"
+        );
+    }
 }
 
 /// The compatibility version this build writes for `database`.

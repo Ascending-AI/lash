@@ -1018,6 +1018,57 @@ mod tests {
         );
     }
 
+    /// FIG-4485: the 1.0 build states every version at its release baseline.
+    /// Each durable format is at 1 and each format identity at `v1`, and
+    /// every range `lashctl version` prints, each component's, each wire's
+    /// and the fleet's, is at 1. The synthetic-next build moves a surface one
+    /// past the baseline and no further.
+    #[test]
+    #[ignore = "release cut: FIG-4485"]
+    fn the_build_states_every_version_at_the_release_baseline() {
+        fn numbers(value: &Value, found: &mut Vec<u64>) {
+            match value {
+                Value::Number(number) => found.extend(number.as_u64()),
+                Value::Array(items) => items.iter().for_each(|item| numbers(item, found)),
+                Value::Object(fields) => fields.values().for_each(|item| numbers(item, found)),
+                _ => {}
+            }
+        }
+        let newest = if cfg!(feature = "synthetic-next") {
+            2
+        } else {
+            1
+        };
+        let mut off_baseline = Vec::new();
+        for entry in lash::formats::durable_formats() {
+            let versions: Vec<u64> = match entry.version {
+                lash::formats::FormatVersion::Counter(value) => vec![u64::from(value)],
+                lash::formats::FormatVersion::Identity(identity) => identity
+                    .split(['/', ':', '-'])
+                    .skip(1)
+                    .filter_map(|segment| segment.strip_prefix('v')?.parse().ok())
+                    .collect(),
+                other => panic!("unhandled format version: {other:?}"),
+            };
+            if versions.is_empty() || versions.iter().any(|value| !(1..=newest).contains(value)) {
+                off_baseline.push(format!("{} = {}", entry.constant, entry.version));
+            }
+        }
+        let version = version_result(&[]);
+        for field in ["components", "wires", "fleet_writable"] {
+            let mut found = Vec::new();
+            numbers(&version[field], &mut found);
+            assert!(!found.is_empty(), "`lashctl version` states its {field}");
+            if found.iter().any(|value| !(1..=newest).contains(value)) {
+                off_baseline.push(format!("{field} = {}", version[field]));
+            }
+        }
+        assert!(
+            off_baseline.is_empty(),
+            "versions off the release baseline 1 (newest {newest}): {off_baseline:#?}"
+        );
+    }
+
     #[test]
     fn incompatible_store_error_keeps_the_typed_refusal() {
         let error = CliError::store(StoreError::Incompatible {

@@ -21,6 +21,50 @@ fn production_catalogs_start_at_the_release_baseline() {
     );
 }
 
+/// FIG-4493: the 1.0 catalogs hold no transition from a pre-1.0 version. The
+/// component starts at the release baseline 1; the default build carries no
+/// step, and the synthetic-next build's steps carry the baseline to 2 and
+/// wait for no epoch and raise no floor past it.
+#[test]
+#[ignore = "release cut: FIG-4493"]
+fn catalogs_hold_no_pre_release_transition() {
+    assert_eq!(
+        SCHEMA_VERSION, 1,
+        "the component starts at the release baseline"
+    );
+    let newest = if cfg!(feature = "synthetic-next") {
+        2
+    } else {
+        1
+    };
+    let expand: Vec<_> = EXPAND_MIGRATIONS
+        .iter()
+        .map(|step| (step.id, step.from_version, step.to_version))
+        .collect();
+    let backfill: Vec<_> = BACKFILL_MIGRATIONS
+        .iter()
+        .map(|step| (step.id, step.after_fleet))
+        .collect();
+    let contract: Vec<_> = CONTRACT_MIGRATIONS
+        .iter()
+        .map(|step| (step.id, step.after_fleet, step.min_reader))
+        .collect();
+    assert!(
+        expand.iter().all(|&(_, from, to)| (from, to) == (1, 2))
+            && backfill.iter().all(|&(_, fleet)| fleet <= newest as u32)
+            && contract
+                .iter()
+                .all(|&(_, fleet, floor)| fleet <= newest as u32 && floor <= newest),
+        "a step outside the release baseline 1 and its successor: \
+         expand={expand:?}, backfill={backfill:?}, contract={contract:?}"
+    );
+    assert_eq!(
+        expand.is_empty() && backfill.is_empty() && contract.is_empty(),
+        newest == 1,
+        "only the synthetic-next build carries steps"
+    );
+}
+
 /// The upgrade path and the bootstrap provision identical objects: a
 /// catalog step that creates an object states it exactly the way
 /// `schema.sql` does, so the two paths can never disagree about that
