@@ -343,6 +343,41 @@ async fn a_partially_created_child_completes_from_its_recorded_creation_config_o
     .await;
 }
 
+/// FIG-4727 on PostgreSQL: a process a session turn started parks with its
+/// profile key and completes when a deployment serving it resumes it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
+async fn a_session_turn_started_process_parks_with_its_profile_key_on_postgres() {
+    let url = database_url();
+    let _lock = DatabaseLock::acquire(&url).await;
+    let storage = lash_postgres_store::PostgresStorage::connect(&url)
+        .await
+        .expect("connect the PostgreSQL session-turn park law store");
+    reset(storage.pool()).await;
+    let attachments = tempfile::tempdir().expect("attachment directory");
+    let double = lash_restate_test::backend_with_store_set(
+        0x4727,
+        lash_restate_test::ServerConfig::default(),
+        lash_restate_test::DeploymentHooks::default(),
+        |clock| async {
+            Ok(Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
+                &storage,
+                Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+                    attachments.path(),
+                )),
+                lash_core::WakeDeliveryConfig::default(),
+                clock,
+            )) as Arc<dyn lash_core::StoreSet>)
+        },
+    )
+    .await
+    .expect("the Restate double over PostgreSQL stores");
+    super::process_exhaustion_park::a_session_turn_started_process_parks_with_its_profile_key(
+        &double,
+    )
+    .await;
+}
+
 /// A process registry over a freshly reset PostgreSQL database, and the
 /// attachment directory its store set holds.
 async fn postgres_process_registry(url: &str) -> (Arc<dyn ProcessRegistry>, tempfile::TempDir) {

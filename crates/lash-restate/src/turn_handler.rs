@@ -63,7 +63,7 @@ pub fn parked_turn_failure(refusal: impl std::fmt::Display) -> HandlerError {
 /// that text, so a typed attempt fault rides it as a record, and the park
 /// the exhausted retries become reads the record back (FIG-4404).
 pub(crate) fn retried_attempt_failure(failure: String) -> HandlerError {
-    HandlerError::from(std::io::Error::other(failure))
+    HandlerError::from(RetriedAttempt(failure))
 }
 
 /// Records the park of the turn a group tool child belongs to, when the child
@@ -88,6 +88,28 @@ pub(crate) async fn park_refused_group_child(
     )
     .await
 }
+
+/// The retryable failure [`retried_attempt_failure`] ends a retried attempt
+/// with: the fault's `attempt_failure_text`, verbatim. The endpoint records
+/// a retryable handler error's `Debug` as the attempt's failure, so this
+/// error's `Debug` is the text itself — an `io::Error`'s `Debug` would
+/// escape it (`Custom { kind: Other, error: "..." }`), burying the record
+/// the exhausted retries' park reads back (FIG-4727).
+struct RetriedAttempt(String);
+
+impl std::fmt::Display for RetriedAttempt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Debug for RetriedAttempt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for RetriedAttempt {}
 
 /// The retryable failure [`parked_turn_failure`] ends a parked attempt with.
 #[derive(Debug)]

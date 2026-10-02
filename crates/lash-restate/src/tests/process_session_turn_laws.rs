@@ -90,7 +90,7 @@ async fn worker_for(
 }
 
 /// A SessionTurn worker whose deployment installs `models`.
-async fn worker_with_llm_profiles(
+pub(super) async fn worker_with_llm_profiles(
     engine_backend: lash_core::Backend,
     registry: Arc<dyn ProcessRegistry>,
     session_factory: Arc<dyn lash_core::DeploymentStore>,
@@ -127,7 +127,7 @@ async fn worker_with_llm_profiles(
     .expect("valid SessionTurn worker")
 }
 
-fn answering_provider(text: &str) -> lash_core::facade_support::ProviderHandle {
+pub(super) fn answering_provider(text: &str) -> lash_core::facade_support::ProviderHandle {
     let text = text.to_string();
     lash_core::testing::TestProvider::builder()
         .kind("mock")
@@ -660,10 +660,10 @@ async fn redelivery_after_create_commit_reopens_child_and_runs_turn() {
 }
 
 /// The key a subagent tier names for its child.
-const FAST: &str = "fast";
+pub(super) const FAST: &str = "fast";
 
 /// A host session-turn start of `child` that names the model key [`FAST`].
-async fn keyed_registration_for(child: &SessionId) -> ProcessRegistration {
+pub(super) async fn keyed_registration_for(child: &SessionId) -> ProcessRegistration {
     ProcessRegistration::new(
         ProcessInput::SessionTurn {
             definition_key: "test-session-turn:v1".to_string(),
@@ -688,7 +688,7 @@ async fn keyed_registration_for(child: &SessionId) -> ProcessRegistration {
 }
 
 /// A deployment that serves the standard test model and [`FAST`].
-fn llm_profiles_serving_fast(
+pub(super) fn llm_profiles_serving_fast(
     provider: lash_core::facade_support::ProviderHandle,
 ) -> Arc<dyn lash_core::LlmProfiles> {
     Arc::new(
