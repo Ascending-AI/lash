@@ -4,7 +4,8 @@
 Each fixture is a throwaway git repository with two source-declared surfaces: a
 decoder-law ``migrate`` surface and a ``coexist`` wire. The four verdicts the
 1.0 cut records (FIG-4494) are the first four tests, each run as the command
-CI runs.
+CI runs with strictness enabled for the cut; FreezeVerdicts covers the
+pre-cut default.
 """
 
 from __future__ import annotations
@@ -288,11 +289,13 @@ class Fixture(unittest.TestCase):
         self.git("commit", "--quiet", "--allow-empty", "--message", message)
         return self.git("rev-parse", "HEAD")
 
-    def run_command(self, base: str, head: str) -> subprocess.CompletedProcess[str]:
-        """The gate exactly as CI invokes it."""
+    def run_command(
+        self, base: str, head: str, *, strict: bool = True
+    ) -> subprocess.CompletedProcess[str]:
+        """The gate's command, with the cut policy unless testing the freeze."""
         return subprocess.run(
             [sys.executable, str(SCRIPT), "--base", base, "--head", head,
-             "--repo", str(self.repo)],
+             "--repo", str(self.repo), *(["--strict"] if strict else [])],
             capture_output=True,
             text=True,
         )
@@ -301,9 +304,36 @@ class Fixture(unittest.TestCase):
         output = io.StringIO()
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
             code = gate.main(
-                ["--base", base or self.base, "--head", head, "--repo", str(self.repo)]
+                ["--base", base or self.base, "--head", head, "--repo", str(self.repo),
+                 "--strict"]
             )
         return code, output.getvalue()
+
+
+class FreezeVerdicts(Fixture):
+    def test_an_in_place_change_is_reported_before_the_cut(self) -> None:
+        self.write("crates/demo/src/lib.rs", WIDER_RECORD)
+        head = self.commit("in-place shape change")
+        result = self.run_command(self.base, head, strict=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("in-place shape change:", result.stdout)
+        self.assertIn("crates/demo/src/lib.rs:WIRE_VERSION", result.stdout)
+        self.assertRegex(result.stdout, r"head sha256:[0-9a-f]{64}")
+        self.assertIn("2 of 2 surfaces evaluated", result.stdout)
+        self.assertNotIn("Bump WIRE_VERSION", result.stdout)
+        strict = self.run_command(self.base, head)
+        self.assertEqual(strict.returncode, 1, strict.stdout + strict.stderr)
+        self.assertIn("Bump WIRE_VERSION strictly past 3", strict.stderr)
+        shape_hash = re.search(r"head sha256:[0-9a-f]{64}", result.stdout).group()
+        self.assertIn(shape_hash, strict.stderr)
+
+    def test_an_unevaluated_guard_still_fails_before_the_cut(self) -> None:
+        self.write("crates/demo/src/lib.rs", WIDER_RECORD.replace(
+            "items(Record, encode_record)", "items(Record, missing_decoder)"))
+        result = self.run_command(self.base, self.commit("unevaluable guard"), strict=False)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("1 of 2 surfaces evaluated", result.stderr)
+        self.assertIn("does not find missing_decoder", result.stderr)
 
 
 class CutVerdicts(Fixture):
@@ -917,7 +947,7 @@ class RegistryMoves(Fixture):
         code, output = self.verdict("0" * 40)
         self.assertEqual(code, 2, output)
 
-    def test_there_is_no_report_only_mode(self) -> None:
+    def test_there_are_no_policy_bypass_flags(self) -> None:
         for flag in ("--report-only", "--freeze", "--config", "--surface"):
             with self.subTest(flag=flag), contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit) as refused:
@@ -1111,7 +1141,7 @@ class RealRepository(unittest.TestCase):
         self.assertIn("0 not evaluated", output.getvalue())
 
     def test_the_working_tree_against_itself_passes(self) -> None:
-        result = gate.check_views(self.view, self.view)
+        result = gate.check_views(self.view, self.view, strict=True)
         self.assertEqual(((), ()), (result.errors, result.failures))
         self.assertEqual(len(self.surfaces), len(result.evaluated))
 
@@ -1124,7 +1154,7 @@ class RealRepository(unittest.TestCase):
                 with self.subTest(surface=key, guard=guard.label):
                     changed = planted_change(self.view, guard)
                     self.assertIsNotNone(changed, "no entry of the guard could be changed")
-                    result = gate.check_views(self.view, changed, only=frozenset({key}))
+                    result = gate.check_views(self.view, changed, only=frozenset({key}), strict=True)
                     self.assertEqual((), result.errors)
                     self.assertEqual([key], [finding.surface.key for finding in result.failures])
                     self.assertIn("its guarded shape changed", result.failures[0].detail)
@@ -1144,7 +1174,7 @@ class RealRepository(unittest.TestCase):
 
     def assert_planted_leaf_fails(self, key: str, shape: gate.Shape) -> None:
         result = gate.check_views(
-            self.view, planted_shape(self.view, shape), only=frozenset({key})
+            self.view, planted_shape(self.view, shape), only=frozenset({key}), strict=True
         )
         self.assertEqual((), result.errors)
         self.assertEqual([key], [finding.surface.key for finding in result.failures])
@@ -1267,7 +1297,7 @@ class RealRepository(unittest.TestCase):
                 )
                 self.assertEqual(1, bumps)
                 bumped = PlantedView(ddl, {surface.constant_path: bumped_file})
-                result = gate.check_views(self.view, bumped, only=frozenset({key}))
+                result = gate.check_views(self.view, bumped, only=frozenset({key}), strict=True)
                 self.assertEqual((), result.errors)
                 self.assertEqual(1, len(result.failures), result)
                 self.assertIn(
@@ -1290,7 +1320,7 @@ class RealRepository(unittest.TestCase):
                         + table[closing:]
                     },
                 )
-                result = gate.check_views(self.view, stepped, only=frozenset({key}))
+                result = gate.check_views(self.view, stepped, only=frozenset({key}), strict=True)
                 self.assertEqual(((), ()), (result.errors, result.failures))
                 self.assertEqual(
                     [f"{at} to {at + 1} (catalog steps registered)"],

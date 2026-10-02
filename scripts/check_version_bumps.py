@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Require a version bump, and its upgrade evidence, when a guarded shape changes.
+"""Check guarded shapes and their version/upgrade evidence across two commits.
 
 The inventory reads constants declaring ``/// version_surface = "coexist"``
 in source. Declarations use ``migrate``, ``drain`` and ``coexist`` policies.
@@ -48,7 +48,7 @@ repository-relative and may be a glob. A surface that versions no shape the
 tree can project says so instead: ``version_guard(unshaped = "<reason>")``.
 
 The gate compares two commits. For each surface it projects the guarded
-shapes at ``--base`` and at ``--head``; when they differ, the head's constant
+shapes at ``--base`` and at ``--head``; in strict mode, when they differ, the head's constant
 must be strictly greater than the base's, and the bump must carry its upgrade
 evidence:
 
@@ -66,8 +66,11 @@ dropping a shape from a marker does not excuse changing it, a constant that
 disappears does not excuse the shapes it guarded, and dropping a ``catalog``
 does not excuse the step.
 
-There is no report-only mode. A changed shape without its bump, a bump
-without its evidence, and a guard that cannot be evaluated all exit nonzero.
+Before the 1.0 cut (FIG-3846), an unchanged version with a changed shape is
+reported with the head shape hash and does not fail. FIG-4494 flips
+``STRICT_VERSION_BUMPS`` at the cut; ``--strict`` exercises that policy now.
+Strict mode requires the bump. In both modes, a bump without its evidence,
+a backwards version, and a guard that cannot be evaluated exit nonzero.
 A reachable type the tree cannot resolve is such a guard.
 ``version_guard_closure.py`` prints each surface's closure, its cycles and
 what the walk leaves opaque.
@@ -102,6 +105,8 @@ ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = "scripts/versioned-surfaces.toml"
 MARKER = "version_guard"
 GUARD_KINDS = ("items", "shapes", "impls", "file", "roots")
+# FIG-4494 flips this at the 1.0 cut for every caller, including CI.
+STRICT_VERSION_BUMPS = False
 # The one table a record lift is registered in (ADR 0106 §2). Its default-build
 # arm is the upgrade evidence a bumped decoder-law surface owes.
 UPCASTER_REGISTRY = "crates/lash-core-store/src/store/fleet_format.rs"
@@ -3173,6 +3178,7 @@ class CheckResult:
     errors: tuple[Finding, ...]
     bumped: tuple[Finding, ...] = ()
     registered: tuple[Surface, ...] = ()
+    in_place: tuple[Finding, ...] = ()
 
 
 def _declaration(view: TreeView, surface: Surface) -> Declaration | None:
@@ -3230,15 +3236,22 @@ def _base_surface(
     return moved[0] if len(moved) == 1 else None
 
 
-def check_surfaces(repo: Path, base: str, head: str) -> CheckResult:
+def check_surfaces(
+    repo: Path, base: str, head: str, *, strict: bool = STRICT_VERSION_BUMPS
+) -> CheckResult:
     return check_views(
         RevisionView(repo, resolve_revision(repo, base)),
         RevisionView(repo, resolve_revision(repo, head)),
+        strict=strict,
     )
 
 
 def check_views(
-    base_view: TreeView, head_view: TreeView, only: frozenset[str] | None = None
+    base_view: TreeView,
+    head_view: TreeView,
+    only: frozenset[str] | None = None,
+    *,
+    strict: bool = STRICT_VERSION_BUMPS,
 ) -> CheckResult:
     """Compare two trees. `only` names the surface keys to evaluate; the
     command evaluates every surface."""
@@ -3264,6 +3277,7 @@ def check_views(
     errors: list[Finding] = []
     bumped: list[Finding] = []
     registered: list[Surface] = []
+    in_place: list[Finding] = []
     continued: set[str] = set()
     lifts: set[tuple[str, int]] | None = None
 
@@ -3314,13 +3328,17 @@ def check_views(
                         )
                     )
                 elif changed and head_version == base_version:
-                    failures.append(
+                    (failures if strict else in_place).append(
                         Finding(
                             surface,
                             f"{surface.constant} is {head_version} on both sides but "
                             f"its guarded shape changed ({', '.join(changed)}; head "
-                            f"{surface_fingerprint(head_entries)}). Bump "
-                            f"{surface.constant} strictly past {base_version}.",
+                            f"{surface_fingerprint(head_entries)})."
+                            + (
+                                f" Bump {surface.constant} strictly past {base_version}."
+                                if strict
+                                else " Pre-1.0 version freeze: changed in place."
+                            ),
                         )
                     )
                 elif head_version > base_version:
@@ -3445,6 +3463,7 @@ def check_views(
         tuple(errors),
         tuple(bumped),
         tuple(registered),
+        tuple(in_place),
     )
 
 
@@ -3504,6 +3523,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
     parser.add_argument("--base", required=True, help="baseline commit")
     parser.add_argument("--head", required=True, help="candidate commit")
+    parser.add_argument(
+        "--strict", action="store_true", default=STRICT_VERSION_BUMPS,
+        help="require version bumps for shape changes (mandatory after the 1.0 cut)",
+    )
     parser.add_argument("--repo", type=Path, default=ROOT, help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
@@ -3513,7 +3536,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         base = resolve_revision(args.repo, args.base)
         head = resolve_revision(args.repo, args.head)
-        result = check_surfaces(args.repo, base, head)
+        result = check_surfaces(args.repo, base, head, strict=args.strict)
     except CheckError as error:
         print(f"version-bump check error: {error}", file=sys.stderr)
         return 2
@@ -3527,6 +3550,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     for finding in result.bumped:
         print(f"bumped: {finding.surface.key} {finding.detail}")
+    for finding in result.in_place:
+        print(f"in-place shape change: {finding.surface.key}: {finding.detail}")
     for surface in result.registered:
         print(f"registered by this change: {surface.key}")
     if result.errors:
