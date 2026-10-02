@@ -714,16 +714,24 @@ impl Provider for MetricsTransport {
 pub(super) fn empty_request() -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: "model".to_string(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::builder("model".to_string())
+                    .context_window_tokens(128_000)
+                    .capability(crate::LlmProfileCapability::default())
+                    .extra_body(Default::default())
+                    .request_defaults(Default::default())
+                    .build()
+                    .expect("valid profile"),
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages: Vec::new(),
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::None,
         attachment_acceptance: Default::default(),
-        model_variant: Default::default(),
-        llm_profile_capability: crate::LlmProfileCapability::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         scope: crate::LlmRequestScope::new(
             "provider-test",
             "provider-test:frame",
@@ -739,7 +747,7 @@ pub(super) fn empty_request() -> LlmRequest {
 #[tokio::test]
 async fn provider_handle_records_drop_without_provider_trace_and_stamps_fresh_state() {
     let mut request = empty_request();
-    request.model = "serving-model".to_string();
+    request.model.metadata_mut().wire_model = "serving-model".to_string();
     request.messages = vec![LlmMessage::new(
         LlmRole::Assistant,
         vec![LlmContentBlock::Reasoning {
@@ -796,7 +804,7 @@ async fn provider_handle_records_drop_without_provider_trace_and_stamps_fresh_st
 #[tokio::test]
 async fn same_provider_and_model_on_distinct_gateways_are_foreign_routes() {
     let mut request = empty_request();
-    request.model = "shared-model".to_string();
+    request.model.metadata_mut().wire_model = "shared-model".to_string();
     request.messages = vec![LlmMessage::new(
         LlmRole::Assistant,
         vec![LlmContentBlock::Reasoning {
@@ -1097,10 +1105,9 @@ fn provider_reliability_without_response_start_timeout_preserves_derived_bound()
 }
 
 #[test]
-fn model_request_defaults_roundtrip_output_limit_retention_thinking_and_capture() {
+fn model_request_defaults_roundtrip_retention_thinking_and_capture() {
     let defaults = LlmProfileRequestDefaults {
         expose_thinking: true,
-        max_output_tokens: Some(16_384),
         cache_retention: CacheRetention::Long,
         response_metadata_headers: vec!["X-Request-Cost".to_string()],
         response_metadata_body_paths: vec!["/usage/cost".to_string()],
@@ -1108,7 +1115,6 @@ fn model_request_defaults_roundtrip_output_limit_retention_thinking_and_capture(
 
     let value = serde_json::to_value(&defaults).expect("serialize");
     assert_eq!(value["expose_thinking"], serde_json::json!(true));
-    assert_eq!(value["max_output_tokens"], serde_json::json!(16_384));
     assert_eq!(value["cache_retention"], serde_json::json!("long"));
     assert_eq!(
         value["response_metadata_headers"],
@@ -1186,7 +1192,6 @@ fn model_request_defaults_default_omits_and_restores_every_field() {
     let restored: LlmProfileRequestDefaults =
         serde_json::from_value(serde_json::json!({})).expect("default");
     assert!(!restored.expose_thinking);
-    assert_eq!(restored.max_output_tokens, None);
     assert_eq!(restored.cache_retention, CacheRetention::Short);
     assert!(restored.response_metadata_headers.is_empty());
     assert!(restored.response_metadata_body_paths.is_empty());

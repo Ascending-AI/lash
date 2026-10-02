@@ -450,7 +450,7 @@ fn replay_route_response(request: &LlmRequest) -> LlmResponse {
                     origin: Some(ProviderRouteIdentity::new(
                         "workbench-dev-failure",
                         "workbench-dev-failure",
-                        request.model.clone(),
+                        request.model.wire_model().to_string(),
                     )),
                     ..ProviderReasoningReplay::default()
                 }),

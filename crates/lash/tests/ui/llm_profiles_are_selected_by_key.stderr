@@ -17,7 +17,7 @@ error[E0277]: the trait bound `LlmProfileKey: From<LlmProfileMetadata>` is not s
    |         ^^^^^ the trait `From<LlmProfileMetadata>` is not implemented for `LlmProfileKey`
    |
 help: `LlmProfileKey` implements trait `From<T>`
-  --> $WORKSPACE/crates/lash-core-llm/src/llm_profile.rs
+  --> $WORKSPACE/crates/lash-sansio/src/llm_profile.rs
    |
    | impl From<&str> for LlmProfileKey {
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `From<&str>`

@@ -441,21 +441,14 @@ impl ToolProvider for RetryingDirectTools {
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         assert_eq!(call.name(), "retrying_direct");
-        let model = match call.context.sessions().model().await {
-            Ok(model) => model,
-            Err(err) => return lash_core::ToolOutcome::err_fmt(err).into(),
-        };
         let completion = match call
             .context
             .direct_completions()
             .complete(
-                lash_core::facade_support::DirectRequest::text(
-                    model.model,
-                    format!(
-                        "retrying direct completion attempt {}",
-                        call.context.attempt_number()
-                    ),
-                ),
+                lash_core::facade_support::DirectRequest::text(format!(
+                    "retrying direct completion attempt {}",
+                    call.context.attempt_number()
+                )),
                 "retrying_direct",
             )
             .await
@@ -965,8 +958,10 @@ fn recording_text_provider(
         .complete(move |request| {
             let seen = Arc::clone(&seen);
             async move {
-                seen.lock_recover()
-                    .push((request.model, request.model_variant));
+                seen.lock_recover().push((
+                    request.model.wire_model().to_string(),
+                    request.model.reasoning,
+                ));
                 Ok(LlmResponse {
                     parts: vec![LlmOutputPart::Text {
                         text: text.to_string(),

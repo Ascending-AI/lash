@@ -15,6 +15,7 @@ pub mod json_decode;
 pub mod json_schema;
 pub use json_schema::{InvalidSchemaKind, JsonSchema, SchemaAdmissionError, ValueMismatch};
 pub mod llm;
+pub mod llm_profile;
 pub mod module_artifact_refusal;
 pub mod plugin;
 pub mod process_cursor;

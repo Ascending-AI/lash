@@ -157,7 +157,7 @@ pub(crate) fn responses_request_fingerprint(
     let origin_route = ProviderRouteIdentity::for_endpoint(
         endpoint.provider_kind(),
         &provider.base_url,
-        req.model.clone(),
+        req.model.wire_model().to_string(),
     );
     let built = build_request_body(
         provider,
@@ -242,7 +242,7 @@ pub(crate) async fn complete(
     req: LlmRequest,
     endpoint: CompletionEndpoint,
 ) -> Result<LlmResponse, LlmTransportError> {
-    let origin_model = req.model.clone();
+    let origin_model = req.model.wire_model().to_string();
     let origin_route = ProviderRouteIdentity::for_endpoint(
         endpoint.provider_kind(),
         &provider.base_url,
@@ -263,13 +263,15 @@ pub(crate) async fn complete(
         })
     });
     let provider_trace = req.provider_trace.clone();
-    let expose_thinking = req.request_defaults.expose_thinking;
-    let request_defaults = req.request_defaults.clone();
+    let expose_thinking = req.model.metadata().request_defaults.expose_thinking;
+    let request_defaults = req.model.metadata().request_defaults.clone();
     let timeouts = provider.options.llm_timeouts();
     let stream = stream_events.is_some();
     let compat = provider.resolved_compat(endpoint);
     let stream_termination = req
-        .llm_profile_capability
+        .model
+        .metadata()
+        .capability
         .stream_termination
         .unwrap_or(compat.stream_termination);
     let request_id = req.scope.request_id.clone();

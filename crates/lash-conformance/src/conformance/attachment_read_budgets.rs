@@ -7,7 +7,19 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 fn request(sources: Vec<AttachmentSource>) -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: "fixture".into(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::new(
+                    "fixture",
+                    std::num::NonZeroUsize::MIN.saturating_add(127_999),
+                )
+                .with_capability(Default::default())
+                .with_extra_body(Default::default())
+                .with_request_defaults(Default::default()),
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages: vec![LlmMessage::new(
             LlmRole::User,
             sources
@@ -20,11 +32,7 @@ fn request(sources: Vec<AttachmentSource>) -> LlmRequest {
         resolved_stored: Default::default(),
         tools: Arc::new(vec![]),
         tool_choice: LlmToolChoice::None,
-        model_variant: Default::default(),
-        llm_profile_capability: Default::default(),
         attachment_acceptance: Default::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         scope: lash_core::llm::types::LlmRequestScope::new("session", "frame", "call"),
         output_spec: None,
         stream_events: None,

@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn chat_tools_use_projected_openai_schema_and_preserve_override() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model = "anthropic/claude-sonnet-4.6".to_string();
+    req.model.metadata_mut().wire_model = "anthropic/claude-sonnet-4.6".to_string();
     req.tools = Arc::new(vec![
         LlmToolSpec {
             name: "empty".to_string(),

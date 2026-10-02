@@ -8,7 +8,6 @@ use pretty_assertions::assert_eq;
 /// The request defaults the root records: the crashing execution's binding.
 fn recorded_defaults() -> lash_core::provider::LlmProfileRequestDefaults {
     lash_core::provider::LlmProfileRequestDefaults {
-        max_output_tokens: Some(3_333),
         response_metadata_headers: vec!["x-recorded-cost".to_string()],
         response_metadata_body_paths: vec!["/recorded/cost".to_string()],
         ..lash_core::provider::LlmProfileRequestDefaults::default()
@@ -20,7 +19,6 @@ fn recorded_defaults() -> lash_core::provider::LlmProfileRequestDefaults {
 fn redeployed_defaults() -> lash_core::provider::LlmProfileRequestDefaults {
     lash_core::provider::LlmProfileRequestDefaults {
         expose_thinking: true,
-        max_output_tokens: Some(7_777),
         cache_retention: lash_sansio::llm::capability::CacheRetention::Long,
         response_metadata_headers: vec!["x-redeployed-cost".to_string()],
         response_metadata_body_paths: vec!["/redeployed".to_string()],
@@ -54,13 +52,15 @@ fn capturing_model(
 /// A policy whose creation default binds [`FIRST_PROFILE`] with `defaults`.
 fn policy_with_request_defaults(
     defaults: lash_core::provider::LlmProfileRequestDefaults,
+    default_cap: std::num::NonZeroUsize,
 ) -> crate::SessionPolicy {
     crate::SessionPolicy {
-        model: Some(crate::testing::test_llm_profile_config(
-            FIRST_PROFILE,
-            crate::testing::test_llm_profile_metadata(FIRST_PROFILE)
-                .with_request_defaults(defaults),
-        )),
+        model: Some(crate::testing::test_llm_profile_config(FIRST_PROFILE, {
+            let mut metadata = crate::testing::test_llm_profile_metadata(FIRST_PROFILE)
+                .with_request_defaults(defaults);
+            metadata.limits.output_tokens = crate::OutputTokenLimits::from_default_cap(default_cap);
+            metadata
+        })),
         ..crate::testing::mock_session_policy()
     }
 }
@@ -92,7 +92,10 @@ pub async fn a_redrive_calls_the_model_with_the_request_defaults_its_root_record
         &effect_host,
         &stores,
         turn_config_llm_profiles(capturing_model(&requests)),
-        policy_with_request_defaults(recorded_defaults()),
+        policy_with_request_defaults(
+            recorded_defaults(),
+            std::num::NonZeroUsize::MIN.saturating_add(3332),
+        ),
         Vec::new(),
     )
     .await;
@@ -107,9 +110,14 @@ pub async fn a_redrive_calls_the_model_with_the_request_defaults_its_root_record
             let parts = parts.clone();
             let root = root.clone();
             Box::pin(async move {
-                let mut runtime =
-                    build_runtime_under(parts, policy_with_request_defaults(recorded_defaults()))
-                        .await;
+                let mut runtime = build_runtime_under(
+                    parts,
+                    policy_with_request_defaults(
+                        recorded_defaults(),
+                        std::num::NonZeroUsize::MIN.saturating_add(3332),
+                    ),
+                )
+                .await;
                 runtime.set_turn_phase_probe(Arc::new(CrashBeforeFirstModelCall));
                 let _ = runtime
                     .drive_turn(
@@ -129,9 +137,14 @@ pub async fn a_redrive_calls_the_model_with_the_request_defaults_its_root_record
             let root = root.clone();
             let turn_tx = turn_tx.clone();
             Box::pin(async move {
-                let mut runtime =
-                    build_runtime_under(parts, policy_with_request_defaults(redeployed_defaults()))
-                        .await;
+                let mut runtime = build_runtime_under(
+                    parts,
+                    policy_with_request_defaults(
+                        redeployed_defaults(),
+                        std::num::NonZeroUsize::MIN.saturating_add(7776),
+                    ),
+                )
+                .await;
                 let turn = runtime
                     .drive_turn(
                         text_input(&root, "answer once"),
@@ -164,7 +177,18 @@ pub async fn a_redrive_calls_the_model_with_the_request_defaults_its_root_record
     let requests = lash_sansio::sync::MutexExt::lock_recover(&*requests).clone();
     assert_eq!(requests.len(), 1, "the root made exactly one model call");
     assert_eq!(
-        requests[0].request_defaults,
+        requests[0]
+            .model
+            .metadata()
+            .limits
+            .output_tokens
+            .default_cap()
+            .map(std::num::NonZeroUsize::get),
+        Some(3333),
+        "the redrive keeps the recorded cap"
+    );
+    assert_eq!(
+        requests[0].model.metadata().request_defaults,
         recorded_defaults(),
         "the redriven call carries the request defaults its root recorded, capture allowlists included"
     );

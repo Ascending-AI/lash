@@ -26,6 +26,8 @@ pub use config::{GoogleOAuthClient, GoogleOAuthProvider};
 
 #[cfg(test)]
 mod tests {
+    mod request_support;
+    use request_support::{request, request_with_capability};
     mod epilogue;
     mod generation_tests;
     mod tool_result_shape;
@@ -85,36 +87,6 @@ mod tests {
         }
     }
 
-    fn request_with_capability(
-        model_variant: Option<&str>,
-        llm_profile_capability: LlmProfileCapability,
-    ) -> LlmRequest {
-        LlmRequest {
-            instructions: None,
-            model: "gemini-3.1-pro-preview".to_string(),
-            messages: vec![LlmMessage::text(LlmRole::User, "hello")],
-            resolved_stored: Default::default(),
-            tools: Arc::new(Vec::<LlmToolSpec>::new()),
-            tool_choice: LlmToolChoice::Auto,
-            attachment_acceptance: crate::attachment_test_acceptance(),
-            model_variant: model_variant
-                .map(|effort| lash_core::provider::ReasoningSelection::Effort(effort.to_string()))
-                .unwrap_or_default(),
-            llm_profile_capability,
-            extra_body: Default::default(),
-            request_defaults: Default::default(),
-            scope: lash_core::LlmRequestScope::new(
-                "session-1",
-                "session-1:frame:test",
-                "session-1:request:test",
-            ),
-            output_spec: None,
-            stream_events: None::<LlmEventSender>,
-            generation: lash_core::GenerationOptions::default(),
-            provider_trace: None,
-        }
-    }
-
     /// How the stream tests read a response: thinking stays hidden.
     fn hidden_thinking(stream_termination: StreamTermination) -> crate::provider::ResponseReading {
         crate::provider::ResponseReading {
@@ -124,10 +96,6 @@ mod tests {
                 ..Default::default()
             },
         }
-    }
-
-    fn request(model_variant: Option<&str>) -> LlmRequest {
-        request_with_capability(model_variant, LlmProfileCapability::default())
     }
 
     mod passthrough_tests;
@@ -494,7 +462,7 @@ mod tests {
         let durable_history: Vec<Message> =
             serde_json::from_str(&durable_json).expect("history deserializes");
         let mut req = request(None);
-        req.model = "gemini-test".to_string();
+        req.model.metadata_mut().wire_model = "gemini-test".to_string();
         req.messages = lash_core::session_model::render_prompt(&durable_history).messages;
         let provider = GoogleOAuthProvider::new(
             "access",
@@ -1124,7 +1092,7 @@ mod tests {
             None,
             budget_capability(&[("high", 16_000), ("max", 24_576)]),
         );
-        req.model_variant = lash_core::provider::ReasoningSelection::Disabled;
+        req.model.reasoning = lash_core::provider::ReasoningSelection::Disabled;
 
         let body = GoogleOAuthProvider::build_request(&provider, &req, Vec::new(), None)
             .expect("schema projection");
@@ -1183,7 +1151,11 @@ mod tests {
             Some("medium"),
             effort_capability(&["low", "medium", "high"]),
         );
-        exposed_request.request_defaults.expose_thinking = true;
+        exposed_request
+            .model
+            .metadata_mut()
+            .request_defaults
+            .expose_thinking = true;
         let exposed = GoogleOAuthProvider::build_request(
             &exposed_provider,
             &exposed_request,
@@ -1210,14 +1182,21 @@ mod tests {
         );
 
         let mut req = request(None);
-        req.request_defaults.max_output_tokens = Some(9999);
+        req.model.metadata_mut().limits.output_tokens =
+            lash_sansio::llm_profile::OutputTokenLimits::new(None, Some(9999))
+                .expect("valid output-token limits");
         req.generation.output_token_cap = NonZeroUsize::new(4096);
         let body = GoogleOAuthProvider::build_request(&provider, &req, Vec::new(), None)
             .expect("schema projection");
 
         assert_eq!(body["request"]["generationConfig"]["maxOutputTokens"], 4096);
         let mut model_limited_request = request(None);
-        model_limited_request.request_defaults.max_output_tokens = Some(9999);
+        model_limited_request
+            .model
+            .metadata_mut()
+            .limits
+            .output_tokens = lash_sansio::llm_profile::OutputTokenLimits::new(None, Some(9999))
+            .expect("valid output-token limits");
         let model_limited =
             GoogleOAuthProvider::build_request(&provider, &model_limited_request, Vec::new(), None)
                 .expect("schema projection");
@@ -1323,7 +1302,7 @@ mod tests {
         );
 
         // A pinned model refuses the temperature instead of dropping it.
-        req.llm_profile_capability.sampling = lash_core::SamplingCapability::Pinned;
+        req.model.metadata_mut().capability.sampling = lash_core::SamplingCapability::Pinned;
         let error = GoogleOAuthProvider::build_request(&provider, &req, vec![], None)
             .expect_err("pinned sampling");
         assert_eq!(
@@ -1542,9 +1521,12 @@ mod tests {
             },
         );
         let mut claude_on_vertex = request(None);
-        claude_on_vertex.model = "claude-sonnet-4-6".to_string();
-        claude_on_vertex.llm_profile_capability.google_dialect =
-            lash_core::GoogleDialect::ClaudeOnVertex;
+        claude_on_vertex.model.metadata_mut().wire_model = "claude-sonnet-4-6".to_string();
+        claude_on_vertex
+            .model
+            .metadata_mut()
+            .capability
+            .google_dialect = lash_core::GoogleDialect::ClaudeOnVertex;
         claude_on_vertex.tools = Arc::new(vec![LlmToolSpec {
             name: "lookup".to_string(),
             description: "Lookup".to_string(),
@@ -1583,8 +1565,8 @@ mod tests {
         );
 
         let mut gemini = claude_on_vertex;
-        gemini.model = "gemini-3.1-pro-preview".to_string();
-        gemini.llm_profile_capability.google_dialect = lash_core::GoogleDialect::Gemini3;
+        gemini.model.metadata_mut().wire_model = "gemini-3.1-pro-preview".to_string();
+        gemini.model.metadata_mut().capability.google_dialect = lash_core::GoogleDialect::Gemini3;
         let gemini_body = GoogleOAuthProvider::build_request(&provider, &gemini, Vec::new(), None)
             .expect("schema projection");
         assert!(

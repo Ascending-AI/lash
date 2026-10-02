@@ -21,7 +21,19 @@ mod tests {
         let attachment_store = crate::RuntimeAttachmentStore::ephemeral(backend.attachment_store());
         let llm_request = CoreLlmRequest {
             instructions: Some(Arc::from("I")),
-            model: "model".to_string(),
+            model: lash_sansio::llm_profile::LlmProfileConfig::new(
+                lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                    lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                    lash_sansio::llm_profile::LlmProfileMetadata::builder("model".to_string())
+                        .context_window_tokens(128_000)
+                        .capability(crate::LlmProfileCapability::default())
+                        .extra_body(Default::default())
+                        .request_defaults(Default::default())
+                        .build()
+                        .expect("valid profile"),
+                ),
+            )
+            .with_reasoning(crate::ReasoningSelection::Effort("fast".to_string())),
             messages: vec![LlmMessage::new(
                 crate::llm::types::LlmRole::User,
                 vec![crate::llm::types::LlmContentBlock::Attachment {
@@ -35,10 +47,6 @@ mod tests {
             tools: Arc::new(Vec::new()),
             tool_choice: LlmToolChoice::None,
             attachment_acceptance: Default::default(),
-            model_variant: crate::ReasoningSelection::Effort("fast".to_string()),
-            llm_profile_capability: crate::LlmProfileCapability::default(),
-            extra_body: Default::default(),
-            request_defaults: Default::default(),
             scope: crate::LlmRequestScope::new(
                 "session",
                 "session:frame:test",
@@ -69,7 +77,7 @@ mod tests {
         );
         let decoded: LlmRequestSpec = serde_json::from_str(&encoded).expect("decode llm spec");
         let live = decoded.into_request(None, None);
-        assert_eq!(live.model, "model");
+        assert_eq!(live.model.wire_model(), "model");
         assert_eq!(live.instructions.as_deref(), Some("I"));
         assert!(matches!(
             live.attachments()[0],
@@ -89,12 +97,18 @@ mod tests {
         let envelope = RuntimeEffectEnvelope::new(
             invocation,
             RuntimeEffectCommand::Direct {
-                profile_key: crate::LlmProfileKey::new("test"),
-                request: Box::new(
-                    LlmRequestSpec::from_request(&llm_request, &attachment_store)
-                        .await
-                        .expect("normalized spec"),
-                ),
+                request: {
+                    let mut request = Box::new(
+                        LlmRequestSpec::from_request(&llm_request, &attachment_store)
+                            .await
+                            .expect("normalized spec"),
+                    );
+                    request.model.model = lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                        crate::LlmProfileKey::new("test"),
+                        request.model.metadata().clone(),
+                    );
+                    request
+                },
                 usage_source: "test".to_string(),
             },
         );

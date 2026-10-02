@@ -913,7 +913,7 @@ pub struct LlmRequest {
     /// Initial session instructions, separate from runtime feedback in messages.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions: Option<Arc<str>>,
-    pub model: String,
+    pub model: crate::llm_profile::LlmProfileConfig,
     pub messages: Vec<LlmMessage>,
     /// Request-local bytes resolved through the session guard for `Stored`
     /// sources. This materialization cache is never serialized and does not
@@ -923,9 +923,6 @@ pub struct LlmRequest {
     pub resolved_stored: HashMap<crate::AttachmentId, Vec<u8>>,
     pub tools: Arc<Vec<LlmToolSpec>>,
     pub tool_choice: LlmToolChoice,
-    pub model_variant: crate::llm::capability::ReasoningSelection,
-    #[serde(default)]
-    pub llm_profile_capability: crate::llm::capability::LlmProfileCapability,
     /// The session's recorded attachment-acceptance rules (ADR 0026). They
     /// are session config, not model metadata: they decide whether an
     /// attachment reaches this request or degrades to a placeholder.
@@ -934,15 +931,6 @@ pub struct LlmRequest {
         skip_serializing_if = "crate::llm::capability::AttachmentCapabilitySnapshot::is_empty_arc"
     )]
     pub attachment_acceptance: Arc<crate::llm::capability::AttachmentCapabilitySnapshot>,
-    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
-    pub extra_body: serde_json::Map<String, serde_json::Value>,
-    /// The recorded model's request defaults: what the call does where
-    /// [`Self::generation`] states nothing.
-    #[serde(
-        default,
-        skip_serializing_if = "crate::llm::capability::LlmProfileRequestDefaults::is_default"
-    )]
-    pub request_defaults: crate::llm::capability::LlmProfileRequestDefaults,
     #[serde(default)]
     pub generation: GenerationOptions,
     pub scope: LlmRequestScope,
@@ -1072,13 +1060,22 @@ impl LlmRequest {
         provider_kind: &str,
         adapter_support: ProviderReasoningRetentionSupport,
     ) -> Result<std::borrow::Cow<'a, Self>, ReasoningRetentionValidationError> {
-        self.llm_profile_capability.validate_reasoning_retention(
-            &self.model,
-            provider_kind,
-            adapter_support,
-        )?;
+        self.model
+            .metadata()
+            .capability
+            .validate_reasoning_retention(
+                self.model.wire_model(),
+                provider_kind,
+                adapter_support,
+            )?;
 
-        let cutoff = match self.llm_profile_capability.reasoning_retention.selection {
+        let cutoff = match self
+            .model
+            .metadata()
+            .capability
+            .reasoning_retention
+            .selection
+        {
             ReasoningRetentionSelection::ClientSideUserSegments { max_segments } => {
                 let starts = self
                     .messages

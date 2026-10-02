@@ -237,7 +237,9 @@ impl CodexProvider {
         let stream_events = req.stream_events.clone();
         let provider_trace = req.provider_trace.clone();
         let stream_termination = req
-            .llm_profile_capability
+            .model
+            .metadata()
+            .capability
             .stream_termination
             .unwrap_or(StreamTermination::RequireTerminalEvidence);
         let websocket_body = Self::websocket_create_request(&plan.body);
@@ -267,7 +269,7 @@ impl CodexProvider {
         self.emit_websocket_attempt_trace(provider_trace.as_ref(), &diagnostics);
         let mut events_seen = false;
         let mut state = shared::ResponsesStreamState {
-            expose_thinking: req.request_defaults.expose_thinking,
+            expose_thinking: req.model.metadata().request_defaults.expose_thinking,
             ..Default::default()
         };
         if let Err(error) = attempt
@@ -286,7 +288,7 @@ impl CodexProvider {
             ));
         }
 
-        let expose_thinking = req.request_defaults.expose_thinking;
+        let expose_thinking = req.model.metadata().request_defaults.expose_thinking;
         let stream_start_timeout = response_start_timeout(
             timeouts.request_timeout,
             timeouts.response_start_timeout,
@@ -645,7 +647,7 @@ impl Provider for CodexProvider {
     }
 
     async fn complete(&mut self, mut req: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
-        let route = self.route_identity(&req.model);
+        let route = self.route_identity(req.model.wire_model());
         route.validate_endpoint().map_err(|error| {
             LlmTransportError::new(error.to_string())
                 .with_kind(ProviderFailureKind::Validation)
@@ -678,8 +680,7 @@ impl Provider for CodexProvider {
                     let minting_route = context.minting_route;
                     let result: Result<LlmResponse, LlmTransportError> = async {
             let credential = &credential_lease.value;
-            let stream_termination = req
-                .llm_profile_capability
+            let stream_termination = req.model.metadata().capability
                 .stream_termination
                 .unwrap_or(StreamTermination::RequireTerminalEvidence);
             if !matches!(provider.transport, CodexTransport::Sse) {
@@ -834,7 +835,7 @@ impl Provider for CodexProvider {
                 ));
             }
             let mut response_metadata =
-                ResponseMetadataCapture::from_response(&req.request_defaults, &response_headers);
+                ResponseMetadataCapture::from_response(&req.model.metadata().request_defaults, &response_headers);
             if let Some(tx) = &stream_events {
                 tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                     response_started: true,
@@ -870,7 +871,7 @@ impl Provider for CodexProvider {
                 emit_provider_trace(provider_trace.as_ref(), "codex", &text);
                 if Self::looks_like_sse_payload(&text) {
                     let mut state = shared::ResponsesStreamState {
-                        expose_thinking: req.request_defaults.expose_thinking,
+                        expose_thinking: req.model.metadata().request_defaults.expose_thinking,
                         execution_evidence: provider_request_id.clone().map(
                             |provider_request_id| ExecutionEvidence {
                                 provider_request_id: Some(provider_request_id),
@@ -900,7 +901,7 @@ impl Provider for CodexProvider {
                         // The body was itself an SSE payload: the block events
                         // were already minted while folding it.
                         for event in block_events {
-                            if !req.request_defaults.expose_thinking
+                            if !req.model.metadata().request_defaults.expose_thinking
                                 && crate::support::is_reasoning_block_event(&event)
                             {
                                 continue;
@@ -913,7 +914,7 @@ impl Provider for CodexProvider {
                                     tx.send(LlmStreamEvent::Part(part.clone()));
                                 }
                                 lash_core::llm::types::LlmOutputPart::Reasoning { .. }
-                                    if req.request_defaults.expose_thinking =>
+                                    if req.model.metadata().request_defaults.expose_thinking =>
                                 {
                                     tx.send(LlmStreamEvent::Part(part.clone()));
                                 }
@@ -958,7 +959,7 @@ impl Provider for CodexProvider {
                         tx.send(LlmStreamEvent::Usage(usage.clone()));
                     }
                     let mut next_ordinal = 0u64;
-                    if req.request_defaults.expose_thinking {
+                    if req.model.metadata().request_defaults.expose_thinking {
                         for part in parts
                             .iter()
                             .filter(|part| {
@@ -1025,7 +1026,7 @@ impl Provider for CodexProvider {
                     execution_evidence,
                     generation_disposition,
                     response_metadata: response_metadata.into_metadata(),
-                    expose_thinking: Some(req.request_defaults.expose_thinking),
+                    expose_thinking: Some(req.model.metadata().request_defaults.expose_thinking),
                 });
             }
 
@@ -1039,7 +1040,7 @@ impl Provider for CodexProvider {
             }
 
             let mut state = shared::ResponsesStreamState {
-                expose_thinking: req.request_defaults.expose_thinking,
+                expose_thinking: req.model.metadata().request_defaults.expose_thinking,
                 execution_evidence: provider_request_id.map(|provider_request_id| {
                     ExecutionEvidence {
                         provider_request_id: Some(provider_request_id),
@@ -1048,7 +1049,7 @@ impl Provider for CodexProvider {
                 }),
                 ..Default::default()
             };
-            let expose_thinking = req.request_defaults.expose_thinking;
+            let expose_thinking = req.model.metadata().request_defaults.expose_thinking;
             let stream_result = drive_sse_response(
                 body,
                 timeouts.chunk_timeout,

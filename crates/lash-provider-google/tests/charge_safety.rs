@@ -40,16 +40,24 @@ impl lash_llm_transport::LlmHttpTransport for CountingSseTransport {
 fn request() -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: "gemini-3.1-pro-preview".to_string(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::new(
+                    "gemini-3.1-pro-preview".to_string(),
+                    std::num::NonZeroUsize::MIN.saturating_add(127_999),
+                )
+                .with_capability(Default::default())
+                .with_extra_body(Default::default())
+                .with_request_defaults(Default::default()),
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "hello")],
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
-        model_variant: Default::default(),
-        llm_profile_capability: Default::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         scope: LlmRequestScope::new(
             "charge-safety",
             "charge-safety:frame",

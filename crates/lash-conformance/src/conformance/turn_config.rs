@@ -217,7 +217,7 @@ fn recording_model(
             models
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(request.model.clone());
+                .push(request.model.wire_model().to_string());
             async move {
                 Ok(crate::LlmResponse {
                     parts: vec![crate::LlmOutputPart::Text {
@@ -251,7 +251,7 @@ fn gated_recording_model(
             models
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(request.model.clone());
+                .push(request.model.wire_model().to_string());
             let entered = Arc::clone(&entered);
             let release = Arc::clone(&release);
             async move {
@@ -1025,7 +1025,7 @@ pub async fn one_config_resolution_per_root(
                 models
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .push(request.model.clone());
+                    .push(request.model.wire_model().to_string());
                 async move {
                     let part = if index == 0 {
                         crate::LlmOutputPart::ToolCall {

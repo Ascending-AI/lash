@@ -83,8 +83,7 @@ impl McpSamplingHandler for DemoSamplingHandler {
             messages.push(DirectMessage { role, parts });
         }
 
-        let mut direct = DirectRequest::text(&self.model.wire_model, "");
-        direct.llm_profile_capability = self.model.capability.clone();
+        let mut direct = DirectRequest::text("");
         direct.instructions = params.system_prompt.as_deref().map(Arc::from);
         direct.messages = messages;
         direct.generation.output_token_cap = NonZeroUsize::new(params.max_tokens as usize);
@@ -96,7 +95,13 @@ impl McpSamplingHandler for DemoSamplingHandler {
             .transpose()
             .map_err(|error| McpProtocolError::invalid_params(error.to_string(), None))?;
 
-        let mut client = DirectLlmClient::new(self.provider.clone());
+        let mut client = DirectLlmClient::new(
+            self.provider.clone(),
+            lash::LlmProfileConfig::new(lash::RecordedLlmProfile::mint(
+                lash::LlmProfileKey::new("mcp-sampling"),
+                self.model.clone(),
+            )),
+        );
         let result = tokio::select! {
             result = client.complete(direct) => {
                 result.map_err(|error| McpProtocolError::internal_error(error.to_string(), None))?

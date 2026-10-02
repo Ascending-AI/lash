@@ -1333,8 +1333,14 @@ fn fig793_llm_envelope() -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         runtime_invocation(RuntimeEffectKind::LlmCall, "fig793-llm"),
         RuntimeEffectCommand::LlmCall {
-            profile_key: lash_core::LlmProfileKey::new("test"),
-            request: Box::new(llm_spec()),
+            request: {
+                let mut request = Box::new(llm_spec());
+                request.model.model = lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                    lash_core::LlmProfileKey::new("test"),
+                    request.model.metadata().clone(),
+                );
+                request
+            },
         },
     )
 }
@@ -1650,7 +1656,7 @@ fn fig1142_recorded_llm_call() -> crate::controller::RecordedRuntimeEffect {
 
 fn fig1142_llm_envelope(model_version: usize) -> RuntimeEffectEnvelope {
     let mut request = llm_spec();
-    request.model = format!("model-v{model_version}");
+    request.model.metadata_mut().wire_model = format!("model-v{model_version}");
     RuntimeEffectEnvelope::new(
         test_turn_effect_invocation(
             "fig1142-session",
@@ -1661,8 +1667,14 @@ fn fig1142_llm_envelope(model_version: usize) -> RuntimeEffectEnvelope {
             "fig1142-replay-divergence",
         ),
         RuntimeEffectCommand::LlmCall {
-            profile_key: lash_core::LlmProfileKey::new("test"),
-            request: Box::new(request),
+            request: {
+                let mut request = Box::new(request);
+                request.model.model = lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                    lash_core::LlmProfileKey::new("test"),
+                    request.model.metadata().clone(),
+                );
+                request
+            },
         },
     )
 }

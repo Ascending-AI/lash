@@ -7,16 +7,24 @@ use std::sync::Arc;
 fn request(messages: Vec<LlmMessage>) -> LlmRequest {
     LlmRequest {
         instructions: Some(Arc::from("I")),
-        model: "host-selected-model".into(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::builder("host-selected-model")
+                    .context_window_tokens(128_000)
+                    .capability(Default::default())
+                    .extra_body(Default::default())
+                    .request_defaults(Default::default())
+                    .build()
+                    .expect("valid profile"),
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages,
         resolved_stored: Default::default(),
         tools: Arc::new(vec![]),
         tool_choice: Default::default(),
         attachment_acceptance: Default::default(),
-        model_variant: Default::default(),
-        llm_profile_capability: Default::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         generation: Default::default(),
         scope: lash_core::LlmRequestScope::new("session", "frame", "request"),
         output_spec: None,
@@ -38,8 +46,10 @@ enum Wire {
 impl Wire {
     fn body(self, req: &LlmRequest) -> Value {
         let mut req = req.clone();
-        req.llm_profile_capability.native_mid_conversation_system =
-            matches!(self, Self::AnthropicNative);
+        req.model
+            .metadata_mut()
+            .capability
+            .native_mid_conversation_system = matches!(self, Self::AnthropicNative);
         match self {
             Self::Responses => lash_provider_openai::testing::serialize_responses_request(
                 &req,
@@ -286,7 +296,8 @@ fn runtime_feedback_anthropic_per_message_legality_and_coalescing() {
 fn runtime_feedback_host_instruction_role_controls_all_openai_wires() {
     for wire in [Wire::Responses, Wire::Codex, Wire::Chat] {
         let mut req = request(vec![text(LlmRole::User, "U"), text(LlmRole::System, "F")]);
-        req.llm_profile_capability.instruction_role = lash::provider::InstructionRole::Developer;
+        req.model.metadata_mut().capability.instruction_role =
+            lash::provider::InstructionRole::Developer;
         let body = wire.body(&req);
         let messages = flattened(wire.messages(&body));
         assert_eq!(messages.last().unwrap(), &("developer".into(), "F".into()));
@@ -735,7 +746,7 @@ fn feedback_image(wire: Wire) {
                 text(LlmRole::System, "NATIVE"),
                 text(LlmRole::Assistant, "AFTER"),
             ]);
-            req.llm_profile_capability.instruction_role = role;
+            req.model.metadata_mut().capability.instruction_role = role;
             req.attachment_acceptance = Arc::new(AttachmentCapabilitySnapshot {
                 revision: "feedback-image".into(),
                 acceptors: [
@@ -887,7 +898,10 @@ fn runtime_feedback_unresolved_attachment_errors_retain_message_index() {
         .collect(),
     });
     for native in [false, true] {
-        req.llm_profile_capability.native_mid_conversation_system = native;
+        req.model
+            .metadata_mut()
+            .capability
+            .native_mid_conversation_system = native;
         for error in [
             lash_provider_openai::testing::serialize_responses_request(&req, CacheRetention::None)
                 .unwrap_err(),

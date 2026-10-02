@@ -10,43 +10,6 @@ pub(super) fn emit_plugin_runtime_events_runtime(
     }
 }
 
-/// Report the clamp on every disposition the call produced.
-///
-/// The adapter knows only that it put the cap it was handed on the wire, so it
-/// reports `Applied`; the runtime is the only layer that saw the larger number
-/// the caller asked for. This narrows that report on every carrier of it — the
-/// response, each attempt of the ledger, and the partial response an error
-/// carries when the adapter salvaged one — so no two accounts of the same
-/// request disagree. An adapter that reports nothing keeps reporting nothing:
-/// `None` means unreported, not "nothing happened".
-pub(super) fn record_clamped_output_token_cap(
-    result: &mut Result<LlmResponse, LlmCallError>,
-    call_record: Option<&mut crate::LlmCallRecord>,
-) {
-    fn narrow(disposition: Option<&mut crate::GenerationReceipt>) {
-        if let Some(disposition) = disposition
-            && disposition.output_token_cap == crate::GenerationOptionOutcome::Applied
-        {
-            disposition.output_token_cap = crate::GenerationOptionOutcome::ClampedToCapacity;
-        }
-    }
-
-    match result {
-        Ok(response) => narrow(response.generation_disposition.as_mut()),
-        Err(error) => narrow(
-            error
-                .partial_response
-                .as_deref_mut()
-                .and_then(|partial| partial.generation_disposition.as_mut()),
-        ),
-    }
-    if let Some(call_record) = call_record {
-        for attempt in &mut call_record.attempts {
-            narrow(attempt.generation_disposition.as_mut());
-        }
-    }
-}
-
 /// Narrow the adapter's wire-level report when protocol projection suppressed
 /// caller-owned stop sequences before the request reached the adapter.
 pub(super) fn record_protocol_owned_stop_suppression(

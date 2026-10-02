@@ -494,7 +494,7 @@ impl crate::ToolProvider for LawLeafProvider {
                     if let Err(error) = context
                         .direct_completions()
                         .complete(
-                            crate::DirectRequest::text("law-model", "spend before the park"),
+                            crate::DirectRequest::text("spend before the park"),
                             "law-spend-deferred",
                         )
                         .await
@@ -627,7 +627,7 @@ impl crate::ToolProvider for LawLeafProvider {
                 if let Err(error) = context
                     .direct_completions()
                     .complete(
-                        crate::DirectRequest::text("law-model", "spend before the commit"),
+                        crate::DirectRequest::text("spend before the commit"),
                         "law-spend-commit-leaf",
                     )
                     .await
@@ -699,7 +699,7 @@ impl crate::ToolProvider for LawLeafProvider {
                 match context
                     .direct_completions()
                     .complete(
-                        crate::DirectRequest::text("law-model", "spend inside the attempt"),
+                        crate::DirectRequest::text("spend inside the attempt"),
                         "law-usage-leaf",
                     )
                     .await
@@ -722,7 +722,7 @@ impl crate::ToolProvider for LawLeafProvider {
                 if let Err(error) = context
                     .direct_completions()
                     .complete(
-                        crate::DirectRequest::text("law-billed-model", "billed spend"),
+                        crate::DirectRequest::text("billed spend"),
                         "law-billed-leaf",
                     )
                     .await
@@ -750,7 +750,7 @@ impl crate::ToolProvider for LawLeafProvider {
                 if let Err(error) = context
                     .direct_completions()
                     .complete(
-                        crate::DirectRequest::text("law-model", "spend before the cancel"),
+                        crate::DirectRequest::text("spend before the cancel"),
                         "law-spend-cancel-leaf",
                     )
                     .await
@@ -926,8 +926,8 @@ fn build_opener_dispatch(
     .tool_registry(Arc::new(tool_registry))
     .processes(processes)
     .direct_completions(crate::DirectCompletionClient::from_fn(
-        |request, _source| {
-            Ok(if request.model == "law-billed-model" {
+        |_request, source| {
+            Ok(if source == "law-billed-leaf" {
                 law_billed_completion()
             } else {
                 law_direct_completion()

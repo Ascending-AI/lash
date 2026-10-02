@@ -127,7 +127,7 @@ fn v37_llm_decode_refuses_v36_and_v35_before_new_or_malformed_vocabulary() {
                 "protocol_version": peer_version,
                 "request_id": "request-old-peer",
                 "scope": "malformed-on-purpose",
-                "model_intent": { "model": "shared-model" },
+                "model": { "model": "shared-model" },
                 "messages": [{ "role": "assistant", "content": [content] }]
             })
             .to_string();
@@ -165,7 +165,7 @@ fn remote_attachment_media_types_are_validated_syntactically() {
         instructions: None,
         request_id: "request-invalid-mime".to_string(),
         scope: RemoteLlmRequestScope::new("session", "session:frame:test", "request-invalid-mime"),
-        model_intent: RemoteModelIntent::new("gpt-test"),
+        model: RemoteModelConfig::new("gpt-test"),
         attachment_acceptance: Default::default(),
         messages: vec![RemoteLlmMessage {
             role: RemoteLlmRole::User,
@@ -227,7 +227,7 @@ fn remote_attachment_ref_rejects_every_hostile_id_shape() {
             "protocol_version": REMOTE_PROTOCOL_VERSION,
             "request_id": "hostile",
             "scope": { "session_id": "session", "agent_frame_id": "frame", "request_id": "hostile" },
-            "model_intent": { "model": "model" },
+            "model": RemoteModelConfig::new("model"),
             "messages": [{
                 "role": "user",
                 "content": [{
@@ -402,7 +402,7 @@ fn remote_turn_request_json_round_trips() {
             .expect("serialize turn request envelope"),
     )
     .expect("envelope json");
-    assert!(value.get("model_intent").is_none());
+    assert!(value.get("model").is_none());
     let decoded = RemoteTurnRequest::decode_json(
         &serde_json::to_vec(&value).expect("serialize envelope value"),
     )
@@ -1937,7 +1937,7 @@ fn remote_process_env_persistence_dtos_validate() {
     );
 
     let mut invalid = request;
-    invalid.env_spec.policy.model = Some(RemoteLlmProfileConfig {
+    invalid.env_spec.policy.model = Some(RemoteModelConfig {
         key: "remote-key".to_string(),
         metadata: RemoteLlmProfileMetadata {
             wire_model: "remote-model".to_string(),
@@ -1946,7 +1946,7 @@ fn remote_process_env_persistence_dtos_validate() {
             capability: Default::default(),
             limits: RemoteProcessModelLimits {
                 context_window_tokens: 0,
-                output_token_capacity: None,
+                output_tokens: Default::default(),
             },
         },
         reasoning: Default::default(),
@@ -1960,7 +1960,7 @@ fn remote_process_env_persistence_dtos_validate() {
 #[test]
 fn process_execution_policy_carries_session_generation_options() {
     let mut policy = RemoteProcessExecutionPolicy {
-        model: Some(RemoteLlmProfileConfig {
+        model: Some(RemoteModelConfig {
             key: "remote-key".to_string(),
             metadata: RemoteLlmProfileMetadata {
                 wire_model: "remote-model".to_string(),
@@ -1969,7 +1969,11 @@ fn process_execution_policy_carries_session_generation_options() {
                 capability: Default::default(),
                 limits: RemoteProcessModelLimits {
                     context_window_tokens: 4096,
-                    output_token_capacity: Some(1024),
+                    output_tokens: lash_sansio::llm_profile::OutputTokenLimits::new(
+                        Some(1024),
+                        None,
+                    )
+                    .unwrap(),
                 },
             },
             reasoning: Default::default(),
@@ -2155,11 +2159,11 @@ fn assert_schema_excludes_protocol_version<T: JsonSchema>() {
 }
 
 #[test]
-fn remote_turn_request_schema_has_no_model_intent() {
+fn remote_turn_request_schema_has_no_model() {
     let schema = schemars::schema_for!(RemoteTurnRequest);
     let schema_json = serde_json::to_value(&schema).expect("schema json");
     assert!(
-        !schema_json.to_string().contains("model_intent"),
+        !schema_json.to_string().contains("model"),
         "agent-turn schema must not expose a model intent: {schema_json}"
     );
 }

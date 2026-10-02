@@ -29,46 +29,52 @@ const ON_KEY_ONE: &str = "recorded-defaults-session-one";
 const ON_KEY_TWO: &str = "recorded-defaults-session-two";
 
 /// What the creating deployment registers under [`KEY_ONE`].
-fn key_one_defaults() -> lash_core::provider::LlmProfileRequestDefaults {
-    lash_core::provider::LlmProfileRequestDefaults {
-        max_output_tokens: Some(1_111),
-        response_metadata_headers: vec!["x-key-one-cost".to_string()],
-        response_metadata_body_paths: vec!["/key-one/cost".to_string()],
-        ..lash_core::provider::LlmProfileRequestDefaults::default()
-    }
+fn key_one_metadata() -> lash_core::LlmProfileMetadata {
+    let mut metadata = llm_profile_spec(format!("{KEY_ONE}-wire"), None, 200_000)
+        .with_request_defaults(lash_core::provider::LlmProfileRequestDefaults {
+            response_metadata_headers: vec!["x-key-one-cost".to_string()],
+            response_metadata_body_paths: vec!["/key-one/cost".to_string()],
+            ..lash_core::provider::LlmProfileRequestDefaults::default()
+        });
+    metadata.limits.output_tokens =
+        crate::OutputTokenLimits::new(None, Some(1111)).expect("valid recorded cap");
+    metadata
 }
 
 /// What the creating deployment registers under [`KEY_TWO`]: no field agrees
-/// with [`key_one_defaults`].
-fn key_two_defaults() -> lash_core::provider::LlmProfileRequestDefaults {
-    lash_core::provider::LlmProfileRequestDefaults {
-        expose_thinking: true,
-        max_output_tokens: Some(2_222),
-        cache_retention: crate::provider::CacheRetention::Long,
-        response_metadata_headers: vec!["x-key-two-cost".to_string(), "x-key-two-tier".to_string()],
-        response_metadata_body_paths: vec!["/key-two/cost".to_string()],
-    }
+/// with [`key_one_metadata`].
+fn key_two_metadata() -> lash_core::LlmProfileMetadata {
+    let mut metadata = llm_profile_spec(format!("{KEY_TWO}-wire"), None, 200_000)
+        .with_request_defaults(lash_core::provider::LlmProfileRequestDefaults {
+            expose_thinking: true,
+            cache_retention: crate::provider::CacheRetention::Long,
+            response_metadata_headers: vec![
+                "x-key-two-cost".to_string(),
+                "x-key-two-tier".to_string(),
+            ],
+            response_metadata_body_paths: vec!["/key-two/cost".to_string()],
+        });
+    metadata.limits.output_tokens =
+        crate::OutputTokenLimits::new(None, Some(2222)).expect("valid recorded cap");
+    metadata
 }
 
 /// A registry serving [`KEY_ONE`] and [`KEY_TWO`] through `provider`, each
 /// under a wire model of its own and the request defaults given for it.
 fn two_key_registry(
     provider: &ProviderHandle,
-    one: lash_core::provider::LlmProfileRequestDefaults,
-    two: lash_core::provider::LlmProfileRequestDefaults,
+    one: lash_core::LlmProfileMetadata,
+    two: lash_core::LlmProfileMetadata,
 ) -> Arc<lash_core::LlmProfileRegistry> {
     let registry = [(KEY_ONE, one), (KEY_TWO, two)]
         .into_iter()
         .try_fold(
             lash_core::LlmProfileRegistry::new(),
-            |registry, (key, defaults)| {
+            |registry, (key, mut metadata)| {
+                metadata.wire_model = format!("{key}-wire");
                 registry.register(
                     key,
-                    lash_core::RegisteredLlmProfile::new(
-                        llm_profile_spec(format!("{key}-wire"), None, 200_000)
-                            .with_request_defaults(defaults),
-                        provider.clone(),
-                    ),
+                    lash_core::RegisteredLlmProfile::new(metadata, provider.clone()),
                 )
             },
         )
@@ -156,9 +162,9 @@ async fn two_sessions_under_two_profile_keys_each_keep_their_request_defaults_ac
             .into_handle()
     };
     let models = Arc::new(RedeployableLlmProfiles {
-        creating: two_key_registry(&provider, key_one_defaults(), key_two_defaults()),
+        creating: two_key_registry(&provider, key_one_metadata(), key_two_metadata()),
         // The redeployed build serves each key with the other key's defaults.
-        redeployed: two_key_registry(&provider, key_two_defaults(), key_one_defaults()),
+        redeployed: two_key_registry(&provider, key_two_metadata(), key_one_metadata()),
         is_redeployed: std::sync::atomic::AtomicBool::new(false),
     });
     assert!(
@@ -172,16 +178,17 @@ async fn two_sessions_under_two_profile_keys_each_keep_their_request_defaults_ac
         .llm_profiles(Arc::clone(&models) as Arc<dyn lash_core::LlmProfiles>)
         .build(crate::testing::runtime_lease_owner())?;
     let recorded = [
-        (ON_KEY_ONE, KEY_ONE, key_one_defaults()),
-        (ON_KEY_TWO, KEY_TWO, key_two_defaults()),
+        (ON_KEY_ONE, KEY_ONE, key_one_metadata()),
+        (ON_KEY_TWO, KEY_TWO, key_two_metadata()),
     ];
     let assert_every_call_carries_its_own = |calls: usize, how: &str| {
-        for (id, _, defaults) in &recorded {
+        for (id, _, metadata) in &recorded {
             let requests = requests_of(&served, id);
             assert_eq!(requests.len(), calls, "{id} {how}: its model calls");
             for request in requests {
                 assert_eq!(
-                    &request.request_defaults, defaults,
+                    request.model.metadata(),
+                    metadata,
                     "{id} {how}: every call carries the defaults its session recorded"
                 );
             }

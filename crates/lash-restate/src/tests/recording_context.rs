@@ -56,15 +56,13 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
         ),
         (
             RuntimeEffectCommand::LlmCall {
-                profile_key: lash_core::LlmProfileKey::new("test"),
-                request: Box::new(llm_spec()),
+                request: helpers::llm_spec_for_profile("test"),
             },
             "journaled_run",
         ),
         (
             RuntimeEffectCommand::Direct {
-                profile_key: lash_core::LlmProfileKey::new("test"),
-                request: Box::new(llm_spec()),
+                request: helpers::llm_spec_for_profile("test"),
                 usage_source: "test".to_string(),
             },
             "journaled_run",

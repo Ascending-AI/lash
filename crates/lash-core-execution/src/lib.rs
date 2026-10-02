@@ -59,11 +59,9 @@ pub mod direct;
 pub mod direct_completion_client;
 pub mod engine;
 pub(crate) use lash_core_ids::identity_json;
+pub(crate) use lash_core_ids::operational_metrics;
 pub use lash_core_llm::llm;
 pub(crate) use lash_core_llm::llm_profile;
-pub mod model_clamp;
-pub(crate) use lash_core_ids::operational_metrics;
-pub(crate) use model_clamp::ModelGenerationClamp;
 /// Panic containment for runtime-owned work.
 ///
 /// The module lives in `lash-core-ids`; this facade re-exports its public
@@ -714,7 +712,7 @@ pub use lash_trace::{
 pub use llm::transport::ProviderFailureKind;
 pub use llm_profile::{
     LlmProfileConfig, LlmProfileKey, LlmProfileLimits, LlmProfileLimitsError, LlmProfileMetadata,
-    LlmProfileMetadataBuilder, ReasoningRefused, RecordedLlmProfile,
+    LlmProfileMetadataBuilder, OutputTokenLimits, ReasoningRefused, RecordedLlmProfile,
 };
 pub use plugin::{
     AdmittedPluginConfig, CandidateFacts, ConfigCommand, ConfigCommandCatalog,

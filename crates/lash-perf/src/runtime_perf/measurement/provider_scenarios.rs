@@ -94,7 +94,13 @@ pub(super) async fn run_once_direct_llm_client(
         .build(async {
             let provider =
                 crate::runtime_perf::providers::benchmark_provider(scenario).into_handle();
-            Ok(lash::direct::DirectLlmClient::new(provider))
+            Ok(lash::direct::DirectLlmClient::new(
+                provider,
+                lash::testing::test_llm_profile_config(
+                    "runtime-perf",
+                    lash::testing::test_llm_profile_metadata("runtime-perf"),
+                ),
+            ))
         })
         .await?;
     run.seed(async { Ok(()) }).await?;

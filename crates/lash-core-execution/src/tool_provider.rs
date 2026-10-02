@@ -1,4 +1,3 @@
-use crate::ModelGenerationClamp;
 use crate::ProcessId;
 use crate::SessionId;
 pub(crate) use completion_support::AttemptCompletionSupport;
@@ -56,17 +55,10 @@ impl AttemptSessionReads {
                 "the attempt owner has selected no model".to_string(),
             ));
         };
-        let metadata = config.model.metadata();
-        let generation = metadata.clamped_generation(&policy.generation);
         Ok(session::ToolSessionLlmProfile {
-            profile_key: config.model.key().clone(),
-            model: metadata.wire_model.clone(),
-            model_variant: config.reasoning,
-            llm_profile_capability: metadata.capability.clone(),
+            model: config,
             attachment_acceptance: policy.attachment_acceptance,
-            extra_body: metadata.extra_body.clone(),
-            request_defaults: metadata.request_defaults.clone(),
-            generation,
+            generation: policy.generation,
         })
     }
 

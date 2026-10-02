@@ -7,8 +7,7 @@ use super::super::model::{
     ProcessStatus, WaitKind, WaitState,
 };
 
-#[test]
-fn process_execution_env_identity_golden_corpus() {
+fn process_execution_env_identity_corpus() -> [(String, String); 2] {
     let mut plugin_config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));
     plugin_config.insert("a:b", serde_json::json!({"enabled": true}));
     let plugin_config = crate::AdmittedPluginConfig::new(plugin_config, 3);
@@ -66,7 +65,7 @@ fn process_execution_env_identity_golden_corpus() {
         ),
         ProcessExecutionEnvSpec::new(plugin_config, policy),
     ];
-    let actual = specs.map(|spec| {
+    specs.map(|spec| {
         let bytes = spec.to_store_bytes().expect("encode golden env");
         (
             String::from_utf8(bytes).expect("env bytes are JSON"),
@@ -74,19 +73,23 @@ fn process_execution_env_identity_golden_corpus() {
                 .expect("derive golden env ref")
                 .to_string(),
         )
-    });
-    assert_eq!(
-        actual,
-        [
-            (
-                "{\"plugin_config\":{\"revision\":0,\"config\":{}},\"policy\":{\"autonomous\":false,\"turn_budget\":\"unbounded\",\"max_tool_calls\":1024}}".to_string(),
-                "process-env:v6:blake3:3641569afdcec6b35e96943efa84f8677600ab5ce39909921592ff7a4cde44ee".to_string(),
-            ),
-            (
-                r#"{"plugin_config":{"revision":3,"config":{"protocol":"protocol","namespaces":{"a:b":{"format_version":1,"value":{"enabled":true}}}}},"policy":{"model":{"model":{"key":"rich-key","metadata":{"wire_model":"model:rich","limits":{"context_window_tokens":8192,"output_token_capacity":2048},"capability":{"instruction_role":"developer","native_mid_conversation_system":true,"cache_control":"anthropic","stream_termination":"eof_tolerated","sampling":"pinned","reasoning":{"efforts":["low","high"],"encoding":{"budget":{"high":1024,"low":256}},"disable":true,"mandatory":true}}}},"reasoning":{"effort":"high"}},"autonomous":true,"turn_budget":{"bounded":1},"max_tool_calls":1024,"generation":{"output_token_cap":1024,"temperature":0.25,"seed":-7}}}"#.to_string(),
-                "process-env:v6:blake3:375dbc9991d83cdac4145861714e1f9c30eac81d2a9f2b91077ab0c8314f35aa".to_string(),
-            ),
-        ]
+    })
+}
+
+#[test]
+fn process_execution_env_identity_golden_corpus() {
+    let expected: [(String, String); 2] =
+        serde_json::from_str(include_str!("fixtures/process_execution_env_identity.json"))
+            .expect("generated identity corpus");
+    assert_eq!(process_execution_env_identity_corpus(), expected);
+}
+
+#[test]
+#[ignore = "prints the corpus for scripts/generate-process-env-identity-golden.py"]
+fn regenerate_process_execution_env_identity_golden_corpus() {
+    println!(
+        "PROCESS_ENV_IDENTITY_GOLDEN {}",
+        serde_json::to_string(&process_execution_env_identity_corpus()).expect("encode corpus")
     );
 }
 

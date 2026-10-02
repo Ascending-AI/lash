@@ -101,8 +101,11 @@ impl OpenAiProvider {
         req: &LlmRequest,
         stream: bool,
     ) -> Result<BuiltRequest, LlmTransportError> {
-        self.inner
-            .build_responses_request_for_route(req, stream, &self.route_identity(&req.model))
+        self.inner.build_responses_request_for_route(
+            req,
+            stream,
+            &self.route_identity(req.model.wire_model()),
+        )
     }
 }
 

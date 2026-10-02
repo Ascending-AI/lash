@@ -60,26 +60,42 @@ fn a_direct_completion_retries_an_unbound_llm_profile_instead_of_recording_it() 
     let route = execution::restate_effect_execution(RuntimeEffectEnvelope {
         invocation,
         command: RuntimeEffectCommand::Direct {
-            profile_key: lash_core::LlmProfileKey::new("kimi-k3@tensorx"),
-            request: Box::new(lash_core::LlmRequestSpec {
-                instructions: None,
-                model: "kimi-k3".to_string(),
-                messages: Vec::new(),
-                tools: Arc::new(Vec::new()),
-                tool_choice: Default::default(),
-                attachment_acceptance: Default::default(),
-                model_variant: Default::default(),
-                llm_profile_capability: lash_core::LlmProfileCapability::default(),
-                extra_body: Default::default(),
-                request_defaults: Default::default(),
-                generation: lash_core::GenerationOptions::default(),
-                scope: lash_core::LlmRequestScope::new(
-                    "direct-session".to_string(),
-                    "direct-session:frame:test".to_string(),
-                    "direct-session:request:test".to_string(),
-                ),
-                output_spec: None,
-            }),
+            request: {
+                let mut request = Box::new(lash_core::LlmRequestSpec {
+                    instructions: None,
+                    model: lash_sansio::llm_profile::LlmProfileConfig::new(
+                        lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                            lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                            lash_sansio::llm_profile::LlmProfileMetadata::builder(
+                                "kimi-k3".to_string(),
+                            )
+                            .context_window_tokens(128_000)
+                            .capability(lash_core::LlmProfileCapability::default())
+                            .extra_body(Default::default())
+                            .request_defaults(Default::default())
+                            .build()
+                            .expect("valid profile"),
+                        ),
+                    )
+                    .with_reasoning(Default::default()),
+                    messages: Vec::new(),
+                    tools: Arc::new(Vec::new()),
+                    tool_choice: Default::default(),
+                    attachment_acceptance: Default::default(),
+                    generation: lash_core::GenerationOptions::default(),
+                    scope: lash_core::LlmRequestScope::new(
+                        "direct-session".to_string(),
+                        "direct-session:frame:test".to_string(),
+                        "direct-session:request:test".to_string(),
+                    ),
+                    output_spec: None,
+                });
+                request.model.model = lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                    lash_core::LlmProfileKey::new("kimi-k3@tensorx"),
+                    request.model.metadata().clone(),
+                );
+                request
+            },
             usage_source: "compaction".into(),
         },
         group: None,

@@ -639,10 +639,6 @@ fn effect_request_spec(request: &LlmRequest) -> LlmRequestSpec {
         tools: Arc::clone(&request.tools),
         tool_choice: request.tool_choice.clone(),
         attachment_acceptance: Arc::clone(&request.attachment_acceptance),
-        model_variant: request.model_variant.clone(),
-        llm_profile_capability: request.llm_profile_capability.clone(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         generation: request.generation.clone(),
         scope: request.scope.clone(),
         output_spec: request.output_spec.clone(),
@@ -693,8 +689,14 @@ async fn persisted_effect_replay_ignores_strict_toggle(endpoint: Endpoint) {
             "strict-tool-call",
         ),
         RuntimeEffectCommand::LlmCall {
-            profile_key: lash_core::LlmProfileKey::new("strict-tool-model"),
-            request: Box::new(effect_request_spec(&request)),
+            request: {
+                let mut request = Box::new(effect_request_spec(&request));
+                request.model.model = lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                    lash_core::LlmProfileKey::new("strict-tool-model"),
+                    request.model.metadata().clone(),
+                );
+                request
+            },
         },
     );
     let strict_transport = Arc::new(CapturingScriptedTransport::new([tool_response(

@@ -24,11 +24,15 @@ fn generation_request(generation: GenerationOptions) -> LlmRequest {
 }
 
 /// `request` carrying the recorded model request `defaults`.
-fn with_defaults(request: LlmRequest, defaults: LlmProfileRequestDefaults) -> LlmRequest {
-    LlmRequest {
-        request_defaults: defaults,
-        ..request
-    }
+fn with_defaults(mut request: LlmRequest, defaults: LlmProfileRequestDefaults) -> LlmRequest {
+    request.model.metadata_mut().request_defaults = defaults;
+    request
+}
+
+fn with_cap(mut request: LlmRequest, cap: u64) -> LlmRequest {
+    request.model.metadata_mut().limits.output_tokens =
+        lash_sansio::llm_profile::OutputTokenLimits::new(None, Some(cap)).unwrap();
+    request
 }
 
 fn refusal_code(error: &LlmTransportError) -> Option<TurnFailureCode> {
@@ -38,7 +42,6 @@ fn refusal_code(error: &LlmTransportError) -> Option<TurnFailureCode> {
 #[test]
 fn generation_policy_prefers_request_then_model_default_and_invents_no_cap() {
     let model_defaults = LlmProfileRequestDefaults {
-        max_output_tokens: Some(8_192),
         cache_retention: CacheRetention::Long,
         expose_thinking: true,
         ..LlmProfileRequestDefaults::default()
@@ -54,7 +57,7 @@ fn generation_policy_prefers_request_then_model_default_and_invents_no_cap() {
     assert_eq!(unset.reasoning, None);
 
     let default_limited = resolve_generation_policy(
-        &with_defaults(empty_request(), model_defaults.clone()),
+        &with_cap(with_defaults(empty_request(), model_defaults.clone()), 8192),
         "test",
         &open_wire(),
     )
@@ -88,6 +91,61 @@ fn generation_policy_prefers_request_then_model_default_and_invents_no_cap() {
 }
 
 #[test]
+fn generation_policy_clamps_once_and_only_reports_a_cap_that_reached_the_wire() {
+    let mut request = with_cap(
+        generation_request(GenerationOptions {
+            output_token_cap: NonZeroUsize::new(8192),
+            ..GenerationOptions::default()
+        }),
+        1024,
+    );
+    request.model.metadata_mut().limits.output_tokens =
+        lash_sansio::llm_profile::OutputTokenLimits::new(Some(2048), Some(1024))
+            .expect("valid limits");
+    let policy = resolve_generation_policy(&request, "test", &open_wire()).expect("resolved");
+    assert_eq!(policy.max_output_tokens, Some(2048));
+    assert_eq!(request.generation.output_token_cap, NonZeroUsize::new(8192));
+    assert_eq!(
+        policy
+            .receipt(
+                &request,
+                &GenerationEmission {
+                    output_token_cap: true,
+                    ..GenerationEmission::default()
+                }
+            )
+            .output_token_cap,
+        GenerationOptionOutcome::ClampedToCapacity
+    );
+    assert_eq!(
+        policy
+            .receipt(&request, &GenerationEmission::default())
+            .output_token_cap,
+        GenerationOptionOutcome::OmittedUnsupported
+    );
+    request.generation.output_token_cap = None;
+    let policy = resolve_generation_policy(&request, "test", &open_wire()).expect("default cap");
+    assert_eq!(policy.max_output_tokens, Some(1024));
+    assert_eq!(
+        policy
+            .receipt(
+                &request,
+                &GenerationEmission {
+                    output_token_cap: true,
+                    ..GenerationEmission::default()
+                }
+            )
+            .output_token_cap,
+        GenerationOptionOutcome::Applied
+    );
+    request.model.metadata_mut().limits.output_tokens =
+        lash_sansio::llm_profile::OutputTokenLimits::new(Some(2048), None).expect("valid limits");
+    let policy =
+        resolve_generation_policy(&request, "test", &open_wire()).expect("no invented cap");
+    assert_eq!(policy.max_output_tokens, None);
+}
+
+#[test]
 fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
     struct Case {
         name: &'static str,
@@ -114,10 +172,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
         Case {
             name: "default cap on a wire without one",
             generation: GenerationOptions::default(),
-            options: LlmProfileRequestDefaults {
-                max_output_tokens: Some(1_024),
-                ..LlmProfileRequestDefaults::default()
-            },
+            options: LlmProfileRequestDefaults::default(),
             wire: GenerationWire {
                 output_token_cap: OutputCapWire::Unsupported,
                 ..open_wire()
@@ -188,12 +243,13 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
         },
     ];
     for case in cases {
-        let error = resolve_generation_policy(
-            &with_defaults(generation_request(case.generation), case.options),
-            "test",
-            &case.wire,
-        )
-        .expect_err(case.name);
+        let request = with_defaults(generation_request(case.generation), case.options);
+        let request = if case.name == "default cap on a wire without one" {
+            with_cap(request, 512)
+        } else {
+            request
+        };
+        let error = resolve_generation_policy(&request, "test", &case.wire).expect_err(case.name);
         assert_eq!(refusal_code(&error), Some(case.code), "{}", case.name);
         assert_eq!(
             error.retry_verdict,
@@ -210,7 +266,7 @@ fn pinned_sampling_refuses_a_set_temperature_on_every_wire() {
         temperature: Some(NonNegativeFiniteF64::new(0.2).expect("finite")),
         ..GenerationOptions::default()
     });
-    pinned.llm_profile_capability.sampling = crate::provider::SamplingCapability::Pinned;
+    pinned.model.metadata_mut().capability.sampling = crate::provider::SamplingCapability::Pinned;
     for pins in [false, true] {
         let wire = GenerationWire {
             active_thinking_pins_sampling: pins,
@@ -229,16 +285,17 @@ fn pinned_sampling_refuses_a_set_temperature_on_every_wire() {
         temperature: Some(NonNegativeFiniteF64::new(0.2).expect("finite")),
         ..GenerationOptions::default()
     });
-    thinking.llm_profile_capability.reasoning = Some(crate::provider::ReasoningCapability {
-        efforts: vec!["high".to_string()],
-        disable: true,
-        ..crate::provider::ReasoningCapability::default()
-    });
+    thinking.model.metadata_mut().capability.reasoning =
+        Some(crate::provider::ReasoningCapability {
+            efforts: vec!["high".to_string()],
+            disable: true,
+            ..crate::provider::ReasoningCapability::default()
+        });
     let pinning_wire = GenerationWire {
         active_thinking_pins_sampling: true,
         ..open_wire()
     };
-    thinking.model_variant = ReasoningSelection::Effort("high".to_string());
+    thinking.model.reasoning = ReasoningSelection::Effort("high".to_string());
     let error = resolve_generation_policy(&thinking, "test", &pinning_wire)
         .expect_err("active thinking pins sampling");
     assert_eq!(
@@ -247,7 +304,7 @@ fn pinned_sampling_refuses_a_set_temperature_on_every_wire() {
     );
     resolve_generation_policy(&thinking, "test", &open_wire())
         .expect("a wire whose thinking does not pin sampling sends the temperature");
-    thinking.model_variant = ReasoningSelection::Disabled;
+    thinking.model.reasoning = ReasoningSelection::Disabled;
     let off = resolve_generation_policy(&thinking, "test", &pinning_wire)
         .expect("reasoning off does not pin sampling");
     assert_eq!(off.reasoning, Some(ReasoningIntent::Off));
@@ -302,7 +359,7 @@ fn expose_thinking_is_local_visibility_and_a_wire_flag_only_where_one_exists() {
 #[test]
 fn generation_policy_refuses_an_invalid_reasoning_selection() {
     let mut request = empty_request();
-    request.model_variant = ReasoningSelection::Effort("high".to_string());
+    request.model.reasoning = ReasoningSelection::Effort("high".to_string());
     let error = resolve_generation_policy(&request, "test", &open_wire())
         .expect_err("no reasoning capability");
     assert_eq!(
@@ -318,22 +375,26 @@ fn receipt_joins_requested_settings_with_adapter_emission() {
         parallel_tool_calls: Some(true),
         ..GenerationOptions::default()
     });
-    request.llm_profile_capability.reasoning = Some(crate::provider::ReasoningCapability {
-        efforts: vec!["high".to_string()],
-        ..crate::provider::ReasoningCapability::default()
-    });
-    request.model_variant = ReasoningSelection::Effort("high".to_string());
-    request.llm_profile_capability.reasoning_retention.selection =
-        crate::provider::ReasoningRetentionSelection::ClientSideUserSegments {
-            max_segments: NonZeroUsize::new(1).expect("positive"),
-        };
+    request.model.metadata_mut().capability.reasoning =
+        Some(crate::provider::ReasoningCapability {
+            efforts: vec!["high".to_string()],
+            ..crate::provider::ReasoningCapability::default()
+        });
+    request.model.reasoning = ReasoningSelection::Effort("high".to_string());
+    request
+        .model
+        .metadata_mut()
+        .capability
+        .reasoning_retention
+        .selection = crate::provider::ReasoningRetentionSelection::ClientSideUserSegments {
+        max_segments: NonZeroUsize::new(1).expect("positive"),
+    };
     let options = LlmProfileRequestDefaults {
-        max_output_tokens: Some(4_096),
         expose_thinking: true,
         ..LlmProfileRequestDefaults::default()
     };
     let policy = resolve_generation_policy(
-        &with_defaults(request.clone(), options),
+        &with_cap(with_defaults(request.clone(), options), 4096),
         "test",
         &open_wire(),
     )

@@ -320,12 +320,6 @@ pub struct LlmProfileRequestDefaults {
     /// Surface the reasoning the provider streams in responses.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub expose_thinking: bool,
-    /// Output-token cap for calls whose request sets none. `None` sends no
-    /// cap; a wire that requires one (Anthropic Messages) then refuses the
-    /// call. Providers translate it to their wire-specific field
-    /// (`max_tokens`, `max_output_tokens`, `maxOutputTokens`, …).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_output_tokens: Option<u64>,
     /// Prompt-cache lifetime hint; see [`CacheRetention`].
     #[serde(default, skip_serializing_if = "CacheRetention::is_default")]
     pub cache_retention: CacheRetention,

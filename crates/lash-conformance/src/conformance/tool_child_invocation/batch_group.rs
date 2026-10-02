@@ -77,8 +77,8 @@ async fn run_batch(
         scenario.process_env_store,
     ))
     .direct_completions(crate::DirectCompletionClient::from_fn(
-        |request, _source| {
-            Ok(if request.model == "law-billed-model" {
+        |_request, source| {
+            Ok(if source == "law-billed-leaf" {
                 law_billed_completion()
             } else {
                 law_direct_completion()

@@ -523,7 +523,7 @@ impl ToolProvider for AttemptIntentTools {
             call.context
                 .direct_completions()
                 .complete(
-                    crate::DirectRequest::text("attempt-model", "attempt prompt"),
+                    crate::DirectRequest::text("attempt prompt"),
                     "attempt-context-law",
                 )
                 .await

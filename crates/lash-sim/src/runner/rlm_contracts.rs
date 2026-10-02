@@ -747,15 +747,22 @@ fn rlm_contract_config_with_turn_options(
         protocol_driver,
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         projector: Arc::new(lash_core::sansio::ChatContextProjector),
-        model: "rlm-contract".to_string(),
-        max_context_tokens: None,
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::new(
+                    "rlm-contract".to_string(),
+                    std::num::NonZeroUsize::MIN.saturating_add(127_999),
+                )
+                .with_capability(lash_core::LlmProfileCapability::default())
+                .with_extra_body(Default::default())
+                .with_request_defaults(Default::default()),
+            ),
+        )
+        .with_reasoning(Default::default()),
         turn_budget: lash_core::TurnBudget::Unbounded,
         no_progress_budget: Default::default(),
-        model_variant: Default::default(),
         attachment_acceptance: Default::default(),
-        llm_profile_capability: lash_core::LlmProfileCapability::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         autonomous: false,
         session_id: SessionId::from("rlm-contract"),

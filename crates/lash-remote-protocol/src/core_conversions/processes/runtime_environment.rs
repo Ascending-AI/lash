@@ -343,7 +343,7 @@ impl From<lash_core::LlmProfileLimits> for RemoteProcessModelLimits {
     fn from(value: lash_core::LlmProfileLimits) -> Self {
         Self {
             context_window_tokens: value.context_window_tokens.get(),
-            output_token_capacity: value.output_token_capacity.map(|value| value.get()),
+            output_tokens: value.output_tokens,
         }
     }
 }
@@ -378,26 +378,26 @@ impl TryFrom<RemoteLlmProfileMetadata> for lash_core::LlmProfileMetadata {
             limits,
             request_defaults,
         } = value;
-        let model = lash_core::LlmProfileMetadata::builder(wire_model)
-            .context_window_tokens(limits.context_window_tokens);
-        let model = match limits.output_token_capacity {
-            Some(capacity) => model.output_token_capacity(capacity),
-            None => model,
-        };
-        let model = model
-            .build()
-            .map_err(|err| RemoteProtocolError::InvalidEnvelope {
-                type_name: "RemoteProcessExecutionPolicy",
-                message: err.to_string(),
-            })?
-            .with_capability(capability.into())
-            .with_extra_body(extra_body)
-            .with_request_defaults(request_defaults.into());
+        let context_window_tokens = std::num::NonZeroUsize::new(limits.context_window_tokens)
+            .ok_or_else(|| RemoteProtocolError::InvalidEnvelope {
+                type_name: "RemoteModelConfig",
+                message: "context_window_tokens must be greater than zero".into(),
+            })?;
+        let model = lash_core::LlmProfileMetadata::with_limits(
+            wire_model,
+            lash_core::LlmProfileLimits {
+                context_window_tokens,
+                output_tokens: limits.output_tokens,
+            },
+        )
+        .with_capability(capability.into())
+        .with_extra_body(extra_body)
+        .with_request_defaults(request_defaults.into());
         Ok(model)
     }
 }
 
-impl From<lash_core::LlmProfileConfig> for RemoteLlmProfileConfig {
+impl From<lash_core::LlmProfileConfig> for RemoteModelConfig {
     fn from(value: lash_core::LlmProfileConfig) -> Self {
         let lash_core::LlmProfileConfig { model, reasoning } = value;
         Self {
@@ -408,13 +408,13 @@ impl From<lash_core::LlmProfileConfig> for RemoteLlmProfileConfig {
     }
 }
 
-impl TryFrom<RemoteLlmProfileConfig> for lash_core::LlmProfileConfig {
+impl TryFrom<RemoteModelConfig> for lash_core::LlmProfileConfig {
     type Error = RemoteProtocolError;
 
     /// The remote carrier conveys a binding the session already recorded;
     /// decoding it restores that recorded value, never a fresh lookup.
-    fn try_from(value: RemoteLlmProfileConfig) -> Result<Self, Self::Error> {
-        let RemoteLlmProfileConfig {
+    fn try_from(value: RemoteModelConfig) -> Result<Self, Self::Error> {
+        let RemoteModelConfig {
             key,
             metadata,
             reasoning,

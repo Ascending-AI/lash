@@ -197,15 +197,22 @@ pub(super) fn projection_test_config(
             crate::dialect::TypescriptDialect,
         ))),
         projector: Arc::new(lash_core::sansio::ChatContextProjector),
-        model: model.to_string(),
-        max_context_tokens,
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::builder(model.to_string())
+                    .context_window_tokens(max_context_tokens.unwrap_or(128_000))
+                    .capability(Default::default())
+                    .extra_body(Default::default())
+                    .request_defaults(Default::default())
+                    .build()
+                    .expect("valid profile"),
+            ),
+        )
+        .with_reasoning(Default::default()),
         turn_budget: lash_core::TurnBudget::Unbounded,
         no_progress_budget: Default::default(),
-        model_variant: Default::default(),
         attachment_acceptance: Default::default(),
-        llm_profile_capability: Default::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         generation,
         autonomous: false,
         session_id: SessionId::from("prefix-stability"),

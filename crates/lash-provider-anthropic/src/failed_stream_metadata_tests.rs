@@ -15,8 +15,8 @@ async fn native_adapters_preserve_allowlisted_metadata_on_failed_streams() {
             .with_transport(Arc::new(OwnedMetadataSseTransport(body)));
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
         req.stream_events = Some(LlmEventSender::new(|_| {}));
-        req.request_defaults.response_metadata_headers = vec!["X-Request-Cost".into()];
-        req.request_defaults.response_metadata_body_paths =
+        req.model.metadata_mut().request_defaults.response_metadata_headers = vec!["X-Request-Cost".into()];
+        req.model.metadata_mut().request_defaults.response_metadata_body_paths =
             vec!["/billing/cost".into(), "/missing".into()];
         let error = provider
             .complete(req)

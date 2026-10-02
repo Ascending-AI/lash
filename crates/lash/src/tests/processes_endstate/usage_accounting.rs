@@ -33,7 +33,7 @@ impl lash_core::ToolProvider for CompletionTool {
             .context
             .direct_completions()
             .complete(
-                crate::direct::DirectRequest::text("mock-model", "process paid call"),
+                crate::direct::DirectRequest::text("process paid call"),
                 "process-direct",
             )
             .await

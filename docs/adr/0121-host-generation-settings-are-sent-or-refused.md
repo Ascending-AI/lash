@@ -19,7 +19,7 @@ non-retryable failure. Nothing is dropped and nothing is remapped. Two
 deliberate non-send dispositions remain, and the per-call `GenerationReceipt`
 names both:
 
-- an output-token cap reduced to the model's `output_token_capacity`
+- an output-token cap reduced to the recorded profile's `output_tokens.capacity`
   (`ClampedToCapacity`);
 - stop sequences a protocol suppresses because its grammar owns the response
   boundary (`SuppressedProtocolOwned`).
@@ -31,6 +31,14 @@ Anthropic `display` inside active thinking, Google `includeThoughts`. Chat
 Completions has no such flag, so nothing is sent there, and the host's intent
 is still fully honored locally. The receipt splits the two halves into
 `thinking_summary` and `thinking_visibility`.
+
+**Output-token facts have one recorded home.** `OutputTokenLimits` holds
+optional non-zero capacity and default cap. Construction and decoding reject
+a default above capacity. Requests carry the full `LlmProfileConfig`; a
+session-owned direct completion takes it from its owner. Generation resolution
+selects the request cap or recorded default and bounds it against capacity
+once. Requests and journals retain the original intent. The adapter's receipt
+reports `ClampedToCapacity` only when that bounded cap reached the wire.
 
 **Reasoning resolves once.** `LlmProfileCapability::reasoning_intent` resolves the
 session's recorded `ReasoningSelection` against the recorded capability into
@@ -83,7 +91,7 @@ A custom trait object cannot supply the same durable and remote contract.
 call. It refuses everything else before the adapter does any I/O:
 
 - **Cap.** The effective cap is the request's, else the recorded model's
-  `LlmProfileRequestDefaults.max_output_tokens`. With neither set, an optional-cap wire
+  `LlmProfileLimits.output_tokens.default_cap`. With neither set, an optional-cap wire
   sends none, and Anthropic refuses with `output_token_cap_required`. Codex
   and `max_tokens_field: Omit` endpoints refuse any cap.
 - **Temperature.** A wire without a temperature field refuses one. A model
@@ -132,7 +140,7 @@ refuses an `omitted_sampling_pinned` outcome.
 - A mixed-model session that sets a session-wide temperature or seed must
   clear it for models or wires that cannot carry it
   (`GenerationOverlay::Replace`). A receipt cannot un-send a call.
-- Hosts on Anthropic set `LlmProfileRequestDefaults.max_output_tokens` or a request cap.
+- Hosts on Anthropic set `LlmProfileLimits.output_tokens.default_cap` or a request cap.
 - Hosts choose a preset or set
   `OpenAiCompat.reasoning`.
 - Replay-route ownership is exact. Opaque reasoning, tool-call and

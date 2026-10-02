@@ -13,10 +13,11 @@ impl Children {
     pub(super) async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         let index = call.args["call"].as_u64().expect("child position");
         for abort in [false, true] {
-            let mut request = crate::DirectRequest::text("mock-model", "nested child spend");
-            request.extra_body.insert(
-                "usage_child".into(),
-                serde_json::json!({"index": index, "abort": abort}),
+            let request = crate::DirectRequest::text(
+                serde_json::json!({
+                    "usage_child": {"index": index, "abort": abort}
+                })
+                .to_string(),
             );
             let completion = call
                 .context

@@ -55,10 +55,7 @@ pub(super) async fn exercise_attempt_capabilities(attempt: &lash_core::AttemptCo
         attempt
             .direct_completions()
             .complete(
-                lash_core::facade_support::DirectRequest::text(
-                    DIRECT_MODEL,
-                    "attempt direct completion"
-                ),
+                lash_core::facade_support::DirectRequest::text("attempt direct completion"),
                 "attempt-atomicity",
             )
             .await

@@ -9,10 +9,6 @@ impl RemoteLlmRequest {
             tools,
             tool_choice,
             attachment_acceptance,
-            model_variant,
-            llm_profile_capability,
-            extra_body,
-            request_defaults,
             generation,
             scope,
             output_spec,
@@ -23,15 +19,7 @@ impl RemoteLlmRequest {
         Self {
             request_id: request_id.into(),
             scope: scope.into(),
-            model_intent: RemoteModelIntent {
-                model,
-                variant: model_variant.into(),
-                capability: llm_profile_capability.into(),
-                request_defaults: request_defaults.into(),
-                extra_body,
-                provider: None,
-                metadata: HashMap::new(),
-            },
+            model: model.into(),
             attachment_acceptance: std::sync::Arc::unwrap_or_clone(attachment_acceptance).into(),
             instructions: instructions.map(|text| text.to_string()),
             messages: messages.into_iter().map(Into::into).collect(),
@@ -51,7 +39,7 @@ impl TryFrom<RemoteLlmRequest> for core_llm::LlmRequest {
         value.validate()?;
         let RemoteLlmRequest {
             request_id: _,
-            model_intent,
+            model,
             attachment_acceptance,
             instructions,
             messages,
@@ -62,17 +50,8 @@ impl TryFrom<RemoteLlmRequest> for core_llm::LlmRequest {
             scope,
             metadata: _,
         } = value;
-        let RemoteModelIntent {
-            model,
-            variant,
-            capability,
-            request_defaults,
-            extra_body,
-            provider: _,
-            metadata: _,
-        } = model_intent;
         Ok(Self {
-            model,
+            model: model.try_into()?,
             instructions: instructions.map(Into::into),
             messages: messages
                 .into_iter()
@@ -81,11 +60,7 @@ impl TryFrom<RemoteLlmRequest> for core_llm::LlmRequest {
             resolved_stored: Default::default(),
             tools: Arc::new(tools.into_iter().map(Into::into).collect()),
             tool_choice: tool_choice.into(),
-            model_variant: variant.into(),
-            llm_profile_capability: capability.into(),
             attachment_acceptance: Arc::new(attachment_acceptance.into()),
-            extra_body,
-            request_defaults: request_defaults.into(),
             generation: generation.try_into()?,
             scope: scope.into(),
             output_spec: output_spec.map(Into::into),

@@ -57,7 +57,10 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
         let budget_suffix = crate::rlm_support::format_budget_suffix_with_vocabulary(
             ctx.protocol_iteration + 1,
             ctx.environment.projector_turn_inputs.prompt_usage.as_ref(),
-            effective_budget_tokens(self.max_budget_tokens, ctx.config.max_context_tokens),
+            effective_budget_tokens(
+                self.max_budget_tokens,
+                Some(ctx.config.model.context_window_tokens()),
+            ),
             vocabulary,
             self.prompt_features.decomposition,
         );
@@ -100,10 +103,6 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
             tools: Arc::new(vec![super::tool::tool_spec(self.dialect.as_ref())]),
             tool_choice: LlmToolChoice::Auto,
             attachment_acceptance: Arc::clone(&ctx.config.attachment_acceptance),
-            model_variant: ctx.config.model_variant.clone(),
-            llm_profile_capability: ctx.config.llm_profile_capability.clone(),
-            extra_body: ctx.config.extra_body.clone(),
-            request_defaults: ctx.config.request_defaults.clone(),
             scope: LlmRequestScope::new(
                 ctx.config.session_id.clone(),
                 ctx.config.agent_frame_id.clone(),

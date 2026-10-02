@@ -5,7 +5,9 @@ use crate::llm::types::{
     AttachmentSource, LlmContentBlock, LlmEventSender, LlmJsonSchema, LlmMessage, LlmOutputSpec,
     LlmRequest, LlmRequestScope, LlmResponse, LlmRole, LlmStreamEvent, LlmToolChoice,
 };
-use crate::provider::{LlmProfileCapability, LlmProfileEffortValidationCategory, ProviderHandle};
+#[cfg(test)]
+use crate::provider::LlmProfileCapability;
+use crate::provider::{LlmProfileEffortValidationCategory, ProviderHandle};
 use lash_trace::{TraceContext, TraceSink};
 use std::sync::Arc;
 
@@ -45,15 +47,11 @@ pub enum DirectOutputSpec {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DirectRequest {
     /// Initial instructions; System messages are runtime feedback only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions: Option<Arc<str>>,
-    pub model: String,
-    #[serde(default)]
-    pub model_variant: crate::ReasoningSelection,
-    #[serde(default, skip_serializing_if = "LlmProfileCapability::is_empty")]
-    pub llm_profile_capability: LlmProfileCapability,
     /// The attachment-acceptance rules the request renders its attachments
     /// under. A durable direct completion replaces them with its session's
     /// recorded rules.
@@ -62,15 +60,6 @@ pub struct DirectRequest {
         skip_serializing_if = "crate::provider::AttachmentCapabilitySnapshot::is_empty_arc"
     )]
     pub attachment_acceptance: Arc<crate::provider::AttachmentCapabilitySnapshot>,
-    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
-    pub extra_body: serde_json::Map<String, serde_json::Value>,
-    /// What the call does where [`Self::generation`] states nothing: a
-    /// session's direct completion carries its recorded model's defaults.
-    #[serde(
-        default,
-        skip_serializing_if = "crate::provider::LlmProfileRequestDefaults::is_default"
-    )]
-    pub request_defaults: crate::provider::LlmProfileRequestDefaults,
     #[serde(default)]
     pub messages: Vec<DirectMessage>,
     #[serde(default)]
@@ -109,15 +98,10 @@ impl DirectRequest {
             .collect()
     }
 
-    pub fn text(model: impl Into<String>, prompt: impl Into<String>) -> Self {
+    pub fn text(prompt: impl Into<String>) -> Self {
         Self {
             instructions: None,
-            model: model.into(),
-            model_variant: crate::ReasoningSelection::ProviderDefault,
-            llm_profile_capability: LlmProfileCapability::default(),
             attachment_acceptance: Arc::default(),
-            extra_body: serde_json::Map::new(),
-            request_defaults: crate::provider::LlmProfileRequestDefaults::default(),
             messages: vec![DirectMessage {
                 role: DirectRole::User,
                 parts: vec![DirectPart::Text(prompt.into())],
@@ -131,21 +115,17 @@ impl DirectRequest {
         }
     }
 
-    pub fn json(model: impl Into<String>, prompt: impl Into<String>) -> Self {
+    pub fn json(prompt: impl Into<String>) -> Self {
         Self {
             output: DirectOutputSpec::JsonObject,
-            ..Self::text(model, prompt)
+            ..Self::text(prompt)
         }
     }
 
-    pub fn json_schema(
-        model: impl Into<String>,
-        prompt: impl Into<String>,
-        schema: DirectJsonSchema,
-    ) -> Self {
+    pub fn json_schema(prompt: impl Into<String>, schema: DirectJsonSchema) -> Self {
         Self {
             output: DirectOutputSpec::JsonSchema(schema),
-            ..Self::text(model, prompt)
+            ..Self::text(prompt)
         }
     }
 
@@ -215,15 +195,17 @@ impl DirectLlmOutcome {
 
 pub struct DirectLlmClient {
     provider: ProviderHandle,
+    model: crate::LlmProfileConfig,
     trace_sink: Option<Arc<dyn TraceSink>>,
     trace_context: TraceContext,
     clock: Arc<dyn crate::Clock>,
 }
 
 impl DirectLlmClient {
-    pub fn new(provider: ProviderHandle) -> Self {
+    pub fn new(provider: ProviderHandle, model: crate::LlmProfileConfig) -> Self {
         Self {
             provider,
+            model,
             trace_sink: None,
             trace_context: TraceContext::default(),
             clock: Arc::new(crate::SystemClock),
@@ -257,22 +239,19 @@ impl DirectLlmClient {
         &mut self,
         request: DirectRequest,
     ) -> Result<DirectLlmOutcome, DirectLlmError> {
-        // Validate the requested effort against the capability that travels
-        // with the request; the selection itself travels unchanged.
-        request
-            .llm_profile_capability
-            .validate_selection(&request.model, self.provider.kind(), &request.model_variant)
+        self.model
+            .validate_reasoning()
             .map_err(|error| DirectLlmError::InvalidRequest {
                 category: error.category,
                 message: error.message,
             })?;
 
         let output_for_validation = request.output.clone();
-        let model = request.model.clone();
+        let model = self.model.clone();
         let mut llm_request = build_llm_request(request, model)?;
         llm_request.stream_events =
             transport_stream_events_for_direct(&self.provider, llm_request.stream_events.take());
-        let request_model = llm_request.model.clone();
+        let request_model = llm_request.model.wire_model().to_string();
         let llm_call_id = if self.trace_sink.is_some() {
             let id = uuid::Uuid::new_v4().to_string();
             crate::runtime::effect::emit_llm_trace_started(
@@ -364,7 +343,7 @@ impl DirectLlmClient {
 /// ([`transport_stream_events_for_direct`]).
 pub fn build_llm_request(
     request: DirectRequest,
-    model: String,
+    model: crate::LlmProfileConfig,
 ) -> Result<LlmRequest, DirectLlmError> {
     if request
         .messages
@@ -375,12 +354,7 @@ pub fn build_llm_request(
     }
     let DirectRequest {
         instructions,
-        model: _,
-        model_variant,
-        llm_profile_capability,
         attachment_acceptance,
-        extra_body,
-        request_defaults,
         messages,
         output,
         generation,
@@ -460,10 +434,6 @@ pub fn build_llm_request(
         tools: Vec::new().into(),
         tool_choice: LlmToolChoice::None,
         attachment_acceptance,
-        model_variant,
-        llm_profile_capability,
-        extra_body,
-        request_defaults,
         generation,
         scope,
         output_spec,
@@ -500,6 +470,17 @@ fn transport_stream_events_for_direct(
     } else {
         None
     }
+}
+
+#[cfg(test)]
+fn profile(wire_model: &str) -> crate::LlmProfileConfig {
+    crate::LlmProfileConfig::new(crate::RecordedLlmProfile::mint(
+        crate::LlmProfileKey::new("direct-test"),
+        crate::LlmProfileMetadata::builder(wire_model)
+            .context_window_tokens(128_000)
+            .build()
+            .expect("valid standalone profile"),
+    ))
 }
 
 #[cfg(test)]
@@ -595,9 +576,12 @@ mod tests {
     ) -> DirectLlmClient {
         let trace_sink: Arc<dyn TraceSink> = sink.clone();
         let clock: Arc<dyn crate::Clock> = clock.clone();
-        DirectLlmClient::new(provider.into_handle().with_clock(Arc::clone(&clock)))
-            .with_trace_sink(Some(trace_sink))
-            .with_clock(clock)
+        DirectLlmClient::new(
+            provider.into_handle().with_clock(Arc::clone(&clock)),
+            profile("trace-model"),
+        )
+        .with_trace_sink(Some(trace_sink))
+        .with_clock(clock)
     }
 
     #[test]
@@ -615,7 +599,7 @@ mod tests {
             strict: true,
         };
 
-        let request = DirectRequest::json_schema("model-a", "return json", schema.clone());
+        let request = DirectRequest::json_schema("return json", schema.clone());
 
         assert_eq!(
             request.output,
@@ -630,7 +614,7 @@ mod tests {
             .kind("direct-accessor-provider")
             .build()
             .into_handle();
-        let mut client = DirectLlmClient::new(provider);
+        let mut client = DirectLlmClient::new(provider, profile("direct-model"));
 
         assert_eq!(client.provider().kind(), "direct-accessor-provider");
 
@@ -670,7 +654,7 @@ mod tests {
             .build();
         let mut client = traced_client(provider, &sink, &clock);
         let response = client
-            .complete(DirectRequest::text("trace-model", "trace success"))
+            .complete(DirectRequest::text("trace success"))
             .await
             .expect("direct success should complete");
         assert_eq!(response.full_text(), "direct success");
@@ -681,7 +665,7 @@ mod tests {
             .build();
         let mut client = traced_client(provider, &sink, &clock);
         let error = client
-            .complete(DirectRequest::text("trace-model", "trace failure"))
+            .complete(DirectRequest::text("trace failure"))
             .await
             .expect_err("direct transport failure should be returned");
         assert!(matches!(error, DirectLlmError::Transport(_)));
@@ -708,7 +692,6 @@ mod tests {
         let mut client = traced_client(provider, &sink, &clock);
         let error = client
             .complete(DirectRequest::json_schema(
-                "trace-model",
                 "trace structured rejection",
                 DirectJsonSchema {
                     name: "answer_shape".to_string(),
@@ -820,8 +803,8 @@ mod tests {
             })
             .build()
             .into_handle();
-        let mut client = DirectLlmClient::new(provider);
-        let mut request = DirectRequest::json("direct-model", "answer as json");
+        let mut client = DirectLlmClient::new(provider, profile("direct-model"));
+        let mut request = DirectRequest::json("answer as json");
         request.session_id = Some(SessionId::from("direct-session"));
 
         let response = client
@@ -835,7 +818,7 @@ mod tests {
             .lock_recover()
             .clone()
             .expect("provider should receive a request");
-        assert_eq!(captured.model, "direct-model");
+        assert_eq!(captured.model.wire_model(), "direct-model");
         assert_eq!(captured.scope.session_id, "direct-session");
         assert_eq!(captured.scope.agent_frame_id, "direct-session:frame:direct");
         assert_eq!(captured.scope.request_id, "direct-session:direct");
@@ -868,9 +851,8 @@ mod tests {
             })
             .build()
             .into_handle();
-        let mut client = DirectLlmClient::new(provider);
+        let mut client = DirectLlmClient::new(provider, profile("direct-model"));
         let request = DirectRequest::json_schema(
-            "direct-model",
             "return items",
             DirectJsonSchema {
                 name: "items_result".to_string(),
@@ -944,12 +926,12 @@ mod tests {
             })
             .build()
             .into_handle();
-        let mut client = DirectLlmClient::new(provider);
+        let mut client = DirectLlmClient::new(provider, profile("direct-model"));
 
-        let mut request = DirectRequest::text("direct-model", "hi");
+        let request = DirectRequest::text("hi");
         // Effort names match exactly: no alias, case folding or clamping.
-        request.model_variant = crate::ReasoningSelection::Effort("MAX".to_string());
-        request.llm_profile_capability = reasoning_capability();
+        client.model.reasoning = crate::ReasoningSelection::Effort("MAX".to_string());
+        client.model.metadata_mut().capability = reasoning_capability();
 
         let err = client
             .complete(request)
@@ -978,7 +960,7 @@ mod tests {
             .complete(move |request| {
                 let captured = Arc::clone(&captured_for_provider);
                 async move {
-                    *captured.lock_recover() = Some(request.model_variant.clone());
+                    *captured.lock_recover() = Some(request.model.reasoning.clone());
                     Ok(LlmResponse {
                         parts: vec![LlmOutputPart::Text {
                             text: "ok".to_string(),
@@ -992,11 +974,11 @@ mod tests {
             })
             .build()
             .into_handle();
-        let mut client = DirectLlmClient::new(provider);
+        let mut client = DirectLlmClient::new(provider, profile("direct-model"));
 
-        let mut request = DirectRequest::text("direct-model", "hi");
-        request.model_variant = crate::ReasoningSelection::Effort("max".to_string());
-        request.llm_profile_capability = reasoning_capability();
+        let request = DirectRequest::text("hi");
+        client.model.reasoning = crate::ReasoningSelection::Effort("max".to_string());
+        client.model.metadata_mut().capability = reasoning_capability();
 
         client.complete(request).await.expect("completion");
         let seen = captured
@@ -1017,10 +999,10 @@ mod tests {
             .complete(|_request| async { Ok(LlmResponse::default()) })
             .build()
             .into_handle();
-        let mut client = DirectLlmClient::new(provider);
+        let mut client = DirectLlmClient::new(provider, profile("direct-model"));
 
-        let mut request = DirectRequest::text("direct-model", "hi");
-        request.model_variant = crate::ReasoningSelection::Effort("high".to_string());
+        let request = DirectRequest::text("hi");
+        client.model.reasoning = crate::ReasoningSelection::Effort("high".to_string());
         // No capability: the model exposes no configurable effort.
 
         let err = client
@@ -1043,12 +1025,12 @@ mod tests {
             .complete(|_request| async { Ok(LlmResponse::default()) })
             .build()
             .into_handle();
-        let mut client = DirectLlmClient::new(provider);
+        let mut client = DirectLlmClient::new(provider, profile("direct-model"));
 
         let mut capability = reasoning_capability();
         capability.reasoning.as_mut().expect("reasoning").mandatory = true;
-        let mut request = DirectRequest::text("direct-model", "hi");
-        request.llm_profile_capability = capability;
+        let request = DirectRequest::text("hi");
+        client.model.metadata_mut().capability = capability;
         // No model_variant supplied, but the model requires one.
 
         let err = client
@@ -1082,11 +1064,11 @@ mod tests {
         let requested_sender = LlmEventSender::new(move |event| {
             captured_for_sender.lock_recover().push(event);
         });
-        let mut request = DirectRequest::text("model", "prompt");
+        let mut request = DirectRequest::text("prompt");
         request.stream_events = Some(requested_sender);
         let provider = TestProvider::default().into_handle();
 
-        let llm_request = build_llm_request(request, "model".to_string()).unwrap();
+        let llm_request = build_llm_request(request, profile("model")).unwrap();
         let sender = transport_stream_events_for_direct(&provider, llm_request.stream_events)
             .expect("explicit direct stream sender must be preserved");
         sender.send(LlmStreamEvent::Delta {
@@ -1100,7 +1082,7 @@ mod tests {
             .build()
             .into_handle();
         let llm_request =
-            build_llm_request(DirectRequest::text("model", "prompt"), "model".to_string()).unwrap();
+            build_llm_request(DirectRequest::text("prompt"), profile("model")).unwrap();
         assert!(
             llm_request.stream_events.is_none(),
             "the request alone names no sender the caller did not ask for"
@@ -1111,17 +1093,6 @@ mod tests {
             "providers that require streaming need a no-op sender even when direct caller did not request one"
         );
     }
-
-    #[test]
-    fn direct_extra_body_is_per_call() {
-        let mut first = DirectRequest::text("model", "first");
-        first.extra_body = json!({"route":{"host":true}}).as_object().cloned().unwrap();
-        let first = build_llm_request(first, "model".into()).unwrap();
-        let second =
-            build_llm_request(DirectRequest::text("model", "second"), "model".into()).unwrap();
-        assert_eq!(first.extra_body["route"], json!({"host":true}));
-        assert!(second.extra_body.is_empty());
-    }
 }
 
 #[cfg(test)]
@@ -1131,8 +1102,8 @@ mod runtime_feedback_tests {
     #[tokio::test]
     async fn direct_leading_system_is_refused_with_instructions_error() {
         let provider = crate::testing::TestProvider::default().into_handle();
-        let mut client = DirectLlmClient::new(provider);
-        let mut request = DirectRequest::text("model", "user");
+        let mut client = DirectLlmClient::new(provider, profile("direct-model"));
+        let mut request = DirectRequest::text("user");
         request.messages.insert(
             0,
             DirectMessage {
@@ -1147,7 +1118,7 @@ mod runtime_feedback_tests {
 
     #[test]
     fn direct_explicit_instructions_keep_mid_conversation_feedback() {
-        let mut request = DirectRequest::text("model", "user");
+        let mut request = DirectRequest::text("user");
         request.instructions = Some(Arc::from("I"));
         request.messages.extend([
             DirectMessage {
@@ -1159,7 +1130,7 @@ mod runtime_feedback_tests {
                 parts: vec![DirectPart::Text("retry".into())],
             },
         ]);
-        let normalized = build_llm_request(request, "model".into()).unwrap();
+        let normalized = build_llm_request(request, profile("model")).unwrap();
         assert_eq!(normalized.instructions.as_deref(), Some("I"));
         assert_eq!(
             normalized

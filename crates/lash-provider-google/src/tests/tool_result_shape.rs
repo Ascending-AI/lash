@@ -23,7 +23,7 @@ fn contents(dialect: GoogleDialect) -> Vec<Value> {
 
 fn contents_with(dialect: GoogleDialect, content: Vec<ModelToolReturnPart>) -> Vec<Value> {
     let mut req = request(None);
-    req.llm_profile_capability.google_dialect = dialect;
+    req.model.metadata_mut().capability.google_dialect = dialect;
     req.messages = vec![
         LlmMessage::new(
             LlmRole::Assistant,

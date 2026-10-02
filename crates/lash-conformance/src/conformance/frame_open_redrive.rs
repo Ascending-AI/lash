@@ -351,7 +351,7 @@ async fn summarize(
     })?;
     let request = crate::LlmRequest {
         instructions: None,
-        model: model.model.wire_model().to_string(),
+        model: model.clone(),
         messages: vec![lash_sansio::llm::types::LlmMessage::text(
             lash_sansio::llm::types::LlmRole::User,
             "Summarize the conversation so far.",
@@ -360,10 +360,6 @@ async fn summarize(
         tools: Arc::new(Vec::new()),
         tool_choice: lash_sansio::llm::types::LlmToolChoice::None,
         attachment_acceptance: Arc::clone(&policy.attachment_acceptance),
-        model_variant: model.reasoning.clone(),
-        llm_profile_capability: model.metadata().capability.clone(),
-        extra_body: model.metadata().extra_body.clone(),
-        request_defaults: model.metadata().request_defaults.clone(),
         generation: policy.generation.clone(),
         scope: crate::LlmRequestScope::new(
             session_id.clone(),

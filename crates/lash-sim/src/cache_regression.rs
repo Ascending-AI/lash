@@ -61,16 +61,24 @@ fn text_block(text: &str, cache_breakpoint: bool) -> LlmContentBlock {
 fn request(model: &str, messages: Vec<LlmMessage>) -> LlmRequest {
     LlmRequest {
         instructions: Some(Arc::from("stable system")),
-        model: model.to_string(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::builder(model.to_string())
+                    .context_window_tokens(128_000)
+                    .capability(Default::default())
+                    .extra_body(Default::default())
+                    .request_defaults(Default::default())
+                    .build()
+                    .expect("valid profile"),
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages,
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: Default::default(),
         attachment_acceptance: Default::default(),
-        model_variant: Default::default(),
-        llm_profile_capability: Default::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         scope: lash_core::LlmRequestScope::new(
             "cache-regression-session",
             "cache-regression-frame",
@@ -84,7 +92,7 @@ fn request(model: &str, messages: Vec<LlmMessage>) -> LlmRequest {
 }
 
 fn with_cache_control(mut request: LlmRequest, dialect: CacheControlDialect) -> LlmRequest {
-    request.llm_profile_capability.cache_control = Some(dialect);
+    request.model.metadata_mut().capability.cache_control = Some(dialect);
     request
 }
 
@@ -358,7 +366,7 @@ async fn rlm_live_bound_state_is_prefix_stable_for_every_serializer() {
             .iter()
             .cloned()
             .map(|mut request| {
-                request.model = model.to_string();
+                request.model.metadata_mut().wire_model = model.to_string();
                 request
             })
             .collect::<Vec<_>>();

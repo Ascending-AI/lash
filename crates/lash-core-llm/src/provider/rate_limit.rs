@@ -198,7 +198,7 @@ fn bucket_decision(
 }
 
 fn estimate_request_tokens(request: &LlmRequest) -> u32 {
-    let mut chars = request.model.len();
+    let mut chars = request.model.wire_model().len();
     for message in &request.messages {
         for block in message.blocks.iter() {
             match block {

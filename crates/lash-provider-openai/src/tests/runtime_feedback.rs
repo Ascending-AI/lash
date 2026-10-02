@@ -52,8 +52,8 @@ fn runtime_feedback_chat_cache_distinguishes_instructions_and_explicit_fences() 
         LlmMessage::text(LlmRole::System, "F"),
         LlmMessage::text(LlmRole::User, "tail"),
     ]);
-    req.request_defaults.cache_retention = CacheRetention::Short;
-    req.llm_profile_capability.cache_control = Some(CacheControlDialect::Anthropic);
+    req.model.metadata_mut().request_defaults.cache_retention = CacheRetention::Short;
+    req.model.metadata_mut().capability.cache_control = Some(CacheControlDialect::Anthropic);
     let body = provider.build_chat_request_body(&req, false).unwrap();
     assert!(
         body["messages"][1]["content"][0]

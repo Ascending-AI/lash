@@ -790,7 +790,7 @@ pub(super) async fn turn_driver_sends_an_exact_effort_unchanged() {
         .complete(move |req| {
             let captured = Arc::clone(&captured_for_provider);
             async move {
-                *captured.lock_recover() = Some(req.model_variant.clone());
+                *captured.lock_recover() = Some(req.model.reasoning.clone());
                 Ok(LlmResponse {
                     parts: vec![LlmOutputPart::Text {
                         text: "ok".to_string(),
@@ -986,7 +986,12 @@ pub(super) async fn session_generation_options_reach_every_provider_request() {
             async move {
                 captured.lock_recover().push((
                     req.generation.clone(),
-                    req.request_defaults.max_output_tokens,
+                    req.model
+                        .metadata()
+                        .limits
+                        .output_tokens
+                        .default_cap()
+                        .map(|cap| cap.get() as u64),
                 ));
                 Ok(LlmResponse {
                     parts: vec![LlmOutputPart::Text {
@@ -1006,16 +1011,16 @@ pub(super) async fn session_generation_options_reach_every_provider_request() {
         [(
             lash_core::LlmProfileKey::new("served-model"),
             // A recorded model's output-cap default is model configuration,
-            // not request intent: it rides the request's defaults, never its
-            // generation options, and the adapter layers it under them in
-            // `resolve_generation_policy`.
+            // not request intent: it rides the recorded limits, never the
+            // generation options, and resolution layers it under them.
             lash_core::RegisteredLlmProfile::new(
-                lash_core::testing::test_llm_profile_metadata("mock-model").with_request_defaults(
-                    lash_core::provider::LlmProfileRequestDefaults {
-                        max_output_tokens: Some(1_024),
-                        ..Default::default()
-                    },
-                ),
+                {
+                    let mut metadata = lash_core::testing::test_llm_profile_metadata("mock-model");
+                    metadata.limits.output_tokens =
+                        lash_core::OutputTokenLimits::new(None, Some(1024))
+                            .expect("valid recorded cap");
+                    metadata
+                },
                 provider.clone(),
             ),
         )],
@@ -1194,29 +1199,48 @@ pub(super) async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
     // `update_session_config` selecting a smaller model must not leave the
     // session failing every remaining turn. It sends what the model can
     // produce, and the disposition says the number was reduced.
-    let captured: Arc<Mutex<Vec<lash_core::GenerationOptions>>> = Arc::new(Mutex::new(Vec::new()));
+    type Captured = (lash_core::GenerationOptions, Option<u64>);
+    let captured: Arc<Mutex<Vec<Captured>>> = Arc::new(Mutex::new(Vec::new()));
     let captured_for_provider = Arc::clone(&captured);
     let provider = TestProvider::builder()
         .kind("clamping-capture")
         .complete(move |req| {
             let captured = Arc::clone(&captured_for_provider);
             async move {
-                captured.lock_recover().push(req.generation.clone());
+                use lash_core::provider::{
+                    GenerationEmission, GenerationWire, OutputCapWire, ThinkingSummaryWire,
+                    resolve_generation_policy,
+                };
+                let policy = resolve_generation_policy(
+                    &req,
+                    "clamping-capture",
+                    &GenerationWire {
+                        label: "clamping-capture",
+                        output_token_cap: OutputCapWire::Optional,
+                        temperature: true,
+                        seed: true,
+                        stop_sequences: true,
+                        parallel_tool_calls: true,
+                        thinking_summary: ThinkingSummaryWire::NoField,
+                        active_thinking_pins_sampling: false,
+                    },
+                )?;
+                captured
+                    .lock_recover()
+                    .push((req.generation.clone(), policy.max_output_tokens));
                 Ok(LlmResponse {
                     parts: vec![LlmOutputPart::Text {
                         text: "ok".to_string(),
                         response_meta: None,
                     }],
-                    // The adapter reports the cap it was handed as applied; it
-                    // has no idea a larger one was asked for.
-                    generation_disposition: Some(lash_core::GenerationReceipt {
-                        output_token_cap: lash_core::GenerationOptionOutcome::Applied,
-                        temperature: lash_core::GenerationOptionOutcome::Applied,
-                        seed: lash_core::GenerationOptionOutcome::NotRequested,
-                        stop_sequences: lash_core::GenerationOptionOutcome::NotRequested,
-                        cache: lash_core::GenerationOptionOutcome::NotRequested,
-                        ..lash_core::GenerationReceipt::default()
-                    }),
+                    generation_disposition: Some(policy.receipt(
+                        &req,
+                        &GenerationEmission {
+                            output_token_cap: true,
+                            temperature: true,
+                            ..GenerationEmission::default()
+                        },
+                    )),
                     ..LlmResponse::default()
                 })
             }
@@ -1278,9 +1302,14 @@ pub(super) async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
 
     let seen = captured.lock_recover().clone();
     assert_eq!(
-        seen.first().expect("one provider call").output_token_cap,
-        NonZeroUsize::new(2_048),
-        "the request carries the model's capacity, not the larger cap asked for"
+        seen.first().expect("one provider call").0.output_token_cap,
+        NonZeroUsize::new(32_000),
+        "the request carries the original intent to resolution"
+    );
+    assert_eq!(
+        seen.first().expect("one provider call").1,
+        Some(2048),
+        "resolution sends the capacity"
     );
     assert_eq!(
         runtime.session_policy().generation.output_token_cap,

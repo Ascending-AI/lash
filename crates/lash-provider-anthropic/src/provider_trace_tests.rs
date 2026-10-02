@@ -58,7 +58,19 @@ impl LlmHttpTransport for RecordingTransport {
 fn request() -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: "claude-test".to_string(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::builder("claude-test".to_string())
+                    .context_window_tokens(128_000)
+                    .capability(Default::default())
+                    .extra_body(Default::default())
+                    .request_defaults(Default::default())
+                    .build()
+                    .expect("valid profile"),
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(
             LlmRole::User,
             format!("large prompt: {}", "x".repeat(3_000)),
@@ -67,10 +79,6 @@ fn request() -> LlmRequest {
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: crate::attachment_test_acceptance(),
-        model_variant: Default::default(),
-        llm_profile_capability: Default::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         generation: lash_core::GenerationOptions {
             output_token_cap: std::num::NonZeroUsize::new(4_096),
             ..lash_core::GenerationOptions::default()

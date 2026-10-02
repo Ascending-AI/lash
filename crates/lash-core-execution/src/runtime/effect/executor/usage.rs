@@ -54,12 +54,14 @@ impl super::LocalDirectEffectRunner {
         provider: crate::ProviderHandle,
         request: crate::LlmRequest,
         usage_source: String,
-        profile_key: crate::LlmProfileKey,
         usage_run: Option<&crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        let call = self
-            .usage
-            .call(usage_run, usage_source, profile_key, &request.model)?;
+        let call = self.usage.call(
+            usage_run,
+            usage_source,
+            request.model.key().clone(),
+            request.model.wire_model(),
+        )?;
         let (result, call_record) = self.run_direct_llm_request(provider, request, &call).await;
         if let Some(call_record) = &call_record {
             call.record(call_record);

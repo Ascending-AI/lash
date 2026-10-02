@@ -13,10 +13,7 @@ pub struct SansIoTurnInput<M: TurnProtocol = UnitTurnProtocol> {
     pub agent_frame_id: String,
     pub turn_id: TurnId,
     pub autonomous: bool,
-    pub model: String,
-    /// Model context-window size in tokens, if known. Threaded into the kernel
-    /// so it can reclassify a zero-output `OutputLimit` as `ContextOverflow`.
-    pub max_context_tokens: Option<usize>,
+    pub model: crate::llm_profile::LlmProfileConfig,
     pub messages: MessageSequence,
     pub events: crate::AppendVec<crate::SessionHistoryRecord<M::Event>>,
     pub turn_causes: Vec<crate::TurnCause>,
@@ -24,13 +21,9 @@ pub struct SansIoTurnInput<M: TurnProtocol = UnitTurnProtocol> {
     pub turn_driver_preamble: Arc<TurnDriverPreamble<M>>,
     pub turn_budget: crate::TurnBudget,
     pub no_progress_budget: crate::NoProgressBudget,
-    pub model_variant: crate::llm::capability::ReasoningSelection,
-    pub llm_profile_capability: crate::llm::capability::LlmProfileCapability,
     /// The session's recorded attachment-acceptance rules every request of
     /// the turn carries.
     pub attachment_acceptance: Arc<crate::llm::capability::AttachmentCapabilitySnapshot>,
-    pub extra_body: serde_json::Map<String, serde_json::Value>,
-    pub request_defaults: crate::llm::capability::LlmProfileRequestDefaults,
     pub generation: crate::llm::types::GenerationOptions,
     pub emit_llm_trace: bool,
     pub termination: M::Termination,
@@ -48,14 +41,9 @@ pub fn build_turn<M: TurnProtocol>(input: SansIoTurnInput<M>) -> PreparedTurnMac
             protocol_driver: input.turn_driver_preamble.config.protocol.clone(),
             projector: input.turn_driver_preamble.config.projector.clone(),
             model: input.model,
-            max_context_tokens: input.max_context_tokens,
             turn_budget: input.turn_budget,
             no_progress_budget: input.no_progress_budget,
-            model_variant: input.model_variant,
-            llm_profile_capability: input.llm_profile_capability,
             attachment_acceptance: input.attachment_acceptance,
-            extra_body: input.extra_body,
-            request_defaults: input.request_defaults,
             generation: input.generation,
             autonomous: input.autonomous,
             session_id: input.session_id,
@@ -158,8 +146,19 @@ mod tests {
             agent_frame_id: "frame-test".to_string(),
             turn_id: TurnId::from("turn"),
             autonomous: false,
-            model: "gpt-5".to_string(),
-            max_context_tokens: None,
+            model: crate::llm_profile::LlmProfileConfig::new(
+                crate::llm_profile::RecordedLlmProfile::mint(
+                    crate::llm_profile::LlmProfileKey::new("request-fixture"),
+                    crate::llm_profile::LlmProfileMetadata::builder("gpt-5".to_string())
+                        .context_window_tokens(128_000)
+                        .capability(crate::llm::capability::LlmProfileCapability::default())
+                        .extra_body(Default::default())
+                        .request_defaults(Default::default())
+                        .build()
+                        .expect("valid profile"),
+                ),
+            )
+            .with_reasoning(crate::ReasoningSelection::Effort("mini".to_string())),
             messages: crate::MessageSequence::default(),
             events: crate::AppendVec::new(),
             turn_causes: Vec::new(),
@@ -167,11 +166,7 @@ mod tests {
             turn_driver_preamble,
             turn_budget: crate::TurnBudget::bounded(3),
             no_progress_budget: crate::NoProgressBudget::default(),
-            model_variant: crate::ReasoningSelection::Effort("mini".to_string()),
-            llm_profile_capability: crate::llm::capability::LlmProfileCapability::default(),
             attachment_acceptance: Default::default(),
-            extra_body: Default::default(),
-            request_defaults: Default::default(),
             generation: crate::llm::types::GenerationOptions::default(),
             emit_llm_trace: true,
             termination: (),

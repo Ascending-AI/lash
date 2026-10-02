@@ -1,6 +1,7 @@
 //! LLM request/response envelopes: messages, attachments, tool specs, output
 //! specs, provider metadata, and schema-projection contracts.
 
+use crate::processes::RemoteModelConfig;
 use lash_sansio::SessionId;
 use std::collections::{BTreeMap, HashMap};
 
@@ -89,7 +90,7 @@ pub struct RemoteLlmRequest {
     pub instructions: Option<String>,
     pub request_id: String,
     pub scope: RemoteLlmRequestScope,
-    pub model_intent: RemoteModelIntent,
+    pub model: RemoteModelConfig,
     /// The session's recorded attachment-acceptance rules the request
     /// renders its attachments under (mirrors `LlmRequest`).
     #[serde(
@@ -151,7 +152,7 @@ impl RemoteLlmRequest {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         require_non_empty("RemoteLlmRequest", "request_id", &self.request_id)?;
         self.scope.validate()?;
-        self.model_intent.validate()?;
+        self.model.validate()?;
         self.generation.validate("RemoteLlmRequest")?;
         for (index, message) in self.messages.iter().enumerate() {
             message.validate(index)?;
@@ -497,30 +498,6 @@ impl RemoteLlmResponse {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteModelIntent {
-    pub model: String,
-    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
-    pub extra_body: serde_json::Map<String, serde_json::Value>,
-    #[serde(default)]
-    pub variant: RemoteReasoningSelection,
-    /// Host-supplied capability metadata for the model (mirrors the core
-    /// `LlmProfileCapability` contract).
-    #[serde(default, skip_serializing_if = "RemoteLlmProfileCapability::is_empty")]
-    pub capability: RemoteLlmProfileCapability,
-    /// The recorded model's request defaults (mirrors the core
-    /// `LlmRequest::request_defaults`).
-    #[serde(
-        default,
-        skip_serializing_if = "RemoteLlmProfileRequestDefaults::is_default"
-    )]
-    pub request_defaults: RemoteLlmProfileRequestDefaults,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub metadata: HashMap<String, String>,
-}
-
 /// Mirror of the core `LlmProfileRequestDefaults`: what a model's requests do
 /// where a request states nothing, recorded with the model.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -528,8 +505,6 @@ pub struct RemoteModelIntent {
 pub struct RemoteLlmProfileRequestDefaults {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub expose_thinking: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_output_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "RemoteCacheRetention::is_short")]
     pub cache_retention: RemoteCacheRetention,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -746,24 +721,6 @@ pub enum RemoteReasoningEncoding {
     #[default]
     Effort,
     Budget(BTreeMap<String, u32>),
-}
-
-impl RemoteModelIntent {
-    pub fn new(model: impl Into<String>) -> Self {
-        Self {
-            model: model.into(),
-            extra_body: serde_json::Map::new(),
-            request_defaults: Default::default(),
-            variant: RemoteReasoningSelection::ProviderDefault,
-            capability: RemoteLlmProfileCapability::default(),
-            provider: None,
-            metadata: HashMap::new(),
-        }
-    }
-
-    pub(crate) fn validate(&self) -> Result<(), RemoteProtocolError> {
-        require_non_empty("RemoteModelIntent", "model", &self.model)
-    }
 }
 
 /// Closed generation-option set: only options this protocol can actually

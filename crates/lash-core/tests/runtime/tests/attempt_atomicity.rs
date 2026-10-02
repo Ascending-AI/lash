@@ -1520,7 +1520,6 @@ async fn direct_completion_inside_a_recorded_attempt_redrives_without_a_journal_
                         .direct_completions()
                         .complete(
                             lash_core::facade_support::DirectRequest::text(
-                                DIRECT_MODEL,
                                 "redrive direct completion"
                             ),
                             "attempt-atomicity",
@@ -1616,7 +1615,19 @@ async fn direct_completion_inside_a_recorded_attempt_redrives_without_a_journal_
 fn direct_llm_request(request_id: &str) -> lash_core::LlmRequest {
     lash_core::LlmRequest {
         instructions: None,
-        model: DIRECT_MODEL.to_string(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::builder(DIRECT_MODEL.to_string())
+                    .context_window_tokens(128_000)
+                    .capability(lash_core::LlmProfileCapability::default())
+                    .extra_body(Default::default())
+                    .request_defaults(Default::default())
+                    .build()
+                    .expect("valid profile"),
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages: vec![lash_core::llm::types::LlmMessage::new(
             lash_core::llm::types::LlmRole::User,
             vec![lash_core::llm::types::LlmContentBlock::Text {
@@ -1629,10 +1640,6 @@ fn direct_llm_request(request_id: &str) -> lash_core::LlmRequest {
         tools: Arc::new(Vec::new()),
         tool_choice: lash_core::llm::types::LlmToolChoice::None,
         attachment_acceptance: Default::default(),
-        model_variant: Default::default(),
-        llm_profile_capability: lash_core::LlmProfileCapability::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         scope: lash_core::LlmRequestScope::new(SESSION, format!("{SESSION}:frame"), request_id),
         output_spec: None,
         stream_events: None,
@@ -1743,10 +1750,7 @@ impl lash_core::ToolProvider for RawClientDirectProvider {
         let completion = context
             .direct_completions
             .direct_completion(
-                lash_core::facade_support::DirectRequest::text(
-                    DIRECT_MODEL,
-                    "raw client direct completion",
-                ),
+                lash_core::facade_support::DirectRequest::text("raw client direct completion"),
                 "attempt-atomicity",
             )
             .await
@@ -1796,7 +1800,6 @@ async fn assert_raw_client_probe_starts_unbound(fixtures: &Fixtures) {
                 let completion = direct_completions
                     .direct_completion(
                         lash_core::facade_support::DirectRequest::text(
-                            DIRECT_MODEL,
                             "unbound client precondition",
                         ),
                         "attempt-atomicity",

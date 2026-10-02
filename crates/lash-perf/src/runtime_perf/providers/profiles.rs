@@ -723,17 +723,25 @@ pub(super) fn request_text(request: &LlmRequest) -> String {
 pub(super) fn empty_request() -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: "mock-model".to_string(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::new(
+                    "mock-model".to_string(),
+                    std::num::NonZeroUsize::MIN.saturating_add(127_999),
+                )
+                .with_capability(lash_core::LlmProfileCapability::default())
+                .with_extra_body(Default::default())
+                .with_request_defaults(Default::default()),
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages: Vec::new(),
         resolved_stored: Default::default(),
         tools: std::sync::Arc::new(Vec::new()),
         tool_choice: Default::default(),
         generation: Default::default(),
         attachment_acceptance: Default::default(),
-        model_variant: Default::default(),
-        llm_profile_capability: lash_core::LlmProfileCapability::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         scope: LlmRequestScope::new(
             "runtime-perf-empty".to_string(),
             "runtime-perf-empty:frame".to_string(),

@@ -619,7 +619,19 @@ fn wire_script_json(timeline: Value) -> String {
 fn request(stream_events: Option<LlmEventSender>) -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: "openai/gpt-5.4".to_string(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::builder("openai/gpt-5.4".to_string())
+                    .context_window_tokens(128_000)
+                    .capability(lash_core::LlmProfileCapability::default())
+                    .extra_body(Default::default())
+                    .request_defaults(Default::default())
+                    .build()
+                    .expect("valid profile"),
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "lookup x")],
         resolved_stored: Default::default(),
         tools: Arc::new(vec![LlmToolSpec {
@@ -637,10 +649,6 @@ fn request(stream_events: Option<LlmEventSender>) -> LlmRequest {
         }]),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
-        model_variant: Default::default(),
-        llm_profile_capability: lash_core::LlmProfileCapability::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",
@@ -656,16 +664,24 @@ fn request(stream_events: Option<LlmEventSender>) -> LlmRequest {
 fn responses_request() -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: "gpt-5.4".to_string(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::builder("gpt-5.4".to_string())
+                    .context_window_tokens(128_000)
+                    .capability(lash_core::LlmProfileCapability::default())
+                    .extra_body(Default::default())
+                    .request_defaults(Default::default())
+                    .build()
+                    .expect("valid profile"),
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
-        model_variant: Default::default(),
-        llm_profile_capability: lash_core::LlmProfileCapability::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",

@@ -609,7 +609,6 @@ fn push_sse_event(body: &mut String, event: serde_json::Value) {
 )]
 pub(super) fn direct_llm_client_request(turn_index: usize) -> lash::direct::DirectRequest {
     lash::direct::DirectRequest::json_schema(
-        "mock-model",
         format!(
             "Direct LLM client runtime perf turn {}. Return the benchmark marker.",
             turn_index + 1

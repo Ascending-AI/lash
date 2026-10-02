@@ -239,8 +239,10 @@ impl Route {
             .kind(KIND)
             .complete(move |request| {
                 seen.lock().expect("seen requests").push(Seen {
-                    wire_model: request.model.clone(),
+                    wire_model: request.model.wire_model().to_string(),
                     revision: request
+                        .model
+                        .metadata()
                         .extra_body
                         .get("catalog_revision")
                         .and_then(|value| value.as_str())
@@ -1423,7 +1425,7 @@ impl lash::tools::ToolProvider for AskModel {
             .context
             .direct_completions()
             .complete(
-                lash::direct::DirectRequest::text("kimi-k3", "a direct question"),
+                lash::direct::DirectRequest::text("a direct question"),
                 "ask-model",
             )
             .await;
@@ -1688,7 +1690,7 @@ impl AskTwice {
             .context
             .direct_completions()
             .complete(
-                lash::direct::DirectRequest::text("kimi-k3", "a direct question"),
+                lash::direct::DirectRequest::text("a direct question"),
                 source,
             )
             .await;

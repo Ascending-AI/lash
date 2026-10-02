@@ -30,25 +30,33 @@ const OWN: &str = "INTRO THE SESSION'S OWN SPEC STATED";
 
 /// The request defaults the first deployment registers for the model: every
 /// session it creates records them with its model binding.
-fn creating_core_defaults() -> lash_core::provider::LlmProfileRequestDefaults {
-    lash_core::provider::LlmProfileRequestDefaults {
-        max_output_tokens: Some(3_333),
-        response_metadata_headers: vec!["x-creator-cost".to_string()],
-        response_metadata_body_paths: vec!["/creator/cost".to_string()],
-        ..lash_core::provider::LlmProfileRequestDefaults::default()
-    }
+fn creating_core_metadata() -> lash_core::LlmProfileMetadata {
+    let mut metadata = mock_llm_profile_spec().with_request_defaults(
+        lash_core::provider::LlmProfileRequestDefaults {
+            response_metadata_headers: vec!["x-creator-cost".to_string()],
+            response_metadata_body_paths: vec!["/creator/cost".to_string()],
+            ..lash_core::provider::LlmProfileRequestDefaults::default()
+        },
+    );
+    metadata.limits.output_tokens =
+        crate::OutputTokenLimits::new(None, Some(3333)).expect("valid recorded cap");
+    metadata
 }
 
 /// The request defaults the redeployed core registers for the same model
 /// key: no session created before it may be served with them.
-fn redeployed_core_defaults() -> lash_core::provider::LlmProfileRequestDefaults {
-    lash_core::provider::LlmProfileRequestDefaults {
-        expose_thinking: true,
-        max_output_tokens: Some(7_777),
-        cache_retention: crate::provider::CacheRetention::Long,
-        response_metadata_headers: vec!["x-redeployed-cost".to_string()],
-        response_metadata_body_paths: vec!["/redeployed".to_string()],
-    }
+fn redeployed_core_metadata() -> lash_core::LlmProfileMetadata {
+    let mut metadata = mock_llm_profile_spec().with_request_defaults(
+        lash_core::provider::LlmProfileRequestDefaults {
+            expose_thinking: true,
+            cache_retention: crate::provider::CacheRetention::Long,
+            response_metadata_headers: vec!["x-redeployed-cost".to_string()],
+            response_metadata_body_paths: vec!["/redeployed".to_string()],
+        },
+    );
+    metadata.limits.output_tokens =
+        crate::OutputTokenLimits::new(None, Some(7777)).expect("valid recorded cap");
+    metadata
 }
 
 /// Every request a provider served, in the order it served them.
@@ -130,20 +138,17 @@ fn spec_stating(intro: &str) -> Result<lash_core::facade_support::SessionSpec> {
         .map_err(EmbedError::ProtocolTurnOptions)
 }
 
-/// A core over `backend` whose model is registered with `request_defaults`.
+/// A core over `backend` whose model is registered with `metadata`.
 /// The deployment's default spec is its host's: [`spec_stating`] the
 /// deployment's default intro, passed to each creation.
-fn core_with_defaults(
+fn core_with_metadata(
     backend: lash_core::Backend,
     provider: ProviderHandle,
-    request_defaults: lash_core::provider::LlmProfileRequestDefaults,
+    metadata: lash_core::LlmProfileMetadata,
 ) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .tools(Arc::new(AppTools))
-        .serve_test_llm_profile(
-            provider,
-            mock_llm_profile_spec().with_request_defaults(request_defaults),
-        )
+        .serve_test_llm_profile(provider, metadata)
         .build(crate::testing::runtime_lease_owner())
 }
 
@@ -255,8 +260,8 @@ async fn a_session_created_under_defaults_a_reopens_and_redrives_under_a(
         for request in &requests {
             assert_intro(request, intro, &format!("{id} {how}"));
             assert_eq!(
-                request.request_defaults,
-                creating_core_defaults(),
+                request.model.metadata(),
+                &creating_core_metadata(),
                 "{id} {how}: its calls carry the request defaults its model binding recorded"
             );
         }
@@ -264,10 +269,10 @@ async fn a_session_created_under_defaults_a_reopens_and_redrives_under_a(
 
     let (first, _held) = deployment(stores, seed, config).await;
     {
-        let creator = core_with_defaults(
+        let creator = core_with_metadata(
             first.lash_backend(),
             scripted_provider(&served, &script),
-            creating_core_defaults(),
+            creating_core_metadata(),
         )?;
         creator
             .session(DEFAULTED)
@@ -295,10 +300,10 @@ async fn a_session_created_under_defaults_a_reopens_and_redrives_under_a(
         }
     }
     let second = redeploy(first).await;
-    let redeployed = core_with_defaults(
+    let redeployed = core_with_metadata(
         second.lash_backend(),
         scripted_provider(&served, &script),
-        redeployed_core_defaults(),
+        redeployed_core_metadata(),
     )?;
     for (id, intro) in recorded {
         tokio::time::timeout(
@@ -370,8 +375,8 @@ async fn a_session_created_under_defaults_a_reopens_and_redrives_under_a(
     assert_eq!(created_later.len(), 1);
     assert_intro(&created_later[0], DEFAULTS_B, "a session created later");
     assert_eq!(
-        created_later[0].request_defaults,
-        redeployed_core_defaults()
+        created_later[0].model.metadata(),
+        &redeployed_core_metadata()
     );
     Ok(())
 }
@@ -444,10 +449,10 @@ async fn a_prompt_command_reaches_the_next_root_and_not_the_running_one(
     let script = Arc::new(Script::default());
     let (double, _held) =
         deployment(stores, seed, lash_restate_test::ServerConfig::default()).await;
-    let core = core_with_defaults(
+    let core = core_with_metadata(
         double.lash_backend(),
         scripted_provider(&served, &script),
-        creating_core_defaults(),
+        creating_core_metadata(),
     )?;
     core.session(ID)
         .create(crate::SessionCreation::root(spec_stating(DEFAULTS_A)?))
@@ -532,10 +537,10 @@ async fn a_child_created_before_its_parents_prompt_changed_keeps_its_own(
     let (double, _held) =
         deployment(stores, seed, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
-    let core = core_with_defaults(
+    let core = core_with_metadata(
         backend.clone(),
         scripted_provider(&served, &script),
-        creating_core_defaults(),
+        creating_core_metadata(),
     )?;
     core.session(PARENT)
         .create(crate::SessionCreation {
@@ -693,10 +698,10 @@ async fn a_run_options_prompt_is_refused(stores: Stores, seed: u64) -> Result<()
     let script = Arc::new(Script::default());
     let (double, _held) =
         deployment(stores, seed, lash_restate_test::ServerConfig::default()).await;
-    let core = core_with_defaults(
+    let core = core_with_metadata(
         double.lash_backend(),
         scripted_provider(&served, &script),
-        creating_core_defaults(),
+        creating_core_metadata(),
     )?;
     core.session(ID)
         .create(crate::SessionCreation::root(spec_stating(DEFAULTS_A)?))

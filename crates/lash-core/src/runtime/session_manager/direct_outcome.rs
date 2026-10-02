@@ -54,7 +54,7 @@ async fn apply_direct_llm_result(
                 llm_call_id.as_deref(),
                 caused_by,
                 &response,
-                &request.model,
+                request.model.wire_model(),
                 call_record,
             );
             let usage = token_usage_from_llm(&response.usage);

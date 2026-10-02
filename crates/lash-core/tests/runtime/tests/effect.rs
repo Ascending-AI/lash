@@ -333,7 +333,7 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
                 .context
                 .direct_completions()
                 .complete(
-                    lash_core::facade_support::DirectRequest::text("mock-model", "nested"),
+                    lash_core::facade_support::DirectRequest::text("nested"),
                     "tool-direct",
                 )
                 .await
@@ -1078,7 +1078,7 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
         .expect("valid test runtime scope"),
         None,
     );
-    let mut request = lash_core::facade_support::DirectRequest::text("mock-model", "summarize");
+    let mut request = lash_core::facade_support::DirectRequest::text("summarize");
     let caused_by = CausalRef::ToolCall {
         session_id: SessionId::from("root"),
         call_id: lash_core::ToolCallId::fixture("originating-tool-call"),
@@ -1121,6 +1121,82 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
         "a canned answer is no paid call: {usage:?}"
     );
     assert_eq!(usage.completeness, lash_core::UsageCompleteness::default());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_direct_completion_journals_the_owners_recorded_binding() {
+    let double = kernel_double(SEED + 4655, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let recorder = RecordingEffectController::default();
+    let runtime = runtime_with_plugins_and_tools_and_host(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        mock_provider(Vec::new()),
+        host_with_effect_recorder(&backend, recorder.clone()),
+    )
+    .await;
+    let owner = runtime
+        .session_policy()
+        .model
+        .as_ref()
+        .expect("recorded profile")
+        .clone();
+    let manager = runtime
+        .runtime_session_services()
+        .expect("session services");
+    let direct = manager.direct_completion_client(
+        ScopedEffectController::shared(
+            layered_operation_controller(&backend, Arc::new(recorder.clone())),
+            lash_core::AdmittedScope::runtime_operation("recorded-direct-binding"),
+        )
+        .expect("operation scope"),
+        None,
+    );
+    let request = lash_core::facade_support::DirectRequest::text("summarize");
+    direct
+        .direct_completion(request, "binding-law")
+        .await
+        .expect("completion");
+    let mut forged = owner.clone();
+    forged.model = lash_core::RecordedLlmProfile::mint(
+        lash_core::LlmProfileKey::new("caller-profile"),
+        lash_core::LlmProfileMetadata::builder("another-model")
+            .context_window_tokens(4096)
+            .output_token_capacity(1024)
+            .max_output_tokens(512)
+            .extra_body(
+                serde_json::json!({"caller_route": true})
+                    .as_object()
+                    .expect("object")
+                    .clone(),
+            )
+            .build()
+            .expect("valid caller metadata"),
+    );
+    forged.reasoning = lash_core::ReasoningSelection::Effort("unsupported-caller-effort".into());
+    let mut raw = lash_core::direct::build_llm_request(
+        lash_core::facade_support::DirectRequest::text("raw summarize"),
+        forged,
+    )
+    .expect("request");
+    raw.scope.request_id = "raw-binding-law".into();
+    direct
+        .direct_llm_completion(raw, "raw-binding-law")
+        .await
+        .expect("raw completion");
+    let requests: Vec<_> = recorder
+        .envelopes()
+        .into_iter()
+        .map(|wire| serde_json::from_str::<RuntimeEffectEnvelope>(&wire).expect("envelope"))
+        .filter_map(|envelope| match envelope.command {
+            RuntimeEffectCommand::Direct { request, .. } => Some(request),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(requests.len(), 2);
+    for request in requests {
+        assert_eq!(request.model, owner);
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1170,7 +1246,7 @@ async fn in_turn_direct_completion_uses_effect_controller_without_out_of_band_co
     );
     let completion = direct
         .direct_completion(
-            lash_core::facade_support::DirectRequest::text("mock-model", "summarize"),
+            lash_core::facade_support::DirectRequest::text("summarize"),
             "direct-test",
         )
         .await
@@ -1247,14 +1323,14 @@ async fn direct_clients_from_one_turn_share_sequential_replay_ordinals() {
 
     first
         .direct_completion(
-            lash_core::facade_support::DirectRequest::text("mock-model", "first"),
+            lash_core::facade_support::DirectRequest::text("first"),
             "direct-test",
         )
         .await
         .expect("first direct completion");
     second
         .direct_completion(
-            lash_core::facade_support::DirectRequest::text("mock-model", "second"),
+            lash_core::facade_support::DirectRequest::text("second"),
             "direct-test",
         )
         .await
@@ -1306,7 +1382,7 @@ async fn direct_concurrency_requires_keys_and_releases_unkeyed_guard() {
     let mut first = lash_core::task::spawn(async move {
         first_client
             .direct_completion(
-                lash_core::facade_support::DirectRequest::text("mock-model", "first"),
+                lash_core::facade_support::DirectRequest::text("first"),
                 "direct-test",
             )
             .await
@@ -1314,7 +1390,7 @@ async fn direct_concurrency_requires_keys_and_releases_unkeyed_guard() {
     gate.0.notified().await;
     client
         .direct_completion(
-            lash_core::facade_support::DirectRequest::text("mock-model", "other hook"),
+            lash_core::facade_support::DirectRequest::text("other hook"),
             "other-plugin-hook",
         )
         .await
@@ -1322,7 +1398,7 @@ async fn direct_concurrency_requires_keys_and_releases_unkeyed_guard() {
     let overlap = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         client.direct_completion(
-            lash_core::facade_support::DirectRequest::text("mock-model", "overlap"),
+            lash_core::facade_support::DirectRequest::text("overlap"),
             "direct-test",
         ),
     )
@@ -1338,11 +1414,11 @@ async fn direct_concurrency_requires_keys_and_releases_unkeyed_guard() {
         .expect("first completion");
 
     let keyed_a = client.direct_completion(
-        lash_core::facade_support::DirectRequest::text("mock-model", "a").with_replay_key("a"),
+        lash_core::facade_support::DirectRequest::text("a").with_replay_key("a"),
         "direct-test",
     );
     let keyed_b = client.direct_completion(
-        lash_core::facade_support::DirectRequest::text("mock-model", "b").with_replay_key("b"),
+        lash_core::facade_support::DirectRequest::text("b").with_replay_key("b"),
         "direct-test",
     );
     let (a, b) = tokio::join!(keyed_a, keyed_b);
@@ -1350,7 +1426,7 @@ async fn direct_concurrency_requires_keys_and_releases_unkeyed_guard() {
     b.expect("second keyed call");
     client
         .direct_completion(
-            lash_core::facade_support::DirectRequest::text("mock-model", "after"),
+            lash_core::facade_support::DirectRequest::text("after"),
             "direct-test",
         )
         .await
@@ -1399,7 +1475,7 @@ async fn direct_effect_restores_required_streaming_for_provider_execution() {
     let direct = manager.direct_completion_client(handler.scoped(), None);
     let completion = direct
         .direct_completion(
-            lash_core::facade_support::DirectRequest::text("mock-model", "summarize"),
+            lash_core::facade_support::DirectRequest::text("summarize"),
             "direct-test",
         )
         .await
@@ -1431,7 +1507,19 @@ async fn direct_llm_completion_envelope_stores_attachment_refs_not_bytes() {
     let expected_attachment_id = lash_core::attachments::content_id(&image_bytes).to_string();
     let request = LlmRequest {
         instructions: None,
-        model: "mock-model".to_string(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::builder("mock-model".to_string())
+                    .context_window_tokens(128_000)
+                    .capability(lash_core::LlmProfileCapability::default())
+                    .extra_body(Default::default())
+                    .request_defaults(Default::default())
+                    .build()
+                    .expect("valid profile"),
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages: vec![LlmMessage::new(
             LlmRole::User,
             vec![LlmContentBlock::Attachment {
@@ -1445,10 +1533,6 @@ async fn direct_llm_completion_envelope_stores_attachment_refs_not_bytes() {
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::None,
         attachment_acceptance: Default::default(),
-        model_variant: Default::default(),
-        llm_profile_capability: lash_core::LlmProfileCapability::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         scope: lash_core::LlmRequestScope::new(
             "direct-attachment-test",
             "direct-attachment-test:frame",

@@ -105,12 +105,7 @@ impl LlmToolsProvider {
             .complete(
                 DirectRequest {
                     instructions: Some(Arc::from("Answer the focused sub-question using only the supplied task and inputs. Return only JSON matching the requested result wrapper. Use kind=\"error\" with a concise error only when the task cannot be answered from the supplied inputs.")),
-                    model: session_model.model,
-                    model_variant: session_model.model_variant,
-                    llm_profile_capability: session_model.llm_profile_capability,
                     attachment_acceptance: session_model.attachment_acceptance,
-                    extra_body: session_model.extra_body,
-                    request_defaults: session_model.request_defaults,
                     messages: vec![
                         DirectMessage {
                             role: DirectRole::User,
@@ -583,8 +578,7 @@ mod tests {
         assert_eq!(requests.len(), 1);
         let (request, usage_source) = &requests[0];
         assert_eq!(usage_source, "llm_query");
-        assert_eq!(request.model, "root-model");
-        assert_eq!(request.model_variant.effort(), Some("fast"));
+        assert_eq!(request.generation, manager.snapshot.policy.generation);
         assert!(matches!(
             request.output,
             lash_core::facade_support::DirectOutputSpec::JsonSchema(_)
@@ -603,12 +597,10 @@ mod tests {
         assert!(prompt.contains("\"log\": \"failed\""));
     }
 
-    /// `llm_query` has no model selection of its own: the request carries
-    /// the session's recorded wire model, reasoning, capability, request
-    /// extensions and request defaults, and nothing the plugin was built
-    /// with.
+    /// The runtime supplies the recorded binding; the tool supplies only
+    /// the session's generation intent and the focused prompt.
     #[tokio::test]
-    async fn llm_query_sends_only_what_the_session_recorded() {
+    async fn llm_query_leaves_binding_to_its_session_owner() {
         let mut extra_body = serde_json::Map::new();
         extra_body.insert("catalog_revision".to_string(), json!("r1"));
         let metadata = lash_core::LlmProfileMetadata::builder("root-model")
@@ -645,10 +637,11 @@ mod tests {
         let requests = manager.requests.lock_recover();
         assert_eq!(requests.len(), 1);
         let (request, _) = &requests[0];
-        assert_eq!(request.model, "root-model");
-        assert_eq!(request.extra_body, extra_body);
-        assert_eq!(request.request_defaults, metadata.request_defaults);
-        assert_eq!(request.llm_profile_capability, metadata.capability);
+        assert_eq!(request.generation, manager.snapshot.policy.generation);
+        let wire = serde_json::to_value(request).expect("direct request");
+        assert!(wire.get("model").is_none());
+        assert!(wire.get("extra_body").is_none());
+        assert!(wire.get("request_defaults").is_none());
     }
 
     #[tokio::test]

@@ -6,7 +6,19 @@ use crate::{AttachmentSource, MediaType};
 fn request(sources: Vec<AttachmentSource>) -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: "fixture".into(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::builder("fixture")
+                    .context_window_tokens(128_000)
+                    .capability(Default::default())
+                    .extra_body(Default::default())
+                    .request_defaults(Default::default())
+                    .build()
+                    .expect("valid profile"),
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages: vec![LlmMessage::new(
             LlmRole::User,
             sources
@@ -19,11 +31,7 @@ fn request(sources: Vec<AttachmentSource>) -> LlmRequest {
         resolved_stored: Default::default(),
         tools: Arc::new(vec![]),
         tool_choice: LlmToolChoice::None,
-        model_variant: Default::default(),
-        llm_profile_capability: Default::default(),
         attachment_acceptance: Default::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         scope: crate::llm::types::LlmRequestScope::new("session", "frame", "call"),
         output_spec: None,
         stream_events: None,

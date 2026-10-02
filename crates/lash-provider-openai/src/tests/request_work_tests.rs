@@ -127,7 +127,7 @@ fn request_work_budget_rejects_large_field_before_json_writer() {
     let large = "x".repeat(1024 * 1024);
     let text = request(vec![LlmMessage::text(LlmRole::User, large.clone())]);
     let mut model = request(Vec::new());
-    model.model = large.clone();
+    model.model.metadata_mut().wire_model = large.clone();
     let mut scope = request(Vec::new());
     scope.scope.request_id = large.clone();
     let mut schema = request(Vec::new());

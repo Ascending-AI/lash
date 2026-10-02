@@ -138,7 +138,7 @@ fn assert_runs_creation_config(policy: &lash_core::SessionPolicy) {
 }
 
 fn assert_request_uses_creation_config(request: &lash_core::LlmRequest) {
-    assert_eq!(request.model, "created-model");
+    assert_eq!(request.model.wire_model(), "created-model");
     assert!(
         request
             .instructions

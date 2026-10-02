@@ -408,8 +408,8 @@ pub(crate) fn trace_context_with_causal_ref(
 
 pub(crate) fn trace_llm_request(req: &LlmRequest) -> TraceLlmRequest {
     TraceLlmRequest {
-        model: req.model.clone(),
-        model_variant: match &req.model_variant {
+        model: req.model.wire_model().to_string(),
+        model_variant: match &req.model.reasoning {
             crate::ReasoningSelection::ProviderDefault => None,
             crate::ReasoningSelection::Disabled => Some("disabled".to_string()),
             crate::ReasoningSelection::Effort(effort) => Some(effort.clone()),
@@ -475,7 +475,9 @@ pub fn trace_composition_key(req: &LlmRequest, tool_fingerprints: &[[u8; 32]]) -
     let mut hash = Blake3DomainHasher::new(LASH_MODEL_FACING_COMPOSITION_DOMAIN_VERSION);
     hash.update([u8::from(req.instructions.is_some())]);
     hash.update(
-        req.llm_profile_capability
+        req.model
+            .metadata()
+            .capability
             .instruction_role
             .as_str()
             .as_bytes(),

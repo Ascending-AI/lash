@@ -20,7 +20,7 @@ impl OpenAiCompatibleProvider {
         req: &LlmRequest,
         stream: bool,
     ) -> Result<BuiltRequest, LlmTransportError> {
-        let serving_route = self.route_identity(&req.model);
+        let serving_route = self.route_identity(req.model.wire_model());
         self.build_responses_request_for_route(req, stream, &serving_route)
     }
 
@@ -71,7 +71,7 @@ impl OpenAiCompatibleProvider {
             shared::build_tools_with_capabilities(PROVIDER, req, &compat.schema_capabilities)?;
         let input = shared::build_responses_input(req);
         let mut body = json!({
-            "model": req.model,
+            "model": req.model.wire_model(),
             "input": null,
             "tools": tools,
             "stream": stream,
@@ -106,8 +106,12 @@ impl OpenAiCompatibleProvider {
                 body[key] = value;
             }
         }
-        if let ReasoningRetentionSelection::OpenAiContext { context } =
-            req.llm_profile_capability.reasoning_retention.selection
+        if let ReasoningRetentionSelection::OpenAiContext { context } = req
+            .model
+            .metadata()
+            .capability
+            .reasoning_retention
+            .selection
         {
             reasoning_object(&mut body)["context"] = json!(context.as_str());
             emission.reasoning_retention = true;
@@ -147,7 +151,7 @@ impl OpenAiCompatibleProvider {
         if compat.cache_session_affinity {
             reserved.push("/session_id");
         }
-        let passthrough = merge_extra_body(&mut body, &req.extra_body, &reserved)?;
+        let passthrough = merge_extra_body(&mut body, &req.model.metadata().extra_body, &reserved)?;
         let mut receipt = policy.receipt(req, &emission);
         receipt.passthrough = if !self.wire.extra_headers.is_empty() {
             lash_core::GenerationOptionOutcome::Applied

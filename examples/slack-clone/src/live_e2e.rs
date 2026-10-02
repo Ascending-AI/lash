@@ -176,7 +176,7 @@ impl SpendLedger {
                 ),
             ));
         }
-        let Some(price) = price_for(&request.model) else {
+        let Some(price) = price_for(request.model.wire_model()) else {
             return Err(typed_provider_error(
                 "ModelNotPriced",
                 ProviderFailureKind::Unsupported,
@@ -392,7 +392,7 @@ impl Provider for MeteredProvider {
                 "live E2E spend cap was already exceeded",
             ));
         }
-        if price_for(&request.model).is_none() {
+        if price_for(request.model.wire_model()).is_none() {
             return Err(typed_provider_error(
                 "ModelNotPriced",
                 ProviderFailureKind::Unsupported,
@@ -402,7 +402,7 @@ impl Provider for MeteredProvider {
                 ),
             ));
         }
-        let model = request.model.clone();
+        let model = request.model.wire_model().to_string();
         let reservation = self.ledger.reserve(&request)?;
         match self.inner.complete(request).await {
             Ok(response) => {

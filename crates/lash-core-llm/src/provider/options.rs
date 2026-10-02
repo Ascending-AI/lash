@@ -106,11 +106,12 @@ impl<'de> Deserialize<'de> for RequestTimeout {
 }
 
 /// A provider route's operational options: its reliability policy and its
-/// transport byte guards. They govern an attempt and never what a call asks
-/// for or captures: publication, the fallback output cap, the cache hint and
-/// response-metadata capture are the recorded model's
-/// [`LlmProfileRequestDefaults`](lash_sansio::llm::capability::LlmProfileRequestDefaults),
-/// carried by each request.
+/// transport byte guards. Publication, cache hints and response-metadata capture
+/// come from the recorded model's
+/// [`LlmProfileRequestDefaults`](lash_sansio::llm::capability::LlmProfileRequestDefaults).
+/// The default output cap comes from its
+/// [`OutputTokenLimits`](crate::llm_profile::OutputTokenLimits). Each request
+/// carries both as part of its recorded binding.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderOptions {
@@ -202,6 +203,7 @@ pub struct ResolvedGenerationPolicy {
     /// The request's cap, else the model's recorded default. `None` sends no
     /// cap.
     pub max_output_tokens: Option<u64>,
+    pub output_token_cap_clamped: bool,
     pub temperature: Option<crate::NonNegativeFiniteF64>,
     pub seed: Option<i64>,
     /// Caller-requested literal generation boundaries, copied to the wire
@@ -259,7 +261,7 @@ fn unsupported(wire: &GenerationWire, setting: &str, reason: &str) -> LlmTranspo
 /// and nothing is remapped.
 ///
 /// Lash invents no defaults: with no request cap and no recorded
-/// `max_output_tokens` default no cap is sent, and a wire that requires one
+/// `output_tokens.default_cap` no cap is sent, and a wire that requires one
 /// refuses the call with `output_token_cap_required`. A pinned model
 /// ([`SamplingCapability::Pinned`](lash_sansio::llm::capability::SamplingCapability))
 /// or active thinking that pins sampling refuses a set temperature on every
@@ -269,24 +271,36 @@ pub fn resolve_generation_policy(
     provider_kind: &str,
     wire: &GenerationWire,
 ) -> Result<ResolvedGenerationPolicy, LlmTransportError> {
-    let defaults = &request.request_defaults;
+    let defaults = &request.model.metadata().request_defaults;
     let reasoning = request
-        .llm_profile_capability
-        .reasoning_intent(&request.model, provider_kind, &request.model_variant)
+        .model
+        .metadata()
+        .capability
+        .reasoning_intent(
+            request.model.wire_model(),
+            provider_kind,
+            &request.model.reasoning,
+        )
         .map_err(|error| {
             refused(error.category.failure_code(), error.message)
                 .with_kind(ProviderFailureKind::Validation)
         })?;
     let generation = &request.generation;
-    let max_output_tokens = generation
-        .output_token_cap_u64()
-        .or(defaults.max_output_tokens);
+    let output_tokens = &request.model.metadata().limits.output_tokens;
+    let requested_cap = generation.output_token_cap.or(output_tokens.default_cap());
+    let effective_cap = match (requested_cap, output_tokens.capacity()) {
+        (Some(requested), Some(capacity)) => Some(requested.min(capacity)),
+        (requested, None) => requested,
+        (None, Some(_)) => None,
+    };
+    let max_output_tokens = effective_cap.map(|cap| cap.get() as u64);
+    let output_token_cap_clamped = requested_cap != effective_cap;
     match (wire.output_token_cap, max_output_tokens) {
         (OutputCapWire::Required, None) => {
             return Err(refused(
                 TurnFailureCode::OutputTokenCapRequired,
                 format!(
-                    "{} requires an output-token cap; set the request's `output_token_cap` or the model's `max_output_tokens` default.",
+                    "{} requires an output-token cap; set the request's `output_token_cap` or the model's `output_tokens.default_cap`.",
                     wire.label
                 ),
             ));
@@ -300,7 +314,12 @@ pub fn resolve_generation_policy(
         if !wire.temperature {
             return Err(unsupported(wire, "temperature", "has no field for"));
         }
-        if !request.llm_profile_capability.allows_caller_temperature() {
+        if !request
+            .model
+            .metadata()
+            .capability
+            .allows_caller_temperature()
+        {
             return Err(unsupported(
                 wire,
                 "temperature",
@@ -344,6 +363,7 @@ pub fn resolve_generation_policy(
         };
     Ok(ResolvedGenerationPolicy {
         max_output_tokens,
+        output_token_cap_clamped,
         temperature: generation.temperature.clone(),
         seed: generation.seed,
         stop_sequences: generation.stop_sequences.clone(),
@@ -358,8 +378,7 @@ pub fn resolve_generation_policy(
 impl ResolvedGenerationPolicy {
     /// The per-call receipt: this resolution supplies what the host asked
     /// for, the adapter's `emission` what it put on the wire. `Applied` means
-    /// sent, never provider compliance. Runtime layers narrow it afterwards
-    /// for the clamp and protocol stop suppression they alone saw.
+    /// sent, never provider compliance. Resolution reports clamping; the runtime reports protocol stop suppression.
     pub fn receipt(
         &self,
         request: &LlmRequest,
@@ -378,10 +397,11 @@ impl ResolvedGenerationPolicy {
             })
         });
         GenerationReceipt {
-            output_token_cap: Outcome::from_emission(
-                self.max_output_tokens.is_some(),
-                emission.output_token_cap,
-            ),
+            output_token_cap: if self.output_token_cap_clamped && emission.output_token_cap {
+                Outcome::ClampedToCapacity
+            } else {
+                Outcome::from_emission(self.max_output_tokens.is_some(), emission.output_token_cap)
+            },
             temperature: Outcome::from_emission(self.temperature.is_some(), emission.temperature),
             seed: Outcome::from_emission(self.seed.is_some(), emission.seed),
             stop_sequences: Outcome::from_emission(
@@ -392,7 +412,12 @@ impl ResolvedGenerationPolicy {
             reasoning: Outcome::from_emission(self.reasoning.is_some(), emission.reasoning),
             reasoning_retention: Outcome::from_emission(
                 !matches!(
-                    request.llm_profile_capability.reasoning_retention.selection,
+                    request
+                        .model
+                        .metadata()
+                        .capability
+                        .reasoning_retention
+                        .selection,
                     ReasoningRetentionSelection::ProviderDefault
                 ),
                 emission.reasoning_retention,

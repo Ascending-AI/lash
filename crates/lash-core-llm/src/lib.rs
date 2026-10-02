@@ -8,7 +8,7 @@
 //! item below at its original path.
 
 pub mod llm;
-pub mod llm_profile;
+pub use lash_sansio::llm_profile;
 pub mod provider;
 pub mod session_model;
 pub mod trace;

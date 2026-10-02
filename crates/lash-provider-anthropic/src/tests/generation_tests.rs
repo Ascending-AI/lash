@@ -16,9 +16,9 @@ fn requested_temperature_is_sent_and_refused_where_thinking_pins_sampling() {
     );
 
     let mut thinking_req = req.clone();
-    thinking_req.model_variant =
+    thinking_req.model.reasoning =
         lash_core::provider::ReasoningSelection::Effort("medium".to_string());
-    thinking_req.llm_profile_capability = effort_capability(&["low", "medium", "high"]);
+    thinking_req.model.metadata_mut().capability = effort_capability(&["low", "medium", "high"]);
     // Extended thinking pins sampling; the temperature is refused rather
     // than dropped.
     let error = provider
@@ -30,7 +30,7 @@ fn requested_temperature_is_sent_and_refused_where_thinking_pins_sampling() {
     );
 
     // Thinking turned off does not pin sampling.
-    thinking_req.model_variant = lash_core::provider::ReasoningSelection::Disabled;
+    thinking_req.model.reasoning = lash_core::provider::ReasoningSelection::Disabled;
     let (off, _) = provider.build_request(&thinking_req).expect("off body");
     assert_eq!(off["temperature"], json!(0.25));
 }
@@ -55,9 +55,9 @@ fn requested_temperature_is_refused_for_a_model_that_pins_sampling() {
     // through the capability; the adapter never reads the model name.
     let provider = AnthropicProvider::new("key");
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model = "claude-opus-4-7".to_string();
+    req.model.metadata_mut().wire_model = "claude-opus-4-7".to_string();
     req.generation.temperature = Some(NonNegativeFiniteF64::new(0.25).expect("finite temperature"));
-    req.llm_profile_capability.sampling = lash_core::SamplingCapability::Pinned;
+    req.model.metadata_mut().capability.sampling = lash_core::SamplingCapability::Pinned;
 
     let error = provider
         .build_request(&req)
@@ -68,7 +68,7 @@ fn requested_temperature_is_refused_for_a_model_that_pins_sampling() {
     );
 
     // The same request against a model that allows it still emits.
-    req.llm_profile_capability.sampling = lash_core::SamplingCapability::Configurable;
+    req.model.metadata_mut().capability.sampling = lash_core::SamplingCapability::Configurable;
     let (configurable, receipt) = provider.build_request(&req).expect("body");
     assert_eq!(configurable["temperature"], json!(0.25));
     assert_eq!(
@@ -90,7 +90,9 @@ fn an_uncapped_call_is_refused_with_output_token_cap_required() {
     );
     assert!(!error.is_retryable());
 
-    req.request_defaults.max_output_tokens = Some(8_000);
+    req.model.metadata_mut().limits.output_tokens =
+        lash_sansio::llm_profile::OutputTokenLimits::new(None, Some(8_000))
+            .expect("valid output-token limits");
     let (body, receipt) = AnthropicProvider::new("key")
         .build_request(&req)
         .expect("the model's recorded cap is the fallback");
@@ -104,8 +106,8 @@ fn an_uncapped_call_is_refused_with_output_token_cap_required() {
 #[test]
 fn a_budget_that_does_not_fit_under_the_cap_is_refused() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
-    req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-    req.llm_profile_capability = budget_capability();
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
+    req.model.metadata_mut().capability = budget_capability();
     req.generation.output_token_cap = std::num::NonZeroUsize::new(12_288);
     let error = AnthropicProvider::new("key")
         .build_request(&req)
@@ -156,7 +158,7 @@ fn parallel_tool_calls_rides_tool_choice_and_needs_tools() {
 #[test]
 fn expose_thinking_without_active_thinking_is_local_visibility_only() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.request_defaults.expose_thinking = true;
+    req.model.metadata_mut().request_defaults.expose_thinking = true;
     let (body, receipt) = AnthropicProvider::new("key")
         .build_request(&req)
         .expect("expose_thinking is never refused");
@@ -196,13 +198,13 @@ async fn refused_settings_never_reach_the_transport() {
     seeded.generation.seed = Some(1);
     let mut pinned = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     pinned.generation.temperature = Some(NonNegativeFiniteF64::new(0.5).expect("finite"));
-    pinned.llm_profile_capability.sampling = lash_core::SamplingCapability::Pinned;
+    pinned.model.metadata_mut().capability.sampling = lash_core::SamplingCapability::Pinned;
     let mut inexact = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    inexact.llm_profile_capability = effort_capability(&["low", "high"]);
-    inexact.model_variant = lash_core::provider::ReasoningSelection::Effort("High".to_string());
+    inexact.model.metadata_mut().capability = effort_capability(&["low", "high"]);
+    inexact.model.reasoning = lash_core::provider::ReasoningSelection::Effort("High".to_string());
     let mut off_unsupported = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    off_unsupported.llm_profile_capability = budget_capability();
-    off_unsupported.model_variant = lash_core::provider::ReasoningSelection::Disabled;
+    off_unsupported.model.metadata_mut().capability = budget_capability();
+    off_unsupported.model.reasoning = lash_core::provider::ReasoningSelection::Disabled;
     for (label, req, code) in [
         ("uncapped", uncapped, "lash:output_token_cap_required"),
         ("seed", seeded, "lash:unsupported_generation_option"),

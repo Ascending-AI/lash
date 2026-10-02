@@ -11,11 +11,22 @@ pub fn serialize_request(
     retention: CacheRetention,
 ) -> Result<Value, lash_core::facade_support::LlmTransportError> {
     let mut request = request.clone();
-    request.request_defaults.cache_retention = retention;
-    // Messages requires a cap, and lash invents none.
     request
+        .model
+        .metadata_mut()
         .request_defaults
-        .max_output_tokens
-        .get_or_insert(4_096);
+        .cache_retention = retention;
+    // This serializer fixture requests a cap when neither caller nor profile does.
+    if request.generation.output_token_cap.is_none()
+        && request
+            .model
+            .metadata()
+            .limits
+            .output_tokens
+            .default_cap()
+            .is_none()
+    {
+        request.generation.output_token_cap = std::num::NonZeroUsize::new(4096);
+    }
     AnthropicProvider::new("test").build_request_body(&request)
 }

@@ -84,20 +84,36 @@ fn transport(script: &str) -> Arc<ScriptedLlmHttpTransport> {
 fn request(model: &str, stream: bool, structured: bool) -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: model.to_string(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                {
+                    let mut metadata =
+                        lash_sansio::llm_profile::LlmProfileMetadata::builder(model.to_string())
+                            .context_window_tokens(128_000)
+                            .capability(lash_core::LlmProfileCapability::default())
+                            .extra_body(Default::default())
+                            .request_defaults(lash_core::provider::LlmProfileRequestDefaults {
+                                ..Default::default()
+                            })
+                            .build()
+                            .expect("valid profile");
+                    metadata.limits.output_tokens =
+                        lash_sansio::llm_profile::OutputTokenLimits::new(
+                            None,
+                            model.starts_with("claude").then_some(4096),
+                        )
+                        .expect("valid limits");
+                    metadata
+                },
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
-        model_variant: Default::default(),
-        llm_profile_capability: lash_core::LlmProfileCapability::default(),
-        extra_body: Default::default(),
-        // Messages requires a cap, and lash invents none.
-        request_defaults: lash_core::provider::LlmProfileRequestDefaults {
-            max_output_tokens: model.starts_with("claude").then_some(4_096),
-            ..Default::default()
-        },
         generation: lash_core::GenerationOptions::default(),
         scope: lash_core::LlmRequestScope::new(
             "recorded-session",

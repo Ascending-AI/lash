@@ -4,9 +4,9 @@ use super::*;
 fn fig1123_responses_body_composes_effort_with_native_current_turn_retention() {
     let provider = OpenAiProvider::new("key");
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-    req.llm_profile_capability = reasoning_capability();
-    *req.llm_profile_capability.reasoning_retention = ReasoningRetentionPolicy {
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
+    req.model.metadata_mut().capability = reasoning_capability();
+    *req.model.metadata_mut().capability.reasoning_retention = ReasoningRetentionPolicy {
         capability: Some(ReasoningRetentionCapability::OpenAiContext {
             supported: vec![OpenAiReasoningContext::CurrentTurn],
         }),
@@ -28,7 +28,7 @@ async fn fig1123_unsupported_retention_is_refused_before_network() {
     let transport = Arc::new(RecordingHttpTransport::default());
     let mut provider = OpenAiProvider::new("key").with_transport(transport.clone());
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    *req.llm_profile_capability.reasoning_retention = ReasoningRetentionPolicy {
+    *req.model.metadata_mut().capability.reasoning_retention = ReasoningRetentionPolicy {
         capability: Some(ReasoningRetentionCapability::AnthropicClearThinking),
         selection: ReasoningRetentionSelection::AnthropicClearThinking {
             keep: lash_core::llm::types::AnthropicThinkingRetention::All,
@@ -58,7 +58,7 @@ fn fig1123_chat_fallback_evicts_whole_genuine_user_segments() {
         LlmMessage::text(LlmRole::User, "new input").with_user_segment_start(),
         LlmMessage::text(LlmRole::Assistant, "new answer"),
     ]);
-    *req.llm_profile_capability.reasoning_retention = ReasoningRetentionPolicy {
+    *req.model.metadata_mut().capability.reasoning_retention = ReasoningRetentionPolicy {
         capability: Some(ReasoningRetentionCapability::ClientSideUserSegments),
         selection: ReasoningRetentionSelection::ClientSideUserSegments {
             max_segments: NonZeroUsize::new(1).unwrap(),

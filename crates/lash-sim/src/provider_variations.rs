@@ -622,16 +622,24 @@ mod tests {
     ) -> LlmRequest {
         LlmRequest {
             instructions: None,
-            model: model.wire_model.clone(),
+            model: lash_sansio::llm_profile::LlmProfileConfig::new(
+                lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                    lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                    lash_sansio::llm_profile::LlmProfileMetadata::builder(model.wire_model.clone())
+                        .context_window_tokens(128_000)
+                        .capability(Default::default())
+                        .extra_body(Default::default())
+                        .request_defaults(model.request_defaults.clone())
+                        .build()
+                        .expect("valid profile"),
+                ),
+            )
+            .with_reasoning(Default::default()),
             messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
             resolved_stored: Default::default(),
             tools: Arc::new(Vec::new()),
             tool_choice: LlmToolChoice::None,
             attachment_acceptance: Default::default(),
-            model_variant: Default::default(),
-            llm_profile_capability: Default::default(),
-            extra_body: Default::default(),
-            request_defaults: model.request_defaults.clone(),
             generation: GenerationOptions {
                 stop_sequences: (variation == ProviderStopVariation::StopConsumed)
                     .then(|| TYPESCRIPT_CLOSE_DELIMITER.to_string())

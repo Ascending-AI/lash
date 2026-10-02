@@ -8,11 +8,11 @@ fn dialect_request(
     capability: LlmProfileCapability,
 ) -> LlmRequest {
     let mut req = request(None);
-    req.llm_profile_capability = LlmProfileCapability {
+    req.model.metadata_mut().capability = LlmProfileCapability {
         google_dialect: dialect,
         ..capability
     };
-    req.model_variant = variant;
+    req.model.reasoning = variant;
     req
 }
 
@@ -117,7 +117,7 @@ fn reasoning_maps_per_google_dialect() {
 fn expose_thinking_requests_thoughts_without_a_reasoning_selection() {
     let provider = GoogleOAuthProvider::for_test();
     let mut req = request(None);
-    req.request_defaults.expose_thinking = true;
+    req.model.metadata_mut().request_defaults.expose_thinking = true;
     let (body, receipt) =
         GoogleOAuthProvider::build_request_with_receipt(&provider, &req, vec![], None)
             .expect("body");

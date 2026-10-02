@@ -2217,15 +2217,23 @@ pub(super) fn test_sleep_envelope(duration_ms: u64) -> RuntimeEffectEnvelope {
 pub(super) fn llm_spec() -> lash_core::LlmRequestSpec {
     lash_core::LlmRequestSpec {
         instructions: None,
-        model: "model".to_string(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::builder("model".to_string())
+                    .context_window_tokens(128_000)
+                    .capability(lash_core::LlmProfileCapability::default())
+                    .extra_body(Default::default())
+                    .request_defaults(Default::default())
+                    .build()
+                    .expect("valid profile"),
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages: Vec::new(),
         tools: Arc::new(Vec::new()),
         tool_choice: Default::default(),
         attachment_acceptance: Default::default(),
-        model_variant: Default::default(),
-        llm_profile_capability: lash_core::LlmProfileCapability::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         scope: lash_core::LlmRequestScope::new(
             "session".to_string(),

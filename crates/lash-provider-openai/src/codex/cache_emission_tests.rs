@@ -12,7 +12,7 @@ fn codex_tool_schema_prompt_cache_key_is_not_cache_emission() {
             cache_breakpoint: true,
         }],
     )]);
-    req.request_defaults.cache_retention = CacheRetention::None;
+    req.model.metadata_mut().request_defaults.cache_retention = CacheRetention::None;
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "cache-shaped-input".to_string(),
         description: "Host tool with a provider-looking property".to_string(),
@@ -34,7 +34,7 @@ fn codex_tool_schema_prompt_cache_key_is_not_cache_emission() {
         lash_core::GenerationOptionOutcome::OmittedUnsupported
     );
 
-    req.request_defaults.cache_retention = CacheRetention::Short;
+    req.model.metadata_mut().request_defaults.cache_retention = CacheRetention::Short;
     let built = provider.build_request(&req, false).unwrap();
     assert!(built.body.get("prompt_cache_key").is_some());
     assert_eq!(

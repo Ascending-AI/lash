@@ -11,7 +11,7 @@ async fn cloud_request_passthrough_refuses_owned_nested_and_header_conflicts() {
         json!({"sessionId":"other"}),
     ] {
         let mut req = base.clone();
-        req.extra_body = extra.as_object().cloned().unwrap();
+        req.model.metadata_mut().extra_body = extra.as_object().cloned().unwrap();
         assert_eq!(
             build(&req)
                 .unwrap_err()
@@ -24,7 +24,7 @@ async fn cloud_request_passthrough_refuses_owned_nested_and_header_conflicts() {
     }
     let mut req = base.clone();
     req.generation.temperature = Some(lash_core::NonNegativeFiniteF64::new(0.2).unwrap());
-    req.extra_body = json!({"generationConfig":{"temperature":0.4}})
+    req.model.metadata_mut().extra_body = json!({"generationConfig":{"temperature":0.4}})
         .as_object()
         .cloned()
         .unwrap();
@@ -32,7 +32,7 @@ async fn cloud_request_passthrough_refuses_owned_nested_and_header_conflicts() {
     let mut req = base.clone();
     req.generation.stop_sequences = vec!["END".into()];
     req.generation.suppress_stop_sequences_for_protocol();
-    req.extra_body = json!({"generationConfig":{"stopSequences":["END"]}})
+    req.model.metadata_mut().extra_body = json!({"generationConfig":{"stopSequences":["END"]}})
         .as_object()
         .cloned()
         .unwrap();
@@ -43,8 +43,8 @@ async fn cloud_request_passthrough_refuses_owned_nested_and_header_conflicts() {
             .contains("/generationConfig/stopSequences")
     );
     let mut req = base.clone();
-    req.llm_profile_capability.sampling = lash_core::SamplingCapability::Pinned;
-    req.extra_body = json!({"generationConfig":{"temperature":0.3}})
+    req.model.metadata_mut().capability.sampling = lash_core::SamplingCapability::Pinned;
+    req.model.metadata_mut().extra_body = json!({"generationConfig":{"temperature":0.3}})
         .as_object()
         .cloned()
         .unwrap();
@@ -55,7 +55,7 @@ async fn cloud_request_passthrough_refuses_owned_nested_and_header_conflicts() {
             .contains("/generationConfig/temperature")
     );
     let mut req = base.clone();
-    req.extra_body = json!({"generationConfig":{"host":true}})
+    req.model.metadata_mut().extra_body = json!({"generationConfig":{"host":true}})
         .as_object()
         .cloned()
         .unwrap();

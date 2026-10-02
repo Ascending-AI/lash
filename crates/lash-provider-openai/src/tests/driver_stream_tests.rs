@@ -1201,6 +1201,10 @@ async fn aborted_chat_stream_seals_the_open_reasoning_block() {
 }
 
 fn thinking_exposed(mut request: LlmRequest) -> LlmRequest {
-    request.request_defaults.expose_thinking = true;
+    request
+        .model
+        .metadata_mut()
+        .request_defaults
+        .expose_thinking = true;
     request
 }

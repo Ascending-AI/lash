@@ -57,16 +57,24 @@ fn replay_request_from_reopened_message(
         serde_json::from_slice(&persisted).expect("session history reopens");
     crate::llm::types::LlmRequest {
         instructions: None,
-        model: serving_model.to_string(),
+        model: crate::llm_profile::LlmProfileConfig::new(
+            crate::llm_profile::RecordedLlmProfile::mint(
+                crate::llm_profile::LlmProfileKey::new("request-fixture"),
+                crate::llm_profile::LlmProfileMetadata::builder(serving_model.to_string())
+                    .context_window_tokens(128_000)
+                    .capability(Default::default())
+                    .extra_body(Default::default())
+                    .request_defaults(Default::default())
+                    .build()
+                    .expect("valid profile"),
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages: render_prompt(&reopened).messages,
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: crate::llm::types::LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
-        model_variant: Default::default(),
-        llm_profile_capability: Default::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         generation: Default::default(),
         scope: crate::llm::types::LlmRequestScope::new("session-1", "frame-1", "request-1"),
         output_spec: None,

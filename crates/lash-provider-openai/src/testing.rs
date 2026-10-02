@@ -82,6 +82,10 @@ pub fn serialize_codex_request(
 /// `request` whose recorded defaults carry `retention`.
 fn with_retention(request: &LlmRequest, retention: CacheRetention) -> LlmRequest {
     let mut request = request.clone();
-    request.request_defaults.cache_retention = retention;
+    request
+        .model
+        .metadata_mut()
+        .request_defaults
+        .cache_retention = retention;
     request
 }

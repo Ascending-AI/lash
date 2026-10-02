@@ -1591,7 +1591,7 @@ async fn a_patched_model_reaches_all_runtime_consumers() -> Result<()> {
             async move {
                 request_probe
                     .lock_recover()
-                    .push(request.model);
+                    .push(request.model.wire_model().to_string());
                 let response_index = request_probe
                     .lock_recover()
                     .len();

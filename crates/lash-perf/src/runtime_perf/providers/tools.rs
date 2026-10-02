@@ -880,7 +880,6 @@ async fn execute_oblique_list_async_handles(_call: lash_core::ToolCall<'_>) -> T
 )]
 fn oblique_judge_direct_request(candidate_ids: &[String]) -> DirectRequest {
     DirectRequest::json_schema(
-        "mock-model",
         format!(
             "Judge {} synthetic OBLIQ candidates and return stable JSON.",
             candidate_ids.len()

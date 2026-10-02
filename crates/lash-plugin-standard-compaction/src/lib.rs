@@ -548,16 +548,12 @@ async fn summarize_compaction_prefix(
     })?;
     let request = lash_core::LlmRequest {
         instructions: system_prompt,
-        model: model.model.wire_model().to_string(),
+        model: model.clone(),
         messages: rendered.messages,
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: lash_sansio::llm::types::LlmToolChoice::None,
         attachment_acceptance: Arc::clone(&snapshot.policy.attachment_acceptance),
-        model_variant: model.reasoning.clone(),
-        llm_profile_capability: model.metadata().capability.clone(),
-        extra_body: Default::default(),
-        request_defaults: model.metadata().request_defaults.clone(),
         generation: snapshot.policy.generation.clone(),
         scope: lash_core::LlmRequestScope::new(
             session_id.clone(),

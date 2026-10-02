@@ -264,7 +264,17 @@ impl World {
         &self,
         request: crate::LlmRequest,
     ) -> Result<crate::LlmResponse, crate::facade_support::LlmTransportError> {
-        if let Some(child) = request.extra_body.get("usage_child") {
+        let marker = request
+            .messages
+            .iter()
+            .flat_map(|message| message.blocks.iter())
+            .find_map(|block| match block {
+                crate::llm::types::LlmContentBlock::Text { text, .. } => {
+                    serde_json::from_str::<serde_json::Value>(text).ok()
+                }
+                _ => None,
+            });
+        if let Some(child) = marker.as_ref().and_then(|marker| marker.get("usage_child")) {
             let index = usize::try_from(child["index"].as_u64().expect("child index"))
                 .expect("child index fits");
             self.witness.invocations.fetch_add(1, Ordering::SeqCst);
@@ -313,7 +323,8 @@ impl World {
             });
         }
         if let Some(child) = &self.deletion_child
-            && request.extra_body.contains_key("usage_delete_child")
+            && request.messages.iter().flat_map(|message| message.blocks.iter())
+                .any(|block| matches!(block, crate::llm::types::LlmContentBlock::Text {text, ..} if text.as_ref() == "child held across deletion"))
         {
             self.witness.invocations.fetch_add(1, Ordering::SeqCst);
             if child.dispatched.fetch_add(1, Ordering::SeqCst) != 0 {

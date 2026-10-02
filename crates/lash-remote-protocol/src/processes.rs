@@ -1354,8 +1354,7 @@ pub struct RemoteProcessPluginConfig {
 #[serde(deny_unknown_fields)]
 pub struct RemoteProcessModelLimits {
     pub context_window_tokens: usize,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_token_capacity: Option<usize>,
+    pub output_tokens: lash_sansio::llm_profile::OutputTokenLimits,
 }
 
 /// Mirror of the core `LlmProfileMetadata`: the recorded facts of one registered
@@ -1383,11 +1382,36 @@ pub struct RemoteLlmProfileMetadata {
 /// recorded for its key, and the reasoning it runs that model with.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct RemoteLlmProfileConfig {
+pub struct RemoteModelConfig {
     pub key: String,
     pub metadata: RemoteLlmProfileMetadata,
     #[serde(default)]
     pub reasoning: crate::llm::RemoteReasoningSelection,
+}
+
+impl RemoteModelConfig {
+    pub(crate) fn validate(&self) -> Result<(), RemoteProtocolError> {
+        require_non_empty("RemoteModelConfig", "key", &self.key)?;
+        require_non_empty("RemoteModelConfig", "wire_model", &self.metadata.wire_model)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new(model: impl Into<String>) -> Self {
+        Self {
+            key: "remote-fixture".into(),
+            metadata: RemoteLlmProfileMetadata {
+                wire_model: model.into(),
+                extra_body: Default::default(),
+                capability: Default::default(),
+                limits: RemoteProcessModelLimits {
+                    context_window_tokens: 128_000,
+                    output_tokens: Default::default(),
+                },
+                request_defaults: Default::default(),
+            },
+            reasoning: Default::default(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

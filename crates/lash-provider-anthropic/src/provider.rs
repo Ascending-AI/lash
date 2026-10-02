@@ -64,7 +64,7 @@ impl Provider for AnthropicProvider {
             ],
             true,
         )?;
-        let minting_route = self.route_identity(&req.model);
+        let minting_route = self.route_identity(req.model.wire_model());
         minting_route.validate_endpoint().map_err(|error| {
             LlmTransportError::new(error.to_string())
                 .with_kind(ProviderFailureKind::Validation)
@@ -170,8 +170,10 @@ impl Provider for AnthropicProvider {
         let provider_request_id = first_header_value(&resp.headers, "request-id")
             .or_else(|| first_header_value(&resp.headers, "x-request-id"))
             .map(str::to_string);
-        let mut response_metadata =
-            ResponseMetadataCapture::from_response(&req.request_defaults, &resp.headers);
+        let mut response_metadata = ResponseMetadataCapture::from_response(
+            &req.model.metadata().request_defaults,
+            &resp.headers,
+        );
         if let Some(tx) = &stream_events {
             tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                 response_started: true,
@@ -196,10 +198,10 @@ impl Provider for AnthropicProvider {
                 provider_request_id: Some(provider_request_id),
                 ..Default::default()
             }),
-            expose_thinking: req.request_defaults.expose_thinking,
+            expose_thinking: req.model.metadata().request_defaults.expose_thinking,
             ..StreamState::default()
         };
-        let expose_thinking = req.request_defaults.expose_thinking;
+        let expose_thinking = req.model.metadata().request_defaults.expose_thinking;
         let stream_result = drive_sse_response(
             resp.body,
             timeouts.chunk_timeout,
@@ -215,7 +217,9 @@ impl Provider for AnthropicProvider {
         .await;
 
         let stream_termination = req
-            .llm_profile_capability
+            .model
+            .metadata()
+            .capability
             .stream_termination
             .unwrap_or(self.stream_termination);
         if let Err(error) = stream_result {
@@ -224,7 +228,7 @@ impl Provider for AnthropicProvider {
                 request_body.clone(),
                 &url,
                 generation_disposition,
-                &req.model,
+                req.model.wire_model(),
             );
             partial.response_metadata = response_metadata.into_metadata();
             partial
@@ -240,7 +244,7 @@ impl Provider for AnthropicProvider {
                 request_body,
                 &url,
                 generation_disposition,
-                &req.model,
+                req.model.wire_model(),
             );
             partial.response_metadata = response_metadata.into_metadata();
             partial
@@ -258,7 +262,7 @@ impl Provider for AnthropicProvider {
         let provider_usage = state.provider_usage.take();
         let execution_evidence = state.execution_evidence.clone();
         let expose_thinking = state.expose_thinking;
-        let (parts, usage, terminal_reason) = Self::finalize(state, &req.model);
+        let (parts, usage, terminal_reason) = Self::finalize(state, req.model.wire_model());
         let mut response = LlmResponse {
             parts,
             usage,

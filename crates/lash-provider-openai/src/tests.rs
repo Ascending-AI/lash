@@ -1,3 +1,5 @@
+mod request_support;
+use request_support::request;
 mod runtime_feedback;
 mod schema_projection;
 use crate::support::*;
@@ -146,7 +148,7 @@ fn developer_role_compat_field_is_rejected() {
 }
 
 fn enable_cache_control(req: &mut LlmRequest, dialect: CacheControlDialect) {
-    req.llm_profile_capability.cache_control = Some(dialect);
+    req.model.metadata_mut().capability.cache_control = Some(dialect);
 }
 
 #[async_trait]
@@ -202,31 +204,6 @@ fn budget_reasoning_capability() -> LlmProfileCapability {
     }
 }
 
-fn request(messages: Vec<LlmMessage>) -> LlmRequest {
-    LlmRequest {
-        instructions: None,
-        model: "openai/gpt-5.4".to_string(),
-        messages,
-        resolved_stored: Default::default(),
-        tools: Arc::new(Vec::<LlmToolSpec>::new()),
-        tool_choice: LlmToolChoice::Auto,
-        attachment_acceptance: crate::attachment_test_acceptance(),
-        model_variant: Default::default(),
-        llm_profile_capability: Default::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
-        scope: LlmRequestScope::new(
-            "session-1",
-            "session-1:frame:test",
-            "session-1:request:test",
-        ),
-        output_spec: None,
-        stream_events: None,
-        generation: lash_core::GenerationOptions::default(),
-        provider_trace: None,
-    }
-}
-
 #[test]
 fn chat_and_responses_passthrough_refuse_owned_and_suppressed_controls() {
     let chat = OpenAiCompatibleProvider::new("key", "https://example.test");
@@ -250,7 +227,7 @@ fn chat_and_responses_passthrough_refuse_owned_and_suppressed_controls() {
             json!({"model":null}),
         ] {
             let mut req = base.clone();
-            req.extra_body = extra.as_object().cloned().unwrap();
+            req.model.metadata_mut().extra_body = extra.as_object().cloned().unwrap();
             let error = build(&req).unwrap_err();
             assert_eq!(
                 error.code.as_ref().map(ToString::to_string).as_deref(),
@@ -260,11 +237,12 @@ fn chat_and_responses_passthrough_refuse_owned_and_suppressed_controls() {
         let mut req = base.clone();
         req.generation.stop_sequences = vec!["END".into()];
         req.generation.suppress_stop_sequences_for_protocol();
-        req.extra_body = json!({"stop":["END"]}).as_object().cloned().unwrap();
+        req.model.metadata_mut().extra_body = json!({"stop":["END"]}).as_object().cloned().unwrap();
         assert!(build(&req).unwrap_err().message.contains("/stop"));
         let mut req = base.clone();
-        req.llm_profile_capability.sampling = lash_core::SamplingCapability::Pinned;
-        req.extra_body = json!({"temperature":0.3}).as_object().cloned().unwrap();
+        req.model.metadata_mut().capability.sampling = lash_core::SamplingCapability::Pinned;
+        req.model.metadata_mut().extra_body =
+            json!({"temperature":0.3}).as_object().cloned().unwrap();
         assert!(build(&req).unwrap_err().message.contains("/temperature"));
         let mut req = base.clone();
         let nested = match endpoint {
@@ -276,10 +254,10 @@ fn chat_and_responses_passthrough_refuse_owned_and_suppressed_controls() {
                 json!({"text":{"format":{"type":"other"}}})
             }
         };
-        req.extra_body = nested.as_object().cloned().unwrap();
+        req.model.metadata_mut().extra_body = nested.as_object().cloned().unwrap();
         assert!(build(&req).is_err());
         let mut req = base.clone();
-        req.extra_body = json!({"host":{"nested":true}})
+        req.model.metadata_mut().extra_body = json!({"host":{"nested":true}})
             .as_object()
             .cloned()
             .unwrap();
@@ -292,7 +270,7 @@ fn openai_route_headers_refuse_case_variant_of_adapter_header() {
     let req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     let compatible = OpenAiCompatibleProvider::new("key", "https://example.test")
         .with_extra_headers(vec![("aUtHoRiZaTiOn".into(), "other".into())]);
-    let route = compatible.route_identity(&req.model);
+    let route = compatible.route_identity(req.model.wire_model());
     let error = crate::driver::build_request_body(
         &compatible,
         &req,
@@ -307,7 +285,7 @@ fn openai_route_headers_refuse_case_variant_of_adapter_header() {
     );
     let native = OpenAiProvider::new("key")
         .with_extra_headers(vec![("cOnTeNt-TyPe".into(), "other".into())]);
-    let route = native.route_identity(&req.model);
+    let route = native.route_identity(req.model.wire_model());
     let error = crate::driver::build_request_body(
         &native.inner,
         &req,
@@ -754,9 +732,9 @@ fn responses_unsupported_image_mime_is_rejected_at_request_boundary() {
 fn responses_body_emits_reasoning_from_capability_variant() {
     let provider = OpenAiProvider::new("key");
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model = "custom-direct-model".to_string();
-    req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-    req.llm_profile_capability = reasoning_capability();
+    req.model.metadata_mut().wire_model = "custom-direct-model".to_string();
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
+    req.model.metadata_mut().capability = reasoning_capability();
 
     let body = provider.build_responses_request_body(&req, true).unwrap();
 
@@ -768,8 +746,8 @@ fn responses_body_emits_reasoning_from_capability_variant() {
 fn responses_body_rejects_numeric_reasoning_from_budget_encoding() {
     let provider = OpenAiProvider::new("key");
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-    req.llm_profile_capability = budget_reasoning_capability();
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
+    req.model.metadata_mut().capability = budget_reasoning_capability();
 
     let error = provider
         .build_responses_request_body(&req, true)
@@ -787,8 +765,8 @@ fn responses_body_rejects_numeric_reasoning_from_budget_encoding() {
 fn responses_body_emits_none_effort_for_disabled_selection() {
     let provider = OpenAiProvider::new("key");
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model_variant = lash_core::provider::ReasoningSelection::Disabled;
-    req.llm_profile_capability = reasoning_capability();
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Disabled;
+    req.model.metadata_mut().capability = reasoning_capability();
 
     let body = provider.build_responses_request_body(&req, true).unwrap();
 
@@ -799,8 +777,8 @@ fn responses_body_emits_none_effort_for_disabled_selection() {
 fn responses_body_refuses_an_effort_without_capability() {
     let provider = OpenAiProvider::new("key");
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model = "custom-direct-model".to_string();
-    req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
+    req.model.metadata_mut().wire_model = "custom-direct-model".to_string();
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
 
     let error = provider
         .build_responses_request_body(&req, true)
@@ -816,9 +794,9 @@ fn responses_body_refuses_an_effort_without_capability() {
 fn responses_body_requests_reasoning_summaries_when_provider_exposes_thinking() {
     let provider = OpenAiProvider::new("key");
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.request_defaults.expose_thinking = true;
-    req.model_variant = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
-    req.llm_profile_capability = reasoning_capability();
+    req.model.metadata_mut().request_defaults.expose_thinking = true;
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
+    req.model.metadata_mut().capability = reasoning_capability();
 
     let body = provider.build_responses_request_body(&req, true).unwrap();
 
@@ -867,7 +845,7 @@ fn chat_body_uses_messages_and_not_responses_input() {
         "system prompt",
         vec![LlmMessage::text(LlmRole::User, "hello")],
     );
-    req.model = "anthropic/claude-sonnet-4.6".to_string();
+    req.model.metadata_mut().wire_model = "anthropic/claude-sonnet-4.6".to_string();
     req.output_spec = Some(LlmOutputSpec::JsonObject);
 
     let body = openrouter_provider()
@@ -885,9 +863,9 @@ fn chat_body_uses_messages_and_not_responses_input() {
 #[test]
 fn chat_body_emits_reasoning_from_capability_variant() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model = "openrouter/custom-model".to_string();
-    req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-    req.llm_profile_capability = reasoning_capability();
+    req.model.metadata_mut().wire_model = "openrouter/custom-model".to_string();
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
+    req.model.metadata_mut().capability = reasoning_capability();
 
     let body = openrouter_provider()
         .build_chat_request_body(&req, true)
@@ -900,8 +878,8 @@ fn chat_body_emits_reasoning_from_capability_variant() {
 #[test]
 fn chat_body_openai_dialect_emits_top_level_reasoning_effort_only() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-    req.llm_profile_capability = reasoning_capability();
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
+    req.model.metadata_mut().capability = reasoning_capability();
     let provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
         .with_reasoning_dialect(OpenAiReasoningDialect::OpenAi);
 
@@ -914,8 +892,8 @@ fn chat_body_openai_dialect_emits_top_level_reasoning_effort_only() {
 #[test]
 fn openai_chat_preset_speaks_the_openai_dialect_on_chat_completions() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-    req.llm_profile_capability = reasoning_capability();
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
+    req.model.metadata_mut().capability = reasoning_capability();
     req.generation.output_token_cap = std::num::NonZeroUsize::new(1_024);
     let provider = OpenAiCompatibleProvider::new("key", OPENAI_BASE_URL)
         .with_compat(OpenAiCompat::openai_chat());
@@ -930,9 +908,9 @@ fn openai_chat_preset_speaks_the_openai_dialect_on_chat_completions() {
 #[test]
 fn chat_body_emits_numeric_reasoning_from_budget_encoding() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model = "openrouter/custom-model".to_string();
-    req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-    req.llm_profile_capability = budget_reasoning_capability();
+    req.model.metadata_mut().wire_model = "openrouter/custom-model".to_string();
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
+    req.model.metadata_mut().capability = budget_reasoning_capability();
 
     let body = openrouter_provider()
         .build_chat_request_body(&req, true)
@@ -945,8 +923,8 @@ fn chat_body_emits_numeric_reasoning_from_budget_encoding() {
 #[test]
 fn openai_dialect_refuses_a_budget_on_both_endpoints() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-    req.llm_profile_capability = budget_reasoning_capability();
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
+    req.model.metadata_mut().capability = budget_reasoning_capability();
     let provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
         .with_reasoning_dialect(OpenAiReasoningDialect::OpenAi);
 
@@ -970,8 +948,8 @@ fn openai_dialect_refuses_a_budget_on_both_endpoints() {
 #[test]
 fn disabled_selection_maps_per_dialect() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model_variant = lash_core::provider::ReasoningSelection::Disabled;
-    req.llm_profile_capability = reasoning_capability();
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Disabled;
+    req.model.metadata_mut().capability = reasoning_capability();
 
     let openrouter = openrouter_provider()
         .build_chat_request_body(&req, true)
@@ -990,8 +968,8 @@ fn disabled_selection_maps_per_dialect() {
 #[test]
 fn chat_body_refuses_an_effort_without_capability() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model = "openrouter/custom-model".to_string();
-    req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
+    req.model.metadata_mut().wire_model = "openrouter/custom-model".to_string();
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
 
     let error = openrouter_provider()
         .build_chat_request_body(&req, true)
@@ -1006,8 +984,8 @@ fn chat_body_refuses_an_effort_without_capability() {
 #[test]
 fn chat_body_without_a_reasoning_dialect_refuses_an_explicit_selection() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-    req.llm_profile_capability = reasoning_capability();
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
+    req.model.metadata_mut().capability = reasoning_capability();
     let provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1");
 
     let error = provider
@@ -1024,7 +1002,7 @@ fn chat_body_without_a_reasoning_dialect_refuses_an_explicit_selection() {
 #[test]
 fn a_route_without_a_reasoning_dialect_sends_nothing_for_provider_default() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.llm_profile_capability = reasoning_capability();
+    req.model.metadata_mut().capability = reasoning_capability();
     for provider in [
         OpenAiCompatibleProvider::new("key", "https://proxy.example/v1"),
         OpenAiCompatibleProvider::new("key", "http://localhost:11434/v1")
@@ -1041,8 +1019,8 @@ fn a_route_without_a_reasoning_dialect_sends_nothing_for_provider_default() {
 #[test]
 fn no_url_selects_a_reasoning_dialect() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-    req.llm_profile_capability = reasoning_capability();
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
+    req.model.metadata_mut().capability = reasoning_capability();
     for base_url in [OPENAI_BASE_URL, OPENROUTER_BASE_URL] {
         let provider = OpenAiCompatibleProvider::new("key", base_url);
         for error in [
@@ -1066,7 +1044,7 @@ fn anthropic_cache_dialect_marks_canonical_breakpoints_for_an_arbitrary_model() 
         "stable system prompt",
         vec![LlmMessage::text(LlmRole::User, "dynamic tail")],
     );
-    req.model = "custom/model-v1".to_string();
+    req.model.metadata_mut().wire_model = "custom/model-v1".to_string();
     enable_cache_control(&mut req, CacheControlDialect::Anthropic);
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "search".to_string(),
@@ -1120,8 +1098,8 @@ fn gemini_cache_dialect_emits_one_ephemeral_explicit_breakpoint() {
             ],
         )],
     );
-    req.request_defaults.cache_retention = CacheRetention::Long;
-    req.model = "custom/model-v1".to_string();
+    req.model.metadata_mut().request_defaults.cache_retention = CacheRetention::Long;
+    req.model.metadata_mut().wire_model = "custom/model-v1".to_string();
     enable_cache_control(&mut req, CacheControlDialect::Gemini);
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "search".to_string(),
@@ -1162,7 +1140,7 @@ fn absent_cache_dialect_strips_breakpoint_even_on_the_openrouter_url() {
             cache_breakpoint: true,
         }],
     )]);
-    req.model = "google/gemini-2.5-pro".to_string();
+    req.model.metadata_mut().wire_model = "google/gemini-2.5-pro".to_string();
 
     let body = openrouter_provider()
         .build_chat_request_body(&req, true)
@@ -1270,7 +1248,7 @@ fn anthropic_cache_dialect_prefers_explicit_text_breakpoint() {
             ],
         )],
     );
-    req.model = "custom/model-v1".to_string();
+    req.model.metadata_mut().wire_model = "custom/model-v1".to_string();
     enable_cache_control(&mut req, CacheControlDialect::Anthropic);
 
     let body = openrouter_provider()
@@ -1326,7 +1304,7 @@ fn cache_dialect_chat_history_shape_is_stable_when_breakpoint_moves() {
                 LlmMessage::text(LlmRole::User, "dynamic iteration one"),
             ],
         );
-        previous.model = model.to_string();
+        previous.model.metadata_mut().wire_model = model.to_string();
         enable_cache_control(&mut previous, dialect);
         let mut next = request_with_instructions(
             "stable system prompt",
@@ -1336,7 +1314,7 @@ fn cache_dialect_chat_history_shape_is_stable_when_breakpoint_moves() {
                 LlmMessage::text(LlmRole::User, "dynamic iteration two"),
             ],
         );
-        next.model = model.to_string();
+        next.model.metadata_mut().wire_model = model.to_string();
         enable_cache_control(&mut next, dialect);
 
         let provider = openrouter_provider();
@@ -1359,7 +1337,7 @@ fn cache_retention_none_removes_chat_cache_markers() {
         "stable system prompt",
         vec![LlmMessage::text(LlmRole::User, "dynamic tail")],
     );
-    req.request_defaults.cache_retention = CacheRetention::None;
+    req.model.metadata_mut().request_defaults.cache_retention = CacheRetention::None;
     enable_cache_control(&mut req, CacheControlDialect::Anthropic);
 
     let body = openrouter_provider()
@@ -1385,7 +1363,7 @@ fn cache_retention_long_uses_anthropic_ttl_on_chat_cache_markers() {
         "stable system prompt",
         vec![LlmMessage::text(LlmRole::User, "dynamic tail")],
     );
-    req.request_defaults.cache_retention = CacheRetention::Long;
+    req.model.metadata_mut().request_defaults.cache_retention = CacheRetention::Long;
     enable_cache_control(&mut req, CacheControlDialect::Anthropic);
 
     let body = openrouter_provider()
@@ -1402,7 +1380,7 @@ fn cache_retention_long_uses_anthropic_ttl_on_chat_cache_markers() {
 fn responses_long_cache_retention_emits_openai_retention() {
     let provider = OpenAiProvider::new("key");
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.request_defaults.cache_retention = CacheRetention::Long;
+    req.model.metadata_mut().request_defaults.cache_retention = CacheRetention::Long;
 
     let body = provider.build_responses_request_body(&req, true).unwrap();
 
@@ -1415,7 +1393,7 @@ fn responses_long_cache_retention_emits_openai_retention() {
 fn responses_none_cache_retention_omits_prompt_cache_fields() {
     let provider = OpenAiProvider::new("key");
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.request_defaults.cache_retention = CacheRetention::None;
+    req.model.metadata_mut().request_defaults.cache_retention = CacheRetention::None;
 
     let body = provider.build_responses_request_body(&req, true).unwrap();
 
@@ -1571,7 +1549,7 @@ fn chat_body_honors_compat_max_token_field_streaming_usage_and_strict_tools() {
 #[test]
 fn local_preset_suppresses_optional_openai_fields() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.llm_profile_capability = reasoning_capability();
+    req.model.metadata_mut().capability = reasoning_capability();
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "lookup".to_string(),
         description: "Lookup".to_string(),
@@ -1887,7 +1865,7 @@ async fn openrouter_handle_records_failed_request_id_then_served_model_evidence(
         .with_transport(transport);
     let mut handle = ProviderHandle::new(provider.into_components());
     let mut req = request(Vec::new());
-    req.model = "openrouter/auto".to_string();
+    req.model.metadata_mut().wire_model = "openrouter/auto".to_string();
 
     let completion = handle
         .complete(
@@ -2028,10 +2006,16 @@ fn openrouter_stream_wire_fences_all_evidence_on_served_model_conflict() {
 /// `request` asking for the response metadata its recorded model captures:
 /// the allowlisted header names and body pointers.
 fn capturing(mut request: LlmRequest, headers: &[&str], body_paths: &[&str]) -> LlmRequest {
-    request.request_defaults.response_metadata_headers =
-        headers.iter().map(ToString::to_string).collect();
-    request.request_defaults.response_metadata_body_paths =
-        body_paths.iter().map(ToString::to_string).collect();
+    request
+        .model
+        .metadata_mut()
+        .request_defaults
+        .response_metadata_headers = headers.iter().map(ToString::to_string).collect();
+    request
+        .model
+        .metadata_mut()
+        .request_defaults
+        .response_metadata_body_paths = body_paths.iter().map(ToString::to_string).collect();
     request
 }
 

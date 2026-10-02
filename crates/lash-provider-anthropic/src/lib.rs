@@ -17,6 +17,8 @@ pub use config::{AnthropicProvider, DEFAULT_BASE_URL};
 
 #[cfg(test)]
 mod tests {
+    mod request_support;
+    use request_support::request;
     mod block_identity_tests;
     mod runtime_feedback;
     mod stream_bounds;
@@ -139,35 +141,6 @@ mod tests {
     // downstream hosts; reference it here so the re-export stays covered.
     const _: &str = DEFAULT_BASE_URL;
 
-    fn request(messages: Vec<LlmMessage>) -> LlmRequest {
-        LlmRequest {
-            instructions: None,
-            model: "claude-sonnet-4-6".to_string(),
-            messages,
-            resolved_stored: Default::default(),
-            tools: Arc::new(Vec::<LlmToolSpec>::new()),
-            tool_choice: LlmToolChoice::Auto,
-            attachment_acceptance: crate::attachment_test_acceptance(),
-            model_variant: Default::default(),
-            llm_profile_capability: Default::default(),
-            extra_body: Default::default(),
-            request_defaults: Default::default(),
-            scope: lash_core::LlmRequestScope::new(
-                "session-1",
-                "session-1:frame:test",
-                "session-1:request:test",
-            ),
-            output_spec: None,
-            stream_events: None,
-            // Anthropic requires a cap, and lash invents none.
-            generation: lash_core::GenerationOptions {
-                output_token_cap: std::num::NonZeroUsize::new(16_384),
-                ..lash_core::GenerationOptions::default()
-            },
-            provider_trace: None,
-        }
-    }
-
     #[tokio::test]
     async fn messages_passthrough_refuses_owned_nested_and_header_conflicts() {
         let provider = AnthropicProvider::new("key");
@@ -178,7 +151,7 @@ mod tests {
             json!({"model":null}),
         ] {
             let mut req = base.clone();
-            req.extra_body = extra.as_object().cloned().unwrap();
+            req.model.metadata_mut().extra_body = extra.as_object().cloned().unwrap();
             assert_eq!(
                 provider
                     .build_request_body(&req)
@@ -192,7 +165,7 @@ mod tests {
         }
         let mut req = base.clone();
         req.output_spec = Some(LlmOutputSpec::JsonObject);
-        req.extra_body = json!({"output_config":{"format":{"type":"other"}}})
+        req.model.metadata_mut().extra_body = json!({"output_config":{"format":{"type":"other"}}})
             .as_object()
             .cloned()
             .unwrap();
@@ -200,7 +173,7 @@ mod tests {
         let mut req = base.clone();
         req.generation.stop_sequences = vec!["END".into()];
         req.generation.suppress_stop_sequences_for_protocol();
-        req.extra_body = json!({"stop_sequences":["END"]})
+        req.model.metadata_mut().extra_body = json!({"stop_sequences":["END"]})
             .as_object()
             .cloned()
             .unwrap();
@@ -212,8 +185,9 @@ mod tests {
                 .contains("/stop_sequences")
         );
         let mut req = base.clone();
-        req.llm_profile_capability.sampling = lash_core::SamplingCapability::Pinned;
-        req.extra_body = json!({"temperature":0.3}).as_object().cloned().unwrap();
+        req.model.metadata_mut().capability.sampling = lash_core::SamplingCapability::Pinned;
+        req.model.metadata_mut().extra_body =
+            json!({"temperature":0.3}).as_object().cloned().unwrap();
         assert!(
             provider
                 .build_request_body(&req)
@@ -222,7 +196,7 @@ mod tests {
                 .contains("/temperature")
         );
         let mut req = base.clone();
-        req.extra_body = json!({"host":{"nested":true}})
+        req.model.metadata_mut().extra_body = json!({"host":{"nested":true}})
             .as_object()
             .cloned()
             .unwrap();
@@ -353,8 +327,14 @@ mod tests {
         req.stream_events = Some(LlmEventSender::new(move |event| {
             event_sink.lock_recover().push(event);
         }));
-        req.request_defaults.response_metadata_headers = vec!["X-Request-Cost".to_string()];
-        req.request_defaults.response_metadata_body_paths = vec!["/billing/cost".to_string()];
+        req.model
+            .metadata_mut()
+            .request_defaults
+            .response_metadata_headers = vec!["X-Request-Cost".to_string()];
+        req.model
+            .metadata_mut()
+            .request_defaults
+            .response_metadata_body_paths = vec!["/billing/cost".to_string()];
 
         let response = provider
             .complete(req)
@@ -614,8 +594,11 @@ mod tests {
         );
         let mut tolerant_req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
         tolerant_req.stream_events = Some(LlmEventSender::new(|_| {}));
-        tolerant_req.llm_profile_capability.stream_termination =
-            Some(StreamTermination::EofTolerated);
+        tolerant_req
+            .model
+            .metadata_mut()
+            .capability
+            .stream_termination = Some(StreamTermination::EofTolerated);
         let mut tolerant =
             AnthropicProvider::new("key").with_transport(Arc::new(StaticSseTransport(eof_body)));
         assert_eq!(
@@ -772,8 +755,8 @@ mod tests {
     fn structured_output_preserves_adaptive_effort_config() {
         let provider = AnthropicProvider::new("key");
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "extract")]);
-        req.model_variant = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
-        req.llm_profile_capability = effort_capability(&["low", "medium", "high"]);
+        req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
+        req.model.metadata_mut().capability = effort_capability(&["low", "medium", "high"]);
         req.output_spec = Some(LlmOutputSpec::JsonObject);
 
         let body = provider.build_request_body(&req).expect("body");
@@ -942,15 +925,15 @@ mod tests {
     #[test]
     fn thinking_display_is_omitted_unless_the_model_exposes_thinking() {
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "extract")]);
-        req.model_variant = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
-        req.llm_profile_capability = effort_capability(&["low", "medium", "high"]);
+        req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
+        req.model.metadata_mut().capability = effort_capability(&["low", "medium", "high"]);
 
         let hidden = AnthropicProvider::new("key")
             .build_request_body(&req)
             .expect("body");
         assert_eq!(hidden["thinking"]["display"], "omitted");
 
-        req.request_defaults.expose_thinking = true;
+        req.model.metadata_mut().request_defaults.expose_thinking = true;
         let exposed = AnthropicProvider::new("key")
             .build_request_body(&req)
             .expect("body");
@@ -966,9 +949,10 @@ mod tests {
         assert!(plain.get("temperature").is_none());
 
         let mut thinking_req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
-        thinking_req.model_variant =
+        thinking_req.model.reasoning =
             lash_core::provider::ReasoningSelection::Effort("medium".to_string());
-        thinking_req.llm_profile_capability = effort_capability(&["low", "medium", "high"]);
+        thinking_req.model.metadata_mut().capability =
+            effort_capability(&["low", "medium", "high"]);
         let thinking = provider
             .build_request_body(&thinking_req)
             .expect("thinking body");
@@ -987,9 +971,10 @@ mod tests {
         // `xhigh`).
         let provider = AnthropicProvider::new("key");
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
-        req.model = "claude-opus-4-7".to_string();
-        req.model_variant = lash_core::provider::ReasoningSelection::Effort("xhigh".to_string());
-        req.llm_profile_capability = effort_capability(&["low", "medium", "high", "xhigh"]);
+        req.model.metadata_mut().wire_model = "claude-opus-4-7".to_string();
+        req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("xhigh".to_string());
+        req.model.metadata_mut().capability =
+            effort_capability(&["low", "medium", "high", "xhigh"]);
 
         let body = provider.build_request_body(&req).expect("body");
 
@@ -1004,9 +989,9 @@ mod tests {
         // `enabled` thinking block; no `output_config.effort` is set.
         let provider = AnthropicProvider::new("key");
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
-        req.model = "claude-haiku-4".to_string();
-        req.model_variant = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
-        req.llm_profile_capability = budget_capability();
+        req.model.metadata_mut().wire_model = "claude-haiku-4".to_string();
+        req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
+        req.model.metadata_mut().capability = budget_capability();
 
         let body = provider.build_request_body(&req).expect("body");
 
@@ -1019,9 +1004,9 @@ mod tests {
     fn disabled_selection_is_refused_without_a_declared_disable() {
         let provider = AnthropicProvider::new("key");
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
-        req.model = "claude-haiku-4".to_string();
-        req.model_variant = lash_core::provider::ReasoningSelection::Disabled;
-        req.llm_profile_capability = budget_capability();
+        req.model.metadata_mut().wire_model = "claude-haiku-4".to_string();
+        req.model.reasoning = lash_core::provider::ReasoningSelection::Disabled;
+        req.model.metadata_mut().capability = budget_capability();
 
         let error = provider
             .build_request_body(&req)
@@ -1037,8 +1022,8 @@ mod tests {
     fn adaptive_capability_disabled_selection_emits_native_disabled_thinking() {
         let provider = AnthropicProvider::new("key");
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
-        req.model_variant = lash_core::provider::ReasoningSelection::Disabled;
-        req.llm_profile_capability = effort_capability(&["low", "medium", "high"]);
+        req.model.reasoning = lash_core::provider::ReasoningSelection::Disabled;
+        req.model.metadata_mut().capability = effort_capability(&["low", "medium", "high"]);
 
         let body = provider.build_request_body(&req).expect("body");
 
@@ -1050,7 +1035,7 @@ mod tests {
     fn an_effort_without_reasoning_capability_is_refused() {
         let provider = AnthropicProvider::new("key");
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
-        req.model_variant = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
+        req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
 
         let error = provider
             .build_request_body(&req)
@@ -1066,7 +1051,7 @@ mod tests {
     fn no_variant_emits_no_thinking_even_with_capability() {
         let provider = AnthropicProvider::new("key");
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
-        req.llm_profile_capability = effort_capability(&["low", "medium", "high"]);
+        req.model.metadata_mut().capability = effort_capability(&["low", "medium", "high"]);
 
         let body = provider.build_request_body(&req).expect("body");
 
@@ -1077,7 +1062,7 @@ mod tests {
     fn fig1123_native_clear_thinking_maps_exact_thinking_turn_units() {
         let provider = AnthropicProvider::new("key");
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
-        *req.llm_profile_capability.reasoning_retention = ReasoningRetentionPolicy {
+        *req.model.metadata_mut().capability.reasoning_retention = ReasoningRetentionPolicy {
             capability: Some(ReasoningRetentionCapability::AnthropicClearThinking),
             selection: ReasoningRetentionSelection::AnthropicClearThinking {
                 keep: AnthropicThinkingRetention::Turns(std::num::NonZeroU32::new(2).unwrap()),
@@ -1178,20 +1163,21 @@ mod tests {
         // thinking (built-in) and no thinking do not. Gating is on the wire
         // shape, never the model name.
         let mut budget = request(vec![LlmMessage::text(LlmRole::User, "think")]);
-        budget.model = "claude-haiku-4".to_string();
-        budget.model_variant =
+        budget.model.metadata_mut().wire_model = "claude-haiku-4".to_string();
+        budget.model.reasoning =
             lash_core::provider::ReasoningSelection::Effort("medium".to_string());
-        budget.llm_profile_capability = budget_capability();
+        budget.model.metadata_mut().capability = budget_capability();
         assert!(
             captured_beta_for(budget).contains(crate::policy::INTERLEAVED_THINKING_BETA),
             "budget thinking must request the interleaved beta"
         );
 
         let mut adaptive = request(vec![LlmMessage::text(LlmRole::User, "think")]);
-        adaptive.model = "claude-opus-4-7".to_string();
-        adaptive.model_variant =
+        adaptive.model.metadata_mut().wire_model = "claude-opus-4-7".to_string();
+        adaptive.model.reasoning =
             lash_core::provider::ReasoningSelection::Effort("high".to_string());
-        adaptive.llm_profile_capability = effort_capability(&["low", "medium", "high", "xhigh"]);
+        adaptive.model.metadata_mut().capability =
+            effort_capability(&["low", "medium", "high", "xhigh"]);
         assert!(
             !captured_beta_for(adaptive).contains(crate::policy::INTERLEAVED_THINKING_BETA),
             "adaptive thinking must not request the interleaved beta"
@@ -1207,7 +1193,7 @@ mod tests {
     #[test]
     fn fig1123_context_management_beta_gates_on_native_retention_body() {
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
-        *req.llm_profile_capability.reasoning_retention = ReasoningRetentionPolicy {
+        *req.model.metadata_mut().capability.reasoning_retention = ReasoningRetentionPolicy {
             capability: Some(ReasoningRetentionCapability::AnthropicClearThinking),
             selection: ReasoningRetentionSelection::AnthropicClearThinking {
                 keep: AnthropicThinkingRetention::All,
@@ -1263,7 +1249,7 @@ mod tests {
             "stable system prompt",
             vec![LlmMessage::text(LlmRole::User, "dynamic tail")],
         );
-        req.request_defaults.cache_retention = CacheRetention::None;
+        req.model.metadata_mut().request_defaults.cache_retention = CacheRetention::None;
 
         let body = provider.build_request_body(&req).expect("body");
 
@@ -1282,7 +1268,7 @@ mod tests {
             "stable system prompt",
             vec![LlmMessage::text(LlmRole::User, "dynamic tail")],
         );
-        req.request_defaults.cache_retention = CacheRetention::Long;
+        req.model.metadata_mut().request_defaults.cache_retention = CacheRetention::Long;
 
         let body = provider.build_request_body(&req).expect("body");
 
@@ -1300,7 +1286,9 @@ mod tests {
     fn output_token_cap_maps_to_max_tokens() {
         let provider = AnthropicProvider::new("key");
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-        req.request_defaults.max_output_tokens = Some(9999);
+        req.model.metadata_mut().limits.output_tokens =
+            lash_sansio::llm_profile::OutputTokenLimits::new(None, Some(9999))
+                .expect("valid output-token limits");
         req.generation.output_token_cap = NonZeroUsize::new(2048);
 
         let body = provider.build_request_body(&req).expect("body");
@@ -1308,7 +1296,9 @@ mod tests {
         assert_eq!(body["max_tokens"], 2048);
         let mut model_limited = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
         model_limited.generation.output_token_cap = None;
-        model_limited.request_defaults.max_output_tokens = Some(9999);
+        model_limited.model.metadata_mut().limits.output_tokens =
+            lash_sansio::llm_profile::OutputTokenLimits::new(None, Some(9999))
+                .expect("valid output-token limits");
         let model_limited_body = provider.build_request_body(&model_limited).expect("body");
         assert_eq!(model_limited_body["max_tokens"], 9999);
     }

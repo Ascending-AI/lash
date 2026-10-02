@@ -100,7 +100,19 @@ async fn host_admission_permit_releases_on_cancellation_and_forwards_close() {
     let mut first = make_handle();
     let mut second = make_handle();
     let request = LlmRequest {
-        model: "fixture-model".into(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::builder("fixture-model")
+                    .context_window_tokens(128_000)
+                    .capability(Default::default())
+                    .extra_body(Default::default())
+                    .request_defaults(Default::default())
+                    .build()
+                    .expect("valid profile"),
+            ),
+        )
+        .with_reasoning(Default::default()),
         scope: lash_core::LlmRequestScope::new("tenant", "frame", "request"),
         instructions: None,
         messages: vec![],
@@ -108,10 +120,6 @@ async fn host_admission_permit_releases_on_cancellation_and_forwards_close() {
         tools: Arc::new(vec![]),
         tool_choice: lash_core::llm::types::LlmToolChoice::None,
         attachment_acceptance: Default::default(),
-        model_variant: Default::default(),
-        llm_profile_capability: Default::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         generation: Default::default(),
         output_spec: None,
         stream_events: None,

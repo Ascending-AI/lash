@@ -210,7 +210,7 @@ impl crate::ToolProvider for SugarTools {
                 .context
                 .direct_completions()
                 .complete(
-                    crate::DirectRequest::text("batch-accounting", "batch member spend"),
+                    crate::DirectRequest::text("batch member spend"),
                     "batch-member",
                 )
                 .await
@@ -274,7 +274,8 @@ fn scripted_model(
     crate::testing::TestProvider::builder()
         .kind("stub")
         .complete(move |request| {
-            if request.model == "batch-accounting" {
+            if request.messages.iter().flat_map(|message| message.blocks.iter())
+                .any(|block| matches!(block, crate::llm::types::LlmContentBlock::Text {text, ..} if text.as_ref() == "batch member spend")) {
                 return std::future::ready(Ok(crate::LlmResponse {
                     usage: crate::llm::types::LlmUsage {
                         input_tokens: 41,

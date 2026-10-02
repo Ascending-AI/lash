@@ -248,7 +248,7 @@ impl CodexProvider {
         req: &LlmRequest,
         then: impl FnOnce(&LlmRequest, ResolvedGenerationPolicy, Value) -> Result<T, LlmTransportError>,
     ) -> Result<T, LlmTransportError> {
-        let serving_route = self.route_identity(&req.model);
+        let serving_route = self.route_identity(req.model.wire_model());
         let safe_request = req
             .reasoning_retention_safe_for(
                 &serving_route,
@@ -307,7 +307,7 @@ impl CodexProvider {
         // `store:false` and the encrypted reasoning include are replay
         // mechanics of this stateless wire, not host settings.
         let mut body = json!({
-            "model": req.model,
+            "model": req.model.wire_model(),
             "input": input,
             "tools": tools,
             "stream": stream,
@@ -334,8 +334,12 @@ impl CodexProvider {
                 body[key] = value;
             }
         }
-        if let ReasoningRetentionSelection::OpenAiContext { context } =
-            req.llm_profile_capability.reasoning_retention.selection
+        if let ReasoningRetentionSelection::OpenAiContext { context } = req
+            .model
+            .metadata()
+            .capability
+            .reasoning_retention
+            .selection
         {
             reasoning_object(&mut body)["context"] = json!(context.as_str());
             emission.reasoning_retention = true;
@@ -371,7 +375,7 @@ impl CodexProvider {
         }
         let passthrough = merge_extra_body(
             &mut body,
-            &req.extra_body,
+            &req.model.metadata().extra_body,
             &reserved_generation_paths(req, "/stop", "/temperature"),
         )?;
         let mut receipt = policy.receipt(req, &emission);

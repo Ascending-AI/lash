@@ -1,5 +1,28 @@
 {
   "$defs": {
+    "OutputTokenLimits": {
+      "additionalProperties": false,
+      "description": "Output capacity and the default cap recorded together for a profile.",
+      "properties": {
+        "capacity": {
+          "format": "uint",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "default_cap": {
+          "format": "uint",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "RemoteAnthropicThinkingRetention": {
       "oneOf": [
         {
@@ -297,27 +320,6 @@
       },
       "type": "object"
     },
-    "RemoteLlmProfileConfig": {
-      "additionalProperties": false,
-      "description": "Mirror of the core `LlmProfileConfig`: the registry-minted binding a session\nrecorded for its key, and the reasoning it runs that model with.",
-      "properties": {
-        "key": {
-          "type": "string"
-        },
-        "metadata": {
-          "$ref": "#/$defs/RemoteLlmProfileMetadata"
-        },
-        "reasoning": {
-          "$ref": "#/$defs/RemoteReasoningSelection",
-          "default": "provider_default"
-        }
-      },
-      "required": [
-        "key",
-        "metadata"
-      ],
-      "type": "object"
-    },
     "RemoteLlmProfileMetadata": {
       "additionalProperties": false,
       "description": "Mirror of the core `LlmProfileMetadata`: the recorded facts of one registered\nmodel.",
@@ -355,14 +357,6 @@
         "expose_thinking": {
           "type": "boolean"
         },
-        "max_output_tokens": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
         "response_metadata_body_paths": {
           "items": {
             "type": "string"
@@ -376,6 +370,27 @@
           "type": "array"
         }
       },
+      "type": "object"
+    },
+    "RemoteModelConfig": {
+      "additionalProperties": false,
+      "description": "Mirror of the core `LlmProfileConfig`: the registry-minted binding a session\nrecorded for its key, and the reasoning it runs that model with.",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/$defs/RemoteLlmProfileMetadata"
+        },
+        "reasoning": {
+          "$ref": "#/$defs/RemoteReasoningSelection",
+          "default": "provider_default"
+        }
+      },
+      "required": [
+        "key",
+        "metadata"
+      ],
       "type": "object"
     },
     "RemoteNoProgressBudget": {
@@ -480,7 +495,7 @@
         "model": {
           "anyOf": [
             {
-              "$ref": "#/$defs/RemoteLlmProfileConfig"
+              "$ref": "#/$defs/RemoteModelConfig"
             },
             {
               "type": "null"
@@ -511,17 +526,13 @@
           "minimum": 0,
           "type": "integer"
         },
-        "output_token_capacity": {
-          "format": "uint",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+        "output_tokens": {
+          "$ref": "#/$defs/OutputTokenLimits"
         }
       },
       "required": [
-        "context_window_tokens"
+        "context_window_tokens",
+        "output_tokens"
       ],
       "type": "object"
     },

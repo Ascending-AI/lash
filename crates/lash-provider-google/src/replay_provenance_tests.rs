@@ -40,16 +40,24 @@ impl lash_llm_transport::LlmHttpTransport for CapturingTransport {
 fn request() -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: "gemini-2.5-pro".to_string(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::builder("gemini-2.5-pro".to_string())
+                    .context_window_tokens(128_000)
+                    .capability(Default::default())
+                    .extra_body(Default::default())
+                    .request_defaults(Default::default())
+                    .build()
+                    .expect("valid profile"),
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "hello")],
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: crate::attachment_test_acceptance(),
-        model_variant: Default::default(),
-        llm_profile_capability: Default::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",
             "session-1:frame:test",
@@ -72,7 +80,7 @@ fn fig1123_google_fallback_evicts_whole_genuine_user_segments() {
         LlmMessage::text(LlmRole::User, "new input").with_user_segment_start(),
         LlmMessage::text(LlmRole::Assistant, "new answer"),
     ];
-    *req.llm_profile_capability.reasoning_retention = ReasoningRetentionPolicy {
+    *req.model.metadata_mut().capability.reasoning_retention = ReasoningRetentionPolicy {
         capability: Some(ReasoningRetentionCapability::ClientSideUserSegments),
         selection: ReasoningRetentionSelection::ClientSideUserSegments {
             max_segments: std::num::NonZeroUsize::new(1).expect("non-zero segment count"),

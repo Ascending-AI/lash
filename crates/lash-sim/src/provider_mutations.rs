@@ -570,7 +570,19 @@ fn provider_transport(transport: &Arc<ScriptedLlmHttpTransport>) -> Arc<dyn LlmH
 fn openai_compatible_request(stream: bool) -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: "openai/gpt-5.4".to_string(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::new(
+                    "openai/gpt-5.4".to_string(),
+                    std::num::NonZeroUsize::MIN.saturating_add(127_999),
+                )
+                .with_capability(lash_core::LlmProfileCapability::default())
+                .with_extra_body(Default::default())
+                .with_request_defaults(Default::default()),
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "lookup x")],
         resolved_stored: Default::default(),
         tools: Arc::new(vec![LlmToolSpec {
@@ -588,10 +600,6 @@ fn openai_compatible_request(stream: bool) -> LlmRequest {
         }]),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
-        model_variant: Default::default(),
-        llm_profile_capability: lash_core::LlmProfileCapability::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",
@@ -607,16 +615,24 @@ fn openai_compatible_request(stream: bool) -> LlmRequest {
 fn openai_responses_request() -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: "gpt-5.4".to_string(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::new(
+                    "gpt-5.4".to_string(),
+                    std::num::NonZeroUsize::MIN.saturating_add(127_999),
+                )
+                .with_capability(lash_core::LlmProfileCapability::default())
+                .with_extra_body(Default::default())
+                .with_request_defaults(Default::default()),
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
-        model_variant: Default::default(),
-        llm_profile_capability: lash_core::LlmProfileCapability::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",
@@ -632,20 +648,30 @@ fn openai_responses_request() -> LlmRequest {
 fn anthropic_messages_request() -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: "claude-sonnet-4-20250514".to_string(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::with_limits(
+                    "claude-sonnet-4-20250514".to_string(),
+                    lash_sansio::llm_profile::LlmProfileLimits {
+                        context_window_tokens: std::num::NonZeroUsize::MIN.saturating_add(127_999),
+                        output_tokens:
+                            lash_sansio::llm_profile::OutputTokenLimits::from_default_cap(
+                                std::num::NonZeroUsize::MIN.saturating_add(4095),
+                            ),
+                    },
+                )
+                .with_capability(lash_core::LlmProfileCapability::default())
+                .with_extra_body(Default::default())
+                .with_request_defaults(Default::default()),
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
-        model_variant: Default::default(),
-        llm_profile_capability: lash_core::LlmProfileCapability::default(),
-        extra_body: Default::default(),
-        // Messages requires a cap, and lash invents none.
-        request_defaults: lash_core::provider::LlmProfileRequestDefaults {
-            max_output_tokens: Some(4_096),
-            ..Default::default()
-        },
         generation: lash_core::GenerationOptions::default(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",
@@ -661,16 +687,24 @@ fn anthropic_messages_request() -> LlmRequest {
 fn google_request(stream: bool) -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: "gemini-3.1-pro-preview".to_string(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::new(
+                    "gemini-3.1-pro-preview".to_string(),
+                    std::num::NonZeroUsize::MIN.saturating_add(127_999),
+                )
+                .with_capability(lash_core::LlmProfileCapability::default())
+                .with_extra_body(Default::default())
+                .with_request_defaults(Default::default()),
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
-        model_variant: Default::default(),
-        llm_profile_capability: lash_core::LlmProfileCapability::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",

@@ -69,3 +69,12 @@ pub(in crate::tests) fn test_turn_cancel_wait_request(
         deadline: None,
     }
 }
+
+pub(super) fn llm_spec_for_profile(key: &str) -> Box<lash_core::LlmRequestSpec> {
+    let mut request = Box::new(llm_spec());
+    request.model.model = lash_sansio::llm_profile::RecordedLlmProfile::mint(
+        lash_core::LlmProfileKey::new(key),
+        request.model.metadata().clone(),
+    );
+    request
+}

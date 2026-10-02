@@ -640,10 +640,7 @@ async fn the_lent_completion_client_is_rebound_to_the_recorded_authority() {
 
     let completion = child
         .direct_completions
-        .direct_completion(
-            crate::DirectRequest::text("law-model", "a managed call"),
-            "law-source",
-        )
+        .direct_completion(crate::DirectRequest::text("a managed call"), "law-source")
         .await
         .expect("the rebound client completes");
     assert_eq!(completion.text, "probed completion");
@@ -665,10 +662,7 @@ async fn the_lent_completion_client_is_rebound_to_the_recorded_authority() {
     // The opener's own client is untouched: a call on it still arrives under
     // the turn it was minted with — the rebind cloned, it did not mutate.
     lent.direct_completions
-        .direct_completion(
-            crate::DirectRequest::text("law-model", "the opener's"),
-            "law",
-        )
+        .direct_completion(crate::DirectRequest::text("the opener's"), "law")
         .await
         .expect("the lent client still completes");
     assert_eq!(

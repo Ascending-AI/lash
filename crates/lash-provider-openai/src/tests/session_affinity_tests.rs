@@ -53,7 +53,7 @@ fn request_bodies_carry_only_hashed_session_identity() {
     // provider-facing cache or affinity field must carry only the opaque hash.
     let raw_session = "tenant:acme-corp:user:jane.doe@acme.com:chat:8f2c";
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.request_defaults.cache_retention = CacheRetention::Short;
+    req.model.metadata_mut().request_defaults.cache_retention = CacheRetention::Short;
     req.scope.session_id = SessionId::from(raw_session);
     let session_key = req.provider_session_affinity_key();
     let cache_key = req.provider_prompt_cache_key();
@@ -77,8 +77,11 @@ fn request_bodies_carry_only_hashed_session_identity() {
         (CompletionEndpoint::ChatCompletions, "openai-compatible"),
     ] {
         let provider = openrouter_provider();
-        let route =
-            ProviderRouteIdentity::for_endpoint(kind, &provider.base_url, req.model.clone());
+        let route = ProviderRouteIdentity::for_endpoint(
+            kind,
+            &provider.base_url,
+            req.model.wire_model().to_string(),
+        );
         let body = crate::driver::build_request_body(&provider, &req, endpoint, false, &route)
             .expect("openrouter-compatible body")
             .body;

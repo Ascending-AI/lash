@@ -29,15 +29,22 @@ fn test_config(protocol_driver: Arc<dyn ProtocolDriverHandle>) -> TurnMachineCon
         model_tool_calls: crate::ModelToolCalls::fixture(),
         protocol_driver,
         projector: Arc::new(ChatContextProjector),
-        model: "test-model".to_string(),
-        max_context_tokens: None,
+        model: crate::llm_profile::LlmProfileConfig::new(
+            crate::llm_profile::RecordedLlmProfile::mint(
+                crate::llm_profile::LlmProfileKey::new("request-fixture"),
+                crate::llm_profile::LlmProfileMetadata::builder("test-model".to_string())
+                    .context_window_tokens(128_000)
+                    .capability(crate::llm::capability::LlmProfileCapability::default())
+                    .extra_body(Default::default())
+                    .request_defaults(Default::default())
+                    .build()
+                    .expect("valid profile"),
+            ),
+        )
+        .with_reasoning(crate::ReasoningSelection::ProviderDefault),
         turn_budget: crate::TurnBudget::Unbounded,
         no_progress_budget: Default::default(),
-        model_variant: crate::ReasoningSelection::ProviderDefault,
-        llm_profile_capability: crate::llm::capability::LlmProfileCapability::default(),
         attachment_acceptance: Default::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         generation: crate::llm::types::GenerationOptions::default(),
         autonomous: false,
         session_id: SessionId::from("test".to_string()),
@@ -1229,7 +1236,8 @@ fn output_limit_stops_as_incomplete_without_assistant_message() {
 #[test]
 fn zero_output_limit_with_a_full_prompt_refines_to_context_overflow() {
     let mut config = test_config(Arc::new(ProseDriver));
-    config.max_context_tokens = Some(100);
+    config.model.metadata_mut().limits.context_window_tokens =
+        std::num::NonZeroUsize::new(100).unwrap();
     let msgs = vec![user_message("hello")];
     let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
 
@@ -1277,7 +1285,8 @@ fn zero_output_limit_with_a_full_prompt_refines_to_context_overflow() {
 #[test]
 fn provider_prompt_subtotal_overflow_fails_the_turn_at_ingress() {
     let mut config = test_config(Arc::new(ProseDriver));
-    config.max_context_tokens = Some(100);
+    config.model.metadata_mut().limits.context_window_tokens =
+        std::num::NonZeroUsize::new(100).unwrap();
     let msgs = vec![user_message("hello")];
     let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
 

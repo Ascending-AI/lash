@@ -209,7 +209,7 @@ fn provider_file_media_type_round_trips_between_core_and_remote() {
 fn llm_request_and_response_round_trip_owned_dtos() {
     let request = core_llm::LlmRequest {
         instructions: Some(Arc::from("I")),
-        model: "gpt-test".to_string(),
+        model: llm_profile_passthrough::request_profile(),
         messages: vec![core_llm::LlmMessage::new(
             core_llm::LlmRole::User,
             vec![
@@ -248,30 +248,6 @@ fn llm_request_and_response_round_trip_owned_dtos() {
         }]),
         tool_choice: core_llm::LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
-        model_variant: core_llm::ReasoningSelection::Effort("fast".to_string()),
-        llm_profile_capability: core_llm::LlmProfileCapability {
-            instruction_role: core_llm::InstructionRole::Developer,
-            native_mid_conversation_system: true,
-            google_dialect: Default::default(),
-            reasoning: Some(core_llm::ReasoningCapability {
-                efforts: vec!["fast".to_string(), "slow".to_string()],
-                encoding: core_llm::ReasoningEncoding::Budget(std::collections::BTreeMap::from([
-                    ("fast".to_string(), 1024u32),
-                    ("slow".to_string(), 2048u32),
-                ])),
-                disable: true,
-                mandatory: false,
-            }),
-            cache_control: Some(core_llm::CacheControlDialect::Anthropic),
-            stream_termination: Some(core_llm::StreamTermination::RequireTerminalEvidence),
-            sampling: core_llm::SamplingCapability::Pinned,
-            reasoning_retention: Default::default(),
-        },
-        extra_body: serde_json::Map::from_iter([(
-            "host_option".to_string(),
-            serde_json::json!({"enabled": true}),
-        )]),
-        request_defaults: Default::default(),
         generation: core_llm::GenerationOptions {
             output_token_cap: NonZeroUsize::new(42),
             temperature: Some(
@@ -295,19 +271,19 @@ fn llm_request_and_response_round_trip_owned_dtos() {
     let remote = RemoteLlmRequest::from_core("request-1", request);
     let remote_json = serde_json::to_value(&remote).expect("serialize remote request");
     assert_eq!(
-        remote_json["model_intent"]["variant"],
+        remote_json["model"]["reasoning"],
         serde_json::json!({ "effort": "fast" })
     );
     assert_eq!(
-        remote_json["model_intent"]["capability"]["reasoning"]["disable"],
+        remote_json["model"]["metadata"]["capability"]["reasoning"]["disable"],
         serde_json::json!(true)
     );
     assert_eq!(
-        remote_json["model_intent"]["capability"]["cache_control"],
+        remote_json["model"]["metadata"]["capability"]["cache_control"],
         serde_json::json!("anthropic")
     );
     assert_eq!(
-        remote_json["model_intent"]["extra_body"],
+        remote_json["model"]["metadata"]["extra_body"],
         serde_json::json!({"host_option":{"enabled":true}})
     );
     let remote: RemoteLlmRequest =
@@ -318,28 +294,35 @@ fn llm_request_and_response_round_trip_owned_dtos() {
     let core = core_llm::LlmRequest::try_from(remote).expect("core request");
     assert_eq!(core.instructions.as_deref(), Some("I"));
     assert_eq!(
-        core.llm_profile_capability.instruction_role,
+        core.model.metadata().capability.instruction_role,
         core_llm::InstructionRole::Developer
     );
-    assert!(core.llm_profile_capability.native_mid_conversation_system);
-    assert_eq!(core.model, "gpt-test");
+    assert!(
+        core.model
+            .metadata()
+            .capability
+            .native_mid_conversation_system
+    );
+    assert_eq!(core.model.wire_model(), "gpt-test");
     assert_eq!(
-        core.extra_body["host_option"],
+        core.model.metadata().extra_body["host_option"],
         serde_json::json!({"enabled":true})
     );
     assert_eq!(
-        core.model_variant,
+        core.model.reasoning,
         core_llm::ReasoningSelection::Effort("fast".to_string())
     );
     let reasoning = core
-        .llm_profile_capability
+        .model
+        .metadata()
+        .capability
         .reasoning
         .as_ref()
         .expect("capability must round-trip");
     assert_eq!(reasoning.efforts, vec!["fast", "slow"]);
     assert!(reasoning.disable);
     assert_eq!(
-        core.llm_profile_capability.cache_control,
+        core.model.metadata().capability.cache_control,
         Some(core_llm::CacheControlDialect::Anthropic)
     );
     assert_eq!(

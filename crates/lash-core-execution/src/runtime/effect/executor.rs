@@ -1474,7 +1474,6 @@ impl RuntimeEffectLocalRunner for LocalDirectEffectRunner {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         match envelope.command {
             RuntimeEffectCommand::Direct {
-                profile_key,
                 request,
                 usage_source,
             } => {
@@ -1485,14 +1484,8 @@ impl RuntimeEffectLocalRunner for LocalDirectEffectRunner {
                     crate::session_model::transport_stream_events(&provider, None),
                     None,
                 );
-                self.run_direct_in_usage_run(
-                    provider,
-                    request,
-                    usage_source,
-                    profile_key,
-                    usage_run.as_ref(),
-                )
-                .await
+                self.run_direct_in_usage_run(provider, request, usage_source, usage_run.as_ref())
+                    .await
             }
             RuntimeEffectCommand::Sleep { spec } => {
                 let duration_ms = sleep_duration(spec, crate::SystemClock.timestamp_ms());

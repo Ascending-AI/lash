@@ -20,7 +20,7 @@ fn gemini_cache_dialect_reports_fallback_emission_when_marked_text_is_empty() {
             ],
         )],
     );
-    req.model = "custom/model-v1".to_string();
+    req.model.metadata_mut().wire_model = "custom/model-v1".to_string();
     enable_cache_control(&mut req, CacheControlDialect::Gemini);
 
     let (built, diagnostics) = openrouter_provider()

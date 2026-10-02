@@ -33,7 +33,7 @@ pub enum RemoteChargeSafetyPolicy {
 pub struct RemoteProcessExecutionPolicy {
     /// The recorded model selection; absent for a policy that selects none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<RemoteLlmProfileConfig>,
+    pub model: Option<RemoteModelConfig>,
     /// The session's recorded attachment-acceptance rules.
     #[serde(
         default,
@@ -110,13 +110,6 @@ impl RemoteProcessExecutionEnvSpec {
                 return Err(RemoteProtocolError::InvalidEnvelope {
                     type_name,
                     message: "env_spec.policy.model.metadata.limits.context_window_tokens must be greater than zero"
-                        .to_string(),
-                });
-            }
-            if limits.output_token_capacity.is_some_and(|value| value == 0) {
-                return Err(RemoteProtocolError::InvalidEnvelope {
-                    type_name,
-                    message: "env_spec.policy.model.metadata.limits.output_token_capacity must be greater than zero"
                         .to_string(),
                 });
             }

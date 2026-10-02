@@ -55,9 +55,9 @@ fn drain_area_witnesses() {
     });
     // W0013: lash::RecordedLlmProfile::metadata [function]
     let _ = lash::RecordedLlmProfile::metadata;
-    // W0014: lash::LlmProfileLimits::output_token_capacity [field]
+    // W0014: lash::LlmProfileLimits::output_tokens [field]
     field_witness(|value: &lash::LlmProfileLimits| {
-        let _ = &value.output_token_capacity;
+        let _ = &value.output_tokens;
     });
     // W0015: lash::LlmProfileLimitsError [enum]
     type_witness::<lash::LlmProfileLimitsError>();
@@ -226,18 +226,10 @@ fn drain_area_witnesses() {
         let _ = &value.generation;
     });
     // W0063: lash::direct::DirectRequest::json [function]
-    let _: fn(String, String) -> lash::direct::DirectRequest = lash::direct::DirectRequest::json;
+    let _: fn(String) -> lash::direct::DirectRequest = lash::direct::DirectRequest::json;
     // W0064: lash::direct::DirectRequest::json_schema [function]
-    let _: fn(String, String, lash::direct::DirectJsonSchema) -> lash::direct::DirectRequest =
+    let _: fn(String, lash::direct::DirectJsonSchema) -> lash::direct::DirectRequest =
         lash::direct::DirectRequest::json_schema;
-    // W0065: lash::direct::DirectRequest::model [field]
-    field_witness(|value: &lash::direct::DirectRequest| {
-        let _ = &value.model;
-    });
-    // W0066: lash::direct::DirectRequest::llm_profile_capability [field]
-    field_witness(|value: &lash::direct::DirectRequest| {
-        let _ = &value.llm_profile_capability;
-    });
     // W0067: lash::direct::DirectRequest::output [field]
     field_witness(|value: &lash::direct::DirectRequest| {
         let _ = &value.output;
@@ -657,13 +649,13 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::runtime::LlmRequestSpec| {
         let _ = &value.model;
     });
-    // W0181: lash::runtime::LlmRequestSpec::llm_profile_capability [field]
+    // W0181: lash::runtime::LlmRequestSpec::model.metadata().capability [field]
     field_witness(|value: &lash::runtime::LlmRequestSpec| {
-        let _ = &value.llm_profile_capability;
+        let _ = &value.model.metadata().capability;
     });
-    // W0182: lash::runtime::LlmRequestSpec::model_variant [field]
+    // W0182: lash::runtime::LlmRequestSpec::model.reasoning [field]
     field_witness(|value: &lash::runtime::LlmRequestSpec| {
-        let _ = &value.model_variant;
+        let _ = &value.model.reasoning;
     });
     // W0183: lash::runtime::LlmRequestSpec::output_spec [field]
     field_witness(|value: &lash::runtime::LlmRequestSpec| {

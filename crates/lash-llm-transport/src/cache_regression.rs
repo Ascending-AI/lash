@@ -98,16 +98,24 @@ mod tests {
     fn request(messages: Vec<LlmMessage>) -> LlmRequest {
         LlmRequest {
             instructions: None,
-            model: "model".to_string(),
+            model: lash_sansio::llm_profile::LlmProfileConfig::new(
+                lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                    lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                    lash_sansio::llm_profile::LlmProfileMetadata::builder("model".to_string())
+                        .context_window_tokens(128_000)
+                        .capability(Default::default())
+                        .extra_body(Default::default())
+                        .request_defaults(Default::default())
+                        .build()
+                        .expect("valid profile"),
+                ),
+            )
+            .with_reasoning(Default::default()),
             messages,
             resolved_stored: Default::default(),
             tools: Arc::new(Vec::new()),
             tool_choice: Default::default(),
             attachment_acceptance: Default::default(),
-            model_variant: Default::default(),
-            llm_profile_capability: Default::default(),
-            extra_body: Default::default(),
-            request_defaults: Default::default(),
             scope: lash_core::LlmRequestScope::new("session", "frame", "request"),
             output_spec: None,
             stream_events: None,

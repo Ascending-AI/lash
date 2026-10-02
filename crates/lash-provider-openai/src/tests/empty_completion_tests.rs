@@ -121,7 +121,7 @@ async fn eof_tolerance_does_not_turn_empty_unterminated_streams_into_success() {
     let mut responses =
         OpenAiProvider::new("key").with_transport(Arc::clone(&responses_transport) as _);
     let mut req = streamed_request(Arc::new(std::sync::Mutex::new(Vec::new())));
-    req.llm_profile_capability.stream_termination = Some(StreamTermination::EofTolerated);
+    req.model.metadata_mut().capability.stream_termination = Some(StreamTermination::EofTolerated);
     let responses_error = responses
         .complete(req)
         .await

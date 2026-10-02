@@ -287,7 +287,7 @@ impl ProviderHandle {
         &self,
         request: &mut LlmRequest,
     ) -> ProviderCompletionSideband {
-        let serving_route = self.route_identity(&request.model);
+        let serving_route = self.route_identity(request.model.wire_model());
         // Do not manufacture trace evidence containing an invalid endpoint:
         // URL userinfo may itself be credential material. `complete_prepared`
         // rejects the route before the LLM Provider is invoked.
@@ -364,7 +364,7 @@ impl ProviderHandle {
                 .admit_dispatch(&ProviderDispatch {
                     call_id: &call_id,
                     attempt_ordinal,
-                    model: &request.model,
+                    model: request.model.wire_model(),
                 })
                 .await
             {

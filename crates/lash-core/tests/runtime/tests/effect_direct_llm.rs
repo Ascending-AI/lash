@@ -56,7 +56,19 @@ async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() 
     );
     let request = LlmRequest {
         instructions: None,
-        model: "mock-model".to_string(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::builder("mock-model".to_string())
+                    .context_window_tokens(128_000)
+                    .capability(lash_core::LlmProfileCapability::default())
+                    .extra_body(Default::default())
+                    .request_defaults(Default::default())
+                    .build()
+                    .expect("valid profile"),
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages: vec![LlmMessage::new(
             LlmRole::User,
             vec![LlmContentBlock::Text {
@@ -69,10 +81,6 @@ async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() 
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::None,
         attachment_acceptance: Default::default(),
-        model_variant: Default::default(),
-        llm_profile_capability: lash_core::LlmProfileCapability::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         scope: lash_core::LlmRequestScope::new(
             "direct-llm-test",
             "direct-llm-test:frame",

@@ -12,7 +12,21 @@ fn request_with_inline_attachment(mime: &str) -> LlmRequest {
     );
     LlmRequest {
         instructions: None,
-        model: "claude-sonnet-4-6".to_string(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::builder(
+                    "claude-sonnet-4-6".to_string(),
+                )
+                .context_window_tokens(128_000)
+                .capability(Default::default())
+                .extra_body(Default::default())
+                .request_defaults(Default::default())
+                .build()
+                .expect("valid profile"),
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages: vec![LlmMessage::new(
             LlmRole::User,
             vec![LlmContentBlock::Attachment {
@@ -23,10 +37,6 @@ fn request_with_inline_attachment(mime: &str) -> LlmRequest {
         tools: Default::default(),
         tool_choice: Default::default(),
         attachment_acceptance: crate::attachment_test_acceptance(),
-        model_variant: Default::default(),
-        llm_profile_capability: Default::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",
             "session-1:frame:test",

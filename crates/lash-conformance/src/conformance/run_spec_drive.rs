@@ -128,7 +128,7 @@ fn record_llm_profiles(parts: &mut DriveParts) -> Arc<std::sync::Mutex<Vec<Strin
                 models
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .push(request.model.clone());
+                    .push(request.model.wire_model().to_string());
                 async move {
                     Ok(crate::LlmResponse {
                         parts: vec![crate::LlmOutputPart::Text {
@@ -1068,7 +1068,7 @@ pub async fn a_recovered_follow_on_inherits_its_roots_recorded_run(
                 models
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .push(request.model.clone());
+                    .push(request.model.wire_model().to_string());
                 async move {
                     let part = if index == 0 {
                         crate::LlmOutputPart::ToolCall {

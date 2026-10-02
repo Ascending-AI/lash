@@ -10,7 +10,7 @@ fn codex_passthrough_refuses_owned_nested_and_suppressed_controls() {
         json!({"model":null}),
     ] {
         let mut req = base.clone();
-        req.extra_body = extra.as_object().cloned().unwrap();
+        req.model.metadata_mut().extra_body = extra.as_object().cloned().unwrap();
         assert_eq!(
             provider
                 .build_request(&req, false)
@@ -24,7 +24,7 @@ fn codex_passthrough_refuses_owned_nested_and_suppressed_controls() {
     }
     let mut req = base.clone();
     req.output_spec = Some(LlmOutputSpec::JsonObject);
-    req.extra_body = json!({"text":{"format":{"type":"other"}}})
+    req.model.metadata_mut().extra_body = json!({"text":{"format":{"type":"other"}}})
         .as_object()
         .cloned()
         .unwrap();
@@ -32,7 +32,7 @@ fn codex_passthrough_refuses_owned_nested_and_suppressed_controls() {
     let mut req = base.clone();
     req.generation.stop_sequences = vec!["END".into()];
     req.generation.suppress_stop_sequences_for_protocol();
-    req.extra_body = json!({"stop":["END"]}).as_object().cloned().unwrap();
+    req.model.metadata_mut().extra_body = json!({"stop":["END"]}).as_object().cloned().unwrap();
     assert!(
         provider
             .build_request(&req, false)
@@ -41,8 +41,8 @@ fn codex_passthrough_refuses_owned_nested_and_suppressed_controls() {
             .contains("/stop")
     );
     let mut req = base.clone();
-    req.llm_profile_capability.sampling = lash_core::SamplingCapability::Pinned;
-    req.extra_body = json!({"temperature":0.3}).as_object().cloned().unwrap();
+    req.model.metadata_mut().capability.sampling = lash_core::SamplingCapability::Pinned;
+    req.model.metadata_mut().extra_body = json!({"temperature":0.3}).as_object().cloned().unwrap();
     assert!(
         provider
             .build_request(&req, false)
@@ -51,7 +51,7 @@ fn codex_passthrough_refuses_owned_nested_and_suppressed_controls() {
             .contains("/temperature")
     );
     let mut req = base.clone();
-    req.extra_body = json!({"host":{"nested":true}})
+    req.model.metadata_mut().extra_body = json!({"host":{"nested":true}})
         .as_object()
         .cloned()
         .unwrap();

@@ -60,7 +60,10 @@ fn runtime_feedback_native_trailing_section_retains_conversation_cache() {
             LlmMessage::text(LlmRole::System, "F"),
         ],
     );
-    req.llm_profile_capability.native_mid_conversation_system = true;
+    req.model
+        .metadata_mut()
+        .capability
+        .native_mid_conversation_system = true;
     let body = AnthropicProvider::new("key")
         .build_request_body(&req)
         .unwrap();
@@ -92,7 +95,10 @@ fn runtime_feedback_native_nontext_and_empty_messages_use_tagged_fallback() {
             ],
         ),
     ]);
-    req.llm_profile_capability.native_mid_conversation_system = true;
+    req.model
+        .metadata_mut()
+        .capability
+        .native_mid_conversation_system = true;
     let body = AnthropicProvider::new("key")
         .build_request_body(&req)
         .unwrap();
@@ -122,7 +128,10 @@ fn runtime_feedback_native_sections_respect_neighboring_fallback_blocks() {
         LlmMessage::text(LlmRole::System, "after"),
         LlmMessage::text(LlmRole::Assistant, "A"),
     ]);
-    req.llm_profile_capability.native_mid_conversation_system = true;
+    req.model
+        .metadata_mut()
+        .capability
+        .native_mid_conversation_system = true;
     let body = AnthropicProvider::new("key")
         .build_request_body(&req)
         .unwrap();
@@ -157,7 +166,10 @@ fn runtime_feedback_native_does_not_drop_whitespace_text_blocks() {
                 .collect(),
         ),
     ]);
-    req.llm_profile_capability.native_mid_conversation_system = true;
+    req.model
+        .metadata_mut()
+        .capability
+        .native_mid_conversation_system = true;
     let body = AnthropicProvider::new("key")
         .build_request_body(&req)
         .unwrap();
@@ -197,8 +209,11 @@ fn runtime_feedback_result_order_preserves_explicit_cache_marker() {
             }],
         ),
     ]);
-    req.request_defaults.cache_retention = CacheRetention::Short;
-    req.llm_profile_capability.native_mid_conversation_system = true;
+    req.model.metadata_mut().request_defaults.cache_retention = CacheRetention::Short;
+    req.model
+        .metadata_mut()
+        .capability
+        .native_mid_conversation_system = true;
     let provider = AnthropicProvider::new("key");
     let body = provider.build_request_body(&req).unwrap();
     let parts = body["messages"][2]["content"].as_array().unwrap();

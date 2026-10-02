@@ -252,16 +252,24 @@ mod tests {
     fn request() -> crate::LlmRequest {
         crate::LlmRequest {
             instructions: None,
-            model: "test/model".to_string(),
+            model: lash_sansio::llm_profile::LlmProfileConfig::new(
+                lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                    lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                    lash_sansio::llm_profile::LlmProfileMetadata::builder("test/model".to_string())
+                        .context_window_tokens(128_000)
+                        .capability(Default::default())
+                        .extra_body(Default::default())
+                        .request_defaults(Default::default())
+                        .build()
+                        .expect("valid profile"),
+                ),
+            )
+            .with_reasoning(crate::ReasoningSelection::ProviderDefault),
             messages: Vec::new(),
             resolved_stored: Default::default(),
             tools: Arc::new(Vec::new()),
             tool_choice: crate::llm::types::LlmToolChoice::Auto,
             attachment_acceptance: Default::default(),
-            model_variant: crate::ReasoningSelection::ProviderDefault,
-            llm_profile_capability: Default::default(),
-            extra_body: Default::default(),
-            request_defaults: Default::default(),
             generation: Default::default(),
             scope: crate::LlmRequestScope::new("request-session", "frame", "request"),
             output_spec: None,

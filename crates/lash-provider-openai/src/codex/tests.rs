@@ -65,16 +65,20 @@ fn reasoning_capability() -> LlmProfileCapability {
 fn request(messages: Vec<LlmMessage>) -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: "gpt-5.4".to_string(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::builder("gpt-5.4".to_string())
+                    .context_window_tokens(128_000)
+                    .build()
+                    .expect("valid profile"),
+            ),
+        ),
         messages,
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: crate::attachment_test_acceptance(),
-        model_variant: Default::default(),
-        llm_profile_capability: Default::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         scope: LlmRequestScope::new(
             "session-1",
             "session-1:frame:test",
@@ -311,9 +315,9 @@ fn codex_content_filter_incomplete_maps_to_content_filter() {
 #[test]
 fn codex_request_body_emits_reasoning_from_capability_variant() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model = "custom-codex-model".to_string();
-    req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-    req.llm_profile_capability = reasoning_capability();
+    req.model.metadata_mut().wire_model = "custom-codex-model".to_string();
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
+    req.model.metadata_mut().capability = reasoning_capability();
     let body = CodexProvider::new("access", "refresh", 0)
         .build_request_body(&req, true)
         .unwrap();
@@ -323,8 +327,8 @@ fn codex_request_body_emits_reasoning_from_capability_variant() {
 #[test]
 fn codex_request_body_emits_none_effort_for_disabled_selection() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model_variant = lash_core::provider::ReasoningSelection::Disabled;
-    req.llm_profile_capability = reasoning_capability();
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Disabled;
+    req.model.metadata_mut().capability = reasoning_capability();
     let body = CodexProvider::new("access", "refresh", 0)
         .build_request_body(&req, true)
         .unwrap();
@@ -334,8 +338,8 @@ fn codex_request_body_emits_none_effort_for_disabled_selection() {
 #[test]
 fn codex_request_body_refuses_an_effort_without_capability() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model = "custom-codex-model".to_string();
-    req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
+    req.model.metadata_mut().wire_model = "custom-codex-model".to_string();
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
     let error = CodexProvider::new("access", "refresh", 0)
         .build_request_body(&req, true)
         .expect_err("an effort without capability is refused");
@@ -482,13 +486,13 @@ async fn raw_provider_complete_filters_codex_sse_and_websocket_wire_captures() {
 #[test]
 fn codex_request_body_exposes_reasoning_summary_only_when_configured() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model_variant = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
-    req.llm_profile_capability = reasoning_capability();
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
+    req.model.metadata_mut().capability = reasoning_capability();
     let hidden = CodexProvider::new("access", "refresh", 0)
         .build_request_body(&req, true)
         .unwrap();
     assert_eq!(hidden["reasoning"], json!({ "effort": "medium" }));
-    req.request_defaults.expose_thinking = true;
+    req.model.metadata_mut().request_defaults.expose_thinking = true;
     let exposed = CodexProvider::new("access", "refresh", 0)
         .build_request_body(&req, true)
         .unwrap();
@@ -498,7 +502,9 @@ fn codex_request_body_exposes_reasoning_summary_only_when_configured() {
 #[test]
 fn codex_request_refuses_an_output_token_cap_from_either_source() {
     let mut defaulted = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    defaulted.request_defaults.max_output_tokens = Some(9_999);
+    defaulted.model.metadata_mut().limits.output_tokens =
+        lash_sansio::llm_profile::OutputTokenLimits::new(None, Some(9_999))
+            .expect("valid output-token limits");
     CodexProvider::new("access", "refresh", 0)
         .build_request_body(&defaulted, false)
         .expect_err("a recorded model cap is refused on Codex");
@@ -1792,7 +1798,10 @@ async fn codex_sse_stream_evidence_carries_allowlisted_response_headers() {
     let events = Arc::new(Mutex::new(Vec::new()));
     let event_sink = Arc::clone(&events);
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.request_defaults.response_metadata_headers = vec!["X-Request-Cost".to_string()];
+    req.model
+        .metadata_mut()
+        .request_defaults
+        .response_metadata_headers = vec!["X-Request-Cost".to_string()];
     req.stream_events = Some(lash_core::llm::types::LlmEventSender::new(move |event| {
         event_sink.lock_recover().push(event);
     }));
@@ -1972,8 +1981,11 @@ async fn codex_websocket_clean_eof_requires_terminal_event_unless_explicitly_tol
         tolerant_ws.url.clone(),
     );
     let mut tolerant_request = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    tolerant_request.llm_profile_capability.stream_termination =
-        Some(StreamTermination::EofTolerated);
+    tolerant_request
+        .model
+        .metadata_mut()
+        .capability
+        .stream_termination = Some(StreamTermination::EofTolerated);
     let response = tolerant
         .complete(tolerant_request)
         .await

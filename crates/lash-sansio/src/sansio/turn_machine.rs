@@ -636,7 +636,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 refine_terminal_reason_for_context_window(
                     &mut llm_response,
                     prompt_input_tokens,
-                    self.config.max_context_tokens,
+                    Some(self.config.model.context_window_tokens()),
                 );
                 let response_text = llm_response.full_text();
                 self.record_llm_usage(&llm_response, usage, &response_text)?;

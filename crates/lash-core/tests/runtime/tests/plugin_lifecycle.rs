@@ -36,13 +36,13 @@ async fn lifecycle_hook_concurrency_rejection_is_host_observable() {
                             let (first_result, overlap_result) = tokio::join! {
                                 biased;
                                 first.direct_completion(
-                                    lash_core::facade_support::DirectRequest::text("mock-model", "first"),
+                                    lash_core::facade_support::DirectRequest::text( "first"),
                                     "same-plugin-hook",
                                 ),
                                 async {
                                     hook_gate.0.notified().await;
                                     let result = second.direct_completion(
-                                        lash_core::facade_support::DirectRequest::text("mock-model", "overlap"),
+                                        lash_core::facade_support::DirectRequest::text( "overlap"),
                                         "same-plugin-hook",
                                     ).await;
                                     hook_gate.1.notify_one();

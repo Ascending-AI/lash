@@ -114,7 +114,7 @@ impl OpenAiCompatibleProvider {
     fn build_chat_messages(req: &LlmRequest) -> Vec<Value> {
         let mut messages = Vec::new();
         if let Some(instructions) = &req.instructions {
-            messages.push(json!({"role": req.llm_profile_capability.instruction_role.as_str(), "content": [{"type": "text", "text": instructions}]}));
+            messages.push(json!({"role": req.model.metadata().capability.instruction_role.as_str(), "content": [{"type": "text", "text": instructions}]}));
         }
         let mut feedback_start = None;
         for msg in &req.messages {
@@ -122,7 +122,7 @@ impl OpenAiCompatibleProvider {
             let fallback = shared::attachment_feedback(msg);
             let msg = fallback.as_ref().unwrap_or(msg);
             let role = if matches!(msg.role, LlmRole::System) {
-                req.llm_profile_capability.instruction_role.as_str()
+                req.model.metadata().capability.instruction_role.as_str()
             } else {
                 role_name(&msg.role)
             };
@@ -333,7 +333,7 @@ impl OpenAiCompatibleProvider {
                 )
             })
             .count();
-        let Some(dialect) = req.llm_profile_capability.cache_control else {
+        let Some(dialect) = req.model.metadata().capability.cache_control else {
             Self::strip_internal_cache_markers(messages);
             return CacheBreakpointDiagnostics {
                 requested,
@@ -452,7 +452,7 @@ impl OpenAiCompatibleProvider {
         req: &LlmRequest,
         stream: bool,
     ) -> Result<(BuiltRequest, CacheBreakpointDiagnostics), LlmTransportError> {
-        let serving_route = self.route_identity(&req.model);
+        let serving_route = self.route_identity(req.model.wire_model());
         let safe_request = req
             .reasoning_retention_safe_for(
                 &serving_route,
@@ -467,7 +467,11 @@ impl OpenAiCompatibleProvider {
             resolve_generation_policy(req, self.kind(), &Self::chat_generation_wire(&compat, req))?;
         let mut emission = GenerationEmission {
             reasoning_retention: matches!(
-                req.llm_profile_capability.reasoning_retention.selection,
+                req.model
+                    .metadata()
+                    .capability
+                    .reasoning_retention
+                    .selection,
                 ReasoningRetentionSelection::ClientSideUserSegments { .. }
             ),
             ..GenerationEmission::default()
@@ -488,7 +492,7 @@ impl OpenAiCompatibleProvider {
             Self::apply_chat_cache_control(req, policy.cache_retention, &mut messages, &mut tools);
         emission.cache = cache_diagnostics.cache_control_emitted;
         let mut body = json!({
-            "model": req.model,
+            "model": req.model.wire_model(),
             "messages": null,
             "stream": stream,
         });
@@ -551,7 +555,7 @@ impl OpenAiCompatibleProvider {
         if compat.cache_session_affinity {
             reserved.push("/session_id");
         }
-        let passthrough = merge_extra_body(&mut body, &req.extra_body, &reserved)?;
+        let passthrough = merge_extra_body(&mut body, &req.model.metadata().extra_body, &reserved)?;
         let mut receipt = policy.receipt(req, &emission);
         receipt.passthrough = if !self.wire.extra_headers.is_empty() {
             lash_core::GenerationOptionOutcome::Applied

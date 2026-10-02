@@ -6,7 +6,9 @@ use lash_sansio::sync::MutexExt;
 #[test]
 fn output_token_cap_maps_to_wire_fields() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.request_defaults.max_output_tokens = Some(9999);
+    req.model.metadata_mut().limits.output_tokens =
+        lash_sansio::llm_profile::OutputTokenLimits::new(None, Some(9999))
+            .expect("valid output-token limits");
     req.generation.output_token_cap = NonZeroUsize::new(2048);
 
     let responses_body = OpenAiProvider::new("key")
@@ -14,20 +16,23 @@ fn output_token_cap_maps_to_wire_fields() {
         .unwrap();
     assert_eq!(responses_body["max_output_tokens"], 2048);
     let mut model_limited_req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    model_limited_req.request_defaults.max_output_tokens = Some(9999);
+    model_limited_req.model.metadata_mut().limits.output_tokens =
+        lash_sansio::llm_profile::OutputTokenLimits::new(None, Some(9999))
+            .expect("valid output-token limits");
     let model_limited_responses_body = OpenAiProvider::new("key")
         .build_responses_request_body(&model_limited_req, true)
         .unwrap();
     assert_eq!(model_limited_responses_body["max_output_tokens"], 9999);
 
     let mut chat_req = req;
-    chat_req.model = "anthropic/claude-sonnet-4.6".to_string();
+    chat_req.model.metadata_mut().wire_model = "anthropic/claude-sonnet-4.6".to_string();
     let chat_body = openrouter_provider()
         .build_chat_request_body(&chat_req, true)
         .unwrap();
     assert_eq!(chat_body["max_tokens"], 2048);
     let mut model_limited_chat_req = model_limited_req;
-    model_limited_chat_req.model = "anthropic/claude-sonnet-4.6".to_string();
+    model_limited_chat_req.model.metadata_mut().wire_model =
+        "anthropic/claude-sonnet-4.6".to_string();
     let model_limited_chat_body = openrouter_provider()
         .build_chat_request_body(&model_limited_chat_req, true)
         .unwrap();
@@ -41,7 +46,7 @@ fn refusal_code(error: &LlmTransportError) -> Option<String> {
 #[test]
 fn stop_sequences_reach_chat_and_are_refused_by_responses_and_codex() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model = "anthropic/claude-sonnet-4.6".to_string();
+    req.model.metadata_mut().wire_model = "anthropic/claude-sonnet-4.6".to_string();
     req.generation.stop_sequences = vec!["</lashlang>".to_string()];
 
     let (chat, _) = openrouter_provider()
@@ -136,7 +141,7 @@ fn chat_body_omits_temperature_and_seed_when_the_caller_sets_neither() {
 #[test]
 fn sampling_controls_do_not_disturb_the_rest_of_the_chat_body() {
     let mut req = sampled_request();
-    req.model = "anthropic/claude-sonnet-4.6".to_string();
+    req.model.metadata_mut().wire_model = "anthropic/claude-sonnet-4.6".to_string();
     req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
         name: "answer".to_string(),
         schema: lash_sansio::SchemaContract::admit(json!({ "type": "object", "properties": {} }))
@@ -153,8 +158,8 @@ fn sampling_controls_do_not_disturb_the_rest_of_the_chat_body() {
         output_schema: lash_sansio::SchemaContract::admit(json!({}))
             .expect("valid declared schema"),
     }]);
-    req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-    req.llm_profile_capability = LlmProfileCapability {
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
+    req.model.metadata_mut().capability = LlmProfileCapability {
         reasoning: Some(ReasoningCapability {
             efforts: vec!["high".to_string()],
             encoding: ReasoningEncoding::Effort,
@@ -227,7 +232,7 @@ async fn every_retry_attempt_reapplies_the_sampling_controls() {
 #[test]
 fn responses_body_carries_temperature_and_refuses_a_seed() {
     let mut req = sampled_request();
-    req.model = "gpt-5.4".to_string();
+    req.model.metadata_mut().wire_model = "gpt-5.4".to_string();
 
     let error = OpenAiProvider::new("key")
         .build_responses_request_body(&req, true)
@@ -258,7 +263,9 @@ fn codex_refuses_every_sampling_control_and_the_cap() {
     cap.generation.output_token_cap = NonZeroUsize::new(1_024);
     cases.push(("output_token_cap", cap));
     let mut model_cap = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    model_cap.request_defaults.max_output_tokens = Some(1_024);
+    model_cap.model.metadata_mut().limits.output_tokens =
+        lash_sansio::llm_profile::OutputTokenLimits::new(None, Some(1_024))
+            .expect("valid output-token limits");
     cases.push(("output_token_cap", model_cap));
     for (setting, req) in cases {
         let error = CodexProvider::new("access", "refresh", 0)
@@ -317,7 +324,7 @@ async fn unsupported_settings_are_refused_before_any_transport_call() {
     }
     let pinned = |req: &mut LlmRequest| {
         req.generation.temperature = Some(NonNegativeFiniteF64::new(0.2).expect("finite"));
-        req.llm_profile_capability.sampling = lash_core::SamplingCapability::Pinned;
+        req.model.metadata_mut().capability.sampling = lash_core::SamplingCapability::Pinned;
     };
     // (label, endpoint is Responses, compat, options, request, expected code)
     let cases: Vec<(&str, bool, OpenAiCompat, ProviderOptions, LlmRequest, &str)> = vec![
@@ -389,8 +396,8 @@ async fn unsupported_settings_are_refused_before_any_transport_call() {
             OpenAiCompat::default(),
             ProviderOptions::default(),
             with(|req| {
-                req.llm_profile_capability = reasoning_capability();
-                req.model_variant =
+                req.model.metadata_mut().capability = reasoning_capability();
+                req.model.reasoning =
                     lash_core::provider::ReasoningSelection::Effort("high".to_string());
             }),
             "lash:reasoning_encoding_unrepresentable",
@@ -401,8 +408,8 @@ async fn unsupported_settings_are_refused_before_any_transport_call() {
             OpenAiCompat::openrouter(),
             ProviderOptions::default(),
             with(|req| {
-                req.llm_profile_capability = reasoning_capability();
-                req.model_variant =
+                req.model.metadata_mut().capability = reasoning_capability();
+                req.model.reasoning =
                     lash_core::provider::ReasoningSelection::Effort("High".to_string());
             }),
             "lash:unsupported_effort",
@@ -500,7 +507,7 @@ fn parallel_tool_calls_is_sent_as_the_host_set_it() {
 #[test]
 fn expose_thinking_requests_a_summary_on_responses_and_codex_even_without_effort() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.request_defaults.expose_thinking = true;
+    req.model.metadata_mut().request_defaults.expose_thinking = true;
     let responses = OpenAiProvider::new("key")
         .build_responses_request(&req, true)
         .unwrap();
@@ -527,7 +534,7 @@ fn expose_thinking_requests_a_summary_on_responses_and_codex_even_without_effort
 #[test]
 fn expose_thinking_on_chat_is_local_visibility_only() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.request_defaults.expose_thinking = true;
+    req.model.metadata_mut().request_defaults.expose_thinking = true;
     let (chat, _) = openrouter_provider()
         .build_chat_request_body_with_diagnostics(&req, true)
         .expect("expose_thinking is not refused on Chat");
@@ -548,19 +555,19 @@ fn expose_thinking_on_chat_is_local_visibility_only() {
 #[test]
 fn codex_speaks_responses_in_the_openai_reasoning_dialect() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.llm_profile_capability = reasoning_capability();
+    req.model.metadata_mut().capability = reasoning_capability();
     let codex = CodexProvider::new("access", "refresh", 0);
 
-    req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
     let body = codex.build_request_body(&req, true).unwrap();
     assert_eq!(body["reasoning"], json!({ "effort": "high" }));
 
-    req.model_variant = lash_core::provider::ReasoningSelection::Disabled;
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Disabled;
     let body = codex.build_request_body(&req, true).unwrap();
     assert_eq!(body["reasoning"], json!({ "effort": "none" }));
 
-    req.llm_profile_capability = budget_reasoning_capability();
-    req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
+    req.model.metadata_mut().capability = budget_reasoning_capability();
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".to_string());
     let error = codex
         .build_request_body(&req, true)
         .expect_err("Codex has no reasoning token-budget field");

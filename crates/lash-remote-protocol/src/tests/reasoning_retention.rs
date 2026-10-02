@@ -20,8 +20,8 @@ fn absent_retention_and_user_segment_marker_decode_to_safe_defaults() {
 
 #[test]
 fn fig1123_remote_llm_request_json_round_trips() {
-    let mut model_intent = RemoteModelIntent::new("gpt-test");
-    model_intent.capability.reasoning_retention = RemoteReasoningRetentionPolicy {
+    let mut model = RemoteModelConfig::new("gpt-test");
+    model.metadata.capability.reasoning_retention = RemoteReasoningRetentionPolicy {
         capability: Some(RemoteReasoningRetentionCapability::OpenAiContext {
             supported: vec![RemoteOpenAiReasoningContext::CurrentTurn],
         }),
@@ -33,7 +33,7 @@ fn fig1123_remote_llm_request_json_round_trips() {
         instructions: None,
         request_id: "request-1".to_string(),
         scope: RemoteLlmRequestScope::new("session", "session:frame:test", "request-1"),
-        model_intent,
+        model,
         attachment_acceptance: Default::default(),
         messages: vec![RemoteLlmMessage {
             role: RemoteLlmRole::User,
@@ -73,7 +73,7 @@ fn current_llm_envelope_rejects_userinfo_in_replay_route_without_echoing_it() {
         instructions: None,
         request_id: "request-userinfo".to_string(),
         scope: RemoteLlmRequestScope::new("session", "session:frame:test", "request-userinfo"),
-        model_intent: RemoteModelIntent::new("gpt-test"),
+        model: RemoteModelConfig::new("gpt-test"),
         attachment_acceptance: Default::default(),
         messages: vec![RemoteLlmMessage {
             role: RemoteLlmRole::Assistant,

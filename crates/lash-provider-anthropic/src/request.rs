@@ -209,7 +209,11 @@ impl AnthropicProvider {
         for (index, msg) in req.messages.iter().enumerate() {
             let feedback = matches!(msg.role, LlmRole::System);
             let native = Self::native_feedback_content(msg)
-                && req.llm_profile_capability.native_mid_conversation_system
+                && req
+                    .model
+                    .metadata()
+                    .capability
+                    .native_mid_conversation_system
                 && Self::native_feedback_position(req, index, &out);
             let wire_role = if native {
                 "system"
@@ -461,7 +465,7 @@ impl AnthropicProvider {
         &self,
         req: &LlmRequest,
     ) -> Result<(Value, GenerationReceipt), LlmTransportError> {
-        let serving_route = self.route_identity(&req.model);
+        let serving_route = self.route_identity(req.model.wire_model());
         let safe_request = req
             .reasoning_retention_safe_for(
                 &serving_route,
@@ -572,13 +576,17 @@ impl AnthropicProvider {
         );
 
         let mut body = json!({
-            "model": req.model,
+            "model": req.model.wire_model(),
             "max_tokens": max_tokens,
             "messages": messages,
         });
 
-        if let ReasoningRetentionSelection::AnthropicClearThinking { keep } =
-            req.llm_profile_capability.reasoning_retention.selection
+        if let ReasoningRetentionSelection::AnthropicClearThinking { keep } = req
+            .model
+            .metadata()
+            .capability
+            .reasoning_retention
+            .selection
         {
             let keep = match keep {
                 AnthropicThinkingRetention::All => json!("all"),
@@ -663,7 +671,7 @@ impl AnthropicProvider {
         body["stream"] = json!(true);
         let passthrough = merge_extra_body(
             &mut body,
-            &req.extra_body,
+            &req.model.metadata().extra_body,
             &reserved_generation_paths(req, "/stop_sequences", "/temperature"),
         )?;
         let mut receipt = policy.receipt(req, &emission);

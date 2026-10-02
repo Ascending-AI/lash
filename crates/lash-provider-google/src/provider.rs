@@ -420,10 +420,12 @@ impl GoogleOAuthProvider {
         let provider_trace = req.provider_trace.clone();
         let reading = ResponseReading {
             stream_termination: req
-                .llm_profile_capability
+                .model
+                .metadata()
+                .capability
                 .stream_termination
                 .unwrap_or(self.stream_termination),
-            defaults: req.request_defaults.clone(),
+            defaults: req.model.metadata().request_defaults.clone(),
         };
         let GoogleCredential {
             access_token,
@@ -588,7 +590,7 @@ impl Provider for GoogleOAuthProvider {
     }
 
     async fn complete(&mut self, req: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
-        self.route_identity_for_model(&req.model)
+        self.route_identity_for_model(req.model.wire_model())
             .validate_endpoint()
             .map_err(|error| {
                 LlmTransportError::new(error.to_string())
@@ -704,7 +706,21 @@ mod error_detail_tests {
     fn completion_request() -> LlmRequest {
         LlmRequest {
             instructions: None,
-            model: "gemini-3.1-pro-preview".to_string(),
+            model: lash_sansio::llm_profile::LlmProfileConfig::new(
+                lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                    lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                    lash_sansio::llm_profile::LlmProfileMetadata::builder(
+                        "gemini-3.1-pro-preview".to_string(),
+                    )
+                    .context_window_tokens(128_000)
+                    .capability(Default::default())
+                    .extra_body(Default::default())
+                    .request_defaults(Default::default())
+                    .build()
+                    .expect("valid profile"),
+                ),
+            )
+            .with_reasoning(Default::default()),
             messages: vec![lash_core::llm::types::LlmMessage::text(
                 LlmRole::User,
                 "hello",
@@ -713,10 +729,6 @@ mod error_detail_tests {
             tools: Arc::new(Vec::<lash_core::llm::types::LlmToolSpec>::new()),
             tool_choice: LlmToolChoice::Auto,
             attachment_acceptance: Default::default(),
-            model_variant: Default::default(),
-            llm_profile_capability: Default::default(),
-            extra_body: Default::default(),
-            request_defaults: Default::default(),
             scope: lash_core::LlmRequestScope::new(
                 "project-resolution",
                 "project-resolution:frame",
@@ -817,20 +829,21 @@ mod error_detail_tests {
         let mut pinned = completion_request();
         pinned.generation.temperature =
             Some(lash_core::NonNegativeFiniteF64::new(0.5).expect("finite"));
-        pinned.llm_profile_capability.sampling = lash_core::SamplingCapability::Pinned;
+        pinned.model.metadata_mut().capability.sampling = lash_core::SamplingCapability::Pinned;
         let mut parallel = completion_request();
         parallel.generation.parallel_tool_calls = Some(true);
         let mut effort = completion_request();
-        effort.model_variant = lash_core::provider::ReasoningSelection::Effort("high".into());
+        effort.model.reasoning = lash_core::provider::ReasoningSelection::Effort("high".into());
         let mut gemini3_off = completion_request();
-        gemini3_off.llm_profile_capability.google_dialect = lash_core::GoogleDialect::Gemini3;
-        gemini3_off.llm_profile_capability.reasoning =
+        gemini3_off.model.metadata_mut().capability.google_dialect =
+            lash_core::GoogleDialect::Gemini3;
+        gemini3_off.model.metadata_mut().capability.reasoning =
             Some(lash_core::provider::ReasoningCapability {
                 efforts: vec!["high".to_string()],
                 disable: true,
                 ..lash_core::provider::ReasoningCapability::default()
             });
-        gemini3_off.model_variant = lash_core::provider::ReasoningSelection::Disabled;
+        gemini3_off.model.reasoning = lash_core::provider::ReasoningSelection::Disabled;
         for (label, req, code) in [
             ("pinned", pinned, "lash:unsupported_generation_option"),
             ("parallel", parallel, "lash:unsupported_generation_option"),
@@ -916,14 +929,15 @@ mod error_detail_tests {
         )
         .with_transport(transport.clone());
         let mut request = completion_request();
-        *request.llm_profile_capability.reasoning_retention = lash_core::ReasoningRetentionPolicy {
-            capability: Some(lash_core::ReasoningRetentionCapability::OpenAiContext {
-                supported: vec![lash_core::OpenAiReasoningContext::CurrentTurn],
-            }),
-            selection: lash_core::ReasoningRetentionSelection::OpenAiContext {
-                context: lash_core::OpenAiReasoningContext::CurrentTurn,
-            },
-        };
+        *request.model.metadata_mut().capability.reasoning_retention =
+            lash_core::ReasoningRetentionPolicy {
+                capability: Some(lash_core::ReasoningRetentionCapability::OpenAiContext {
+                    supported: vec![lash_core::OpenAiReasoningContext::CurrentTurn],
+                }),
+                selection: lash_core::ReasoningRetentionSelection::OpenAiContext {
+                    context: lash_core::OpenAiReasoningContext::CurrentTurn,
+                },
+            };
 
         let error = provider
             .complete(request)

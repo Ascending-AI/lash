@@ -772,10 +772,6 @@ impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
                 LlmToolChoice::None
             },
             attachment_acceptance: Arc::clone(&ctx.config.attachment_acceptance),
-            model_variant: ctx.config.model_variant.clone(),
-            llm_profile_capability: ctx.config.llm_profile_capability.clone(),
-            extra_body: ctx.config.extra_body.clone(),
-            request_defaults: ctx.config.request_defaults.clone(),
             generation: ctx.config.generation.clone(),
             scope: crate::llm::types::LlmRequestScope::new(
                 ctx.config.session_id.clone(),
@@ -966,25 +962,14 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
     pub model_tool_calls: ModelToolCalls,
     pub protocol_driver: Arc<dyn ProtocolDriverHandle<M>>,
     pub projector: Arc<dyn ContextProjector<M>>,
-    pub model: String,
-    /// Model context-window size in tokens, if known. Lets the kernel
-    /// reclassify a zero-output `OutputLimit` terminal reason as
-    /// `ContextOverflow` when the prompt nearly filled the window. `None`
-    /// disables that refinement.
-    pub max_context_tokens: Option<usize>,
+    pub model: crate::llm_profile::LlmProfileConfig,
     pub turn_budget: crate::TurnBudget,
     /// Bound on consecutive provider attempts that commit no successful
     /// execution. Enforced by the protocol driver, which is the only layer
     /// that can tell a productive attempt from a stalled one.
     pub no_progress_budget: crate::NoProgressBudget,
-    pub model_variant: crate::ReasoningSelection,
-    pub llm_profile_capability: crate::llm::capability::LlmProfileCapability,
     /// The session's recorded attachment-acceptance rules.
     pub attachment_acceptance: Arc<crate::llm::capability::AttachmentCapabilitySnapshot>,
-    pub extra_body: serde_json::Map<String, serde_json::Value>,
-    /// The recorded model's request defaults every request of the turn
-    /// carries.
-    pub request_defaults: crate::llm::capability::LlmProfileRequestDefaults,
     pub generation: crate::llm::types::GenerationOptions,
     pub autonomous: bool,
     pub session_id: SessionId,

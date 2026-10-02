@@ -115,22 +115,36 @@ where
         let mut envelope =
             journaled_conformance_envelope(invocation.execution_scope(), &key, "unused");
         envelope.command = RuntimeEffectCommand::LlmCall {
-            profile_key: crate::LlmProfileKey::new("attempt-ledger"),
-            request: Box::new(crate::runtime::LlmRequestSpec {
-                instructions: None,
-                model: "ledger-model".into(),
-                messages: Vec::new(),
-                tools: Arc::new(Vec::new()),
-                tool_choice: crate::llm::types::LlmToolChoice::None,
-                attachment_acceptance: Default::default(),
-                model_variant: Default::default(),
-                llm_profile_capability: Default::default(),
-                extra_body: Default::default(),
-                request_defaults: Default::default(),
-                generation: Default::default(),
-                scope: crate::LlmRequestScope::new("session", "session:frame", &key),
-                output_spec: None,
-            }),
+            request: {
+                let mut request = Box::new(crate::runtime::LlmRequestSpec {
+                    instructions: None,
+                    model: lash_sansio::llm_profile::LlmProfileConfig::new(
+                        lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                            lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                            lash_sansio::llm_profile::LlmProfileMetadata::builder("ledger-model")
+                                .context_window_tokens(128_000)
+                                .capability(Default::default())
+                                .extra_body(Default::default())
+                                .request_defaults(Default::default())
+                                .build()
+                                .expect("valid profile"),
+                        ),
+                    )
+                    .with_reasoning(Default::default()),
+                    messages: Vec::new(),
+                    tools: Arc::new(Vec::new()),
+                    tool_choice: crate::llm::types::LlmToolChoice::None,
+                    attachment_acceptance: Default::default(),
+                    generation: Default::default(),
+                    scope: crate::LlmRequestScope::new("session", "session:frame", &key),
+                    output_spec: None,
+                });
+                request.model.model = lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                    crate::LlmProfileKey::new("attempt-ledger"),
+                    request.model.metadata().clone(),
+                );
+                request
+            },
         };
         let record = crate::LlmCallRecord {
             call_id: crate::LlmCallId(key),

@@ -11,14 +11,7 @@ pub(super) struct Child {
 impl Child {
     #[expect(clippy::expect_used, reason = "conformance fixture assertions")]
     pub(super) async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
-        let request = || {
-            let mut request =
-                crate::DirectRequest::text("mock-model", "child held across deletion");
-            request
-                .extra_body
-                .insert("usage_delete_child".into(), serde_json::json!(true));
-            request
-        };
+        let request = || crate::DirectRequest::text("child held across deletion");
         call.context
             .direct_completions()
             .complete(request(), "delete-child")

@@ -9,8 +9,6 @@ use std::sync::Arc;
 
 use futures_util::FutureExt as _;
 
-use crate::ModelGenerationClamp;
-
 use lash_trace::{
     TraceError, TraceEvent, TraceProviderRequestEvent, TraceProviderStreamEvent,
     TraceRuntimeStreamEvent,
@@ -82,7 +80,6 @@ impl RuntimeTurnDriver<'_> {
             RuntimeEffectEnvelope::new(
                 invocation,
                 RuntimeEffectCommand::LlmCall {
-                    profile_key: self.policy.llm_profile_config().key().clone(),
                     request: Box::new(
                         LlmRequestSpec::from_request(
                             &request,
@@ -202,14 +199,9 @@ impl RuntimeTurnDriver<'_> {
             provider,
             usage_call,
         } = dispatch;
-        let mut request = (*request).clone();
+        let request = (*request).clone();
         let protocol_suppressed_stop_sequences =
             request.generation.stop_sequences_suppressed_by_protocol();
-        let clamped_output_token_cap = self
-            .policy
-            .llm_profile_config()
-            .metadata()
-            .clamp_generation_options(&mut request.generation);
         let request = match crate::attachments::resolve_llm_request_attachments(
             request,
             self.host.core.durability.attachment_store.as_ref(),
@@ -239,7 +231,7 @@ impl RuntimeTurnDriver<'_> {
                 };
             }
         };
-        let request_model = request.model.clone();
+        let request_model = request.model.wire_model().to_string();
         let trace_enabled = self.host.core.tracing.trace_sink.is_some();
         let llm_call_id = trace_enabled.then(|| self.llm_call_id(protocol_iteration, &invocation));
         if let Some(llm_call_id) = llm_call_id.as_ref() {
@@ -640,9 +632,6 @@ impl RuntimeTurnDriver<'_> {
                 }
                 Err(_) => {}
             }
-        }
-        if clamped_output_token_cap {
-            record_clamped_output_token_cap(&mut result, call_record.as_mut());
         }
         if protocol_suppressed_stop_sequences {
             record_protocol_owned_stop_suppression(&mut result, call_record.as_mut());
@@ -1499,8 +1488,8 @@ pub(in crate::runtime) struct LlmCallDispatch {
 mod provider_host_forwarding_tests;
 
 #[cfg(test)]
-#[path = "streaming/clamp_report_tests.rs"]
-mod clamp_report_tests;
+#[path = "streaming/generation_report_tests.rs"]
+mod generation_report_tests;
 
 #[cfg(test)]
 #[path = "streaming_protocol_abort_tests.rs"]

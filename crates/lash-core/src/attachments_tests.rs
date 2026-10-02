@@ -1828,7 +1828,21 @@ fn attachment_request(
         .collect();
     Arc::new(crate::llm::types::LlmRequest {
         instructions: None,
-        model: "attachment-model".to_string(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::builder(
+                    "attachment-model".to_string(),
+                )
+                .context_window_tokens(128_000)
+                .capability(Default::default())
+                .extra_body(Default::default())
+                .request_defaults(Default::default())
+                .build()
+                .expect("valid profile"),
+            ),
+        )
+        .with_reasoning(crate::ReasoningSelection::ProviderDefault),
         messages: vec![crate::llm::types::LlmMessage::new(
             crate::llm::types::LlmRole::User,
             blocks,
@@ -1837,10 +1851,6 @@ fn attachment_request(
         tools: Arc::new(Vec::new()),
         tool_choice: crate::llm::types::LlmToolChoice::None,
         attachment_acceptance: lash_core_store::attachments::attachment_test_acceptance(),
-        model_variant: crate::ReasoningSelection::ProviderDefault,
-        llm_profile_capability: Default::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         generation: crate::llm::types::GenerationOptions::default(),
         scope: crate::llm::types::LlmRequestScope::new(
             "attachment-session",

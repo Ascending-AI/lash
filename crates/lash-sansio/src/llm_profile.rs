@@ -1,6 +1,6 @@
 use std::num::NonZeroUsize;
 
-use crate::provider::{
+use crate::llm::capability::{
     CacheRetention, LlmProfileCapability, LlmProfileEffortValidationCategory,
     LlmProfileRequestDefaults, ReasoningSelection,
 };
@@ -94,7 +94,7 @@ impl LlmProfileMetadata {
             wire_model,
             LlmProfileLimits {
                 context_window_tokens,
-                output_token_capacity: None,
+                output_tokens: OutputTokenLimits::default(),
             },
         )
     }
@@ -147,6 +147,7 @@ pub struct LlmProfileMetadataBuilder {
     capability: LlmProfileCapability,
     extra_body: serde_json::Map<String, serde_json::Value>,
     request_defaults: LlmProfileRequestDefaults,
+    default_output_token_cap: Option<u64>,
 }
 
 impl LlmProfileMetadataBuilder {
@@ -158,6 +159,7 @@ impl LlmProfileMetadataBuilder {
             capability: LlmProfileCapability::default(),
             extra_body: serde_json::Map::new(),
             request_defaults: LlmProfileRequestDefaults::default(),
+            default_output_token_cap: None,
         }
     }
 
@@ -182,6 +184,11 @@ impl LlmProfileMetadataBuilder {
         self
     }
 
+    pub fn request_defaults(mut self, request_defaults: LlmProfileRequestDefaults) -> Self {
+        self.request_defaults = request_defaults;
+        self
+    }
+
     /// Surface the reasoning the provider streams in this model's responses.
     pub fn expose_thinking(mut self, expose_thinking: bool) -> Self {
         self.request_defaults.expose_thinking = expose_thinking;
@@ -190,7 +197,7 @@ impl LlmProfileMetadataBuilder {
 
     /// The output-token cap of this model's calls whose request sets none.
     pub fn max_output_tokens(mut self, max_output_tokens: u64) -> Self {
-        self.request_defaults.max_output_tokens = Some(max_output_tokens);
+        self.default_output_token_cap = Some(max_output_tokens);
         self
     }
 
@@ -220,7 +227,14 @@ impl LlmProfileMetadataBuilder {
             .ok_or(LlmProfileLimitsError::MissingContextWindowTokens)?;
         Ok(LlmProfileMetadata::with_limits(
             self.wire_model,
-            LlmProfileLimits::validated(context_window_tokens, self.output_token_capacity)?,
+            LlmProfileLimits {
+                context_window_tokens: NonZeroUsize::new(context_window_tokens)
+                    .ok_or(LlmProfileLimitsError::ZeroContextWindowTokens)?,
+                output_tokens: OutputTokenLimits::new(
+                    self.output_token_capacity,
+                    self.default_output_token_cap,
+                )?,
+            },
         )
         .with_capability(self.capability)
         .with_extra_body(self.extra_body)
@@ -228,7 +242,7 @@ impl LlmProfileMetadataBuilder {
     }
 }
 
-/// A model binding a host's [`LlmProfiles`](crate::provider::LlmProfiles)
+/// A model binding a host's `LlmProfiles`
 /// minted for one key: the key and the metadata it served at that moment.
 ///
 /// A session records it at creation and at every model change, and a root
@@ -246,7 +260,7 @@ pub struct RecordedLlmProfile {
 
 impl RecordedLlmProfile {
     /// Mint the binding a registry serves `key` with. Only a
-    /// [`LlmProfiles`](crate::provider::LlmProfiles) implementation
+    /// `LlmProfiles` implementation
     /// calls this: everything else copies a recorded value.
     pub fn mint(key: LlmProfileKey, metadata: LlmProfileMetadata) -> Self {
         Self { key, metadata }
@@ -304,6 +318,15 @@ impl LlmProfileConfig {
 
     pub fn metadata(&self) -> &LlmProfileMetadata {
         self.model.metadata()
+    }
+
+    pub fn wire_model(&self) -> &str {
+        self.model.wire_model()
+    }
+
+    /// Edit this owned binding before dispatch; recorded owners are copied intact.
+    pub fn metadata_mut(&mut self) -> &mut LlmProfileMetadata {
+        &mut self.model.metadata
     }
 
     pub fn context_window_tokens(&self) -> usize {
@@ -369,8 +392,7 @@ pub struct LlmProfileLimits {
     /// the model's total context (input + output), which would over-budget by
     /// the whole response reservation.
     pub context_window_tokens: NonZeroUsize,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_token_capacity: Option<NonZeroUsize>,
+    pub output_tokens: OutputTokenLimits,
 }
 
 /// Invalid or incomplete token-limit metadata supplied for a model.
@@ -383,22 +405,97 @@ pub enum LlmProfileLimitsError {
     ZeroContextWindowTokens,
     #[error("output_token_capacity must be greater than zero")]
     ZeroOutputTokenCapacity,
+    #[error("default output-token cap must be greater than zero")]
+    ZeroOutputTokenDefault,
+    #[error("default output-token cap does not fit the platform's token count")]
+    OutputTokenDefaultOutOfRange,
+    #[error("default output-token cap {default_cap} exceeds capacity {capacity}")]
+    OutputTokenDefaultExceedsCapacity {
+        default_cap: NonZeroUsize,
+        capacity: NonZeroUsize,
+    },
 }
 
-impl LlmProfileLimits {
-    fn validated(
-        context_window_tokens: usize,
-        output_token_capacity: Option<usize>,
+/// Output capacity and the default cap recorded together for a profile.
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(try_from = "OutputTokenLimitsWire", into = "OutputTokenLimitsWire")]
+pub struct OutputTokenLimits {
+    capacity: Option<NonZeroUsize>,
+    default_cap: Option<NonZeroUsize>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct OutputTokenLimitsWire {
+    pub capacity: Option<NonZeroUsize>,
+    pub default_cap: Option<NonZeroUsize>,
+}
+
+impl OutputTokenLimits {
+    /// A nonzero default with no declared capacity, valid by construction.
+    pub fn from_default_cap(default_cap: NonZeroUsize) -> Self {
+        Self {
+            capacity: None,
+            default_cap: Some(default_cap),
+        }
+    }
+
+    pub fn new(
+        capacity: Option<usize>,
+        default_cap: Option<u64>,
     ) -> Result<Self, LlmProfileLimitsError> {
+        let capacity = capacity
+            .map(|value| {
+                NonZeroUsize::new(value).ok_or(LlmProfileLimitsError::ZeroOutputTokenCapacity)
+            })
+            .transpose()?;
+        let default_cap = default_cap
+            .map(|value| {
+                let value = usize::try_from(value)
+                    .map_err(|_| LlmProfileLimitsError::OutputTokenDefaultOutOfRange)?;
+                NonZeroUsize::new(value).ok_or(LlmProfileLimitsError::ZeroOutputTokenDefault)
+            })
+            .transpose()?;
+        if let (Some(capacity), Some(default_cap)) = (capacity, default_cap)
+            && default_cap > capacity
+        {
+            return Err(LlmProfileLimitsError::OutputTokenDefaultExceedsCapacity {
+                default_cap,
+                capacity,
+            });
+        }
         Ok(Self {
-            context_window_tokens: NonZeroUsize::new(context_window_tokens)
-                .ok_or(LlmProfileLimitsError::ZeroContextWindowTokens)?,
-            output_token_capacity: output_token_capacity
-                .map(|value| {
-                    NonZeroUsize::new(value).ok_or(LlmProfileLimitsError::ZeroOutputTokenCapacity)
-                })
-                .transpose()?,
+            capacity,
+            default_cap,
         })
+    }
+
+    pub fn capacity(&self) -> Option<NonZeroUsize> {
+        self.capacity
+    }
+    pub fn default_cap(&self) -> Option<NonZeroUsize> {
+        self.default_cap
+    }
+}
+
+impl TryFrom<OutputTokenLimitsWire> for OutputTokenLimits {
+    type Error = LlmProfileLimitsError;
+    fn try_from(value: OutputTokenLimitsWire) -> Result<Self, Self::Error> {
+        Self::new(
+            value.capacity.map(NonZeroUsize::get),
+            value.default_cap.map(|cap| cap.get() as u64),
+        )
+    }
+}
+
+impl From<OutputTokenLimits> for OutputTokenLimitsWire {
+    fn from(value: OutputTokenLimits) -> Self {
+        Self {
+            capacity: value.capacity,
+            default_cap: value.default_cap,
+        }
     }
 }
 
@@ -412,6 +509,65 @@ mod tests {
             .output_token_capacity(1_024)
             .build()
             .expect("valid metadata")
+    }
+
+    #[test]
+    fn recorded_output_default_cannot_be_zero() {
+        assert!(
+            LlmProfileMetadata::builder("provider/model")
+                .context_window_tokens(8192)
+                .max_output_tokens(0)
+                .build()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn recorded_output_default_cannot_exceed_capacity() {
+        assert!(
+            LlmProfileMetadata::builder("provider/model")
+                .context_window_tokens(8192)
+                .output_token_capacity(1024)
+                .max_output_tokens(2048)
+                .build()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn output_token_limits_validate_stored_facts_and_reject_the_old_shape() {
+        for wire in [
+            serde_json::json!({"capacity": 0, "default_cap": null}),
+            serde_json::json!({"capacity": 1024, "default_cap": 0}),
+            serde_json::json!({"capacity": 1024, "default_cap": 2048}),
+            serde_json::json!({"output_token_capacity": 1024}),
+        ] {
+            assert!(serde_json::from_value::<OutputTokenLimits>(wire).is_err());
+        }
+        for (capacity, default_cap) in [
+            (None, None),
+            (Some(1024), None),
+            (None, Some(2048)),
+            (Some(1024), Some(1024)),
+        ] {
+            let limits = OutputTokenLimits::new(capacity, default_cap).expect("valid limits");
+            let wire = serde_json::to_value(&limits).expect("serialize limits");
+            assert_eq!(
+                wire,
+                serde_json::json!({"capacity": capacity, "default_cap": default_cap})
+            );
+            assert_eq!(
+                serde_json::from_value::<OutputTokenLimits>(wire).expect("decode limits"),
+                limits
+            );
+        }
+        assert_eq!(
+            OutputTokenLimits::new(Some(1024), Some(2048)),
+            Err(LlmProfileLimitsError::OutputTokenDefaultExceedsCapacity {
+                capacity: NonZeroUsize::new(1024).expect("positive"),
+                default_cap: NonZeroUsize::new(2048).expect("positive"),
+            })
+        );
     }
 
     #[test]
@@ -458,7 +614,7 @@ mod tests {
             .context_window_tokens(200_000)
             .output_token_capacity(8_192)
             .capability(LlmProfileCapability {
-                reasoning: Some(crate::provider::ReasoningCapability {
+                reasoning: Some(crate::llm::capability::ReasoningCapability {
                     efforts: vec!["high".to_string()],
                     ..Default::default()
                 }),
@@ -470,7 +626,7 @@ mod tests {
         assert_eq!(spec.wire_model, "provider/model");
         assert_eq!(spec.context_window_tokens(), 200_000);
         assert_eq!(
-            spec.limits.output_token_capacity.map(NonZeroUsize::get),
+            spec.limits.output_tokens.capacity().map(NonZeroUsize::get),
             Some(8_192)
         );
         assert!(!spec.capability.is_empty());

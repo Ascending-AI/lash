@@ -38,15 +38,22 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver: preamble.config.protocol,
         projector: preamble.config.projector,
-        model: "scripted".to_string(),
-        max_context_tokens: None,
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::builder("scripted".to_string())
+                    .context_window_tokens(128_000)
+                    .capability(Default::default())
+                    .extra_body(Default::default())
+                    .request_defaults(Default::default())
+                    .build()
+                    .expect("valid profile"),
+            ),
+        )
+        .with_reasoning(Default::default()),
         turn_budget: lash_core::TurnBudget::bounded(4),
         no_progress_budget: lash_core::NoProgressBudget::bounded(3),
-        model_variant: Default::default(),
         attachment_acceptance: Default::default(),
-        llm_profile_capability: Default::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         generation: Default::default(),
         autonomous: false,
         session_id: SessionId::from("parity"),

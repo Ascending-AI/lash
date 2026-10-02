@@ -254,7 +254,6 @@ impl DirectCompletionCapability {
         let envelope = crate::RuntimeEffectEnvelope::new(
             invocation,
             crate::RuntimeEffectCommand::Direct {
-                profile_key: binding.recorded().key().clone(),
                 request: Box::new(request_spec),
                 usage_source,
             },
@@ -322,19 +321,9 @@ impl DirectCompletionCapability {
         request: crate::DirectRequest,
         usage_source: &str,
     ) -> Result<crate::DirectCompletion, crate::PluginError> {
-        let binding = context.current.resolve_policy()?.binding().clone();
-        let model = request.model.clone();
-        // Validate against the capability carried by the request before the
-        // request is built, naming the model by the session's recorded key;
-        // the selection travels unchanged.
-        request
-            .llm_profile_capability
-            .validate_selection(
-                &model,
-                binding.recorded().key().as_str(),
-                &request.model_variant,
-            )
-            .map_err(|error| crate::PluginError::Session(error.message))?;
+        let policy = context.current.resolve_policy()?;
+        let binding = policy.binding().clone();
+        let model = policy.llm_profile_config().clone();
         let replay = request.replay.clone();
         let caused_by = request.caused_by.clone();
         let _unkeyed_guard = if context.position == DirectExecutionPosition::Independent
@@ -383,26 +372,19 @@ impl DirectCompletionCapability {
     pub(in crate::runtime::session_manager) async fn invoke_direct_llm_completion(
         &self,
         context: DirectInvocationContext<'_>,
-        request: crate::LlmRequest,
+        mut request: crate::LlmRequest,
         usage_source: &str,
         caused_by: Option<crate::CausalRef>,
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
-        let binding = context.current.resolve_policy()?.binding().clone();
+        let policy = context.current.resolve_policy()?;
+        let binding = policy.binding().clone();
         if request.scope.request_id.trim().is_empty() {
             return Err(crate::PluginError::Session(
                 "direct LLM completion request_id must be non-empty for durable replay".to_string(),
             ));
         }
-        // Same variant validation the text lane applies before the request
-        // is planned.
-        request
-            .llm_profile_capability
-            .validate_selection(
-                &request.model,
-                binding.recorded().key().as_str(),
-                &request.model_variant,
-            )
-            .map_err(|error| crate::PluginError::Session(error.message))?;
+        request.model = policy.llm_profile_config().clone();
+        request.attachment_acceptance = Arc::clone(&context.current.policy.attachment_acceptance);
         let replay = crate::RuntimeReplay {
             key: request.scope.request_id.clone(),
             attribution: None,

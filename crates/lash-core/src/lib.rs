@@ -22,7 +22,6 @@ pub use lash_core_execution::compat;
 pub use lash_core_execution::direct;
 pub(crate) use lash_core_execution::direct_completion_client;
 pub use lash_core_execution::engine;
-pub(crate) use lash_core_execution::model_clamp;
 #[cfg(any(test, feature = "testing"))]
 pub use lash_core_execution::process_id_for_test;
 pub use lash_core_execution::process_id_from_handle_json;
@@ -45,7 +44,6 @@ pub use lash_core_store::impl_current_fleet_format;
 pub use lash_core_store::impl_noop_attachment_referrers;
 pub use lash_core_store::protocol_turn_options::{ProtocolTurnOptions, ProtocolTurnOptionsError};
 pub use lash_core_store::surface_format;
-pub(crate) use model_clamp::ModelGenerationClamp;
 /// The session drive (FIG-3600): admission as recorded steps, then the
 /// admitted root's turns.
 pub use runtime::drive;
@@ -625,7 +623,7 @@ pub use lash_trace::{
 pub use llm::transport::ProviderFailureKind;
 pub use llm_profile::{
     LlmProfileConfig, LlmProfileKey, LlmProfileLimits, LlmProfileLimitsError, LlmProfileMetadata,
-    LlmProfileMetadataBuilder, ReasoningRefused, RecordedLlmProfile,
+    LlmProfileMetadataBuilder, OutputTokenLimits, ReasoningRefused, RecordedLlmProfile,
 };
 pub(crate) use plugin::PluginRuntimeDirective;
 pub use plugin::{

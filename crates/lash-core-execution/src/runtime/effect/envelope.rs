@@ -352,11 +352,6 @@ pub enum RuntimeEffectCommand {
         request: Box<CoreLlmRequest>,
     },
     LlmCall {
-        /// The model key the turn's recorded policy names for this call. With
-        /// the request's wire model it is the recorded selection the call runs
-        /// under, so a replay whose policy names another key diverges instead
-        /// of continuing on it.
-        profile_key: crate::LlmProfileKey,
         request: Box<LlmRequestSpec>,
     },
     /// Run host assistant-response hooks over the raw provider completion that
@@ -372,11 +367,6 @@ pub enum RuntimeEffectCommand {
         stream_hook_states: Vec<AssistantStreamHookState>,
     },
     Direct {
-        /// The recorded model key the completion runs under: the session's
-        /// (or the tool child's) recorded selection at the time of the call.
-        /// The usage ledger attributes the call to it, and a replay under
-        /// another key diverges instead of continuing on it.
-        profile_key: crate::LlmProfileKey,
         request: Box<LlmRequestSpec>,
         usage_source: String,
     },
@@ -1446,13 +1436,10 @@ const _: () = assert!(std::mem::size_of::<RuntimeEffectOutcome>() <= 128);
 pub struct LlmRequestSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions: Option<Arc<str>>,
-    pub model: String,
+    pub model: lash_sansio::llm_profile::LlmProfileConfig,
     pub messages: Vec<LlmMessage>,
     pub tools: Arc<Vec<LlmToolSpec>>,
     pub tool_choice: LlmToolChoice,
-    pub model_variant: crate::ReasoningSelection,
-    #[serde(default)]
-    pub llm_profile_capability: crate::LlmProfileCapability,
     /// The session's recorded attachment-acceptance rules the request
     /// renders its attachments under.
     #[serde(
@@ -1460,13 +1447,6 @@ pub struct LlmRequestSpec {
         skip_serializing_if = "crate::provider::AttachmentCapabilitySnapshot::is_empty_arc"
     )]
     pub attachment_acceptance: Arc<crate::provider::AttachmentCapabilitySnapshot>,
-    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
-    pub extra_body: serde_json::Map<String, serde_json::Value>,
-    #[serde(
-        default,
-        skip_serializing_if = "crate::provider::LlmProfileRequestDefaults::is_default"
-    )]
-    pub request_defaults: crate::provider::LlmProfileRequestDefaults,
     #[serde(default)]
     pub generation: crate::GenerationOptions,
     pub scope: crate::LlmRequestScope,
@@ -1521,11 +1501,7 @@ impl LlmRequestSpec {
             messages,
             tools: Arc::clone(&request.tools),
             tool_choice: request.tool_choice.clone(),
-            model_variant: request.model_variant.clone(),
-            llm_profile_capability: request.llm_profile_capability.clone(),
             attachment_acceptance: Arc::clone(&request.attachment_acceptance),
-            extra_body: request.extra_body.clone(),
-            request_defaults: request.request_defaults.clone(),
             generation: request.generation.clone(),
             scope: request.scope.clone(),
             output_spec: request.output_spec.clone(),
@@ -1544,11 +1520,7 @@ impl LlmRequestSpec {
             resolved_stored: Default::default(),
             tools: self.tools,
             tool_choice: self.tool_choice,
-            model_variant: self.model_variant,
-            llm_profile_capability: self.llm_profile_capability,
             attachment_acceptance: self.attachment_acceptance,
-            extra_body: self.extra_body,
-            request_defaults: self.request_defaults,
             generation: self.generation,
             scope: self.scope,
             output_spec: self.output_spec,

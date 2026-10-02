@@ -214,10 +214,10 @@ pub(crate) async fn provider_execution_evidence_scenarios() -> serde_json::Value
         let mut transaction = lash::config::ConfigTransaction::of(lash::config::SetLlmProfile {
             model: lash::LlmProfileKey::new(model.wire_model.clone()),
         });
-        if let Some(cap) = model.request_defaults.max_output_tokens {
+        if let Some(cap) = model.limits.output_tokens.default_cap() {
             transaction = transaction.then(lash::config::SetGeneration {
                 generation: lash::GenerationOverlay::Merge(lash::direct::GenerationOptions {
-                    output_token_cap: std::num::NonZeroUsize::new(cap as usize),
+                    output_token_cap: Some(cap),
                     ..Default::default()
                 }),
             });

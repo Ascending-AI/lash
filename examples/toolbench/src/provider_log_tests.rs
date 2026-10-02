@@ -35,16 +35,22 @@ impl Provider for Scripted {
 fn request() -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: "test".into(),
+        model: lash::LlmProfileConfig::new(lash::RecordedLlmProfile::mint(
+            lash::LlmProfileKey::new("request-fixture"),
+            lash::LlmProfileMetadata::builder("test")
+                .context_window_tokens(128_000)
+                .capability(Default::default())
+                .extra_body(Default::default())
+                .request_defaults(Default::default())
+                .build()
+                .expect("valid profile"),
+        ))
+        .with_reasoning(Default::default()),
         messages: vec![],
         resolved_stored: Default::default(),
         tools: Default::default(),
         tool_choice: Default::default(),
         attachment_acceptance: Default::default(),
-        model_variant: Default::default(),
-        llm_profile_capability: Default::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         generation: Default::default(),
         scope: LlmRequestScope::new("s", "f", "r"),
         output_spec: None,

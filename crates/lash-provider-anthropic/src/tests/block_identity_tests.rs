@@ -31,16 +31,26 @@ impl lash_llm_transport::LlmHttpTransport for StaticSseTransport {
 fn request(messages: Vec<LlmMessage>) -> LlmRequest {
     LlmRequest {
         instructions: None,
-        model: "claude-sonnet-4-6".to_string(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                lash_sansio::llm_profile::LlmProfileMetadata::builder(
+                    "claude-sonnet-4-6".to_string(),
+                )
+                .context_window_tokens(128_000)
+                .capability(Default::default())
+                .extra_body(Default::default())
+                .request_defaults(Default::default())
+                .build()
+                .expect("valid profile"),
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages,
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::<LlmToolSpec>::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: crate::attachment_test_acceptance(),
-        model_variant: Default::default(),
-        llm_profile_capability: Default::default(),
-        extra_body: Default::default(),
-        request_defaults: Default::default(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",
             "session-1:frame:test",
@@ -84,7 +94,7 @@ fn capture() -> (Arc<std::sync::Mutex<Vec<LlmStreamEvent>>>, LlmEventSender) {
 async fn hidden_thinking_stream_emits_no_reasoning_events() {
     let (events, sender) = capture();
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
-    req.request_defaults.expose_thinking = false;
+    req.model.metadata_mut().request_defaults.expose_thinking = false;
     req.stream_events = Some(sender);
     let mut provider = AnthropicProvider::new("key")
         .with_transport(Arc::new(StaticSseTransport(THINKING_STREAM_UNSIGNED)));
@@ -121,7 +131,7 @@ async fn hidden_thinking_stream_emits_no_reasoning_events() {
 async fn unsigned_thinking_part_carries_content_block_item_id() {
     let (events, sender) = capture();
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
-    req.request_defaults.expose_thinking = true;
+    req.model.metadata_mut().request_defaults.expose_thinking = true;
     req.stream_events = Some(sender);
     let mut provider = AnthropicProvider::new("key")
         .with_transport(Arc::new(StaticSseTransport(THINKING_STREAM_UNSIGNED)));
@@ -168,7 +178,7 @@ async fn streamed_reasoning_parts_are_stamped_at_the_anthropic_boundary() {
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let event_sink = Arc::clone(&events);
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.request_defaults.expose_thinking = true;
+    req.model.metadata_mut().request_defaults.expose_thinking = true;
     req.stream_events = Some(LlmEventSender::new(move |event| {
         event_sink.lock_recover().push(event);
     }));

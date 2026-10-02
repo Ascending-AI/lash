@@ -905,22 +905,37 @@ fn matrix_request(
     };
     LlmRequest {
         instructions: None,
-        model: model.to_string(),
+        model: lash_sansio::llm_profile::LlmProfileConfig::new(
+            lash_sansio::llm_profile::RecordedLlmProfile::mint(
+                lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
+                {
+                    let mut metadata =
+                        lash_sansio::llm_profile::LlmProfileMetadata::builder(model.to_string())
+                            .context_window_tokens(128_000)
+                            .capability(llm_profile_capability)
+                            .extra_body(Default::default())
+                            .request_defaults(lash_core::provider::LlmProfileRequestDefaults {
+                                expose_thinking: true,
+                                ..Default::default()
+                            })
+                            .build()
+                            .expect("valid profile");
+                    metadata.limits.output_tokens =
+                        lash_sansio::llm_profile::OutputTokenLimits::new(
+                            None,
+                            (dialect == "anthropic.messages").then_some(4096),
+                        )
+                        .expect("valid limits");
+                    metadata
+                },
+            ),
+        )
+        .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
-        model_variant: Default::default(),
-        llm_profile_capability,
-        extra_body: Default::default(),
-        // Every matrix row records a model that exposes thinking; Anthropic
-        // additionally requires a cap, and lash invents none.
-        request_defaults: lash_core::provider::LlmProfileRequestDefaults {
-            expose_thinking: true,
-            max_output_tokens: (dialect == "anthropic.messages").then_some(4_096),
-            ..Default::default()
-        },
         generation: lash_core::GenerationOptions {
             stop_sequences: (row.variation == "stop_consumed")
                 .then(|| TYPESCRIPT_CLOSE_DELIMITER.to_string())
