@@ -16,10 +16,10 @@ and what this runbook gates is whether a Lash bot behaves correctly *as a guest*
 everything, answers only when addressed, spends nothing while merely listening, answers
 exactly once, and survives both processes dying.
 
-The token-free, exact-answer subset is executable on every PR through
-[`../slack-clone-deterministic/runbook.md`](../slack-clone-deterministic/runbook.md).
-This document remains the real-token judged path; it is not replaced by the CI
-companion.
+The token-free, exact-answer subset is executable on every PR through the
+[deterministic companion](#deterministic-companion) section at the end of this
+document. This document remains the real-token judged path; it is not replaced
+by the CI companion.
 
 **Why four layers.** The other runbooks reconcile three (DOM / durable state / logs) inside
 one process. Here there are **two independent processes with two independent durable stores**,
@@ -241,11 +241,12 @@ Screenshot `03-mention-both-tabs.png`.
 This phase absorbs the former `slack-clone-mcp-client-depth` runbook. The four
 client-depth features themselves — sampling, form elicitation, URL elicitation
 completion, and workspace roots — are proven headlessly with exact scripted
-oracles by [`slack-clone-deterministic`](../slack-clone-deterministic/runbook.md)
-("MCP phases 0-3"), so re-running them as their own paid judged row bought a
-second boot and no additional claim. Two things the scripted harness cannot say
-survive here, because they need a real provider: that **sampling is served by
-the model the bot configured**, and that the reply reflects the sampled input.
+oracles by the [deterministic companion](#deterministic-companion) ("MCP phases
+0-3" in its boundary table), so re-running them as their own paid judged row
+bought a second boot and no additional claim. Two things the scripted harness
+cannot say survive here, because they need a real provider: that **sampling is
+served by the model the bot configured**, and that the reply reflects the
+sampled input.
 
 As **B**, post one message that mentions the bot and asks for all four features,
 naming them:
@@ -281,9 +282,9 @@ platform port + 2. The bot does **not** wire it at boot: it is an integration an
 operator attaches over the bot's own admin API, which is the point of this
 sub-phase — nothing the model can call reaches that API, so growing the tool
 catalog stays an operator act. The mechanics (a connected status row, the
-attachment write, an emptied catalog after detach) are proven headlessly by
-[`slack-clone-deterministic`](../slack-clone-deterministic/runbook.md); what
-survives here is the model half.
+attachment write, an emptied catalog after detach) are proven headlessly by the
+[deterministic companion](#deterministic-companion); what survives here is the
+model half.
 
 Attach it, using the bot's operator credential as the admin bearer:
 
@@ -611,6 +612,62 @@ room's context and a real tool call, ignore a redelivery, answer a mention it wa
 the middle of, survive the platform restarting under it, and render one identical conversation
 to both humans — with the platform's database, the bot's Lash stores, and the runtime trace
 agreeing on every count?
+
+## Deterministic companion
+
+The executable, hermetic companion to this runbook's judged path. Phase 3M
+absorbed the former `slack-clone-mcp-client-depth` scenario once this harness
+was shown to cover its whole scorecard. Run it with:
+
+```bash
+just slack-clone-full-host-e2e
+```
+
+It acquires the repository worktree gate and takes offsets `+35`, `+36`, and
+`+37` of that worktree's 50-port block for its platform, bot, and HTTP MCP
+server — three consecutive ports that stay inside the block, since the port
+lock is per slot and an offset past `+49` would be the next slot's `+0`. It
+keeps state outside the checkout, and always tears down its platform, bot,
+stdio MCP child, HTTP MCP server, and two headless Chromium contexts. If the
+derived slot is occupied, `LASH_GATE_SLOT_OVERRIDE` selects a different
+worktree gate block. `LASH_SLACK_CLONE_E2E_ARTIFACT_DIR` selects the evidence
+directory. There is no model call or token dependency.
+
+The scorecard at `scorecard.json` reconciles the same four named layers at
+every applicable checkpoint: rendered DOM in both browser contexts, platform
+HTTP API plus SQLite truth, bot ledger/session SQLite truth, and JSONL trace
+plus typed disposition logs. Screenshots and a complete four-layer extract
+accompany every checkpoint.
+
+### Exact automated boundary
+
+| Judged cell | Deterministic CI coverage |
+| --- | --- |
+| Phases 0-2 | Boot/identity/silence and two ambient admissions, with no turn |
+| Phase 3 | One mention, folded context, dropped twin, one native `list_channels` tool and one reply |
+| Phase 3T | Retained thread fork, inherited root, both-direction post-fork isolation, two thread replies |
+| Phase 3T root recall | The child's first answer names the thread root and not the later room mention; the child's first provider request carries the host's thread-root seed exactly once, on a line of its own — queued text inputs concatenate with no separator, so a seed behind copied pre-root context would start mid-line and stop being a label. Inheritance is read from the fork lineage's ancestor chain, never from the child's own graph rows — `fork_at` writes no nodes into the child, so an isolation gate written against those rows passes vacuously |
+| Phase 4 | Exact event-envelope redelivery, durable delivery increment, no new turn or reply |
+| Phase 5 | Provider-entry/accepted-stage kill, durable claim evidence, real live-lease deferral, timed reclaim/retry, one recovered reply, live DOM mutation history |
+| Phase 5T | **NONE** — the deterministic suite proves the same kill/recovery machinery on the channel route; child-route mid-turn recovery remains judged/manual and has focused Rust coverage |
+| Phase 6 | **NONE** — platform-outbox crash recovery is orthogonal to the FIG-1341 bot full-host acceptance and remains judged/manual plus focused Rust coverage |
+| Phase 7 | Both independent contexts reload to the same top-level API/database projection |
+| Phase 3M (runtime integration attach/detach) | An operator attaches the HTTP-served MCP server over the bot's admin API mid-run: the status row reports connected with its advertised tools, the next turn calls its binary-content tool and the bytes land in the host attachment store as a `stored` attachment, detaching leaves the operator view holding only the stdio server the bot booted with, and the following turn's provider request no longer offers the tool. **NOT covered:** that a real model chooses the newly-offered tool unprompted and reports its absence honestly after detach — that is model behaviour, which is why phase 3M keeps a judged half |
+| Phase 3M (MCP client depth) | One rendered turn invokes sampling, form elicitation, URL elicitation/completion, and roots over the bundled stdio child; four committed results and four exact trace attempts. **NOT covered:** that sampling is served by the bot's configured real provider — a scripted provider has no model id to name, which is why phase 3M survives as a judged step |
+
+The deterministic provider is compiled only by the `e2e` Cargo feature and
+requires the explicit `SLACK_CLONE_E2E_PROVIDER=scripted-v1` selector. Omitting
+the selector preserves the normal OpenRouter requirement even in an E2E-feature
+build.
+
+### Deliberate RED proof
+
+The implementation report records five temporary source mutations, one at each
+evidence-producing boundary — including the runtime-attach checkpoint, whose bot
+layer was reproduced red by configuring the attached HTTP server without binary
+content attachments — and the checkpoint that rejected each mutation.
+Those mutations are reverted after proof and are not shipped as runtime test
+switches.
 
 ---
 

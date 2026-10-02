@@ -81,7 +81,7 @@ attaches and detaches the HTTP MCP server mid-run, reloads both humans,
 and emits a machine-readable DOM/platform/bot/trace scorecard. State and evidence
 live in a temporary directory outside the checkout by default; set
 `LASH_SLACK_CLONE_E2E_ARTIFACT_DIR` to retain them at a chosen location. See the
-[deterministic coverage boundary](../../runbooks/slack-clone-deterministic/runbook.md).
+[deterministic coverage boundary](../../runbooks/slack-clone-bot/runbook.md#deterministic-companion).
 
 The `e2e` Cargo feature and `SLACK_CLONE_E2E_PROVIDER=scripted-v1` selector are
 test-harness implementation details. Both are required together; ordinary
@@ -192,7 +192,7 @@ not in the session usage ledger or `TurnReport` usage.
 
 [Run the judged MCP client-depth walkthrough](../../runbooks/slack-clone-bot/runbook.md)
 (`slack-clone-bot` Phase 3M) for real-provider semantic judgement, or the
-[deterministic full-host companion](../../runbooks/slack-clone-deterministic/runbook.md)
+[deterministic full-host companion](../../runbooks/slack-clone-bot/runbook.md#deterministic-companion)
 for the exact four-tool, four-layer CI contract.
 
 `lash-plugin-mcp` imports tools as `mcp__<server>__<tool>` with bare code

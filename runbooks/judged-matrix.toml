@@ -93,7 +93,7 @@ typescript-host-flows = { tier = "frontier", model = "openai/gpt-5.6-sol" }
 # RLM session served it, and these rows cannot make that claim.
 [no_rlm_session_only]
 workbench-valid-empty-completion = { tier = "deterministic", model = "scripted-provider" }
-slack-clone-bot = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
+slack-clone-bot = { tier = "economy", model = "deepseek/deepseek-v4-pro", deterministic_phases = "the `just slack-clone-full-host-e2e` companion in the runbook's Deterministic companion section; the judged row keeps the live-provider phases" }
 workflow-editor-authoring = { tier = "deterministic", model = "scripted-provider" }
 
 # Live-model scripted harnesses with deterministic shell oracles. They open an
@@ -120,5 +120,4 @@ session-binding = { tier = "deterministic", model = "scripted-provider" }
 session-operator = { tier = "deterministic", model = "scripted-provider" }
 resident-tool-authority = { tier = "deterministic", model = "scripted-provider" }
 rolling-upgrade = { tier = "deterministic", model = "scripted-provider" }
-slack-clone-deterministic = { tier = "deterministic", model = "scripted-provider" }
 workbench-attachment-reclamation = { tier = "deterministic", model = "scripted-provider" }
