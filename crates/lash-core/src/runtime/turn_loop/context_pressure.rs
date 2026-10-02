@@ -303,7 +303,7 @@ impl LashRuntime {
                     (
                         lash_trace::TraceContext::default()
                             .for_session(self.state.session_id.clone())
-                            .for_turn(write.turn_id.to_string()),
+                            .for_turn(write.turn_id.clone()),
                         lash_trace::TraceEvent::Custom {
                             name: "context_pressure.frame_opened".to_string(),
                             payload: serde_json::json!({

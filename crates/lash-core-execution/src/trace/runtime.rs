@@ -464,16 +464,18 @@ fn fresh_attempt() -> TraceAttemptId {
 /// A drive issues its recorded steps through one scoped controller and its
 /// clones, and re-runs from its start on every attempt with a new one. The
 /// engine's step wrapper tells the frontier what became of each step it
-/// issued: its body really ran, or it was answered without one.
+/// issued: its body really ran, or the journal answered it.
 ///
-/// - Before the first recorded step, the drive cannot know whether it is new
-///   work or a reconstruction, so what it observes is held.
-/// - When the first step's body runs, the attempt is the drive's first: the
-///   held observations are emitted, and so is everything after.
-/// - When a step is answered from the journal instead, the drive is
-///   reconstructing work an earlier attempt already observed: the held
-///   observations are dropped, and it observes nothing until a step body
-///   really runs in this attempt.
+/// While the drive is behind its journal it cannot know whether what it
+/// observes is new, so the observation is held:
+///
+/// - a step the journal answers proves everything held was a reconstruction
+///   of work an earlier attempt observed, and it is dropped;
+/// - a step whose body runs, or the drive concluding, proves the attempt
+///   reached new work: what is still held was made after the last answered
+///   step, by this attempt, and is emitted.
+///
+/// Past the journal, the drive emits as it observes.
 #[derive(Clone)]
 pub struct JournalFrontier {
     inner: Arc<FrontierInner>,
@@ -488,17 +490,15 @@ struct FrontierInner {
 /// One held drive observation: emits itself under the frontier's attempt.
 type HeldObservation = Box<dyn FnOnce(&EmissionPermit, TraceAttemptId, u64) + Send>;
 
-/// What a drive holds before its first recorded step, at most. A drive
-/// records a step within a few observations; the bound keeps a drive that
-/// never does from growing.
+/// What a drive holds between two recorded steps, at most. A drive records a
+/// step within a few observations; the bound keeps one that never does from
+/// growing.
 const HELD_OBSERVATIONS_MAX: usize = 256;
 
 enum FrontierState {
-    /// No recorded step has completed or run yet.
-    Unknown(Vec<HeldObservation>),
-    /// Steps so far were answered from the journal.
-    Reconstructing,
-    /// A step body has really run in this attempt.
+    /// No step body has run in this attempt yet.
+    Behind(Vec<HeldObservation>),
+    /// A step body has really run in this attempt, or the drive concluded.
     Past,
 }
 
@@ -521,7 +521,7 @@ impl JournalFrontier {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(FrontierInner {
-                state: std::sync::Mutex::new(FrontierState::Unknown(Vec::new())),
+                state: std::sync::Mutex::new(FrontierState::Behind(Vec::new())),
                 attempt: fresh_attempt(),
                 next_ordinal: AtomicU64::new(0),
             }),
@@ -538,48 +538,38 @@ impl JournalFrontier {
     /// Records that a step body of this drive really ran ([`StepIssue`]).
     fn cross(&self) {
         let held = match std::mem::replace(&mut *self.state(), FrontierState::Past) {
-            FrontierState::Unknown(held) => held,
-            FrontierState::Reconstructing | FrontierState::Past => return,
+            FrontierState::Behind(held) => held,
+            FrontierState::Past => return,
         };
         for observation in held {
             self.emit_held(observation);
         }
     }
 
-    /// Records that a step of this drive was answered without its body
-    /// running: the journal served it.
+    /// Records that the journal answered a step of this drive without its
+    /// body running.
     fn served(&self) {
-        let mut state = self.state();
-        if matches!(*state, FrontierState::Unknown(_)) {
-            *state = FrontierState::Reconstructing;
+        if let FrontierState::Behind(held) = &mut *self.state() {
+            held.clear();
         }
     }
 
-    /// Whether a step body of this drive has really run in this attempt.
+    /// Whether a step body of this drive has really run in this attempt, or
+    /// the drive concluded.
     pub fn is_crossed(&self) -> bool {
         matches!(*self.state(), FrontierState::Past)
     }
 
-    /// Whether an observation the drive makes now can still reach an
-    /// observer.
-    fn may_observe(&self) -> bool {
-        !matches!(*self.state(), FrontierState::Reconstructing)
-    }
-
-    /// Emits `observation` now when the drive is past its journal, holds it
-    /// while that is unknown, and drops it during a reconstruction.
+    /// Emits `observation` now when the drive is past its journal, and holds
+    /// it otherwise.
     fn observe(&self, observation: HeldObservation) {
         {
             let mut state = self.state();
-            match &mut *state {
-                FrontierState::Past => {}
-                FrontierState::Reconstructing => return,
-                FrontierState::Unknown(held) => {
-                    if held.len() < HELD_OBSERVATIONS_MAX {
-                        held.push(observation);
-                    }
-                    return;
+            if let FrontierState::Behind(held) = &mut *state {
+                if held.len() < HELD_OBSERVATIONS_MAX {
+                    held.push(observation);
                 }
+                return;
             }
         }
         self.emit_held(observation);
@@ -712,10 +702,16 @@ impl TraceStanding {
     /// must prepare a record's parts ahead of the call test it first.
     pub fn is_observed(&self) -> bool {
         self.runtime.is_observed()
-            && match &self.right {
-                EmissionRight::Body(_) => true,
-                EmissionRight::Drive { frontier, .. } => frontier.may_observe(),
-            }
+    }
+
+    /// Concludes the drive this standing belongs to: it reached its end in
+    /// this attempt, so what it still holds was made after the last step the
+    /// journal answered and is emitted. A standing in a body has nothing
+    /// held.
+    pub fn conclude(&self) {
+        if let EmissionRight::Drive { frontier, .. } = &self.right {
+            frontier.cross();
+        }
     }
 
     /// The same right under another scope: a child scope of this one.
@@ -762,9 +758,6 @@ impl TraceStanding {
                 record,
             ),
             EmissionRight::Drive { frontier, .. } => {
-                if !frontier.may_observe() {
-                    return;
-                }
                 // The record is built now, where the drive made it; only its
                 // emission waits on the frontier.
                 let record = self.project(record());

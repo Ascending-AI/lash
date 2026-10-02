@@ -290,6 +290,7 @@ mod layered_effect_host_on_the_double;
 mod live_fault_park_on_the_double;
 mod live_turn_probe;
 mod obligation_relay_on_the_double;
+mod otel_laws;
 mod parent_end_on_the_double;
 mod paused_group_children;
 mod process_effect_summary;

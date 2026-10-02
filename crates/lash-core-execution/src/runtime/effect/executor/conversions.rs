@@ -136,4 +136,65 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     pub fn step_issue(&self) -> &crate::trace::StepIssue {
         &self.issued
     }
+
+    /// A [`testing`](Self::testing) executor whose body is handed the live
+    /// step the engine began for it, so a law can observe from inside a
+    /// recorded body. Hidden from the published documentation like
+    /// `testing`: it is not an integrator seam.
+    #[doc(hidden)]
+    pub fn testing_in_step<F, Fut>(run: F) -> Self
+    where
+        F: FnOnce(RuntimeEffectEnvelope, Arc<crate::trace::LiveStep>) -> Fut + Send + 'run,
+        Fut: Future<Output = Result<RuntimeEffectOutcome, RuntimeEffectControllerError>>
+            + Send
+            + 'run,
+    {
+        Self {
+            state: RuntimeEffectLocalExecutorState::Runner(Box::new(LiveStepRunner {
+                run: Box::new(move |envelope, live| Box::pin(run(envelope, live))),
+                live: None,
+            })),
+            replay_trace: None,
+            served_only: None,
+            issued: crate::trace::StepIssue::default(),
+        }
+    }
+}
+
+type LiveStepRunnerFn<'run> = dyn FnOnce(
+        RuntimeEffectEnvelope,
+        Arc<crate::trace::LiveStep>,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<RuntimeEffectOutcome, RuntimeEffectControllerError>>
+                + Send
+                + 'run,
+        >,
+    > + Send
+    + 'run;
+
+struct LiveStepRunner<'run> {
+    run: Box<LiveStepRunnerFn<'run>>,
+    live: Option<Arc<crate::trace::LiveStep>>,
+}
+
+#[async_trait::async_trait]
+impl RuntimeEffectLocalRunner for LiveStepRunner<'_> {
+    fn bind_live_step(&mut self, live: Arc<crate::trace::LiveStep>) {
+        self.live = Some(live);
+    }
+
+    async fn execute(
+        self: Box<Self>,
+        envelope: RuntimeEffectEnvelope,
+        _usage_run: Option<crate::UsageRun>,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        let Some(live) = self.live else {
+            return Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                "a live-step executor runs only a recorded step's body",
+            ));
+        };
+        (self.run)(envelope, live).await
+    }
 }

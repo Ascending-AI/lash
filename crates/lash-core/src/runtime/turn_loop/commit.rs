@@ -910,12 +910,15 @@ impl LashRuntime {
                 lash_trace::TraceContext::default()
                     .for_session(state.session_id.clone())
                     .for_turn_index(state.turn_index)
-                    .for_turn(trace_turn_id.to_string()),
+                    .for_turn(trace_turn_id.clone()),
                 lash_trace::TraceEvent::TurnCompleted {
                     outcome: trace_outcome,
                 },
             )
         });
+        // The turn reached its end in this attempt: nothing it observed after
+        // the last step its journal answered is a reconstruction.
+        turn_trace.conclude();
     }
 
     pub(in crate::runtime) async fn finish_logical_turn_error(
