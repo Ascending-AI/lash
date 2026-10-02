@@ -550,7 +550,7 @@ async fn catalog_storm_sqlite_file_turn_witness() {
     witness(Store::SqliteFile, false).await;
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires the managed PostgreSQL service gate"]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn catalog_storm_postgres_turn_witness() {
     witness(Store::Postgres, false).await;
 }
@@ -579,7 +579,7 @@ async fn mcp_law_turn_failures_sqlite_file() {
     turn_witness(Store::SqliteFile, false, true).await;
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires the managed PostgreSQL service gate"]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
 async fn mcp_law_turn_failures_postgres() {
     turn_witness(Store::Postgres, false, true).await;
 }
