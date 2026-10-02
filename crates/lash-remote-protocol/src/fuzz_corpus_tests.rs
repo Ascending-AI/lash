@@ -18,7 +18,7 @@
 //! . ./env.sh
 //! kiln test //crates/lash-remote-protocol:lash-remote-protocol__unit_test \
 //!   --local-test-execution --no-test-cache \
-//!   --test_env LASH_REGENERATE_FUZZ_CORPUS=1 \
+//!   --test_env LASH_REGENERATE=1 \
 //!   --test_env "BUILD_WORKSPACE_DIRECTORY=$PWD" \
 //!   --test_arg=regenerate_committed_fuzz_corpus --test_arg=--ignored
 //! ```
@@ -28,7 +28,7 @@ use lash_sansio::{ProcessId, SessionId, ToolCallId, TurnId};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
-const REGENERATE_ENV: &str = "LASH_REGENERATE_FUZZ_CORPUS";
+const REGENERATE_ENV: &str = "LASH_REGENERATE";
 
 /// The decoder one seed class runs: the same calls the matching fuzz target
 /// makes on every input.
@@ -196,7 +196,7 @@ fn committed_fuzz_seeds_decode_under_current_wire_shapes() {
 /// whole directory contents, so a fuzzer-discovered input worth keeping is
 /// re-encoded through the encoders and committed under its class name.
 #[test]
-#[ignore = "rewrites the committed corpus; set LASH_REGENERATE_FUZZ_CORPUS=1"]
+#[ignore = "regenerates crates/lash-remote-protocol/testdata/fuzz-corpus"]
 fn regenerate_committed_fuzz_corpus() {
     assert_eq!(
         std::env::var(REGENERATE_ENV).as_deref(),

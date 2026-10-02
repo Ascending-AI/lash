@@ -72,6 +72,14 @@ fn the_published_ddl_is_creation_only_and_unqualified() {
 /// where a future table or a future non-table object could silently escape it.
 #[test]
 fn the_published_teardown_is_generated_from_the_schema_object_list() {
+    let expected = teardown_artifact();
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("teardown.sql");
+    let published = std::fs::read_to_string(&path).expect("read the committed teardown artifact");
+    assert_eq!(published, expected);
+    assert_eq!(crate::PostgresStorage::teardown_ddl(), expected);
+}
+
+fn teardown_artifact() -> String {
     let mut drops = Vec::new();
     for line in crate::PostgresStorage::schema_ddl().lines() {
         let line = line.trim();
@@ -96,7 +104,7 @@ fn the_published_teardown_is_generated_from_the_schema_object_list() {
         !drops.is_empty(),
         "the schema object list must not be empty"
     );
-    let expected = format!(
+    format!(
         "-- lash-postgres-store teardown, component version {SCHEMA_VERSION}.\n\
          --\n\
          -- Generated artifact. These bytes are exactly the DDL a host applies to drop\n\
@@ -109,27 +117,26 @@ fn the_published_teardown_is_generated_from_the_schema_object_list() {
          --\n\
          -- Like schema.sql, nothing here is schema-qualified: the file tears down\n\
          -- whichever schema the session's `search_path` resolves. Regenerate it with\n\
-         -- the schema_shape suite's LASH_UPDATE_TEARDOWN_SQL=1 path, never by hand.\n\
+         -- the schema_shape suite's LASH_REGENERATE=1 path, never by hand.\n\
          --\n\
          {}\n",
         drops.join("\n\n")
-    );
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("teardown.sql");
-    let published = std::fs::read_to_string(&path).expect("read the committed teardown artifact");
-    if published != expected {
-        if std::env::var("LASH_UPDATE_TEARDOWN_SQL").as_deref() == Ok("1") {
-            std::fs::write(&path, &expected).expect("rewrite the teardown artifact");
-            panic!(
-                "regenerated {} -- rerun the suite to confirm",
-                path.display()
-            );
-        }
-        panic!(
-            "the committed teardown artifact does not match the object list schema.sql declares. \
-             Regenerate it with LASH_UPDATE_TEARDOWN_SQL=1 and review the diff."
-        );
-    }
-    assert_eq!(crate::PostgresStorage::teardown_ddl(), expected);
+    )
+}
+
+#[test]
+#[ignore = "regenerates crates/lash-postgres-store/teardown.sql"]
+fn regenerate_teardown_artifact() {
+    assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
+    std::fs::write(regeneration_path("teardown.sql"), teardown_artifact())
+        .expect("rewrite the teardown artifact");
+}
+
+fn regeneration_path(name: &str) -> std::path::PathBuf {
+    let root = std::env::var_os("BUILD_WORKSPACE_DIRECTORY").expect("regeneration workspace");
+    std::path::PathBuf::from(root)
+        .join("crates/lash-postgres-store")
+        .join(name)
 }
 
 /// A structural check cannot see a missing row, so the artifact has to carry the
@@ -466,29 +473,32 @@ fn drift_renders_a_sectioned_named_diff_not_a_hash() {
 /// asserts 14, 16, and 18 all render the same artifact.
 #[tokio::test]
 async fn committed_shape_artifact_matches_the_ddl_artifact() {
+    let Some(rendered) = schema_shape_artifact().await else {
+        return;
+    };
+    assert_eq!(rendered, SHAPE_ARTIFACT);
+}
+
+async fn schema_shape_artifact() -> Option<String> {
     let Some(database_url) = postgres_test_support::database_url() else {
         eprintln!("skipping schema shape artifact drift check: database URL is not set");
-        return;
+        return None;
     };
     let (connection, scratch, live) = provision_scratch_schema(&database_url).await;
     let rendered = live.render(SCHEMA_VERSION);
     drop_scratch_schema(connection, &scratch).await;
+    Some(rendered)
+}
 
-    if rendered != SHAPE_ARTIFACT {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("schema-shape.txt");
-        if std::env::var("LASH_UPDATE_SCHEMA_SHAPE").as_deref() == Ok("1") {
-            std::fs::write(&path, &rendered).expect("rewrite the shape artifact");
-            panic!(
-                "regenerated {} -- rerun the suite to confirm",
-                path.display()
-            );
-        }
-        panic!(
-            "the committed schema shape artifact does not match what schema.sql produces on this \
-             PostgreSQL. Regenerate it with LASH_UPDATE_SCHEMA_SHAPE=1 and review the diff.\n\
-             --- committed ---\n{SHAPE_ARTIFACT}\n--- live ---\n{rendered}"
-        );
-    }
+#[tokio::test]
+#[ignore = "regenerates crates/lash-postgres-store/schema-shape.txt"]
+async fn regenerate_schema_shape_artifact() {
+    assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
+    let rendered = schema_shape_artifact()
+        .await
+        .expect("regeneration requires PostgreSQL");
+    std::fs::write(regeneration_path("schema-shape.txt"), rendered)
+        .expect("rewrite the shape artifact");
 }
 
 /// The DDL artifact provisions into whatever schema `search_path` resolves, and

@@ -3,6 +3,7 @@
 
 import json
 import os
+import re
 from pathlib import Path
 import re
 import shutil
@@ -10,14 +11,93 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import release_baseline as baseline
 import release_reset as reset
+from fixture_regenerators import without_comments
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseBaselineTests(unittest.TestCase):
+    def test_discovery_lexer_preserves_literals_and_removes_nested_comments(self):
+        source = '''const QUOTE: u8 = b'"';
+const BRACE: char = '{';
+const UNICODE: char = '\\u{7b}';
+const RAW: &str = r#"/* a literal */"#;
+/* /* nested */ #[ignore = "regenerates false"] */
+// #[ignore = "regenerates false"]
+#[ignore = "regenerates fixtures/real"]
+'''
+        cleaned = without_comments(source)
+        self.assertIn('b\'"\'', cleaned)
+        self.assertIn('r#"/* a literal */"#', cleaned)
+        self.assertNotIn('regenerates false', cleaned)
+        self.assertIn('regenerates fixtures/real', cleaned)
+
+    def test_every_fixture_regenerator_is_discovered(self):
+        generators = reset.discover(ROOT)
+        discovered = {row["source"] for row in generators}
+        undiscovered = []
+        for path in sorted((ROOT / "crates").rglob("*.rs")):
+            source = without_comments(path.read_text())
+            variables = re.findall(r'"((?:UPDATE_|LASH_UPDATE_|LASH_REGENERATE_)[A-Z0-9_]+)"', source)
+            if variables:
+                undiscovered.append(f"{path.relative_to(ROOT)}: {', '.join(variables)}")
+            annotations = re.findall(r'#\[ignore\s*=\s*"regenerates ([^"]+)"\]', source)
+            actual = [row["output"] for row in generators if row["source"] == str(path.relative_to(ROOT))]
+            self.assertCountEqual(annotations, actual, str(path))
+            if '"LASH_REGENERATE"' in source and str(path.relative_to(ROOT)) not in discovered:
+                undiscovered.append(f"{path.relative_to(ROOT)}: LASH_REGENERATE")
+        self.assertEqual(undiscovered, [], "fixture writers missing from discovery")
+        self.assertIn("crates/lash-core-store/src/testdata/usage_fact_payload_v4.hex",
+                      {row["output"] for row in generators})
+
+    def test_regenerator_discovery_follows_rust_modules_and_cargo_targets(self):
+        scratch_root = ROOT / ".buck2/release-baseline-tests"
+        scratch_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=scratch_root) as temporary:
+            repo = Path(temporary)
+            package = repo / "crates/demo"
+            (package / "src/nested").mkdir(parents=True)
+            (package / "tests").mkdir()
+            (package / "Cargo.toml").write_text('[package]\nname = "demo"\nversion = "1.0.0"\n')
+            (package / "src/lib.rs").write_text('''
+#[path = "nested/fixtures.rs"]
+pub(crate) mod renamed;
+// #[ignore = "regenerates commented"]
+''')
+            generator = '''
+#[tokio::test]
+#[ignore = "regenerates fixtures/demo"]
+async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1")); }
+'''
+            (package / "src/nested/fixtures.rs").write_text('mod checks {' + generator + '}')
+            (package / "tests/golden.rs").write_text(generator)
+            rows = reset.discover(repo)
+            self.assertEqual([(row["target"], row["law"]) for row in rows], [
+                ("//crates/demo:demo__unit_test", "renamed::checks::rewrite"),
+                ("//crates/demo:golden__test", "rewrite"),
+            ])
+            (package / "tests/golden.rs").write_text(generator.replace("fixtures/demo", "../outside"))
+            with self.assertRaises(baseline.BaselineError):
+                reset.discover(repo)
+
+    def test_reset_runs_every_discovered_generator_with_exact_selection(self):
+        rows = reset.discover(ROOT)
+        with patch.object(reset, "run") as run:
+            reset.regenerate_fixtures(ROOT)
+        self.assertEqual(run.call_count, len(rows))
+        for call, row in zip(run.call_args_list, rows):
+            repo, argv = call.args
+            self.assertEqual(repo, ROOT)
+            self.assertEqual(argv[:3], ["kiln", "test", row["target"]])
+            for argument in ("--test_arg=--ignored", "--test_arg=--exact",
+                             f"--test_arg={row['law']}", "--test_env=LASH_REGENERATE=1",
+                             f"--test_env=BUILD_WORKSPACE_DIRECTORY={ROOT}"):
+                self.assertIn(argument, argv)
+
     def command(self, *args):
         return subprocess.run(
             [sys.executable, str(ROOT / "scripts/release_baseline.py"), *args],

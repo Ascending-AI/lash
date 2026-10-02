@@ -7,8 +7,11 @@ The ignored generator writes under `CARGO_MANIFEST_DIR` and records the checkout
 Git revision. Regenerate the corpus from the repository root with:
 
 ```console
-LASH_REGENERATE_REPLAY_CORPUS=1 cargo test -p lash-internal-restate \
-  tests::replay_corpus::regenerate_replay_corpus_fixtures -- --ignored --exact
+kiln test //crates/lash-restate:lash-restate__unit_test \
+  --local-test-execution --no-test-cache --test_env=LASH_REGENERATE=1 \
+  --test_env="BUILD_WORKSPACE_DIRECTORY=$PWD" \
+  --test_arg=--ignored --test_arg=--exact \
+  --test_arg=tests::replay_corpus::regenerate_replay_corpus_fixtures
 ```
 
 Review the resulting fixture diff and run `kiln test

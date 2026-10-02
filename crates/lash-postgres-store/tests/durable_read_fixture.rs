@@ -23,7 +23,7 @@ mod support;
 #[path = "../../lash-core/tests/support/durable_read_fixture.rs"]
 mod fixture;
 
-const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
+const REGENERATE_ENV: &str = "LASH_REGENERATE";
 const FIXTURE_SCHEMA: &str = "lash_durable_read_fixture";
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,7 +62,7 @@ async fn postgres_seed_round_trips_through_a_fresh_store_when_configured() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "writes the release-capture fixture tree; set LASH_REGENERATE_DURABLE_READ_FIXTURES=1"]
+#[ignore = "regenerates fixtures/durable-read/v1/postgres"]
 async fn regenerate_postgres_durable_fixture() {
     assert_eq!(
         std::env::var(REGENERATE_ENV).as_deref(),

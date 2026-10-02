@@ -10,7 +10,7 @@
 --
 -- Like schema.sql, nothing here is schema-qualified: the file tears down
 -- whichever schema the session's `search_path` resolves. Regenerate it with
--- the schema_shape suite's LASH_UPDATE_TEARDOWN_SQL=1 path, never by hand.
+-- the schema_shape suite's LASH_REGENERATE=1 path, never by hand.
 --
 DROP TABLE IF EXISTS lash_schema_versions CASCADE;
 

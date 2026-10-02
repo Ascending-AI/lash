@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const CORPUS_ROOT_ENV: &str = "LASH_REPLAY_CORPUS_ROOT";
-const REGENERATE_ENV: &str = "LASH_REGENERATE_REPLAY_CORPUS";
+const REGENERATE_ENV: &str = "LASH_REGENERATE";
 const FORMAT_NOTE: &str =
     "lash-restate RecordedRuntimeEffect JSON v1; map keys are Restate effect names";
 
@@ -243,7 +243,7 @@ fn replay_corpus_root_uses_the_selected_directory() {
 }
 
 #[tokio::test]
-#[ignore = "writes committed replay fixtures; set LASH_REGENERATE_REPLAY_CORPUS=1"]
+#[ignore = "regenerates crates/lash-restate/testdata/replay-corpus"]
 async fn regenerate_replay_corpus_fixtures() {
     assert_eq!(
         std::env::var(REGENERATE_ENV).as_deref(),

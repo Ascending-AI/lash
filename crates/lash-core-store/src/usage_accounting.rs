@@ -1104,15 +1104,20 @@ mod tests {
     }
     #[test]
     fn usage_fact_payload_v4_golden_corpus() {
-        let rendered = corpus()
+        let rendered = usage_fact_golden_rows();
+        assert_eq!(rendered, include_str!("testdata/usage_fact_payload_v4.hex"));
+    }
+
+    pub(super) fn usage_fact_golden_rows() -> String {
+        corpus()
             .into_iter()
             .map(|(name, bytes, hash)| {
                 let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
                 format!("{name}={hex}|{hash}\n")
             })
-            .collect::<String>();
-        assert_eq!(rendered, include_str!("testdata/usage_fact_payload_v4.hex"));
+            .collect::<String>()
     }
+
     #[test]
     fn run_ids_accept_only_canonical_v4_renderings() {
         assert!(UsageRunId::try_from(UsageRunId::mint().as_str().to_owned()).is_ok());
@@ -1172,3 +1177,7 @@ mod tests {
         assert_ne!(hash, usage_fact_payload_hash(&fact, &UsageRunId::mint()));
     }
 }
+
+#[cfg(test)]
+#[path = "usage_accounting_golden_tests.rs"]
+mod golden_tests;

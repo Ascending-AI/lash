@@ -49,7 +49,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 
-REGENERATE_DURABLE_READ = {"LASH_REGENERATE_DURABLE_READ_FIXTURES": "1"}
+REGENERATE_DURABLE_READ = {"LASH_REGENERATE": "1"}
 SQLITE_REGENERATE = (
     REGENERATE_DURABLE_READ,
     [
@@ -67,7 +67,7 @@ POSTGRES_REGENERATE = (
     ],
 )
 REPLAY_CORPUS_REGENERATE = (
-    {"LASH_REGENERATE_REPLAY_CORPUS": "1"},
+    {"LASH_REGENERATE": "1"},
     [
         "cargo", "test", "-p", "lash-internal-restate", "--locked", "--lib",
         "tests::replay_corpus::regenerate_replay_corpus_fixtures", "--",

@@ -713,7 +713,7 @@ const ARTIFACT_HEADER: &str = "\
 #
 # Generated artifact -- never edit by hand. Regenerate after any change to
 # schema.sql by running the crate's `schema_shape` suite against a live
-# PostgreSQL with LASH_UPDATE_SCHEMA_SHAPE=1, which rewrites this file from the
+# PostgreSQL with LASH_REGENERATE=1, which rewrites this file from the
 # catalog the DDL artifact actually produces. Every attribute recorded here
 # renders identically on PostgreSQL 14 through 18; CI asserts that on all three.
 #

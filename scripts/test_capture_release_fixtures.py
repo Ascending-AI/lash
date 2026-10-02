@@ -113,6 +113,9 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(self.run_capture(), 2)
 
     def test_regeneration_uses_named_cargo_recipes(self):
+        for environment, _argv in (capture.SQLITE_REGENERATE, capture.POSTGRES_REGENERATE,
+                                    capture.REPLAY_CORPUS_REGENERATE):
+            self.assertEqual(environment, {"LASH_REGENERATE": "1"})
         commands = [
             argv
             for leg in capture.LEGS

@@ -857,6 +857,14 @@ mod append_request_identity_tests {
 
     #[test]
     fn append_request_identity_v7_golden_byte_corpus() {
+        let rendered = append_request_golden_rows();
+        assert_eq!(
+            rendered,
+            include_str!("testdata/append_request_identity_v7.hex")
+        );
+    }
+
+    fn append_request_golden_rows() -> String {
         // Versioned durability corpus. These are the exact v5 bytes, not merely
         // relational hashes. Any projection change requires an explicit
         // APPEND_REQUEST_IDENTITY_ENCODING_VERSION bump and corpus replacement.
@@ -1081,18 +1089,20 @@ mod append_request_identity_tests {
             .collect::<String>();
         rendered.push_str(&route_identity_rows());
         rendered.push_str(&super::commit_identity_effect_tests::effect_identity_rows());
-        if std::env::var_os("UPDATE_APPEND_REQUEST_IDENTITY_GOLDEN").is_some() {
-            std::fs::write(
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("src/store/testdata/append_request_identity_v7.hex"),
-                &rendered,
-            )
-            .expect("write golden corpus");
-        }
-        assert_eq!(
-            rendered,
-            include_str!("testdata/append_request_identity_v7.hex")
-        );
+        rendered
+    }
+
+    #[test]
+    #[ignore = "regenerates crates/lash-core-store/src/store/testdata/append_request_identity_v7.hex"]
+    fn regenerate_append_request_identity_v7_golden_byte_corpus() {
+        assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
+        let root = std::env::var_os("BUILD_WORKSPACE_DIRECTORY").expect("regeneration workspace");
+        std::fs::write(
+            std::path::PathBuf::from(root)
+                .join("crates/lash-core-store/src/store/testdata/append_request_identity_v7.hex"),
+            append_request_golden_rows(),
+        )
+        .expect("write golden corpus");
     }
 
     fn route_identity_rows() -> String {

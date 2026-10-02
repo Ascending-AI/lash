@@ -49,11 +49,11 @@
 //!
 //! ```text
 //! . ./env.sh
-//! LASH_REGENERATE_DURABLE_READ_FIXTURES=1 \
+//! LASH_REGENERATE=1 \
 //!   cargo test -p lash-internal-sqlite-store --locked \
 //!   --test durable_read_fixture regenerate_sqlite_durable_fixture -- --ignored --exact
 //! LASH_POSTGRES_DATABASE_URL=postgres://lash:lash@127.0.0.1:55487/lash \
-//! LASH_REGENERATE_DURABLE_READ_FIXTURES=1 \
+//! LASH_REGENERATE=1 \
 //!   cargo test -p lash-internal-postgres-store --locked \
 //!   --test durable_read_fixture regenerate_postgres_durable_fixture -- --ignored --exact
 //! ```

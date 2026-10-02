@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 #[path = "../../lash-core/tests/support/durable_read_fixture.rs"]
 mod fixture;
 
-const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
+const REGENERATE_ENV: &str = "LASH_REGENERATE";
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct SqliteVersions {
@@ -116,7 +116,7 @@ async fn seed_fresh_store(root: &Path) -> fixture::ExpectedFixture {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "writes the release-capture fixture tree; set LASH_REGENERATE_DURABLE_READ_FIXTURES=1"]
+#[ignore = "regenerates fixtures/durable-read/v1/sqlite"]
 async fn regenerate_sqlite_durable_fixture() {
     assert_eq!(
         std::env::var(REGENERATE_ENV).as_deref(),

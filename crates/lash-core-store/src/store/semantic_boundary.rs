@@ -198,19 +198,27 @@ mod semantic_boundary_request_identity_tests {
 
     #[test]
     fn semantic_boundary_request_identity_v1_golden_corpus() {
-        // Versioned durability corpus: the exact canonical preimage and hash
-        // per adopting operation. Any projection change requires an explicit
-        // per-operation encoding-version bump and corpus replacement. To
-        // refresh after an intentional grammar change:
-        // . ./env.sh
-        // kiln test //crates/lash-core-store:lash-core-store__unit_test \
-        //   --local-test-execution --no-test-cache \
-        //   --test_env UPDATE_SEMANTIC_BOUNDARY_REQUEST_V1_GOLDEN=1 \
-        //   --test_env "BUILD_WORKSPACE_DIRECTORY=$PWD" \
-        //   --test_arg=semantic_boundary_request_identity_v1_golden_corpus
-        let rows = [
-            ("record-config", "protocol-materialization", 3),
-            ("create-session", "child-1", 3),
+        let rows = semantic_boundary_golden_rows();
+        assert_eq!(
+            rows,
+            include_str!("testdata/semantic_boundary_request_v1.golden"),
+            "v1 canonical request bytes moved; use the documented refresh command only for an \
+             intentional grammar change with a version bump"
+        );
+    }
+
+    fn semantic_boundary_golden_rows() -> String {
+        [
+            (
+                "record-config",
+                "protocol-materialization",
+                RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION,
+            ),
+            (
+                "create-session",
+                "child-1",
+                CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION,
+            ),
         ]
         .into_iter()
         .map(|(key, boundary, expected_version)| {
@@ -229,30 +237,21 @@ mod semantic_boundary_request_identity_tests {
         })
         .collect::<Vec<_>>()
         .join("\n")
-            + "\n";
-        if std::env::var_os("UPDATE_SEMANTIC_BOUNDARY_REQUEST_V1_GOLDEN").is_some() {
-            let workspace = std::env::var_os("BUILD_WORKSPACE_DIRECTORY");
-            assert!(
-                workspace.is_some()
-                    || std::path::Path::new(env!("CARGO_MANIFEST_DIR")).is_absolute(),
-                "Buck2 regeneration requires BUILD_WORKSPACE_DIRECTORY"
-            );
-            let manifest_dir = workspace.map_or_else(
-                || std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-                |root| std::path::PathBuf::from(root).join("crates/lash-core-store"),
-            );
-            std::fs::write(
-                manifest_dir.join("src/store/testdata/semantic_boundary_request_v1.golden"),
-                &rows,
-            )
-            .expect("write semantic-boundary golden corpus");
-        }
-        assert_eq!(
-            rows,
-            include_str!("testdata/semantic_boundary_request_v1.golden"),
-            "v1 canonical request bytes moved; use the documented refresh command only for an \
-             intentional grammar change with a version bump"
-        );
+            + "\n"
+    }
+
+    #[test]
+    #[ignore = "regenerates crates/lash-core-store/src/store/testdata/semantic_boundary_request_v1.golden"]
+    fn regenerate_semantic_boundary_request_identity_v1_golden_corpus() {
+        assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
+        let root = std::env::var_os("BUILD_WORKSPACE_DIRECTORY").expect("regeneration workspace");
+        std::fs::write(
+            std::path::PathBuf::from(root).join(
+                "crates/lash-core-store/src/store/testdata/semantic_boundary_request_v1.golden",
+            ),
+            semantic_boundary_golden_rows(),
+        )
+        .expect("write golden corpus");
     }
 
     #[test]

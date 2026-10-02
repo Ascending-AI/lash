@@ -337,10 +337,6 @@ fn legacy_hash_reproduces_random_committed_message_id_conflict() {
 }
 
 #[test]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the opt-in test generator writes the corpus in the supplied workspace"
-)]
 fn intent_hash_golden_vector() {
     // Checkpoint manifest v3, explicit ambient tool access, and the config
     // revision are pinned in intent bytes.
@@ -348,19 +344,28 @@ fn intent_hash_golden_vector() {
     // follow-on enters it only when the commit leaves one on the head.
     // FIG-4236: the usage deltas left the intent (ADR 0125).
     let hash = intent_fixture().turn_commit_hash().expect("golden intent");
-    if std::env::var_os("UPDATE_RUNTIME_COMMIT_INTENT_GOLDEN").is_some() {
-        let root = std::env::var_os("BUILD_WORKSPACE_DIRECTORY").expect("regeneration workspace");
-        std::fs::write(
-            std::path::PathBuf::from(root)
-                .join("crates/lash-core-store/src/store/testdata/runtime_commit_intent.hex"),
-            format!("{hash}\n"),
-        )
-        .expect("write intent golden");
-    }
     assert_eq!(
         hash,
         include_str!("testdata/runtime_commit_intent.hex").trim()
     );
+}
+
+#[test]
+#[ignore = "regenerates crates/lash-core-store/src/store/testdata/runtime_commit_intent.hex"]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the opt-in test generator writes the corpus in the supplied workspace"
+)]
+fn regenerate_intent_hash_golden_vector() {
+    assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
+    let root = std::env::var_os("BUILD_WORKSPACE_DIRECTORY").expect("regeneration workspace");
+    let hash = intent_fixture().turn_commit_hash().expect("golden intent");
+    std::fs::write(
+        std::path::PathBuf::from(root)
+            .join("crates/lash-core-store/src/store/testdata/runtime_commit_intent.hex"),
+        format!("{hash}\n"),
+    )
+    .expect("write intent golden");
 }
 
 #[test]
