@@ -8,8 +8,36 @@ use lash_core::facade_support::{
 use lash_core::testing::TestTurnDrive as _;
 use tokio_util::sync::CancellationToken;
 
+/// The boundary events of a turn, one inner list per handler execution.
+///
+/// Restate runs the handler again from the top on every replay of the
+/// invocation, and each execution feeds the sinks it is handed: an execution
+/// suspended mid-turn leaves a prefix of the committed boundaries, the
+/// execution that ends leaves them all. The law asserts that per-execution
+/// shape — what replay must preserve — not one flat sequence across
+/// executions.
 #[derive(Clone, Default)]
-struct BoundaryEvents(Arc<Mutex<Vec<&'static str>>>);
+struct BoundaryEvents(Arc<Mutex<Vec<Vec<&'static str>>>>);
+
+impl BoundaryEvents {
+    /// The committed boundary sequence a turn that stops after one committed
+    /// step records.
+    const COMMITTED: [&'static str; 2] = ["checkpoint", "stopped"];
+
+    /// Open the next execution's list; the turn fixture calls it before each
+    /// execution drives the turn.
+    fn begin_execution(&self) {
+        self.0.lock_recover().push(Vec::new());
+    }
+
+    fn record(&self, event: &'static str) {
+        self.0
+            .lock_recover()
+            .last_mut()
+            .expect("a turn execution is recording")
+            .push(event);
+    }
+}
 
 #[async_trait::async_trait]
 impl lash_core::runtime::EventSink for BoundaryEvents {
@@ -20,7 +48,7 @@ impl lash_core::runtime::EventSink for BoundaryEvents {
                 outcome: TurnOutcome::Stopped(_)
             }
         ) {
-            self.0.lock_recover().push("stopped");
+            self.record("stopped");
         }
     }
 }
@@ -32,7 +60,7 @@ impl lash_core::runtime::TurnActivitySink for BoundaryEvents {
             activity.event,
             lash_core::TurnEvent::CheckpointRecorded { .. }
         ) {
-            self.0.lock_recover().push("checkpoint");
+            self.record("checkpoint");
         }
     }
 }
@@ -51,6 +79,7 @@ impl TurnFixture {
         &self,
         scope: ScopedEffectController<'_>,
     ) -> Result<AssembledTurn, lash_core::RuntimeError> {
+        self.events.begin_execution();
         let mut config = RuntimeHostConfig::new(
             self.backend.clone(),
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
@@ -227,7 +256,11 @@ pub(super) async fn held_step_law<Stores: lash_core::StoreSet + ?Sized + 'static
         "remote AfterStep must not interrupt the held step"
     );
     assert!(
-        events.0.lock_recover().is_empty(),
+        events
+            .0
+            .lock_recover()
+            .iter()
+            .all(|execution| execution.is_empty()),
         "no boundary is committed while the step is held"
     );
     release.cancel();
@@ -257,7 +290,19 @@ pub(super) async fn held_step_law<Stores: lash_core::StoreSet + ?Sized + 'static
         matches!(receipt.outcome, lash_core::facade_support::TurnCancelOutcome::Requested(ref accepted)
         if accepted.mode == TurnCancelMode::AfterStep && accepted.honoured_after_step.is_none())
     );
-    assert_eq!(*events.0.lock_recover(), ["checkpoint", "stopped"]);
+    let executions = events.0.lock_recover().clone();
+    assert!(
+        executions
+            .iter()
+            .all(|execution| BoundaryEvents::COMMITTED.starts_with(execution)),
+        "every execution replays a prefix of the committed boundaries: {executions:?}"
+    );
+    assert!(
+        executions
+            .iter()
+            .any(|execution| execution.as_slice() == BoundaryEvents::COMMITTED),
+        "the completing execution observes every committed boundary: {executions:?}"
+    );
     assert_eq!(
         turn.tool_calls.len(),
         1,

@@ -263,6 +263,14 @@ effect-group-conformance-e2e:
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite admission-fence --leg replay \
     --artifacts "$artifacts"
 
+  # The remote turn-cancellation law (FIG-4650): a remote AfterStep cancel
+  # waits for the committed step boundary, on both legs.
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite remote-cancellation --leg live \
+    --artifacts "$artifacts"
+
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite remote-cancellation --leg replay \
+    --artifacts "$artifacts"
+
   # The drain hand-over's PostgreSQL legs (FIG-4639): this recipe has the
   # database its SQLite legs, in `server-double-e2e`, do not need.
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite drain-hand-over-postgres --leg live \
