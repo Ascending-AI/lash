@@ -16,13 +16,18 @@ name: Cache warm
 # It runs on every push to `main`, so the tree the next pull request branches
 # from is warm, including after an admin merge that skipped the queue; on a
 # daily schedule, which refreshes the pinned tools before work starts;
-# and on dispatch. The Buck2 job builds the clippy and test graphs on the pool:
-# after a merge-queue landing that is all cache hits, and after anything else
-# it is the prewarm the pool would otherwise pay on the next pull request.
-# The Cargo job serves fork pull requests only, so it runs on the schedule and
-# on dispatch, not on every push.
+# and on dispatch. The Buck2 job builds the clippy, check and test graphs on
+# the pool: after a merge-queue landing that is all cache hits, and after
+# anything else it is the prewarm the pool would otherwise pay on the next
+# pull request. The Cargo job serves fork pull requests only, so it runs on
+# the schedule and on dispatch, not on every push.
 #
-# Nothing here is gating. CI saves the separate Cargo heavy-suite cache on main.
+# The `static-checks` job is the exception to "nothing here is gating": it
+# runs the cheap static gates on every push and fails the run visibly, so a
+# break that used to wait for the hourly full CI shows within the push's own
+# run. It shares nothing with the warm jobs — no `needs`, no shared steps —
+# so its failure can neither cancel nor delay the cache fill.
+# CI saves the separate Cargo heavy-suite cache on main.
 on:
   push:
     branches: [main]
@@ -53,7 +58,7 @@ jobs:
   warm-buck2:
     name: Warm Buck2 caches
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     environment: build-cache
     steps:
       - &checkout
@@ -100,6 +105,19 @@ jobs:
           scripts/hermetic-build.sh clippy --jobs 32 --materializations none \
             //:workspace_clippy //:feature_lane_clippy
 
+      # `kiln check` resolves the metadata-only `[check]` graph, which neither
+      # the clippy actions nor the test-binary builds share: `//:workspace_check`
+      # is the default resolution an agent's first check requests, and
+      # `//:feature_lane_compile` is the `__fv_` lane-variant set the
+      # `feature-lanes` CI job shards across four runners. The two aggregates
+      # expand to the generated workspace/feature-lane check target lists.
+      - name: Warm check actions
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/hermetic-build.sh check --jobs 32 --materializations none \
+            //:workspace_check //:feature_lane_compile
+
       # Build the same binaries as the core and tail partition, plus the
       # live Restate harness and its VM worker, without executing tests.
       - name: Warm test binaries
@@ -135,6 +153,122 @@ jobs:
             tools/buck2/toolchains/rust-files
             vendor
           key: ${{ steps.cache.outputs.tool-cache-key }}
+
+  # The fast static gates, on every push: schema checks, the facade
+  # completeness check, the repository-script contracts and a `[check]` of the
+  # feature-lane graph. These breaks used to surface only in the hourly full
+  # CI; here they fail the push's own run. A separate job — not a warm step —
+  # so a red gate cannot cancel or starve the cache fill, and a slow warm
+  # cannot delay the signal.
+  static-checks:
+    name: Static checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    if: github.event_name == 'push'
+    environment: build-cache
+    steps:
+      # Tags on: the repository gates assert release-baseline and fixture
+      # contracts that read the tag set, as ci.yml's repo-gates checkout does.
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+          CHECKOUT_TAGS: --tags
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+
+      - name: Install mold
+        uses: ./.github/actions/setup-mold
+
+      - name: Configure Buck2 shared cache
+        uses: ./.github/actions/buck2-shared-cache
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
+      # The launcher self-tests in the gate list isolate themselves with
+      # bwrap; same profile ci.yml's repo-gates job installs.
+      - name: Install launcher test sandbox
+        run: |
+          if ! command -v bwrap >/dev/null 2>&1 || ! command -v apparmor_parser >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y bubblewrap apparmor
+          fi
+          # Ubuntu 24.04 restricts capabilities inside unprivileged user
+          # namespaces. Allow this runner's bwrap to configure its private
+          # loopback interface without changing the host-wide restriction.
+          sandbox_bin="$RUNNER_TEMP/lash-launcher-sandbox"
+          mkdir -p "$sandbox_bin"
+          install -m 0755 "$(command -v bwrap)" "$sandbox_bin/bwrap"
+          cat > "$sandbox_bin/apparmor.profile" <<PROFILE
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile lash-launcher-bwrap "$sandbox_bin/bwrap" flags=(unconfined) {
+            userns,
+          }
+          PROFILE
+          sudo apparmor_parser --replace "$sandbox_bin/apparmor.profile"
+          echo "$sandbox_bin" >> "$GITHUB_PATH"
+          "$sandbox_bin/bwrap" --unshare-user --unshare-pid --unshare-net \
+            --unshare-ipc --unshare-uts --die-with-parent \
+            --ro-bind / / --proc /proc --dev /dev --tmpfs /tmp /bin/true
+
+      # `//:schema_checks` is the generated host/example schema group;
+      # `//crates/lash:facade_completeness` is an external-runner test whose
+      # build only renders rustdoc, so the check itself runs under
+      # `buck2 test` exactly as ci.yml's workspace-core leg runs it.
+      - name: Check schemas and the facade
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/hermetic-build.sh build --jobs 32 --materializations none \
+            //:schema_checks
+          scripts/ci/buck2-test.sh static-checks //crates/lash:facade_completeness
+
+      # The same `__fv_` `[check]` aggregate ci.yml's feature-lanes job shards;
+      # one invocation suffices here because the warm above already holds the
+      # lane graph's cache entries.
+      - name: Check the feature-lane graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/hermetic-build.sh check --jobs 32 --materializations none \
+            //:feature_lane_compile
+
+      # The gate list is extracted from ci.yml's GATES heredoc, so it tracks
+      # the repo-gates job as that job's contract changes.
+      - name: Run repository gates
+        run: bash scripts/ci/repository-gates.sh --all
+
+      - name: Remove client credentials
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
   # Warms `workspace-tests-v2` under main scope — the `target/debug` subtrees
   # the `Test Cargo workspace partition` job restores. Builds the same scope

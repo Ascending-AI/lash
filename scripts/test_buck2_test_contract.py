@@ -404,6 +404,53 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("github.ref == 'refs/heads/main'", save["if"])
         self.assertIn("steps.cache.outputs.tool-cache-hit != 'true'", save["if"])
 
+    def test_warmer_covers_the_check_graphs_agents_and_ci_request(self) -> None:
+        warm = workflow("cache-warm.yml")["jobs"]["warm-buck2"]
+        run = step(warm, "Warm check actions")["run"]
+        inventory = json.loads(
+            (ROOT / "tools/buck2/target-inventory.json").read_text()
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "scripts").mkdir()
+            driver = root / "scripts/hermetic-build.sh"
+            driver.write_text("#!/bin/bash\nprintf '%s\\n' \"$@\" > argv\n")
+            driver.chmod(0o755)
+            result = subprocess.run(["bash", "-c", run], cwd=root, capture_output=True, text=True)
+            self.assertEqual(0, result.returncode, result.stderr)
+            argv = (root / "argv").read_text().splitlines()
+        self.assertEqual("check", argv[0])
+        labels = {arg for arg in argv if arg.startswith("//")}
+        # The two generated aggregates expand to the `[check]` graph: the
+        # workspace's default resolution plus every `__fv_` lane variant.
+        self.assertEqual({"//:workspace_check", "//:feature_lane_compile"}, labels)
+        self.assertTrue(inventory["workspace_check_targets"])
+        self.assertTrue(inventory["feature_lane_check_targets"])
+
+    def test_push_static_checks_are_a_separate_visible_job(self) -> None:
+        parsed = workflow("cache-warm.yml")
+        static = parsed["jobs"]["static-checks"]
+        # A sibling of the warm, not a step of it: a red gate fails the
+        # workflow without blocking or cancelling the cache fill.
+        self.assertNotIn("needs", static)
+        self.assertNotIn("static-checks", str(parsed["jobs"]["warm-buck2"]))
+        self.assertEqual("github.event_name == 'push'", static["if"])
+        text = yaml.dump(static)
+        for needle in (
+            "//:schema_checks",
+            # facade_completeness is an external-runner test rule: building it
+            # only renders rustdoc, the check executes under `buck2 test`.
+            "buck2-test.sh",
+            "//crates/lash:facade_completeness",
+            "scripts/ci/repository-gates.sh",
+            "hermetic-build.sh check",
+            "//:feature_lane_compile",
+        ):
+            self.assertIn(needle, text)
+        self.assertNotIn("continue-on-error", text)
+        cleanup = step(static, "Remove client credentials")
+        self.assertEqual("always()", cleanup["if"])
+
     def test_warmer_builds_the_partition_and_live_restate_binaries_without_tests(self) -> None:
         warm = workflow("cache-warm.yml")["jobs"]["warm-buck2"]
         run = step(warm, "Warm test binaries")["run"]

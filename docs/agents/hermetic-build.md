@@ -765,7 +765,13 @@ configuration and certificate state.
 Fork/Dependabot events receive no credentials and retain Cargo lint, workspace
 tests, feature checks and service branches. Always clean the job's private
 certificate directory. Pool cache warming keeps one trusted main writer; cold
-caches affect timing rather than correctness.
+caches affect timing rather than correctness. The push warm covers the clippy,
+`[check]` (workspace and `__fv_` lane-variant) and test-binary graphs, so an
+agent's first `kiln check` or `kiln test` after a push reads the action cache
+rather than re-executing. A separate `static-checks` job in the same workflow
+runs the schema checks, `facade_completeness`, the repository-gate contracts
+and a feature-lane `[check]` on every push and fails the run visibly; it does
+not gate the warm.
 
 | Fact | Local owner | CI owner |
 | --- | --- | --- |
