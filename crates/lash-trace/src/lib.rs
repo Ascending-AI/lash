@@ -40,6 +40,7 @@ mod language_execution_failure;
 mod lashlang_graph;
 #[cfg(feature = "otel")]
 pub mod otel;
+pub mod telemetry;
 
 pub use content_block::{TraceContentBlock, TraceToolResultBlock};
 use jsonl_records::truncate_torn_tail;
@@ -62,6 +63,14 @@ pub use lashlang_graph::{
     TraceLashlangGraphHistoryEvent, TraceLashlangGraphNode, TraceLashlangGraphStore,
     TraceLashlangNodeObservation, TraceLashlangNodeReport, TraceLashlangNodeRetention,
     TraceLashlangNodeTerminalRecord, TraceLashlangNodeTerminalStatus, fold_lashlang_graph,
+};
+pub use telemetry::{
+    AttemptObservation, DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier,
+    InvalidTraceLinks, TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT,
+    TraceAdmissionCandidate, TraceAnchor, TraceAttemptId, TraceCandidateOutcome, TraceCarrier,
+    TraceCause, TraceLinks, TraceRecordIdentity, TraceScopeAdmission, TraceScopeFactory,
+    TraceScopeId, TraceScopeKind, TraceScopeOwner, TraceTransitionKind, UntracedScopes, W3cSpanId,
+    W3cTraceFlags, W3cTraceId, W3cTraceState,
 };
 
 /// Version of the durable trace JSONL schema, written to
