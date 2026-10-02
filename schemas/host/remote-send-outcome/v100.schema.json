@@ -12261,6 +12261,37 @@
         },
         {
           "additionalProperties": false,
+          "description": "The cursor predates retained subscription deletion evidence. Resync\nthrough the atomic subscription snapshot before continuing.",
+          "properties": {
+            "message": {
+              "additionalProperties": false,
+              "properties": {
+                "requested_cursor": {
+                  "$ref": "#/$defs/TriggerSubscriptionChangeCursor"
+                },
+                "tombstone_compaction_horizon": {
+                  "$ref": "#/$defs/TriggerSubscriptionChangeCursor"
+                }
+              },
+              "required": [
+                "requested_cursor",
+                "tombstone_compaction_horizon"
+              ],
+              "type": "object"
+            },
+            "type": {
+              "const": "trigger_subscription_change_cursor_pruned",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "A process park feed cursor predates history\n`compact_process_park_feed` removed. The consumer must relist parked\nprocesses before resuming from the reported horizon.",
           "properties": {
             "message": {
@@ -12975,6 +13006,12 @@
           "type": "object"
         }
       ]
+    },
+    "TriggerSubscriptionChangeCursor": {
+      "description": "Position in one trigger store's subscription change feed. Never compare\ncursors issued by different stores.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
     },
     "TurnFailureKind": {
       "type": "string"

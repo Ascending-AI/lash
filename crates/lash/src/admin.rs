@@ -108,6 +108,51 @@ impl CoreTriggerAdmin {
             .map_err(Into::into)
     }
 
+    /// Read the latest desired source states in durable change order.
+    /// Apply idempotently by subscription id. Within an incarnation, ignore
+    /// revisions older than the one already applied. A new incarnation replaces
+    /// the prior source. Commit the cursor after applying the page, or atomically
+    /// with your own records. Re-reading an earlier cursor is safe.
+    ///
+    /// On `PluginError::TriggerSubscriptionChangeCursorPruned`, resync through
+    /// `subscriptions_snapshot`, remove sources absent from that snapshot, and
+    /// continue from its cursor. Hosts send work through the engine as usual.
+    pub async fn changed_since(
+        &self,
+        cursor: lash_core::TriggerSubscriptionChangeCursor,
+        limit: usize,
+    ) -> Result<(
+        Vec<lash_core::TriggerSubscriptionChange>,
+        lash_core::TriggerSubscriptionChangeCursor,
+    )> {
+        self.store()?
+            .subscriptions_changed_since(cursor, limit)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Atomically read all live subscriptions and their continuation cursor.
+    pub async fn subscriptions_snapshot(
+        &self,
+    ) -> Result<(
+        Vec<lash_core::TriggerSubscriptionRecord>,
+        lash_core::TriggerSubscriptionChangeCursor,
+    )> {
+        self.store()?
+            .list_subscriptions_with_cursor()
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Retain tombstones until this host-chosen cutoff. Consumers behind the
+    /// removed evidence receive a typed refusal and must resync.
+    pub async fn compact_subscription_tombstones(&self, cutoff_epoch_ms: u64) -> Result<usize> {
+        self.store()?
+            .compact_subscription_tombstones(cutoff_epoch_ms)
+            .await
+            .map_err(Into::into)
+    }
+
     pub async fn subscriptions(
         &self,
         filter: lash_core::TriggerSubscriptionFilter,

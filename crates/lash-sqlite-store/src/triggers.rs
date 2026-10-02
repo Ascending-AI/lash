@@ -1,5 +1,5 @@
 //! SQLite-backed runtime trigger store, and the SQLite owner of the trigger
-//! family's four tables.
+//! family.
 //!
 //! This is the durable peer of [`SqliteProcessRegistry`]: it stores trigger
 //! subscriptions and append-only trigger occurrences at deployment scope,
@@ -21,6 +21,10 @@ use lash_store_sql::trigger::{
     subscriptions::{ListShape as SubscriptionListShape, SubscriptionStatements},
 };
 use std::sync::LazyLock;
+
+#[path = "triggers/subscription_changes.rs"]
+mod subscription_changes;
+use subscription_changes::record_subscription_change;
 
 lash_store_sql::statements! {
     /// `trigger_subscriptions` statements only SQLite issues.
@@ -79,11 +83,15 @@ lash_store_sql::statements! {
         select_all_for_session_sweep = "SELECT subscription_id, record_json
              FROM trigger_subscriptions";
 
-        /// Delete every subscription of the owner scopes in JSON array `?1`
-        /// that no delivery still references.
+        /// Read every subscription of the owner scopes in JSON array `?1`
+        /// that no delivery still references, before recording deletion evidence.
         ///
         /// SQLite unnests the array with `json_each`; PostgreSQL binds a real
         /// `TEXT[]`.
+        select_unreferenced_for_owners = "SELECT record_json FROM trigger_subscriptions AS subscription
+             WHERE owner_scope IN (SELECT value FROM json_each(?1))
+               AND NOT EXISTS (SELECT 1 FROM trigger_deliveries WHERE trigger_deliveries.subscription_id = subscription.subscription_id)";
+
         delete_unreferenced_for_owners = "DELETE FROM trigger_subscriptions
              WHERE owner_scope IN (SELECT value FROM json_each(?1))
                AND NOT EXISTS (
@@ -313,6 +321,10 @@ lash_store_sql::statements! {
 /// Every trigger-family statement, rendered once.
 pub(crate) struct TriggerSql {
     /// `trigger_subscriptions` statements both backends issue verbatim.
+    subscription_change:
+        lash_store_sql::trigger::subscription_changes::SubscriptionChangeStatements,
+    subscription_change_clock:
+        lash_store_sql::trigger::subscription_change_clock::SubscriptionChangeClockStatements,
     subscription: SubscriptionStatements,
     /// `trigger_subscriptions` statements only SQLite issues.
     subscription_sqlite: SubscriptionSqliteStatements,
@@ -338,6 +350,11 @@ pub(crate) struct TriggerSql {
 static TRIGGER_SQL: LazyLock<TriggerSql> = LazyLock::new(|| {
     let dialect = lash_store_sql::Dialect::sqlite_unqualified();
     TriggerSql {
+        subscription_change:
+            lash_store_sql::trigger::subscription_changes::SubscriptionChangeStatements::render(
+                dialect,
+            ),
+        subscription_change_clock: lash_store_sql::trigger::subscription_change_clock::SubscriptionChangeClockStatements::render(dialect),
         subscription: SubscriptionStatements::render(dialect),
         subscription_sqlite: SubscriptionSqliteStatements::render(dialect),
         occurrence: OccurrenceStatements::render(dialect),
@@ -679,6 +696,7 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                             ],
                         )
                         .map_err(process_sqlite_error)?;
+                        record_subscription_change(tx, record)?;
                     }
                     crate::conn::cached_execute(tx,
                         sql.receipt.insert.sql(),
@@ -741,6 +759,39 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
             })
             .await
             .map_err(process_sqlite_error)?
+    }
+
+    async fn subscriptions_changed_since(
+        &self,
+        cursor: lash_core_execution::TriggerSubscriptionChangeCursor,
+        limit: usize,
+    ) -> Result<
+        (
+            Vec<lash_core_execution::TriggerSubscriptionChange>,
+            lash_core_execution::TriggerSubscriptionChangeCursor,
+        ),
+        lash_core_execution::PluginError,
+    > {
+        subscription_changes::changed_since(self, cursor, limit).await
+    }
+
+    async fn list_subscriptions_with_cursor(
+        &self,
+    ) -> Result<
+        (
+            Vec<lash_core_execution::TriggerSubscriptionRecord>,
+            lash_core_execution::TriggerSubscriptionChangeCursor,
+        ),
+        lash_core_execution::PluginError,
+    > {
+        subscription_changes::snapshot(self).await
+    }
+
+    async fn compact_subscription_tombstones(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> Result<usize, lash_core_execution::PluginError> {
+        subscription_changes::compact(self, cutoff_epoch_ms).await
     }
 
     async fn delete_session_subscriptions(
@@ -810,6 +861,7 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                                 ],
                             )
                             .map_err(process_sqlite_error)?;
+                        record_subscription_change(tx, &record)?;
                     }
                     Ok(deleted)
                 })()))
@@ -1153,58 +1205,97 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
             serde_json::to_string(&deleted_owner_scopes).map_err(process_decode_error)?;
         let reclaimed_at_ms = i64::try_from(self.clock.timestamp_ms()).unwrap_or(i64::MAX);
         self.conn
-            .write(move |tx| {
-                let sql = trigger_sql();
-                let reclaimed_delivery_count = crate::conn::cached_execute(
-                    tx,
-                    sql.delivery_sqlite.delete_retention_candidates.sql(),
-                    params![&candidates_json],
-                )?;
-                crate::conn::cached_execute(
-                    tx,
-                    sql.occurrence_sqlite.tombstone_orphan_fired.sql(),
-                    params![reclaimed_at_ms],
-                )?;
-                let reclaimed_occurrence_count = crate::conn::cached_execute(
-                    tx,
-                    sql.occurrence_sqlite.delete_orphan_fired.sql(),
-                    [],
-                )?;
+            .write_flow(move |tx| {
+                Ok(trigger_tx_outcome((|| {
+                    let sql = trigger_sql();
+                    let reclaimed_delivery_count = crate::conn::cached_execute(
+                        tx,
+                        sql.delivery_sqlite.delete_retention_candidates.sql(),
+                        params![&candidates_json],
+                    )
+                    .map_err(process_sqlite_error)?;
+                    crate::conn::cached_execute(
+                        tx,
+                        sql.occurrence_sqlite.tombstone_orphan_fired.sql(),
+                        params![reclaimed_at_ms],
+                    )
+                    .map_err(process_sqlite_error)?;
+                    let reclaimed_occurrence_count = crate::conn::cached_execute(
+                        tx,
+                        sql.occurrence_sqlite.delete_orphan_fired.sql(),
+                        [],
+                    )
+                    .map_err(process_sqlite_error)?;
 
-                let blocked_owner_scopes = {
-                    let mut stmt =
-                        tx.prepare_cached(sql.delivery_sqlite.select_session_owner_scopes.sql())?;
-                    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-                    rows.collect::<Result<std::collections::HashSet<_>, _>>()?
-                };
-                let receipt_owner_ids = deleted_owner_scopes
-                    .iter()
-                    .filter(|owner_scope| !blocked_owner_scopes.contains(*owner_scope))
-                    .map(|owner_scope| owner_scope["session:".len()..].to_string())
-                    .collect::<Vec<_>>();
-                let receipt_owner_ids_json = serde_json::to_string(&receipt_owner_ids)
-                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+                    let blocked_owner_scopes = {
+                        let mut stmt = tx
+                            .prepare_cached(sql.delivery_sqlite.select_session_owner_scopes.sql())
+                            .map_err(process_sqlite_error)?;
+                        let rows = stmt
+                            .query_map([], |row| row.get::<_, String>(0))
+                            .map_err(process_sqlite_error)?;
+                        rows.collect::<Result<std::collections::HashSet<_>, _>>()
+                            .map_err(process_sqlite_error)?
+                    };
+                    let receipt_owner_ids = deleted_owner_scopes
+                        .iter()
+                        .filter(|owner_scope| !blocked_owner_scopes.contains(*owner_scope))
+                        .map(|owner_scope| owner_scope["session:".len()..].to_string())
+                        .collect::<Vec<_>>();
+                    let receipt_owner_ids_json = serde_json::to_string(&receipt_owner_ids)
+                        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))
+                        .map_err(process_sqlite_error)?;
 
-                let reclaimed_subscription_count = crate::conn::cached_execute(
-                    tx,
-                    sql.subscription_sqlite.delete_unreferenced_for_owners.sql(),
-                    params![&deleted_owner_scopes_json],
-                )?;
-                let reclaimed_mutation_receipt_count = crate::conn::cached_execute(
-                    tx,
-                    sql.receipt_sqlite.delete_for_session_owners.sql(),
-                    params![&receipt_owner_ids_json],
-                )?;
+                    let records = {
+                        let mut stmt = tx
+                            .prepare(sql.subscription_sqlite.select_unreferenced_for_owners.sql())
+                            .map_err(process_sqlite_error)?;
+                        let rows = stmt
+                            .query_map(params![&deleted_owner_scopes_json], |row| {
+                                row.get::<_, String>(0)
+                            })
+                            .map_err(process_sqlite_error)?;
+                        rows.collect::<Result<Vec<_>, _>>()
+                            .map_err(process_sqlite_error)?
+                    };
+                    for json in records {
+                        let mut record =
+                            lash_core_execution::facade_support::decode_trigger_subscription_json(
+                                &json,
+                            )?;
+                        if !record.is_tombstoned() {
+                            record.revision =
+                                lash_core_execution::facade_support::next_trigger_store_revision(
+                                    &record,
+                                )?;
+                            record.tombstone(reclaimed_at_ms as u64);
+                        }
+                        record_subscription_change(tx, &record)?;
+                    }
 
-                Ok(lash_core_execution::TriggerRetentionReconciliationReport {
-                    reclaimed_delivery_count,
-                    reclaimed_occurrence_count,
-                    reclaimed_subscription_count,
-                    reclaimed_mutation_receipt_count,
-                })
+                    let reclaimed_subscription_count = crate::conn::cached_execute(
+                        tx,
+                        sql.subscription_sqlite.delete_unreferenced_for_owners.sql(),
+                        params![&deleted_owner_scopes_json],
+                    )
+                    .map_err(process_sqlite_error)?;
+                    let reclaimed_mutation_receipt_count = crate::conn::cached_execute(
+                        tx,
+                        sql.receipt_sqlite.delete_for_session_owners.sql(),
+                        params![&receipt_owner_ids_json],
+                    )
+                    .map_err(process_sqlite_error)?;
+
+                    Ok(lash_core_execution::TriggerRetentionReconciliationReport {
+                        reclaimed_delivery_count,
+                        reclaimed_occurrence_count,
+                        reclaimed_subscription_count,
+                        reclaimed_mutation_receipt_count,
+                    })
+                })()))
             })
             .await
-            .map_err(process_sqlite_error)
+            .map_err(process_sqlite_error)?
     }
 
     async fn delete_delivery_retention_candidates(

@@ -32,6 +32,7 @@ pub(super) struct SurfaceState {
     /// The `load_turn_park` answers the record ops produced, in operation
     /// order. Recorded by the runner, not read off the tables.
     pub(super) turn_park_loads: Vec<serde_json::Value>,
+    pub(super) trigger_feed_reads: Vec<serde_json::Value>,
 }
 
 pub(super) enum SurfaceReader {
@@ -329,6 +330,7 @@ pub(super) fn read_sqlite_surface(
             },
         ),
         turn_park_loads: Vec::new(),
+        trigger_feed_reads: Vec::new(),
     }
 }
 
@@ -507,6 +509,7 @@ pub(super) async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
         triggers: read_postgres_triggers(pool).await,
         turn_parks: read_postgres_turn_parks(pool).await,
         turn_park_loads: Vec::new(),
+        trigger_feed_reads: Vec::new(),
     }
 }
 
@@ -593,6 +596,7 @@ pub(super) fn states_agree(observations: &[(&str, SurfaceState)]) -> bool {
             && pair[0].1.triggers == pair[1].1.triggers
             && pair[0].1.turn_parks == pair[1].1.turn_parks
             && pair[0].1.turn_park_loads == pair[1].1.turn_park_loads
+            && pair[0].1.trigger_feed_reads == pair[1].1.trigger_feed_reads
     })
 }
 

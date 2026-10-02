@@ -266,6 +266,13 @@ fn trigger_types_are_homed_in_triggers(
     let _ = lash::triggers::empty_trigger_source_key("ui.button.pressed");
 }
 
+fn trigger_change_types_are_homed_in_triggers(
+    cursor: lash::triggers::TriggerSubscriptionChangeCursor,
+    change: lash::triggers::TriggerSubscriptionChange,
+) {
+    let _ = (cursor, change);
+}
+
 fn trigger_route_service_is_installable(
     builder: lash::LashCoreBuilder,
     restorer: std::sync::Arc<dyn lash::triggers::TriggerRouteRestorer>,

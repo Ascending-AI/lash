@@ -354,6 +354,18 @@ fn store_trait_surface_is_fully_gated() {
         }
     }
 
+    for method in [
+        "subscriptions_changed_since",
+        "list_subscriptions_with_cursor",
+        "compact_subscription_tombstones",
+    ] {
+        if harness_drives(&sources, method) {
+            covered += 1;
+        } else {
+            missing.push(format!("TriggerStore::{method}"));
+        }
+    }
+
     // The attachment blob store's method names (`put`, `get`, `list`, ...) are
     // too generic to detect by call site, so its surface is gated by requiring
     // a reason for every declared fallible method instead.

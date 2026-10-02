@@ -1,5 +1,5 @@
 //! PostgreSQL-backed runtime trigger store, and the PostgreSQL owner of the
-//! trigger family's four tables.
+//! trigger family.
 //!
 //! Every mutating atom runs in a server transaction that takes an advisory
 //! lock on the subscription or the idempotency key first and reads the rows it
@@ -26,6 +26,9 @@ use std::sync::LazyLock;
 lash_store_sql::statements! {
     /// `trigger_subscriptions` statements only PostgreSQL issues.
     pub(crate) struct SubscriptionPostgresStatements @ "trigger_subscription" {
+        /// Serialize compaction with subscription change publication.
+        lock_change_clock = "SELECT current_seq FROM trigger_subscription_change_clock WHERE singleton = TRUE FOR UPDATE";
+
         /// The record of subscription `$1`, under its write lock.
         ///
         /// `FOR UPDATE` is the fork: `READ COMMITTED` cannot hold this read
@@ -80,13 +83,18 @@ lash_store_sql::statements! {
              FROM trigger_subscriptions
              WHERE owner_scope = ?1 AND lifecycle <> 'tombstoned' FOR UPDATE";
 
-        /// Delete every subscription of the owner scopes in `?1` that no
-        /// delivery still references.
+        /// Lock every subscription of the owner scopes in `?1` that no
+        /// delivery still references, before recording deletion evidence.
         ///
         /// PostgreSQL binds a real `TEXT[]`; SQLite unnests a JSON array with
         /// `json_each`.
-        delete_unreferenced_for_owners = "DELETE FROM trigger_subscriptions AS subscription
-             WHERE subscription.owner_scope = ANY(?1::TEXT[])
+        select_unreferenced_for_owners = "SELECT record_json FROM trigger_subscriptions AS subscription
+             WHERE owner_scope = ANY(?1)
+               AND NOT EXISTS (SELECT 1 FROM trigger_deliveries WHERE trigger_deliveries.subscription_id = subscription.subscription_id)
+             FOR UPDATE";
+
+        delete_unreferenced_by_ids = "DELETE FROM trigger_subscriptions AS subscription
+             WHERE subscription.subscription_id = ANY(?1::TEXT[])
                AND NOT EXISTS (
                    SELECT 1 FROM trigger_deliveries AS delivery
                    WHERE delivery.subscription_id = subscription.subscription_id
@@ -278,6 +286,10 @@ lash_store_sql::statements! {
 /// Every trigger-family statement, rendered once.
 pub(crate) struct TriggerSql {
     /// `trigger_subscriptions` statements both backends issue verbatim.
+    subscription_change:
+        lash_store_sql::trigger::subscription_changes::SubscriptionChangeStatements,
+    subscription_change_clock:
+        lash_store_sql::trigger::subscription_change_clock::SubscriptionChangeClockStatements,
     pub(crate) subscription: SubscriptionStatements,
     /// `trigger_subscriptions` statements only PostgreSQL issues.
     pub(crate) subscription_postgres: SubscriptionPostgresStatements,
@@ -303,6 +315,11 @@ pub(crate) struct TriggerSql {
 static TRIGGER_SQL: LazyLock<TriggerSql> = LazyLock::new(|| {
     let dialect = Dialect::postgres();
     TriggerSql {
+        subscription_change:
+            lash_store_sql::trigger::subscription_changes::SubscriptionChangeStatements::render(
+                dialect,
+            ),
+        subscription_change_clock: lash_store_sql::trigger::subscription_change_clock::SubscriptionChangeClockStatements::render(dialect),
         subscription: SubscriptionStatements::render(dialect),
         subscription_postgres: SubscriptionPostgresStatements::render(dialect),
         occurrence: OccurrenceStatements::render(dialect),
@@ -517,6 +534,7 @@ impl TriggerStore for PostgresTriggerStore {
                 .execute(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
+            record_subscription_change(&mut tx, record).await?;
         }
         sqlx::query(sql.receipt.insert.sql())
             .bind(&preparation.receipt_id)
@@ -564,6 +582,149 @@ impl TriggerStore for PostgresTriggerStore {
         Ok(records)
     }
 
+    async fn subscriptions_changed_since(
+        &self,
+        cursor: lash_core_execution::TriggerSubscriptionChangeCursor,
+        limit: usize,
+    ) -> Result<
+        (
+            Vec<lash_core_execution::TriggerSubscriptionChange>,
+            lash_core_execution::TriggerSubscriptionChangeCursor,
+        ),
+        PluginError,
+    > {
+        let sequence = plugin_sql_counter_value(
+            "trigger_subscription_change_cursor",
+            cursor.store_sequence(),
+        )?;
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        sqlx::query(
+            crate::connection_sql::connection_sql()
+                .begin_repeatable_read_read_only
+                .sql(),
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        let sql = &trigger_sql().subscription_change;
+        let row = sqlx::query(trigger_sql().subscription_change_clock.clock.sql())
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
+        let horizon: i64 = row.get(1);
+        if sequence < horizon {
+            return Err(PluginError::TriggerSubscriptionChangeCursorPruned {
+                requested_cursor: cursor,
+                tombstone_compaction_horizon:
+                    lash_core_execution::TriggerSubscriptionChangeCursor::from_store_sequence(
+                        horizon as u64,
+                    ),
+            });
+        }
+        let rows = sqlx::query(sql.page.sql())
+            .bind(sequence)
+            .bind(limit)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
+        let mut next = cursor;
+        let mut changes = Vec::new();
+        for row in rows {
+            let seq: i64 = row.get(0);
+            let json: String = row.get(1);
+            changes.push(serde_json::from_str(&json).map_err(|error| {
+                PluginError::StoredDataCorrupt {
+                    record_kind: "TriggerSubscriptionChange".into(),
+                    message: error.to_string(),
+                }
+            })?);
+            next = lash_core_execution::TriggerSubscriptionChangeCursor::from_store_sequence(
+                seq as u64,
+            );
+        }
+        tx.commit().await.map_err(plugin_sqlx_error)?;
+        Ok((changes, next))
+    }
+
+    async fn list_subscriptions_with_cursor(
+        &self,
+    ) -> Result<
+        (
+            Vec<TriggerSubscriptionRecord>,
+            lash_core_execution::TriggerSubscriptionChangeCursor,
+        ),
+        PluginError,
+    > {
+        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        sqlx::query(
+            crate::connection_sql::connection_sql()
+                .begin_repeatable_read_read_only
+                .sql(),
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
+
+        let row = sqlx::query(trigger_sql().subscription_change_clock.clock.sql())
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
+        let seq: i64 = row.get(0);
+        let rows = sqlx::query(trigger_sql().subscription.live_snapshot.sql())
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
+        let mut records = Vec::new();
+        for row in rows {
+            let json: String = row.get(0);
+            records.push(
+                lash_core_execution::facade_support::decode_trigger_subscription_json(&json)?,
+            );
+        }
+        tx.commit().await.map_err(plugin_sqlx_error)?;
+        Ok((
+            records,
+            lash_core_execution::TriggerSubscriptionChangeCursor::from_store_sequence(seq as u64),
+        ))
+    }
+
+    async fn compact_subscription_tombstones(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> Result<usize, PluginError> {
+        let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(plugin_store_error)?;
+        let sql = &trigger_sql().subscription_change;
+        // Lock the publication clock before selecting and deleting evidence.
+        sqlx::query(trigger_sql().subscription_postgres.lock_change_clock.sql())
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
+        let max: Option<i64> = sqlx::query_scalar(sql.compactable.sql())
+            .bind(cutoff)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
+        let count = sqlx::query(sql.compact.sql())
+            .bind(cutoff)
+            .execute(&mut **tx)
+            .await
+            .map_err(plugin_sqlx_error)?
+            .rows_affected() as usize;
+        if let Some(max) = max {
+            sqlx::query(trigger_sql().subscription_change_clock.horizon.sql())
+                .bind(max)
+                .execute(&mut **tx)
+                .await
+                .map_err(plugin_sqlx_error)?;
+        }
+        tx.commit().await.map_err(plugin_sqlx_error)?;
+        Ok(count)
+    }
+
     async fn delete_session_subscriptions(
         &self,
         session_id: &SessionId,
@@ -605,6 +766,7 @@ impl TriggerStore for PostgresTriggerStore {
                 .execute(&mut **tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
+            record_subscription_change(&mut tx, &record).await?;
         }
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(rows.len())
@@ -941,19 +1103,38 @@ impl TriggerStore for PostgresTriggerStore {
             .map(|owner_scope| owner_scope["session:".len()..].to_string())
             .collect::<Vec<_>>();
 
-        let reclaimed_subscription_count = if deleted_owner_scopes.is_empty() {
+        let now = self.clock.timestamp_ms();
+        let rows = sqlx::query(
+            sql.subscription_postgres
+                .select_unreferenced_for_owners
+                .sql(),
+        )
+        .bind(&deleted_owner_scopes)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        let mut reclaimed_subscription_ids = Vec::new();
+        for row in rows {
+            let json: String = row.get(0);
+            let mut record =
+                lash_core_execution::facade_support::decode_trigger_subscription_json(&json)?;
+            if !record.is_tombstoned() {
+                record.revision =
+                    lash_core_execution::facade_support::next_trigger_store_revision(&record)?;
+                record.tombstone(now);
+            }
+            record_subscription_change(&mut tx, &record).await?;
+            reclaimed_subscription_ids.push(record.subscription_id);
+        }
+        let reclaimed_subscription_count = if reclaimed_subscription_ids.is_empty() {
             0
         } else {
-            sqlx::query(
-                sql.subscription_postgres
-                    .delete_unreferenced_for_owners
-                    .sql(),
-            )
-            .bind(&deleted_owner_scopes)
-            .execute(&mut **tx)
-            .await
-            .map_err(plugin_sqlx_error)?
-            .rows_affected() as usize
+            sqlx::query(sql.subscription_postgres.delete_unreferenced_by_ids.sql())
+                .bind(&reclaimed_subscription_ids)
+                .execute(&mut **tx)
+                .await
+                .map_err(plugin_sqlx_error)?
+                .rows_affected() as usize
         };
         let reclaimed_mutation_receipt_count = if receipt_owner_ids.is_empty() {
             0
@@ -1143,6 +1324,47 @@ impl TriggerStore for PostgresTriggerStore {
         .map_err(crate::plugin_store_error)?;
         Ok(pruned.rows_affected() as usize)
     }
+}
+
+async fn record_subscription_change(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    record: &TriggerSubscriptionRecord,
+) -> Result<(), PluginError> {
+    let sql = &trigger_sql().subscription_change;
+    let json = serde_json::to_string(&lash_core_execution::TriggerSubscriptionChange::from(
+        record,
+    ))
+    .map_err(|error| PluginError::StoredDataCorrupt {
+        record_kind: "TriggerSubscriptionChange".into(),
+        message: error.to_string(),
+    })?;
+    let previous: Option<String> = sqlx::query_scalar(sql.previous.sql())
+        .bind(&record.subscription_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
+    if previous.as_deref() == Some(json.as_str()) {
+        return Ok(());
+    }
+    // This transactional clock also serializes publication in commit order.
+    // A PostgreSQL sequence would let an earlier uncommitted change be missed.
+    let seq: Option<i64> = sqlx::query_scalar(trigger_sql().subscription_change_clock.bump.sql())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
+    let seq = seq.ok_or_else(|| PluginError::MonotonicCounterOverflow {
+        counter: "trigger_subscription_change_sequence".into(),
+        current: i64::MAX as u64,
+    })?;
+    sqlx::query(sql.upsert.sql())
+        .bind(&record.subscription_id)
+        .bind(seq)
+        .bind(record.lifecycle.deleted_at_ms().map(|ms| ms as i64))
+        .bind(json)
+        .execute(&mut **tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
+    Ok(())
 }
 
 async fn reserve_postgres_deliveries(

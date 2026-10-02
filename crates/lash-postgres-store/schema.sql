@@ -1065,6 +1065,23 @@ CREATE TABLE IF NOT EXISTS lash_tool_intent_submissions (
 CREATE INDEX IF NOT EXISTS idx_lash_tool_intent_submissions_scope
     ON lash_tool_intent_submissions(owner, execution_scope_id, intent_index);
 
+CREATE TABLE IF NOT EXISTS lash_trigger_subscription_change_clock (
+    singleton BOOLEAN PRIMARY KEY CHECK (singleton),
+    current_seq BIGINT NOT NULL CHECK (current_seq >= 0),
+    pruned_through BIGINT NOT NULL CHECK (pruned_through >= 0 AND pruned_through <= current_seq)
+);
+INSERT INTO lash_trigger_subscription_change_clock (singleton, current_seq, pruned_through)
+    VALUES (TRUE, 0, 0) ON CONFLICT (singleton) DO NOTHING;
+CREATE TABLE IF NOT EXISTS lash_trigger_subscription_changes (
+    subscription_id TEXT PRIMARY KEY,
+    change_seq BIGINT NOT NULL UNIQUE CHECK (change_seq > 0),
+    deleted_at_ms BIGINT,
+    record_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_lash_trigger_subscription_changes_deleted
+    ON lash_trigger_subscription_changes(deleted_at_ms, change_seq)
+    WHERE deleted_at_ms IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS lash_trigger_subscriptions (
     subscription_id TEXT PRIMARY KEY,
     owner_scope TEXT NOT NULL,

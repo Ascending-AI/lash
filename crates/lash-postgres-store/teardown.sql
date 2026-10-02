@@ -120,6 +120,10 @@ DROP TABLE IF EXISTS lash_parent_end_plans CASCADE;
 
 DROP TABLE IF EXISTS lash_tool_intent_submissions CASCADE;
 
+DROP TABLE IF EXISTS lash_trigger_subscription_change_clock CASCADE;
+
+DROP TABLE IF EXISTS lash_trigger_subscription_changes CASCADE;
+
 DROP TABLE IF EXISTS lash_trigger_subscriptions CASCADE;
 
 DROP TABLE IF EXISTS lash_trigger_occurrences CASCADE;

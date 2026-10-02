@@ -59,6 +59,9 @@ const ALL_SURFACE_OPERATION_KINDS: &[&str] = &[
     "prune",
     "compact_tombstones",
     "trigger_register",
+    "trigger_changes",
+    "trigger_snapshot",
+    "trigger_compact",
     "trigger_disable",
     "trigger_occurrence",
     "trigger_occurrence_null_source",
@@ -72,6 +75,9 @@ const ALL_SURFACE_OPERATION_KINDS: &[&str] = &[
 #[serde(tag = "surface", content = "operation", rename_all = "snake_case")]
 enum SurfaceOperation {
     StoreContract(StoreContractOp),
+    TriggerChanges,
+    TriggerSnapshot,
+    TriggerCompact,
     TriggerRegister {
         key: u8,
     },
@@ -129,6 +135,9 @@ impl SurfaceOperation {
                 StoreContractOp::Prune { .. } => "prune",
                 StoreContractOp::CompactTombstones { .. } => "compact_tombstones",
             },
+            Self::TriggerChanges => "trigger_changes",
+            Self::TriggerSnapshot => "trigger_snapshot",
+            Self::TriggerCompact => "trigger_compact",
             Self::TriggerRegister { .. } => "trigger_register",
             Self::TriggerDisable { .. } => "trigger_disable",
             Self::TriggerOccurrence { .. } => "trigger_occurrence",
@@ -157,6 +166,7 @@ struct SurfaceRunner {
     /// order. Compared across every backend: each lane's runtime store is a
     /// real durable one.
     turn_park_loads: Vec<serde_json::Value>,
+    trigger_feed_reads: Vec<serde_json::Value>,
     reader: SurfaceReader,
 }
 
@@ -197,11 +207,16 @@ fn generated_surface_operations(seed: u64) -> Vec<SurfaceOperation> {
     let mut operations = vec![
         SurfaceOperation::TriggerRegister { key: 0 },
         SurfaceOperation::TriggerOccurrence { key: 0 },
+        SurfaceOperation::TriggerChanges,
+        SurfaceOperation::TriggerSnapshot,
+        SurfaceOperation::TriggerCompact,
     ];
     for (index, operation) in contract.into_iter().enumerate() {
         operations.push(SurfaceOperation::StoreContract(operation));
         if index == 5 {
             operations.push(SurfaceOperation::TriggerDisable { key: 0 });
+            operations.push(SurfaceOperation::TriggerChanges);
+            operations.push(SurfaceOperation::TriggerSnapshot);
         }
         // Park turn 0, read it back, then replace it with turn 1's park —
         // one record per session. Turn 0's settle leaves turn 1's park (a
@@ -228,6 +243,59 @@ impl SurfaceRunner {
     async fn apply(&mut self, operation: &SurfaceOperation) -> Result<(), String> {
         match operation {
             SurfaceOperation::StoreContract(operation) => self.scenario.apply(operation).await,
+            SurfaceOperation::TriggerChanges => {
+                let (changes, cursor) = self
+                    .trigger_store
+                    .subscriptions_changed_since(
+                        lash_core::TriggerSubscriptionChangeCursor::initial(),
+                        10,
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let mut incarnations = BTreeMap::new();
+                let changes = changes
+                    .into_iter()
+                    .map(|change| {
+                        observation::normalized_trigger_json(
+                            serde_json::json!(change),
+                            &mut incarnations,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                self.trigger_feed_reads
+                    .push(serde_json::json!({"changes": changes, "cursor": cursor}));
+                Ok(())
+            }
+            SurfaceOperation::TriggerSnapshot => {
+                let (records, cursor) = self
+                    .trigger_store
+                    .list_subscriptions_with_cursor()
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let mut incarnations = BTreeMap::new();
+                let records = records
+                    .into_iter()
+                    .map(|record| {
+                        observation::normalized_trigger_json(
+                            serde_json::json!(record),
+                            &mut incarnations,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                self.trigger_feed_reads
+                    .push(serde_json::json!({"snapshot": records, "cursor": cursor}));
+                Ok(())
+            }
+            SurfaceOperation::TriggerCompact => {
+                let removed = self
+                    .trigger_store
+                    .compact_subscription_tombstones(0)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                self.trigger_feed_reads
+                    .push(serde_json::json!({"removed": removed}));
+                Ok(())
+            }
             SurfaceOperation::TriggerRegister { key } => {
                 let subscription_key = format!("surface-{key}");
                 let mut inputs = BTreeMap::new();
@@ -390,6 +458,7 @@ impl SurfaceRunner {
     async fn observe(&self) -> SurfaceState {
         let mut state = self.reader.observe().await;
         state.turn_park_loads = self.turn_park_loads.clone();
+        state.trigger_feed_reads = self.trigger_feed_reads.clone();
         state
     }
 }
@@ -407,6 +476,7 @@ async fn reset_postgres_surface(storage: &PostgresStorage) {
     .execute(storage.pool())
     .await
     .unwrap();
+    sqlx::query("INSERT INTO lash_trigger_subscription_change_clock (singleton, current_seq, pruned_through) VALUES (TRUE, 0, 0) ON CONFLICT (singleton) DO UPDATE SET current_seq = 0, pruned_through = 0").execute(storage.pool()).await.unwrap();
     sqlx::query("INSERT INTO lash_process_change_clock (singleton, current_seq, tombstone_compaction_horizon) VALUES (TRUE, 0, 0) ON CONFLICT (singleton) DO UPDATE SET current_seq = 0, tombstone_compaction_horizon = 0").execute(storage.pool()).await.unwrap();
     sqlx::query("INSERT INTO lash_turn_park_clock (singleton, current_seq, compaction_horizon) VALUES (TRUE, 0, 0) ON CONFLICT (singleton) DO UPDATE SET current_seq = 0, compaction_horizon = 0").execute(storage.pool()).await.unwrap();
 }
@@ -491,6 +561,7 @@ async fn surface_runners(
             trigger_store: sqlite_triggers,
             runtime: sqlite_runtime,
             turn_park_loads: Vec::new(),
+            trigger_feed_reads: Vec::new(),
             reader: SurfaceReader::Sqlite {
                 runtime_path: sqlite_runtime_path,
                 process_path: sqlite_process_path,
@@ -507,6 +578,7 @@ async fn surface_runners(
             trigger_store: postgres_triggers,
             runtime: postgres_runtime,
             turn_park_loads: Vec::new(),
+            trigger_feed_reads: Vec::new(),
             reader: SurfaceReader::Postgres {
                 pool: storage.pool().clone(),
             },

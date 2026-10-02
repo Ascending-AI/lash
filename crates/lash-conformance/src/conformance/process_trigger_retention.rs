@@ -1776,6 +1776,39 @@ impl TriggerStore for BindCrashesOnce {
         self.inner.list_subscriptions(filter).await
     }
 
+    async fn subscriptions_changed_since(
+        &self,
+        cursor: crate::TriggerSubscriptionChangeCursor,
+        limit: usize,
+    ) -> std::result::Result<
+        (
+            Vec<crate::TriggerSubscriptionChange>,
+            crate::TriggerSubscriptionChangeCursor,
+        ),
+        crate::PluginError,
+    > {
+        self.inner.subscriptions_changed_since(cursor, limit).await
+    }
+    async fn list_subscriptions_with_cursor(
+        &self,
+    ) -> std::result::Result<
+        (
+            Vec<crate::TriggerSubscriptionRecord>,
+            crate::TriggerSubscriptionChangeCursor,
+        ),
+        crate::PluginError,
+    > {
+        self.inner.list_subscriptions_with_cursor().await
+    }
+    async fn compact_subscription_tombstones(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> std::result::Result<usize, crate::PluginError> {
+        self.inner
+            .compact_subscription_tombstones(cutoff_epoch_ms)
+            .await
+    }
+
     async fn delete_session_subscriptions(
         &self,
         session_id: &SessionId,

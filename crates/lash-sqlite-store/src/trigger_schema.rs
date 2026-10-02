@@ -12,6 +12,23 @@ CREATE TABLE IF NOT EXISTS lash_compat (
     CHECK (version >= 1 AND min_reader >= 1 AND min_reader <= version AND fleet_format >= 1)
 );
 
+CREATE TABLE IF NOT EXISTS trigger_subscription_change_clock (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    current_seq INTEGER NOT NULL CHECK (current_seq >= 0),
+    pruned_through INTEGER NOT NULL CHECK (pruned_through >= 0 AND pruned_through <= current_seq)
+);
+INSERT INTO trigger_subscription_change_clock (singleton, current_seq, pruned_through)
+    VALUES (TRUE, 0, 0) ON CONFLICT (singleton) DO NOTHING;
+CREATE TABLE IF NOT EXISTS trigger_subscription_changes (
+    subscription_id TEXT PRIMARY KEY,
+    change_seq INTEGER NOT NULL UNIQUE CHECK (change_seq > 0),
+    deleted_at_ms INTEGER,
+    record_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_trigger_subscription_changes_deleted
+    ON trigger_subscription_changes(deleted_at_ms, change_seq)
+    WHERE deleted_at_ms IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
     subscription_id      TEXT PRIMARY KEY,
     owner_scope          TEXT NOT NULL,

@@ -2,8 +2,11 @@
 //! subscriptions and atomic occurrence reservation.
 
 use super::*;
+
+mod subscription_changes;
 use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
+pub use subscription_changes::trigger_subscription_change_cursor_law;
 
 pub async fn trigger_store<F>(make: F)
 where

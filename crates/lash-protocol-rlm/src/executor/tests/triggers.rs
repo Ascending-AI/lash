@@ -1177,6 +1177,39 @@ impl lash_core::TriggerStore for RecordingTriggerStore {
         self.inner.list_subscriptions(filter).await
     }
 
+    async fn subscriptions_changed_since(
+        &self,
+        cursor: lash_core::TriggerSubscriptionChangeCursor,
+        limit: usize,
+    ) -> std::result::Result<
+        (
+            Vec<lash_core::TriggerSubscriptionChange>,
+            lash_core::TriggerSubscriptionChangeCursor,
+        ),
+        lash_core::PluginError,
+    > {
+        self.inner.subscriptions_changed_since(cursor, limit).await
+    }
+    async fn list_subscriptions_with_cursor(
+        &self,
+    ) -> std::result::Result<
+        (
+            Vec<lash_core::TriggerSubscriptionRecord>,
+            lash_core::TriggerSubscriptionChangeCursor,
+        ),
+        lash_core::PluginError,
+    > {
+        self.inner.list_subscriptions_with_cursor().await
+    }
+    async fn compact_subscription_tombstones(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> std::result::Result<usize, lash_core::PluginError> {
+        self.inner
+            .compact_subscription_tombstones(cutoff_epoch_ms)
+            .await
+    }
+
     async fn delete_session_subscriptions(
         &self,
         session_id: &SessionId,

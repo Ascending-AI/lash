@@ -57,6 +57,7 @@ crate::statements! {
         /// Every live subscription, in listing order. The general listing:
         /// it has no predicate to seek on, so it scans by design, and it is
         /// what an arbitrary admin filter falls to.
+        live_snapshot = "SELECT record_json FROM trigger_subscriptions WHERE lifecycle <> 'tombstoned' ORDER BY owner_scope, subscription_key";
         list_all = "SELECT subscription_id, record_json
              FROM trigger_subscriptions
              WHERE lifecycle <> 'tombstoned'

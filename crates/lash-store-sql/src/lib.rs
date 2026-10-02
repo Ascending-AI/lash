@@ -133,6 +133,8 @@ pub const TABLES: &[&str] = &[
     trigger::occurrence_tombstones::TABLE,
     trigger::occurrences::TABLE,
     trigger::subscriptions::TABLE,
+    trigger::subscription_changes::TABLE,
+    trigger::subscription_change_clock::TABLE,
     turn_ingress::cancel_affected_inputs::TABLE,
     turn_ingress::cancel_requests::TABLE,
     turn_ingress::cancellation_bindings::TABLE,
@@ -197,6 +199,11 @@ pub fn all_statements() -> Vec<Statement> {
         .extend_from_slice(trigger::occurrence_tombstones::OccurrenceTombstoneStatements::NEUTRAL);
     statements.extend_from_slice(trigger::occurrences::OccurrenceStatements::NEUTRAL);
     statements.extend_from_slice(trigger::subscriptions::SubscriptionStatements::NEUTRAL);
+    statements
+        .extend_from_slice(trigger::subscription_changes::SubscriptionChangeStatements::NEUTRAL);
+    statements.extend_from_slice(
+        trigger::subscription_change_clock::SubscriptionChangeClockStatements::NEUTRAL,
+    );
     statements.extend_from_slice(process::events::EventStatements::NEUTRAL);
     statements.extend_from_slice(process::park_events::ProcessParkEventStatements::NEUTRAL);
     statements.extend_from_slice(process::observers::ObserverStatements::NEUTRAL);

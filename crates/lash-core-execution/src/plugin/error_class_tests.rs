@@ -186,6 +186,10 @@ plugin_error_samples! {
         requested_cursor: crate::ProcessChangeCursor::initial(),
         tombstone_compaction_horizon: crate::ProcessChangeCursor::from_store_sequence(2),
     },
+    TriggerSubscriptionChangeCursorPruned { .. } => PluginError::TriggerSubscriptionChangeCursorPruned {
+        requested_cursor: crate::TriggerSubscriptionChangeCursor::initial(),
+        tombstone_compaction_horizon: crate::TriggerSubscriptionChangeCursor::from_store_sequence(2),
+    },
     ProcessParkFeedCursorCompacted { .. } => PluginError::ProcessParkFeedCursorCompacted {
         horizon: crate::store::ParkFeedCursor::initial(),
     },

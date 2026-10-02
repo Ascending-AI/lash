@@ -152,3 +152,47 @@ async fn trigger_revision_columns_carry_the_record_revision() {
         "the column must move when the counter moves"
     );
 }
+
+#[tokio::test]
+async fn subscription_changes_are_durable_on_sqlite_memory() {
+    let store = crate::SqliteStoreSet::memory()
+        .await
+        .expect("memory stores")
+        .trigger_store();
+    let registered = receipt_of(
+        store
+            .execute_command(
+                "change-register",
+                register_command("change-owner", "change-key", "ui.button.pressed"),
+            )
+            .await
+            .expect("store registration")
+            .expect("registration"),
+    );
+    let changed = store
+        .conn
+        .call(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM trigger_subscription_changes WHERE change_seq > 0",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+        })
+        .await
+        .expect("subscription mutations publish their durable change in the accepting transaction");
+    assert_eq!(changed, 1);
+    let (changes, cursor) = store
+        .subscriptions_changed_since(
+            lash_core_execution::TriggerSubscriptionChangeCursor::initial(),
+            10,
+        )
+        .await
+        .expect("change page");
+    assert_eq!(
+        changes,
+        vec![lash_core_execution::TriggerSubscriptionChange::from(
+            &registered.record_snapshot
+        )]
+    );
+    assert!(cursor.store_sequence() > 0);
+}

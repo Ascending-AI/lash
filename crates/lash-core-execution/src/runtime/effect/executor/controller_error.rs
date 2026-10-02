@@ -119,6 +119,7 @@ impl From<PluginError> for RuntimeEffectControllerError {
             | PluginError::ProcessOutputAttachmentUnavailable { .. }
             | PluginError::ProcessUnknown { .. }
             | PluginError::ProcessChangeCursorPruned { .. }
+            | PluginError::TriggerSubscriptionChangeCursorPruned { .. }
             | PluginError::ProcessParkFeedCursorCompacted { .. }
             | PluginError::ProcessCallerDeparted { .. }
             | PluginError::ProcessHandedOver { .. }

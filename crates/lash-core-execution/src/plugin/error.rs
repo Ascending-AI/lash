@@ -704,6 +704,24 @@ define_plugin_errors! {
         => Self::ProcessChangeCursorPruned { .. }
         => "process_change_cursor_pruned"
         => crate::ToolFailureClass::Internal;
+    /// The cursor predates retained subscription deletion evidence. Resync
+    /// through the atomic subscription snapshot before continuing.
+    #[error(
+        "trigger subscription change cursor {requested_cursor:?} is below tombstone-compaction horizon {tombstone_compaction_horizon:?}; a full relist is required"
+    )]
+    TriggerSubscriptionChangeCursorPruned {
+        requested_cursor: crate::TriggerSubscriptionChangeCursor,
+        tombstone_compaction_horizon: crate::TriggerSubscriptionChangeCursor,
+    }
+        => PluginError::TriggerSubscriptionChangeCursorPruned { requested_cursor, tombstone_compaction_horizon }
+        => {
+        requested_cursor: crate::TriggerSubscriptionChangeCursor,
+        tombstone_compaction_horizon: crate::TriggerSubscriptionChangeCursor,
+    }
+        => Self::TriggerSubscriptionChangeCursorPruned { requested_cursor: *requested_cursor, tombstone_compaction_horizon: *tombstone_compaction_horizon }
+        => Self::TriggerSubscriptionChangeCursorPruned { .. }
+        => "trigger_subscription_change_cursor_pruned"
+        => crate::ToolFailureClass::Internal;
 /// A process park feed cursor predates history
     /// `compact_process_park_feed` removed. The consumer must relist parked
     /// processes before resuming from the reported horizon.
@@ -1069,6 +1087,7 @@ impl PluginError {
             | Self::ProcessOutputAttachmentUnavailable { .. }
             | Self::ProcessUnknown { .. }
             | Self::ProcessChangeCursorPruned { .. }
+            | Self::TriggerSubscriptionChangeCursorPruned { .. }
             | Self::ProcessParkFeedCursorCompacted { .. }
             | Self::MonotonicCounterOverflow { .. }
             | Self::ProcessNoLongerRetained { .. }

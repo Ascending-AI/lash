@@ -555,6 +555,18 @@ table lash_trigger_occurrences
   unique (idempotency_key)
   unique (occurrence_id, outcome_kind)
   primary-key (occurrence_id)
+table lash_trigger_subscription_change_clock
+  column current_seq bigint not-null
+  column pruned_through bigint not-null
+  column singleton boolean not-null
+  primary-key (singleton)
+table lash_trigger_subscription_changes
+  column change_seq bigint not-null
+  column deleted_at_ms bigint nullable
+  column record_json text not-null
+  column subscription_id text not-null
+  unique (change_seq)
+  primary-key (subscription_id)
 table lash_trigger_subscriptions
   column created_at_ms bigint not-null
   column definition_fingerprint text not-null

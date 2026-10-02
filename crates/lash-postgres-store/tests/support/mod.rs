@@ -117,6 +117,8 @@ pub async fn reset(pool: &PgPool) {
         .execute(pool)
         .await
         .expect("reset postgres tables");
+    sqlx::query("INSERT INTO lash_trigger_subscription_change_clock (singleton, current_seq, pruned_through) VALUES (TRUE, 0, 0) ON CONFLICT (singleton) DO UPDATE SET current_seq = 0, pruned_through = 0")
+        .execute(pool).await.expect("reset postgres subscription change clock");
     sqlx::query(
         "INSERT INTO lash_process_change_clock (singleton, current_seq)
          VALUES (TRUE, 0)

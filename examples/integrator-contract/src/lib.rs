@@ -728,6 +728,36 @@ impl TriggerStore for Integrator {
     ) -> Result<Vec<TriggerSubscriptionRecord>, PluginError> {
         unreachable!("external signature witness")
     }
+    async fn subscriptions_changed_since(
+        &self,
+        cursor: TriggerSubscriptionChangeCursor,
+        limit: usize,
+    ) -> Result<
+        (
+            Vec<TriggerSubscriptionChange>,
+            TriggerSubscriptionChangeCursor,
+        ),
+        PluginError,
+    > {
+        unreachable!("external signature witness")
+    }
+    async fn list_subscriptions_with_cursor(
+        &self,
+    ) -> Result<
+        (
+            Vec<TriggerSubscriptionRecord>,
+            TriggerSubscriptionChangeCursor,
+        ),
+        PluginError,
+    > {
+        unreachable!("external signature witness")
+    }
+    async fn compact_subscription_tombstones(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> Result<usize, PluginError> {
+        unreachable!("external signature witness")
+    }
     async fn delete_session_subscriptions(
         &self,
         session_id: &SessionId,

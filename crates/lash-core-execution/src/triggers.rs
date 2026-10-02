@@ -12,6 +12,7 @@ mod report;
 mod revision_referrer;
 mod router;
 mod store_support;
+mod subscription_changes;
 #[cfg(test)]
 mod tests;
 
@@ -30,6 +31,7 @@ pub use store_support::{
     decode_trigger_subscription_json, encode_trigger_row, prepare_trigger_command,
     stored_trigger_receipt, trigger_mutation_records,
 };
+pub use subscription_changes::{TriggerSubscriptionChange, TriggerSubscriptionChangeCursor};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TriggerEvent {
@@ -1833,6 +1835,41 @@ pub trait TriggerStore: Send + Sync {
         &self,
         filter: TriggerSubscriptionFilter,
     ) -> Result<Vec<TriggerSubscriptionRecord>, PluginError>;
+
+    /// Read each subscription's latest state in change-sequence order.
+    /// Multiple edits coalesce. A zero limit leaves the cursor unchanged.
+    /// A cursor below the retained tombstone horizon returns
+    /// `PluginError::TriggerSubscriptionChangeCursorPruned`.
+    async fn subscriptions_changed_since(
+        &self,
+        cursor: TriggerSubscriptionChangeCursor,
+        limit: usize,
+    ) -> Result<
+        (
+            Vec<TriggerSubscriptionChange>,
+            TriggerSubscriptionChangeCursor,
+        ),
+        PluginError,
+    >;
+
+    /// Atomically list all live subscriptions and the cursor at that snapshot.
+    /// Use this after an expired cursor, reconciling absent ids as deletions.
+    async fn list_subscriptions_with_cursor(
+        &self,
+    ) -> Result<
+        (
+            Vec<TriggerSubscriptionRecord>,
+            TriggerSubscriptionChangeCursor,
+        ),
+        PluginError,
+    >;
+
+    /// Forget deletion evidence strictly older than this host-chosen time.
+    /// Lagging consumers must resync. Returns the number of removed tombstones.
+    async fn compact_subscription_tombstones(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> Result<usize, PluginError>;
 
     async fn delete_session_subscriptions(
         &self,

@@ -68,12 +68,16 @@ const SHAPE_ARTIFACT: &str = include_str!("../../schema-shape.txt");
 /// outside the verified scope, so a host port that omits it can hold a
 /// `singleton = FALSE` row that satisfies "the table has rows" and then fails
 /// every runtime read.
-const SEED_ROWS: [(&str, &str); 2] = [
+const SEED_ROWS: [(&str, &str); 3] = [
     (
         "lash_process_change_clock",
         "transactional process-change clock",
     ),
     ("lash_catalog_identity", "catalog identity"),
+    (
+        "lash_trigger_subscription_change_clock",
+        "transactional trigger-subscription change clock",
+    ),
 ];
 
 /// The namespace-anchoring table. Its resolution through `search_path` decides

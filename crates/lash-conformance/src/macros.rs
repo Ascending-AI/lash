@@ -1118,6 +1118,7 @@ macro_rules! trigger_store_reopenable_tests {
     ($fixture:block) => {
         $crate::trigger_store_reopenable_tests!(@catalogue $fixture; [
             (trigger_store_reopenable, "trigger-store-reopenable"),
+            (trigger_subscription_change_cursor_law, "trigger-subscription-change-cursor"),
             (host_scope_filters_list_cancel_and_deactivate_uniformly, "host-scope-filters"),
         ]);
     };
