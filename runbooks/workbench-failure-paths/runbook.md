@@ -14,11 +14,13 @@ visible wording and final state are objective gates.
 **Deterministic companion.** `just agent-workbench-restate-e2e` asserts the auth terminal,
 same-session recovery, retry attempt reset, and single-copy live/replay observations.
 `kiln test --test_output=all //crates/lash-core-llm:lash-core-llm__unit_test --test_arg=charge_safety` asserts the
-paid-output refusal and the charge-safety decision surface — six tests; require that count,
-because a name filter that matches nothing still exits 0. (The previously named
+paid-output refusal and the charge-safety decision surface — six tests; require that count.
+(The previously named
 `retryable_mid_stream_failure_preserves_paid_output_without_retry` does not exist, and the
-command that named it passed vacuously.) `cargo test -p agent-workbench
-process_work_tests` asserts the failed-process `/api/work` projection and UI error rendering.
+Cargo command that named it passed vacuously; under `kiln test` an unmatched selector fails
+the target outright.) `kiln test
+//examples/agent-workbench:agent-workbench__unit_test --test_arg=process_work_tests`
+asserts the failed-process `/api/work` projection and UI error rendering — seven tests.
 The browser run judges the actual transcript and work rail; it does not reproduce those
 internal assertions.
 

@@ -110,12 +110,13 @@ The deterministic `session_lifecycle_growth::flat_commit_growth_after_large_bind
 test separately observes accepted commit inputs with production budget accounting. Run it as
 
 ```sh
-cargo nextest run -p lash-runtime --all-features --lib session_lifecycle_growth::flat_commit_growth_after_large_bindings_stabilize
+kiln test --test_output=all //crates/lash:lash__unit_test \
+  --test_arg=session_lifecycle_growth::flat_commit_growth_after_large_bindings_stabilize
 ```
 
-— the full module path with `-p lash-runtime --all-features --lib`. The obvious shorter
-invocations select nothing and report `0 passed`, which reads green: require the run to
-report exactly one test passed, or the gate is unobserved. It
+— the `lash-runtime` package's Buck2 unit-test label with the full module path filter. The
+runner refuses a selector that names nothing in the binary, and the run must still report
+exactly one test passed, or the gate is unobserved. It
 checks forty dirty turns retain sixteen large leaf identities, excludes unchanged bodies,
 and requires exactly one submitted leaf body after rebinding one large value. Browser
 traces establish executed operations; they do not expose exact submitted component bodies.

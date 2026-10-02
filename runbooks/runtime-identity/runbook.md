@@ -83,13 +83,14 @@ nothing; it passed vacuously.) The Restate refusal
 run above in this phase — running it twice adds no coverage and inflates the phase count.
 
 For an owned PostgreSQL gate, let the repository's service owner provide the database rather
-than hand-rolling a container: `scripts/ci/with-service.sh pg16 -- <cmd>` binds an ephemeral
+than hand-rolling a container, and run it inside `kiln gate` so the container lands in your
+gate's namespace: `scripts/ci/with-service.sh pg16 -- <cmd>` binds an ephemeral
 loopback port, exports `LASH_POSTGRES_DATABASE_URL` into the command, and labels the container
 so the gate's leftover-refusal can see it. Require the test to run rather than print its
 `LASH_POSTGRES_DATABASE_URL is not set` skip message:
 
 ```sh
-scripts/ci/with-service.sh pg16 -- \
+kiln gate lash <fork> -- scripts/ci/with-service.sh pg16 -- \
   cargo test -p lash-internal-postgres-store --locked --test conformance session_ingress -- --nocapture
 ```
 

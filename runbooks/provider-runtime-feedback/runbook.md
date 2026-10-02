@@ -17,13 +17,22 @@ partial answer that caused it. The tag is fallback and has no native authority.
 Source the fork's `env.sh`, then run:
 
 ```sh
-cargo nextest run --workspace --locked -E 'test(runtime_feedback_)'
+kiln test --test_output=all \
+  //crates/lash-core-execution:lash-core-execution__unit_test \
+  //crates/lash-core-execution:store_backed__test \
+  //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test \
+  //crates/lash-provider-anthropic:lash-provider-anthropic__unit_test \
+  //crates/lash-provider-openai:lash-provider-openai__unit_test \
+  //crates/lash-sim:lash-sim__unit_test \
+  --test_arg=runtime_feedback_
 ```
 
-Expect **45 executed tests** covering Responses, Codex, Chat, both Anthropic
-modes, Gemini, Code Assist, real RLM output-limit retries, and checkpoint directives. Pin the
-count, not "nonzero": a filter that has drifted to select two of the forty-five still reports
-a nonzero pass and reads as green.
+Expect **44 executed tests** in total across the six targets — the sim binary
+runs sharded, so sum the per-target `passed` counts — covering Responses, Codex,
+Chat, both Anthropic modes, Gemini, Code Assist, real RLM output-limit retries,
+and checkpoint directives. Pin the count, not "nonzero": a filter that has
+drifted to select two of the forty-four still reports a nonzero pass and reads
+as green.
 The Anthropic witnesses must include native/fallback
 wire equality after a partial answer and a request containing both a legal and
 an illegal native slot. This companion uses scripted providers in tests only;

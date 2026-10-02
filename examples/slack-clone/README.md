@@ -54,17 +54,8 @@ State lives under `.slack-clone/`. `kiln test //examples/slack-clone:slack-clone
 ## Coverage
 
 The [example coverage matrix](../../runbooks/RULES.md#example-coverage-matrix) is the
-source of truth for the CI split:
+source of truth for the CI split.
 
-- **Deterministic CI:** `Test docs + build cache` compiles all workspace targets, and
-  `Test shard ${{ matrix.shard }}/4` runs the workspace tests, including the Slack
-  package tests.
-- **Full-host CI:** the `slack-clone-full-host` functional E2E leg runs
-  `just slack-clone-full-host-e2e` (token-free, deterministic). CI still does not
-  run `just slack-clone` interactively or the real-token MCP client-depth path.
-- **Manual live-model CI:** the dispatch-only `Slack-clone live-model acceptance`
-  workflow runs one RLM agent and one standard agent through OpenRouter. It is
-  never triggered by pushes, pull requests, or schedules.
 - **Manual judged:** [`slack-clone-bot`](../../runbooks/slack-clone-bot/runbook.md),
   whose Phase 3M covers MCP client depth and runtime integration attach/detach.
 

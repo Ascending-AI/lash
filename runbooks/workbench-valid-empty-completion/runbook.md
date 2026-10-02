@@ -35,16 +35,24 @@ pending input.
 From the repository root, source `./env.sh` and run:
 
 ```sh
-cargo nextest run -p lash-internal-protocol-standard -p lash-internal-provider-openai \
-  --all-targets --locked \
-  -E 'test(valid_empty_terminal_completions_succeed_across_chat_and_responses) | test(eof_tolerance_does_not_turn_empty_unterminated_streams_into_success) | test(standard_protocol_scenario_empty_model_response_finishes_after_checkpoint) | test(post_tool_empty_model_response_finishes_without_repeating_the_tool) | test(empty_model_response_checkpoint_delivers_pending_input_before_completion)'
+kiln test --test_output=all \
+  //crates/lash-provider-openai:lash-provider-openai__unit_test \
+  --test_arg=valid_empty_terminal_completions_succeed_across_chat_and_responses \
+  --test_arg=eof_tolerance_does_not_turn_empty_unterminated_streams_into_success
+
+kiln test --test_output=all \
+  //crates/lash-protocol-standard:protocol_scenarios__test \
+  --test_arg=standard_protocol_scenario_empty_model_response_finishes_after_checkpoint \
+  --test_arg=post_tool_empty_model_response_finishes_without_repeating_the_tool \
+  --test_arg=empty_model_response_checkpoint_delivers_pending_input_before_completion
 ```
 
-Require five **executed** tests and five passes. The executed count is the load-bearing half
-of this gate, not the exit code: a name filter that matches nothing still exits 0 and prints
-`0 passed`, so a drifted or renamed test reads as a pass unless the count is checked. The two
-packages named above own all five tests — do not widen this to `--workspace`, which pays for
-a full workspace test build to run the same five. The adapter suite covers buffered and streamed
+Require five **executed** tests and five passes — two on the provider label, three on the
+scenarios label. The two targets named above own all five tests, and each selector must match
+the binary it is handed to — the runner refuses a selector that names nothing in its binary,
+which is why the selection is split per label rather than written as one cross-crate filter.
+A renamed or drifted test fails the target it belonged to; require the count anyway.
+The adapter suite covers buffered and streamed
 Chat and Responses paths inside one test, and its negative companion proves EOF tolerance
 does not turn an empty unterminated stream into success.
 
@@ -107,7 +115,7 @@ port-derived Restate container is gone.
 
 | Item | Objective gate | Verdict | Evidence |
 |---|---|---|---|
-| Contract coverage | five focused tests execute and pass | | focused nextest log |
+| Contract coverage | five focused tests execute and pass | | focused `kiln test` log |
 | Dev-only fixture | exact startup warning, no credentials or network provider | | Workbench log, `01-valid-empty-ready.png` |
 | Normal completion | rendered successful Standard result with zero assistant bytes | | `02-valid-empty-finished.png` |
 | Provider evidence | one completed terminal-observed attempt, native `stop`, 7/0 usage | | `02-valid-empty-report.json` |

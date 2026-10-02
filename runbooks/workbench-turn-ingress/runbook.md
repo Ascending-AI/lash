@@ -90,7 +90,7 @@ structure rather than exact assistant wording.
 
   ```bash
   export AGENT_WORKBENCH_E2E_RUN_ID="turn-ingress-$(date +%s)-$$"
-  scripts/ci/with-service.sh pg16 -- bash -c '
+  kiln gate lash <fork> -- scripts/ci/with-service.sh pg16 -- bash -c '
     set -euo pipefail
     export AGENT_WORKBENCH_E2E_POSTGRES_BASE_URL="${LASH_POSTGRES_DATABASE_URL%/*}"
     exec python3 scripts/ci/restate_suite.py suite agent-workbench \

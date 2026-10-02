@@ -79,14 +79,8 @@ kiln test //examples/agent-workbench:agent-workbench__unit_test
 ## Coverage
 
 The [example coverage matrix](../../runbooks/RULES.md#example-coverage-matrix) is the
-source of truth for the CI split:
+source of truth for the CI split.
 
-- **Deterministic CI:** `Test docs + build cache` runs the all-target workspace check,
-  `Package feature checks` runs the package-scoped workbench check, and
-  `Test shard ${{ matrix.shard }}/4` runs workspace tests.
-- **Full-host CI:** `Functional E2E (agent-workbench)` runs
-  `agent-workbench-restate-e2e` with Restate and Postgres live tests; it does not judge
-  the browser journeys.
 - **Manual judged:** [`workbench-process-lifecycle`](../../runbooks/workbench-process-lifecycle/runbook.md),
   [`workbench-session-resume`](../../runbooks/workbench-session-resume/runbook.md), and
   [`workbench-deferred-tools`](../../runbooks/workbench-deferred-tools/runbook.md), plus

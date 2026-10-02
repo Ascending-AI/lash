@@ -55,13 +55,8 @@ as unreachable.
 ## Coverage
 
 The [example coverage matrix](../../runbooks/RULES.md#example-coverage-matrix) is the
-source of truth for the CI split:
+source of truth for the CI split.
 
-- **Deterministic CI:** `Test docs + build cache` compiles all workspace targets, and
-  `Test shard ${{ matrix.shard }}/4` runs workspace tests.
-- **Full-host CI:** `Functional E2E (agent-service)` runs `agent-service-restate-e2e`,
-  including the Restate ingress, process-workflow, and effect-group HTTP live tests; it
-  does not judge the browser journeys.
 - **Manual judged:** [`agent-service-branching`](../../runbooks/agent-service-branching/runbook.md),
   [`agent-service-effect-groups`](../../runbooks/agent-service-effect-groups/runbook.md),
   and [`tictactoe-full-game`](../../runbooks/tictactoe-full-game/runbook.md).

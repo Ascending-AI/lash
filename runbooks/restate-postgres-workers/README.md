@@ -241,7 +241,7 @@ Without it, the Postgres conformance binary reports a skip. To run the process
 registry conformance locally without the full E2E stack:
 
 ```sh
-scripts/ci/with-service.sh pg16 -- \
+kiln gate lash <fork> -- scripts/ci/with-service.sh pg16 -- \
   cargo test -p lash-internal-postgres-store --locked --test conformance \
   process_registry_
 ```

@@ -14,7 +14,7 @@ PgBouncer — never needs DDL privileges, or DDL at all, on the application pool
 **Deterministic companion.**
 
 ```sh
-bash scripts/ci/with-service.sh pg16 -- \
+kiln gate lash <fork> -- scripts/ci/with-service.sh pg16 -- \
   cargo test -p lash-internal-postgres-store --locked --test host_provisioned_rollout
 ```
 

@@ -29,34 +29,48 @@ Do:
 
 ```bash
 kiln gate lash "$LASH_RESIDENT_AUTHORITY_FORK" -- bash -lc '
+  set -eo pipefail
   . ./env.sh
-  cargo nextest run --workspace --locked -E "
-    test(~effective_member_without_contract_is_refused_before_prepare) |
-    test(~restricted_definition_uses_id_route_and_missing_route_is_refused_before_prepare) |
-    test(~plugin_session_refuses_missing_resident_route_before_advertisement) |
-    test(~model_request_pin_captures_provider_route_across_same_id_reassignment) |
-    test(~dispatch_uses_catalog_pinned_contract_without_reresolution) |
-    test(~native_rlm_and_validation_share_one_pinned_definition_under_registry_drift) |
-    test(~catalog_pins_contract_once_before_any_projection) |
-    test(~missing_contract_is_refused_only_for_effective_members) |
-    test(~duplicate_effective_identity_is_refused_before_contract_resolution) |
-    test(~replay_reuses_record_without_calling_resolver) |
-    test(~execution_grant_routes_multi_provider_source_by_id_not_name) |
-    test(~pinned_source_preserves_provider_execute_result_and_intents) |
-    test(~pinned_source_executes_with_the_provider_manifest_under_alias_drift_and_provider_swap) |
-    test(~pinned_source_retains_exactly_known_nonadvertised_resident_id) |
-    test(~resident_snapshot_refuses_mismatched_known_id_without_overwriting_advertised_route) |
-    test(~process_run_context_captures_catalog_and_execution_route_together) |
-    test(~ambient_and_restricted_empty_select_distinct_resident_catalogs) |
-    test(~standard_protocol_distinguishes_ambient_from_restricted_empty_access) |
-    test(~rlm_catalog_distinguishes_ambient_from_restricted_empty_access) |
-    test(~deferred_call_executes_through_grant_without_mutating_catalog) |
-    test(~typescript_deferred_call_executes_through_the_same_grant_path)
-  "
+  kiln test --test_output=all \
+    //crates/lash-core-execution:lash-core-execution__unit_test \
+    --test_arg=effective_member_without_contract_is_refused_before_prepare \
+    --test_arg=restricted_definition_uses_id_route_and_missing_route_is_refused_before_prepare \
+    --test_arg=plugin_session_refuses_missing_resident_route_before_advertisement \
+    --test_arg=model_request_pin_captures_provider_route_across_same_id_reassignment \
+    --test_arg=execution_grant_routes_multi_provider_source_by_id_not_name \
+    --test_arg=pinned_source_preserves_provider_execute_result_and_intents \
+    --test_arg=pinned_source_executes_with_the_provider_manifest_under_alias_drift_and_provider_swap \
+    --test_arg=pinned_source_retains_exactly_known_nonadvertised_resident_id \
+    --test_arg=resident_snapshot_refuses_mismatched_known_id_without_overwriting_advertised_route \
+    --test_arg=ambient_and_restricted_empty_select_distinct_resident_catalogs
+  kiln test --test_output=all //crates/lash-core-execution:store_backed__test \
+    --test_arg=dispatch_uses_catalog_pinned_contract_without_reresolution
+  kiln test --test_output=all //crates/lash-sansio:lash-sansio__unit_test \
+    --test_arg=catalog_pins_contract_once_before_any_projection \
+    --test_arg=missing_contract_is_refused_only_for_effective_members \
+    --test_arg=duplicate_effective_identity_is_refused_before_contract_resolution
+  kiln test --test_output=all //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test \
+    --test_arg=native_rlm_and_validation_share_one_pinned_definition_under_registry_drift \
+    --test_arg=rlm_catalog_distinguishes_ambient_from_restricted_empty_access \
+    --test_arg=deferred_call_executes_through_grant_without_mutating_catalog \
+    --test_arg=typescript_deferred_call_executes_through_the_same_grant_path
+  kiln test --test_output=all //crates/lash-lashlang-runtime:lash-lashlang-runtime__unit_test \
+    --test_arg=replay_reuses_record_without_calling_resolver
+  kiln test --test_output=all //crates/lash-core:lash-core__unit_test \
+    --test_arg=process_run_context_captures_catalog_and_execution_route_together
+  kiln test --test_output=all //crates/lash-protocol-standard:native_tools__test \
+    --test_arg=standard_protocol_distinguishes_ambient_from_restricted_empty_access
 ' | tee "$LASH_RESIDENT_AUTHORITY_EVIDENCE_DIR/resident-tool-authority.log"
 ```
 
-Expect exactly twenty-one tests and `21 passed; 0 failed`. The positive witnesses
+Buck2 hands every `--test_arg` selector to each listed binary and refuses a
+selector that names nothing in that binary, so a cross-crate selection is
+spelled per label rather than as one filter.
+
+Expect exactly twenty-one tests across the seven labels — 10 on
+`lash-core-execution__unit_test`, then 1, 3, 4, 1, 1, and 1 — and `0 failed`.
+The RLM unit test runs sharded, so its four land on separate shard actions;
+sum the per-target `passed` counts rather than reading one line. The positive witnesses
 prove that native tool schemas, RLM documentation and host bindings, and
 argument validation retain the same catalog-owned contract even when the
 source resolver would return a different definition later. A restricted
@@ -96,9 +110,9 @@ alias or old request keeping its route, no deferred call admitted through reside
 operator makes, and from the runner's side the only observable is the passed count. Read them
 as the meaning of the gate, not as a second look.
 
-Budget note: `cargo nextest run --workspace --locked` compiles every test binary in the
-workspace to run these twenty-one tests. That is the honest way to write a cross-crate filter
-and it is correct, but it is a full workspace test build, not a focused one.
+Budget note: the seven labels build only the owning binaries — Buck2's
+per-binary selector check is what makes one cross-crate filter impossible, so
+the split is the focused spelling, not a workaround.
 
 ## Phase 2 — durable authority bytes
 

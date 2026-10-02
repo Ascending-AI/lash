@@ -83,7 +83,7 @@ Before a live process-operations judgment, run the registry conformance laws aga
 PostgreSQL database with the production-required gate enabled:
 
 ```sh
-LASH_POSTGRES_DATABASE_URL=<disposable-url> LASH_REQUIRE_POSTGRES=1 \
+kiln gate lash <fork> -- scripts/ci/with-service.sh pg16 -- \
   cargo test -p lash-internal-postgres-store --features testing --test conformance \
   parent_end --locked -- --nocapture --test-threads=1
 ```

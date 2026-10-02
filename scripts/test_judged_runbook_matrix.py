@@ -1,6 +1,9 @@
 import importlib.util
 import pathlib
+import re
 import unittest
+
+import yaml
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -10,6 +13,76 @@ SPEC = importlib.util.spec_from_file_location(
 assert SPEC and SPEC.loader
 MATRIX = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MATRIX)
+
+COVERAGE_MATRIX_SECTION = "## Example coverage matrix"
+MATRIX_EXPRESSION = re.compile(r"\$\{\{\s*matrix\.([A-Za-z0-9_]+)\s*\}\}")
+
+
+def cited_ci_names(rules_text: str) -> set:
+    """Capitalized code spans in the RULES.md coverage-matrix section.
+
+    A capitalized code span in the matrix cites a CI display name — a job,
+    step, or workflow — by convention; lowercase spans are recipes, labels,
+    and other identifiers the workflows would never name.
+    """
+    section = rules_text.split(COVERAGE_MATRIX_SECTION, 1)[1].split("\n## ", 1)[0]
+    return {
+        span
+        for span in re.findall(r"`([^`]+)`", section)
+        if span[:1].isupper()
+    }
+
+
+def expanded_job_names(template: str, matrix: dict) -> set:
+    """A job's display-name template plus every `${{ matrix.<key> }}`
+    expansion the declared matrix produces. The literal template stays a
+    valid citation: it is the name as the workflow file writes it."""
+    expanded = {template}
+    for key in MATRIX_EXPRESSION.findall(template):
+        values = set(matrix.get(key) or [])
+        values.update(
+            entry[key]
+            for entry in matrix.get("include") or []
+            if isinstance(entry, dict) and key in entry
+        )
+        if not values:
+            continue
+        expanded = {
+            re.sub(
+                r"\$\{\{\s*matrix\." + re.escape(key) + r"\s*\}\}",
+                str(value),
+                name,
+            )
+            for name in expanded
+            for value in values
+        }
+    return expanded | {template}
+
+
+def workflow_ci_names() -> set:
+    """Every display name `.github/workflows/` defines: workflow names, job
+    ids and names (with matrix expansions), and step names."""
+    names = set()
+    workflows = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+    workflows += sorted((ROOT / ".github" / "workflows").glob("*.yaml"))
+    for workflow in workflows:
+        document = yaml.safe_load(workflow.read_text())
+        names.add(document.get("name"))
+        for job_id, job in (document.get("jobs") or {}).items():
+            names.add(job_id)
+            names.add(job.get("name"))
+            if job.get("name"):
+                names.update(
+                    expanded_job_names(
+                        job["name"],
+                        (job.get("strategy") or {}).get("matrix") or {},
+                    )
+                )
+            for step in job.get("steps") or []:
+                if isinstance(step, dict):
+                    names.add(step.get("name"))
+    names.discard(None)
+    return names
 
 
 class JudgedRunbookMatrixTests(unittest.TestCase):
@@ -280,6 +353,33 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
                 if deleted_page in text:
                     violations.append(f"{path.relative_to(ROOT)}: {deleted_page}")
         self.assertEqual(violations, [])
+
+    def test_the_coverage_matrix_cites_only_ci_names_that_exist(self) -> None:
+        # The matrix is the source of truth for the coverage split; a cited
+        # job or step that no longer exists keeps reading as coverage while
+        # nothing checks it. Matrix expressions are expanded so a per-leg
+        # citation such as `Functional E2E (agent-service)` resolves.
+        cited = cited_ci_names((ROOT / "runbooks" / "RULES.md").read_text())
+        missing = sorted(cited - workflow_ci_names())
+        self.assertEqual(
+            missing,
+            [],
+            f"RULES.md cites CI names no workflow defines: {missing}",
+        )
+
+    def test_a_stale_ci_name_citation_is_rejected(self) -> None:
+        # The red side: the retired `Test shard` job name the matrix used to
+        # cite must still be detectable as a violation, so the check cannot
+        # pass vacuously on an empty cited set.
+        cited = cited_ci_names(
+            f"{COVERAGE_MATRIX_SECTION}\n\n"
+            "| `example` | `Test shard ${{ matrix.shard }}/4` | x | x |\n"
+            "\n## Following section\n"
+        )
+        self.assertEqual(cited, {"Test shard ${{ matrix.shard }}/4"})
+        self.assertNotIn(
+            "Test shard ${{ matrix.shard }}/4", workflow_ci_names()
+        )
 
 if __name__ == "__main__":
     unittest.main()
