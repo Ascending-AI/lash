@@ -113,6 +113,35 @@ fn surface_plugin_factory() -> Arc<dyn lash_core::facade_support::PluginFactory>
     ))
 }
 
+struct SurfaceSettingsRecorder;
+
+impl LashlangRunSettingsRecorder for SurfaceSettingsRecorder {
+    fn record(
+        &self,
+        config: &AdmittedPluginConfig,
+    ) -> Result<LashlangRecordedSettings, PluginError> {
+        let grant = config
+            .decode::<SessionSurfaceOptions>(SURFACE_PLUGIN_ID)
+            .map_err(|error| PluginError::StoredDataCorrupt {
+                record_kind: "captured surface options".to_owned(),
+                message: error.to_string(),
+            })?
+            .is_some_and(|options| options.grant_vocabulary);
+        Ok(LashlangRecordedSettings::new(
+            LashlangSurface::new(
+                lashlang::LashlangAbilities::default(),
+                lashlang::LashlangLanguageFeatures::default(),
+                if grant {
+                    session_surface_resources()
+                } else {
+                    lashlang::LashlangHostCatalog::new()
+                },
+            ),
+            lashlang::ExecutionBounds::unbounded(),
+        ))
+    }
+}
+
 /// Runs `main` through a durable worker whose engine surface lacks the named
 /// data type and value constructor, granting them (when `grant`) only through
 /// the per-process plugin options the session plugin reads.
@@ -173,7 +202,10 @@ async fn run_session_surface_case(grant: bool) -> lash_core::ProcessAwaitOutput 
         ),
         harness.backend().worker_recovery(),
     );
-    harness.install_lashlang_worker(engine, vec![surface_plugin_factory()]);
+    harness.install_lashlang_worker(
+        engine.with_run_settings_recorder(Arc::new(SurfaceSettingsRecorder)),
+        vec![surface_plugin_factory()],
+    );
 
     let registration = ProcessRegistration::new(
         process_input

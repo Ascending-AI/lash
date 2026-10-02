@@ -546,6 +546,7 @@ async fn run_lashlang_process_scoped(
         .unwrap_or("")
         .to_owned();
     let run_settings = engine.run_settings(&context)?;
+    let execution_bounds = run_settings.execution_bounds;
     let (tool_catalog, host_environment) = {
         let _phase = context.named_phase("rlm_process.resolve_environment");
         let tool_catalog = match context.resolved_tool_catalog() {
@@ -554,17 +555,11 @@ async fn run_lashlang_process_scoped(
                 return Err(lash_core::ProcessInfraError::new(err));
             }
         };
-        let session_extensions = context.plugins().session_extensions().clone();
-        let surface = run_settings
-            .surface
+        let host_environment = run_settings
+            .into_surface()
             .for_process_registry(context.process_registry_available())
-            .with_plugin_extensions(&session_extensions);
-        let host_environment = match surface {
-            Ok(surface) => surface
-                .host_environment(&tool_catalog)
-                .map_err(|error| error.to_string()),
-            Err(error) => Err(error.to_string()),
-        };
+            .host_environment(&tool_catalog)
+            .map_err(|error| error.to_string());
         if let Err(output) = validate_lashlang_process_for_run(
             &artifact,
             &input,
@@ -679,7 +674,7 @@ async fn run_lashlang_process_scoped(
             &engine.workers,
             &artifact,
             &input,
-            run_settings.execution_bounds,
+            execution_bounds,
             segment_controller.controller(),
             &host,
             (segment_state, current_program_hash),

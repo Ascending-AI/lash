@@ -18,6 +18,7 @@ impl RuntimeErrorCause {
             | Self::StoreRefusal { .. }
             | Self::StoredDataCorrupt { .. }
             | Self::ModuleArtifactRefused { .. }
+            | Self::MissingRecordedProcessConfig { .. }
             | Self::SessionDeleted { .. }
             | Self::ArtifactReferrerEnded { .. }
             | Self::EffectGroupChildUnroutable { .. }

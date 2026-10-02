@@ -11,8 +11,7 @@ use lash_core::{
     TriggerSubscriptionDraft, TurnBudget,
 };
 use lash_lashlang_runtime::{
-    LashlangProcessEngine, LashlangProcessInput, LashlangSurface, LashlangSurfaceContribution,
-    lashlang_process_engine_registration, lashlang_surface_extension,
+    LashlangProcessInput, LashlangSurfaceContribution, lashlang_surface_extension,
 };
 
 const SURFACE_PLUGIN_ID: &str = "fig3344.trigger-surface";
@@ -112,7 +111,6 @@ const main = async () => "ok";
 async fn trigger_fired_process_runs_under_session_contributed_event_type() {
     let table = crate::testing::DoubleProcesses::new(0x3344_0001).await;
     let backend = table.backend().clone();
-    let artifact_store = lashlang::LashlangArtifacts::of_backend(&backend);
     let factory = Arc::new(crate::RlmProtocolPluginFactory::new(
         crate::RlmProtocolPluginConfig::builder()
             .channel(crate::RlmChannel::Cell)
@@ -222,23 +220,16 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
         "trigger registration mutates the store"
     );
 
-    let engine = || {
-        LashlangProcessEngine::new(
-            artifact_store.clone(),
-            LashlangSurface::new(
-                lashlang::LashlangAbilities::default(),
-                lashlang::LashlangLanguageFeatures::default(),
-                lashlang::LashlangHostCatalog::new(),
+    let runtime_host = plugin_host
+        .install_process_engine_contributions(
+            RuntimeHostConfig::new(
+                backend.clone(),
+                CommitBudget::bounded(1024 * 1024, 512),
+                QueuedWorkBatchingConfig::new(1),
             ),
-            table.backend().worker_recovery(),
+            true,
         )
-    };
-    let runtime_host = RuntimeHostConfig::new(
-        backend.clone(),
-        CommitBudget::bounded(1024 * 1024, 512),
-        QueuedWorkBatchingConfig::new(1),
-    )
-    .with_process_engine_registration(lashlang_process_engine_registration(engine()));
+        .expect("the RLM recorder captures creation-time surface contributions");
     let process_engines = runtime_host.process_engines.clone();
     table.install_worker(
         vec![
@@ -277,6 +268,27 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
         .into_iter()
         .find_map(|delivery| delivery.process_id().cloned())
         .expect("the occurrence's delivery started its process");
+    let record = backend
+        .process_registry()
+        .get_process(&process_id)
+        .await
+        .expect("load the created process")
+        .expect("the triggered process exists");
+    let resources: lashlang::LashlangHostCatalog = serde_json::from_value(
+        record
+            .engine_config
+            .as_ref()
+            .and_then(|config| config.get("resources"))
+            .expect("the process row records its resource catalog")
+            .clone(),
+    )
+    .expect("the recorded catalog decodes");
+    assert!(
+        resources
+            .resolve_named_data_type("ui.ButtonPressed")
+            .is_some(),
+        "the event type is captured at creation"
+    );
     let terminal = tokio::time::timeout(
         std::time::Duration::from_secs(30),
         table.await_terminal(&process_id),

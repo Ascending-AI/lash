@@ -22,11 +22,11 @@ async fn a_hand_built_engine_runs_under_recorded_bounds_after_a_remote_round_tri
         .expect("the creation records its behaviour")
         .expect("a hand-built engine must record its behaviour");
     assert_eq!(
-        recorded["instruction_budget"],
+        recorded["execution_bounds"]["instruction_budget"],
         serde_json::json!({"bounded": 1000})
     );
     assert_eq!(
-        recorded["memory_limit"],
+        recorded["execution_bounds"]["memory_limit"],
         serde_json::json!({"bounded": 1048576})
     );
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
@@ -126,8 +126,7 @@ async fn a_hand_built_engine_refuses_a_run_without_recorded_behaviour() {
     );
     let error = engine
         .run_settings(&context)
-        .err()
-        .expect("a run cannot use constructor behaviour")
+        .expect_err("a run cannot use constructor behaviour")
         .into_plugin_error();
     assert!(error.is_terminal());
     assert!(!error.is_retryable());

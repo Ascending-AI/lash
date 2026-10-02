@@ -213,7 +213,7 @@ impl PluginHost {
         let trace_context = runtime_host.process_engine_trace_context().clone();
         let observation_sink = runtime_host.process_observation_sink();
         let ctx = super::ProcessEngineContributionContext::new(
-            &self.extensions,
+            self,
             &trace_context,
             process_lifecycle_available,
         )

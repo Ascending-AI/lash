@@ -292,8 +292,10 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(
     )
     .await;
     assert_eq!(disposition, lash_core::ProcessRegistrationOutcome::Created);
-    let recorded = serde_json::to_value(creating_config().recorded_behaviour(false))
-        .expect("the creating behaviour encodes");
+    let recorded = contributed_engine(&creating)
+        .creation_config(&env_spec)
+        .expect("the creating settings encode")
+        .expect("creation records engine settings");
     assert_eq!(
         created.engine_config.as_ref(),
         Some(&recorded),
@@ -466,6 +468,518 @@ async fn a_child_session_runs_under_its_parents_recorded_behaviour(double: Doubl
     assert!(model.calls.load(Ordering::SeqCst) >= 1);
 }
 
+fn contributed_engine(deployment: &Deployment) -> Arc<dyn lash_core::ProcessEngine> {
+    deployment
+        .runtime_host
+        .process_engines
+        .require(lash_lashlang_runtime::LASHLANG_ENGINE_KIND)
+        .unwrap()
+}
+
+fn settings_fixture(sleep: bool) -> lashlang::ModuleCompileOutput {
+    use lashlang::testing::ast_builders as b;
+    let body = if sleep {
+        b::block(vec![b::sleep_for(b::num(0.0)), b::finish(b::num(42.0))])
+    } else {
+        b::finish(b::num(42.0))
+    };
+    lashlang::compile_module(lashlang::ModuleCompileRequest {
+        source: "process settings() -> int { finish 42 }",
+        program: b::module(
+            vec![b::process_returning(
+                "settings",
+                Vec::new(),
+                lashlang::TypeExpr::Int,
+                body,
+            )],
+            Vec::new(),
+        ),
+        environment: &lashlang::LashlangHostEnvironment::new(
+            lashlang::LashlangHostCatalog::new(),
+            lashlang::LashlangAbilities::all(),
+        ),
+    })
+    .expect("settings witness compiles")
+}
+
+async fn stored_settings_registration(
+    backend: &lash_core::Backend,
+    compiled: &lashlang::ModuleCompileOutput,
+    recorded: Option<serde_json::Value>,
+) -> lash_core::ProcessRegistration {
+    let input = LashlangProcessInput {
+        module_ref: compiled.module_ref.clone(),
+        process_ref: compiled.artifact.process_ref("settings").unwrap().clone(),
+        host_requirements_ref: compiled.host_requirements_ref.clone(),
+        process_name: "settings".to_owned(),
+        args: serde_json::Map::new(),
+    };
+    let mut registration = lash_core::ProcessRegistration::new(
+        input.to_process_input().unwrap(),
+        lash_core::ProcessProvenance::host(),
+        lash_core::Lifetime::Detached,
+    )
+    .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+        input.process_identity(),
+    ));
+    registration.engine_config = recorded;
+    registration.env_ref = Some(
+        lash_core::runtime::publish_process_execution_env(
+            backend.process_env_store().as_ref(),
+            &host_pin_claim(),
+            &ProcessExecutionEnvSpec::new(lash_core::AdmittedPluginConfig::default(), policy()),
+        )
+        .await
+        .unwrap(),
+    );
+    let registry = backend.process_registry();
+    let stored = registry
+        .register_process(registration.clone())
+        .await
+        .unwrap();
+    let loaded = registry.get_process(&stored.id).await.unwrap().unwrap();
+    let remote = lash_remote_protocol::RemoteProcessRecord::try_from(loaded).unwrap();
+    let received = lash_core::ProcessRecord::try_from(
+        serde_json::from_slice::<lash_remote_protocol::RemoteProcessRecord>(
+            &serde_json::to_vec(&remote).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(received.engine_config, registration.engine_config);
+    registration.engine_config = received.engine_config;
+    registration
+}
+
+fn settings_run_context(
+    backend: &lash_core::Backend,
+    registration: lash_core::ProcessRegistration,
+    plugins: Option<Arc<lash_core::plugin::PluginSession>>,
+) -> lash_core::ProcessEngineRunContext<'static> {
+    let plugins = plugins.unwrap_or_else(|| {
+        PluginHost::new(lash_core::testing::test_standard_protocol_factories())
+            .build_session(lash_core::plugin::PluginSessionRequest::creation(
+                "settings-law",
+                Default::default(),
+            ))
+            .unwrap()
+    });
+    let id = lash_core::mint_process_id();
+    let scoped = backend
+        .effect_host()
+        .scoped_static(lash_core::AdmittedScope::process(id.clone()))
+        .unwrap()
+        .unwrap();
+    lash_core::ProcessEngineRunContext::new(
+        registration,
+        id.clone(),
+        lash_core::ProcessExecutionContext::default().with_execution_write_authority(
+            lash_core::ProcessExecutionWriteAuthority::invocation(id, "settings-law")
+                .bind_attempt(1),
+        ),
+        lash_core::testing::process_work_wiring_for_registry(backend.process_registry()),
+        plugins,
+        Arc::new(lash_core::ToolCatalog::default()),
+        None,
+        None,
+        Arc::new(lash_core::NoSessionWork::new()),
+        lash_core::DeliveryPolicy::EarliestSafeBoundary,
+        backend.clock(),
+        true,
+        lash_core::CancellationToken::new(),
+        None,
+        scoped,
+        None,
+        Box::new(|_| {
+            Err(lash_core::PluginError::Registration(
+                "recorded resources reached runtime".to_owned(),
+            ))
+        }),
+    )
+}
+
+async fn missing_process_settings_are_terminal(double: Double, _name: &str) {
+    process_settings_refusals(double, true).await;
+}
+
+async fn corrupt_process_settings_are_terminal(double: Double, _name: &str) {
+    process_settings_refusals(double, false).await;
+}
+
+async fn refusal_settles_on_double(
+    double: &Double,
+    engine: Arc<dyn lash_core::ProcessEngine>,
+    registration: lash_core::ProcessRegistration,
+    expected: lash_core::RuntimeErrorCode,
+) {
+    let backend = double.lash_backend();
+    let deployment = Deployment::new(creating_config(), &backend);
+    let runtime_host = RuntimeHostConfig::new(
+        backend.clone(),
+        CommitBudget::bounded(8 * 1024 * 1024, 1024),
+        QueuedWorkBatchingConfig::new(1),
+    )
+    .with_process_engine_registration(
+        lash_core::ProcessEngineRegistration::new(
+            engine,
+            lash_core::ProcessEngineAdmission::new(
+                lash_lashlang_runtime::LASHLANG_ENGINE_KIND,
+                lash_lashlang_runtime::admit_lashlang_process,
+            ),
+        )
+        .unwrap(),
+    );
+    let worker = lash_core_worker::DurableProcessWorker::new(
+        lash_core_worker::DurableProcessWorkerConfig::new(
+            deployment.plugin_host,
+            runtime_host,
+            backend.process_work(),
+            Arc::new(lash_core::NoSessionWork::new()),
+            lash_core::testing::runtime_lease_owner(),
+        ),
+    )
+    .unwrap();
+    double.install_process_worker(worker);
+    let registry = backend.process_registry();
+    let record = registry.register_process(registration).await.unwrap();
+    let relay = lash_core::runtime::process_start::ProcessStartRelay::new(
+        backend.obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
+        Arc::clone(&registry),
+        Arc::clone(backend.process_work().port()),
+        backend.clock(),
+    );
+    relay.deliver_start(&record.id).await.unwrap();
+    let terminal = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        lash_core::NoProcessWork::for_registry(Arc::clone(&registry)).await_terminal(&record.id),
+    )
+    .await
+    .expect("a refused record settles without retrying")
+    .unwrap();
+    let lash_core::ProcessAwaitOutput::Settled { output } = terminal else {
+        panic!("typed terminal")
+    };
+    let lash_core::ToolCallOutcome::Failure(failure) = output.outcome else {
+        panic!("refused process")
+    };
+    assert_eq!(failure.code, expected.as_str());
+    let completed = registry.get_process(&record.id).await.unwrap().unwrap();
+    assert_eq!(
+        completed.first_started.unwrap().attempt,
+        1,
+        "refused settings are never retried"
+    );
+}
+
+async fn process_settings_refusals(double: Double, missing: bool) {
+    let backend = lash_conformance::recording_backend_over(Arc::clone(double.engine_stores()));
+    let deployment = Deployment::new(creating_config(), &backend);
+    let hand_built: Arc<dyn lash_core::ProcessEngine> =
+        Arc::new(lash_lashlang_runtime::LashlangProcessEngine::new(
+            deployment.factory.artifact_store(),
+            lash_lashlang_runtime::LashlangSurface::default(),
+            backend.worker_recovery(),
+        ));
+    let compiled = settings_fixture(false);
+    deployment
+        .factory
+        .artifact_store()
+        .publish_module_artifact(&host_pin_claim(), &compiled.artifact)
+        .await
+        .unwrap();
+    for engine in [hand_built, contributed_engine(&deployment)] {
+        let records = if missing {
+            vec![None]
+        } else {
+            vec![
+                Some(serde_json::json!({})),
+                Some(serde_json::json!("corrupt")),
+                Some(serde_json::to_value(creating_config().recorded_behaviour(false)).unwrap()),
+            ]
+        };
+        for recorded in records {
+            let registration = stored_settings_registration(&backend, &compiled, recorded).await;
+            let lash_core::ProcessInput::Engine { payload, .. } = registration.input.as_ref()
+            else {
+                panic!("engine input")
+            };
+            let payload = payload.clone();
+            let context = settings_run_context(&backend, registration.clone(), None);
+            let error = engine
+                .run(context, payload)
+                .await
+                .expect_err("unreadable settings cannot enter the runtime")
+                .into_plugin_error();
+            assert!(error.is_terminal(), "{error:?}");
+            assert!(!error.is_retryable(), "{error:?}");
+            if missing {
+                assert!(
+                    matches!(&error, lash_core::PluginError::MissingRecordedProcessConfig { engine_kind } if engine_kind == lash_lashlang_runtime::LASHLANG_ENGINE_KIND),
+                    "{error:?}"
+                );
+            } else {
+                assert!(
+                    matches!(&error, lash_core::PluginError::StoredDataCorrupt { record_kind, .. } if record_kind == "lashlang process engine_config"),
+                    "{error:?}"
+                );
+            }
+            let wire = serde_json::to_vec(&error).unwrap();
+            let decoded: lash_core::PluginError = serde_json::from_slice(&wire).unwrap();
+            assert_eq!(
+                serde_json::to_value(&decoded).unwrap(),
+                serde_json::to_value(&error).unwrap()
+            );
+            let controller = lash_core::RuntimeEffectControllerError::from(decoded);
+            assert!(controller.is_terminal());
+            assert!(
+                controller.cause.is_some(),
+                "the host retains the typed cause: {controller:?}"
+            );
+            let turn = error.into_turn_failure(lash_core::RuntimeErrorCode::Plugin);
+            assert_eq!(turn.cause, controller.cause);
+            assert_eq!(
+                turn.code,
+                if missing {
+                    lash_core::RuntimeErrorCode::MissingRecordedProcessConfig
+                } else {
+                    lash_core::RuntimeErrorCode::RuntimeStoreCorrupt
+                }
+            );
+            refusal_settles_on_double(&double, Arc::clone(&engine), registration, turn.code).await;
+        }
+    }
+}
+
+async fn recorded_sleep_is_not_enabled_by_run_wiring(double: Double, _name: &str) {
+    let backend = lash_conformance::recording_backend_over(Arc::clone(double.engine_stores()));
+    let deployment = Deployment::new(creating_config(), &backend);
+    let hand_built: Arc<dyn lash_core::ProcessEngine> =
+        Arc::new(lash_lashlang_runtime::LashlangProcessEngine::new(
+            deployment.factory.artifact_store(),
+            lash_lashlang_runtime::LashlangSurface::new(
+                lashlang::LashlangAbilities::default(),
+                lashlang::LashlangLanguageFeatures::default(),
+                lashlang::LashlangHostCatalog::new(),
+            ),
+            backend.worker_recovery(),
+        ));
+    let compiled = settings_fixture(true);
+    deployment
+        .factory
+        .artifact_store()
+        .publish_module_artifact(&host_pin_claim(), &compiled.artifact)
+        .await
+        .unwrap();
+    let env = ProcessExecutionEnvSpec::new(lash_core::AdmittedPluginConfig::default(), policy());
+    for engine in [hand_built, contributed_engine(&deployment)] {
+        let recorded = engine
+            .creation_config(&env)
+            .unwrap()
+            .expect("creation always records settings");
+        assert_eq!(recorded["abilities"]["sleep"], serde_json::json!(false));
+        let registration = stored_settings_registration(&backend, &compiled, Some(recorded)).await;
+        let lash_core::ProcessInput::Engine { payload, .. } = registration.input.as_ref() else {
+            panic!("engine input")
+        };
+        let payload = payload.clone();
+        let context = settings_run_context(&backend, registration, None);
+        let outcome = engine
+            .run(context, payload)
+            .await
+            .expect("recorded sleep refusal precedes nested runtime creation");
+        let terminal = outcome
+            .terminal_output()
+            .expect("sleep refusal is terminal");
+        assert!(
+            matches!(terminal, lash_core::ProcessAwaitOutput::Settled { output } if !output.is_success()),
+            "{terminal:?}"
+        );
+        assert!(
+            serde_json::to_string(terminal).unwrap().contains("sleep"),
+            "{terminal:?}"
+        );
+    }
+}
+
+fn settings_resources(field_type: lashlang::TypeExpr) -> lashlang::LashlangHostCatalog {
+    let mut resources = lashlang::LashlangHostCatalog::new();
+    resources
+        .add_named_data_type(
+            lashlang::NamedDataType::object(
+                "settings.Record",
+                vec![lashlang::TypeField {
+                    name: "value".into(),
+                    ty: field_type,
+                    optional: false,
+                }],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    resources
+}
+
+fn resource_factory(field_type: lashlang::TypeExpr) -> Arc<dyn PluginFactory> {
+    Arc::new(lash_core::plugin::PluginSpecFactory::new(
+        "settings-resources",
+        Arc::new(move |_| {
+            Ok(
+                lash_core::plugin::PluginSpec::new().with_extension_contribution(
+                    lash_lashlang_runtime::lashlang_surface_extension(
+                        &lash_lashlang_runtime::LashlangSurfaceContribution::new(
+                            lashlang::LashlangAbilities::default(),
+                            lashlang::LashlangLanguageFeatures::default(),
+                            settings_resources(field_type.clone()),
+                        ),
+                    )
+                    .unwrap(),
+                ),
+            )
+        }),
+    ))
+}
+
+async fn recorded_resources_are_not_overwritten_at_run(double: Double, _name: &str) {
+    use lash_core::ProcessEngine as _;
+    let backend = lash_conformance::recording_backend_over(Arc::clone(double.engine_stores()));
+    let creating = Deployment::new(creating_config(), &backend);
+    let engine = lash_lashlang_runtime::LashlangProcessEngine::new(
+        creating.factory.artifact_store(),
+        lash_lashlang_runtime::LashlangSurface::new(
+            lashlang::LashlangAbilities::default(),
+            lashlang::LashlangLanguageFeatures::default(),
+            settings_resources(lashlang::TypeExpr::Str),
+        ),
+        backend.worker_recovery(),
+    );
+    let compiled = settings_fixture(false);
+    creating
+        .factory
+        .artifact_store()
+        .publish_module_artifact(&host_pin_claim(), &compiled.artifact)
+        .await
+        .unwrap();
+    let recorded = engine
+        .creation_config(&ProcessExecutionEnvSpec::new(
+            lash_core::AdmittedPluginConfig::default(),
+            policy(),
+        ))
+        .unwrap();
+    let registration = stored_settings_registration(&backend, &compiled, recorded).await;
+    let lash_core::ProcessInput::Engine { payload, .. } = registration.input.as_ref() else {
+        panic!("engine input")
+    };
+    let payload = payload.clone();
+    let factory = resource_factory(lashlang::TypeExpr::Int);
+    let mut factories = lash_core::testing::test_standard_protocol_factories();
+    factories.push(factory);
+    let plugins = PluginHost::new(factories)
+        .build_session(lash_core::plugin::PluginSessionRequest::creation(
+            "resources-law",
+            Default::default(),
+        ))
+        .unwrap();
+    for engine in [
+        Arc::new(engine) as Arc<dyn lash_core::ProcessEngine>,
+        contributed_engine(&creating),
+    ] {
+        let context =
+            settings_run_context(&backend, registration.clone(), Some(Arc::clone(&plugins)));
+        let error = engine
+            .run(context, payload.clone())
+            .await
+            .expect_err("recorded resources admit the process and reach the runtime builder")
+            .into_plugin_error();
+        assert!(
+            matches!(error, lash_core::PluginError::Registration(ref message) if message == "recorded resources reached runtime"),
+            "{error:?}"
+        );
+    }
+}
+
+async fn process_settings_have_one_recorded_engine_shape(double: Double, _name: &str) {
+    let backend = double.lash_backend();
+    let creating = Deployment::new(creating_config(), &backend);
+    let factory = Arc::new(RlmProtocolPluginFactory::new(
+        redeploying_config(),
+        Arc::new(crate::TypescriptDialect),
+        &backend,
+    ));
+    let plugin_host = PluginHost::new(vec![factory, resource_factory(lashlang::TypeExpr::Str)]);
+    let runtime_host = plugin_host
+        .install_process_engine_contributions(
+            RuntimeHostConfig::new(
+                backend.clone(),
+                CommitBudget::bounded(8 * 1024 * 1024, 1024),
+                QueuedWorkBatchingConfig::new(1),
+            ),
+            true,
+        )
+        .unwrap();
+    let plugin_config = creating
+        .plugin_host
+        .resolve_creation_plugin_config(
+            Some(RLM_PROTOCOL_PLUGIN_ID),
+            &lash_core::PluginOptions::default(),
+            None,
+            true,
+        )
+        .unwrap();
+    let env = ProcessExecutionEnvSpec::new(
+        lash_core::AdmittedPluginConfig::new(plugin_config, 0),
+        policy(),
+    );
+    let record = runtime_host
+        .process_engines
+        .require(lash_lashlang_runtime::LASHLANG_ENGINE_KIND)
+        .unwrap()
+        .creation_config(&env)
+        .unwrap()
+        .expect("captured settings are mapped into the process row");
+    assert_eq!(
+        record["execution_bounds"]["instruction_budget"],
+        serde_json::json!({"bounded": 1_000_000})
+    );
+    assert_eq!(
+        record["execution_bounds"]["memory_limit"],
+        serde_json::json!({"bounded": 67_108_864})
+    );
+    assert_eq!(record["abilities"]["sleep"], serde_json::json!(false));
+    assert_eq!(
+        record["language_features"]["label_annotations"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        record["resources"],
+        serde_json::to_value(settings_resources(lashlang::TypeExpr::Str)).unwrap(),
+        "creation captures dynamic plugin resources"
+    );
+    for unused in [
+        "prompt_features",
+        "max_output_chars",
+        "continue_as_soft_warn_tokens",
+        "discovery_operation",
+        "render",
+    ] {
+        assert!(
+            record.get(unused).is_none(),
+            "process record contains unused RLM field {unused}"
+        );
+    }
+    let hand_built = lash_lashlang_runtime::LashlangProcessEngine::new(
+        creating.factory.artifact_store(),
+        lash_lashlang_runtime::LashlangSurface::new(
+            lashlang::LashlangAbilities::default(),
+            lashlang::LashlangLanguageFeatures::default().with_label_annotations(),
+            settings_resources(lashlang::TypeExpr::Str),
+        ),
+        backend.worker_recovery(),
+    )
+    .with_execution_bounds(creating_config().execution_bounds().into_engine());
+    use lash_core::ProcessEngine as _;
+    assert_eq!(hand_built.creation_config(&env).unwrap(), Some(record));
+}
+
 macro_rules! on_every_store {
     ($law:ident, $prefix:literal, $file:ident, $file_replay:ident, $memory:ident, $memory_replay:ident, $postgres:ident, $postgres_replay:ident) => {
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -525,6 +1039,60 @@ macro_rules! on_every_store {
         }
     };
 }
+
+on_every_store!(
+    missing_process_settings_are_terminal,
+    "missing_process_settings_are_terminal",
+    missing_process_settings_are_terminal_on_sqlite_file,
+    missing_process_settings_are_terminal_on_sqlite_file_always_replay,
+    missing_process_settings_are_terminal_on_sqlite_memory,
+    missing_process_settings_are_terminal_on_sqlite_memory_always_replay,
+    missing_process_settings_are_terminal_on_postgres,
+    missing_process_settings_are_terminal_on_postgres_always_replay
+);
+on_every_store!(
+    corrupt_process_settings_are_terminal,
+    "corrupt_process_settings_are_terminal",
+    corrupt_process_settings_are_terminal_on_sqlite_file,
+    corrupt_process_settings_are_terminal_on_sqlite_file_always_replay,
+    corrupt_process_settings_are_terminal_on_sqlite_memory,
+    corrupt_process_settings_are_terminal_on_sqlite_memory_always_replay,
+    corrupt_process_settings_are_terminal_on_postgres,
+    corrupt_process_settings_are_terminal_on_postgres_always_replay
+);
+
+on_every_store!(
+    recorded_sleep_is_not_enabled_by_run_wiring,
+    "recorded_sleep_is_not_enabled_by_run_wiring",
+    recorded_sleep_is_not_enabled_by_run_wiring_on_sqlite_file,
+    recorded_sleep_is_not_enabled_by_run_wiring_on_sqlite_file_always_replay,
+    recorded_sleep_is_not_enabled_by_run_wiring_on_sqlite_memory,
+    recorded_sleep_is_not_enabled_by_run_wiring_on_sqlite_memory_always_replay,
+    recorded_sleep_is_not_enabled_by_run_wiring_on_postgres,
+    recorded_sleep_is_not_enabled_by_run_wiring_on_postgres_always_replay
+);
+
+on_every_store!(
+    process_settings_have_one_recorded_engine_shape,
+    "process_settings_have_one_recorded_engine_shape",
+    process_settings_have_one_recorded_engine_shape_on_sqlite_file,
+    process_settings_have_one_recorded_engine_shape_on_sqlite_file_always_replay,
+    process_settings_have_one_recorded_engine_shape_on_sqlite_memory,
+    process_settings_have_one_recorded_engine_shape_on_sqlite_memory_always_replay,
+    process_settings_have_one_recorded_engine_shape_on_postgres,
+    process_settings_have_one_recorded_engine_shape_on_postgres_always_replay
+);
+
+on_every_store!(
+    recorded_resources_are_not_overwritten_at_run,
+    "recorded_resources_are_not_overwritten_at_run",
+    recorded_resources_are_not_overwritten_at_run_on_sqlite_file,
+    recorded_resources_are_not_overwritten_at_run_on_sqlite_file_always_replay,
+    recorded_resources_are_not_overwritten_at_run_on_sqlite_memory,
+    recorded_resources_are_not_overwritten_at_run_on_sqlite_memory_always_replay,
+    recorded_resources_are_not_overwritten_at_run_on_postgres,
+    recorded_resources_are_not_overwritten_at_run_on_postgres_always_replay
+);
 
 async fn process_law_on_double(double: Double, name: &str) {
     a_host_started_process_runs_under_the_behaviour_its_creation_recorded(

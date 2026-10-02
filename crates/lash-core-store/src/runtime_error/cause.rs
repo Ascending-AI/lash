@@ -31,6 +31,10 @@ pub enum RuntimeErrorCause {
         #[serde(flatten)]
         corruption: Box<StoredDataCorruption>,
     },
+    /// A process row lacks the configuration its engine requires to execute.
+    MissingRecordedProcessConfig {
+        engine_kind: String,
+    },
     SessionDeleted {
         session_id: SessionId,
     },

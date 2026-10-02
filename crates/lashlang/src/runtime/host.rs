@@ -392,7 +392,8 @@ impl<'de> serde::Deserialize<'de> for ExecutionBound<std::num::NonZeroU64> {
 /// Enforcement occurs after intrinsic dispatch, before and after effects, at
 /// cooperative yields, and at terminal VM exits, so instruction limits can
 /// overshoot only by one bounded dispatch/check interval.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutionBounds {
     pub instruction_budget: ExecutionBound<std::num::NonZeroU64>,
     pub memory_limit: ExecutionBound<std::num::NonZeroU64>,

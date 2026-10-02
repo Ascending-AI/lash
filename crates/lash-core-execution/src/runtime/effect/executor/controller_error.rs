@@ -22,10 +22,15 @@ impl From<PluginError> for RuntimeEffectControllerError {
             err @ PluginError::SessionHeadOwned { .. } => {
                 Self::new(RuntimeErrorCode::SessionHeadOwned, err.to_string())
             }
-            err @ PluginError::MissingRecordedProcessConfig { .. } => Self::new(
-                RuntimeErrorCode::MissingRecordedProcessConfig,
-                err.to_string(),
-            ),
+            PluginError::MissingRecordedProcessConfig { engine_kind } => {
+                let mut error = Self::new(
+                    RuntimeErrorCode::MissingRecordedProcessConfig,
+                    format!("process engine `{engine_kind}` has no recorded configuration"),
+                );
+                error.cause =
+                    Some(crate::RuntimeErrorCause::MissingRecordedProcessConfig { engine_kind });
+                error
+            }
             err @ PluginError::ProcessNotVisible { .. } => {
                 Self::new(RuntimeErrorCode::ProcessNotVisible, err.to_string())
             }

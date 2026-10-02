@@ -560,8 +560,9 @@ pub trait ProcessEngine: Send + Sync {
     /// and written to [`ProcessRecord::engine_config`](super::ProcessRecord):
     /// every run, redrive and replay of the process reads it back from there,
     /// whatever the running deployment is configured with. `None` for an
-    /// engine with no such configuration, or when `env_spec` already records
-    /// it.
+    /// engine with no such configuration. An engine maps settings from
+    /// `env_spec` into its own shape at creation, rather than reading another
+    /// configuration home during execution.
     fn creation_config(
         &self,
         _env_spec: &ProcessExecutionEnvSpec,

@@ -591,7 +591,7 @@ pub trait PluginFactory: Send + Sync {
 /// are never contributed. The facade exports it as
 /// `lash::plugins::ProcessEngineContributionContext` (FIG-4373).
 pub struct ProcessEngineContributionContext<'a> {
-    extensions: &'a PluginExtensions,
+    plugin_host: &'a super::PluginHost,
     trace_context: &'a crate::TraceContext,
     process_observation_sink: Option<Arc<dyn lash_trace::TraceSink>>,
     process_lifecycle_available: bool,
@@ -599,12 +599,12 @@ pub struct ProcessEngineContributionContext<'a> {
 
 impl<'a> ProcessEngineContributionContext<'a> {
     pub fn new(
-        extensions: &'a PluginExtensions,
+        plugin_host: &'a super::PluginHost,
         trace_context: &'a crate::TraceContext,
         process_lifecycle_available: bool,
     ) -> Self {
         Self {
-            extensions,
+            plugin_host,
             trace_context,
             process_observation_sink: None,
             process_lifecycle_available,
@@ -612,7 +612,12 @@ impl<'a> ProcessEngineContributionContext<'a> {
     }
 
     pub fn extensions(&self) -> &PluginExtensions {
-        self.extensions
+        self.plugin_host.extensions()
+    }
+
+    /// The host whose factories supply creation-time process resource grants.
+    pub fn plugin_host(&self) -> &super::PluginHost {
+        self.plugin_host
     }
 
     pub fn trace_context(&self) -> &crate::TraceContext {

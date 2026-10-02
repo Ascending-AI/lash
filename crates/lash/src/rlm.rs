@@ -250,7 +250,7 @@ pub use lash_vm_worker::{
 
 // The vocabulary this module's signatures name (the facade-completeness rule).
 pub use lash_lashlang_runtime::{
-    LashlangProcessFailureCode, LashlangRecordedRunSettings, LashlangRunSettings,
+    LashlangProcessFailureCode, LashlangRecordedSettings, LashlangRunSettingsRecorder,
 };
 pub use lash_sansio::worker_limit::WorkerFrameKind;
 pub use lash_vm_client::service::CompiledModule;

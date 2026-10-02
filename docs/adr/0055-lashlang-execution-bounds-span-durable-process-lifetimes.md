@@ -33,27 +33,28 @@ VM host contract separately supplies a default logical-memory ceiling of
 
 The configured bounds are a deployment's creation default. A session records
 the bounds it was created under in its RLM namespace (`RlmRecordedBehaviour`,
-FIG-4398). Its cells, and every process it starts, run under the recorded
-bounds: a process reads them from the plugin configuration it captured with
-its execution environment. A deployment configured with other bounds that
-opens, redrives or resumes the session does not change them.
+FIG-4398), and its cells use those bounds. At process creation, the RLM
+recorder maps that captured behaviour and the creation-time resource catalog
+into `LashlangRecordedSettings`. Without a captured RLM namespace, it maps
+the creating deployment's defaults instead (FIG-4527).
 
-A process whose captured plugin configuration has no RLM namespace, such as
-one a host starts under an environment it published itself, records the
-creating deployment's behaviour with its row instead (FIG-4527). The engine
-states it once, in the start's recorded registration step
-(`ProcessEngine::creation_config`, `ProcessRecord::engine_config`), and
-every run reads it back. A start that finds a row retained under its key is
-returned that row with what its own creation recorded. A process that
-recorded its behaviour in neither place is refused; no run reads the bounds
-of the deployment it runs on.
+Both RLM-contributed and hand-built `LashlangProcessEngine` instances record
+the same engine-owned shape in `ProcessRecord::engine_config` through
+`ProcessEngine::creation_config` (FIG-4664). It contains abilities, language
+features, resources and execution bounds. Constructor setters supply
+creation defaults only. A start that finds a retained row returns that row's
+settings, and every run reads only those settings. A deployment opening,
+redriving or resuming a process cannot override them through its RLM
+namespace or live extensions. Available process wiring can restrict a
+recorded ability but cannot enable a recorded-disabled ability.
 
-A hand-built `LashlangProcessEngine` records its constructor surface and
-bounds with `engine_config` at creation too. Constructor setters supply
-creation defaults only. Runs use the registration reconstructed from the
-record, including after a remote round trip; `RemoteProcessRecord` carries
-the engine configuration unchanged. Missing recorded settings are a typed
-`PluginError::MissingRecordedProcessConfig` refusal (FIG-4558).
+Runs use the registration reconstructed from the record, including after a
+remote round trip; `RemoteProcessRecord` carries the engine configuration
+unchanged. Missing settings are a typed
+`PluginError::MissingRecordedProcessConfig` refusal (FIG-4558), and malformed
+settings are `PluginError::StoredDataCorrupt`. Both remain typed terminal
+causes across the host boundary. Neither path falls back to deployment
+defaults or another recorded home.
 
 ### Heap accounting
 

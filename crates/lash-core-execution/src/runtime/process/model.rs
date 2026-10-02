@@ -619,8 +619,8 @@ pub struct ProcessRegistration {
     pub trigger_delivery_pin: Option<TriggerDeliveryPin>,
     /// What the process's engine recorded when the row was created
     /// ([`ProcessEngine::creation_config`](super::ProcessEngine::creation_config)):
-    /// the configuration its runs read back, where the captured environment
-    /// records none (FIG-4527). The start's registration step writes it,
+    /// the engine-owned configuration its runs read back. Captured settings
+    /// are mapped into this record at creation. The registration step writes it,
     /// never the start's author, and a retained row keeps its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine_config: Option<serde_json::Value>,

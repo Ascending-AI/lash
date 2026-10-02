@@ -460,10 +460,9 @@ impl PluginError {
             {
                 error.into_runtime_error()
             }
-            error @ Self::MissingRecordedProcessConfig { .. } => crate::RuntimeError::new(
-                crate::RuntimeErrorCode::MissingRecordedProcessConfig,
-                error.to_string(),
-            ),
+            error @ Self::MissingRecordedProcessConfig { .. } => {
+                crate::RuntimeEffectControllerError::from(error).into_runtime_error()
+            }
             error @ Self::SessionHeadOwned { .. } => crate::RuntimeError::new(
                 crate::RuntimeErrorCode::SessionHeadOwned,
                 error.to_string(),

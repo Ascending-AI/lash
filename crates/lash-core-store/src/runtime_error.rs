@@ -1510,6 +1510,7 @@ impl RuntimeError {
             | RuntimeErrorCause::ModuleArtifactRefused { .. }
             | RuntimeErrorCause::RunShapeRefused { .. }
             | RuntimeErrorCause::ConfigRefused { .. }
+            | RuntimeErrorCause::MissingRecordedProcessConfig { .. }
             | RuntimeErrorCause::StoreRefusal { .. } => None,
         }
     }
