@@ -289,17 +289,29 @@ impl RuntimeCommit {
         commit_budget: CommitBudget,
         fleet_format: super::FleetFormat,
     ) -> Result<(), StoreError> {
-        let read = super::SessionWindowRead::new(
-            session_id.clone(),
-            0,
-            config,
-            None,
-            crate::SessionGraph::default(),
-            None,
-            None,
-        )?;
-        let mut state = super::window_state(read, fleet_format)?.state;
-        state.ensure_agent_frame_initialized();
+        Self::created_head_budget_probe(session_id, config, commit_budget, fleet_format)?
+            .validate_budget()
+    }
+
+    fn created_head_budget_probe(
+        session_id: &crate::SessionId,
+        config: crate::PersistedSessionConfig,
+        commit_budget: CommitBudget,
+        fleet_format: super::FleetFormat,
+    ) -> Result<Self, StoreError> {
+        let mut state = crate::RuntimeSessionState {
+            session_id: session_id.clone(),
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                config.turn_budget,
+                config.max_tool_calls,
+            ))
+        };
+        crate::session_state::adopt_session_config(&mut state, &config);
+        // This frame is only a sizing probe. Wall time's fractional precision
+        // varies, so reserve all nine digits without reading the clock.
+        state.ensure_agent_frame_initialized_with_timestamp(|| {
+            "1970-01-01T00:00:00.000000001+00:00".to_string()
+        });
         // A session command's settlement commits under its batch's queue
         // drain; every batch id has the derived id's length.
         let operation = super::OperationId::new(
@@ -315,7 +327,7 @@ impl RuntimeCommit {
             commit_budget,
             fleet_format,
         )?;
-        commit.validate_budget()
+        Ok(commit)
     }
 
     pub fn measure_budget(&self) -> Result<RuntimeCommitBudgetMeasurement, StoreError> {
@@ -399,6 +411,42 @@ impl RuntimeCommit {
 mod tests {
     use super::*;
     use crate::SessionId;
+
+    #[test]
+    fn created_head_budget_probe_has_a_fixed_full_precision_timestamp() {
+        let session_id = SessionId::from("creation-budget-timestamp");
+        let config = crate::testing::store_fixtures::root_session_request(&session_id).config;
+        let probe = RuntimeCommit::created_head_budget_probe(
+            &session_id,
+            config,
+            CommitBudget::new(CommitBudgetLimit::Unbounded, CommitBudgetLimit::Unbounded),
+            super::super::FleetFormat::current(),
+        )
+        .expect("build the creation sizing probe");
+        let nodes = probe.graph.nodes();
+        assert_eq!(nodes.len(), 1, "the probe includes the initial frame");
+        assert_eq!(
+            nodes[0].timestamp, "1970-01-01T00:00:00.000000001+00:00",
+            "a sizing probe must never sample wall time or omit fractional digits"
+        );
+        let reserved = probe.measure_budget().expect("measure the sizing probe");
+        for timestamp in [
+            "2026-10-02T00:00:00+00:00",
+            "2026-10-02T00:00:00.123+00:00",
+            "2026-10-02T00:00:00.123456+00:00",
+            "2026-10-02T00:00:00.123456789+00:00",
+        ] {
+            let mut realized = probe.clone();
+            realized.graph.nodes_mut()[0].timestamp = timestamp.to_string();
+            let actual = realized
+                .measure_budget()
+                .expect("measure the realized frame");
+            assert!(
+                actual.total_bytes <= reserved.total_bytes,
+                "the sizing probe covers every fractional precision: {timestamp}"
+            );
+        }
+    }
 
     #[test]
     fn rejects_node_count_over_limit() {

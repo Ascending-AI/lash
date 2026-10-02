@@ -1181,11 +1181,18 @@ impl RuntimeSessionState {
     /// session's first `FrameOpen` directly, before any frame exists to leave,
     /// so the open has no seed to carry artifacts from, no execution state to
     /// reset and no live interpreter to restart (FIG-4134).
+    pub fn ensure_agent_frame_initialized_with_clock(&mut self, clock: &dyn crate::Clock) {
+        self.ensure_agent_frame_initialized_with_timestamp(|| clock.timestamp_rfc3339());
+    }
+
     #[expect(
         clippy::expect_used,
         reason = "a frame node identity and the initial frame material are non-empty"
     )]
-    pub fn ensure_agent_frame_initialized_with_clock(&mut self, clock: &dyn crate::Clock) {
+    pub(crate) fn ensure_agent_frame_initialized_with_timestamp(
+        &mut self,
+        timestamp: impl FnOnce() -> String,
+    ) {
         if let Some(frame_node_id) = self
             .session_graph
             .nearest_frame_node_id(self.session_graph.leaf_node_id.as_deref())
@@ -1215,7 +1222,7 @@ impl RuntimeSessionState {
             frame_key,
             crate::AgentFrameReason::initial(),
             assignment,
-            clock.timestamp_rfc3339(),
+            timestamp(),
         );
         self.current_frame_node_id = Some(frame_node_id);
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);

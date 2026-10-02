@@ -26,7 +26,9 @@ fn byte_budget(bytes: usize) -> crate::CommitBudget {
 /// Creation measures the head it creates (FIG-4393): a config whose
 /// created head's bare commit exceeds the budget is refused with the typed
 /// byte-budget error, one byte short of that commit included, and nothing
-/// is written; at the commit's own size the session is created.
+/// is written; at the commit's own size the session is created. The sizing
+/// probe reserves a fixed full-precision timestamp, so repeated admissions
+/// measure identical input even when the wall clock's precision changes.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"

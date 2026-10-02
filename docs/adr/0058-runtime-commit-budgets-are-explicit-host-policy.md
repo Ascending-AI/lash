@@ -51,8 +51,11 @@ its session, a session command's settlement included. Creation is the one head
 write outside a runtime commit, and it measures that commit:
 `admit_created_session` sizes the bare commit over the created head, a session
 command's settlement with the session's initial frame, and refuses a config
-that does not fit with the typed budget rejection, writing nothing. Every later
-head write is a budgeted commit.
+that does not fit with the typed budget rejection, writing nothing. The sizing
+probe uses a fixed initial-frame timestamp with all nine fractional digits,
+so the admission threshold does not vary with wall-clock precision. This
+synthetic timestamp is never persisted. Every later head write is a budgeted
+commit.
 
 A command whose commit exceeds the budget settles failed with the budget
 rejection, over the durable head. That settlement is the head's bare commit
