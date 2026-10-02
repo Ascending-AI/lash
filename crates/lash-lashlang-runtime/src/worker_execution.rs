@@ -38,6 +38,14 @@ pub struct WorkerRun<'a, H> {
 pub struct HandOverGate {
     parked: std::sync::atomic::AtomicBool,
     namespace: Mutex<Option<String>>,
+    refusal: Mutex<Option<HandOverRefusal>>,
+}
+
+/// Why a captured foreground cell must keep executing on its admitted build.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum HandOverRefusal {
+    #[error("the cell holds {count} exported host descriptors without a portable capture contract")]
+    ExportedHostDescriptors { count: usize },
 }
 
 impl HandOverGate {
@@ -48,6 +56,15 @@ impl HandOverGate {
     /// Whether the operation being performed may be handed over.
     pub fn parked(&self) -> bool {
         self.parked.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// The reason the last parked operation could not hand over. A refusal
+    /// keeps the operation and its turn alive on their original build.
+    pub fn refusal(&self) -> Option<HandOverRefusal> {
+        *self
+            .refusal
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// The namespace the run's projection tokens are minted under, once an
@@ -138,12 +155,25 @@ impl<H: ExecutionHost + Sync> ParentEffects for Effects<'_, H> {
     ) -> Result<ParkedPerformed, ParentFault> {
         // A token minted for a descriptor a host outcome exported resolves
         // only in this run's registry, so a run holding one stays here.
-        let Some(gate) = self.hand_over.filter(|_| self.projections.rebuildable()) else {
+        let Some(gate) = self.hand_over else {
             return self
                 .perform(operation)
                 .await
                 .map(ParkedPerformed::Performed);
         };
+        let count = self.projections.exported_descriptors();
+        let refusal = (count > 0).then_some(HandOverRefusal::ExportedHostDescriptors { count });
+        *gate
+            .refusal
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = refusal;
+        if let Some(refusal) = refusal {
+            crate::process::record_segment_boundary_decline(&refusal, "cell handover declined");
+            return self
+                .perform(operation)
+                .await
+                .map(ParkedPerformed::Performed);
+        }
         gate.namespace
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)

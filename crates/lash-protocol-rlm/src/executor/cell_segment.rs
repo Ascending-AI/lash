@@ -22,8 +22,8 @@
 //!
 //! One thing cannot be carried: a host descriptor a tool outcome exported
 //! into the run's projection registry. A run holding one is never handed
-//! over (`lash_vm_client::Projections::rebuildable`); it runs to its end
-//! where it is.
+//! over: `HandOverRefusal::ExportedHostDescriptors` keeps it on its admitted
+//! build, whose drain still counts the turn until it ends.
 
 use std::collections::BTreeMap;
 

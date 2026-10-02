@@ -51,17 +51,14 @@ impl Projections {
     pub fn namespace(&self) -> &str {
         &self.namespace
     }
-    /// Whether the registry holds only the run's admitted bindings, so a
-    /// segment that admits the same bindings under the same namespace
-    /// resolves every token this run minted. A descriptor exported from a
-    /// host outcome lives only in this registry: a run holding one cannot be
-    /// resumed elsewhere.
-    pub fn rebuildable(&self) -> bool {
+    /// Descriptors exported by host outcomes, which another segment cannot
+    /// reconstruct from the run's admitted bindings.
+    pub fn exported_descriptors(&self) -> usize {
         self.values
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .len()
-            == self.admitted
+            - self.admitted
     }
     pub fn read(&self, request: ProjectionRead) -> Result<Option<ProjectedReadResponse>, String> {
         let value = self

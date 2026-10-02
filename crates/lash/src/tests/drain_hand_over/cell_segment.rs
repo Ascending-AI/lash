@@ -120,10 +120,24 @@ const CONTINUATION: &str = "follow-on:run-run:agent-frame:1#0";
 
 impl CellRoll {
     async fn start(storage: Storage, session: &str) -> Result<Self> {
+        Self::start_with_cell(storage, session, cell(&format!("go-{session}"))).await
+    }
+
+    async fn start_with_cell(storage: Storage, session: &str, code: String) -> Result<Self> {
+        Self::start_with_cell_setup(storage, session, code, |_| {}).await
+    }
+
+    async fn start_with_cell_setup(
+        storage: Storage,
+        session: &str,
+        code: String,
+        setup: impl FnOnce(&lash_restate_test::RestateTestServer),
+    ) -> Result<Self> {
         let World { engine, _keep, .. } = double_world(storage).await;
         let Engine::Double(double) = &engine else {
             unreachable!("the law runs on the double");
         };
+        setup(double.server());
         let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
         let signal = format!("go-{session}");
         let old = engine
@@ -137,7 +151,7 @@ impl CellRoll {
             lash_core::testing::runtime_helpers::LayeredBackend::over(engine.old_backend())
                 .map_session_store_factory(move |inner| scripted.wrap("cell-run", inner))
                 .into_backend();
-        let core = cell_core(backend, engine.old_work(), cell(&signal), &requests);
+        let core = cell_core(backend, engine.old_work(), code, &requests);
         double.install_process_worker(
             lash_core_worker::DurableProcessWorker::new(core.durable_process_worker_config()?)
                 .expect("the core's process worker"),
@@ -1340,3 +1354,5 @@ async fn handover_observes_completion_during_subscription_retirement() -> Result
 async fn handover_honours_cancel_during_subscription_retirement() -> Result<()> {
     terminal_or_cancel_during_retirement(true).await
 }
+
+mod waits;

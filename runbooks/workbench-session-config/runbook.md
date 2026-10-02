@@ -18,7 +18,7 @@ The binding contracts are [ADR 0126](../../docs/adr/0126-session-config-changes-
 [ADR 0111](../../docs/adr/0111-a-deployment-namespace-prefixes-every-restate-name.md).
 Use `SetLlmProfile`, the current name of the model command. Every host example
 below uses the `lash::` facade. Hosts submit through `send()` and observe the
-engine's work; they never drive a run or read live config to reconstruct it.
+engine's work; they never execute a run or read live config to reconstruct it.
 
 ## Working material and preflight
 
@@ -212,7 +212,7 @@ outcomes and captured requests with the original complete metadata for each
 old session on reopen and redrive; a later-created session carries the new
 metadata. A cold open or another ordinary send alone does not prove redrive.
 
-Also run the committed-root replay companion, **one executed law**:
+Also run the committed-run replay companion, **one executed law**:
 
 ```sh
 kiln test --test_output=all --no-test-cache //crates/lash-restate:lash-restate__unit_test \

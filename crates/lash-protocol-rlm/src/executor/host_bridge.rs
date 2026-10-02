@@ -33,6 +33,7 @@ pub(super) struct HostBridge<'run> {
     printed_images: Mutex<Vec<AttachmentRef>>,
     calls: Mutex<Vec<(usize, lash_core::ExecutedCall)>>,
     next_tool_index: Mutex<usize>,
+    sleep_deadlines: Mutex<BTreeMap<u64, u64>>,
     lashlang_execution_trace: Option<LashlangExecutionTrace>,
     host_environment: lashlang::LashlangHostEnvironment,
     deferred_execution_grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
@@ -59,6 +60,7 @@ pub(super) struct CellHostLedgers {
     pub printed_images: Vec<AttachmentRef>,
     pub calls: Vec<(usize, lash_core::ExecutedCall)>,
     pub next_tool_index: usize,
+    pub sleep_deadlines: BTreeMap<u64, u64>,
 }
 
 pub(super) struct HostBridgeConfig<'run> {
@@ -87,6 +89,7 @@ impl<'run> HostBridge<'run> {
             printed_images: Mutex::new(config.ledgers.printed_images),
             calls: Mutex::new(config.ledgers.calls),
             next_tool_index: Mutex::new(config.ledgers.next_tool_index),
+            sleep_deadlines: Mutex::new(config.ledgers.sleep_deadlines),
             lashlang_execution_trace: config.lashlang_execution_trace,
             host_environment: config.host_environment,
             deferred_execution_grants: config.deferred_execution_grants,
@@ -109,6 +112,7 @@ impl<'run> HostBridge<'run> {
             printed_images: self.printed_images.lock_recover().clone(),
             calls: self.calls.lock_recover().clone(),
             next_tool_index: *self.next_tool_index.lock_recover(),
+            sleep_deadlines: self.sleep_deadlines.lock_recover().clone(),
         }
     }
 
@@ -959,7 +963,7 @@ impl HostBridge<'_> {
         Ok(())
     }
 
-    async fn sleep(&self, sleep: Sleep) -> Result<FlowValue, ExecutionHostError> {
+    async fn sleep(&self, sleep: Sleep) -> Result<AbilityOutcome, ExecutionHostError> {
         let commands = self.commands()?;
         let command = commands.issue()?;
         let call_site = sleep.call_site;
@@ -984,11 +988,60 @@ impl HostBridge<'_> {
                 },
             );
         }
-        let slept = in_flight
-            .ctx
+        let transferable = self.hand_over.parked() && self.ctx.turn_hands_over();
+        let command_ctx = in_flight.ctx.clone().with_transferable_waits(transferable);
+        let spec = if transferable {
+            let retained = self
+                .sleep_deadlines
+                .lock_recover()
+                .get(&in_flight.command.ordinal)
+                .copied();
+            let deadline_ms = match retained {
+                Some(deadline) => deadline,
+                None => {
+                    let deadline = match spec {
+                        lash_core::SleepSpec::Until { deadline_ms } => deadline_ms,
+                        lash_core::SleepSpec::For { duration_ms } => {
+                            let now = command_ctx
+                                .journaled_language_runtime_value(
+                                    format!("{}:sleep-clock", in_flight.command.key.as_str()),
+                                    "now".into(),
+                                )
+                                .await
+                                .map_err(|error| {
+                                    commands.journal_error(&in_flight, error, |error| {
+                                        ExecutionHostError::new(error.to_string())
+                                    })
+                                })?;
+                            now.as_u64()
+                                .ok_or_else(|| {
+                                    ExecutionHostError::new("sleep clock returned a non-timestamp")
+                                })?
+                                .saturating_add(duration_ms)
+                        }
+                    };
+                    self.sleep_deadlines
+                        .lock_recover()
+                        .insert(in_flight.command.ordinal, deadline);
+                    deadline
+                }
+            };
+            lash_core::SleepSpec::Until { deadline_ms }
+        } else {
+            spec
+        };
+        let slept = command_ctx
             .sleep_command(&in_flight.command.key, spec)
             .await;
+        if matches!(&slept, Err(error) if error.code == lash_core::RuntimeErrorCode::TurnWaitHandedOver)
+        {
+            commands.hand_over(&in_flight)?;
+            return Ok(AbilityOutcome::HandedOver);
+        }
         commands.finish(&in_flight)?;
+        self.sleep_deadlines
+            .lock_recover()
+            .remove(&in_flight.command.ordinal);
         slept.map_err(|error| {
             commands.journal_error(&in_flight, error, |error| {
                 ExecutionHostError::new(error.to_string())
@@ -1003,7 +1056,7 @@ impl HostBridge<'_> {
                 lash_lashlang_runtime::TraceNodeWaitResolution::TimedOut,
             );
         }
-        Ok(FlowValue::Null)
+        Ok(AbilityOutcome::Value(FlowValue::Null))
     }
 
     /// An ability a cell may not use: it holds its ordinal — the recorded run
@@ -1038,9 +1091,7 @@ impl HostBridge<'_> {
                 self.print(value).await?;
                 Ok(AbilityOutcome::Unit)
             }),
-            AbilityOp::Sleep(sleep) => {
-                Box::pin(async move { self.sleep(sleep).await.map(AbilityOutcome::Value) })
-            }
+            AbilityOp::Sleep(sleep) => Box::pin(async move { self.sleep(sleep).await }),
             AbilityOp::ProcessEvent(_) => Box::pin(async {
                 self.refused_in_cell(
                     "process events are only available inside lashlang process bodies",

@@ -71,6 +71,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                         cancellation,
                         observe_turn_cancel,
                         turn_cancel_scope,
+                        ..
                     },
                 deadline,
                 clock,
@@ -103,6 +104,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                         cancellation,
                         observe_turn_cancel,
                         turn_cancel_scope,
+                        ..
                     },
                 clock,
             }) => RuntimeSleepOptions {

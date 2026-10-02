@@ -1410,3 +1410,120 @@ pub(super) fn flow_record_to_tool_args_preserves_only_seed_projected_roots() {
         );
     });
 }
+
+/// An exported descriptor cannot be replaced by its materialized value: this
+/// oracle answers Render and Materialize differently. The parked cell keeps
+/// the live host registry and completes on the build that admitted it.
+#[tokio::test]
+pub(super) async fn exported_host_descriptor_declines_handover_without_losing_its_reads() {
+    struct DescriptorHost<'a> {
+        descriptor: Arc<SnapshotProjectedToolText>,
+        parked: &'a tokio::sync::Notify,
+        release: &'a tokio::sync::Notify,
+        rendered: &'a std::sync::Mutex<Vec<String>>,
+    }
+    impl ExecutionHost for DescriptorHost<'_> {
+        async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
+            match op {
+                AbilityOp::ResourceOperation(_) => Ok(AbilityOutcome::Value(FlowValue::Record(
+                    Arc::new(FlowRecord::from_iter([(
+                        "doc".to_string(),
+                        FlowValue::Projected(ProjectedValue::custom(
+                            "doc",
+                            self.descriptor.clone(),
+                        )),
+                    )])),
+                ))),
+                AbilityOp::Sleep(_) => {
+                    self.parked.notify_one();
+                    self.release.notified().await;
+                    Ok(AbilityOutcome::Value(FlowValue::Null))
+                }
+                AbilityOp::Print(value) => {
+                    let FlowValue::Projected(value) = value else {
+                        panic!("the print must resolve the live exported descriptor")
+                    };
+                    self.rendered
+                        .lock()
+                        .expect("rendered text")
+                        .push(value.render().expect("descriptor render"));
+                    Ok(AbilityOutcome::Unit)
+                }
+                op => lashlang::testing::harness::EchoHost.perform(op).await,
+            }
+        }
+    }
+    let descriptor = Arc::new(SnapshotProjectedToolText::default());
+    let parked = tokio::sync::Notify::new();
+    let release = tokio::sync::Notify::new();
+    let rendered = std::sync::Mutex::new(Vec::new());
+    let host = DescriptorHost {
+        descriptor: descriptor.clone(),
+        parked: &parked,
+        release: &release,
+        rendered: &rendered,
+    };
+    let gate = lash_lashlang_runtime::HandOverGate::new();
+    let service = lash_vm_client::service::Service::default();
+    let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![
+        super::super::parked_tests::park_tool_definition(),
+    ]);
+    let environment = LashlangSurface::default()
+        .host_environment(&catalog)
+        .expect("fixture surface");
+    let run = lash_lashlang_runtime::WorkerRun {
+        service: &service,
+        host: &host,
+        identities: lash_vm_broker::CodeCallIdentities::process_body(ProcessId::fixture(
+            "descriptor-refusal",
+        )),
+        owner: lash_vm_protocol::VmOwner::new("descriptor-refusal"),
+        frame_epoch: lash_vm_protocol::FrameEpoch(0),
+        program: lash_vm_protocol::ProgramSource::Source {
+            dialect: "typescript".into(),
+            text: "const result = await cell.park({ value: 1 }); await sleep(60000); print(result.doc); finish(42);"
+                .into(),
+        },
+        context: lash_vm_client::RunContext {
+            environment,
+            ..Default::default()
+        },
+        projected: Default::default(),
+        bounds: lashlang::ExecutionBounds::new(
+            lashlang::ExecutionBound::Unbounded,
+            lashlang::ExecutionBound::Unbounded,
+        ),
+        state: lash_vm_protocol::StartState::Fresh,
+        boundary: &|| false,
+        hand_over: Some(&gate),
+        projection_namespace: None,
+    }
+    .run();
+    tokio::pin!(run);
+    tokio::select! {
+        () = parked.notified() => {}
+        result = &mut run => panic!("descriptor cell ended before its parked wait: {result:?}"),
+    }
+    assert!(!gate.parked());
+    assert_eq!(
+        gate.refusal(),
+        Some(lash_lashlang_runtime::HandOverRefusal::ExportedHostDescriptors { count: 1 })
+    );
+    assert_eq!(descriptor.materialize_count.load(Ordering::SeqCst), 0);
+    release.notify_one();
+    let lash_vm_broker::BrokeredEnd::Complete { value, .. } =
+        run.await.expect("cell completes in place")
+    else {
+        panic!("the refused cell must complete in place")
+    };
+    assert_eq!(
+        rmp_serde::from_slice::<ExecutionOutcome>(&value.0).expect("outcome"),
+        ExecutionOutcome::Finished(FlowValue::Number(42.0))
+    );
+    assert_eq!(
+        rendered.lock().expect("rendered text").as_slice(),
+        &["rendered tool text"]
+    );
+    assert_eq!(descriptor.render_count.load(Ordering::SeqCst), 1);
+    assert_eq!(descriptor.materialize_count.load(Ordering::SeqCst), 0);
+}

@@ -141,19 +141,35 @@ where
         invocation: &RuntimeEffectInvocation,
         duration_ms: u64,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-    ) -> Result<Result<RestateTurnCancelRaceOutcome<()>, TerminalError>, RuntimeEffectControllerError>
-    {
+        transferable: bool,
+    ) -> Result<
+        Result<RestateTurnCancelRaceOutcome<context::TurnSleepOutcome>, TerminalError>,
+        RuntimeEffectControllerError,
+    > {
         let duration = Duration::from_millis(duration_ms);
         let Some(cancel) = self.group_child_wait_race(turn_cancel.as_ref()) else {
-            let raced = self
-                .context
-                .sleep_or_turn_cancel(
-                    &self.namespace,
-                    duration,
-                    turn_cancel,
-                    self.options.process_cancel,
-                )
-                .await;
+            let raced = match turn_cancel {
+                Some(turn_cancel) if transferable => {
+                    self.context
+                        .sleep_or_turn_end(
+                            &self.namespace,
+                            duration,
+                            turn_cancel,
+                            self.build_generation.clone(),
+                        )
+                        .await
+                }
+                turn_cancel => self
+                    .context
+                    .sleep_or_turn_cancel(
+                        &self.namespace,
+                        duration,
+                        turn_cancel,
+                        self.options.process_cancel,
+                    )
+                    .await
+                    .map(|outcome| outcome.map(|()| context::TurnSleepOutcome::Resolved)),
+            };
             return match raced {
                 Err(err) if self.is_group_child_engine_cancel(&err) => Err(group_child_cancelled()),
                 raced => Ok(raced),
@@ -164,7 +180,9 @@ where
             .sleep_or_group_child_cancel(&self.namespace, duration, cancel)
             .await
         {
-            Ok(Some(())) => Ok(Ok(RestateTurnCancelRaceOutcome::Completed(()))),
+            Ok(Some(())) => Ok(Ok(RestateTurnCancelRaceOutcome::Completed(
+                context::TurnSleepOutcome::Resolved,
+            ))),
             Ok(None) => {
                 self.emit_trace(Some(invocation), || {
                     lash_trace::TraceEvent::DurableTimerResolved {

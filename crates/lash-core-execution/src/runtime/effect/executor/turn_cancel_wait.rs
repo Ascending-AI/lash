@@ -117,16 +117,24 @@ impl TurnCancelWait {
             cancellation: self.cancellation.clone(),
             observe_turn_cancel: self.observed_scope.is_some(),
             turn_cancel_scope: self.observed_scope.clone(),
+            transferable: self.transferable,
         }
     }
 }
 
 impl super::RuntimeEffectLocalExecutor<'_> {
-    /// Whether this process command's wait may be handed to the Run's
+    /// Whether this command's wait may be handed to the Run's
     /// successor segment (FIG-4739): the turn that issued it holds captured
     /// state that issues it again. An engine draining its build races only
     /// such a wait against the Run's hand-over.
-    pub fn process_wait_transferable(&self) -> bool {
+    pub fn wait_transferable(&self) -> bool {
+        if let super::RuntimeEffectLocalExecutorState::Target(
+            super::LocalTarget::SleepOnly { controls, .. }
+            | super::LocalTarget::ExternalWaitOptions { controls, .. },
+        ) = &self.state
+        {
+            return controls.transferable;
+        }
         matches!(
             &self.state,
             super::RuntimeEffectLocalExecutorState::Target(super::LocalTarget::Process(super::ProcessLocalExecution {

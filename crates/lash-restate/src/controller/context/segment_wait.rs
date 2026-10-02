@@ -49,6 +49,13 @@ pub enum TurnWaitOutcome {
     HandedOver,
 }
 
+/// How a transferable turn sleep ended without cancellation or revocation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TurnSleepOutcome {
+    Resolved,
+    HandedOver,
+}
+
 /// `await_event_or_turn_end` on a context whose turn waits take no drain
 /// wake (a recording test context): the turn's gate alone races the event.
 pub(super) async fn turn_cancel_only<'ctx, 'run, C>(

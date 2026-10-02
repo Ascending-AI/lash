@@ -72,7 +72,7 @@ pub use child_cancel::GroupChildCancelRace;
 use child_cancel::race_group_child_cancel;
 use gate_race::{TurnGateRace, race_turn_cancel_gate, race_turn_gate};
 use segment_wait::race_signal_wait;
-pub use segment_wait::{ProcessCancelRace, SignalWaitOutcome, TurnWaitOutcome};
+pub use segment_wait::{ProcessCancelRace, SignalWaitOutcome, TurnSleepOutcome, TurnWaitOutcome};
 #[cfg(test)]
 pub(crate) use wake::guard_restate_context_future;
 pub(crate) use wake::{ClosureWakeRelay, guard_restate_run_future, relay_closure_wakes};
@@ -264,6 +264,30 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
         'ctx: 'run,
         T: Serialize + DeserializeOwned + Send + 'static,
         Fut: Future<Output = Result<T, String>> + Send + 'run;
+
+    /// A captured turn sleep raced against cancellation and generation drain.
+    fn sleep_or_turn_end<'run>(
+        &'run self,
+        namespace: &'run crate::RestateNamespace,
+        duration: Duration,
+        turn_cancel: RestateDurableWaitAwaitRequest,
+        generation: lash_core::engine::BuildGeneration,
+    ) -> TurnCancelRaceFuture<'run, TurnSleepOutcome>
+    where
+        'ctx: 'run,
+    {
+        let _ = generation;
+        Box::pin(async move {
+            self.sleep_or_turn_cancel(
+                namespace,
+                duration,
+                Some(turn_cancel),
+                ProcessCancelRace::NotRaced,
+            )
+            .await
+            .map(|outcome| outcome.map(|()| TurnSleepOutcome::Resolved))
+        })
+    }
 
     /// Submits the process's workflow run.
     ///
@@ -845,6 +869,29 @@ macro_rules! impl_restate_controller_context {
                             )),
                         )
                         .await
+                    })
+                }
+
+                fn sleep_or_turn_end<'run>(
+                    &'run self,
+                    namespace: &'run crate::RestateNamespace,
+                    duration: Duration,
+                    turn_cancel: RestateDurableWaitAwaitRequest,
+                    generation: lash_core::engine::BuildGeneration,
+                ) -> TurnCancelRaceFuture<'run, TurnSleepOutcome>
+                where 'ctx: 'run,
+                {
+                    Box::pin(async move {
+                        let session_id = turn_cancel.key.scope.session_id().cloned()
+                            .ok_or_else(|| TerminalError::new("turn sleep gate is missing its session id"))?;
+                        match race_turn_gate(
+                            self, namespace, &SessionId::from(session_id), turn_cancel,
+                            Some(generation), || gate_awakeable(self),
+                            || erase_gate_wait(restate_sdk::context::ContextTimers::sleep(self, duration)),
+                        ).await? {
+                            TurnGateRace::HandedOver => Ok(RestateTurnCancelRaceOutcome::Completed(TurnSleepOutcome::HandedOver)),
+                            TurnGateRace::Ended(outcome) => Ok(outcome.map(|()| TurnSleepOutcome::Resolved)),
+                        }
                     })
                 }
 

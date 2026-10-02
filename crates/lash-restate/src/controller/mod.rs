@@ -67,7 +67,7 @@ pub(crate) use live_frontier::LiveFrontier;
 
 pub use context::{
     GroupChildCancelArm, GroupChildCancelRace, ProcessCancelRace, RestateControllerContext,
-    SignalWaitOutcome, TurnWaitOutcome,
+    SignalWaitOutcome, TurnSleepOutcome, TurnWaitOutcome,
 };
 
 /// How a controller observes its own handling of the effects it executes.
@@ -1279,6 +1279,7 @@ where
             RestateEffectExecution::Timer { invocation, spec } => {
                 // Every sleep journals its frontier marker first, so a
                 // served-only one answers there (FIG-3779).
+                let transferable = local_executor.wait_transferable();
                 let served_only = local_executor.served_only();
                 let issue = local_executor.step_issue().clone();
                 let RuntimeSleepOptions {
@@ -1326,10 +1327,20 @@ where
                     turn_cancel_scope.as_ref(),
                 )?;
                 match self
-                    .sleep_raced(&invocation, duration_ms, turn_cancel)
+                    .sleep_raced(&invocation, duration_ms, turn_cancel, transferable)
                     .await?
                 {
-                    Ok(RestateTurnCancelRaceOutcome::Completed(())) => {}
+                    Ok(RestateTurnCancelRaceOutcome::Completed(
+                        context::TurnSleepOutcome::Resolved,
+                    )) => {}
+                    Ok(RestateTurnCancelRaceOutcome::Completed(
+                        context::TurnSleepOutcome::HandedOver,
+                    )) => {
+                        return Err(RuntimeEffectControllerError::new(
+                            RuntimeErrorCode::TurnWaitHandedOver,
+                            "the draining generation handed over the turn's sleep",
+                        ));
+                    }
                     Ok(RestateTurnCancelRaceOutcome::SessionRevoked { session_id }) => {
                         self.emit_trace(Some(&invocation), || {
                             lash_trace::TraceEvent::DurableTimerResolved {
@@ -1407,6 +1418,7 @@ where
                 // wait that observes no turn, such as a process body's
                 // `waitSignal`, races the segment's durable cancel promise
                 // (FIG-3673). No live token reaches it.
+                let transferable = local_executor.wait_transferable();
                 let RuntimeAwaitEventOptions {
                     cancellation: _,
                     deadline,
@@ -1467,18 +1479,42 @@ where
                         )
                         .await;
                 }
-                match self
-                    .context
-                    .await_event_or_turn_cancel(
-                        &self.namespace,
-                        request,
-                        replay_key,
-                        turn_cancel,
-                        self.options.process_cancel,
-                    )
-                    .await
-                {
-                    Ok(RestateTurnCancelRaceOutcome::Completed(resolution)) => {
+                let raced = match turn_cancel {
+                    Some(turn_cancel) if transferable => {
+                        self.context
+                            .await_event_or_turn_end(
+                                &self.namespace,
+                                request,
+                                replay_key,
+                                turn_cancel,
+                                self.build_generation.clone(),
+                            )
+                            .await
+                    }
+                    turn_cancel => self
+                        .context
+                        .await_event_or_turn_cancel(
+                            &self.namespace,
+                            request,
+                            replay_key,
+                            turn_cancel,
+                            self.options.process_cancel,
+                        )
+                        .await
+                        .map(|outcome| outcome.map(context::TurnWaitOutcome::Resolved)),
+                };
+                match raced {
+                    Ok(RestateTurnCancelRaceOutcome::Completed(
+                        context::TurnWaitOutcome::HandedOver,
+                    )) => {
+                        return Err(RuntimeEffectControllerError::new(
+                            RuntimeErrorCode::TurnWaitHandedOver,
+                            "the draining generation handed over the turn's event wait",
+                        ));
+                    }
+                    Ok(RestateTurnCancelRaceOutcome::Completed(
+                        context::TurnWaitOutcome::Resolved(resolution),
+                    )) => {
                         self.emit_trace(Some(&invocation), || {
                             lash_trace::TraceEvent::DurableWaitResolved {
                                 wait_kind: "await_event".to_string(),

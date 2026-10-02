@@ -131,7 +131,7 @@ pub use controller::{
     EFFECT_JOURNAL_VERSION, GroupChildCancelArm, GroupChildCancelRace,
     PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION, ProcessCancelRace, ProcessWorkflowStartFailure,
     RestateEffectControllerOptions, RestateEffectError, RestateRuntimeEffectController,
-    SignalWaitOutcome, TurnWaitOutcome,
+    SignalWaitOutcome, TurnSleepOutcome, TurnWaitOutcome,
 };
 pub use deployment_registry::RestateDeploymentRegistry;
 pub use durable_wait::{
@@ -139,7 +139,8 @@ pub use durable_wait::{
     RestateDurableWaitAwaitInput, RestateDurableWaitAwaitRequest,
     RestateDurableWaitAwakeableRequest, RestateDurableWaitCancelDecidedRequest,
     RestateDurableWaitClassification, RestateDurableWaitDeadline, RestateDurableWaitEffectRequest,
-    RestateDurableWaitGroupRequest, RestateDurableWaitIndexRequest, RestateDurableWaitRegistration,
+    RestateDurableWaitGroupRequest, RestateDurableWaitHandOverRequest,
+    RestateDurableWaitIndexRequest, RestateDurableWaitRegistration,
     RestateDurableWaitResolveRefusal, RestateDurableWaitResolveRequest,
     RestateDurableWaitResolveResponse, RestateDurableWaitScope, RestateDurableWaitSettleRequest,
     RestateTurnGatePeek,

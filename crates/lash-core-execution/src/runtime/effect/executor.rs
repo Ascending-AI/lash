@@ -127,6 +127,7 @@ struct WaitControls {
     pub(super) cancellation: CancellationToken,
     pub(super) observe_turn_cancel: bool,
     pub(super) turn_cancel_scope: Option<crate::ExecutionScope>,
+    pub(super) transferable: bool,
 }
 
 /// The process one run is admitted for: its registration and the minted id
@@ -538,6 +539,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     cancellation,
                     observe_turn_cancel: true,
                     turn_cancel_scope: None,
+                    transferable: false,
                 },
                 clock,
             }),
@@ -566,6 +568,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     cancellation,
                     observe_turn_cancel: true,
                     turn_cancel_scope: None,
+                    transferable: false,
                 },
                 deadline,
                 clock,
