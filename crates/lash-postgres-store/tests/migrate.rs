@@ -125,7 +125,7 @@ async fn catalog_definitions(url: &str) -> Vec<String> {
 
 /// The 1.0 compatibility stamp `schema.sql` provisions, as
 /// `(version, min_reader)` (ADR 0115 §1.2, §7): what open admits by. The
-/// pre-1.0 DDL revision is the migration ledger's, never the stamp's.
+/// DDL revision is the migration ledger's, never the stamp's.
 const COMPAT_STAMP: (i32, i32) = (1, 1);
 
 /// The expand steps this build's migrate runs past the DDL revision it
@@ -180,20 +180,6 @@ async fn compat_stamp(url: &str) -> (i32, i32) {
     .expect("read the component stamp");
     connection.close().await.expect("close stamp read");
     stamp
-}
-
-/// Provisions a scratch schema from the committed artifact, then rewinds it
-/// to stand in for the previous component: the ledger records the
-/// predecessor's own bootstrap, the row a catalog that was provisioned at that
-/// DDL revision carries, and nothing records this build's. The compatibility
-/// stamp stays this build's, because pre-1.0 revisions change the DDL in
-/// place under one stamp. The objects the newest generation adds stay: every
-/// expand step is idempotent, so a catalog that already has the step's output
-/// proves the same thing — what the predecessor lacks is the ledger row, not
-/// the bytes.
-async fn rewind_to_previous_component(database_url: &str, schema: &str) {
-    let predecessor = PostgresStorage::schema_version() - 1;
-    record_component(database_url, schema, predecessor).await;
 }
 
 /// Provisions a scratch schema from the committed artifact and records it in
@@ -442,113 +428,11 @@ async fn a_dry_run_reports_the_plan_and_changes_nothing() {
     drop(database);
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn migrate_advances_a_stamped_predecessor_component() {
-    let Some(database) = migrator_database().await else {
-        return;
-    };
-    let database_url = database.url().to_string();
-    let schema = create_scratch_schema(&database_url).await;
-    let url = scratch_url(&database_url, &schema);
-    rewind_to_previous_component(&database_url, &schema).await;
-    let predecessor = PostgresStorage::schema_version() - 1;
-
-    // Open admits by the compatibility stamp and the shape, never by the
-    // ledger (ADR 0115 §1.3): the predecessor carries this build's stamp and,
-    // one vocabulary-only revision behind, this build's shape, so a worker
-    // opens it Native. What the ledger still owes it is migrate's to apply.
-    PostgresStorage::connect(&url)
-        .await
-        .expect("a predecessor under this build's stamp and shape opens")
-        .pool()
-        .close()
-        .await;
-
-    // The plan's answer is the catalog's: whatever step the build declares
-    // carries the predecessor to this build's component.
-    let ledger_before = ledger_rows(&url).await;
-    let tables_before = scratch_lash_table_count(&database_url, &schema).await;
-    let plan = PostgresStorage::plan_migrations(&url, MigrationPhase::Expand)
-        .await
-        .expect("plan the predecessor upgrade");
-    assert_eq!(plan.found_version, Some(predecessor));
-    assert_eq!(
-        plan.applied.len(),
-        1,
-        "the predecessor's own ledger row is read back: {plan:?}"
-    );
-    assert_eq!(
-        plan.applied[0].migration,
-        format!("bootstrap-{predecessor}")
-    );
-    assert_eq!(
-        plan.planned.len(),
-        1,
-        "a stamped predecessor is exactly one expand step behind: {plan:?}"
-    );
-    let step = &plan.planned[0];
-    assert_eq!(step.phase, MigrationPhase::Expand.name());
-    assert_eq!(step.from_version, Some(predecessor));
-    assert_eq!(step.to_version, PostgresStorage::schema_version());
-    // Planning changed nothing: the stamp is still the one the rewind left,
-    // the ledger rows are exactly what the rewind left, and no DDL ran.
-    assert_eq!(compat_stamp(&url).await, COMPAT_STAMP);
-    assert_eq!(
-        ledger_rows(&url).await,
-        ledger_before,
-        "a dry run must not write the ledger"
-    );
-    assert_eq!(
-        scratch_lash_table_count(&database_url, &schema).await,
-        tables_before,
-        "a dry run must not create tables"
-    );
-
-    let report = PostgresStorage::migrate(&url, MigrationPhase::Expand)
-        .await
-        .expect("migrate the predecessor forward");
-    assert_eq!(report.executed.len(), 1 + COMPONENT_EXPANDS.len());
-    assert_eq!(
-        report.executed[0].migration, step.migration,
-        "migrate executes the step the plan named"
-    );
-    assert_eq!(
-        ledger_rows(&url).await,
-        [
-            ledger_before[0].clone(),
-            (
-                "expand".to_string(),
-                step.migration.clone(),
-                Some(predecessor),
-                PostgresStorage::schema_version()
-            ),
-        ]
-        .into_iter()
-        .chain(component_expand_rows())
-        .collect::<Vec<_>>(),
-        "the ledger keeps the predecessor's row and records the steps"
-    );
-    assert_eq!(
-        compat_stamp(&url).await,
-        migrated_stamp(),
-        "a DDL expand step keeps the stamp and its reader floor; a component expand moves \
-         the stamp to this build's"
-    );
-    PostgresStorage::connect(&url)
-        .await
-        .expect("a migrated predecessor catalog must open")
-        .pool()
-        .close()
-        .await;
-    drop_scratch_schema(&database_url, &schema).await;
-    drop(database);
-}
-
-/// Component 139 (FIG-3607) re-keys the process relations, which no expand
-/// step can do. The nearest unsupported predecessor is derived from this
-/// build's baseline and catalog. Missing required relations make worker open
-/// refuse its shape; planning and migrating refuse typed without changing the
-/// catalog, stamp or ledger.
+/// The 1.0 release carries no expand step, so every catalog a pre-1.0 build
+/// provisioned is an unsupported predecessor. The nearest one is derived from
+/// this build's baseline and catalog. Missing required relations make worker
+/// open refuse its shape; planning and migrating refuse typed without changing
+/// the catalog, stamp or ledger.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_component_without_an_expand_step_is_refused() {
     let Some(database) = migrator_database().await else {
@@ -560,8 +444,8 @@ async fn a_component_without_an_expand_step_is_refused() {
     let baseline = PostgresStorage::schema_version();
     let mut found = baseline.checked_sub(1).expect("baseline has a predecessor");
     record_component(&database_url, &schema, found).await;
-    // Find the nearest unsupported predecessor in the active catalog. The cut
-    // empties that catalog, so its immediate predecessor is then unsupported.
+    // Find the nearest unsupported predecessor in the active catalog. The 1.0
+    // catalog is empty, so the baseline's immediate predecessor is unsupported.
     while PostgresStorage::plan_migrations(&url, MigrationPhase::Expand)
         .await
         .is_ok()
@@ -649,7 +533,6 @@ async fn a_component_without_an_expand_step_is_refused() {
 
 #[cfg(not(feature = "synthetic-next"))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-4493: certify fresh production ledger at the 1.0 cut"]
 async fn fresh_release_ledger_has_only_baseline_bootstrap_evidence() {
     let database = migrator_database()
         .await

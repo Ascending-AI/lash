@@ -2,7 +2,6 @@ use super::*;
 
 #[cfg(not(feature = "synthetic-next"))]
 #[test]
-#[ignore = "FIG-4493: production predecessor catalogs are emptied at the 1.0 cut"]
 fn production_catalogs_start_at_the_release_baseline() {
     let expand: Vec<_> = EXPAND_MIGRATIONS
         .iter()
@@ -57,25 +56,6 @@ fn the_schema_artifact_seeds_the_migrating_build_s_fleet_epoch() {
     );
 }
 
-/// A step that alters tables before it creates any still creates each
-/// object exactly as `schema.sql` states it: every `CREATE` statement of
-/// the logical-root step appears verbatim in the artifact.
-#[test]
-fn the_logical_root_step_creates_what_the_schema_artifact_states() {
-    let created: Vec<&str> = LOGICAL_ROOT_FAMILY_DDL
-        .split(";\n")
-        .map(|statement| statement.trim_end_matches(';'))
-        .filter(|statement| statement.starts_with("CREATE"))
-        .collect();
-    assert_eq!(created.len(), 4, "three tables and an index");
-    for statement in created {
-        assert!(
-            SCHEMA_DDL.contains(statement),
-            "schema.sql does not contain the logical-root step's DDL verbatim: {statement}"
-        );
-    }
-}
-
 /// The catalog must chain to the current component: a step targeting a
 /// version the build no longer stamps would leave planning stuck.
 #[test]
@@ -95,17 +75,14 @@ fn the_expand_catalog_chains_to_the_current_component() {
     }
 }
 
+/// The 1.0 release carries no production expand step. The first one
+/// registered must come with a law that applies it to the previous catalog
+/// and calls the tolerant checker, replacing this one.
+#[cfg(not(feature = "synthetic-next"))]
 #[test]
 fn every_expand_step_passes_the_previous_tolerant_check() {
-    // The catalog below predates the 1.0 compatibility stamp. It is the
-    // pre-cut DDL chain, not a compatibility expand from version 1.
-    // There are no post-cut expand steps yet. When one is registered, this
-    // test must apply it to the previous catalog and call the tolerant
-    // checker before admitting the step.
     assert!(
-        EXPAND_MIGRATIONS
-            .iter()
-            .all(|step| step.from_version < SCHEMA_VERSION),
+        EXPAND_MIGRATIONS.is_empty(),
         "a post-cut expand needs a previous-catalog tolerant check"
     );
 }
