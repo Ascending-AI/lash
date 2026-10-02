@@ -40,19 +40,17 @@ impl LashRuntime {
 
         let result = session
             .plugins()
-            .emit_runtime_event_with_phase_probe(
-                crate::PluginLifecycleEvent::TurnPersisted(Box::new(
-                    crate::SessionStateChangedContext {
-                        session_id: self.state.session_id.clone(),
-                        plugin_config: session.plugins().admitted_plugin_config(),
-                        state: crate::SessionReadView::from_snapshot(&returned_turn.state),
-                        sessions: manager.state_service(),
-                        session_graph: manager.graph_service(),
-                        direct_completions,
-                    },
-                )),
-                self.turn_phase_probe.clone(),
-            )
+            .dispatch(self.turn_phase_probe.as_ref())
+            .emit_runtime_event(crate::PluginLifecycleEvent::TurnPersisted(Box::new(
+                crate::SessionStateChangedContext {
+                    session_id: self.state.session_id.clone(),
+                    plugin_config: session.plugins().admitted_plugin_config(),
+                    state: crate::SessionReadView::from_snapshot(&returned_turn.state),
+                    sessions: manager.state_service(),
+                    session_graph: manager.graph_service(),
+                    direct_completions,
+                },
+            )))
             .await;
         Ok(result.err())
     }

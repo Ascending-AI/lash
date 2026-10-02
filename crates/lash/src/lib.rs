@@ -1406,10 +1406,15 @@ pub mod runtime {
         RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
         RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
         RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeInvocation,
-        RuntimeNamedPhase, RuntimeProviderConfig, RuntimeTurnPhase, RuntimeTurnPhaseProbe,
-        RuntimeTurnPhaseProbeSlot, ScopedEffectController, SessionWorkEngine, SleepSpec,
-        TraceEmitter, TraceRuntime, TurnCancelWait, TurnContext, TurnControlBinding,
-        WorkCadenceError, WorkCadencePolicy, effect_groups_unsupported,
+        RuntimeProviderConfig, ScopedEffectController, SessionWorkEngine, SleepSpec, TraceEmitter,
+        TraceRuntime, TurnCancelWait, TurnContext, TurnControlBinding, WorkCadenceError,
+        WorkCadencePolicy, effect_groups_unsupported,
+    };
+    /// Explicitly unstable internal instrumentation. Phase names may change
+    /// with the turn loop. See `docs/architecture/turn-phase-probe.md`.
+    #[doc(hidden)]
+    pub use lash_core::runtime::{
+        RuntimeNamedPhase, RuntimeTurnPhase, RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot,
     };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the

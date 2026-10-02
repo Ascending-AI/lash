@@ -214,8 +214,7 @@ pub use work::{
 // plugin, tool-provider and tool-dispatch layers can name them without
 // reaching up into the runtime. Re-exported here at their original paths.
 pub use lash_core_llm::turn_vocabulary::{
-    AssistantOutput, OutputState, RuntimeNamedPhase, RuntimeTurnPhase, RuntimeTurnPhaseProbe,
-    TurnExecutionMetrics, TurnIssue, TurnIssueSeverity,
+    AssistantOutput, OutputState, TurnExecutionMetrics, TurnIssue, TurnIssueSeverity,
 };
 
 pub use lash_core_store::effect_opener::EffectOpenerError;
@@ -236,3 +235,9 @@ mod normalized_item {
 // is the seam that lets them, and the non-testing public surface is unchanged.
 #[cfg(feature = "testing")]
 pub use normalized_item::NormalizedItem;
+
+/// Explicitly unstable internal instrumentation, outside the promised API.
+#[doc(hidden)]
+pub use lash_core_llm::turn_vocabulary::{
+    RuntimeNamedPhase, RuntimeTurnPhase, RuntimeTurnPhaseProbe,
+};

@@ -400,17 +400,16 @@ pub use usage::{
 // plugin, tool-provider and tool-dispatch layers can name them without
 // reaching up into the runtime. Re-exported here at their original paths.
 pub use lash_core_llm::turn_vocabulary::{
-    AssistantOutput, OutputState, RuntimeNamedPhase, RuntimeTurnPhase, RuntimeTurnPhaseProbe,
-    TurnExecutionMetrics, TurnIssue, TurnIssueSeverity,
+    AssistantOutput, OutputState, TurnExecutionMetrics, TurnIssue, TurnIssueSeverity,
 };
 
 pub use lash_core_execution::runtime::{
     AgentFrameRun, AssembledTurn, CodeOutputRecord, DeploymentStore, DeploymentStoreDecorator,
     EventSink, NOOP_EVENT_SINK, NOOP_TURN_ACTIVITY_SINK, NoopEventSink, NoopTurnActivitySink,
-    ProtocolSessionExtension, ProtocolSessionExtensionHandle, RuntimeTurnPhaseProbeSlot,
-    TerminationPolicy, TurnActivity, TurnActivitySink, TurnEvent, admit_session_state_generation,
-    admit_session_view, live_session_view, park_turn_of_refused_group_child,
-    park_turn_refused_by_generation, session_is_live,
+    ProtocolSessionExtension, ProtocolSessionExtensionHandle, TerminationPolicy, TurnActivity,
+    TurnActivitySink, TurnEvent, admit_session_state_generation, admit_session_view,
+    live_session_view, park_turn_of_refused_group_child, park_turn_refused_by_generation,
+    session_is_live,
 };
 
 mod normalized_item {
@@ -554,3 +553,11 @@ pub struct LashRuntime {
     /// its final physical turn writes its terminal evidence.
     pub(crate) drive_root: Option<Box<crate::runtime::drive::DriveRootRun>>,
 }
+
+#[doc(hidden)]
+pub use lash_core_execution::runtime::RuntimeTurnPhaseProbeSlot;
+/// Explicitly unstable internal instrumentation, outside the promised API.
+#[doc(hidden)]
+pub use lash_core_llm::turn_vocabulary::{
+    RuntimeNamedPhase, RuntimeTurnPhase, RuntimeTurnPhaseProbe,
+};

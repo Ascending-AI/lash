@@ -8,6 +8,9 @@ use std::fmt;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 
+/// Scope-keyed internal instrumentation, with session fallback for frames.
+/// Explicitly unstable; see `docs/architecture/turn-phase-probe.md`.
+#[doc(hidden)]
 #[derive(Clone, Default)]
 pub struct RuntimeTurnPhaseProbeSlot {
     probes: Arc<StdMutex<HashMap<crate::SessionScopeId, Arc<dyn RuntimeTurnPhaseProbe>>>>,

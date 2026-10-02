@@ -600,11 +600,11 @@ impl LashRuntime {
 
         self.mark_phase_begin(PreparedTurn::RUNTIME_PHASE);
         let finalized = match plugins
-            .finalize_turn_with_phase_probe(
+            .dispatch(self.turn_phase_probe.as_ref())
+            .finalize_turn(
                 assembled,
                 manager.state_service(),
                 manager.graph_service(),
-                self.turn_phase_probe.clone(),
                 &trace_turn_id,
                 self.services.clock.as_ref(),
             )

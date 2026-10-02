@@ -110,41 +110,6 @@ impl PluginSession {
         })
     }
 
-    pub async fn prepare_turn_with_phase_probe(
-        &self,
-        request: PrepareTurnRequest,
-        phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
-        turn_scope_id: &str,
-    ) -> Result<TurnPreparation, PluginError> {
-        let PrepareTurnRequest {
-            session_id,
-            state,
-            messages,
-            sessions,
-            session_graph,
-            turn_context,
-        } = request;
-        let directives = self
-            .before_turn_with_phase_probe(
-                TurnHookContext {
-                    session_id,
-                    plugin_config: self.admitted_plugin_config(),
-                    state,
-                    sessions,
-                    turn_context,
-                },
-                phase_probe.as_ref(),
-            )
-            .await?;
-        self.apply_turn_directives(
-            directives,
-            messages,
-            session_graph,
-            &format!("{turn_scope_id}:before_turn"),
-        )
-        .await
-    }
-
     pub async fn apply_checkpoint(
         &self,
         ctx: CheckpointHookContext,
@@ -169,29 +134,59 @@ impl PluginSession {
             abort,
         })
     }
+}
 
-    pub async fn finalize_turn_with_phase_probe(
+impl PluginDispatchContext<'_> {
+    pub async fn prepare_turn(
+        &self,
+        request: PrepareTurnRequest,
+        turn_scope_id: &str,
+    ) -> Result<TurnPreparation, PluginError> {
+        let PrepareTurnRequest {
+            session_id,
+            state,
+            messages,
+            sessions,
+            session_graph,
+            turn_context,
+        } = request;
+        let directives = self
+            .before_turn(TurnHookContext {
+                session_id,
+                plugin_config: self.session.admitted_plugin_config(),
+                state,
+                sessions,
+                turn_context,
+            })
+            .await?;
+        self.session
+            .apply_turn_directives(
+                directives,
+                messages,
+                session_graph,
+                &format!("{turn_scope_id}:before_turn"),
+            )
+            .await
+    }
+
+    pub async fn finalize_turn(
         &self,
         mut turn: AssembledTurn,
         sessions: Arc<dyn SessionStateService>,
         session_graph: Arc<dyn SessionGraphService>,
-        phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
         turn_scope_id: &str,
         clock: &dyn crate::Clock,
     ) -> Result<TurnFinalization, PluginError> {
         let session_id = turn.state.session_id.clone();
-        let directives = if self.contributions.after_turn_hooks.is_empty() {
+        let directives = if self.session.contributions.after_turn_hooks.is_empty() {
             Vec::new()
         } else {
-            self.after_turn_with_phase_probe(
-                TurnResultHookContext {
-                    session_id: session_id.clone(),
-                    plugin_config: self.admitted_plugin_config(),
-                    turn: Arc::new(crate::plugin::TurnHookReport::from_assembled(&turn)),
-                    sessions,
-                },
-                phase_probe.as_ref(),
-            )
+            self.after_turn(TurnResultHookContext {
+                session_id: session_id.clone(),
+                plugin_config: self.session.admitted_plugin_config(),
+                turn: Arc::new(crate::plugin::TurnHookReport::from_assembled(&turn)),
+                sessions,
+            })
             .await?
         };
         let mut events = Vec::new();
@@ -266,12 +261,9 @@ impl PluginSession {
             turn.state.replace_active_read_state(messages.as_slice());
         }
 
-        if self.has_runtime_event_hooks()
+        if self.session.has_runtime_event_hooks()
             && let Err(error) = self
-                .emit_runtime_event_with_phase_probe(
-                    PluginLifecycleEvent::TurnFinalized(Arc::new(turn.clone())),
-                    phase_probe,
-                )
+                .emit_runtime_event(PluginLifecycleEvent::TurnFinalized(Arc::new(turn.clone())))
                 .await
         {
             turn.errors.push(super::plugin_lifecycle_hook_issue(error));

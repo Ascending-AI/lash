@@ -378,6 +378,7 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) {
     .await
     .unwrap();
     let hook_error = hook_session
+        .dispatch(None)
         .before_turn(crate::plugin::TurnHookContext {
             session_id: id.into(),
             state: runtime.read_view(),

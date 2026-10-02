@@ -1158,6 +1158,8 @@ impl LashSession {
         Ok(runtime.reconcile_unreported_usage().await?)
     }
 
+    /// Install explicitly unstable internal instrumentation for this runtime.
+    #[doc(hidden)]
     pub async fn set_turn_phase_probe(
         &self,
         probe: Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe>,
