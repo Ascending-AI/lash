@@ -292,7 +292,7 @@ impl ShiftParts {
             admitted_generation: crate::engine::BuildGeneration::for_test(admitted_generation),
             executor: crate::store::RunExecutor::Run,
             plugins: Default::default(),
-            trace_anchor: Default::default(),
+            trace_scopes: std::sync::Arc::new(lash_core::UntracedScopes),
         }
     }
 }
@@ -1047,6 +1047,7 @@ pub async fn parked_run_blocks_admission(
             build_generation: None,
         })
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("record the park");
     let request = parts.request("parked-run-shift");
     let outcome: ShiftOutcome = on_tier(&runner, &parts, move |mut runtime, scope| {

@@ -137,6 +137,7 @@ impl EffectGroupDispatchImpl {
             self.sessions.as_ref(),
             child.scope.claim_scope().scope(),
             refusal,
+            &self.executors.trace_runtime(),
         )
         .await;
         match parked {

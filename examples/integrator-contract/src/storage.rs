@@ -169,6 +169,19 @@ impl SessionCatalogStore for Integrator {
 
 #[lash::async_trait]
 impl SessionCommitStore for Integrator {
+    async fn record_tool_request(
+        &self,
+        request: &ToolRequestReceipt,
+    ) -> Result<StoreTransition<ToolRequestReceipt>, StoreError> {
+        unreachable!("external signature witness")
+    }
+    async fn record_tool_completion(
+        &self,
+        completion: &ToolCompletionReceipt,
+    ) -> Result<StoreTransition<ToolCompletionReceipt>, StoreError> {
+        unreachable!("external signature witness")
+    }
+
     async fn read_session_state_version(&self, session_id: &SessionId) -> Result<u32, StoreError> {
         unreachable!("external signature witness")
     }
@@ -237,7 +250,10 @@ impl SessionCommitStore for Integrator {
     ) -> Result<Option<SessionMeta>, StoreError> {
         unreachable!("external signature witness")
     }
-    async fn record_turn_park(&self, park: &TurnParkWrite) -> Result<TurnPark, StoreError> {
+    async fn record_turn_park(
+        &self,
+        park: &TurnParkWrite,
+    ) -> Result<StoreTransition<TurnPark>, StoreError> {
         unreachable!("external signature witness")
     }
     async fn load_turn_park(&self, session_id: &SessionId) -> Result<Option<TurnPark>, StoreError> {
@@ -509,6 +525,20 @@ impl ShiftEpochStore for Integrator {
 
 #[lash::async_trait]
 impl RunStore for Integrator {
+    async fn prepare_run_admission(
+        &self,
+        request: &AdmitRunRequest,
+    ) -> Result<Option<PreparedRunAdmission>, StoreError> {
+        unreachable!("external signature witness")
+    }
+    async fn commit_run_admission(
+        &self,
+        prepared: &PreparedRunAdmission,
+        anchor: &lash::tracing::TraceAnchor,
+    ) -> Result<Option<RunAdmission>, StoreError> {
+        unreachable!("external signature witness")
+    }
+
     async fn unfinished_run(
         &self,
         session_id: &SessionId,
@@ -855,6 +885,29 @@ impl StorePreflight for Integrator {
         unreachable!("external signature witness")
     }
     async fn scan_durable(&self, scan: &DurableScan) -> Result<DurableScanPage, StoreError> {
+        unreachable!("external signature witness")
+    }
+}
+
+#[lash::async_trait]
+impl WaitReceiptStore for Integrator {
+    async fn record_wait_request(
+        &self,
+        request: &WaitRequestReceipt,
+    ) -> Result<StoreTransition<WaitRequestReceipt>, StoreError> {
+        unreachable!("external signature witness")
+    }
+    async fn record_wait_resolution(
+        &self,
+        resolution: &WaitResolutionReceipt,
+    ) -> Result<StoreTransition<WaitResolutionReceipt>, StoreError> {
+        unreachable!("external signature witness")
+    }
+    async fn retire_wait_receipts(
+        &self,
+        owner_key: &str,
+        retired_at_ms: u64,
+    ) -> Result<(), StoreError> {
         unreachable!("external signature witness")
     }
 }

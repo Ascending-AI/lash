@@ -297,7 +297,8 @@ pub async fn delete_session(
     if obligation.state != ObligationState::Due {
         return closing(SessionDeleteWait::Obligation(obligation.state));
     }
-    let relay = SessionDeleteRelay::new(administration.clone());
+    let relay = SessionDeleteRelay::new(administration.clone())
+        .with_metrics(administration.session_close().metrics.clone());
     let verdict = deliver_now(&relay, &obligation.id, clock).await?;
     match relay.take_attempt(&obligation.id) {
         Some(DeleteAttempt::Deleted(report)) => Ok(SessionDeletion::Deleted(report)),
@@ -392,10 +393,20 @@ pub struct SessionDeleteRelay {
     obligations: Arc<dyn ObligationLedger>,
     ledger: Arc<dyn SessionDeleteLedger>,
     policy: RelayPolicy,
+    metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
     last: Mutex<Option<(ObligationId, DeleteAttempt)>>,
 }
 
 impl SessionDeleteRelay {
+    #[must_use]
+    pub fn with_metrics(
+        mut self,
+        metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
+    ) -> Self {
+        self.metrics = metrics;
+        self
+    }
+
     /// The relay over `administration`'s deployment, under the relay policy
     /// the administration's close services carry: the host's configured
     /// attempt budget, not the kind's default (FIG-4246).
@@ -415,6 +426,7 @@ impl SessionDeleteRelay {
             obligations,
             ledger,
             policy,
+            metrics: Default::default(),
             last: Mutex::new(None),
         }
     }
@@ -443,6 +455,10 @@ impl SessionDeleteRelay {
 
 #[async_trait::async_trait]
 impl ObligationRelay for SessionDeleteRelay {
+    fn metrics(&self) -> lash_trace::telemetry::metrics::TelemetryMetrics {
+        self.metrics.clone()
+    }
+
     fn ledger(&self) -> &dyn ObligationLedger {
         self.obligations.as_ref()
     }

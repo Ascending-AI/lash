@@ -365,12 +365,14 @@ impl ToolIntentIngress {
         );
         // The caller's context is snapshotted here, before the first await.
         let trace = self.submission_trace();
-        async {
-            let outcome = self.submit_inner(key, intent, &trace).await;
-            Self::record_decision(&identity, &outcome);
-            outcome
-        }
-        .instrument(span)
+        Box::pin(
+            async {
+                let outcome = self.submit_inner(key, intent, &trace).await;
+                Self::record_decision(&identity, &outcome);
+                outcome
+            }
+            .instrument(span),
+        )
         .await
     }
 
@@ -767,9 +769,56 @@ impl ToolIntentIngress {
             }
         };
         if !recorded {
-            registry
+            let receipt = registry
                 .complete_tool_intent_submission(&identity.replay_key, outcome)
                 .await?;
+            let permit = receipt.permit();
+            let runtime = &self.core.env.core.tracing;
+            let status = match receipt.record.outcome.as_ref() {
+                Some(lash_core::ToolIntentExecutionOutcome::Executed { .. }) => {
+                    lash_core::operational_metrics::record_tool_intent_executed(
+                        runtime.metrics(),
+                        permit.as_ref(),
+                        receipt.record.kind.as_str(),
+                    );
+                    lash_trace::TraceDomainStatus::Completed
+                }
+                Some(
+                    lash_core::ToolIntentExecutionOutcome::Refused { refusal, .. }
+                    | lash_core::ToolIntentExecutionOutcome::ProtocolRefused { refusal },
+                ) => {
+                    lash_core::operational_metrics::record_tool_intent_refused(
+                        runtime.metrics(),
+                        permit.as_ref(),
+                        receipt.record.kind.as_str(),
+                        refusal.code().as_ref(),
+                    );
+                    lash_trace::TraceDomainStatus::Failed
+                }
+                None => return Ok(()),
+            };
+            if let (Some(scope), Some(at_ms)) =
+                (&receipt.record.trace, receipt.record.completed_at_ms)
+            {
+                runtime.unreplayed(Some(scope.clone())).transition(
+                    permit.as_ref(),
+                    at_ms,
+                    lash_trace::TraceTransitionKind::Terminal,
+                    0,
+                    || {
+                        let mut completion = lash_trace::TraceDomainCompletion::new(
+                            lash_trace::TraceDomainOperation::ToolIntent,
+                            scope.started_at_ms,
+                            status,
+                        );
+                        completion.intent_kind = Some(receipt.record.kind.as_str().to_string());
+                        (
+                            lash_trace::TraceContext::default(),
+                            lash_trace::TraceEvent::DomainCompleted { completion },
+                        )
+                    },
+                );
+            }
         }
         Ok(())
     }
@@ -1128,6 +1177,7 @@ impl ToolIntentIngress {
                 std::sync::Arc::clone(self.core.substrate_slot.ports().await.process.port()),
                 self.core.host_process_engines.clone(),
                 lash_core::runtime::HostStartAdmission {
+                    tracing: Some(self.core.env.core.tracing.clone()),
                     session_catalog: Some(std::sync::Arc::clone(&self.core.store_factory) as _),
                     session_turn_admission: None,
                 },
@@ -1139,6 +1189,7 @@ impl ToolIntentIngress {
                     .obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
                 std::sync::Arc::clone(&self.core.env.core.clock),
                 self.core.env.core.control.relay_policy(),
+                self.core.env.core.tracing.metrics().clone(),
             )
             .with_process_env_store(std::sync::Arc::clone(
                 &self.core.env.core.durability.process_env_store,

@@ -133,6 +133,7 @@ impl ProcessLocalExecution {
                 // every caller's future by both.
                 let started = Box::pin(crate::runtime::register_process_start(
                     &crate::runtime::ProcessStartStores {
+                        tracing: host_start.tracing.as_ref(),
                         registry: registry.as_ref(),
                         env_store: process_env_store.as_ref(),
                         engines: &process_engines,

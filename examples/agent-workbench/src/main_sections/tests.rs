@@ -381,19 +381,30 @@ fn append_started_graph(store: &TraceLashlangGraphStore, graph: &TraceLashlangGr
         ..Default::default()
     };
     store
-        .append(&TraceRecord::new(
-            context,
-            TraceEvent::LanguageExecution {
-                language: "typescript".to_string(),
-                event: TraceLanguageExecution {
-                    event_key: format!("{}:start", graph.graph_key),
-                    identity,
-                    payload: TraceLanguageExecutionPayload::ExecutionStarted {
-                        execution_map: TraceLanguageExecutionMap::default(),
+        .append(
+            &TraceRecord::identified(
+                &lash::tracing::TraceRecordIdentity::UnscopedLive {
+                    attempt: lash::tracing::TraceAttemptId::new(format!(
+                        "workbench-graph-fixture:{}",
+                        graph.graph_key
+                    )),
+                    ordinal: 0,
+                },
+                context,
+                TraceEvent::LanguageExecution {
+                    language: "typescript".to_string(),
+                    event: TraceLanguageExecution {
+                        event_key: format!("{}:start", graph.graph_key),
+                        identity,
+                        payload: TraceLanguageExecutionPayload::ExecutionStarted {
+                            execution_map: TraceLanguageExecutionMap::default(),
+                        },
                     },
                 },
-            },
-        ))
+                Utc::now(),
+            )
+            .expect("identify test graph"),
+        )
         .expect("append test graph");
 }
 

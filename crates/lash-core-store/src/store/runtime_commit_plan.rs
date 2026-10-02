@@ -447,8 +447,11 @@ impl<'a> RuntimeCommitPlan<'a> {
         &self,
         checkpoint_ref: BlobRef,
         manifest: SessionCheckpoint,
+        committed_at_ms: u64,
     ) -> RuntimeCommitReceipt {
         RuntimeCommitReceipt {
+            committed_at_ms,
+            trace: self.commit.trace.clone(),
             schema_version: self.fleet_format.writer_version(crate::surface_format!(
                 super::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION
             )),

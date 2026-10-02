@@ -26,6 +26,7 @@ impl RuntimeSessionServices {
         // Never read: the driver points the observer at its recorder.
         let observer = crate::engine::NullObservationSink::arc();
         Ok(crate::tool_dispatch::ToolDispatchContext {
+            tool_receipts: Some(self.current.host.core.session_store_factory()),
             plugins: Arc::clone(&self.current.plugins),
             tools: Arc::clone(&tool_surface.registry) as Arc<dyn crate::ToolProvider>,
             tool_registry: Some(Arc::clone(&tool_surface.registry)),

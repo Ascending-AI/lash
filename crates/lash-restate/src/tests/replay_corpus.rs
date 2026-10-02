@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-mod service_journals;
+pub(super) mod service_journals;
 use service_journals::HandlerJournals;
 
 const CORPUS_ROOT_ENV: &str = "LASH_REPLAY_CORPUS_ROOT";

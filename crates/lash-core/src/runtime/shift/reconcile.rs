@@ -72,6 +72,7 @@ pub struct ReconcileParts<'a> {
     pub processes: Option<ReconcileProcesses<'a>>,
     /// The caller's clock: obligation due times and recovery slots.
     pub clock: &'a dyn Clock,
+    pub metrics: &'a lash_trace::telemetry::metrics::TelemetryMetrics,
     /// Which duties this deployment runs this tick (ADR 0109 §1.7): the
     /// leader-only arms, and the due-obligation claims.
     pub duties: RecoveryDuties,
@@ -141,7 +142,8 @@ pub async fn reconcile_once(
     // budget for it to return the report, and bounds an unresponsive engine.
     let budget = parts.lanes.tick_wait();
     let deadline = parts.clock.now() + budget.saturating_mul(2);
-    let recovery = StoreParkRecovery::new(parts.sessions, parts.clock);
+    let recovery =
+        StoreParkRecovery::new(parts.sessions, parts.clock).with_metrics(parts.metrics.clone());
     let parks = bounded_arm(
         parts.clock,
         deadline,

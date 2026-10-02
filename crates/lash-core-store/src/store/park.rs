@@ -316,6 +316,36 @@ pub fn decide_turn_park_write(
     }
 }
 
+/// The result of an owning store write. The disposition is ephemeral and
+/// cannot be serialized into a journal as a freshness claim.
+#[derive(Debug)]
+pub struct StoreTransition<T> {
+    pub record: T,
+    pub changed: bool,
+}
+
+impl<T> StoreTransition<T> {
+    pub fn changed(record: T) -> Self {
+        Self {
+            record,
+            changed: true,
+        }
+    }
+    pub fn unchanged(record: T) -> Self {
+        Self {
+            record,
+            changed: false,
+        }
+    }
+    pub fn into_record(self) -> T {
+        self.record
+    }
+    pub fn permit(&self) -> Option<lash_trace::EmissionPermit> {
+        self.changed
+            .then(lash_trace::EmissionPermit::new_transition)
+    }
+}
+
 /// The stored parked state of one session's turn.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnPark {

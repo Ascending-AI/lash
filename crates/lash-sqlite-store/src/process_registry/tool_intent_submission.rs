@@ -58,8 +58,9 @@ pub(super) async fn complete(
     registry: &SqliteProcessRegistry,
     replay_key: &str,
     outcome: ToolIntentExecutionOutcome,
-) -> Result<ToolIntentSubmissionRecord, PluginError> {
+) -> Result<lash_core_execution::store::StoreTransition<ToolIntentSubmissionRecord>, PluginError> {
     let replay_key = replay_key.to_string();
+    let at_ms = registry.clock.timestamp_ms();
     registry
         .conn
         .write_flow(move |tx| {
@@ -76,7 +77,9 @@ pub(super) async fn complete(
                     .map_err(process_sqlite_error)?;
                 let mut submission: ToolIntentSubmissionRecord =
                     serde_json::from_str(&encoded).map_err(process_decode_error)?;
-                if submission.outcome.is_none() {
+                let changed = submission.outcome.is_none();
+                if changed {
+                    submission.completed_at_ms = Some(at_ms);
                     submission.outcome = Some(outcome);
                     crate::conn::cached_execute(
                         tx,
@@ -91,7 +94,10 @@ pub(super) async fn complete(
                     )
                     .map_err(process_sqlite_error)?;
                 }
-                Ok(submission)
+                Ok(lash_core_execution::store::StoreTransition {
+                    record: submission,
+                    changed,
+                })
             })()))
         })
         .await

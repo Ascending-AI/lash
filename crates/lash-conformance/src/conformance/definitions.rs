@@ -307,6 +307,7 @@ impl World {
         starter: &'a crate::EffectJournalIdentity,
     ) -> crate::ProcessStartStores<'a> {
         crate::ProcessStartStores {
+            tracing: None,
             registry: self.registry.as_ref(),
             env_store: Some(self.ports.env()),
             engines: &self.engines,

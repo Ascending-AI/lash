@@ -110,6 +110,7 @@ impl RelaySupply {
 /// The parts every kind's relay is assembled from: what a core resolved for
 /// one reconcile tick.
 pub struct RelayParts {
+    pub tracing: crate::trace::TraceRuntime,
     /// The backend whose store set holds every kind's ledger.
     pub backend: Backend,
     pub sessions: Arc<dyn DeploymentStore>,
@@ -127,6 +128,7 @@ pub struct RelayParts {
     /// The policy every kind's relay runs under: the host's attempt budget
     /// (ADR 0109 §1.8) on the kinds' shared retry shape.
     pub policy: RelayPolicy,
+    pub metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
 }
 
 impl RelayParts {
@@ -152,6 +154,7 @@ pub fn obligation_relays(
 ) -> Result<Vec<Arc<dyn ObligationRelay>>, ObligationRelayUnavailable> {
     parts.supply().check()?;
     let RelayParts {
+        tracing,
         backend,
         sessions,
         work,
@@ -161,10 +164,12 @@ pub fn obligation_relays(
         trigger_route_restorer,
         clock,
         policy,
+        metrics,
     } = parts;
     let scope_close: Arc<dyn ObligationRelay> = Arc::new(
         ScopeCloseRelay::over_backend(&backend, Arc::clone(&sessions), Arc::clone(&scopes))
-            .with_policy(policy),
+            .with_policy(policy)
+            .with_metrics(metrics.clone()),
     );
     let unavailable =
         |kind: ObligationKind, need: RelayNeed| ObligationRelayUnavailable { kind, need };
@@ -173,7 +178,8 @@ pub fn obligation_relays(
         let relay: Arc<dyn ObligationRelay> = match kind {
             ObligationKind::Ingress => Arc::new(
                 IngressRelay::over_backend(&backend, Arc::clone(&work), Arc::clone(&clock))
-                    .with_policy(policy),
+                    .with_policy(policy)
+                    .with_metrics(metrics.clone()),
             ),
             ObligationKind::ControlIntent => Arc::new(
                 ControlIntentRelay::new(
@@ -184,7 +190,8 @@ pub fn obligation_relays(
                     Arc::clone(&scope_close),
                     Arc::clone(&clock),
                 )
-                .with_policy(policy),
+                .with_policy(policy)
+                .with_metrics(metrics.clone()),
             ),
             ObligationKind::ScopeClose => Arc::clone(&scope_close),
             ObligationKind::ParentEnd => {
@@ -198,15 +205,19 @@ pub fn obligation_relays(
                         Arc::clone(wiring.port()),
                         Arc::clone(&clock),
                     )
-                    .with_policy(policy),
+                    .with_policy(policy)
+                    .with_metrics(metrics.clone()),
                 )
             }
-            ObligationKind::SessionDelete => Arc::new(SessionDeleteRelay::with_policy(
-                administration
-                    .clone()
-                    .ok_or_else(|| unavailable(kind, RelayNeed::SessionAdministration))?,
-                policy,
-            )),
+            ObligationKind::SessionDelete => Arc::new(
+                SessionDeleteRelay::with_policy(
+                    administration
+                        .clone()
+                        .ok_or_else(|| unavailable(kind, RelayNeed::SessionAdministration))?,
+                    policy,
+                )
+                .with_metrics(metrics.clone()),
+            ),
             ObligationKind::TriggerDelivery => {
                 let wiring = processes
                     .as_ref()
@@ -218,6 +229,7 @@ pub fn obligation_relays(
                 // way the deployment's own emits are, so the recovered start
                 // registers the process a first attempt would have.
                 let mut router = crate::TriggerRouter::new(backend.trigger_store(), wiring.clone())
+                    .with_trace_runtime(tracing.clone())
                     .with_process_artifacts(
                         backend.process_env_store(),
                         administration.process_engines().clone(),
@@ -226,13 +238,15 @@ pub fn obligation_relays(
                         backend.obligation_ledger(ObligationKind::ProcessStart),
                         Arc::clone(&clock),
                         policy,
+                        metrics.clone(),
                     );
                 if let Some(restorer) = &trigger_route_restorer {
                     router = router.with_route_restorer(Arc::clone(restorer));
                 }
                 Arc::new(
                     TriggerDeliveryRelay::new(backend.obligation_ledger(kind), router)
-                        .with_policy(policy),
+                        .with_policy(policy)
+                        .with_metrics(metrics.clone()),
                 )
             }
             ObligationKind::ProcessStart => {
@@ -246,7 +260,8 @@ pub fn obligation_relays(
                         Arc::clone(wiring.port()),
                         Arc::clone(&clock),
                     )
-                    .with_policy(policy),
+                    .with_policy(policy)
+                    .with_metrics(metrics.clone()),
                 )
             }
             ObligationKind::ProcessTerminal => {
@@ -259,7 +274,8 @@ pub fn obligation_relays(
                         Arc::clone(wiring.registry()),
                         Arc::clone(wiring.port()),
                     )
-                    .with_policy(policy),
+                    .with_policy(policy)
+                    .with_metrics(metrics.clone()),
                 )
             }
             ObligationKind::ArtifactCleanup => {
@@ -282,7 +298,8 @@ pub fn obligation_relays(
                         attachments: backend.attachment_referrers(),
                         clock: backend.clock(),
                     })
-                    .with_policy(policy),
+                    .with_policy(policy)
+                    .with_metrics(metrics.clone()),
                 )
             }
         };

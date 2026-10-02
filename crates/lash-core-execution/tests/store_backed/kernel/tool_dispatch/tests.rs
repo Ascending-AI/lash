@@ -760,6 +760,7 @@ async fn strict_mcp_dispatch_context<'h>(
     let tools = plugins.tools();
     let tool_catalog = plugins.resolved_tool_catalog().expect("tool catalog");
     ToolDispatchContext {
+        tool_receipts: None,
         plugins,
         tools,
         tool_registry: None,
@@ -812,6 +813,7 @@ async fn dispatch_context<'h>(ports: crate::support::DispatchPorts<'h>) -> ToolD
     let tools = plugins.tools();
     let tool_catalog = plugins.resolved_tool_catalog().expect("tool catalog");
     ToolDispatchContext {
+        tool_receipts: None,
         plugins,
         tools,
         tool_registry: None,
@@ -872,6 +874,7 @@ async fn projection_policy_dispatch_context<'h>(
     let tools = plugins.tools();
     let tool_catalog = plugins.resolved_tool_catalog().expect("tool catalog");
     ToolDispatchContext {
+        tool_receipts: None,
         plugins,
         tools,
         tool_registry: None,
@@ -1045,6 +1048,7 @@ async fn pinned_contract_dispatch_context<'h>(
     let tools = Arc::clone(&provider);
     let tool_catalog = Arc::new(crate::ToolCatalog::from_tool_definitions(vec![beta_tool()]));
     ToolDispatchContext {
+        tool_receipts: None,
         plugins: test_plugins(provider),
         tools,
         tool_registry: None,
@@ -1115,6 +1119,7 @@ async fn authority_hidden_dispatch_context<'h>(
     let tools = plugins.tools();
     let tool_catalog = plugins.resolved_tool_catalog().expect("tool catalog");
     ToolDispatchContext {
+        tool_receipts: None,
         plugins,
         tools,
         tool_registry: None,
@@ -1165,6 +1170,7 @@ async fn exact_dispatch_context_with_plugins<'h>(
     let tools = plugins.tools();
     let tool_catalog = plugins.resolved_tool_catalog().expect("tool catalog");
     ToolDispatchContext {
+        tool_receipts: None,
         plugins,
         tools,
         tool_registry: None,
@@ -1299,6 +1305,7 @@ async fn pending_dispatch_context<'h>(
     let tools = plugins.tools();
     let tool_catalog = plugins.resolved_tool_catalog().expect("tool catalog");
     ToolDispatchContext {
+        tool_receipts: None,
         plugins,
         tools,
         tool_registry: None,

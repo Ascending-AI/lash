@@ -1,5 +1,6 @@
 use super::*;
 use crate::runtime::effect::tool_child_driver::{complete_deferred_tool, resolve_model_return};
+use lash_sansio::sync::MutexExt;
 
 impl RuntimeExecutionContext<'_> {
     pub async fn await_deferred_tool_completions(
@@ -109,6 +110,11 @@ impl RuntimeExecutionContext<'_> {
         resolution: crate::Resolution,
     ) -> Result<CompletedProtocolToolCall, crate::RuntimeEffectControllerError> {
         let request = completion.request.clone();
+        if let Some(receipt) = &request.trace_request {
+            self.tool_requests
+                .lock_recover()
+                .insert(request.call.call_id.clone(), receipt.clone());
+        }
         // The dispatch rank already incorporated these facts before this wait began.
         completion.pending.captures.clear();
         completion.pending.triggers.clear();

@@ -283,6 +283,7 @@ pub async fn every_execution_write_refuses_a_superseded_invocation_without_mutat
                     &old,
                 )
                 .await
+                .map(lash_core::store::StoreTransition::into_record)
                 .map(|_| ()),
             registry
                 .begin_parked_rerun_with_authority(&id, &old)
@@ -334,6 +335,7 @@ pub async fn every_execution_write_refuses_a_superseded_invocation_without_mutat
                 &current,
             )
             .await
+            .map(lash_core::store::StoreTransition::into_record)
             .expect("current invocation can write");
     }
 }

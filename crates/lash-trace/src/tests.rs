@@ -41,7 +41,7 @@ fn a_failing_sink_does_not_rob_later_sinks_in_a_tee() {
         Arc::new(JsonlTraceSink::new(&path)),
     ]);
 
-    let append = tee.append(&TraceRecord::new(
+    let append = tee.append(&fixture_record(
         TraceContext::default().for_session("root"),
         TraceEvent::Custom {
             name: "test.event".to_string(),
@@ -67,7 +67,7 @@ fn jsonl_sink_writes_record() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("trace.jsonl");
     let sink = JsonlTraceSink::new(&path);
-    sink.append(&TraceRecord::new(
+    sink.append(&fixture_record(
         TraceContext::default().for_session("root"),
         TraceEvent::Custom {
             name: "test.event".to_string(),
@@ -82,7 +82,7 @@ fn jsonl_sink_writes_record() {
 
 #[test]
 fn tool_completion_serializes_typed_failure_output() {
-    let record = TraceRecord::new(
+    let record = fixture_record(
         TraceContext::default().for_session("root"),
         TraceEvent::ToolCallCompleted {
             call_id: lash_sansio::ToolCallId::fixture("call-1"),
@@ -210,6 +210,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         (
             "durable wait failed",
             TraceEvent::DurableWaitResolved {
+                started_at_ms: 0,
                 wait_kind: "event".to_string(),
                 resolution: TraceDurableWaitResolution::Failed,
             },
@@ -323,7 +324,7 @@ fn jsonl_sink_creates_parent_directories() {
     let dir = std::env::temp_dir().join(format!("lash-trace-{}", uuid::Uuid::new_v4()));
     let path = dir.join("nested").join("trace.jsonl");
     let sink = JsonlTraceSink::new(&path);
-    sink.append(&TraceRecord::new(
+    sink.append(&fixture_record(
         TraceContext::default().for_session("root"),
         TraceEvent::RuntimeStreamEvent {
             event: TraceRuntimeStreamEvent {
@@ -358,14 +359,14 @@ fn jsonl_trace_sink_recovers_from_torn_tail() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("trace.jsonl");
 
-    let first = TraceRecord::new(
+    let first = fixture_record(
         TraceContext::default().for_session("root"),
         TraceEvent::Custom {
             name: "first".to_string(),
             payload: serde_json::json!({"seq": 1}),
         },
     );
-    let second = TraceRecord::new(
+    let second = fixture_record(
         TraceContext::default().for_session("root"),
         TraceEvent::Custom {
             name: "second".to_string(),
@@ -403,7 +404,7 @@ fn jsonl_trace_sink_recovers_from_torn_tail() {
 
 #[test]
 fn trace_reader_skips_unknown_kinds_and_counts_them() {
-    let mut known = serde_json::to_value(TraceRecord::new(
+    let mut known = serde_json::to_value(fixture_record(
         TraceContext::default(),
         TraceEvent::Custom {
             name: "known".to_string(),
@@ -429,4 +430,15 @@ fn trace_reader_skips_unknown_kinds_and_counts_them() {
     let mut unsupported = future;
     unsupported["schema_version"] = serde_json::json!(TRACE_SCHEMA_VERSION + 1);
     assert!(parse_trace_jsonl_records(&format!("{unsupported}\n")).is_err());
+}
+
+#[cfg(test)]
+fn fixture_record(context: crate::TraceContext, event: crate::TraceEvent) -> crate::TraceRecord {
+    crate::TraceRecord {
+        schema_version: crate::TRACE_SCHEMA_VERSION,
+        id: "fixture-record".into(),
+        timestamp: Default::default(),
+        context,
+        event,
+    }
 }

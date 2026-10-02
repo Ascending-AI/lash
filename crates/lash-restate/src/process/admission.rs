@@ -183,6 +183,7 @@ pub(crate) fn decode_stamped_request<T: serde::de::DeserializeOwned>(
 pub struct SegmentStarted {
     admitted: lash_core::AdmittedScope,
     segment_ordinal: u64,
+    started_at_ms: u64,
     authority: ProcessExecutionWriteAuthority,
     generation: Option<Box<lash_core::ExecutableGeneration>>,
     build_generation: Option<Box<lash_core::engine::BuildGeneration>>,
@@ -193,6 +194,7 @@ impl SegmentStarted {
     fn new(
         process_id: ProcessId,
         segment_ordinal: u64,
+        started_at_ms: u64,
         execution_id: String,
         generation: Option<lash_core::ExecutableGeneration>,
         build_generation: Option<lash_core::engine::BuildGeneration>,
@@ -203,6 +205,7 @@ impl SegmentStarted {
         Self {
             admitted: lash_core::AdmittedScope::process(process_id),
             segment_ordinal,
+            started_at_ms,
             authority,
             generation: generation.map(Box::new),
             build_generation: build_generation.map(Box::new),
@@ -242,6 +245,11 @@ impl SegmentStarted {
         self.segment_ordinal
     }
 
+    /// The immutable start marker's time, retained across replay.
+    pub fn started_at_ms(&self) -> u64 {
+        self.started_at_ms
+    }
+
     /// The execution identity the segment writes its lifecycle facts under.
     pub fn write_authority(&self) -> &ProcessExecutionWriteAuthority {
         &self.authority
@@ -262,6 +270,7 @@ impl SegmentStarted {
         Self {
             admitted,
             segment_ordinal,
+            started_at_ms: 0,
             authority: authority.unwrap_or_else(|| {
                 ProcessExecutionWriteAuthority::invocation(process_id, "test-segment-execution")
             }),
@@ -319,6 +328,7 @@ enum StartOutcome {
     Started {
         execution_id: String,
         process_id: ProcessId,
+        started_at_ms: u64,
         /// The executable generation the process's start record names
         /// (FIG-3571), journaled with the start so a replay holds the segment
         /// to the stamp it was admitted under.
@@ -639,6 +649,7 @@ pub(crate) async fn admit_segment(
         StartOutcome::Started {
             execution_id,
             process_id,
+            started_at_ms,
             generation,
             build_generation,
             plugins,
@@ -646,6 +657,7 @@ pub(crate) async fn admit_segment(
             started: SegmentStarted::new(
                 process_id,
                 segment_ordinal,
+                started_at_ms,
                 execution_id,
                 generation,
                 build_generation,
@@ -690,6 +702,7 @@ async fn start_root_segment(
                 StartOutcome::Started {
                     execution_id: nonce,
                     process_id: record.id.clone(),
+                    started_at_ms: existing.started_at_ms,
                     generation: existing.generation.clone(),
                     build_generation: existing.build_generation.clone(),
                     plugins: existing.plugins.clone(),
@@ -716,16 +729,23 @@ async fn start_root_segment(
     // writer formats the fleet record permits now.
     let plugins = plugins().await.map_err(store_fault)?;
     started.plugins = plugins.clone();
-    registry
+    let recorded = registry
         .record_first_started_with_authority(process_id, started, &authority)
         .await
-        .map_err(store_fault)?;
+        .map_err(store_fault)?
+        .into_record();
+    let Some(start) = recorded.first_started.as_ref() else {
+        return Ok(StartOutcome::Invariant {
+            message: format!("process `{process_id}` committed no start marker"),
+        });
+    };
     Ok(StartOutcome::Started {
         execution_id: nonce,
         process_id: record.id.clone(),
-        generation,
-        build_generation: Some(build_generation),
-        plugins,
+        started_at_ms: start.started_at_ms,
+        generation: start.generation.clone(),
+        build_generation: start.build_generation.clone(),
+        plugins: start.plugins.clone(),
     })
 }
 
@@ -808,6 +828,7 @@ async fn start_later_segment(
         StartOutcome::Started {
             execution_id,
             process_id: record.id.clone(),
+            started_at_ms: recorded.started_at_ms,
             generation: root.generation.clone(),
             // The recorded marker's stamp, not the executing build's: a
             // redrive returns the same proof the first execution journaled.

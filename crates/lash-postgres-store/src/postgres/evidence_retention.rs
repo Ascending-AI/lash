@@ -55,7 +55,7 @@ pub(crate) async fn reclaim(
             .map_err(store_sqlx_error)?
             .rows_affected() as usize;
         // deleted_sessions permanently protects identity reuse (FIG-754 / FIG-748).
-        let removed_receipt_count =
+        let mut removed_receipt_count =
             sqlx::query(session_sql().turn_commits_postgres.delete_retained.sql())
                 .bind(cutoff)
                 .bind(watermark)
@@ -63,6 +63,25 @@ pub(crate) async fn reclaim(
                 .await
                 .map_err(store_sqlx_error)?
                 .rows_affected() as usize;
+        let tool_sql = lash_store_sql::tool_receipts::ToolReceiptStatements::render(
+            lash_store_sql::Dialect::postgres(),
+        );
+        removed_receipt_count += sqlx::query(tool_sql.reclaim.sql())
+            .bind(clamp_epoch_ms(bound.committed_before_epoch_ms))
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .rows_affected() as usize;
+        let wait_sql = lash_store_sql::wait_receipts::WaitReceiptStatements::render(
+            lash_store_sql::Dialect::postgres(),
+        );
+        removed_receipt_count += sqlx::query(wait_sql.reclaim.sql())
+            .bind(clamp_epoch_ms(bound.committed_before_epoch_ms))
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .rows_affected() as usize;
+
         // Trigger mutation receipts are durable evidence under the same lever
         // (FIG-4108): ownerless rows by age, session rows once the owner is
         // durably deleted and no outstanding delivery names it.

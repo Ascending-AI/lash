@@ -1549,7 +1549,7 @@ impl LashlangProcessHost<'_> {
                 .map(lashlang::AbilityOutcome::Value)
             }),
             lashlang::AbilityOp::ResourceOperationBatch(batch) => Box::pin(async move {
-                self.resource_operation_batch(batch)
+                Box::pin(self.resource_operation_batch(batch))
                     .await
                     .map(lashlang::AbilityOutcome::ResourceOperationBatch)
             }),

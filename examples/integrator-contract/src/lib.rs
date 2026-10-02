@@ -584,7 +584,7 @@ impl ProcessContinuationStore for Integrator {
         &self,
         process_id: &ProcessId,
         handover: PersistedSegmentHandover,
-    ) -> Result<(), PluginError> {
+    ) -> Result<StoreTransition<SegmentHandoverCommit>, PluginError> {
         unreachable!("external signature witness")
     }
     async fn get_segment_handover(
@@ -910,6 +910,21 @@ impl ProcessQuery for Integrator {
 
 #[lash::async_trait]
 impl ProcessRegistrar for Integrator {
+    async fn prepare_process_registration(
+        &self,
+        registration: ProcessRegistration,
+        observers: &[SessionId],
+    ) -> Result<PreparedProcessRegistration, PluginError> {
+        unreachable!("external signature witness")
+    }
+    async fn commit_process_registration(
+        &self,
+        prepared: PreparedProcessRegistration,
+        anchor: lash::tracing::TraceAnchor,
+    ) -> Result<ProcessRegistrationReceipt, PluginError> {
+        unreachable!("external signature witness")
+    }
+
     async fn register_process(
         &self,
         registration: ProcessRegistration,
@@ -1188,7 +1203,7 @@ impl ProcessLifecycle for Integrator {
         process_id: &ProcessId,
         park: ProcessParkWrite,
         authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessRecord, PluginError> {
+    ) -> Result<StoreTransition<ProcessRecord>, PluginError> {
         unreachable!("external signature witness")
     }
     async fn begin_parked_rerun_with_authority(
@@ -1212,7 +1227,7 @@ impl ProcessToolIntents for Integrator {
         &self,
         replay_key: &str,
         outcome: ToolIntentExecutionOutcome,
-    ) -> Result<ToolIntentSubmissionRecord, PluginError> {
+    ) -> Result<StoreTransition<ToolIntentSubmissionRecord>, PluginError> {
         unreachable!("external signature witness")
     }
 }

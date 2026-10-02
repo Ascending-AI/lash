@@ -93,6 +93,7 @@ fn tool_argument_projection_policy_resolves_from_active_catalog_and_defaults_unk
         ))
         .expect("plugin session");
     let dispatch = Arc::new(ToolDispatchContext {
+        tool_receipts: None,
         plugins,
         tools: Arc::new(NoopTools),
         tool_registry: None,
@@ -169,6 +170,7 @@ fn test_execution_context_with_env_store(
         ))
         .expect("plugin session");
     let dispatch = Arc::new(ToolDispatchContext {
+        tool_receipts: None,
         plugins,
         tools: Arc::new(NoopTools),
         tool_registry: None,

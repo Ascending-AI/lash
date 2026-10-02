@@ -112,6 +112,7 @@ pub async fn parked_turns_list_by_since_with_filters_and_keyset_pages(
     store_a
         .record_turn_park(&park_write(&session_a, "turn-a", drift("a drifted"), 100))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park a");
     store_b
         .record_turn_park(&park_write(
@@ -121,10 +122,12 @@ pub async fn parked_turns_list_by_since_with_filters_and_keyset_pages(
             200,
         ))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park b");
     store_c
         .record_turn_park(&park_write(&session_c, "turn-c", drift("c drifted"), 300))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park c");
     // `d` ties `b` on `since_ms`: the keyset's tie branch —
     // `since_ms = after_since AND session_id > after_session_id` — is what a
@@ -132,6 +135,7 @@ pub async fn parked_turns_list_by_since_with_filters_and_keyset_pages(
     store_d
         .record_turn_park(&park_write(&session_d, "turn-d", drift("d drifted"), 200))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park d");
 
     let query = crate::store::TurnParkQuery {
@@ -286,6 +290,7 @@ pub async fn re_park_keeps_since_and_counts_attempts_and_another_turn_supersedes
     let first = store
         .record_turn_park(&first_write)
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park the first turn");
     assert_eq!(
         first.build_generation,
@@ -295,6 +300,7 @@ pub async fn re_park_keeps_since_and_counts_attempts_and_another_turn_supersedes
     let reparked = store
         .record_turn_park(&park_write(&session_id, "turn-a", drift("again"), 200))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("re-park the same turn");
     assert_eq!(
         reparked.park_id, first.park_id,
@@ -339,6 +345,7 @@ pub async fn re_park_keeps_since_and_counts_attempts_and_another_turn_supersedes
             300,
         ))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("a different turn parks");
     assert_ne!(
         second.park_id, first.park_id,
@@ -419,6 +426,7 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
             10,
         ))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park turn-1");
     commit_turn(&commit_store, &commit_session, "turn-1", 0, "commit-owner")
         .await
@@ -430,6 +438,7 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
     other_store
         .record_turn_park(&park_write(&other_session, "turn-2", divergence("two"), 20))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park turn-2");
     let feed_before = factory
         .turn_park_feed(crate::store::ParkFeedCursor::initial(), limit(100))
@@ -485,6 +494,7 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
             30,
         ))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park turn-3");
     let cancelled = withdraw_store
         .cancel_pending_turn_input(&withdraw_session, &input.input_id)
@@ -526,6 +536,7 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
             35,
         ))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park turn-3s");
     let suffix_outcome = suffix_store
         .cancel_pending_turn_input_suffix(
@@ -553,6 +564,7 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
             50,
         ))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park turn-5");
     factory
         .delete_session(&delete_session)
@@ -669,6 +681,7 @@ pub async fn a_command_runs_end_unparks_it(factory: Arc<dyn crate::store::Confor
             10,
         ))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park the command run");
 
     let crate::store::RunEndOutcome::Ended(terminal) = store
@@ -748,6 +761,7 @@ pub async fn a_rolled_back_commit_leaves_park_and_feed_unchanged(
     let parked = store
         .record_turn_park(&park_write(&session_id, "turn-6", divergence("six"), 60))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park turn-6");
     commit_turn(&store, &session_id, "turn-other", 0, "advancing-owner")
         .await
@@ -794,6 +808,7 @@ pub async fn a_compacted_feed_cursor_is_refused_typed(
     let parked = store
         .record_turn_park(&park_write(&session_id, "turn-7", divergence("seven"), 70))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park turn-7");
     let parked_seq = parked.park_id.feed_sequence();
     factory
@@ -834,6 +849,7 @@ pub async fn a_compacted_feed_cursor_is_refused_typed(
             80,
         ))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park another session's turn");
     let tail = factory
         .turn_park_feed(
@@ -893,6 +909,7 @@ pub async fn a_compacted_feed_cursor_is_refused_typed(
             90,
         ))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park a third session's turn");
     let after_clamp = factory
         .turn_park_feed(clamped_horizon, limit(10))
@@ -937,14 +954,17 @@ pub async fn summary_agrees_with_list(factory: Arc<dyn crate::store::Conformance
     store_a
         .record_turn_park(&park_write(&session_a, "turn-a", drift("a"), 300))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park a");
     store_b
         .record_turn_park(&park_write(&session_b, "turn-b", divergence("b"), 100))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park b");
     store_c
         .record_turn_park(&park_write(&session_c, "turn-c", drift("c"), 200))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park c");
 
     let listed = factory

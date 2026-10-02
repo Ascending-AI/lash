@@ -249,7 +249,8 @@ impl lash_core::ProcessContinuationStore for GatedContinuations {
         &self,
         process_id: &ProcessId,
         handover: lash_core::PersistedSegmentHandover,
-    ) -> Result<(), PluginError> {
+    ) -> Result<lash_core::store::StoreTransition<lash_core::SegmentHandoverCommit>, PluginError>
+    {
         let ordinal = handover.segment_ordinal;
         self.pass(GatePoint::BeforeHandoverPut(ordinal)).await;
         let put = self.inner.put_segment_handover(process_id, handover).await;

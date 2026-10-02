@@ -321,6 +321,7 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
         fence: lease.clone(),
         run: turn_id.clone(),
         terminal: None,
+        trace_scope: None,
     }));
     let returned_state = pipeline.export_state_for_assembly();
     pipeline

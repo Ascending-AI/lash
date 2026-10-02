@@ -193,6 +193,16 @@ impl SendTarget {
         }
     }
 
+    pub(crate) fn begin_host_send(
+        &self,
+        parent: Option<&lash_core::TraceCarrier>,
+    ) -> Option<Box<dyn lash_core::TraceHostOperation>> {
+        match self {
+            Self::Live(session) => session.binding.trace_scopes().begin_host_send(parent),
+            Self::Durable(durable) => durable.trace_scopes().begin_host_send(parent),
+        }
+    }
+
     /// The live replay position now: a cursor taken before an acceptance
     /// sees everything the acceptance's shift publishes.
     fn current_cursor(&self) -> lash_core::SessionCursor {
@@ -306,14 +316,14 @@ pub(crate) enum SendTraceContext {
 impl SendTraceContext {
     /// The cause the submission carries: a link to the captured context,
     /// snapshotting it from `target` now when none was chosen.
-    pub(crate) fn into_cause(self, target: &SendTarget) -> lash_core::TraceCause {
-        lash_core::TraceCause::linked_to(match self {
+    pub(crate) fn into_context(self, target: &SendTarget) -> Option<lash_core::TraceCarrier> {
+        match self {
             Self::Ambient => target.capture_trace_context(),
             Self::Captured(context) => context,
-        })
+        }
     }
 
-    /// [`Self::into_cause`] for a submission that captures through
+    /// The cause for a submission that captures through
     /// `scopes` directly.
     pub(crate) fn cause_through(
         &self,
@@ -469,7 +479,14 @@ impl SendBuilder {
         } = self;
         // The caller's context is snapshotted once, here, on the first poll
         // and before the first await: nothing later changes the edge.
-        let trace_cause = trace.into_cause(&target);
+        let parent = trace.into_context(&target);
+        let host_send = target.begin_host_send(parent.as_ref());
+        let trace_cause = lash_core::TraceCause::linked_to(
+            host_send
+                .as_ref()
+                .map(|operation| operation.carrier())
+                .or(parent),
+        );
         let context = target.context().await?;
         // The host id names the run; the shift executes the run's turns under
         // it, so the input carries no turn id of its own. An input sent
@@ -489,7 +506,7 @@ impl SendBuilder {
                 ingress,
                 run_spec,
                 pin,
-                trace_cause,
+                trace_cause.clone(),
             )
             .await?
             .pop()
@@ -499,6 +516,15 @@ impl SendBuilder {
                     "a batch of one admitted no pending turn input",
                 ))
             })?;
+        if let Some(operation) = host_send {
+            // The unique local carrier is retained only by this acceptance's
+            // first SQL writer. A retry returns the original cause instead.
+            operation.settle(if enqueued.trace_cause == trace_cause {
+                lash_trace::TraceCandidateOutcome::Selected
+            } else {
+                lash_trace::TraceCandidateOutcome::Reused
+            });
+        }
         let receipt = TurnInputAcceptanceReceipt::from(&enqueued);
         Ok(SendHandle {
             target,

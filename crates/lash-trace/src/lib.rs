@@ -73,9 +73,10 @@ pub use telemetry::{
     AttemptObservation, DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier,
     InvalidTraceLinks, TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT,
     TraceAdmissionCandidate, TraceAnchor, TraceAttemptId, TraceCandidateOutcome, TraceCarrier,
-    TraceCause, TraceDomainProjector, TraceLinks, TraceRecordIdentity, TraceScopeAdmission,
-    TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOffer, TraceScopeOwner,
-    TraceTransitionKind, UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
+    TraceCause, TraceDomainProjector, TraceHostOperation, TraceLinks, TraceRecordIdentity,
+    TraceScopeAdmission, TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOffer,
+    TraceScopeOwner, TraceTransitionKind, UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId,
+    W3cTraceState,
 };
 
 /// Version of the durable trace JSONL schema, written to
@@ -462,26 +463,6 @@ impl<'de> Deserialize<'de> for TraceRecord {
     }
 }
 
-impl TraceRecord {
-    pub fn new(context: TraceContext, event: TraceEvent) -> Self {
-        Self::new_with_timestamp(context, event, chrono::Utc::now())
-    }
-
-    pub fn new_with_timestamp(
-        context: TraceContext,
-        event: TraceEvent,
-        timestamp: chrono::DateTime<chrono::Utc>,
-    ) -> Self {
-        Self {
-            schema_version: TRACE_SCHEMA_VERSION,
-            id: uuid::Uuid::new_v4().to_string(),
-            timestamp,
-            context,
-            event,
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[allow(
@@ -652,6 +633,7 @@ pub enum TraceEvent {
     },
     /// A Restate durable wait resumed with a terminal resolution.
     DurableWaitResolved {
+        started_at_ms: u64,
         wait_kind: String,
         resolution: TraceDurableWaitResolution,
     },

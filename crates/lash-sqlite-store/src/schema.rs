@@ -9,125 +9,10 @@
 //! 15-second `busy_timeout` (see `conn.rs`).
 
 use super::*;
-use crate::schema_fragments::{SESSION_INGRESS_TABLE, SESSION_RUNS_TABLES};
 pub(crate) use crate::trigger_schema::TRIGGER_SCHEMA;
 
-#[derive(Clone, Copy)]
-struct SqliteDatabaseDefinition {
-    name: &'static str,
-    schema: &'static str,
-    /// Shared table sets this database also carries; see
-    /// [`SqliteDatabase::fragments`].
-    fragments: &'static [&'static str],
-}
-
-/// One of the three independently versioned SQLite databases a lash backend
-/// can hold.
-///
-/// The variant is the single table for each database's schema SQL, version,
-/// and operator-facing name.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum SqliteDatabase {
-    /// Sessions, graph nodes, checkpoints, leases, queued work.
-    DurableCore,
-    /// The process registry.
-    ProcessRegistry,
-    /// The trigger store.
-    Triggers,
-}
-
-impl SqliteDatabase {
-    /// Every database a backend holds.
-    pub(crate) const ALL: [Self; 3] = [Self::DurableCore, Self::ProcessRegistry, Self::Triggers];
-
-    /// The file this database is kept in under a file backend's root.
-    pub const fn file_name(self) -> &'static str {
-        match self {
-            Self::DurableCore => crate::DURABLE_CORE_DB_FILE,
-            Self::ProcessRegistry => "process-registry.db",
-            Self::Triggers => "triggers.db",
-        }
-    }
-
-    /// The last segment of this database's `memdb` name in a memory
-    /// backend.
-    pub(crate) const fn memory_name(self) -> &'static str {
-        match self {
-            Self::DurableCore => "core",
-            Self::ProcessRegistry => "registry",
-            Self::Triggers => "triggers",
-        }
-    }
-
-    const fn definition(self) -> SqliteDatabaseDefinition {
-        match self {
-            Self::DurableCore => SqliteDatabaseDefinition {
-                name: "durable core",
-                schema: SCHEMA,
-                fragments: &[SESSION_INGRESS_TABLE, SESSION_RUNS_TABLES],
-            },
-            Self::ProcessRegistry => SqliteDatabaseDefinition {
-                name: "process registry",
-                schema: PROCESS_SCHEMA,
-                fragments: &[],
-            },
-            Self::Triggers => SqliteDatabaseDefinition {
-                name: "trigger store",
-                schema: TRIGGER_SCHEMA,
-                fragments: &[],
-            },
-        }
-    }
-
-    pub(crate) fn schema(self) -> &'static str {
-        self.definition().schema
-    }
-
-    pub(crate) const fn component(self) -> lash_core_execution::compat::ComponentId {
-        use lash_core_execution::compat::ComponentId;
-        match self {
-            Self::DurableCore => ComponentId::SQLITE_CORE,
-            Self::ProcessRegistry => ComponentId::SQLITE_REGISTRY,
-            Self::Triggers => ComponentId::SQLITE_TRIGGERS,
-        }
-    }
-
-    /// This build's compatibility version for this database.
-    pub fn expected_version(self) -> i64 {
-        lash_core_execution::compat::descriptor(self.component())
-            .map_or(0, |descriptor| i64::from(descriptor.writes.max()))
-    }
-
-    /// The operator-facing name used in reports and refusal messages.
-    pub fn name(self) -> &'static str {
-        self.definition().name
-    }
-
-    /// Shared DDL fragments applied after `schema` inside the same
-    /// initialization transaction; see [`crate::schema_fragments`].
-    pub(crate) fn fragments(self) -> &'static [&'static str] {
-        self.definition().fragments
-    }
-
-    /// The shared fragments provisioning applies after `schema`, in order.
-    #[cfg(feature = "testing")]
-    pub(crate) fn fragment_statements(self) -> impl Iterator<Item = &'static str> {
-        self.definition().fragments.iter().copied()
-    }
-
-    /// Everything provisioning applies, in order: the schema body, the shared
-    /// fragments, then every step of the migration catalog up to this build's
-    /// version ([`crate::migration::provisioning_steps`]), so a database this
-    /// build creates has the shape a migrated one has. Fixtures that shadow
-    /// one table apply this to complete the catalog — every statement is
-    /// idempotent, so the shadowed declaration stands while every other table
-    /// is created.
-    pub(crate) fn provisioning_statements(self) -> impl Iterator<Item = &'static str> {
-        std::iter::once(self.schema())
-            .chain(self.fragments().iter().copied())
-            .chain(crate::migration::provisioning_steps(self))
-    }
-}
+mod database;
+pub use database::SqliteDatabase;
 
 /// Canonical SQLite schema for a factory-wide lash durable-core catalog.
 ///
@@ -141,6 +26,29 @@ impl SqliteDatabase {
 /// in the same transaction. Component blobs are shared and have no
 /// component-side cascade.
 pub(crate) const SCHEMA: &str = "
+CREATE TABLE IF NOT EXISTS wait_receipts (
+    wait_id TEXT PRIMARY KEY,
+    owner_key TEXT NOT NULL,
+    session_id TEXT,
+    started_at_ms INTEGER NOT NULL,
+    request_json TEXT NOT NULL,
+    resolution_json TEXT,
+    resolved_at_ms INTEGER,
+    retired_at_ms INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_wait_receipts_owner ON wait_receipts(owner_key);
+
+CREATE TABLE IF NOT EXISTS tool_call_receipts (
+    request_key TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    payload_digest TEXT NOT NULL,
+    requested_at_ms INTEGER NOT NULL,
+    request_json TEXT NOT NULL,
+    completion_json TEXT,
+    completed_at_ms INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_tool_call_receipts_retention ON tool_call_receipts(session_id, completed_at_ms);
+
 CREATE TABLE IF NOT EXISTS worker_recovery (
     scope_id TEXT PRIMARY KEY,
     revision INTEGER NOT NULL,
@@ -1083,6 +991,7 @@ CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_stalled
 CREATE TABLE IF NOT EXISTS process_segment_handovers (
     process_id       TEXT NOT NULL,
     segment_ordinal  INTEGER NOT NULL,
+    committed_at_ms INTEGER NOT NULL,
     handover_json    TEXT NOT NULL,
     started_json     TEXT,
     written_generation TEXT NOT NULL,

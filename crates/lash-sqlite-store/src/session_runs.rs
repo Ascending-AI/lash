@@ -1203,7 +1203,34 @@ impl RunStore for crate::SqliteStore {
         &self,
         request: &lash_core_execution::store::AdmitRunRequest,
     ) -> Result<Option<RunAdmission>, StoreError> {
-        crate::persistence::admit_run_sqlite(self, request).await
+        lash_core_execution::store::admit_run_with_trace(self, request).await
+    }
+
+    async fn prepare_run_admission(
+        &self,
+        request: &lash_core_execution::store::AdmitRunRequest,
+    ) -> Result<Option<lash_core_execution::store::PreparedRunAdmission>, StoreError> {
+        Ok(crate::persistence::admit_run_sqlite(
+            self,
+            request,
+            None,
+            &lash_core_execution::TraceAnchor::Untraced,
+        )
+        .await?
+        .map(
+            |admission| lash_core_execution::store::PreparedRunAdmission {
+                request: request.clone(),
+                admission,
+            },
+        ))
+    }
+
+    async fn commit_run_admission(
+        &self,
+        prepared: &lash_core_execution::store::PreparedRunAdmission,
+        anchor: &lash_core_execution::TraceAnchor,
+    ) -> Result<Option<RunAdmission>, StoreError> {
+        crate::persistence::admit_run_sqlite(self, &prepared.request, Some(prepared), anchor).await
     }
 
     async fn admit_at_checkpoint(

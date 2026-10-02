@@ -383,7 +383,7 @@ pub async fn inconsistent_divergence_still_parks(
             admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance-law"),
             executor: lash_core::store::RunExecutor::Run,
             plugins: Default::default(),
-            trace_anchor: Default::default(),
+            trace_scopes: std::sync::Arc::new(lash_core::UntracedScopes),
         })
         .await
         .expect("record the run's admission")

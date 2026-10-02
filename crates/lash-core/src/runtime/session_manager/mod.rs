@@ -495,6 +495,7 @@ impl RuntimeSessionServices {
                                 .obligation_ledger(crate::store::ObligationKind::ProcessStart),
                             Arc::clone(&self.current.host.core.clock),
                             self.current.host.core.control.relay_policy(),
+                            self.current.host.core.tracing.metrics().clone(),
                         );
                 if let Some(restorer) = &self.current.host.core.control.trigger_route_restorer {
                     router = router.with_route_restorer(Arc::clone(restorer));

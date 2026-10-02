@@ -41,6 +41,7 @@ mod tests {
     use super::*;
     use crate::SessionId;
     use crate::session_graph::RealizedNodeTimestamp;
+    use crate::store::{StoreTransition, ToolCompletionReceipt, ToolRequestReceipt};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     async fn commit_runtime_state_verified(
@@ -70,6 +71,23 @@ mod tests {
 
     #[async_trait::async_trait]
     impl SessionCommitStore for FacadeTestStore {
+        async fn record_tool_request(
+            &self,
+            _: &ToolRequestReceipt,
+        ) -> Result<StoreTransition<ToolRequestReceipt>, StoreError> {
+            Err(StoreError::Backend(
+                "fixture does not retain tool requests".into(),
+            ))
+        }
+        async fn record_tool_completion(
+            &self,
+            _: &ToolCompletionReceipt,
+        ) -> Result<StoreTransition<ToolCompletionReceipt>, StoreError> {
+            Err(StoreError::Backend(
+                "fixture does not retain tool completions".into(),
+            ))
+        }
+
         async fn read_session_state_version(
             &self,
             _session_id: &SessionId,
@@ -123,6 +141,7 @@ mod tests {
                 .checkpoint
                 .manifest(super::super::FleetFormat::current())?;
             Ok(RuntimeCommitReceipt {
+                committed_at_ms: 0,
                 schema_version: crate::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION,
                 head_revision: commit.expected_head_revision + u64::from(self.advances_revision),
                 checkpoint_ref: "empty-frame-facade".to_string().into(),
@@ -135,6 +154,7 @@ mod tests {
                 realized_node_timestamps,
                 failure_evidence: commit.failure_evidence.clone(),
                 outcome: commit.outcome.clone(),
+                trace: commit.trace.clone(),
                 pending_follow_on: None,
                 command_outcomes: commit.command_outcomes.clone(),
                 turn_input_applications: Vec::new(),
@@ -188,7 +208,7 @@ mod tests {
         async fn record_turn_park(
             &self,
             _park: &super::super::TurnParkWrite,
-        ) -> Result<super::super::TurnPark, StoreError> {
+        ) -> Result<super::super::StoreTransition<super::super::TurnPark>, StoreError> {
             Err(StoreError::UnsupportedStoreOperation {
                 operation: "record_turn_park",
             })

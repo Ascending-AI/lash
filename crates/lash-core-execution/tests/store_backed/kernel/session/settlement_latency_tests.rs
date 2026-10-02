@@ -257,6 +257,7 @@ fn probe_context_with<'run>(
     let attachment_store: Arc<crate::RuntimeAttachmentStore> =
         Arc::new(crate::RuntimeAttachmentStore::unavailable());
     let dispatch = crate::tool_dispatch::ToolDispatchContext {
+        tool_receipts: None,
         plugins,
         tools,
         tool_catalog,

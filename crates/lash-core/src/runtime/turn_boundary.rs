@@ -73,6 +73,8 @@ pub(super) struct TurnBoundary {
     operation_scope: crate::ExecutionScope,
     commit_budget: crate::CommitBudget,
     metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
+    trace: Option<crate::trace::TraceStanding>,
+    trace_metadata: std::collections::BTreeMap<String, serde_json::Value>,
     /// In-turn graph appends riding this turn's commit. Held here as well as
     /// on the draft so services created after finalization still share it.
     graph_appends: TurnGraphAppendDraft,
@@ -122,6 +124,19 @@ impl TurnBoundary {
         metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
     ) -> Self {
         self.metrics = metrics;
+        self
+    }
+
+    pub(super) fn with_trace_metadata(
+        mut self,
+        metadata: std::collections::BTreeMap<String, serde_json::Value>,
+    ) -> Self {
+        self.trace_metadata = metadata;
+        self
+    }
+
+    pub(super) fn with_trace(mut self, trace: crate::trace::TraceStanding) -> Self {
+        self.trace = Some(trace);
         self
     }
 
@@ -185,6 +200,8 @@ impl TurnBoundary {
             operation_scope,
             commit_budget,
             metrics: Default::default(),
+            trace: None,
+            trace_metadata: Default::default(),
             graph_appends,
             protocol_terminal_output: materialize::ProtocolTerminalOutput::default(),
             shift_commit: None,
@@ -683,6 +700,8 @@ impl TurnBoundary {
         let operation = self.final_operation();
         let commit_budget = self.commit_budget;
         let metrics = self.metrics.clone();
+        let trace = self.trace.clone();
+        let trace_metadata = self.trace_metadata.clone();
         let shift_commit = self.shift_commit.clone();
         let park_run = self.park_run.clone();
         // A switch this turn makes ends the frame the turn was admitted on;
@@ -713,11 +732,14 @@ impl TurnBoundary {
                 .len()
                 .try_into()
                 .unwrap_or(u64::MAX);
-            Self::apply_commit(
+            Box::pin(Self::apply_commit(
                 &definition_engines,
                 state,
                 commit_budget,
                 &metrics,
+                trace.as_ref(),
+                &trace_metadata,
+                super::turn_loop::trace_outcome(outcome),
                 store,
                 graph,
                 failure_evidence,
@@ -731,7 +753,7 @@ impl TurnBoundary {
                 shift_commit,
                 park_run,
                 frame_switch,
-            )
+            ))
             .await
         } else {
             // No store will ever rehydrate this commit: the accepted execution
@@ -751,6 +773,9 @@ impl TurnBoundary {
         state: &mut RuntimeSessionState,
         commit_budget: crate::CommitBudget,
         metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
+        trace: Option<&crate::trace::TraceStanding>,
+        trace_metadata: &std::collections::BTreeMap<String, serde_json::Value>,
+        trace_outcome: Option<lash_trace::TraceTurnOutcome>,
         store: &crate::store::SessionStore,
         mut graph: GraphAppend,
         failure_evidence: &[crate::TurnFailureEvidence],
@@ -811,6 +836,26 @@ impl TurnBoundary {
         .with_committed_attachments(committed_attachment_ids);
         commit.failure_evidence = failure_evidence.to_vec();
         commit.outcome = Some(outcome);
+        commit.trace = trace.zip(trace_outcome).and_then(|(trace, outcome)| {
+            let scope = trace.scope()?.clone();
+            let lash_trace::TraceScopeOwner::Turn { turn_id, .. } = &scope.scope.owner else {
+                return None;
+            };
+            let context = lash_trace::TraceContext::default()
+                .for_session(session_id.clone())
+                .for_turn(turn_id.clone())
+                .for_turn_index(state.turn_index);
+            Some(Box::new(crate::store::TurnTraceReceipt {
+                metadata: trace_metadata.clone(),
+                scope,
+                context,
+                outcome,
+                run_scope: shift_commit
+                    .as_ref()
+                    .filter(|commit| commit.terminal.is_some())
+                    .and_then(|commit| commit.trace_scope.clone()),
+            }))
+        });
         commit.adopted_intent_rows = adopted_intent_rows;
         // A cancelled turn's undelivered input follows the cancellation's
         // disposition; every other handed-back row is deferred.
@@ -867,6 +912,72 @@ impl TurnBoundary {
                 Err(err) => return Err(err),
             }
         };
+        if !result.receipt_replayed
+            && let (Some(trace), Some(receipt)) = (trace, result.trace.as_ref())
+        {
+            let standing = trace.under(receipt.scope.clone());
+            let permit = lash_trace::EmissionPermit::new_transition();
+            standing.transition(
+                Some(&permit),
+                receipt.scope.started_at_ms,
+                lash_trace::TraceTransitionKind::Started,
+                0,
+                || {
+                    (
+                        receipt.context.clone(),
+                        lash_trace::TraceEvent::TurnStarted {
+                            metadata: receipt.metadata.clone(),
+                        },
+                    )
+                },
+            );
+            standing.transition(
+                Some(&permit),
+                result.committed_at_ms,
+                lash_trace::TraceTransitionKind::Terminal,
+                0,
+                || {
+                    (
+                        receipt.context.clone(),
+                        lash_trace::TraceEvent::TurnCompleted {
+                            outcome: receipt.outcome.clone(),
+                        },
+                    )
+                },
+            );
+        }
+        if !result.receipt_replayed
+            && let (Some(trace), Some(receipt)) = (trace, result.trace.as_ref())
+            && let Some(scope) = &receipt.run_scope
+        {
+            let status = match &result.outcome {
+                Some(crate::store::TurnCommitOutcome::Cancelled) => {
+                    lash_trace::TraceDomainStatus::Cancelled
+                }
+                Some(crate::store::TurnCommitOutcome::Failed(_)) => {
+                    lash_trace::TraceDomainStatus::Failed
+                }
+                _ => lash_trace::TraceDomainStatus::Completed,
+            };
+            trace.under(scope.clone()).transition(
+                Some(&lash_trace::EmissionPermit::new_transition()),
+                result.committed_at_ms,
+                lash_trace::TraceTransitionKind::Terminal,
+                0,
+                || {
+                    (
+                        receipt.context.clone(),
+                        lash_trace::TraceEvent::DomainCompleted {
+                            completion: lash_trace::TraceDomainCompletion::new(
+                                lash_trace::TraceDomainOperation::Run,
+                                scope.started_at_ms,
+                                status,
+                            ),
+                        },
+                    )
+                },
+            );
+        }
         let turn_cancel_input_outcome = result.turn_cancel_input_outcome.clone();
         state.apply_persisted_commit_result(result);
         state.mark_node_ids_persisted(persisted_node_ids);

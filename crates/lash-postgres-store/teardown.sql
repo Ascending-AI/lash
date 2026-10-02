@@ -1,3 +1,4 @@
+DROP TABLE IF EXISTS lash_wait_receipts;
 -- lash-postgres-store teardown, component version 141.
 --
 -- Generated artifact. These bytes are exactly the DDL a host applies to drop

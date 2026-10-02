@@ -65,6 +65,7 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimeSto
             },
         ))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("record the park");
     store
         .supersede_shift_epoch_for_test(&lease)
@@ -101,6 +102,7 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimeSto
             ..park(&session_id, &parked_turn, cutover.clone())
         })
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("re-park the turn");
     assert_eq!(
         reparked.park_id, divergence.park_id,
@@ -138,6 +140,7 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimeSto
         let parked = store
             .record_turn_park(&park(&session_id, &parked_turn, reason))
             .await
+            .map(lash_core::store::StoreTransition::into_record)
             .expect("park the turn under the reason");
         assert_eq!(
             store
@@ -184,6 +187,7 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimeSto
             },
         ))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park the turn again");
     let state = RuntimeSessionState {
         session_id: session_id.clone(),
@@ -236,7 +240,8 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimeSto
                         message: "stale retry after withdrawal".to_string(),
                     },
                 ))
-                .await,
+                .await
+                .map(lash_core::store::StoreTransition::into_record),
             Err(crate::StoreError::RunInputWithdrawn { .. })
         ),
         "a retry cannot restore a park after its only input was withdrawn"

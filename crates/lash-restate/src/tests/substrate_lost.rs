@@ -1445,6 +1445,7 @@ impl ZombieRun {
                 },
             )
             .await
+            .map(|_| ())
     }
 
     async fn outcome(&self) -> Option<ProcessAwaitOutput> {

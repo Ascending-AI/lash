@@ -29,6 +29,7 @@ pub fn process_transfer_set_identity(process_ids: &[ProcessId]) -> String {
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeEffectKind {
     TransitionPlugins,
+    TraceBoundary,
     /// The protocol's recorded decision before a model call.
     BeforeLlmCall,
     LlmCall,
@@ -157,6 +158,7 @@ impl RuntimeEffectKind {
             Self::ObserveDrainMark => "observe_drain_mark",
             Self::RecoverFollowOn => "recover_follow_on",
             Self::AdmitShift => "admit_shift",
+            Self::TraceBoundary => "trace_boundary",
             Self::DrawRunStart => "draw_run_start",
             Self::SealShiftAdmission => "seal_shift_admission",
             Self::ResolveTurnConfig => "resolve_turn_config",

@@ -126,9 +126,12 @@ macro_rules! carries_session_field {
 }
 
 carries_session_field! {
+    ToolRequestReceipt => |request| &request.session_id;
+    ToolCompletionReceipt => |request| &request.session_id;
     RuntimeCommit => |request| &request.session_id;
     ShiftFence => |request| request.session();
     AdmitRunRequest => |request| request.fence.session();
+    PreparedRunAdmission => |request| request.session_id();
     CheckpointAdmissionRequest => |request| request.fence.session();
     crate::TurnAddress => |request| &request.session_id;
     crate::TurnCancelRequest => |request| &request.address.session_id;

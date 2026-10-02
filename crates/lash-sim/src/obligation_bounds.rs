@@ -601,6 +601,7 @@ async fn held_recovery_preserves_the_interval_and_due_retry_bound() {
                 let at = clock.logical_ms();
                 let tick = reconcile_once(
                     &ReconcileParts {
+                        metrics: &Default::default(),
                         sessions: sessions.as_ref(),
                         work: work.as_ref(),
                         scopes: scopes.as_ref(),
@@ -769,6 +770,7 @@ async fn slow_delivery_does_not_starve_later_kinds_or_parks() {
                 tick_proceed.recv().await.expect("tick admission");
                 let tick = reconcile_once(
                     &ReconcileParts {
+                        metrics: &Default::default(),
                         sessions: factory.as_ref(),
                         work: &work,
                         scopes: close.as_ref(),

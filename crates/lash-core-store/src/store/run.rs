@@ -485,6 +485,20 @@ pub trait RunStore: Send + Sync {
         request: &AdmitRunRequest,
     ) -> Result<Option<RunAdmission>, StoreError>;
 
+    /// Reads the exact composition without binding or retaining any rows.
+    async fn prepare_run_admission(
+        &self,
+        request: &AdmitRunRequest,
+    ) -> Result<Option<PreparedRunAdmission>, StoreError>;
+
+    /// Commits exactly the prepared composition. A changed composition is
+    /// refused; an already recorded run returns the first writer's scope.
+    async fn commit_run_admission(
+        &self,
+        prepared: &PreparedRunAdmission,
+        anchor: &lash_trace::TraceAnchor,
+    ) -> Result<Option<RunAdmission>, StoreError>;
+
     /// Admit the rows a running run's checkpoint delivers, in one
     /// transaction fenced by `request.fence` (FIG-3927).
     ///
@@ -877,7 +891,7 @@ pub enum RunAdmissionRefusal {
 /// `generation` with the durable state generation it reads inside the
 /// admission transaction. `turn_index` and `generation` are recorded as
 /// given, and so are `executor` and `plugins`.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct AdmitRunRequest {
     /// The fence of the shift admission the run executes under: the one
     /// authority the admission's write checks.
@@ -895,10 +909,50 @@ pub struct AdmitRunRequest {
     /// The admitting build's plugin composition and the writer chosen for
     /// each plugin, recorded as given by the first admission.
     pub plugins: super::plugin_writers::PluginAdmission,
-    /// The anchor this admission's candidate offers the run's trace scope.
-    /// The admission that records the run retains it; one that finds the
-    /// run already recorded reads the retained scope back and drops this.
-    pub trace_anchor: lash_trace::TraceAnchor,
+    /// The runtime's scope factory, called outside the admission transaction.
+    pub trace_scopes: std::sync::Arc<dyn lash_trace::TraceScopeFactory>,
+}
+
+impl std::fmt::Debug for AdmitRunRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AdmitRunRequest")
+            .field("root", &self.run)
+            .field("head", &self.head)
+            .field("fence", &self.fence)
+            .finish_non_exhaustive()
+    }
+}
+
+/// A snapshot of the composition the admission may commit.
+#[derive(Clone, Debug)]
+pub struct PreparedRunAdmission {
+    pub request: AdmitRunRequest,
+    pub admission: RunAdmission,
+}
+
+impl PreparedRunAdmission {
+    pub fn session_id(&self) -> &SessionId {
+        self.request.session_id()
+    }
+
+    /// Includes payloads and the retained base, so a same-id content change
+    /// cannot satisfy the composition fence.
+    pub fn matches(
+        &self,
+        inputs: Option<&crate::AdmittedTurnInputs>,
+        queued: Option<&crate::AdmittedQueuedWork>,
+        base: &SessionHeadRef,
+    ) -> Result<bool, StoreError> {
+        let actual = serde_json::to_value((inputs, queued, base))
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let expected = serde_json::to_value((
+            self.admission.inputs.as_deref(),
+            self.admission.queued.as_deref(),
+            &self.admission.base,
+        ))
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+        Ok(actual == expected)
+    }
 }
 
 impl AdmitRunRequest {
@@ -1054,6 +1108,36 @@ pub fn run_binding_conflict(
         "accepted input `{input}` of session `{session_id}` is bound to run `{bound}`; \
          it cannot be bound to run `{requested}`"
     ))
+}
+
+/// Prepare admission, propose its scope outside SQL, then commit the exact plan.
+///
+/// # Errors
+/// Returns the store's typed preparation or commit refusal.
+pub async fn admit_run_with_trace(
+    store: &dyn RunStore,
+    request: &AdmitRunRequest,
+) -> Result<Option<RunAdmission>, StoreError> {
+    let Some(prepared) = store.prepare_run_admission(request).await? else {
+        return Ok(None);
+    };
+    let scope =
+        prepared.admission.trace.as_ref().ok_or_else(|| {
+            StoreError::Backend("prepared admission lacks its trace scope".into())
+        })?;
+    let candidate = request.trace_scopes.propose(&scope.scope, &scope.cause);
+    let result = store
+        .commit_run_admission(&prepared, &candidate.anchor())
+        .await;
+    let outcome = match &result {
+        Ok(Some(admission)) if admission.recorded_by_this_call => {
+            lash_trace::TraceCandidateOutcome::Selected
+        }
+        Ok(Some(_)) => lash_trace::TraceCandidateOutcome::Reused,
+        _ => lash_trace::TraceCandidateOutcome::Refused,
+    };
+    candidate.settle(outcome);
+    result
 }
 
 #[cfg(test)]

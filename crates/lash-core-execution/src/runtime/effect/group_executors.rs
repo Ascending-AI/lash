@@ -3,6 +3,11 @@ use super::executor::RuntimeEffectLocalExecutor;
 
 /// Resolves a recorded group child to the executor owned by this host.
 pub trait GroupExecutors: Send + Sync {
+    /// The deployment's shared observation runtime for reconstructed children.
+    fn trace_runtime(&self) -> crate::trace::TraceRuntime {
+        Default::default()
+    }
+
     /// The executor for `envelope`, or `None` when this host cannot run it.
     ///
     /// Called once per child per resolution, with the envelope as the journal

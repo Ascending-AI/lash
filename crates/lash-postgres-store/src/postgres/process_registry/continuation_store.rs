@@ -7,7 +7,10 @@ impl ProcessContinuationStore for PostgresProcessRegistry {
         &self,
         process_id: &ProcessId,
         handover: PersistedSegmentHandover,
-    ) -> Result<(), PluginError> {
+    ) -> Result<
+        lash_core_execution::store::StoreTransition<lash_core_execution::SegmentHandoverCommit>,
+        PluginError,
+    > {
         let encoded = serde_json::to_string(&handover).map_err(process_decode_error)?;
         let mut tx = begin_guarded(&self.pool, &self.fence)
             .await
@@ -23,12 +26,48 @@ impl ProcessContinuationStore for PostgresProcessRegistry {
                 status: record.status(),
             });
         }
-        let result = sqlx::query(process_sql().handover_postgres.upsert_identical.sql())
+        let existing: Option<String> =
+            sqlx::query_scalar(process_sql().handover.select_by_ordinal.sql())
+                .bind(process_id.as_str())
+                .bind(handover.segment_ordinal as i64)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(plugin_sqlx_error)?;
+        if let Some(existing) = existing {
+            let parked: PersistedSegmentHandover =
+                serde_json::from_str(&existing).map_err(process_decode_error)?;
+            if existing != encoded
+                && (handover.writer.is_empty() || parked.writer != handover.writer)
+            {
+                return Err(PluginError::Session(format!(
+                    "process `{process_id}` segment {} handover conflict",
+                    handover.segment_ordinal
+                )));
+            }
+            let committed_at_ms: i64 =
+                sqlx::query_scalar(process_sql().handover.select_committed_at.sql())
+                    .bind(process_id.as_str())
+                    .bind(handover.segment_ordinal as i64)
+                    .fetch_one(&mut **tx)
+                    .await
+                    .map_err(plugin_sqlx_error)?;
+            tx.commit().await.map_err(plugin_sqlx_error)?;
+            return Ok(lash_core_execution::store::StoreTransition::unchanged(
+                lash_core_execution::SegmentHandoverCommit {
+                    scope: record.trace.clone(),
+                    handover: parked,
+                    committed_at_ms: committed_at_ms as u64,
+                },
+            ));
+        }
+        let committed_at_ms = self.clock.timestamp_ms();
+        let result = sqlx::query(process_sql().handover_postgres.insert.sql())
             .bind(process_id.as_str())
             .bind(handover.segment_ordinal as i64)
             .bind(encoded)
             .bind(handover.written_generation.as_str())
             .bind(handover.route.as_str())
+            .bind(committed_at_ms as i64)
             .execute(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?;
@@ -39,7 +78,13 @@ impl ProcessContinuationStore for PostgresProcessRegistry {
             )));
         }
         tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(())
+        Ok(lash_core_execution::store::StoreTransition::changed(
+            lash_core_execution::SegmentHandoverCommit {
+                scope: record.trace.clone(),
+                handover,
+                committed_at_ms,
+            },
+        ))
     }
 
     async fn get_segment_handover(

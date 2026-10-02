@@ -33,7 +33,7 @@ pub(crate) struct BoundSession {
     models: Arc<dyn lash_core::LlmProfiles>,
     /// The owner core's telemetry adapter: what a send through this
     /// binding captures the caller's trace context from.
-    trace_scopes: Arc<dyn lash_core::TraceScopeFactory>,
+    tracing: lash_core::facade_support::TraceRuntime,
     /// The core's tool-child context source (FIG-3712), held for as long as
     /// the session is: the backend's host holds it weakly, and a session
     /// whose core was dropped still has children to rebuild.
@@ -66,7 +66,7 @@ impl BoundSession {
             relay_policy: env.core.control.relay_policy(),
             clock: Arc::clone(&env.core.clock),
             models: Arc::clone(&env.core.providers.models),
-            trace_scopes: Arc::clone(env.core.tracing.scopes()),
+            tracing: env.core.tracing.clone(),
             tool_child_context_source: None,
         }
     }
@@ -114,6 +114,7 @@ impl BoundSession {
             Arc::clone(&self.clock),
         )
         .with_policy(self.relay_policy)
+        .with_metrics(self.tracing.metrics().clone())
     }
 
     /// The same port as [`queued`](Self::queued), with how a send waits on
@@ -147,7 +148,7 @@ impl BoundSession {
     }
 
     pub(crate) fn trace_scopes(&self) -> Arc<dyn lash_core::TraceScopeFactory> {
-        Arc::clone(&self.trace_scopes)
+        Arc::clone(self.tracing.scopes())
     }
 
     pub(crate) fn administration(&self) -> lash_core::SessionAdministration {
@@ -167,12 +168,14 @@ impl BoundSession {
                         self.catalog(),
                         Arc::clone(&self.scope_close),
                     )
-                    .with_policy(self.relay_policy),
+                    .with_policy(self.relay_policy)
+                    .with_metrics(self.tracing.metrics().clone()),
                 ),
                 intents: self
                     .backend
                     .obligation_ledger(lash_core::store::ObligationKind::ControlIntent),
                 clock: Arc::clone(&self.clock),
+                metrics: self.tracing.metrics().clone(),
                 deletes: lash_core::session_delete::SessionDeleteStores::of(&self.backend),
                 policy: self.relay_policy,
             },

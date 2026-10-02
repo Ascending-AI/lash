@@ -409,6 +409,7 @@ async fn a_redrive_after_the_records_mutable_state_moved_replays_the_run_unchang
             &authority.clone().bind_attempt(1),
         )
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park the process");
     registry
         .set_external_ref(

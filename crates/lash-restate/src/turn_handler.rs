@@ -78,13 +78,14 @@ pub(crate) async fn park_refused_group_child(
     sessions: &dyn lash_core::DeploymentStore,
     scope: &lash_core::ExecutionScope,
     refusal: &lash_core::RuntimeEffectControllerError,
+    tracing: &lash_core::trace::TraceRuntime,
 ) -> Result<Option<lash_core::store::TurnPark>, lash_core::StoreError> {
-    use lash_core::ClockWallTime as _;
     lash_core::park_turn_of_refused_group_child(
         sessions,
         scope,
         &refusal.clone().into_runtime_error(),
-        lash_core::facade_support::SystemClock.timestamp_ms(),
+        tracing.clock().timestamp_ms(),
+        tracing.metrics(),
     )
     .await
 }
@@ -146,6 +147,7 @@ pub async fn park_generation_refused_turn(
     scope: &lash_core::ExecutionScope,
     refusal: lash_core::SessionStateVersionRefusal,
     at_ms: u64,
+    metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
 ) -> Result<Option<lash_core::store::TurnPark>, lash_core::StoreError> {
     let lash_core::ExecutionScope::Turn { session_id, .. } = scope else {
         return Ok(None);
@@ -156,5 +158,5 @@ pub async fn park_generation_refused_turn(
     ) {
         return Ok(None);
     }
-    lash_core::park_turn_refused_by_generation(sessions, scope, refusal, at_ms).await
+    lash_core::park_turn_refused_by_generation(sessions, scope, refusal, at_ms, metrics).await
 }

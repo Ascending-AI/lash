@@ -1,6 +1,7 @@
 //! Execute each physical obligation CHECK against every tagged field shape.
 
-use super::{PROCESS_SCHEMA, SCHEMA, SESSION_RUNS_TABLES, TRIGGER_SCHEMA};
+use super::{PROCESS_SCHEMA, SCHEMA, TRIGGER_SCHEMA};
+use crate::schema_fragments::SESSION_RUNS_TABLES;
 use rusqlite::Connection;
 
 fn obligation_cases() -> Vec<(String, bool)> {

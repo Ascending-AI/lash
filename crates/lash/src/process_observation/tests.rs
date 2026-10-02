@@ -53,7 +53,7 @@ fn record(process_id: &ProcessId, attempt: u32, occurrence: u64) -> TraceRecord 
             call_id: None,
         }
     };
-    TraceRecord::new(
+    fixture_record(
         TraceContext::default(),
         TraceEvent::LanguageExecution {
             language: "lashlang".to_string(),
@@ -1153,5 +1153,19 @@ async fn process_snapshot_capture_race_delivers_each_observation_once() {
         let after = fixture.commit(true).await;
         expect_committed(&next(&mut subscription).await, after.sequence);
         quiet(&mut subscription).await;
+    }
+}
+
+#[cfg(test)]
+fn fixture_record(
+    context: lash_trace::TraceContext,
+    event: lash_trace::TraceEvent,
+) -> lash_trace::TraceRecord {
+    lash_trace::TraceRecord {
+        schema_version: lash_trace::TRACE_SCHEMA_VERSION,
+        id: "fixture-record".into(),
+        timestamp: Default::default(),
+        context,
+        event,
     }
 }

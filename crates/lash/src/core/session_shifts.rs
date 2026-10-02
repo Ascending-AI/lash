@@ -75,6 +75,7 @@ impl CoreSessionShifts {
             None => None,
         };
         lash_core::runtime::shift::obligation_relays(lash_core::runtime::shift::RelayParts {
+            tracing: self.config.env.core.tracing.clone(),
             backend: self.config.env.core.backend().clone(),
             sessions: Arc::clone(&self.config.store_factory),
             work: ports.queued_port(),
@@ -84,6 +85,7 @@ impl CoreSessionShifts {
             trigger_route_restorer: self.config.env.core.control.trigger_route_restorer.clone(),
             clock: Arc::clone(&self.config.env.core.clock),
             policy: self.config.env.core.control.relay_policy(),
+            metrics: self.config.env.core.tracing.metrics().clone(),
         })
     }
 
@@ -375,6 +377,7 @@ impl lash_core::SessionShifts for CoreSessionShifts {
         };
         let report = lash_core::runtime::shift::reconcile_once(
             &lash_core::runtime::shift::ReconcileParts {
+                metrics: self.config.env.core.tracing.metrics(),
                 sessions: self.config.store_factory.as_ref(),
                 work: work.as_ref(),
                 scopes: self.config.env.core.control.scope_close.as_ref(),

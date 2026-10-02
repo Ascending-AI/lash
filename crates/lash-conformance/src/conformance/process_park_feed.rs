@@ -106,6 +106,7 @@ async fn parked(
     let record = registry
         .park_process_with_authority(&id, reason.into(), &authority)
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park the process");
     (id, authority, record)
 }
@@ -276,6 +277,7 @@ pub async fn a_process_re_park_keeps_its_park_and_counts_attempts(
             &authority,
         )
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park the process");
     let opened = first.park().cloned().expect("the first refusal parks");
     assert_eq!(opened.attempts, 1);
@@ -313,6 +315,7 @@ pub async fn a_process_re_park_keeps_its_park_and_counts_attempts(
     let repeated = registry
         .park_process_with_authority(&id, divergence("llm_call").into(), &authority)
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("repeat the park write");
     assert_eq!(
         repeated.park(),
@@ -340,6 +343,7 @@ pub async fn a_process_re_park_keeps_its_park_and_counts_attempts(
     let reparked = registry
         .park_process_with_authority(&id, divergence("llm_call").into(), &authority)
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("the rerun refuses again");
     let park = reparked.park().expect("the process stays parked");
     assert_eq!(park.park_id, opened.park_id, "a re-park keeps its park id");
@@ -418,6 +422,7 @@ pub async fn progress_after_a_rerun_clears_the_park_once(registry: Arc<dyn Proce
     let reparked = registry
         .park_process_with_authority(&id, divergence("llm_call").into(), &authority)
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("a later refusal parks again");
     let park = reparked.park().expect("a new park");
     assert_ne!(park.park_id, opened.park_id, "a new park has a new id");

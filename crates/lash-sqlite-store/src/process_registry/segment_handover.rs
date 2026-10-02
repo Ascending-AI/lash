@@ -6,8 +6,12 @@ impl SqliteProcessRegistry {
         &self,
         process_id: &ProcessId,
         handover: PersistedSegmentHandover,
-    ) -> Result<(), lash_core_execution::PluginError> {
+    ) -> Result<
+        lash_core_execution::store::StoreTransition<lash_core_execution::SegmentHandoverCommit>,
+        lash_core_execution::PluginError,
+    > {
         let process_id = process_id.clone();
+        let committed_at_ms = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -31,16 +35,28 @@ impl SqliteProcessRegistry {
                         .map_err(process_sqlite_error)?;
                     let encoded = process_encode_json(&handover)?;
                     if let Some(existing) = existing {
-                        if existing == encoded {
-                            return Ok(());
-                        }
                         // The writer's own retried write keeps the parked
                         // bytes: a redriven segment re-derives its handover
                         // with a different measured elapsed time.
                         let parked: PersistedSegmentHandover =
                             serde_json::from_str(&existing).map_err(process_decode_error)?;
-                        if !handover.writer.is_empty() && parked.writer == handover.writer {
-                            return Ok(());
+                        if existing == encoded
+                            || (!handover.writer.is_empty() && parked.writer == handover.writer)
+                        {
+                            let committed_at_ms: i64 = tx
+                                .query_row(
+                                    process_sql().handover.select_committed_at.sql(),
+                                    params![process_id.as_str(), handover.segment_ordinal as i64],
+                                    |row| row.get(0),
+                                )
+                                .map_err(process_sqlite_error)?;
+                            return Ok(lash_core_execution::store::StoreTransition::unchanged(
+                                lash_core_execution::SegmentHandoverCommit {
+                                    scope: record.trace.clone(),
+                                    handover: parked,
+                                    committed_at_ms: committed_at_ms as u64,
+                                },
+                            ));
                         }
                         return Err(lash_core_execution::PluginError::Session(format!(
                             "process `{process_id}` segment {} handover conflict",
@@ -55,16 +71,22 @@ impl SqliteProcessRegistry {
                             handover.segment_ordinal as i64,
                             encoded,
                             handover.written_generation.as_str(),
-                            handover.route
+                            handover.route,
+                            committed_at_ms as i64
                         ],
                     )
                     .map_err(process_sqlite_error)?;
-                    Ok(())
+                    Ok(lash_core_execution::store::StoreTransition::changed(
+                        lash_core_execution::SegmentHandoverCommit {
+                            scope: record.trace.clone(),
+                            handover,
+                            committed_at_ms,
+                        },
+                    ))
                 })()))
             })
             .await
-            .map_err(process_sqlite_error)??;
-        Ok(())
+            .map_err(process_sqlite_error)?
     }
 
     pub(super) async fn record_segment_handover_route_impl(

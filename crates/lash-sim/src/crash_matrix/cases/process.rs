@@ -64,6 +64,7 @@ pub(super) async fn stage_start(point: CrashPoint, seed: u64) -> Result<Staged, 
         .clone();
     let started = lash_core::runtime::register_process_start(
         &lash_core::runtime::ProcessStartStores {
+            tracing: None,
             registry: registry.as_ref(),
             env_store: Some(&env_store),
             engines: &engines,

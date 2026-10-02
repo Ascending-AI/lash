@@ -56,7 +56,8 @@ pub(super) async fn complete(
     fence: &crate::guarded_tx::WriterFence,
     replay_key: &str,
     outcome: ToolIntentExecutionOutcome,
-) -> Result<ToolIntentSubmissionRecord, PluginError> {
+    at_ms: u64,
+) -> Result<lash_core_execution::store::StoreTransition<ToolIntentSubmissionRecord>, PluginError> {
     let mut tx = crate::begin_guarded(pool, fence)
         .await
         .map_err(crate::plugin_store_error)?;
@@ -71,7 +72,9 @@ pub(super) async fn complete(
     .await
     .map_err(plugin_sqlx_error)?;
     let mut submission = decode(row.get(0))?;
-    if submission.outcome.is_none() {
+    let changed = submission.outcome.is_none();
+    if changed {
+        submission.completed_at_ms = Some(at_ms);
         submission.outcome = Some(outcome);
         let encoded = serde_json::to_string(&submission).map_err(process_decode_error)?;
         sqlx::query(
@@ -87,7 +90,10 @@ pub(super) async fn complete(
         .map_err(plugin_sqlx_error)?;
     }
     tx.commit().await.map_err(plugin_sqlx_error)?;
-    Ok(submission)
+    Ok(lash_core_execution::store::StoreTransition {
+        record: submission,
+        changed,
+    })
 }
 
 fn decode(encoded: String) -> Result<ToolIntentSubmissionRecord, PluginError> {

@@ -844,6 +844,7 @@ impl Session {
     ) -> Result<RuntimeExecutionContext<'run>, crate::PluginError> {
         let tool_surface = self.active_tool_surface_entry()?;
         let dispatch = Arc::new(ToolDispatchContext {
+            tool_receipts: self.history_store().map(|store| store.store().clone()),
             plugins: Arc::clone(self.plugins()),
             tools: tool_surface.tools(),
             tool_registry: Some(tool_surface.tool_registry()),

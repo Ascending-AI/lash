@@ -161,7 +161,7 @@ fn record_child_conn(
 pub(crate) fn record_turn_park_conn(
     conn: &Connection,
     write: &TurnParkWrite,
-) -> Result<TurnPark, StoreError> {
+) -> Result<lash_core_execution::store::StoreTransition<TurnPark>, StoreError> {
     let session_id = &write.session_id;
     if let Some(terminal) =
         crate::session_runs::run_terminal_conn(conn, session_id, &write.turn_id)?
@@ -223,7 +223,9 @@ pub(crate) fn record_turn_park_conn(
         None => (None, None),
     };
     match (decide_turn_park_write(head.as_ref(), write), stored) {
-        (TurnParkWriteDecision::Unchanged, Some(park)) => return Ok(park),
+        (TurnParkWriteDecision::Unchanged, Some(park)) => {
+            return Ok(lash_core_execution::store::StoreTransition::unchanged(park));
+        }
         (TurnParkWriteDecision::AttachEngine, Some(mut park)) => {
             crate::conn::cached_execute(
                 conn,
@@ -232,11 +234,11 @@ pub(crate) fn record_turn_park_conn(
             )
             .map_err(sqlite_error)?;
             park.engine = write.engine().cloned();
-            return Ok(park);
+            return Ok(lash_core_execution::store::StoreTransition::unchanged(park));
         }
         (TurnParkWriteDecision::AttachChild, Some(mut park)) => {
             record_child_conn(conn, &mut park, write)?;
-            return Ok(park);
+            return Ok(lash_core_execution::store::StoreTransition::unchanged(park));
         }
         (TurnParkWriteDecision::Repark, Some(mut park)) => {
             // A same-run re-park keeps `park_id` and `since_ms`, refreshes
@@ -284,7 +286,7 @@ pub(crate) fn record_turn_park_conn(
                 park.build_generation = write.build_generation.clone();
             }
             record_child_conn(conn, &mut park, write)?;
-            return Ok(park);
+            return Ok(lash_core_execution::store::StoreTransition::changed(park));
         }
         (TurnParkWriteDecision::Supersede, Some(superseded)) => {
             // A different run's park supersedes the stored one: close it on
@@ -350,21 +352,23 @@ pub(crate) fn record_turn_park_conn(
         ],
     )
     .map_err(sqlite_error)?;
-    Ok(TurnPark {
-        session_id: session_id.clone(),
-        turn_id: write.turn_id.clone(),
-        reason: write.reason.clone(),
-        park_id: lash_core_execution::store::ParkId::from_feed_sequence(
-            u64::try_from(park_id).unwrap_or_default(),
-        ),
-        since_ms: write.at_ms,
-        last_refused_ms: write.at_ms,
-        attempts: 1,
-        engine: write.engine().cloned(),
-        children,
-        resume_intent: None,
-        build_generation: write.build_generation.clone(),
-    })
+    Ok(lash_core_execution::store::StoreTransition::changed(
+        TurnPark {
+            session_id: session_id.clone(),
+            turn_id: write.turn_id.clone(),
+            reason: write.reason.clone(),
+            park_id: lash_core_execution::store::ParkId::from_feed_sequence(
+                u64::try_from(park_id).unwrap_or_default(),
+            ),
+            since_ms: write.at_ms,
+            last_refused_ms: write.at_ms,
+            attempts: 1,
+            engine: write.engine().cloned(),
+            children,
+            resume_intent: None,
+            build_generation: write.build_generation.clone(),
+        },
+    ))
 }
 
 /// End `run`'s park on `conn` (inside the transaction that writes the

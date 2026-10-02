@@ -435,6 +435,7 @@ mod panic_tests {
             ))
             .expect("plugin session");
         let dispatch = Arc::new(super::ToolDispatchContext {
+            tool_receipts: None,
             plugins,
             tools: Arc::new(ConstructionPanicTool),
             tool_registry: None,

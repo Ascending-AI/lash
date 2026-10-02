@@ -80,6 +80,8 @@ pub struct ScopedEffectController<'run> {
     /// uncrossed on every attempt and is crossed when a step body of this
     /// attempt really runs ([`Self::frontier`]).
     pub(in crate::runtime::effect::executor) frontier: crate::trace::JournalFrontier,
+    pub(in crate::runtime::effect::executor) trace_scope:
+        Option<Arc<lash_trace::DurableTraceScope>>,
 }
 
 /// A replayed language command's say over the journal writes made under it
@@ -406,6 +408,7 @@ impl<'run> ScopedEffectController<'run> {
             ordinals: Arc::default(),
             effects: Arc::default(),
             frontier: crate::trace::JournalFrontier::new(),
+            trace_scope: None,
         })
     }
 
@@ -424,6 +427,7 @@ impl<'run> ScopedEffectController<'run> {
             ordinals: Arc::default(),
             effects: Arc::default(),
             frontier: crate::trace::JournalFrontier::new(),
+            trace_scope: None,
         })
     }
 
@@ -443,6 +447,7 @@ impl<'run> ScopedEffectController<'run> {
             ordinals: Arc::default(),
             effects: Arc::default(),
             frontier: crate::trace::JournalFrontier::new(),
+            trace_scope: None,
         })
     }
 
@@ -473,21 +478,41 @@ impl<'run> ScopedEffectController<'run> {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         self.validate_envelope_scope(&envelope)?;
         let local_executor = self.guard_local_executor(&envelope, local_executor)?;
-        self.effects.fetch_add(1, Ordering::SeqCst);
+        if !matches!(
+            envelope.command,
+            crate::RuntimeEffectCommand::TraceBoundary { .. }
+        ) {
+            self.effects.fetch_add(1, Ordering::SeqCst);
+        }
         let plugins = local_executor.plugin_state_session();
-        let outcome = self
+        let wait = crate::trace::wait_receipts::WaitBoundary::begin(self, &envelope).await?;
+        let result = self
             .controller()
             .execute_effect(envelope, local_executor)
             .await?;
-        match plugins {
-            Some(plugins) => plugins.restore_effect_state(outcome),
-            None => Ok(outcome),
+        let result = match plugins {
+            Some(plugins) => plugins.restore_effect_state(result)?,
+            None => result,
+        };
+        if let Some(wait) = wait {
+            wait.resolve(&result).await?;
         }
+        Ok(result)
     }
 
     /// Where this controller's shift stands relative to its journal: crossed
     /// once a step executed through this controller or a clone of it ran its
     /// body, which a step served from the journal never does.
+    #[must_use]
+    pub fn with_trace_scope(mut self, scope: lash_trace::DurableTraceScope) -> Self {
+        self.trace_scope = Some(Arc::new(scope));
+        self
+    }
+
+    pub fn trace_scope(&self) -> Option<&lash_trace::DurableTraceScope> {
+        self.trace_scope.as_deref()
+    }
+
     pub fn frontier(&self) -> &crate::trace::JournalFrontier {
         &self.frontier
     }
@@ -520,6 +545,7 @@ impl<'run> ScopedEffectController<'run> {
         let mut local_executor = local_executor.issued_under(
             self.frontier.clone(),
             self.controller().attempt_observation(),
+            self.trace_scope.as_deref().cloned(),
         );
         if let Some(guard) = &self.journal_guard {
             guard.admit(Some(envelope.invocation.effect_replay_key()))?;
@@ -532,7 +558,8 @@ impl<'run> ScopedEffectController<'run> {
             // recording an incorporation (FIG-3725): only a dispatching
             // effect is served only.
             let dispatches = match &envelope.command {
-                crate::RuntimeEffectCommand::AwaitEvent { .. }
+                crate::RuntimeEffectCommand::TraceBoundary { .. }
+                | crate::RuntimeEffectCommand::AwaitEvent { .. }
                 | crate::RuntimeEffectCommand::PeekAwaitEvent { .. }
                 | crate::RuntimeEffectCommand::LoadExecutionEnv { .. }
                 | crate::RuntimeEffectCommand::PresentToolResult { .. }
@@ -593,6 +620,7 @@ impl<'run> ScopedEffectController<'run> {
             ordinals: Arc::clone(&self.ordinals),
             effects: Arc::clone(&self.effects),
             frontier: self.frontier.clone(),
+            trace_scope: self.trace_scope.clone(),
         })
     }
 

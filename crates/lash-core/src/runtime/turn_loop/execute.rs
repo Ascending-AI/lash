@@ -54,6 +54,7 @@ struct TurnPreambleContext<'preamble> {
 /// The state a plugin abort inherits from the preamble, so the abort commit can
 /// run on its own async frame without carrying the preamble's read view.
 struct PreparedTurnAbortContext<'abort, 'run> {
+    trace_metadata: std::collections::BTreeMap<String, serde_json::Value>,
     prepared: crate::plugin::TurnPreparation,
     recorded_assembly: RecordedTurnAssembly,
     turn_index: usize,
@@ -242,6 +243,7 @@ impl LashRuntime {
         context: PreparedTurnAbortContext<'_, '_>,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let PreparedTurnAbortContext {
+            trace_metadata,
             prepared,
             mut recorded_assembly,
             turn_index,
@@ -268,7 +270,12 @@ impl LashRuntime {
             turn_graph_appends,
         )
         .with_definition_engines(self.host.core.process_engines.clone())
-        .with_metrics(self.host.core.tracing.metrics().clone());
+        .with_metrics(self.host.core.tracing.metrics().clone())
+        .with_trace_metadata(trace_metadata)
+        .with_trace(self.host.core.tracing.shift(
+            scoped_effect_controller.trace_scope().cloned(),
+            scoped_effect_controller,
+        ));
         turn_pipeline.apply_prepared_messages(&prepared.messages);
         hold_terminal_sequence(
             &mut recorded_assembly,
@@ -317,6 +324,7 @@ impl LashRuntime {
         let PreparedTurnExecuteContext {
             turn:
                 PreparedLogicalTurn {
+                    trace_metadata,
                     messages,
                     previous_prompt_usage,
                     turn_context,
@@ -390,6 +398,7 @@ impl LashRuntime {
         emit_session_events(observer, std::mem::take(&mut prepared.events));
         if prepared.abort.is_some() {
             return Box::pin(self.finish_prepared_turn_abort(PreparedTurnAbortContext {
+                trace_metadata: trace_metadata.clone(),
                 prepared,
                 recorded_assembly,
                 turn_index,
@@ -426,7 +435,12 @@ impl LashRuntime {
             turn_graph_appends.clone(),
         )
         .with_definition_engines(self.host.core.process_engines.clone())
-        .with_metrics(self.host.core.tracing.metrics().clone());
+        .with_metrics(self.host.core.tracing.metrics().clone())
+        .with_trace_metadata(trace_metadata)
+        .with_trace(self.host.core.tracing.shift(
+            scoped_effect_controller.trace_scope().cloned(),
+            &scoped_effect_controller,
+        ));
         if let Err(error) = turn_pipeline
             .prepared_checkpoint(
                 turn_policy.clone(),

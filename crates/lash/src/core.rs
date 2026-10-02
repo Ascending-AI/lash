@@ -122,13 +122,15 @@ impl AdministrationSource {
                         Arc::clone(&self.store_factory),
                         Arc::clone(&resolved_env.core.control.scope_close),
                     )
-                    .with_policy(resolved_env.core.control.relay_policy()),
+                    .with_policy(resolved_env.core.control.relay_policy())
+                    .with_metrics(resolved_env.core.tracing.metrics().clone()),
                 ),
                 intents: resolved_env
                     .core
                     .backend()
                     .obligation_ledger(lash_core::store::ObligationKind::ControlIntent),
                 clock: Arc::clone(&resolved_env.core.clock),
+                metrics: resolved_env.core.tracing.metrics().clone(),
                 deletes: lash_core::session_delete::SessionDeleteStores::of(
                     resolved_env.core.backend(),
                 ),
@@ -156,6 +158,7 @@ impl LashCore {
             Arc::clone(&self.env.core.clock),
         )
         .with_policy(self.env.core.control.relay_policy())
+        .with_metrics(self.env.core.tracing.metrics().clone())
     }
 
     /// A [`LashCoreBuilder`] over `backend`, the one substrate every
@@ -425,7 +428,8 @@ impl LashCore {
                     Arc::clone(&self.store_factory),
                     Arc::clone(&self.env.core.control.scope_close),
                 )
-                .with_policy(self.env.core.control.relay_policy()),
+                .with_policy(self.env.core.control.relay_policy())
+                .with_metrics(self.env.core.tracing.metrics().clone()),
             ),
             intents: self
                 .backend

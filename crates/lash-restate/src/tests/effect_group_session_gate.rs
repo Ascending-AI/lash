@@ -368,9 +368,15 @@ async fn a_refused_redrive_parks_only_a_turn_in_flight() {
 
     let idle = ExecutionScope::turn(SESSION, "turn-never-accepted");
     assert_eq!(
-        crate::park_generation_refused_turn(sessions.as_ref(), &idle, refusal, 1_000)
-            .await
-            .expect("read the idle scope"),
+        crate::park_generation_refused_turn(
+            sessions.as_ref(),
+            &idle,
+            refusal,
+            1_000,
+            &Default::default()
+        )
+        .await
+        .expect("read the idle scope"),
         None,
         "nothing ran for a scope with no accepted input: its refusal stays terminal"
     );
@@ -382,11 +388,16 @@ async fn a_refused_redrive_parks_only_a_turn_in_flight() {
     );
 
     for (run, at_ms) in [(1_u32, 2_000_u64), (2, 3_000)] {
-        let park =
-            crate::park_generation_refused_turn(sessions.as_ref(), &in_flight, refusal, at_ms)
-                .await
-                .expect("record the park")
-                .expect("the in-flight turn parks");
+        let park = crate::park_generation_refused_turn(
+            sessions.as_ref(),
+            &in_flight,
+            refusal,
+            at_ms,
+            &Default::default(),
+        )
+        .await
+        .expect("record the park")
+        .expect("the in-flight turn parks");
         assert_eq!(park.turn_id, lash_core::TurnId::from("turn-in-flight"));
         assert_eq!(park.attempts, run, "each refused run re-parks the turn");
         assert!(

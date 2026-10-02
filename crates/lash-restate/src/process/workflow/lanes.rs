@@ -87,7 +87,18 @@ where
                 engine: Some(lash_core::store::EnginePark::new(invocation_id)),
                 build_generation: Some(recorded.clone()),
             };
-            if let Err(error) = park_for_generation(&self.registry, process_id, write).await {
+            if let Err(error) = park_for_generation(
+                &self.registry,
+                process_id,
+                write,
+                self.tracing
+                    .clone()
+                    .or_else(|| self.runner.tracing())
+                    .unwrap_or_default()
+                    .metrics(),
+            )
+            .await
+            {
                 tracing::error!(
                     event = "process.park_record_failed",
                     process_id = process_id.as_str(),
@@ -202,6 +213,11 @@ where
         let current =
             registration.map(|registration| self.runner.executable_generation(registration));
         let registry = &self.registry;
+        let tracing = self
+            .tracing
+            .clone()
+            .or_else(|| self.runner.tracing())
+            .unwrap_or_default();
         let own = &self.build_generation;
         let route = self.route.name();
         let Json(window) = ctx
@@ -253,7 +269,8 @@ where
                         engine: None,
                         build_generation: Some(sender.clone()),
                     };
-                    match park_for_generation(registry, process_id, write).await {
+                    match park_for_generation(registry, process_id, write, tracing.metrics()).await
+                    {
                         Ok(()) => Ok(Ok(SuccessorWindow::Refused { message })),
                         Err(error) => step_fault(error),
                     }
@@ -263,12 +280,6 @@ where
             .map_err(HandlerError::from)?;
         let window = window.map_err(TerminalError::new)?;
         if let SuccessorWindow::Refused { message } = &window {
-            lash_core::operational_metrics::record_work_parked(
-                &Default::default(),
-                None,
-                "process",
-                lash_core::store::ParkReasonCode::RetiredGeneration.as_str(),
-            );
             tracing::warn!(
                 event = "process.parked",
                 process_id = process_id.as_str(),
@@ -338,6 +349,7 @@ async fn park_for_generation(
     registry: &Arc<dyn ProcessRegistry>,
     process_id: &ProcessId,
     write: lash_core::store::ProcessParkWrite,
+    metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
 ) -> Result<(), PluginError> {
     let Some(record) = registry.get_process(process_id).await? else {
         return Ok(());
@@ -349,10 +361,17 @@ async fn park_for_generation(
         );
         return Ok(());
     };
-    registry
+    let code = write.reason.code();
+    let receipt = registry
         .park_process_with_authority(process_id, write, &authority)
-        .await
-        .map(|_| ())
+        .await?;
+    lash_core::operational_metrics::record_work_parked(
+        metrics,
+        receipt.permit().as_ref(),
+        "process",
+        code.as_str(),
+    );
+    Ok(())
 }
 
 pub(super) fn observe_refusal_park(

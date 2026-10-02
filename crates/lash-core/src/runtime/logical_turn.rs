@@ -277,6 +277,7 @@ pub(super) fn follow_on_after_turn(
 }
 
 pub(super) struct PreparedLogicalTurn {
+    pub(super) trace_metadata: std::collections::BTreeMap<String, serde_json::Value>,
     pub(super) messages: crate::MessageSequence,
     pub(super) previous_prompt_usage: Option<TokenUsage>,
     pub(super) turn_context: crate::TurnContext,

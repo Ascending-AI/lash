@@ -71,6 +71,7 @@ fn echo_dispatch_context<'h>(
         .expect("plugin session");
     let tool_catalog = plugins.resolved_tool_catalog().expect("tool catalog");
     crate::tool_dispatch::ToolDispatchContext {
+        tool_receipts: None,
         tools: plugins.tools(),
         plugins,
         tool_registry: None,

@@ -24,6 +24,7 @@ fn live_context() -> LiveOpenerContext {
     }
 
     let dispatch = crate::tool_dispatch::ToolDispatchContext {
+        tool_receipts: None,
         plugins: crate::plugin::PluginHost::empty()
             .build_session(PluginSessionRequest::creation(
                 "session",

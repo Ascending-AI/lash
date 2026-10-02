@@ -763,6 +763,7 @@ async fn an_unapplied_plan_is_delivered_once_by_its_obligation_relay() {
     let relays: Vec<Arc<dyn lash_core::shift::relay::ObligationRelay>> = vec![relay];
     let lanes = lash_conformance::law_tick_lanes(Arc::clone(&clock));
     let parts = lash_core::shift::ReconcileParts {
+        metrics: &Default::default(),
         sessions: sessions.as_ref(),
         work: &work,
         scopes: &scopes,

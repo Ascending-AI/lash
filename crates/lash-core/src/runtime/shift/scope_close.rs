@@ -35,9 +35,19 @@ pub struct ScopeCloseRelay {
     sessions: Arc<dyn DeploymentStore>,
     sink: Arc<dyn ScopeCloseSink>,
     policy: RelayPolicy,
+    metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
 }
 
 impl ScopeCloseRelay {
+    #[must_use]
+    pub fn with_metrics(
+        mut self,
+        metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
+    ) -> Self {
+        self.metrics = metrics;
+        self
+    }
+
     /// The relay over `ledger` (must be the `ScopeClose` kind's), reading
     /// `sessions` and closing through `sink`, on the default policy.
     #[must_use]
@@ -51,6 +61,7 @@ impl ScopeCloseRelay {
             sessions,
             sink,
             policy: RelayPolicy::default(),
+            metrics: Default::default(),
         }
     }
 
@@ -80,6 +91,10 @@ impl ScopeCloseRelay {
 
 #[async_trait::async_trait]
 impl ObligationRelay for ScopeCloseRelay {
+    fn metrics(&self) -> lash_trace::telemetry::metrics::TelemetryMetrics {
+        self.metrics.clone()
+    }
+
     fn ledger(&self) -> &dyn ObligationLedger {
         self.ledger.as_ref()
     }

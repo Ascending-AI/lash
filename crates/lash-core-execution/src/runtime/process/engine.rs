@@ -445,8 +445,8 @@ impl<'run> ProcessEngineRunContext<'run> {
     }
 
     /// The scope this run executes under: its process's.
-    pub fn trace_scope(&self) -> lash_trace::DurableTraceScope {
-        crate::trace::process_trace_scope(&self.process_id, self.tracing.clock().timestamp_ms())
+    pub fn trace_scope(&self) -> Option<&lash_trace::DurableTraceScope> {
+        self.scoped_effect_controller.trace_scope()
     }
 
     /// Where this run's shift code stands when it observes: it may emit once
@@ -454,7 +454,7 @@ impl<'run> ProcessEngineRunContext<'run> {
     /// and carries the scope, the substrate attempt and the right to emit.
     pub fn trace_standing(&self) -> crate::trace::TraceStanding {
         self.tracing
-            .shift(Some(self.trace_scope()), &self.scoped_effect_controller)
+            .shift(self.trace_scope().cloned(), &self.scoped_effect_controller)
     }
 
     /// Exposes registration to protocol and process-engine implementors while running a durable

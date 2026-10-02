@@ -768,6 +768,7 @@ fn tool_wait_and_code_completions_use_explicit_scope_and_local_leaf_durations() 
         ),
         (
             TraceEvent::DurableWaitResolved {
+                started_at_ms: 1000,
                 wait_kind: "custom-wait".into(),
                 resolution: crate::TraceDurableWaitResolution::Failed,
             },
@@ -820,4 +821,35 @@ fn tool_wait_and_code_completions_use_explicit_scope_and_local_leaf_durations() 
         );
     }
     assert_eq!(exporter.get_finished_spans().unwrap().len(), 5);
+}
+
+#[test]
+fn host_send_is_a_short_producer_and_retained_acceptances_remain_attempts() {
+    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
+    let parent = context(1);
+    let accepted = adapter
+        .begin_host_send(Some(&parent))
+        .expect("host operation");
+    let accepted_id = accepted.carrier().span_id().to_bytes();
+    accepted.settle(TraceCandidateOutcome::Selected);
+    let retained = adapter
+        .begin_host_send(Some(&parent))
+        .expect("retry operation");
+    assert_ne!(retained.carrier().span_id().to_bytes(), accepted_id);
+    retained.settle(TraceCandidateOutcome::Reused);
+    let spans = exporter.get_finished_spans().expect("finished operations");
+    assert_eq!(spans.len(), 2);
+    assert_eq!(spans[0].name, "lash.send");
+    assert_eq!(spans[1].name, "lash.send.attempt");
+    assert_eq!(
+        spans[0].parent_span_id.to_bytes(),
+        parent.span_id().to_bytes()
+    );
+    assert_eq!(
+        spans[0].span_context.trace_id().to_bytes(),
+        parent.trace_id().to_bytes()
+    );
+    assert_eq!(spans[0].span_kind, opentelemetry::trace::SpanKind::Producer);
+    assert!(UntracedScopes.begin_host_send(Some(&parent)).is_none());
 }

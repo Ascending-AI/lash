@@ -1858,6 +1858,7 @@ async fn postgres_batch_session_delete_writes_one_cancel_event_per_park() {
                 build_generation: None,
             })
             .await
+            .map(lash_core::store::StoreTransition::into_record)
             .expect("park the session's turn");
         session_ids.push(session_id);
     }

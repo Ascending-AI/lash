@@ -29,9 +29,19 @@ pub struct ProcessTerminalRelay {
     registry: Arc<dyn ProcessRegistry>,
     port: Arc<dyn ProcessWorkSubstrate>,
     policy: RelayPolicy,
+    metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
 }
 
 impl ProcessTerminalRelay {
+    #[must_use]
+    pub fn with_metrics(
+        mut self,
+        metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
+    ) -> Self {
+        self.metrics = metrics;
+        self
+    }
+
     /// The relay over `ledger`, the `ProcessTerminal` ledger of the storage
     /// `registry` keeps its rows in, publishing through `port`.
     pub fn new(
@@ -44,6 +54,7 @@ impl ProcessTerminalRelay {
             registry,
             port,
             policy: RelayPolicy::default(),
+            metrics: Default::default(),
         }
     }
 
@@ -58,6 +69,10 @@ impl ProcessTerminalRelay {
 
 #[async_trait::async_trait]
 impl ObligationRelay for ProcessTerminalRelay {
+    fn metrics(&self) -> lash_trace::telemetry::metrics::TelemetryMetrics {
+        self.metrics.clone()
+    }
+
     fn ledger(&self) -> &dyn ObligationLedger {
         self.ledger.as_ref()
     }

@@ -140,6 +140,8 @@ pub const TABLES: &[&str] = &[
     turn_ingress::queued_batches::TABLE,
     turn_ingress::retired_scopes::TABLE,
     turn_ingress::tool_intent_submissions::TABLE,
+    tool_receipts::TABLE,
+    wait_receipts::TABLE,
     turn_ingress::turn_park_clock::TABLE,
     turn_ingress::turn_park_events::TABLE,
     turn_ingress::turn_parks::TABLE,
@@ -244,6 +246,8 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(
         turn_ingress::pending_inputs::PendingTurnInputObligationStatements::NEUTRAL,
     );
+    statements.extend_from_slice(tool_receipts::ToolReceiptStatements::NEUTRAL);
+    statements.extend_from_slice(wait_receipts::WaitReceiptStatements::NEUTRAL);
     statements
         .extend_from_slice(turn_ingress::queued_batches::QueuedBatchObligationStatements::NEUTRAL);
     statements.extend_from_slice(
@@ -403,3 +407,6 @@ macro_rules! statements {
         }
     };
 }
+
+pub mod tool_receipts;
+pub mod wait_receipts;

@@ -31,6 +31,7 @@ const BOUND: Duration = Duration::from_secs(60);
 /// A tool that answers once the workload releases it.
 struct CountingTool {
     release: Arc<tokio::sync::Semaphore>,
+    awaited_child: bool,
 }
 
 fn tool_definition() -> lash_core::ToolDefinition {
@@ -54,12 +55,42 @@ impl lash_core::ToolProvider for CountingTool {
         (name == TOOL).then(|| Arc::new(tool_definition().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+    fn attempt_may_defer(&self, _tool_id: &lash_core::ToolId) -> bool {
+        self.awaited_child
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         self.release
             .acquire()
             .await
             .expect("the workload keeps the tool's gate open")
             .forget();
+        if self.awaited_child {
+            let declaration = lash_core::ProcessStartDeclaration::new(
+                lash_core::ProcessInput::Engine {
+                    kind: ENGINE_KIND.into(),
+                    payload: json!({}),
+                },
+                lash_core::ProcessOriginator::host(),
+                lash_core::Lifetime::Detached,
+            )
+            .with_env_ref(
+                call.context
+                    .process_execution_env_ref()
+                    .expect("the admitted tool carries its execution environment"),
+            );
+            let start = lash_core::DeclaredStart::new(
+                call.context,
+                lash_core::StartProcessIntent {
+                    owner: call.context.owner().runtime_owner(),
+                    declaration,
+                },
+            )
+            .expect("the tool may await its declared child");
+            return lash_core::ToolAttemptOutcome::pending(
+                lash_core::PendingCompletion::new().resolved_by_declared_start(start),
+            );
+        }
         lash_core::ToolOutcome::ok(json!({"result": "counted"})).into()
     }
 }
@@ -163,7 +194,10 @@ fn llm_profile_spec() -> lash_core::LlmProfileMetadata {
 fn model_reply(request: &LlmRequest) -> LlmResponse {
     let saw_tool_result = serde_json::to_string(&request.messages)
         .unwrap_or_default()
-        .contains("counted");
+        .contains("counted")
+        || serde_json::to_string(&request.messages)
+            .unwrap_or_default()
+            .contains("settled");
     let part = if saw_tool_result {
         LlmOutputPart::Text {
             text: "answered".to_owned(),
@@ -188,20 +222,44 @@ pub(super) fn build_core(
     backend: lash_core::Backend,
     release: &Arc<tokio::sync::Semaphore>,
 ) -> lash::LashCore {
+    build_core_with_trace(backend, release, None, None)
+}
+
+pub(in crate::tests) fn build_core_with_trace(
+    backend: lash_core::Backend,
+    release: &Arc<tokio::sync::Semaphore>,
+    tracing: Option<lash_core::facade_support::TraceRuntime>,
+    calls: Option<Arc<std::sync::atomic::AtomicUsize>>,
+) -> lash::LashCore {
+    let awaited_child = calls.is_some();
     let provider = lash_core::testing::TestProvider::builder()
         .kind("replay-corpus")
         .complete(move |request: LlmRequest| {
-            let reply = model_reply(&request);
+            let mut reply = model_reply(&request);
+            if let Some(calls) = &calls {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                reply.usage = lash_core::llm::types::LlmUsage {
+                    input_tokens: 10,
+                    output_tokens: 4,
+                    ..Default::default()
+                };
+                reply.provider_usage = Some(json!({"input_tokens": 10, "output_tokens": 4}));
+            }
             async move { Ok::<_, LlmTransportError>(reply) }
         })
         .build()
         .into_handle();
-    lash::LashCore::standard_builder(backend)
+    let mut builder = lash::LashCore::standard_builder(backend);
+    if let Some(tracing) = tracing {
+        builder = builder.trace_runtime(tracing);
+    }
+    builder
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .serve_test_llm_profile(provider, llm_profile_spec())
         .tools(Arc::new(CountingTool {
             release: Arc::clone(release),
+            awaited_child,
         }) as Arc<dyn lash_core::ToolProvider>)
         .plugin(Arc::new(EnginePluginFactory))
         .build(lash_core::LeaseOwnerIdentity::opaque(
@@ -532,7 +590,7 @@ pub(super) struct ServiceJournals {
 /// Runs the workload through the real handlers and reads back the commands
 /// each lash service journaled.
 pub(super) async fn record() -> ServiceJournals {
-    let (backend, generation) = run_workload().await;
+    let (backend, generation) = Box::pin(run_workload()).await;
     let server = backend.server();
     // The double's own handler host is registered beside lash's services.
     let served = server

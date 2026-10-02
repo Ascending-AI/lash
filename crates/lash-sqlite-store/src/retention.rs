@@ -52,12 +52,25 @@ pub(crate) async fn reclaim(
                         params![cutoff, watermark],
                     )
                     .map_err(sqlite_error)?;
-                    let removed_receipt_count = crate::conn::cached_execute(
+                    let mut removed_receipt_count = crate::conn::cached_execute(
                         tx,
                         session_sql().turn_commits_sqlite.delete_retained.sql(),
                         params![cutoff, watermark],
                     )
                     .map_err(sqlite_error)?;
+                    let tool_sql = lash_store_sql::tool_receipts::ToolReceiptStatements::render(
+                        crate::schema_layout::Schema::Main.dialect(),
+                    );
+                    removed_receipt_count +=
+                        crate::conn::cached_execute(tx, tool_sql.reclaim.sql(), params![cutoff])
+                            .map_err(sqlite_error)?;
+                    let wait_sql = lash_store_sql::wait_receipts::WaitReceiptStatements::render(
+                        crate::schema_layout::Schema::Main.dialect(),
+                    );
+                    removed_receipt_count +=
+                        crate::conn::cached_execute(tx, wait_sql.reclaim.sql(), params![cutoff])
+                            .map_err(sqlite_error)?;
+
                     Ok(lash_core_execution::store::RetentionReport {
                         removed_receipt_count,
                         removed_session_terminal_count,

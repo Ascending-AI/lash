@@ -275,6 +275,20 @@ impl std::error::Error for StoreFault {}
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum StoreError {
+    #[error("prepared registration for process {process_id} is stale")]
+    PreparedProcessRegistrationStale { process_id: crate::ProcessId },
+    #[error("wait {wait_id} conflicts with its retained receipt")]
+    WaitReceiptConflict { wait_id: String },
+    #[error("tool request {request_key} of {session_id} conflicts with its retained request")]
+    ToolRequestConflict {
+        session_id: crate::SessionId,
+        request_key: String,
+    },
+    #[error("prepared run admission for {run} of {session_id} is stale")]
+    PreparedRunAdmissionStale {
+        session_id: crate::SessionId,
+        run: crate::TurnId,
+    },
     #[error("session {session_id} already has unfinished run {run}")]
     UnfinishedRunConflict {
         session_id: crate::SessionId,
@@ -1136,13 +1150,17 @@ impl StoreError {
     /// retryable.
     pub fn is_transient(&self) -> bool {
         match self {
-            Self::Contended
+            Self::PreparedProcessRegistrationStale { .. }
+            | Self::PreparedRunAdmissionStale { .. }
+            | Self::Contended
             | Self::MigrationOpenElsewhere { .. }
             | Self::StorageFailure { .. }
             | Self::Backend(_)
             | Self::SessionHeadOwned { .. }
             | Self::UnfinishedRunConflict { .. } => true,
-            Self::ExecutionStateCaptureFailed { .. }
+            Self::WaitReceiptConflict { .. }
+            | Self::ToolRequestConflict { .. }
+            | Self::ExecutionStateCaptureFailed { .. }
             | Self::TurnOutcomeMaterializationRefused { .. }
             | Self::CommitNodeBudgetExceeded { .. }
             | Self::CommitByteBudgetExceeded { .. }
@@ -1266,7 +1284,9 @@ impl StoreError {
     pub fn runtime_code(&self) -> crate::RuntimeErrorCode {
         use crate::RuntimeErrorCode as Code;
         match self {
-            Self::Contended => Code::StoreCommitContended,
+            Self::PreparedProcessRegistrationStale { .. }
+            | Self::PreparedRunAdmissionStale { .. }
+            | Self::Contended => Code::StoreCommitContended,
             Self::MigrationOpenElsewhere { .. }
             | Self::StorageFailure { .. }
             | Self::Backend(_) => Code::RuntimeStore,
@@ -1312,7 +1332,9 @@ impl StoreError {
             Self::QueuedWorkRowExceedsContextWindow { .. } => {
                 Code::QueuedWorkRowExceedsContextWindow
             }
-            Self::PendingTurnInputSourceKeyConflict { .. }
+            Self::WaitReceiptConflict { .. }
+            | Self::ToolRequestConflict { .. }
+            | Self::PendingTurnInputSourceKeyConflict { .. }
             | Self::QueuedWorkSourceKeyConflict { .. }
             | Self::PendingTurnInputIdConflict { .. }
             | Self::PendingTurnInputBatchDuplicate { .. }
@@ -1465,6 +1487,10 @@ impl StoreError {
         match self {
             Self::ExecutionStateCaptureFailed { .. } => "ExecutionStateCaptureFailed",
             Self::TurnOutcomeMaterializationRefused { .. } => "TurnOutcomeMaterializationRefused",
+            Self::WaitReceiptConflict { .. } => "WaitReceiptConflict",
+            Self::ToolRequestConflict { .. } => "ToolRequestConflict",
+            Self::PreparedProcessRegistrationStale { .. } => "PreparedProcessRegistrationStale",
+            Self::PreparedRunAdmissionStale { .. } => "PreparedRunAdmissionStale",
             Self::Contended => "Contended",
             Self::CommitNodeBudgetExceeded { .. } => "CommitNodeBudgetExceeded",
             Self::CommitByteBudgetExceeded { .. } => "CommitByteBudgetExceeded",

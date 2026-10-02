@@ -201,7 +201,7 @@ where
     /// decided the cancel released the event wait it lost to (FIG-3630).
     pub(super) async fn await_event_under_group_child_cancel(
         &self,
-        invocation: &RuntimeEffectInvocation,
+        _invocation: &RuntimeEffectInvocation,
         request: RestateDurableWaitAwaitRequest,
         replay_key: String,
         cancel: context::GroupChildCancelArm,
@@ -210,20 +210,6 @@ where
             .context
             .await_event_or_group_child_cancel(&self.namespace, request, replay_key, cancel)
             .await;
-        let status = match &raced {
-            Ok(Some(resolution)) => resolution_trace_label(resolution),
-            Ok(None) => lash_trace::TraceDurableWaitResolution::Cancelled,
-            Err(err) if self.is_group_child_engine_cancel(err) => {
-                lash_trace::TraceDurableWaitResolution::Cancelled
-            }
-            Err(_) => lash_trace::TraceDurableWaitResolution::Failed,
-        };
-        self.emit_trace(Some(invocation), || {
-            lash_trace::TraceEvent::DurableWaitResolved {
-                wait_kind: "await_event".to_string(),
-                resolution: status,
-            }
-        });
         match raced {
             Ok(Some(resolution)) => Ok(RuntimeEffectOutcome::AwaitEvent { resolution }),
             Ok(None) => Err(group_child_cancelled()),

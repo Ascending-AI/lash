@@ -37,9 +37,19 @@ pub struct IngressRelay {
     work: Arc<dyn SessionWorkEngine>,
     clock: Arc<dyn Clock>,
     policy: RelayPolicy,
+    metrics: Arc<lash_trace::telemetry::metrics::TelemetryMetrics>,
 }
 
 impl IngressRelay {
+    #[must_use]
+    pub fn with_metrics(
+        mut self,
+        metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
+    ) -> Self {
+        self.metrics = Arc::new(metrics);
+        self
+    }
+
     /// The relay over `ledger` (the store set's ingress ledger) that asks
     /// `work` for shifts.
     #[must_use]
@@ -53,6 +63,7 @@ impl IngressRelay {
             work,
             clock,
             policy: RelayPolicy::default(),
+            metrics: Default::default(),
         }
     }
 
@@ -202,6 +213,10 @@ fn report_store_failure(id: &ObligationId, error: &StoreError) {
 
 #[async_trait::async_trait]
 impl ObligationRelay for IngressRelay {
+    fn metrics(&self) -> lash_trace::telemetry::metrics::TelemetryMetrics {
+        self.metrics.as_ref().clone()
+    }
+
     fn ledger(&self) -> &dyn ObligationLedger {
         self.ledger.as_ref()
     }

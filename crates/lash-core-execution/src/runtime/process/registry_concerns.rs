@@ -20,10 +20,10 @@ use super::events::{
     ProcessEventAppendRequest, ProcessEventPage, ProcessEventQueryMode, ProcessEventReadOutcome,
 };
 use super::model::{
-    ProcessChange, ProcessChangeCursor, ProcessExecutionWriteAuthority, ProcessExternalRef,
-    ProcessId, ProcessListFilter, ProcessObserverBy, ProcessRecord, ProcessRegistration,
-    ProcessRegistrationReceipt, ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted,
-    SessionId, WaitState,
+    PreparedProcessRegistration, ProcessChange, ProcessChangeCursor,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessId, ProcessListFilter,
+    ProcessObserverBy, ProcessRecord, ProcessRegistration, ProcessRegistrationReceipt,
+    ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted, SessionId, WaitState,
 };
 use super::references::ProcessLiveReferenceView;
 use super::registry::{
@@ -240,6 +240,25 @@ pub trait ProcessRegistrar: Send + Sync {
         &self,
         registration: ProcessRegistration,
         observers: &[SessionId],
+    ) -> Result<ProcessRegistrationReceipt, PluginError> {
+        let prepared = self
+            .prepare_process_registration(registration, observers)
+            .await?;
+        let anchor = prepared.trace().anchor().clone();
+        self.commit_process_registration(prepared, anchor).await
+    }
+
+    /// Prepare the actual id and immutable composition without mutating SQL.
+    async fn prepare_process_registration(
+        &self,
+        registration: ProcessRegistration,
+        observers: &[SessionId],
+    ) -> Result<PreparedProcessRegistration, PluginError>;
+    /// Revalidate existing start and closure fences, then commit exactly the plan.
+    async fn commit_process_registration(
+        &self,
+        prepared: PreparedProcessRegistration,
+        anchor: lash_trace::TraceAnchor,
     ) -> Result<ProcessRegistrationReceipt, PluginError>;
 
     /// Bind the effect host whose scope-retirement fence this registry lifts
@@ -762,7 +781,7 @@ pub trait ProcessLifecycle: Send + Sync {
         process_id: &ProcessId,
         park: crate::store::ProcessParkWrite,
         authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessRecord, PluginError>;
+    ) -> Result<crate::store::StoreTransition<ProcessRecord>, PluginError>;
 
     /// Record that a rerun of the parked process began
     /// ([`ProcessTransition::BeginParkedRerun`](super::ProcessTransition::BeginParkedRerun)):
@@ -799,7 +818,7 @@ pub trait ProcessToolIntents: Send + Sync {
         &self,
         replay_key: &str,
         outcome: crate::ToolIntentExecutionOutcome,
-    ) -> Result<crate::ToolIntentSubmissionRecord, PluginError>;
+    ) -> Result<crate::store::StoreTransition<crate::ToolIntentSubmissionRecord>, PluginError>;
 }
 
 /// The wake-delivery outbox.

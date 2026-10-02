@@ -34,9 +34,19 @@ pub struct ParentEndRelay {
     port: Arc<dyn ProcessWorkSubstrate>,
     clock: Arc<dyn Clock>,
     policy: RelayPolicy,
+    metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
 }
 
 impl ParentEndRelay {
+    #[must_use]
+    pub fn with_metrics(
+        mut self,
+        metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
+    ) -> Self {
+        self.metrics = metrics;
+        self
+    }
+
     /// The relay over `ledger`, delivering plans from `registry` through
     /// `port`. `policy` defaults to the kind's shared policy.
     #[must_use]
@@ -52,6 +62,7 @@ impl ParentEndRelay {
             port,
             clock,
             policy: RelayPolicy::default(),
+            metrics: Default::default(),
         }
     }
 
@@ -78,6 +89,10 @@ fn classify(context: &'static str) -> impl Fn(PluginError) -> DeliveryFailure {
 
 #[async_trait::async_trait]
 impl ObligationRelay for ParentEndRelay {
+    fn metrics(&self) -> lash_trace::telemetry::metrics::TelemetryMetrics {
+        self.metrics.clone()
+    }
+
     fn ledger(&self) -> &dyn ObligationLedger {
         self.ledger.as_ref()
     }

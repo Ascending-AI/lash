@@ -198,16 +198,80 @@ async fn a_run_keeps_the_anchor_its_first_admission_offered(parts: &ShiftParts) 
             admit_run_request_for_test(fence, &run, AdmittedHead::Input(head.clone()));
         // One input per run, so the run's cause is its head's.
         request.max_inputs = 1;
-        request.trace_anchor = TraceAnchor::Context(context(candidate));
+        request.trace_scopes = Arc::new(FixedScopes(TraceAnchor::Context(context(candidate))));
         request
     };
     let first = seal_shift_fence_for_test(&parts.store, &parts.session_id, "first").await;
-    let won = parts
+    let first_request = request(&first, FIRST_ANCHOR);
+    let second_request = request(&first, SECOND_ANCHOR);
+    let first_plan = parts
         .store
-        .admit_run(&request(&first, FIRST_ANCHOR))
+        .prepare_run_admission(&first_request)
         .await
-        .expect("the first admission records the run")
-        .expect("the first admission reaches its head");
+        .expect("prepare first candidate")
+        .expect("head exists");
+    let second_plan = parts
+        .store
+        .prepare_run_admission(&second_request)
+        .await
+        .expect("prepare second candidate")
+        .expect("head exists");
+    assert!(
+        parts
+            .store
+            .unfinished_run(&parts.session_id)
+            .await
+            .expect("read admission")
+            .is_none(),
+        "preparation creates no admission"
+    );
+    assert!(
+        parts
+            .store
+            .run_binding(&parts.session_id, &head)
+            .await
+            .expect("read binding")
+            .is_none(),
+        "preparation creates no binding"
+    );
+    let first_anchor = TraceAnchor::Context(context(FIRST_ANCHOR));
+    let second_anchor = TraceAnchor::Context(context(SECOND_ANCHOR));
+    let (one, two) = tokio::join!(
+        parts.store.commit_run_admission(&first_plan, &first_anchor),
+        parts
+            .store
+            .commit_run_admission(&second_plan, &second_anchor),
+    );
+    let one = one
+        .expect("first race participant")
+        .expect("first reaches head");
+    let two = two
+        .expect("second race participant")
+        .expect("second reaches head");
+    assert_ne!(
+        one.recorded_by_this_call, two.recorded_by_this_call,
+        "exactly one committed writer owns the transition"
+    );
+    let winning_anchor = if one.recorded_by_this_call {
+        FIRST_ANCHOR
+    } else {
+        SECOND_ANCHOR
+    };
+    let (won, lost) = if one.recorded_by_this_call {
+        (one, two)
+    } else {
+        (two, one)
+    };
+    assert_eq!(
+        won.trace, lost.trace,
+        "loser dispatches under winner's retained scope"
+    );
+    assert!(
+        lost.trace_admission()
+            .expect("retained scope")
+            .permit()
+            .is_none()
+    );
     let scope = won.trace.clone().expect("the admission retains a scope");
     assert_eq!(
         scope.scope,
@@ -221,7 +285,7 @@ async fn a_run_keeps_the_anchor_its_first_admission_offered(parts: &ShiftParts) 
         linked(FIRST),
         "the run's cause is what caused the input it admitted"
     );
-    assert_eq!(scope.anchor, TraceAnchor::Context(context(FIRST_ANCHOR)));
+    assert_eq!(scope.anchor, TraceAnchor::Context(context(winning_anchor)));
     let admission = won.trace_admission().expect("the admission's receipt");
     assert_eq!(admission, TraceScopeAdmission::Inserted(scope.clone()));
     assert!(
@@ -605,4 +669,25 @@ async fn a_resubmitted_intent_keeps_its_first_scope(
         }
         answer => panic!("a resubmission is answered the first writer: {answer:?}"),
     }
+}
+
+struct FixedScopes(TraceAnchor);
+impl lash_core::TraceScopeFactory for FixedScopes {
+    fn capture_current(&self) -> Option<TraceCarrier> {
+        None
+    }
+    fn propose(
+        &self,
+        _scope: &TraceScopeId,
+        _cause: &TraceCause,
+    ) -> Box<dyn lash_core::TraceAdmissionCandidate> {
+        Box::new(FixedCandidate(self.0.clone()))
+    }
+}
+struct FixedCandidate(TraceAnchor);
+impl lash_core::TraceAdmissionCandidate for FixedCandidate {
+    fn anchor(&self) -> TraceAnchor {
+        self.0.clone()
+    }
+    fn settle(self: Box<Self>, _outcome: lash_core::TraceCandidateOutcome) {}
 }

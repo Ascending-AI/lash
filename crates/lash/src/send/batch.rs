@@ -102,7 +102,14 @@ impl SendBatchBuilder {
         }
         // One request, one cause: the caller's context, snapshotted on the
         // first poll and before the first await.
-        let trace_cause = lash_core::TraceCause::linked_to(target.capture_trace_context());
+        let parent = target.capture_trace_context();
+        let host_send = target.begin_host_send(parent.as_ref());
+        let trace_cause = lash_core::TraceCause::linked_to(
+            host_send
+                .as_ref()
+                .map(|operation| operation.carrier())
+                .or(parent),
+        );
         let mut submissions = Vec::with_capacity(inputs.len());
         for BatchInput { mut input, id } in inputs {
             // As for one send: the host id names the run, and an input sent
@@ -124,9 +131,18 @@ impl SendBatchBuilder {
                 TurnInputIngress::NextTurn,
                 run_spec,
                 false,
-                trace_cause,
+                trace_cause.clone(),
             )
             .await?;
+        if let Some(operation) = host_send {
+            operation.settle(
+                if enqueued.iter().any(|row| row.trace_cause == trace_cause) {
+                    lash_trace::TraceCandidateOutcome::Selected
+                } else {
+                    lash_trace::TraceCandidateOutcome::Reused
+                },
+            );
+        }
         Ok(enqueued
             .iter()
             .map(|row| SendHandle {

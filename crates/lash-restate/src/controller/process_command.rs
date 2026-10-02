@@ -354,7 +354,6 @@ pub(super) async fn execute_restate_process_command<'ctx, C>(
     command: ProcessCommand,
     local_executor: RuntimeEffectLocalExecutor<'_>,
     trace_park: impl Fn(&'static str),
-    trace_resolve: impl Fn(&'static str, lash_trace::TraceDurableWaitResolution),
 ) -> Result<ProcessEffectOutcome, RuntimeEffectControllerError>
 where
     C: RestateControllerContext<'ctx> + ?Sized,
@@ -480,7 +479,6 @@ where
                 local_executor.into_process()?,
                 process_id,
                 trace_park,
-                trace_resolve,
             )
             .await
         }
@@ -824,6 +822,7 @@ where
                 }
             }
             let stores = lash_core::runtime::ProcessStartStores {
+                tracing: host_start.tracing.as_ref(),
                 registry: registry.as_ref(),
                 env_store: process_env_store.as_ref(),
                 engines: &process_engines,
@@ -934,7 +933,6 @@ async fn execute_restate_process_await<'ctx, C>(
     execution: lash_core::runtime::ProcessLocalExecution,
     process_id: lash_core::ProcessId,
     trace_park: impl Fn(&'static str),
-    trace_resolve: impl Fn(&'static str, lash_trace::TraceDurableWaitResolution),
 ) -> Result<(ProcessEffectOutcome, lash_core::StoreRealization), RuntimeEffectControllerError>
 where
     C: RestateControllerContext<'ctx> + ?Sized,
@@ -1030,7 +1028,6 @@ where
             let first_wait = match first_wait {
                 Ok(outcome) => outcome,
                 Err(err) => {
-                    trace_resolve("process", lash_trace::TraceDurableWaitResolution::Failed);
                     return Err(crate::wire::lash_terminal(
                         &err,
                         RuntimeErrorCode::EngineProcessAwait,
@@ -1040,10 +1037,7 @@ where
             match first_wait {
                 RestateTurnCancelRaceOutcome::Completed(context::TurnWaitOutcome::Resolved(
                     resolution,
-                )) => {
-                    trace_resolve("process", lash_trace::TraceDurableWaitResolution::Resolved);
-                    process_await_output_from_resolution(resolution)?
-                }
+                )) => process_await_output_from_resolution(resolution)?,
                 RestateTurnCancelRaceOutcome::Completed(context::TurnWaitOutcome::HandedOver) => {
                     // Retire this physical subscription before the boundary.
                     // Its attach watches the key and cancels its terminal read.
@@ -1082,7 +1076,7 @@ where
                     // own cancellation. The awaited process is left to its
                     // own lifecycle; the ended parent scope's parent-end
                     // plan, not this wait, owns its children.
-                    trace_resolve("process", lash_trace::TraceDurableWaitResolution::Cancelled);
+
                     lash_core::ProcessAwaitOutput::from_tool_output(
                         lash_core::ToolCallOutput::cancelled(lash_core::ToolCancellation::runtime(
                             format!("awaiting process `{process_id}` was cancelled"),
@@ -1090,10 +1084,6 @@ where
                     )
                 }
                 RestateTurnCancelRaceOutcome::TurnCancelled => {
-                    trace_resolve(
-                        "process",
-                        lash_trace::TraceDurableWaitResolution::TurnCancelled,
-                    );
                     let Some(turn_cancellation) = turn_cancellation.as_ref() else {
                         return Err(RuntimeEffectControllerError::new(
                             RuntimeErrorCode::EngineProcessTurnCancelContextMissing,
@@ -1196,18 +1186,8 @@ where
                         )
                         .await
                     {
-                        Ok(resolution) => {
-                            trace_resolve(
-                                "process_after_turn_cancel",
-                                lash_trace::TraceDurableWaitResolution::Resolved,
-                            );
-                            process_await_output_from_resolution(resolution)?
-                        }
+                        Ok(resolution) => process_await_output_from_resolution(resolution)?,
                         Err(err) => {
-                            trace_resolve(
-                                "process_after_turn_cancel",
-                                lash_trace::TraceDurableWaitResolution::Failed,
-                            );
                             return Err(crate::wire::lash_terminal(
                                 &err,
                                 RuntimeErrorCode::EngineProcessAwaitAfterTurnCancel,
@@ -1216,10 +1196,6 @@ where
                     }
                 }
                 RestateTurnCancelRaceOutcome::SessionRevoked { session_id } => {
-                    trace_resolve(
-                        "process",
-                        lash_trace::TraceDurableWaitResolution::SessionRevoked,
-                    );
                     return Err(lash_core::StoreError::SessionDeleted { session_id }.into());
                 }
             }

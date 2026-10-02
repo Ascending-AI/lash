@@ -235,7 +235,7 @@ fn documented_trace_record_decode_rejects_schema_3_before_payload_interpretation
 
 #[test]
 fn new_records_stamp_the_schema_version() {
-    let record = TraceRecord::new(
+    let record = fixture_record(
         TraceContext::default().for_session("root"),
         TraceEvent::TurnStarted {
             metadata: Default::default(),
@@ -364,7 +364,7 @@ fn language_execution_identity_generation_is_the_attempt() {
 
 #[test]
 fn known_trace_event_tolerates_unknown_field() {
-    let record = TraceRecord::new(
+    let record = fixture_record(
         TraceContext::default(),
         TraceEvent::TurnStarted {
             metadata: Default::default(),
@@ -597,6 +597,7 @@ fn event_samples() -> Vec<TraceEvent> {
             wait_kind: "await_event".to_string(),
         },
         TraceEvent::DurableWaitResolved {
+            started_at_ms: 0,
             wait_kind: "await_event".to_string(),
             resolution: TraceDurableWaitResolution::Ok,
         },
@@ -734,7 +735,7 @@ fn event_samples_cover_every_variant() {
 
 #[test]
 fn composition_change_is_a_complete_snapshot_at_schema_version_five() {
-    let record = TraceRecord::new(
+    let record = fixture_record(
         TraceContext::default().for_session("composition-session"),
         TraceEvent::CompositionChanged {
             fingerprint: "4c94f3".to_string(),
@@ -823,7 +824,7 @@ fn read_with_historical_v4_reader(input: &str) -> Result<(), HistoricalV4ReadErr
 
 #[test]
 fn historical_v4_reader_refuses_v5_before_interpreting_new_closed_enum_variant() {
-    let record = TraceRecord::new(
+    let record = fixture_record(
         TraceContext::default(),
         TraceEvent::CompositionChanged {
             fingerprint: "fingerprint".to_string(),
@@ -884,7 +885,7 @@ fn read_with_historical_v5_reader(input: &str) -> Result<(), HistoricalV5ReadErr
 
 #[test]
 fn historical_v5_reader_refuses_v6_provider_replay_dropped_before_interpreting_variant() {
-    let record = TraceRecord::new(
+    let record = fixture_record(
         TraceContext::default(),
         TraceEvent::ProviderReplayDropped {
             event: TraceProviderReplayDropEvent {
@@ -961,7 +962,7 @@ fn read_with_historical_v6_reader(input: &str) -> Result<(), HistoricalV6ReadErr
 
 #[test]
 fn historical_v6_reader_refuses_v7_language_execution_before_interpreting_variant() {
-    let record = TraceRecord::new(
+    let record = fixture_record(
         TraceContext::default(),
         TraceEvent::LanguageExecution {
             language: "lashlang".to_string(),
@@ -1052,7 +1053,7 @@ fn read_with_historical_v7_reader(input: &str) -> Result<(), HistoricalV7ReadErr
 /// reshaped payload.
 #[test]
 fn historical_v7_reader_refuses_v8_turn_outcome_before_interpreting_payload() {
-    let record = TraceRecord::new(
+    let record = fixture_record(
         TraceContext::default(),
         TraceEvent::TurnCompleted {
             outcome: TraceTurnOutcome::Cancelled {
@@ -1340,6 +1341,7 @@ fn durable_outcome_statuses_are_closed_enums() {
         (TraceDurableWaitResolution::Failed, "failed", true),
     ] {
         let event = TraceEvent::DurableWaitResolved {
+            started_at_ms: 0,
             wait_kind: "await_event".to_string(),
             resolution,
         };
@@ -1957,7 +1959,7 @@ fn language_execution_all_payload_variants_round_trip() {
     assert_eq!(covered, (0..variants.len()).collect());
 
     for payload in variants {
-        let record = TraceRecord::new(
+        let record = fixture_record(
             TraceContext::default().for_session("s1"),
             TraceEvent::LanguageExecution {
                 language: "lashlang".to_string(),
@@ -2015,13 +2017,13 @@ fn exec_code_completed_event() -> TraceEvent {
 #[test]
 fn jsonl_round_trip_preserves_records() {
     let records = vec![
-        TraceRecord::new(
+        fixture_record(
             TraceContext::default().for_session("root"),
             TraceEvent::TurnStarted {
                 metadata: Default::default(),
             },
         ),
-        TraceRecord::new(
+        fixture_record(
             TraceContext::default().for_session("root"),
             TraceEvent::ToolCallStarted {
                 call_id: lash_sansio::ToolCallId::fixture("call-1"),
@@ -2031,11 +2033,11 @@ fn jsonl_round_trip_preserves_records() {
                 issuing_node_id: None,
             },
         ),
-        TraceRecord::new(
+        fixture_record(
             TraceContext::default().for_session("root"),
             exec_code_completed_event(),
         ),
-        TraceRecord::new(
+        fixture_record(
             TraceContext::default().for_session("root"),
             TraceEvent::TurnCompleted {
                 outcome: TraceTurnOutcome::Completed {
@@ -2095,6 +2097,7 @@ fn durable_step_events_round_trip_at_schema_version_six() {
             wait_kind: "await_event".to_string(),
         },
         TraceEvent::DurableWaitResolved {
+            started_at_ms: 0,
             wait_kind: "await_event".to_string(),
             resolution: TraceDurableWaitResolution::Ok,
         },
@@ -2117,7 +2120,7 @@ fn durable_step_events_round_trip_at_schema_version_six() {
 
     for event in events {
         let expected_kind = event.kind();
-        let record = TraceRecord::new(TraceContext::default().for_session("s1"), event);
+        let record = fixture_record(TraceContext::default().for_session("s1"), event);
         let json = serde_json::to_value(&record).expect("serialize durable trace event");
         assert_eq!(json["schema_version"], lash_trace::TRACE_SCHEMA_VERSION);
         assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 36);
@@ -2306,7 +2309,7 @@ fn language_execution_records() -> Vec<TraceRecord> {
         .into_iter()
         .enumerate()
         .map(|(index, payload)| {
-            TraceRecord::new(
+            fixture_record(
                 TraceContext::default().for_session("s1"),
                 TraceEvent::LanguageExecution {
                     language: "lashlang".to_string(),
@@ -2339,7 +2342,7 @@ fn published_trace_record_schema_accepts_every_event_and_payload_sample() {
     };
     for event in event_samples() {
         let kind = event.kind();
-        let record = TraceRecord::new(context.clone(), event);
+        let record = fixture_record(context.clone(), event);
         let value = serde_json::to_value(&record).expect("encode record");
         assert_schema_accepts(&validator, &value, kind);
     }
@@ -2358,7 +2361,7 @@ fn published_trace_record_schema_tolerates_additive_fields_and_refuses_unknown_v
         "../../../schemas/host/trace-record/v36.schema.json"
     ))
     .expect("published trace schema");
-    let record = TraceRecord::new(
+    let record = fixture_record(
         TraceContext::default(),
         TraceEvent::TurnStarted {
             metadata: Default::default(),
@@ -2422,4 +2425,18 @@ fn source_locations_are_workspace_relative() {
         std::panic::Location::caller().file(),
         "crates/lash-trace/tests/schema.rs"
     );
+}
+
+#[cfg(test)]
+fn fixture_record(
+    context: lash_trace::TraceContext,
+    event: lash_trace::TraceEvent,
+) -> lash_trace::TraceRecord {
+    lash_trace::TraceRecord {
+        schema_version: lash_trace::TRACE_SCHEMA_VERSION,
+        id: "fixture-record".into(),
+        timestamp: Default::default(),
+        context,
+        event,
+    }
 }

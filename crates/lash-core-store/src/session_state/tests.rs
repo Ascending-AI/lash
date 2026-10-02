@@ -49,6 +49,7 @@ fn resident_leaf_body_bytes(state: &RuntimeSessionState) -> usize {
 fn commit_result_for(state: &RuntimeSessionState) -> crate::store::RuntimeCommitReceipt {
     let commit = crate::RuntimeCommit::persisted_state_for_test(state);
     crate::store::RuntimeCommitReceipt {
+        committed_at_ms: 0,
         schema_version: crate::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION,
         head_revision: state.head_revision + 1,
         checkpoint_ref: "checkpoint-ref".to_string().into(),
@@ -60,6 +61,7 @@ fn commit_result_for(state: &RuntimeSessionState) -> crate::store::RuntimeCommit
         realized_node_timestamps: Vec::new(),
         failure_evidence: Vec::new(),
         outcome: None,
+        trace: None,
         pending_follow_on: None,
         command_outcomes: Default::default(),
         turn_input_applications: Vec::new(),

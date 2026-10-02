@@ -40,6 +40,7 @@ struct TraceRuntimeParts {
     level: TraceLevel,
     base_context: TraceContext,
     metrics: TelemetryMetrics,
+    wait_receipts: Option<Arc<dyn crate::store::WaitReceiptStore>>,
 }
 
 impl TraceRuntime {
@@ -53,6 +54,7 @@ impl TraceRuntime {
                 level: TraceLevel::Standard,
                 base_context: TraceContext::default(),
                 metrics: TelemetryMetrics::default(),
+                wait_receipts: None,
             }),
         }
     }
@@ -69,6 +71,15 @@ impl TraceRuntime {
         let parts = Arc::make_mut(&mut self.parts);
         parts.metrics = metrics;
         self
+    }
+
+    #[must_use]
+    pub fn with_wait_receipts(mut self, store: Arc<dyn crate::store::WaitReceiptStore>) -> Self {
+        Arc::make_mut(&mut self.parts).wait_receipts = Some(store);
+        self
+    }
+    pub(crate) fn wait_receipts(&self) -> Option<&Arc<dyn crate::store::WaitReceiptStore>> {
+        self.parts.wait_receipts.as_ref()
     }
 
     /// The identity-producing scope factory: [`UntracedScopes`] unless the
@@ -185,6 +196,7 @@ impl TraceRuntime {
         scope: Option<DurableTraceScope>,
         controller: &crate::ScopedEffectController<'_>,
     ) -> TraceStanding {
+        controller.frontier().bind_runtime(self.clone());
         self.standing(
             scope,
             EmissionRight::Shift {
@@ -200,7 +212,7 @@ impl TraceRuntime {
     /// passed its journal. A step no shift issued has no standing.
     pub fn issued(&self, scope: Option<DurableTraceScope>, issue: &StepIssue) -> TraceStanding {
         self.standing(
-            scope,
+            issue.scope.clone().or(scope),
             EmissionRight::Shift {
                 frontier: issue.frontier.clone().unwrap_or_default(),
                 attempt: issue.attempt.clone(),
@@ -216,9 +228,8 @@ impl TraceRuntime {
         turn_id: &crate::TurnId,
         controller: &crate::ScopedEffectController<'_>,
     ) -> TraceStanding {
-        let scope = self
-            .is_observed()
-            .then(|| turn_trace_scope(session_id, turn_id, self.parts.clock.timestamp_ms()));
+        let _ = (session_id, turn_id);
+        let scope = controller.trace_scope().cloned();
         self.shift(scope, controller)
     }
 
@@ -229,10 +240,8 @@ impl TraceRuntime {
         invocation: &crate::RuntimeEffectInvocation,
         live: &Arc<LiveStep>,
     ) -> TraceStanding {
-        let scope = self
-            .is_observed()
-            .then(|| effect_trace_scope(invocation, self.parts.clock.timestamp_ms()))
-            .flatten();
+        let _ = invocation;
+        let scope = live.scope.clone();
         self.body(scope, live)
     }
 
@@ -347,6 +356,7 @@ impl TraceEmitter {
     pub fn emit_unscoped(
         &self,
         permit: Option<&EmissionPermit>,
+        identity: impl FnOnce() -> TraceRecordIdentity,
         at_ms: u64,
         record: impl FnOnce() -> (TraceContext, TraceEvent),
     ) {
@@ -354,11 +364,10 @@ impl TraceEmitter {
             return;
         }
         let (context, event) = record();
-        self.append(&TraceRecord::new_with_timestamp(
-            context,
-            event,
-            datetime(at_ms),
-        ));
+        match TraceRecord::identified(&identity(), context, event, datetime(at_ms)) {
+            Ok(record) => self.append(&record),
+            Err(error) => tracing::warn!(%error, "failed to derive unscoped observation identity"),
+        }
     }
 
     /// Publishes one product observation (the process and language graph).
@@ -401,15 +410,21 @@ pub struct LiveStep {
     attempt: TraceAttemptId,
     next_ordinal: AtomicU64,
     observation: Option<AttemptObservation>,
+    scope: Option<DurableTraceScope>,
 }
 
 impl LiveStep {
-    fn of(attempt: TraceAttemptId, observation: Option<AttemptObservation>) -> Arc<Self> {
+    fn of(
+        attempt: TraceAttemptId,
+        observation: Option<AttemptObservation>,
+        scope: Option<DurableTraceScope>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             permit: EmissionPermit::live_execution(attempt.clone()),
             attempt,
             next_ordinal: AtomicU64::new(0),
             observation,
+            scope,
         })
     }
 
@@ -417,24 +432,18 @@ impl LiveStep {
     pub(crate) fn begin(
         effect_attempt: Option<&crate::EffectAttempt>,
         observation: Option<AttemptObservation>,
+        scope: Option<DurableTraceScope>,
     ) -> Arc<Self> {
         let attempt = match effect_attempt {
             Some(attempt) => attempt.trace_id(),
             None => fresh_attempt(),
         };
-        Self::of(attempt, observation)
-    }
-
-    /// Begun by a substrate inside the body of a step it records itself (a
-    /// wait it installs, a timer it starts): the same boundary, for a step
-    /// the engine handed no body for ([`StepIssue::begin_native`]).
-    fn begin_native(observation: Option<AttemptObservation>) -> Arc<Self> {
-        Self::of(fresh_attempt(), observation)
+        Self::of(attempt, observation, scope)
     }
 
     /// Code no journal replays ([`TraceRuntime::unreplayed`]).
     fn unreplayed() -> Arc<Self> {
-        Self::of(fresh_attempt(), None)
+        Self::of(fresh_attempt(), None, None)
     }
 
     pub fn permit(&self) -> &EmissionPermit {
@@ -471,7 +480,7 @@ fn fresh_attempt() -> TraceAttemptId {
 ///
 /// - a step the journal answers proves everything held was a reconstruction
 ///   of work an earlier attempt observed, and it is dropped;
-/// - a step whose body runs, or the shift concluding, proves the attempt
+/// - a step whose body runs proves the attempt
 ///   reached new work: what is still held was made after the last answered
 ///   step, by this attempt, and is emitted.
 ///
@@ -482,6 +491,7 @@ pub struct JournalFrontier {
 }
 
 struct FrontierInner {
+    runtime: std::sync::Mutex<Option<TraceRuntime>>,
     state: std::sync::Mutex<FrontierState>,
     attempt: TraceAttemptId,
     next_ordinal: AtomicU64,
@@ -498,7 +508,7 @@ const HELD_OBSERVATIONS_MAX: usize = 256;
 enum FrontierState {
     /// No step body has run in this attempt yet.
     Behind(Vec<HeldObservation>),
-    /// A step body has really run in this attempt, or the shift concluded.
+    /// A step body has really run in this attempt.
     Past,
 }
 
@@ -521,11 +531,27 @@ impl JournalFrontier {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(FrontierInner {
+                runtime: std::sync::Mutex::new(None),
                 state: std::sync::Mutex::new(FrontierState::Behind(Vec::new())),
                 attempt: fresh_attempt(),
                 next_ordinal: AtomicU64::new(0),
             }),
         }
+    }
+
+    pub(crate) fn bind_runtime(&self, runtime: TraceRuntime) {
+        *self
+            .inner
+            .runtime
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(runtime);
+    }
+    pub(crate) fn runtime(&self) -> Option<TraceRuntime> {
+        self.inner
+            .runtime
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, FrontierState> {
@@ -554,8 +580,7 @@ impl JournalFrontier {
         }
     }
 
-    /// Whether a step body of this shift has really run in this attempt, or
-    /// the shift concluded.
+    /// Whether a step body of this shift has really run in this attempt.
     pub fn is_crossed(&self) -> bool {
         matches!(*self.state(), FrontierState::Past)
     }
@@ -595,6 +620,7 @@ impl JournalFrontier {
 pub struct StepIssue {
     frontier: Option<JournalFrontier>,
     attempt: Option<AttemptObservation>,
+    scope: Option<DurableTraceScope>,
     /// Whether dropping this issue unbegun means the journal served the step.
     reports_served: bool,
 }
@@ -604,6 +630,7 @@ impl Clone for StepIssue {
         Self {
             frontier: self.frontier.clone(),
             attempt: self.attempt.clone(),
+            scope: self.scope.clone(),
             reports_served: false,
         }
     }
@@ -622,10 +649,15 @@ impl Drop for StepIssue {
 }
 
 impl StepIssue {
-    pub(crate) fn new(frontier: JournalFrontier, attempt: Option<AttemptObservation>) -> Self {
+    pub(crate) fn new(
+        frontier: JournalFrontier,
+        attempt: Option<AttemptObservation>,
+        scope: Option<DurableTraceScope>,
+    ) -> Self {
         Self {
             frontier: Some(frontier),
             attempt,
+            scope,
             reports_served: true,
         }
     }
@@ -633,7 +665,7 @@ impl StepIssue {
     /// Begins the live step of a body the engine's step wrapper is running.
     pub(crate) fn begin(&self, effect_attempt: Option<&crate::EffectAttempt>) -> Arc<LiveStep> {
         self.cross();
-        LiveStep::begin(effect_attempt, self.attempt.clone())
+        LiveStep::begin(effect_attempt, self.attempt.clone(), self.scope.clone())
     }
 
     /// Begins the live step of a body a substrate records itself: called
@@ -641,7 +673,7 @@ impl StepIssue {
     #[doc(hidden)]
     pub fn begin_native(&self) -> Arc<LiveStep> {
         self.cross();
-        LiveStep::begin_native(self.attempt.clone())
+        LiveStep::of(fresh_attempt(), self.attempt.clone(), self.scope.clone())
     }
 
     /// Marks the step as one that has no recorded body of its own: one that
@@ -658,6 +690,10 @@ impl StepIssue {
 
     pub fn attempt_observation(&self) -> Option<&AttemptObservation> {
         self.attempt.as_ref()
+    }
+
+    pub fn scope(&self) -> Option<&DurableTraceScope> {
+        self.scope.as_ref()
     }
 
     fn cross(&self) {
@@ -704,13 +740,11 @@ impl TraceStanding {
         self.runtime.is_observed()
     }
 
-    /// Concludes the shift this standing belongs to: it reached its end in
-    /// this attempt, so what it still holds was made after the last step the
-    /// journal answered and is emitted. A standing in a body has nothing
-    /// held.
+    /// Drop observations held by a replay-only drive. Reaching the end does
+    /// not prove that a body executed; logical terminals use SQL receipts.
     pub fn conclude(&self) {
         if let EmissionRight::Shift { frontier, .. } = &self.right {
-            frontier.cross();
+            frontier.served();
         }
     }
 
@@ -748,22 +782,49 @@ impl TraceStanding {
         if !self.runtime.is_observed() {
             return;
         }
-        let at_ms = self.runtime.parts.clock.timestamp_ms();
         match &self.right {
             EmissionRight::Body(live) => self.emit_live(
                 live.permit(),
                 live.attempt.clone(),
                 live.next_ordinal(),
-                at_ms,
+                self.runtime.parts.clock.timestamp_ms(),
                 record,
             ),
+            EmissionRight::Shift { frontier, .. } if frontier.is_crossed() => {
+                let permit = EmissionPermit::live_execution(frontier.inner.attempt.clone());
+                self.emit_live(
+                    &permit,
+                    frontier.inner.attempt.clone(),
+                    frontier.inner.next_ordinal.fetch_add(1, Ordering::Relaxed),
+                    self.runtime.parts.clock.timestamp_ms(),
+                    record,
+                );
+            }
+            EmissionRight::Shift { .. } => {}
+        }
+    }
+
+    /// Defers an owned observation until a real body admits this shift's suffix.
+    /// Neither the clock nor the record constructor runs on a served prefix.
+    pub fn observe_deferred(
+        &self,
+        record: impl FnOnce() -> (TraceContext, TraceEvent) + Send + 'static,
+    ) {
+        if !self.runtime.is_observed() {
+            return;
+        }
+        match &self.right {
+            EmissionRight::Body(_) => self.observe(record),
             EmissionRight::Shift { frontier, .. } => {
-                // The record is built now, where the shift made it; only its
-                // emission waits on the frontier.
-                let record = self.project(record());
                 let standing = self.clone();
                 frontier.observe(Box::new(move |permit, attempt, ordinal| {
-                    standing.emit_projected(permit, attempt, ordinal, at_ms, record);
+                    standing.emit_live(
+                        permit,
+                        attempt,
+                        ordinal,
+                        standing.runtime.parts.clock.timestamp_ms(),
+                        record,
+                    );
                 }));
             }
         }
@@ -778,10 +839,12 @@ impl TraceStanding {
         record: impl FnOnce() -> (TraceContext, TraceEvent),
     ) {
         let Some(scope) = self.scope.as_deref() else {
-            self.runtime
-                .parts
-                .emitter
-                .emit_unscoped(Some(permit), at_ms, || self.project(record()));
+            self.runtime.parts.emitter.emit_unscoped(
+                Some(permit),
+                || TraceRecordIdentity::UnscopedLive { attempt, ordinal },
+                at_ms,
+                || self.project(record()),
+            );
             return;
         };
         self.runtime.parts.emitter.emit(
@@ -798,33 +861,21 @@ impl TraceStanding {
         );
     }
 
-    fn emit_projected(
+    pub fn provider_attempts(
         &self,
-        permit: &EmissionPermit,
-        attempt: TraceAttemptId,
-        ordinal: u64,
-        at_ms: u64,
-        record: (TraceContext, TraceEvent),
-    ) {
-        let Some(scope) = self.scope.as_deref() else {
-            self.runtime
-                .parts
-                .emitter
-                .emit_unscoped(Some(permit), at_ms, || record);
-            return;
-        };
-        self.runtime.parts.emitter.emit(
-            Some(permit),
-            scope,
-            self.attempt_observation(),
-            || TraceRecordIdentity::Live {
-                scope: scope.scope.clone(),
-                attempt,
-                ordinal,
-            },
-            at_ms,
-            || record,
-        );
+        sideband: lash_core_llm::core_internal::ProviderCompletionSideband,
+        context: TraceContext,
+    ) -> lash_core_llm::core_internal::ProviderCompletionSideband {
+        if !self.is_observed() {
+            return sideband;
+        }
+        let standing = self.clone();
+        sideband.with_attempt_observer(
+            Arc::new(move |attempt| {
+                standing.observe(|| (context.clone(), TraceEvent::LlmAttemptCompleted { attempt }));
+            }),
+            self.runtime.clock().clone(),
+        )
     }
 
     /// The live permit of the body this standing is in, and none for shift
@@ -861,17 +912,15 @@ impl TraceStanding {
         ordinal: u64,
         record: impl FnOnce() -> (TraceContext, TraceEvent),
     ) {
-        let Some(receipt) = receipt else {
+        let Some(receipt) = receipt
+            .filter(|permit| matches!(permit.source(), lash_trace::EmissionSource::NewTransition))
+        else {
             return;
         };
         if !self.runtime.is_observed() {
             return;
         }
         let Some(scope) = self.scope.as_deref() else {
-            self.runtime
-                .parts
-                .emitter
-                .emit_unscoped(Some(receipt), at_ms, || self.project(record()));
             return;
         };
         self.runtime.parts.emitter.emit(

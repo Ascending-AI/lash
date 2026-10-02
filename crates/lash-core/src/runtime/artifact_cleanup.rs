@@ -174,6 +174,7 @@ pub struct ArtifactCleanupPorts {
 pub struct ArtifactCleanupRelay {
     ports: ArtifactCleanupPorts,
     policy: RelayPolicy,
+    metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
 }
 
 /// What a plan resolved to.
@@ -190,10 +191,20 @@ enum Resolution {
 
 impl ArtifactCleanupRelay {
     #[must_use]
+    pub fn with_metrics(
+        mut self,
+        metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
+    ) -> Self {
+        self.metrics = metrics;
+        self
+    }
+
+    #[must_use]
     pub fn new(ports: ArtifactCleanupPorts) -> Self {
         Self {
             ports,
             policy: RelayPolicy::default(),
+            metrics: Default::default(),
         }
     }
 
@@ -635,6 +646,10 @@ fn durable_store_failure(context: &'static str) -> impl Fn(crate::StoreError) ->
 
 #[async_trait::async_trait]
 impl ObligationRelay for ArtifactCleanupRelay {
+    fn metrics(&self) -> lash_trace::telemetry::metrics::TelemetryMetrics {
+        self.metrics.clone()
+    }
+
     fn ledger(&self) -> &dyn ObligationLedger {
         self.ports.ledger.as_ref()
     }

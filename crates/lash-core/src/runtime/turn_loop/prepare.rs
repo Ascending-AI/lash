@@ -96,6 +96,32 @@ impl LashRuntime {
                 input.trace_turn_id = input_trace_turn_id;
             }
         }
+        let trace_turn_id = input
+            .trace_turn_id
+            .clone()
+            .expect("turn identity is bound before preparation");
+        let turn_boundary = self
+            .host
+            .core
+            .tracing
+            .record_boundary(
+                &scoped_effect_controller,
+                format!("trace:turn:{trace_turn_id}:started"),
+                lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Turn {
+                    session_id: self.state.session_id.clone(),
+                    turn_id: trace_turn_id.clone(),
+                }),
+                scoped_effect_controller.trace_scope().map_or(
+                    lash_trace::TraceCause::Root,
+                    lash_trace::DurableTraceScope::parent_cause,
+                ),
+                None,
+                lash_trace::TraceTransitionKind::Started,
+            )
+            .await
+            .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
+        let scoped_effect_controller =
+            scoped_effect_controller.with_trace_scope(turn_boundary.scope.clone());
         let previous_prompt_usage = self.state.last_prompt_usage.clone();
         let normalized = match self.normalize_input_items(&input.items).await {
             Ok(items) => items,
@@ -145,7 +171,12 @@ impl LashRuntime {
                     self.host.core.durability.commit_budget,
                 )
                 .with_definition_engines(self.host.core.process_engines.clone())
-                .with_metrics(self.host.core.tracing.metrics().clone());
+                .with_metrics(self.host.core.tracing.metrics().clone())
+                .with_trace_metadata(turn_trace_metadata(&self.state, input.items.len()))
+                .with_trace(self.host.core.tracing.shift(
+                    scoped_effect_controller.trace_scope().cloned(),
+                    &scoped_effect_controller,
+                ));
                 turn_pipeline.apply_prepared_messages(&messages);
                 return Box::pin(self.finish_turn(TurnCommitContext {
                     opener: None,
@@ -172,55 +203,6 @@ impl LashRuntime {
             .trace_turn_id
             .clone()
             .expect("turn id is bound from the execution scope before normalization");
-        // A shift that is replaying its journal reconstructs the turn's start
-        // and reports nothing. No committed boundary record reports the start
-        // as new yet, so it is observed as the work of the attempt that first
-        // reaches it rather than as a logical transition.
-        self.host
-            .core
-            .tracing
-            .turn_execution(
-                &self.state.session_id,
-                &trace_turn_id,
-                &scoped_effect_controller,
-            )
-            .observe(|| {
-                let mut trace_metadata = std::collections::BTreeMap::new();
-                trace_metadata.insert(
-                    "input_item_count".to_string(),
-                    serde_json::json!(normalized.len()),
-                );
-                // The config this physical turn runs under (FIG-3600 S6): the
-                // run's recorded config, adopted on resident state at the
-                // funnel's `ResolveTurnConfig` step.
-                trace_metadata.insert(
-                    "profile_key".to_string(),
-                    serde_json::json!(
-                        self.state
-                            .policy
-                            .model
-                            .as_ref()
-                            .map(|model| model.key().as_str())
-                    ),
-                );
-                trace_metadata.insert(
-                    "model".to_string(),
-                    serde_json::json!(self.state.policy.wire_model()),
-                );
-                trace_metadata.insert(
-                    "config_revision".to_string(),
-                    serde_json::json!(self.state.config_revision),
-                );
-                (
-                    lash_trace::TraceContext::default()
-                        .for_session(self.state.session_id.clone())
-                        .for_turn_index(turn_index)
-                        .for_turn(trace_turn_id.clone()),
-                    lash_trace::TraceEvent::TurnStarted {
-                        metadata: trace_metadata,
-                    },
-                )
-            });
 
         let mut turn_delta = Vec::new();
         let initial_turn_causes: Vec<_> = admissions
@@ -245,6 +227,7 @@ impl LashRuntime {
             .map(crate::runtime::ingress_message_id)
             .unwrap_or_else(|| format!("m_turn_{trace_turn_id}_input"));
         let mut user_parts: Vec<Part> = Vec::new();
+        let trace_metadata = turn_trace_metadata(&self.state, normalized.len());
         for item in normalized {
             match item {
                 NormalizedItem::Text(text) => {
@@ -406,6 +389,7 @@ impl LashRuntime {
         Box::pin(self.stream_prepared_turn_inner_with_graph_appends(
             PreparedTurnExecuteContext {
                 turn: PreparedLogicalTurn {
+                    trace_metadata,
                     messages,
                     previous_prompt_usage,
                     turn_context: input.turn_context.clone(),
@@ -435,4 +419,31 @@ impl LashRuntime {
         )
         .await
     }
+}
+
+pub(super) fn turn_trace_metadata(
+    state: &crate::runtime::RuntimeSessionState,
+    input_item_count: usize,
+) -> std::collections::BTreeMap<String, serde_json::Value> {
+    std::collections::BTreeMap::from([
+        (
+            "input_item_count".into(),
+            serde_json::json!(input_item_count),
+        ),
+        (
+            "profile_key".into(),
+            serde_json::json!(
+                state
+                    .policy
+                    .model
+                    .as_ref()
+                    .map(|model| model.key().as_str())
+            ),
+        ),
+        ("model".into(), serde_json::json!(state.policy.wire_model())),
+        (
+            "config_revision".into(),
+            serde_json::json!(state.config_revision),
+        ),
+    ])
 }

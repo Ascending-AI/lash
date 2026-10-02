@@ -270,7 +270,25 @@ impl DirectLlmClient {
         });
         // No lash execution owns this call: the host that made it owns its
         // billing, and lash keeps no ledger row for it (ADR 0127).
-        match self.provider.complete(llm_request).await {
+        let sideband =
+            lash_core_llm::core_internal::prepare_completion(&self.provider, &mut llm_request);
+        let sideband = match &traced {
+            Some((standing, id)) => standing
+                .provider_attempts(sideband, TraceContext::default().for_llm_call(id.clone())),
+            None => sideband,
+        };
+        match lash_core_llm::core_internal::complete_prepared(
+            &mut self.provider,
+            llm_request,
+            sideband,
+            crate::ChargeSafetyPolicy::default(),
+            &Default::default(),
+            traced
+                .as_ref()
+                .and_then(|(standing, _)| standing.body_permit()),
+        )
+        .await
+        {
             Ok(response) => {
                 let result = DirectLlmOutcome {
                     response: response.response,

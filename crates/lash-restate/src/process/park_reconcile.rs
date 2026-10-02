@@ -106,6 +106,7 @@ pub(crate) async fn reconcile_process_invocations(
     registry: &Arc<dyn ProcessRegistry>,
     continuations: &Arc<dyn ProcessContinuationStore>,
     paused: Vec<RestatePausedInvocation>,
+    metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
 ) -> Result<ProcessParkReconcileReport, PluginError> {
     let mut report = ProcessParkReconcileReport::default();
     for invocation in paused
@@ -122,8 +123,11 @@ pub(crate) async fn reconcile_process_invocations(
             continuations,
             &invocation,
             record,
-            segment_ordinal,
-            Some(EnginePark::new(invocation.id.clone())),
+            (
+                segment_ordinal,
+                Some(EnginePark::new(invocation.id.clone())),
+            ),
+            metrics,
         )
         .await?;
         report.parked.extend(pass.parked);
@@ -142,6 +146,7 @@ pub(crate) async fn reconcile_process_group_work(
     continuations: &Arc<dyn ProcessContinuationStore>,
     invocation: &RestatePausedInvocation,
     process: &ProcessId,
+    metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
 ) -> Result<ProcessParkReconcileReport, PluginError> {
     let Some(record) = registry.get_process(process).await? else {
         admin
@@ -163,8 +168,8 @@ pub(crate) async fn reconcile_process_group_work(
         continuations,
         invocation,
         record,
-        ordinal,
-        None,
+        (ordinal, None),
+        metrics,
     )
     .await
 }
@@ -175,9 +180,10 @@ async fn reconcile_process_work(
     continuations: &Arc<dyn ProcessContinuationStore>,
     invocation: &RestatePausedInvocation,
     record: ProcessRecord,
-    segment_ordinal: u64,
-    engine: Option<EnginePark>,
+    segment: (u64, Option<EnginePark>),
+    metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
 ) -> Result<ProcessParkReconcileReport, PluginError> {
+    let (segment_ordinal, engine) = segment;
     let mut report = ProcessParkReconcileReport::default();
     if record.is_terminal() {
         if release_terminal_segment(admin, registry, &record, invocation).await? {
@@ -221,11 +227,12 @@ async fn reconcile_process_work(
         .await?;
     let reason = lash_core::store::ParkReasonCode::EngineRetryExhausted;
     lash_core::operational_metrics::record_work_parked(
-        &Default::default(),
-        None,
+        metrics,
+        parked.permit().as_ref(),
         "process",
         reason.as_str(),
     );
+    let parked = parked.into_record();
     tracing::warn!(
         event = "process.parked",
         process_id = record.id.as_str(),

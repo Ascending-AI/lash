@@ -79,6 +79,7 @@ mod tests {
     /// a source builds it. Only its tools matter here.
     fn context(tools: Arc<CountingTools>) -> ToolDispatchContext<'static> {
         ToolDispatchContext {
+            tool_receipts: None,
             plugins: crate::support::plugin_host(vec![Arc::new(
                 crate::plugin::StaticPluginFactory::new(
                     crate::plugin::PluginDeclaration::initial("fixture-tools"),

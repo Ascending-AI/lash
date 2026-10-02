@@ -1,5 +1,10 @@
 //! Direct completions retain response usage and sealed attempt history.
+use super::super::envelope::RuntimeDirectLlmOutcome;
+use super::super::outcome::llm_call_error_from_transport;
 use super::*;
+use crate::LlmRequest as CoreLlmRequest;
+use crate::provider::ProviderHandle;
+use crate::sansio::LlmCallError;
 
 impl LocalDirectEffectRunner {
     pub(super) async fn run_direct(
@@ -24,7 +29,9 @@ impl LocalDirectEffectRunner {
                 super::super::emit_llm_trace_started(&standing, context.clone(), &request);
                 (standing, context, request.model.wire_model().to_string())
             });
-        let (result, call_record) = self.run_direct_llm_request(provider, request).await;
+        let (result, call_record) = self
+            .run_direct_llm_request(provider, request, traced.as_ref())
+            .await;
         if let Some((standing, context, request_model)) = traced {
             match &result {
                 Ok(response) => super::super::emit_llm_trace_completed(
@@ -100,5 +107,66 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         envelope: RuntimeEffectEnvelope,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         self.execute_recorded(envelope).await.outcome
+    }
+}
+
+impl LocalDirectEffectRunner {
+    pub(super) async fn run_direct_llm_request(
+        &mut self,
+        mut provider: ProviderHandle,
+        request: CoreLlmRequest,
+        traced: Option<&(
+            crate::trace::TraceStanding,
+            lash_trace::TraceContext,
+            String,
+        )>,
+    ) -> RuntimeDirectLlmOutcome {
+        let request = match crate::attachments::resolve_llm_request_attachments(
+            request,
+            self.attachment_store.as_ref(),
+        )
+        .await
+        {
+            Ok(request) => request,
+            Err(err) => {
+                return (
+                    Err(LlmCallError {
+                        message: err.to_string(),
+                        retryable: false,
+                        kind: crate::ProviderFailureKind::Unknown,
+                        raw: None,
+                        code: Some(crate::FailureCode::lash(
+                            crate::TurnFailureCode::AttachmentResolutionFailed,
+                        )),
+                        terminal_reason: crate::LlmTerminalReason::ProviderError,
+                        request_body: None,
+                        partial_response: None,
+                    }),
+                    None,
+                );
+            }
+        };
+        let mut request = request;
+        let sideband = lash_core_llm::core_internal::prepare_completion(&provider, &mut request);
+        let sideband = traced.map_or_else(
+            || sideband.clone(),
+            |(standing, context, _)| standing.provider_attempts(sideband.clone(), context.clone()),
+        );
+        match lash_core_llm::core_internal::complete_prepared(
+            &mut provider,
+            request,
+            sideband,
+            self.charge_safety.clone(),
+            self.tracing.metrics(),
+            traced.and_then(|(standing, _, _)| standing.body_permit()),
+        )
+        .await
+        {
+            Ok(completion) => (Ok(completion.response), Some(completion.call_record)),
+            Err(failure) => (
+                Err(llm_call_error_from_transport(failure.error)),
+                Some(*failure.call_record),
+            ),
+        }
     }
 }

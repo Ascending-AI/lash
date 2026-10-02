@@ -12,9 +12,9 @@ use opentelemetry::{Context, KeyValue};
 
 use crate::telemetry::{
     AttemptObservation, DurableTraceScope, EmissionSource, TraceAdmissionCandidate, TraceAnchor,
-    TraceCandidateOutcome, TraceCarrier, TraceCause, TraceDomainProjector, TraceScopeFactory,
-    TraceScopeId, TraceScopeKind, UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId,
-    W3cTraceState,
+    TraceCandidateOutcome, TraceCarrier, TraceCause, TraceDomainProjector, TraceHostOperation,
+    TraceScopeFactory, TraceScopeId, TraceScopeKind, UntracedScopes, W3cSpanId, W3cTraceFlags,
+    W3cTraceId, W3cTraceState,
 };
 use crate::{
     TraceDomainOperation, TraceDomainStatus, TraceEvent, TraceLlmAttemptOutcome, TraceRecord,
@@ -201,6 +201,28 @@ impl TraceScopeFactory for OtelTelemetry {
         carrier(Context::current().span().span_context())
     }
 
+    fn begin_host_send(
+        &self,
+        parent: Option<&TraceCarrier>,
+    ) -> Option<Box<dyn TraceHostOperation>> {
+        let definition = DomainSpan::Send.definition();
+        let parent = parent
+            .and_then(span_context)
+            .map(|context| Context::new().with_remote_span_context(context))
+            .unwrap_or_default();
+        let span = self
+            .tracer
+            .span_builder("lash.send.attempt")
+            .with_kind(definition.kind)
+            .with_attributes([A::OperationName.value("send")])
+            .start_with_context(self.tracer.as_ref(), &parent);
+        let context = carrier(span.span_context())?;
+        Some(Box::new(HostOperation {
+            span: Some(span),
+            context,
+        }))
+    }
+
     fn propose(
         &self,
         scope: &TraceScopeId,
@@ -261,6 +283,37 @@ impl TraceDomainProjector for OtelTelemetry {
         record: &TraceRecord,
     ) {
         self.completion(scope, attempt, source, record);
+    }
+}
+
+struct HostOperation {
+    span: Option<BoxedSpan>,
+    context: TraceCarrier,
+}
+impl HostOperation {
+    fn finish(&mut self, outcome: TraceCandidateOutcome) {
+        if let Some(mut span) = self.span.take() {
+            if span.is_recording() {
+                span.set_attribute(A::AdmissionOutcome.value(outcome.as_str()));
+                if outcome == TraceCandidateOutcome::Selected {
+                    span.update_name(DomainSpan::Send.definition().name);
+                }
+            }
+            span.end();
+        }
+    }
+}
+impl TraceHostOperation for HostOperation {
+    fn carrier(&self) -> TraceCarrier {
+        self.context.clone()
+    }
+    fn settle(mut self: Box<Self>, outcome: TraceCandidateOutcome) {
+        self.finish(outcome);
+    }
+}
+impl Drop for HostOperation {
+    fn drop(&mut self) {
+        self.finish(TraceCandidateOutcome::Refused);
     }
 }
 
@@ -398,7 +451,10 @@ impl<'a> Projection<'a> {
                 projection.duration_ms = Some(*duration_ms);
             }
             TraceEvent::ExecCodeFailed { .. } => projection.span = DomainSpan::ExecCode,
-            TraceEvent::DurableWaitResolved { .. } => projection.span = DomainSpan::Wait,
+            TraceEvent::DurableWaitResolved { started_at_ms, .. } => {
+                projection.span = DomainSpan::Wait;
+                projection.started_at_ms = Some(*started_at_ms);
+            }
             TraceEvent::DurableTimerResolved { duration_ms, .. } => {
                 projection.span = DomainSpan::Wait;
                 projection.duration_ms = Some(*duration_ms);

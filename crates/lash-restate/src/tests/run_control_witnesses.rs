@@ -1105,6 +1105,7 @@ async fn crash_gaps(server: HarnessServer) {
             ];
             let report = lash_core::shift::reconcile_once(
                 &lash_core::shift::ReconcileParts {
+                    metrics: &Default::default(),
                     sessions: f.factory.as_ref(),
                     work: &f.work,
                     scopes: scopes.as_ref(),
@@ -1668,6 +1669,7 @@ impl SessionShifts for CadenceShifts {
         let ticked_at = std::time::Instant::now();
         let tick = lash_core::shift::reconcile_once(
             &lash_core::shift::ReconcileParts {
+                metrics: &Default::default(),
                 sessions: self.factory.as_ref(),
                 work: &self.work,
                 scopes: self.scopes.as_ref(),

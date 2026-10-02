@@ -7,7 +7,10 @@ impl ProcessContinuationStore for SqliteProcessRegistry {
         &self,
         process_id: &ProcessId,
         handover: PersistedSegmentHandover,
-    ) -> Result<(), lash_core_execution::PluginError> {
+    ) -> Result<
+        lash_core_execution::store::StoreTransition<lash_core_execution::SegmentHandoverCommit>,
+        lash_core_execution::PluginError,
+    > {
         self.put_segment_handover_impl(process_id, handover).await
     }
 

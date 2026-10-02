@@ -627,13 +627,25 @@ pub(crate) fn emit_workbench_trace(
     let context = session_id
         .map(|session_id| TraceContext::default().for_session(session_id))
         .unwrap_or_default();
-    let record = TraceRecord::new(
+    let record = TraceRecord::identified(
+        &lash::tracing::TraceRecordIdentity::UnscopedLive {
+            attempt: lash::tracing::TraceAttemptId::new(uuid::Uuid::new_v4().to_string()),
+            ordinal: 0,
+        },
         context,
         TraceEvent::Custom {
             name: format!("agent_workbench.{name}"),
             payload,
         },
+        Utc::now(),
     );
+    let record = match record {
+        Ok(record) => record,
+        Err(err) => {
+            eprintln!("warning: failed to identify agent-workbench trace event `{name}`: {err}");
+            return;
+        }
+    };
     if let Err(err) = sink.append(&record) {
         eprintln!("warning: failed to append agent-workbench trace event `{name}`: {err}");
     }

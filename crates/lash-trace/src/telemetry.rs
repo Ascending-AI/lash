@@ -891,6 +891,13 @@ pub trait TraceAdmissionCandidate: Send {
     fn settle(self: Box<Self>, outcome: TraceCandidateOutcome);
 }
 
+/// A short host operation. Its carrier names this call, never a durable owner.
+pub trait TraceHostOperation: Send {
+    fn carrier(&self) -> TraceCarrier;
+    /// Finish after the ingress commit. A retained acceptance remains an attempt.
+    fn settle(self: Box<Self>, outcome: TraceCandidateOutcome);
+}
+
 /// The single identity-producing telemetry adapter of a runtime.
 ///
 /// It mints admission anchors and reads the host's ambient context; it never
@@ -900,6 +907,15 @@ pub trait TraceScopeFactory: Send + Sync {
     /// facade entry point calls this, once per submission and before its
     /// first await; engine code passes explicit values.
     fn capture_current(&self) -> Option<TraceCarrier>;
+
+    /// Begin a host send under its captured parent, before the first await.
+    /// No installed adapter means no operation or carrier.
+    fn begin_host_send(
+        &self,
+        _parent: Option<&TraceCarrier>,
+    ) -> Option<Box<dyn TraceHostOperation>> {
+        None
+    }
 
     /// Starts an admission candidate for `scope` under `cause`.
     fn propose(&self, scope: &TraceScopeId, cause: &TraceCause)
@@ -1017,6 +1033,16 @@ pub enum TraceTransitionKind {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(tag = "class", rename_all = "snake_case")]
 pub enum TraceRecordIdentity {
+    /// One committed transition of a durable engine wait.
+    Wait {
+        wait_id: String,
+        transition: TraceTransitionKind,
+    },
+    /// One real host-owned or diagnostic attempt, with no durable owner.
+    UnscopedLive {
+        attempt: TraceAttemptId,
+        ordinal: u64,
+    },
     /// A logical record: one durable transition of a scope.
     Transition {
         scope: TraceScopeId,

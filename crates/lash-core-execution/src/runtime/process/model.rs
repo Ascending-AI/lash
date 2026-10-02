@@ -1100,6 +1100,57 @@ pub enum ProcessRegistrationOutcome {
     Existing,
 }
 
+/// Read-only registration composition with the registrar's actual proposed id.
+/// Its fields cannot be widened between preparation and the fenced commit.
+#[derive(Clone, Debug)]
+pub struct PreparedProcessRegistration {
+    registration: ProcessRegistration,
+    observers: Vec<SessionId>,
+    process_id: ProcessId,
+    retained: bool,
+    prepared_at_ms: u64,
+}
+impl PreparedProcessRegistration {
+    /// Backend constructor. Validation and id minting precede this read-only plan.
+    pub fn new(
+        registration: ProcessRegistration,
+        mut observers: Vec<SessionId>,
+        process_id: ProcessId,
+        retained: bool,
+        prepared_at_ms: u64,
+    ) -> Self {
+        observers.sort();
+        observers.dedup();
+        Self {
+            registration,
+            observers,
+            process_id,
+            retained,
+            prepared_at_ms,
+        }
+    }
+    pub fn process_id(&self) -> &ProcessId {
+        &self.process_id
+    }
+    pub fn trace(&self) -> &lash_trace::TraceScopeOffer {
+        &self.registration.trace
+    }
+    pub fn into_commit(
+        mut self,
+        anchor: lash_trace::TraceAnchor,
+    ) -> (ProcessRegistration, Vec<SessionId>, ProcessId, bool, u64) {
+        self.registration.trace =
+            lash_trace::TraceScopeOffer::new(self.registration.trace.cause().clone(), anchor);
+        (
+            self.registration,
+            self.observers,
+            self.process_id,
+            self.retained,
+            self.prepared_at_ms,
+        )
+    }
+}
+
 /// A registered process record together with its [`ProcessRegistrationOutcome`].
 #[derive(Clone, Debug)]
 pub struct ProcessRegistrationReceipt {

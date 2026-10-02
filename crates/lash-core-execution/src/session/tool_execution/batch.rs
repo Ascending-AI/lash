@@ -56,6 +56,7 @@ impl RuntimeExecutionContext<'_> {
         mut call: ToolInvocation,
     ) -> ToolLeafPreparation {
         let leaf_started = self.dispatch.clock.now();
+        let requested_at_ms = self.dispatch.clock.timestamp_ms();
         let context = call
             .issuing_language_node_id
             .clone()
@@ -82,6 +83,12 @@ impl RuntimeExecutionContext<'_> {
                 captures: Vec::new(),
                 triggers: Vec::new(),
             };
+            if let Err(error) = context
+                .retain_unadmitted_tool_request(&outcome.record, requested_at_ms)
+                .await
+            {
+                context.record_nested_effect_error(error);
+            }
             // The call never ran; the Completed observation reports the
             // preparation window it actually spent in.
             let completed = context
@@ -126,6 +133,12 @@ impl RuntimeExecutionContext<'_> {
                 }))
             }
             ToolPreparationOutcome::Completed(outcome) => {
+                if let Err(error) = context
+                    .retain_unadmitted_tool_request(&outcome.record, requested_at_ms)
+                    .await
+                {
+                    context.record_nested_effect_error(error);
+                }
                 let completed = context
                     .complete_language_tool_call(
                         AdmittedCallIdentity(call.id, authorization.tool_id().clone()),

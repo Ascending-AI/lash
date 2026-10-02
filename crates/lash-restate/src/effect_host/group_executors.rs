@@ -16,6 +16,13 @@ pub(super) struct RestateHostGroupExecutors {
 }
 
 impl GroupExecutors for RestateHostGroupExecutors {
+    fn trace_runtime(&self) -> lash_core::trace::TraceRuntime {
+        self.controller
+            .group_executors
+            .get()
+            .map_or_else(Default::default, |executors| executors.trace_runtime())
+    }
+
     fn pin_group(&self, group: &RuntimeEffectGroup) {
         if let Some(executors) = self.controller.group_executors.get() {
             executors.pin_group(group);

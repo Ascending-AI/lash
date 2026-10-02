@@ -480,13 +480,9 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
     }
 
     fn effect_scope(
-        trace: &RestateTraceObserver,
-        invocation: &RuntimeEffectInvocation,
+        issue: &lash_core::facade_support::StepIssue,
     ) -> Option<lash_trace::DurableTraceScope> {
-        lash_core::facade_support::effect_trace_scope(
-            invocation,
-            trace.tracing.clock().timestamp_ms(),
-        )
+        issue.scope().cloned()
     }
 
     /// Observes this controller's handling of `invocation`, or, with none, a
@@ -510,7 +506,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
         match invocation {
             Some(invocation) => trace
                 .tracing
-                .issued(Self::effect_scope(trace, invocation), &current.issue)
+                .issued(Self::effect_scope(&current.issue), &current.issue)
                 .observe(|| {
                     (
                         trace_context_for_runtime_effect_invocation(
@@ -539,9 +535,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(CurrentEffectTrace {
             issue: issue.clone(),
-            standing: trace
-                .tracing
-                .issued(Self::effect_scope(trace, invocation), issue),
+            standing: trace.tracing.issued(Self::effect_scope(issue), issue),
             context: trace_context_for_runtime_effect_invocation(
                 lash_trace::TraceContext::default(),
                 invocation,
@@ -561,7 +555,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
         Some(JournaledRunTrace {
             tracing: trace.tracing.clone(),
             issue: issue.clone(),
-            scope: Self::effect_scope(trace, invocation),
+            scope: Self::effect_scope(issue),
             context: trace_context_for_runtime_effect_invocation(
                 lash_trace::TraceContext::default(),
                 invocation,
@@ -758,7 +752,7 @@ where
     /// stops at the wait and the segment hands it to its successor.
     async fn await_segment_signal(
         &self,
-        invocation: &RuntimeEffectInvocation,
+        _invocation: &RuntimeEffectInvocation,
         request: crate::durable_wait::RestateDurableWaitAwaitRequest,
         replay_key: String,
         generation: lash_core::engine::BuildGeneration,
@@ -768,33 +762,13 @@ where
             .await_signal_or_segment_end(&self.namespace, request, replay_key, generation.clone())
             .await
             .map_err(|err| {
-                self.emit_trace(Some(invocation), || {
-                    lash_trace::TraceEvent::DurableWaitResolved {
-                        wait_kind: "await_event".to_string(),
-                        resolution: lash_trace::TraceDurableWaitResolution::Failed,
-                    }
-                });
                 crate::wire::lash_terminal(&err, RuntimeErrorCode::EngineEffectController)
             })?;
         match outcome {
             RestateTurnCancelRaceOutcome::Completed(context::SignalWaitOutcome::Resolved(
                 resolution,
-            )) => {
-                self.emit_trace(Some(invocation), || {
-                    lash_trace::TraceEvent::DurableWaitResolved {
-                        wait_kind: "await_event".to_string(),
-                        resolution: resolution_trace_label(&resolution),
-                    }
-                });
-                Ok(RuntimeEffectOutcome::AwaitEvent { resolution })
-            }
+            )) => Ok(RuntimeEffectOutcome::AwaitEvent { resolution }),
             RestateTurnCancelRaceOutcome::ProcessCancelled => {
-                self.emit_trace(Some(invocation), || {
-                    lash_trace::TraceEvent::DurableWaitResolved {
-                        wait_kind: "await_event".to_string(),
-                        resolution: lash_trace::TraceDurableWaitResolution::Cancelled,
-                    }
-                });
                 Ok(RuntimeEffectOutcome::AwaitEvent {
                     resolution: Resolution::Cancelled,
                 })
@@ -1195,14 +1169,6 @@ where
                         }
                     });
                 },
-                |wait_kind, resolution| {
-                    self.emit_trace(Some(&invocation), || {
-                        lash_trace::TraceEvent::DurableWaitResolved {
-                            wait_kind: wait_kind.to_string(),
-                            resolution,
-                        }
-                    });
-                },
             ))
             .await
             {
@@ -1233,7 +1199,6 @@ where
                                 *command,
                                 local_executor,
                                 |_| {},
-                                |_, _| {},
                             ))
                             .await
                             .map(|result| RuntimeEffectOutcome::Process { result })
@@ -1270,7 +1235,7 @@ where
                 // the journal runs once.
                 let started = self.observer().map(|trace| {
                     let tracing = trace.tracing.clone();
-                    let scope = Self::effect_scope(trace, &invocation);
+                    let scope = Self::effect_scope(&issue);
                     let context = trace_context_for_runtime_effect_invocation(
                         lash_trace::TraceContext::default(),
                         &invocation,
@@ -1486,44 +1451,18 @@ where
                     }
                     Ok(RestateTurnCancelRaceOutcome::Completed(
                         context::TurnWaitOutcome::Resolved(resolution),
-                    )) => {
-                        self.emit_trace(Some(&invocation), || {
-                            lash_trace::TraceEvent::DurableWaitResolved {
-                                wait_kind: "await_event".to_string(),
-                                resolution: resolution_trace_label(&resolution),
-                            }
-                        });
-                        Ok(RuntimeEffectOutcome::AwaitEvent { resolution })
-                    }
+                    )) => Ok(RuntimeEffectOutcome::AwaitEvent { resolution }),
                     Ok(RestateTurnCancelRaceOutcome::SessionRevoked { session_id }) => {
-                        self.emit_trace(Some(&invocation), || {
-                            lash_trace::TraceEvent::DurableWaitResolved {
-                                wait_kind: "await_event".to_string(),
-                                resolution: lash_trace::TraceDurableWaitResolution::SessionRevoked,
-                            }
-                        });
                         Err(RuntimeEffectControllerError::from(
                             lash_core::StoreError::SessionDeleted { session_id },
                         ))
                     }
                     Ok(RestateTurnCancelRaceOutcome::ProcessCancelled) => {
-                        self.emit_trace(Some(&invocation), || {
-                            lash_trace::TraceEvent::DurableWaitResolved {
-                                wait_kind: "await_event".to_string(),
-                                resolution: lash_trace::TraceDurableWaitResolution::Cancelled,
-                            }
-                        });
                         Ok(RuntimeEffectOutcome::AwaitEvent {
                             resolution: Resolution::Cancelled,
                         })
                     }
                     Ok(RestateTurnCancelRaceOutcome::TurnCancelled) => {
-                        self.emit_trace(Some(&invocation), || {
-                            lash_trace::TraceEvent::DurableWaitResolved {
-                                wait_kind: "await_event".to_string(),
-                                resolution: lash_trace::TraceDurableWaitResolution::TurnCancelled,
-                            }
-                        });
                         Ok(RuntimeEffectOutcome::AwaitEvent {
                             resolution: Resolution::Cancelled,
                         })
@@ -1533,18 +1472,10 @@ where
                     Err(err) if self.is_group_child_engine_cancel(&err) => {
                         Err(group_child_cancelled())
                     }
-                    Err(err) => {
-                        self.emit_trace(Some(&invocation), || {
-                            lash_trace::TraceEvent::DurableWaitResolved {
-                                wait_kind: "await_event".to_string(),
-                                resolution: lash_trace::TraceDurableWaitResolution::Failed,
-                            }
-                        });
-                        Err(crate::wire::lash_terminal(
-                            &err,
-                            RuntimeErrorCode::EngineEffectController,
-                        ))
-                    }
+                    Err(err) => Err(crate::wire::lash_terminal(
+                        &err,
+                        RuntimeErrorCode::EngineEffectController,
+                    )),
                 }
             }
             RestateEffectExecution::ArmToolCompletion {
@@ -1651,16 +1582,6 @@ fn effect_group_engine_error(
     group_shape_error(format!(
         "Restate effect-group operation {operation} failed (verify the required services are registered): {error}"
     ))
-}
-
-fn resolution_trace_label(resolution: &Resolution) -> lash_trace::TraceDurableWaitResolution {
-    use lash_trace::TraceDurableWaitResolution as Resolved;
-    match resolution {
-        Resolution::Ok(_) => Resolved::Ok,
-        Resolution::Err(_) => Resolved::Error,
-        Resolution::Timeout => Resolved::Timeout,
-        Resolution::Cancelled => Resolved::Cancelled,
-    }
 }
 
 /// Run a journaled effect body, retaining its outcome and any live attempt fault.

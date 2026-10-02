@@ -142,6 +142,7 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
         let execution_env_spec = self.services.current.execution_env_spec()?;
         let owner = self.services.current.execution_owner()?;
         let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
+            tool_receipts: Some(self.services.current.host.core.session_store_factory()),
             plugins: Arc::clone(&self.services.current.plugins),
             tools: Arc::clone(&tool_surface.registry) as Arc<dyn crate::ToolProvider>,
             tool_registry: Some(Arc::clone(&tool_surface.registry)),

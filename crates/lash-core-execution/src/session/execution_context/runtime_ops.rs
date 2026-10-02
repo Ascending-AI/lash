@@ -100,6 +100,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             nested_effect_error: Arc::default(),
             incorporation_ledger: Arc::default(),
             opener_groups: Arc::default(),
+            tool_requests: Arc::default(),
             cell_tool_calls: Arc::default(),
             tool_call_limit_refusal: Arc::default(),
             unrecorded_sources: crate::runtime::effect::UnrecordedSessionSources::default(),

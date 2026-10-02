@@ -57,6 +57,7 @@ mod tests {
         ));
         let host = Arc::new(crate::testing::MockSessionManager::default());
         let dispatch = crate::tool_dispatch::ToolDispatchContext {
+            tool_receipts: None,
             plugins,
             tools: Arc::new(GrantedLeafTool),
             tool_registry: None,
@@ -219,6 +220,7 @@ mod tests {
     #[derive(Default)]
     struct ToolLifecycleTraceSink {
         lifecycle: Mutex<Vec<(String, &'static str, Option<String>)>>,
+        records: Mutex<Vec<lash_trace::TraceRecord>>,
     }
 
     impl lash_trace::TraceSink for ToolLifecycleTraceSink {
@@ -241,6 +243,7 @@ mod tests {
             };
             if let Some(entry) = entry {
                 self.lifecycle.lock_recover().push(entry);
+                self.records.lock_recover().push(record.clone());
             }
             Ok(())
         }
@@ -252,43 +255,79 @@ mod tests {
         let trace_sink = Arc::new(ToolLifecycleTraceSink::default());
         let erased_trace_sink: Arc<dyn lash_trace::TraceSink> = trace_sink.clone();
         let runtime = crate::trace::TraceRuntime::default().with_trace_sink(erased_trace_sink);
+        let stores = crate::support::sqlite_memory_store_set().await;
+        let factory = stores.session_store_factory();
+        crate::SessionCatalogStore::admit_session(
+            factory.as_ref(),
+            &crate::SessionStoreCreateRequest {
+                owning_process_id: None,
+                pending_observer_intents: Vec::new(),
+                session_id: SessionId::from("session"),
+                relation: crate::SessionRelation::Root,
+                config: crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                )
+                .into(),
+                head: crate::SessionCreationHead::Config,
+            },
+        )
+        .await
+        .expect("admit the receipt owner");
+        let tool_receipts: Arc<dyn crate::RuntimeStore> = factory;
+        let scope = lash_trace::DurableTraceScope {
+            scope: lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Turn {
+                session_id: SessionId::from("session"),
+                turn_id: crate::TurnId::fixture("refused-turn"),
+            }),
+            cause: lash_trace::TraceCause::Root,
+            anchor: lash_trace::TraceAnchor::Untraced,
+            started_at_ms: 1,
+        };
         let tracing = crate::session::RuntimeExecutionTracing::new(
             runtime.clone(),
-            None,
+            Some(scope.clone()),
             lash_trace::TraceContext::default(),
         );
+        let observer = crate::testing::ChannelObservationSink::new(None, Some(turn_tx));
         let context = batch_failure_context(
             Arc::new(BatchFailureEffectController),
-            crate::testing::ChannelObservationSink::new(None, Some(turn_tx)),
+            observer.clone(),
+            Some(tool_receipts.clone()),
         )
-        .with_tracing(Some(tracing))
-        .with_trace_standing(runtime.unreplayed(None));
-
-        context
-            .call_tool_batch(vec![
-                ToolInvocation::new(
-                    lash_core_execution::ToolCallId::fixture("missing-call-a"),
-                    crate::ToolId::from("tool:missing-a"),
-                    serde_json::json!({}),
-                )
-                .with_issuing_language_node_id("node-a"),
-                ToolInvocation::new(
-                    lash_core_execution::ToolCallId::fixture("missing-call-b"),
-                    crate::ToolId::from("tool:missing-b"),
-                    serde_json::json!({}),
-                )
-                .with_issuing_language_node_id("node-b"),
-                ToolInvocation::new(
-                    lash_core_execution::ToolCallId::fixture("invalid-prepared"),
-                    crate::ToolId::from("tool:batch_failure"),
-                    serde_json::Value::Null,
-                )
-                .with_issuing_language_node_id("node-invalid"),
-            ])
-            .await;
+        .with_tracing(Some(tracing.clone()))
+        .with_trace_standing(runtime.unreplayed(Some(scope.clone())));
+        let calls = vec![
+            ToolInvocation::new(
+                lash_core_execution::ToolCallId::fixture("missing-call-a"),
+                crate::ToolId::from("tool:missing-a"),
+                serde_json::json!({}),
+            )
+            .with_issuing_language_node_id("node-a"),
+            ToolInvocation::new(
+                lash_core_execution::ToolCallId::fixture("missing-call-b"),
+                crate::ToolId::from("tool:missing-b"),
+                serde_json::json!({}),
+            )
+            .with_issuing_language_node_id("node-b"),
+            ToolInvocation::new(
+                lash_core_execution::ToolCallId::fixture("invalid-prepared"),
+                crate::ToolId::from("tool:batch_failure"),
+                serde_json::Value::Null,
+            )
+            .with_issuing_language_node_id("node-invalid"),
+        ];
+        let replies = context.call_tool_batch(calls.clone()).await;
+        assert!(
+            replies
+                .replies
+                .iter()
+                .all(|reply| !reply.output.is_success())
+        );
+        assert!(!context.has_nested_effect_error());
 
         // A call that settles before provider dispatch is still a complete
-        // lifecycle attempt. Each call id therefore owns one ordered Started
+        // recorded lifecycle. Each call id therefore owns one ordered Started
         // then Completed pair; the failure path must never publish a bare
         // completion or borrow another call's correlation.
         for (call_id, node_id) in [
@@ -336,6 +375,29 @@ mod tests {
         assert!(
             turn_rx.try_recv().is_err(),
             "exactly one pair per failed call"
+        );
+        let first = serde_json::to_value(&*trace_sink.records.lock_recover()).expect("first pairs");
+        drop(context);
+        let replay = batch_failure_context(
+            Arc::new(BatchFailureEffectController),
+            observer,
+            Some(tool_receipts),
+        )
+        .with_tracing(Some(tracing))
+        .with_trace_standing(runtime.unreplayed(Some(scope)));
+        let replies = replay.call_tool_batch(calls).await;
+        assert!(
+            replies
+                .replies
+                .iter()
+                .all(|reply| !reply.output.is_success())
+        );
+        assert!(!replay.has_nested_effect_error());
+        assert_eq!(trace_sink.records.lock_recover().len(), 6);
+        assert_eq!(
+            serde_json::to_value(&*trace_sink.records.lock_recover()).expect("retained pairs"),
+            first,
+            "re-executing preparation through SQL retains the same identities and times"
         );
     }
 
@@ -434,7 +496,8 @@ mod tests {
             "granted_leaf_probe",
             serde_json::json!({ "probe": true }),
             crate::TurnActivityId::new("tool:start-order"),
-        );
+        )
+        .await;
 
         let activity = sink
             .turn_rx
@@ -564,6 +627,7 @@ mod tests {
     fn batch_failure_context(
         controller: Arc<BatchFailureEffectController>,
         observer: Arc<dyn crate::engine::ObservationSink>,
+        tool_receipts: Option<Arc<dyn crate::RuntimeStore>>,
     ) -> crate::RuntimeExecutionContext<'static> {
         let provider: Arc<dyn crate::ToolProvider> = Arc::new(BatchFailureTools);
         let plugins =
@@ -581,6 +645,7 @@ mod tests {
         let attachment_store: Arc<crate::RuntimeAttachmentStore> =
             Arc::new(crate::RuntimeAttachmentStore::unavailable());
         let dispatch = crate::tool_dispatch::ToolDispatchContext {
+            tool_receipts,
             plugins,
             tools,
             tool_registry: None,
@@ -643,6 +708,7 @@ mod tests {
         let context = batch_failure_context(
             Arc::new(BatchFailureEffectController),
             crate::engine::NullObservationSink::arc(),
+            None,
         );
         let replies = context
             .call_tool_batch(vec![ToolInvocation::new(

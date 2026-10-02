@@ -234,11 +234,35 @@ impl lash_core_execution::ProcessQuery for PostgresProcessRegistry {
 
 #[async_trait::async_trait]
 impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
-    async fn register_process_reporting_outcome(
+    async fn prepare_process_registration(
         &self,
         registration: ProcessRegistration,
         observers: &[SessionId],
+    ) -> Result<lash_core_execution::PreparedProcessRegistration, PluginError> {
+        let registration =
+            lash_core_execution::runtime::prepare_process_registration(registration)?;
+        let existing = match registration.start_key.as_ref() {
+            Some(key) => {
+                lash_core_execution::ProcessQuery::get_process_by_start_key(self, key).await?
+            }
+            None => None,
+        };
+        let retained = existing.is_some();
+        let process_id = existing.map_or_else(|| self.process_id_mint.mint(), |record| record.id);
+        Ok(lash_core_execution::PreparedProcessRegistration::new(
+            registration,
+            observers.to_vec(),
+            process_id,
+            retained,
+            self.clock.timestamp_ms(),
+        ))
+    }
+    async fn commit_process_registration(
+        &self,
+        prepared: lash_core_execution::PreparedProcessRegistration,
+        anchor: lash_core_execution::TraceAnchor,
     ) -> Result<lash_core_execution::ProcessRegistrationReceipt, PluginError> {
+        let (registration, observers, process_id, retained, now) = prepared.into_commit(anchor);
         let mut observers = observers.to_vec();
         observers.sort();
         observers.dedup();
@@ -255,6 +279,14 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
         if let Some(start_key) = start_key.as_ref()
             && let Some(existing) = load_process_by_start_key_tx(&mut tx, start_key).await?
         {
+            if retained && existing.id != process_id {
+                return Err(
+                    lash_core_execution::StoreError::PreparedProcessRegistrationStale {
+                        process_id: process_id.clone(),
+                    }
+                    .into(),
+                );
+            }
             let existing_wake = wake_session_id_tx(&mut tx, &existing.id).await?;
             tx.commit().await.map_err(plugin_sqlx_error)?;
             lash_core_execution::runtime::check_retained_start(
@@ -265,6 +297,14 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
             return Ok(lash_core_execution::ProcessRegistrationReceipt::existing(
                 existing,
             ));
+        }
+        if retained {
+            return Err(
+                lash_core_execution::StoreError::PreparedProcessRegistrationStale {
+                    process_id: process_id.clone(),
+                }
+                .into(),
+            );
         }
         // A delivery's key finds its process only while that process is
         // retained. A delivery already bound, or gone, had its process
@@ -342,8 +382,6 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
         }
         // Minted only once the start is admitted, so no refusal names an id
         // that was never registered.
-        let process_id = self.process_id_mint.mint();
-        let now = self.clock.timestamp_ms();
         let change_seq = next_process_change_seq_tx(&mut tx).await?;
         let mut record = ProcessRecord::from_prepared_registration(registration, process_id, now);
         let record_json = serde_json::to_string(&record).map_err(process_decode_error)?;
@@ -998,8 +1036,20 @@ impl lash_core_execution::ProcessToolIntents for PostgresProcessRegistry {
         &self,
         replay_key: &str,
         outcome: lash_core_execution::ToolIntentExecutionOutcome,
-    ) -> Result<lash_core_execution::ToolIntentSubmissionRecord, PluginError> {
-        tool_intent_submission::complete(&self.pool, &self.fence, replay_key, outcome).await
+    ) -> Result<
+        lash_core_execution::store::StoreTransition<
+            lash_core_execution::ToolIntentSubmissionRecord,
+        >,
+        PluginError,
+    > {
+        tool_intent_submission::complete(
+            &self.pool,
+            &self.fence,
+            replay_key,
+            outcome,
+            self.clock.timestamp_ms(),
+        )
+        .await
     }
 }
 

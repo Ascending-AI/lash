@@ -400,6 +400,8 @@ async fn drive_to_terminal(
                     &process_id,
                     output,
                     prelude,
+                    None,
+                    None,
                 )
                 .await
                 {
@@ -424,6 +426,8 @@ async fn drive_to_terminal(
                             &process_id,
                             output,
                             prelude,
+                            None,
+                            None,
                         )
                         .await
                         .expect("the retried completion stores the terminal");
@@ -635,6 +639,8 @@ async fn a_boundary_refuses_a_changed_summary_payload_without_reaching_the_progr
         &process_id,
         output,
         prelude,
+        None,
+        None,
     )
     .await
     .expect_err("the terminal batch refuses a changed payload under the same key");

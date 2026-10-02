@@ -503,6 +503,9 @@ pub trait StalledExecution: Send + Sync {
 /// keeps its reason and gains the engine's handle.
 #[async_trait::async_trait]
 pub trait ParkRecoveryWriter: Send + Sync {
+    fn metrics(&self) -> lash_trace::telemetry::metrics::TelemetryMetrics {
+        Default::default()
+    }
     /// Park `target` for `reason`, carrying the engine's `engine` handle. A
     /// [`ParkTarget::Shift`] park stores no handle: the engine finds a
     /// stopped shift by its session. A [`ParkTarget::RunChild`] park records

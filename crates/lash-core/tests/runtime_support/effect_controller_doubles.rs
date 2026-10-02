@@ -508,6 +508,11 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             ));
         }
         let outcome = match envelope.command {
+            command @ RuntimeEffectCommand::TraceBoundary { .. } => {
+                local_executor
+                    .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))
+                    .await
+            }
             RuntimeEffectCommand::LlmCall { request } => {
                 if self.execute_llm_locally {
                     local_executor

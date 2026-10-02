@@ -187,6 +187,9 @@ pub struct RuntimeCommit {
     /// Terminal already computed by the turn driver. Nonturn operations have no outcome.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<TurnCommitOutcome>,
+    /// The physical turn's admitted trace scope, committed with its outcome.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace: Option<Box<TurnTraceReceipt>>,
     pub turn_commit: RuntimeTurnCommitStamp,
     /// What this commit does with the rows its run admitted (FIG-3927):
     /// completions, releases and drops, each predicated on the row still
@@ -373,6 +376,16 @@ impl RuntimeCommit {
     }
 }
 
+/// Trace facts retained by the physical turn's business commit.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct TurnTraceReceipt {
+    pub metadata: std::collections::BTreeMap<String, serde_json::Value>,
+    pub scope: lash_trace::DurableTraceScope,
+    pub context: lash_trace::TraceContext,
+    pub outcome: lash_trace::TraceTurnOutcome,
+    pub run_scope: Option<lash_trace::DurableTraceScope>,
+}
+
 /// The terminal of a committed physical turn, independent of live observations.
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
@@ -470,6 +483,8 @@ pub fn validate_turn_commit_outcome_code(
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct RuntimeCommitReceipt {
+    /// Timestamp selected by the committing store, unchanged on receipt replay.
+    pub committed_at_ms: u64,
     pub schema_version: u32,
     pub head_revision: u64,
     pub checkpoint_ref: BlobRef,
@@ -490,6 +505,10 @@ pub struct RuntimeCommitReceipt {
     /// Typed terminal recorded in the same transaction as this receipt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<TurnCommitOutcome>,
+    /// The physical turn's admitted trace scope, committed with its outcome.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<serde_json::Value>")]
+    pub trace: Option<Box<TurnTraceReceipt>>,
     /// The follow-on the head owes after this commit (ADR 0101 §3), so a
     /// replayed switch commit returns the fact it wrote.
     #[serde(default, skip_serializing_if = "Option::is_none")]

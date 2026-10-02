@@ -68,6 +68,7 @@ pub async fn lifecycle_event_timestamps_follow_the_registry_clock(
             &authority,
         )
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park process");
     clock.advance(10);
     registry

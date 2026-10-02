@@ -35,6 +35,9 @@ pub fn composition_schema_serialization_count() -> usize {
     COMPOSITION_SCHEMA_SERIALIZATIONS.with(std::cell::Cell::get)
 }
 
+mod boundary;
+pub(crate) mod wait_receipts;
+pub use boundary::TraceBoundaryReceipt;
 mod runtime;
 pub use runtime::{
     JournalFrontier, LiveStep, StepIssue, TraceEmitter, TraceRuntime, TraceStanding,
@@ -662,6 +665,106 @@ pub(crate) fn trace_output_parts(parts: &[LlmOutputPart]) -> Option<serde_json::
 mod span_identity_tests {
     use super::*;
     use std::sync::Arc;
+
+    #[test]
+    fn a_live_body_cannot_authorize_a_logical_terminal() {
+        let directory = tempfile::tempdir().expect("trace directory");
+        let path = directory.path().join("terminal.jsonl");
+        let runtime = TraceRuntime::default()
+            .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(&path)));
+        let standing = runtime.unreplayed(Some(turn_trace_scope(
+            &crate::SessionId::from("session"),
+            &crate::TurnId::from("turn"),
+            100,
+        )));
+        standing.transition(
+            standing.body_permit(),
+            200,
+            lash_trace::TraceTransitionKind::Terminal,
+            0,
+            || {
+                (
+                    TraceContext::default(),
+                    TraceEvent::TurnCompleted {
+                        outcome: lash_trace::TraceTurnOutcome::Completed {
+                            done_reason: lash_trace::TraceTurnCompletionReason::AssistantMessage,
+                        },
+                    },
+                )
+            },
+        );
+        runtime.flush().expect("flush");
+        assert!(
+            !path.exists(),
+            "a live attempt is not a committed terminal receipt"
+        );
+    }
+
+    #[test]
+    fn replay_only_conclusion_builds_no_records_and_reads_no_clock() {
+        #[derive(Debug)]
+        struct SpyClock(Arc<std::sync::atomic::AtomicUsize>);
+        #[async_trait::async_trait]
+        impl crate::Clock for SpyClock {
+            fn now(&self) -> std::time::Instant {
+                panic!("denied observation read the clock")
+            }
+            fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                chrono::DateTime::UNIX_EPOCH
+            }
+            async fn sleep(&self, _: std::time::Duration) {
+                panic!("unexpected sleep")
+            }
+            async fn sleep_until(&self, _: std::time::Instant) {
+                panic!("unexpected sleep")
+            }
+        }
+        let clock_reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let constructions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let directory = tempfile::tempdir().expect("trace directory");
+        let path = directory.path().join("replayed.jsonl");
+        let runtime = TraceRuntime::new(Arc::new(SpyClock(clock_reads.clone())))
+            .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(&path)));
+        let controller = crate::testing::UnavailableEffectController;
+        let scoped = crate::ScopedEffectController::borrowed(
+            &controller,
+            crate::AdmittedScope::turn("session", "turn"),
+        )
+        .expect("scope");
+        let standing = runtime.shift(
+            Some(turn_trace_scope(
+                &crate::SessionId::from("session"),
+                &crate::TurnId::from("turn"),
+                1,
+            )),
+            &scoped,
+        );
+        standing.observe(|| {
+            constructions.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            (
+                TraceContext::default(),
+                TraceEvent::DurableWaitParked {
+                    wait_kind: "event".into(),
+                },
+            )
+        });
+        let held = constructions.clone();
+        standing.observe_deferred(move || {
+            held.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            (
+                TraceContext::default(),
+                TraceEvent::DurableWaitParked {
+                    wait_kind: "event".into(),
+                },
+            )
+        });
+        standing.conclude();
+        assert!(!scoped.frontier().is_crossed());
+        assert_eq!(constructions.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(clock_reads.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(!path.exists());
+    }
 
     fn turn_context() -> TraceContext {
         TraceContext::default()

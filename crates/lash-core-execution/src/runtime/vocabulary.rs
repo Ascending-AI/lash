@@ -622,12 +622,15 @@ pub async fn park_turn_of_refused_group_child(
     scope: &crate::ExecutionScope,
     refusal: &crate::RuntimeError,
     at_ms: u64,
+    metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
 ) -> Result<Option<crate::store::TurnPark>, crate::StoreError> {
     let Some(reason) = crate::store::ParkReason::of_error(refusal) else {
         return Ok(None);
     };
-    let (session_id, run) = match (scope, scope.logical_run()) {
-        (crate::ExecutionScope::Turn { session_id, .. }, Some(run)) => (session_id, run),
+    let (session_id, ran_execution) = match (scope, scope.logical_run()) {
+        (crate::ExecutionScope::Turn { session_id, .. }, Some(ran_execution)) => {
+            (session_id, ran_execution)
+        }
         _ => return Ok(None),
     };
     if !session_is_live(store, session_id).await? {
@@ -635,15 +638,10 @@ pub async fn park_turn_of_refused_group_child(
     }
     let park = super::record_run_park(
         store,
-        &crate::store::TurnParkWrite::refusal(session_id.clone(), run, reason, at_ms),
+        &crate::store::TurnParkWrite::refusal(session_id.clone(), ran_execution, reason, at_ms),
+        metrics,
     )
     .await?;
-    crate::operational_metrics::record_work_parked(
-        &Default::default(),
-        None,
-        "turn",
-        park.reason.code().as_str(),
-    );
     Ok(Some(park))
 }
 
@@ -669,6 +667,7 @@ pub async fn park_turn_refused_by_generation(
     scope: &crate::ExecutionScope,
     refusal: crate::SessionStateVersionRefusal,
     at_ms: u64,
+    metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
 ) -> Result<Option<crate::store::TurnPark>, crate::StoreError> {
     let crate::ExecutionScope::Turn {
         session_id,
@@ -704,13 +703,8 @@ pub async fn park_turn_refused_by_generation(
             crate::store::ParkReason::session_state_generation_refused(refusal),
             at_ms,
         ),
+        metrics,
     )
     .await?;
-    crate::operational_metrics::record_work_parked(
-        &Default::default(),
-        None,
-        "turn",
-        park.reason.code().as_str(),
-    );
     Ok(Some(park))
 }

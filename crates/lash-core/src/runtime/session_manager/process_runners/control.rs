@@ -259,6 +259,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
                 .obligation_ledger(crate::store::ObligationKind::ProcessStart),
             Arc::clone(&self.current.host.core.clock),
             self.current.host.core.control.relay_policy(),
+            self.current.host.core.tracing.metrics().clone(),
         )
         .with_process_env_store(Arc::clone(
             &self.current.host.core.durability.process_env_store,

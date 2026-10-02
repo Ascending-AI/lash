@@ -172,6 +172,19 @@ async fn carry_into_successor_tx(
 
 #[async_trait::async_trait]
 impl SessionCommitStore for PostgresStore {
+    async fn record_tool_request(
+        &self,
+        request: &ToolRequestReceipt,
+    ) -> Result<StoreTransition<ToolRequestReceipt>, StoreError> {
+        record_tool_request(self, request).await
+    }
+    async fn record_tool_completion(
+        &self,
+        completion: &ToolCompletionReceipt,
+    ) -> Result<StoreTransition<ToolCompletionReceipt>, StoreError> {
+        record_tool_completion(self, completion).await
+    }
+
     async fn committed_turn_exists(
         &self,
         session_id: &SessionId,
@@ -382,7 +395,10 @@ impl SessionCommitStore for PostgresStore {
     async fn record_turn_park(
         &self,
         park: &lash_core_execution::store::TurnParkWrite,
-    ) -> Result<lash_core_execution::store::TurnPark, StoreError> {
+    ) -> Result<
+        lash_core_execution::store::StoreTransition<lash_core_execution::store::TurnPark>,
+        StoreError,
+    > {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         ensure_session_not_deleted_tx(&mut tx, &park.session_id).await?;
@@ -1031,7 +1047,7 @@ impl PostgresStore {
             crate::revisions::release_unretained_tx(&mut tx, false, Some(&commit.session_id))
                 .await?;
         }
-        let mut result = plan.result(checkpoint_ref, manifest);
+        let mut result = plan.result(checkpoint_ref, manifest, now);
         result.turn_cancel_input_outcome = turn_cancel_input_outcome;
         {
             let receipt = plan.receipt_write(&result);
@@ -1077,4 +1093,91 @@ impl PostgresStore {
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(Ok(result))
     }
+}
+
+use lash_core_execution::store::{
+    StoreTransition, ToolCompletionReceipt, ToolRequestReceipt, require_tool_request_matches,
+};
+fn tool_receipt_sql() -> &'static lash_store_sql::tool_receipts::ToolReceiptStatements {
+    static SQL: std::sync::LazyLock<lash_store_sql::tool_receipts::ToolReceiptStatements> =
+        std::sync::LazyLock::new(|| {
+            lash_store_sql::tool_receipts::ToolReceiptStatements::render(
+                lash_store_sql::Dialect::postgres(),
+            )
+        });
+    &SQL
+}
+async fn record_tool_request(
+    store: &PostgresStore,
+    request: &ToolRequestReceipt,
+) -> Result<StoreTransition<ToolRequestReceipt>, StoreError> {
+    let mut tx = begin_guarded(&store.pool, &store.fence).await?;
+    super::lock_session_history_mutation_tx(&mut tx, &request.session_id).await?;
+    super::ensure_session_not_deleted_tx(&mut tx, &request.session_id).await?;
+    let sql = tool_receipt_sql();
+    let changed = sqlx::query(sql.insert_request.sql())
+        .bind(&request.request_key)
+        .bind(request.session_id.as_str())
+        .bind(&request.payload_digest)
+        .bind(clamp_epoch_ms(request.requested_at_ms))
+        .bind(serde_json::to_string(request).map_err(|e| StoreError::Backend(e.to_string()))?)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .rows_affected()
+        == 1;
+    let json: String = sqlx::query_scalar(sql.select_request.sql())
+        .bind(&request.request_key)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    let existing: ToolRequestReceipt =
+        serde_json::from_str(&json).map_err(|e| StoreError::Backend(e.to_string()))?;
+    require_tool_request_matches(&existing, request)?;
+    tx.commit().await.map_err(store_sqlx_error)?;
+    Ok(StoreTransition {
+        record: existing,
+        changed,
+    })
+}
+async fn record_tool_completion(
+    store: &PostgresStore,
+    completion: &ToolCompletionReceipt,
+) -> Result<StoreTransition<ToolCompletionReceipt>, StoreError> {
+    let mut tx = begin_guarded(&store.pool, &store.fence).await?;
+    super::lock_session_history_mutation_tx(&mut tx, &completion.session_id).await?;
+    super::ensure_session_not_deleted_tx(&mut tx, &completion.session_id).await?;
+    let sql = tool_receipt_sql();
+    let json: String = sqlx::query_scalar(sql.select_request.sql())
+        .bind(&completion.request_key)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    let request: ToolRequestReceipt =
+        serde_json::from_str(&json).map_err(|e| StoreError::Backend(e.to_string()))?;
+    if request.session_id != completion.session_id
+        || request.payload_digest != completion.payload_digest
+    {
+        return Err(StoreError::ToolRequestConflict {
+            session_id: completion.session_id.clone(),
+            request_key: completion.request_key.clone(),
+        });
+    }
+    let changed = sqlx::query(sql.complete.sql())
+        .bind(&completion.request_key)
+        .bind(serde_json::to_string(completion).map_err(|e| StoreError::Backend(e.to_string()))?)
+        .bind(clamp_epoch_ms(completion.completed_at_ms))
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .rows_affected()
+        == 1;
+    let json: String = sqlx::query_scalar(sql.select_completion.sql())
+        .bind(&completion.request_key)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    let record = serde_json::from_str(&json).map_err(|e| StoreError::Backend(e.to_string()))?;
+    tx.commit().await.map_err(store_sqlx_error)?;
+    Ok(StoreTransition { record, changed })
 }

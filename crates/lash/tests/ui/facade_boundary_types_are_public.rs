@@ -41,6 +41,7 @@ fn persistence_types_are_nameable(graph: GraphAppend) -> RuntimeCommit {
         shift_fence: None,
         run_terminal: None,
         park_run: None,
+        trace: None,
         config: PersistedSessionConfig::new(
             lash::TurnBudget::Unbounded,
             lash::MaxToolCalls::new(1024),

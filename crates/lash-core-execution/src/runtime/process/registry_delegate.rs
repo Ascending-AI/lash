@@ -173,6 +173,25 @@ macro_rules! delegate_process_registrar {
                 $registration_hook
             }
 
+            async fn prepare_process_registration(
+                &self,
+                registration: $crate::ProcessRegistration,
+                observers: &[$crate::SessionId],
+            ) -> Result<$crate::PreparedProcessRegistration, $crate::PluginError> {
+                self.$inner
+                    .prepare_process_registration(registration, observers)
+                    .await
+            }
+            async fn commit_process_registration(
+                &self,
+                prepared: $crate::PreparedProcessRegistration,
+                anchor: $crate::TraceAnchor,
+            ) -> Result<$crate::ProcessRegistrationReceipt, $crate::PluginError> {
+                let $registration_self = self;
+                let $registration_call = self.$inner.commit_process_registration(prepared, anchor);
+                $registration_hook
+            }
+
             fn bind_effect_host(&self, effect_host: &std::sync::Arc<dyn $crate::EffectHost>) {
                 self.$inner.bind_effect_host(effect_host);
             }
@@ -479,7 +498,8 @@ macro_rules! delegate_process_lifecycle {
                 process_id: &$crate::ProcessId,
                 park: $crate::store::ProcessParkWrite,
                 authority: &$crate::ProcessExecutionWriteAuthority,
-            ) -> Result<$crate::ProcessRecord, $crate::PluginError> {
+            ) -> Result<$crate::store::StoreTransition<$crate::ProcessRecord>, $crate::PluginError>
+            {
                 let $event_process_id = process_id;
                 let $event_self = self;
                 let $event_call = self
@@ -611,7 +631,10 @@ macro_rules! delegate_process_tool_intents {
                 &self,
                 replay_key: &str,
                 outcome: $crate::ToolIntentExecutionOutcome,
-            ) -> Result<$crate::ToolIntentSubmissionRecord, $crate::PluginError> {
+            ) -> Result<
+                $crate::store::StoreTransition<$crate::ToolIntentSubmissionRecord>,
+                $crate::PluginError,
+            > {
                 self.$inner
                     .complete_tool_intent_submission(replay_key, outcome)
                     .await

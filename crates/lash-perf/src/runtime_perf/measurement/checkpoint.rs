@@ -118,29 +118,32 @@ pub(super) async fn assign_checkpoint_binding(
     index: usize,
     turn: usize,
 ) -> anyhow::Result<()> {
-    let turn_id = TurnId::fixture(format!("checkpoint-perf-turn-{turn}"));
-    let scope = lash_core::ExecutionScope::turn(session_id.clone(), turn_id.clone());
-    let invocation = lash_core::runtime::causal::turn_effect_invocation(
-        &scope,
-        session_id,
-        &turn_id,
-        turn,
-        0,
-        lash_core::sansio::EffectId(0),
-        lash_core::RuntimeEffectKind::ExecCode,
-    )
-    .into_runtime_invocation();
-    let handler = backend
-        .open_handler(lash_core::AdmittedScope::turn(session_id.clone(), turn_id))
-        .await
-        .map_err(anyhow::Error::msg)?;
-    let context = lash_core::testing::code_execution_context_with_invocation(
-        lash_core::testing::TestExecutionPorts::lent(&backend.lash_backend(), handler.scoped()),
-        invocation,
-    );
-    let assignment = fixture.assign_one(index, turn, context).await;
-    handler.close().await.map_err(anyhow::Error::msg)?;
-    assignment.map_err(anyhow::Error::from)
+    Box::pin(async {
+        let turn_id = TurnId::fixture(format!("checkpoint-perf-turn-{turn}"));
+        let scope = lash_core::ExecutionScope::turn(session_id.clone(), turn_id.clone());
+        let invocation = lash_core::runtime::causal::turn_effect_invocation(
+            &scope,
+            session_id,
+            &turn_id,
+            turn,
+            0,
+            lash_core::sansio::EffectId(0),
+            lash_core::RuntimeEffectKind::ExecCode,
+        )
+        .into_runtime_invocation();
+        let handler = backend
+            .open_handler(lash_core::AdmittedScope::turn(session_id.clone(), turn_id))
+            .await
+            .map_err(anyhow::Error::msg)?;
+        let context = lash_core::testing::code_execution_context_with_invocation(
+            lash_core::testing::TestExecutionPorts::lent(&backend.lash_backend(), handler.scoped()),
+            invocation,
+        );
+        let assignment = fixture.assign_one(index, turn, context).await;
+        handler.close().await.map_err(anyhow::Error::msg)?;
+        assignment.map_err(anyhow::Error::from)
+    })
+    .await
 }
 
 pub(super) async fn run_once_checkpoint_state_hot_paths(

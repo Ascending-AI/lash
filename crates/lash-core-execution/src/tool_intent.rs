@@ -149,6 +149,7 @@ pub struct ToolIntentSubmissionRecord {
     /// First typed realization outcome, absent while admission is pending.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<crate::ToolIntentExecutionOutcome>,
+    pub completed_at_ms: Option<u64>,
     /// The submission's trace scope: the cause and anchor its first
     /// submission offered and when it was made. The ledger's first writer
     /// retains it with the row; a later submission of the identity reads it
@@ -183,6 +184,7 @@ impl ToolIntentSubmissionRecord {
             payload_hash,
             intent,
             outcome: None,
+            completed_at_ms: None,
             trace: None,
         })
     }

@@ -547,6 +547,7 @@ impl RestateSessionControl {
                 &self.processes,
                 &self.continuations,
                 vec![invocation],
+                &parks.metrics(),
             )
             .await
             .map_err(refusal)?;
@@ -668,6 +669,7 @@ impl RestateSessionControl {
                 &self.continuations,
                 &invocation,
                 process_id,
+                &parks.metrics(),
             )
             .await
             .map_err(refusal)?;

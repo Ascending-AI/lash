@@ -749,6 +749,7 @@ impl HandOff {
         let generation = lash_core::engine::BuildGeneration::for_test(build);
         lash_core::shift::reconcile_once(
             &lash_core::shift::ReconcileParts {
+                metrics: &Default::default(),
                 sessions: sessions.as_ref(),
                 work: &work,
                 scopes: &scopes,

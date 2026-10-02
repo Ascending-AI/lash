@@ -533,6 +533,7 @@ async fn lease_pass(
     );
     lash_core::shift::reconcile_once(
         &lash_core::shift::ReconcileParts {
+            metrics: &Default::default(),
             sessions: sessions.as_ref(),
             work: &work,
             scopes: &lash_core::engine::NoScopeClose,

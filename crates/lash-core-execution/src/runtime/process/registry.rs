@@ -476,6 +476,14 @@ pub struct SegmentStartMarker {
     pub plugins: Option<crate::store::plugin_writers::PluginAdmission>,
 }
 
+/// The immutable handover committed by a segment's first writer.
+#[derive(Clone, Debug)]
+pub struct SegmentHandoverCommit {
+    pub scope: Option<lash_trace::DurableTraceScope>,
+    pub handover: PersistedSegmentHandover,
+    pub committed_at_ms: u64,
+}
+
 /// Substrate-scoped durable continuation storage. This is not part of the
 /// uniform process registry because only segmented execution substrates need
 /// it.
@@ -489,7 +497,7 @@ pub trait ProcessContinuationStore: Send + Sync {
         &self,
         process_id: &ProcessId,
         handover: PersistedSegmentHandover,
-    ) -> Result<(), PluginError>;
+    ) -> Result<crate::store::StoreTransition<SegmentHandoverCommit>, PluginError>;
 
     async fn get_segment_handover(
         &self,

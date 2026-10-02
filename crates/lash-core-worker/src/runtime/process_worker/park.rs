@@ -26,10 +26,11 @@ impl DurableProcessWorker {
             .await?;
         lash_core_ids::operational_metrics::record_work_parked(
             self.config.runtime_host.tracing.metrics(),
-            None,
+            parked.permit().as_ref(),
             "process",
             code.as_str(),
         );
+        let parked = parked.into_record();
         tracing::warn!(
             event = "process.parked",
             process_id = process_id.as_str(),

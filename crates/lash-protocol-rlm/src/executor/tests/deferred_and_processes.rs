@@ -5,7 +5,6 @@ mod journal_ownership;
 mod process_handle_containers;
 
 const SEED: u64 = 0x5_2c0a;
-
 /// Runs a deferred tool resolution and then fails its journal commit, in
 /// front of a controller that journals every other effect.
 pub(super) struct FailingDeferredJournalLayer;
@@ -1982,6 +1981,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
                     .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
                 return lash_core::runtime::register_process_start(
                     &lash_core::runtime::ProcessStartStores {
+                        tracing: None,
                         registry: self.registry.as_ref(),
                         env_store: Some(&self.env_store),
                         engines: &self.engines,

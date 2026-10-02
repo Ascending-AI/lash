@@ -145,6 +145,7 @@ impl lash_core::SessionShifts for RecoveryShifts {
         let relays: Vec<Arc<dyn ObligationRelay>> = vec![self.relay.clone()];
         let tick = reconcile_once(
             &ReconcileParts {
+                metrics: &Default::default(),
                 sessions: sessions.as_ref(),
                 work: self.engine.session_work_engine().as_ref(),
                 scopes: &lash_core::engine::NoScopeClose,

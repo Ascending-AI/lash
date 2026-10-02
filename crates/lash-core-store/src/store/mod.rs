@@ -69,9 +69,16 @@ mod semantic_boundary;
 mod session_config_views;
 mod session_view;
 mod shift_fence;
+mod tool_receipts;
+mod wait_receipts;
 pub use session_config_views::{
     execution_session_config_from_state, persisted_session_config_from_state,
     recorded_session_policy_from_state, root_snapshot_config_from_state,
+};
+pub use tool_receipts::{ToolCompletionReceipt, ToolRequestReceipt, require_tool_request_matches};
+pub use wait_receipts::{
+    EngineWaitKind, WaitReceiptStore, WaitRequestReceipt, WaitResolutionReceipt,
+    require_wait_request_matches, require_wait_resolution_matches,
 };
 mod lease_owner;
 pub mod session_delete;
@@ -152,9 +159,9 @@ pub use obligation::*;
 pub use park::{
     EnginePark, ParkCancelCause, ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage,
     ParkId, ParkReason, ParkReasonCode, ParkReport, ProcessPark, ProcessParkKey, ProcessParkQuery,
-    ProcessParkWrite, StoredParkRedrive, StoredTurnParkHead, TurnPark, TurnParkOrigin,
-    TurnParkQuery, TurnParkTarget, TurnParkWrite, TurnParkWriteDecision, UnparkCause,
-    UnsettledTurnCounts, decide_turn_park_write,
+    ProcessParkWrite, StoreTransition, StoredParkRedrive, StoredTurnParkHead, TurnPark,
+    TurnParkOrigin, TurnParkQuery, TurnParkTarget, TurnParkWrite, TurnParkWriteDecision,
+    UnparkCause, UnsettledTurnCounts, decide_turn_park_write,
 };
 pub use pending_follow_on::{
     DEFAULT_MAX_FOLLOW_ON_RECOVERIES, FollowOnAdmission, FollowOnBlocked, FollowOnRecovery,
@@ -176,17 +183,18 @@ pub use recovery_leader::*;
 pub use retention::{RetentionBound, RetentionReport};
 pub use run::{
     AdmitRunRequest, AdmittedHead, CheckpointAdmission, CheckpointAdmissionRequest,
-    InMemoryRunLedger, RunAdmission, RunAdmissionAnswer, RunAdmissionRefusal, RunCommittedOutcome,
-    RunEndOutcome, RunExecutor, RunStore, RunTerminal, RunTerminalCause, RunTerminalKind,
-    RunTerminalWrite, RunTerminalWriteDecision, RunTurns, StoredRunTerminal, TurnCommitId,
-    UnfinishedRun, decide_run_terminal_write, refused_execution_owns_run, run_binding_conflict,
+    InMemoryRunLedger, PreparedRunAdmission, RunAdmission, RunAdmissionAnswer, RunAdmissionRefusal,
+    RunCommittedOutcome, RunEndOutcome, RunExecutor, RunStore, RunTerminal, RunTerminalCause,
+    RunTerminalKind, RunTerminalWrite, RunTerminalWriteDecision, RunTurns, StoredRunTerminal,
+    TurnCommitId, UnfinishedRun, admit_run_with_trace, decide_run_terminal_write,
+    refused_execution_owns_run, run_binding_conflict,
 };
 pub use runtime_commit::{
     AppendRequestIdentity, FrameTransition, InterruptedTurnClosure,
     RUNTIME_COMMIT_RECEIPT_RECORD_KIND, RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION, RuntimeCommit,
     RuntimeCommitReceipt, RuntimeTurnCommitStamp, SemanticBoundaryOperation, TurnChange,
     TurnChangeCursor, TurnChangeKind, TurnChangePage, TurnCommitFailureCause, TurnCommitOutcome,
-    TurnProjectionWatermark, decode_runtime_commit_receipt,
+    TurnProjectionWatermark, TurnTraceReceipt, decode_runtime_commit_receipt,
     decode_runtime_commit_receipt_for_fleet, ensure_supported_receipt_version,
     ensure_supported_receipt_version_for_fleet, frames_left_by_commit,
     validate_turn_commit_outcome_code,
@@ -596,6 +604,7 @@ impl RuntimeCommit {
             checkpoint: _,
             failure_evidence,
             outcome,
+            trace,
             turn_commit: _,
             ingress,
             applied_commands,
@@ -614,6 +623,7 @@ impl RuntimeCommit {
                 && *adopted_intent_rows == 0
                 && failure_evidence.is_empty()
                 && outcome.is_none()
+                && trace.is_none()
                 && committed_attachment_ids.is_empty()
                 && run_terminal.is_none()
                 && park_run.is_none()
@@ -762,6 +772,7 @@ impl RuntimeCommit {
             checkpoint: build_checkpoint_from_persisted_state(state, fleet_format)?,
             failure_evidence: Vec::new(),
             outcome: None,
+            trace: None,
             turn_commit: RuntimeTurnCommitStamp::new(operation),
             ingress: None,
             applied_commands: None,
@@ -962,6 +973,17 @@ impl Default for SessionHeadPayload {
 /// must fail instead of persisting a checkpoint that hydrates to `None`.
 #[async_trait::async_trait]
 pub trait SessionCommitStore: Send + Sync {
+    /// Retain the first sealed request. The disposition is issued after commit.
+    async fn record_tool_request(
+        &self,
+        request: &ToolRequestReceipt,
+    ) -> Result<StoreTransition<ToolRequestReceipt>, StoreError>;
+    /// Retain the first result under the request's digest; never rewrite a terminal.
+    async fn record_tool_completion(
+        &self,
+        completion: &ToolCompletionReceipt,
+    ) -> Result<StoreTransition<ToolCompletionReceipt>, StoreError>;
+
     /// The session's physical session-state generation marker. A legacy
     /// absent marker reads as [`OLDEST_SUPPORTED_SESSION_STATE_VERSION`].
     async fn read_session_state_version(&self, session_id: &SessionId) -> Result<u32, StoreError>;
@@ -1150,7 +1172,10 @@ pub trait SessionCommitStore: Send + Sync {
     ///
     /// Returns the record as stored, so the caller can report the allocated
     /// `park_id` and attempt count.
-    async fn record_turn_park(&self, park: &TurnParkWrite) -> Result<TurnPark, StoreError>;
+    async fn record_turn_park(
+        &self,
+        park: &TurnParkWrite,
+    ) -> Result<StoreTransition<TurnPark>, StoreError>;
 
     /// The session's parked turn, if its turn is parked.
     async fn load_turn_park(&self, session_id: &SessionId) -> Result<Option<TurnPark>, StoreError>;
@@ -1750,6 +1775,7 @@ pub trait RuntimeStore:
     + ShiftEpochStore
     + RunStore
     + StoreMaintenance
+    + WaitReceiptStore
 {
 }
 
@@ -1764,6 +1790,7 @@ impl<T> RuntimeStore for T where
         + ShiftEpochStore
         + RunStore
         + StoreMaintenance
+        + WaitReceiptStore
         + ?Sized
 {
 }

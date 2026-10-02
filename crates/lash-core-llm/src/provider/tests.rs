@@ -1832,7 +1832,7 @@ fn trace_consumer_reads_completed_attempt_disposition_and_usage() {
         }],
     };
     let attempts = crate::trace::trace_llm_attempts(Some(&call_record));
-    let record = lash_trace::TraceRecord::new(
+    let record = fixture_record(
         lash_trace::TraceContext::default(),
         lash_trace::TraceEvent::LlmCallCompleted {
             response: crate::trace::trace_llm_response(

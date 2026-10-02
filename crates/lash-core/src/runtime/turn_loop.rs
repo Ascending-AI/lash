@@ -47,7 +47,7 @@ pub(in crate::runtime) struct TurnSinks<'sinks> {
 /// Cancellation is its own trace variant carrying the evidence
 /// [`TurnStop::Cancelled`] already holds, so a cancelled turn is never traced
 /// as a failure.
-fn trace_outcome(outcome: &TurnOutcome) -> Option<lash_trace::TraceTurnOutcome> {
+pub(super) fn trace_outcome(outcome: &TurnOutcome) -> Option<lash_trace::TraceTurnOutcome> {
     use lash_trace::{TraceTurnCompletionReason as Reason, TraceTurnOutcome as Outcome};
     Some(match outcome {
         TurnOutcome::Finished(TurnFinish::AssistantMessage { .. }) => Outcome::Completed {

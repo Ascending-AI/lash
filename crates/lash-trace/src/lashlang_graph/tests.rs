@@ -38,7 +38,7 @@ fn identity() -> LanguageIdentity {
 const EFFECT_GRAPH_KEY: &str = r#"effect:{"version":2,"kind":"turn","session_id":"session-1","execution_id":"turn-1"}:"exec-replay-1""#;
 
 fn record_at(event: TraceLanguageExecution, ms: i64) -> TraceRecord {
-    TraceRecord::new_with_timestamp(
+    fixture_record_at(
         TraceContext::default().for_session("session-1"),
         TraceEvent::LanguageExecution {
             language: "lashlang".to_string(),
@@ -348,7 +348,7 @@ fn graph_store_keeps_distinct_site_kinds_for_one_structural_node() {
 fn graph_store_reduces_every_dialects_execution_events() {
     let store = TraceLashlangGraphStore::default();
     store
-        .append(&TraceRecord::new(
+        .append(&fixture_record(
             TraceContext::default().for_session("session-1"),
             TraceEvent::LanguageExecution {
                 language: "typescript".to_string(),
@@ -1879,4 +1879,30 @@ fn the_single_graph_accumulator_refuses_mixed_batches_without_mutation() {
         TraceLashlangGraphAccumulator::default().fold(&[]),
         Err(TraceLashlangGraphFoldError::NoLanguageExecutionEvents)
     );
+}
+
+#[cfg(test)]
+fn fixture_record(context: crate::TraceContext, event: crate::TraceEvent) -> crate::TraceRecord {
+    crate::TraceRecord {
+        schema_version: crate::TRACE_SCHEMA_VERSION,
+        id: "fixture-record".into(),
+        timestamp: Default::default(),
+        context,
+        event,
+    }
+}
+
+#[cfg(test)]
+fn fixture_record_at(
+    context: crate::TraceContext,
+    event: crate::TraceEvent,
+    timestamp: chrono::DateTime<chrono::Utc>,
+) -> crate::TraceRecord {
+    crate::TraceRecord {
+        schema_version: crate::TRACE_SCHEMA_VERSION,
+        id: "fixture-record".into(),
+        timestamp,
+        context,
+        event,
+    }
 }

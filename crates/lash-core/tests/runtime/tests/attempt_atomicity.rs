@@ -436,6 +436,7 @@ fn tool_context_with_provider<'run>(
         direct_completions
     };
     let dispatch = Arc::new(lash_core::tool_dispatch::ToolDispatchContext {
+        tool_receipts: None,
         plugins,
         tools,
         tool_registry: None,

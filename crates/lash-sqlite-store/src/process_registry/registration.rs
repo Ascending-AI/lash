@@ -3,21 +3,44 @@ use lash_core_execution::ScopeId;
 
 #[async_trait::async_trait]
 impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
-    async fn register_process_reporting_outcome(
+    async fn prepare_process_registration(
         &self,
         registration: ProcessRegistration,
         observers: &[SessionId],
+    ) -> Result<lash_core_execution::PreparedProcessRegistration, lash_core_execution::PluginError>
+    {
+        let registration =
+            lash_core_execution::runtime::prepare_process_registration(registration)?;
+        let existing = match registration.start_key.as_ref() {
+            Some(key) => {
+                lash_core_execution::ProcessQuery::get_process_by_start_key(self, key).await?
+            }
+            None => None,
+        };
+        let retained = existing.is_some();
+        let process_id = existing.map_or_else(|| self.process_id_mint.mint(), |record| record.id);
+        Ok(lash_core_execution::PreparedProcessRegistration::new(
+            registration,
+            observers.to_vec(),
+            process_id,
+            retained,
+            self.clock.timestamp_ms(),
+        ))
+    }
+    async fn commit_process_registration(
+        &self,
+        prepared: lash_core_execution::PreparedProcessRegistration,
+        anchor: lash_core_execution::TraceAnchor,
     ) -> Result<lash_core_execution::ProcessRegistrationReceipt, lash_core_execution::PluginError>
     {
+        let (registration, observers, process_id, retained, now) = prepared.into_commit(anchor);
         let mut observers = observers.to_vec();
         observers.sort();
         observers.dedup();
         let wake_session_id = registration.wake_session_id.clone();
         let consumer_hold = registration.consumer_hold.clone();
         let trigger_delivery_pin = registration.trigger_delivery_pin.clone();
-        let now = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
-        let process_id_mint = self.process_id_mint.clone();
         let trigger_delivery_bindings = self.trigger_delivery_bindings;
         self.conn
             .write_flow(move |tx| {
@@ -30,6 +53,14 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                     if let Some(start_key) = registration.start_key.as_ref()
                         && let Some(existing) = Self::load_process_by_start_key_conn(tx, start_key)?
                     {
+                        if retained && existing.id != process_id {
+                            return Err(
+                                lash_core_execution::StoreError::PreparedProcessRegistrationStale {
+                                    process_id: process_id.clone(),
+                                }
+                                .into(),
+                            );
+                        }
                         lash_core_execution::runtime::check_retained_start(
                             &registration,
                             &existing,
@@ -38,6 +69,14 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                         return Ok(lash_core_execution::ProcessRegistrationReceipt::existing(
                             existing,
                         ));
+                    }
+                    if retained {
+                        return Err(
+                            lash_core_execution::StoreError::PreparedProcessRegistrationStale {
+                                process_id: process_id.clone(),
+                            }
+                            .into(),
+                        );
                     }
                     // A delivery's key finds its process only while that
                     // process is retained. A delivery already bound, or gone,
@@ -83,7 +122,6 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                     }
                     // Minted only once the start is admitted, so no refusal
                     // names an id that was never registered.
-                    let process_id = process_id_mint.mint();
                     let change_seq = Self::next_change_seq_conn(tx)?;
                     let record =
                         ProcessRecord::from_prepared_registration(registration, process_id, now);

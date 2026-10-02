@@ -273,8 +273,11 @@ impl RuntimeTurnDriver<'_> {
         // one: a replay, which never runs this body, must make the same next
         // call as the live pass.
         let mut call_provider = provider;
-        let completion_sideband =
-            crate::provider::prepare_completion(&call_provider, &mut llm_request);
+        let completion_sideband = self.trace.provider_attempts(
+            crate::provider::prepare_completion(&call_provider, &mut llm_request),
+            crate::trace::trace_context_from_invocation(&invocation)
+                .for_llm_call(llm_call_id.clone().unwrap_or_default()),
+        );
         let task_sideband = completion_sideband.clone();
         let charge_safety = self.policy.charge_safety.clone();
         let call_id = crate::provider::call_id_for_scope(&llm_request.scope);

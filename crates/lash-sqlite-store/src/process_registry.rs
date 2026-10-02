@@ -1021,7 +1021,10 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
         process_id: &ProcessId,
         park: lash_core_execution::store::ProcessParkWrite,
         authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessRecord, lash_core_execution::PluginError> {
+    ) -> Result<
+        lash_core_execution::store::StoreTransition<ProcessRecord>,
+        lash_core_execution::PluginError,
+    > {
         let process_id = process_id.clone();
         let authority = authority.clone();
         let now = self.clock.timestamp_ms();
@@ -1036,7 +1039,11 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
                         &record,
                         ProcessTransition::Park(park),
                     )? {
-                        ProcessTransitionPlan::Unchanged => return Ok(record),
+                        ProcessTransitionPlan::Unchanged => {
+                            return Ok(lash_core_execution::store::StoreTransition::unchanged(
+                                record,
+                            ));
+                        }
                         ProcessTransitionPlan::Append(request) => {
                             Self::append_event_conn(
                                 tx,
@@ -1048,7 +1055,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
                             )?;
                         }
                     }
-                    Ok(record)
+                    Ok(lash_core_execution::store::StoreTransition::changed(record))
                 })()))
             })
             .await
@@ -1108,8 +1115,12 @@ impl lash_core_execution::ProcessToolIntents for SqliteProcessRegistry {
         &self,
         replay_key: &str,
         outcome: lash_core_execution::ToolIntentExecutionOutcome,
-    ) -> Result<lash_core_execution::ToolIntentSubmissionRecord, lash_core_execution::PluginError>
-    {
+    ) -> Result<
+        lash_core_execution::store::StoreTransition<
+            lash_core_execution::ToolIntentSubmissionRecord,
+        >,
+        lash_core_execution::PluginError,
+    > {
         tool_intent_submission::complete(self, replay_key, outcome).await
     }
 }

@@ -616,6 +616,11 @@ pub mod persistence {
         SettleOutcome,
         session_delete::{SessionDeleteLedger, SessionDeleteObligation},
     };
+    pub use lash_core::store::{
+        EngineWaitKind, PreparedRunAdmission, StoreTransition, ToolCompletionReceipt,
+        ToolRequestReceipt, TurnTraceReceipt, WaitReceiptStore, WaitRequestReceipt,
+        WaitResolutionReceipt, admit_run_with_trace,
+    };
     /// Artifact ownership supplied to protocol engines and effect controllers.
     pub use lash_core::{
         ArtifactName, ArtifactReferrer, FrameEnvironmentId, ReferrerClaim, ResolvedArtifactCleanup,
@@ -1314,6 +1319,7 @@ pub mod durability {
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::RecordedKeys;
     pub use lash_core::runtime::process_start::ProcessStartRelay;
+    pub use lash_core::{PreparedProcessRegistration, SegmentHandoverCommit};
     pub use lash_core_store::attachments::{
         AttachmentProducer, AttachmentSourcePolicy, AttachmentSourcePolicyError,
     };
@@ -1348,6 +1354,7 @@ pub mod durability {
 /// Runtime events, errors, and execution controls.
 pub mod runtime {
     pub use lash_core::IngressReservedSourceKeyRefusal;
+    pub use lash_core::facade_support::TraceBoundaryReceipt;
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::engine::{
         AdmitRequest, AdmitVerdict, EngineAck, EngineCursor, EnginePage, EngineParkRecorded,
@@ -1454,10 +1461,10 @@ pub mod runtime {
 /// Trace context, events, and sink configuration.
 pub mod tracing {
     // The vocabulary this module's signatures name (the facade-completeness rule).
-    pub use lash_core::facade_support::StoreObserver;
     /// Where engine code stands when it observes, and the journaled-step
     /// boundary that grants the right to.
     pub use lash_core::facade_support::{JournalFrontier, LiveStep, StepIssue, TraceStanding};
+    pub use lash_core::facade_support::{ProviderCompletionSideband, StoreObserver};
     pub use lash_sansio::{AttachmentMaterializationReason, AttachmentMaterializationSource};
     /// The scope, cause, permit and identity vocabulary the trace runtime's
     /// signatures name.
@@ -1469,10 +1476,10 @@ pub mod tracing {
         AttemptObservation, DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier,
         InvalidTraceLinks, TraceAdmissionCandidate, TraceAnchor, TraceAttemptId,
         TraceCandidateOutcome, TraceCarrier, TraceCause, TraceDomainCompletion,
-        TraceDomainOperation, TraceDomainProjector, TraceDomainStatus, TraceLinks, TraceLlmAttempt,
-        TraceRecordIdentity, TraceScopeAdmission, TraceScopeFactory, TraceScopeId, TraceScopeKind,
-        TraceScopeOffer, TraceScopeOwner, TraceTransitionKind, UntracedScopes, W3cSpanId,
-        W3cTraceFlags, W3cTraceId, W3cTraceState,
+        TraceDomainOperation, TraceDomainProjector, TraceDomainStatus, TraceHostOperation,
+        TraceLinks, TraceLlmAttempt, TraceRecordIdentity, TraceScopeAdmission, TraceScopeFactory,
+        TraceScopeId, TraceScopeKind, TraceScopeOffer, TraceScopeOwner, TraceTransitionKind,
+        UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
     };
     pub use lash_trace::{
         TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT,

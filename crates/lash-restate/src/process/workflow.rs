@@ -49,8 +49,11 @@ use crate::ingress::RestateIngressClient;
 use crate::process_stop::ProcessStopDelivery;
 use crate::services::{Lane, LashService, ServiceRoute, routed_workflow};
 
+mod completion;
 mod lanes;
+mod park;
 mod scope_journal;
+pub(crate) use completion::complete_process_outcome;
 
 /// The journal name of the terminal completion step.
 const COMPLETE_STEP: &str = "lash.process.complete";
@@ -554,6 +557,7 @@ where
                     output: Box::new(failure.into_output()),
                     prelude: Vec::new(),
                 },
+                None,
             )
             .await?;
         if signal == SegmentSignal::Unresolved {
@@ -626,6 +630,7 @@ where
         journal: &WorkflowContext<'_>,
         process_id: &ProcessId,
         proposal: TerminalProposal,
+        segment: Option<(u64, u64)>,
     ) -> Result<ProcessAwaitOutput, HandlerError> {
         let registry = &self.registry;
         let attachments = self.attachments.as_ref();
@@ -640,6 +645,11 @@ where
                         process_id,
                         *output,
                         prelude,
+                        self.tracing
+                            .clone()
+                            .or_else(|| self.runner.tracing())
+                            .as_ref(),
+                        segment,
                     )
                     .await
                     {
@@ -712,6 +722,11 @@ where
             process_id,
             proposed,
             Vec::new(),
+            self.tracing
+                .clone()
+                .or_else(|| self.runner.tracing())
+                .as_ref(),
+            None,
         )
         .await
     }
@@ -758,6 +773,11 @@ where
                     &process_id,
                     *output,
                     prelude,
+                    self.tracing
+                        .clone()
+                        .or_else(|| self.runner.tracing())
+                        .as_ref(),
+                    Some((started.segment_ordinal(), started.started_at_ms())),
                 )
                 .await
                 .map_err(handler_error_from_plugin)?;
@@ -905,96 +925,6 @@ where
             Err(err) => Err(HandlerError::from(err)),
         }
     }
-
-    /// Park `process_id` on the replay refusal `refusal` (FIG-3659 NOW-B).
-    ///
-    /// Best effort, like a turn's park: the attempt fails retryably either
-    /// way, and a retry that refuses again writes the park again, so a failed
-    /// write is logged rather than allowed to turn a park into a failure.
-    async fn park_diverged_process(
-        &self,
-        process_id: &ProcessId,
-        refusal: &PluginError,
-        started: &SegmentStarted,
-    ) {
-        let Some(reason) = refusal.park_reason() else {
-            return;
-        };
-        let code = reason.code();
-        // The park carries the checkpoint's generation stamp (FIG-3795 S8):
-        // the recorded admission's build generation, never the refusing
-        // build's own.
-        let write = lash_core::store::ProcessParkWrite {
-            reason,
-            engine: None,
-            build_generation: started.build_generation().cloned(),
-        };
-        let parked = match self.registry.get_process(process_id).await {
-            Ok(Some(record)) => {
-                self.registry
-                    .park_process_with_authority(
-                        process_id,
-                        write,
-                        &park_authority(&record, started),
-                    )
-                    .await
-            }
-            Ok(None) => Err(lash_core::runtime::registry_transitions::unknown_process(
-                process_id,
-            )),
-            Err(error) => Err(error),
-        };
-        match parked {
-            Ok(parked) => {
-                lanes::observe_refusal_park(&Default::default(), None, process_id, code, &parked);
-            }
-            Err(error) => tracing::error!(
-                event = "process.park_record_failed",
-                process_id = process_id.as_str(),
-                reason_code = code.as_str(),
-                error = %error,
-                "a diverged process could not record its park"
-            ),
-        }
-    }
-}
-
-/// Store `proposed` as the process's terminal, answering the outcome the
-/// registry kept: this one, or the one an earlier writer committed.
-pub(crate) async fn complete_process_outcome(
-    registry: &Arc<dyn ProcessRegistry>,
-    attachments: &dyn lash_core::AttachmentReferrers,
-    process_id: &ProcessId,
-    proposed: ProcessAwaitOutput,
-    prelude: Vec<lash_core::ProcessEventAppendRequest>,
-) -> Result<ProcessAwaitOutput, PluginError> {
-    // The record holds what its terminal delivers before the registry
-    // records it (ADR 0124 §4); a swept source publishes the typed
-    // source-gone failure instead.
-    let proposed = lash_core::runtime::attachment_delivery::publish_process_terminal(
-        attachments,
-        process_id,
-        proposed,
-    )
-    .await?;
-    let completion = registry
-        .complete_process_with_prelude(
-            process_id,
-            proposed,
-            prelude,
-            workflow_key_authority(process_id),
-        )
-        .await?;
-    let record = match completion {
-        lash_core::ProcessCompletionOutcome::Committed(record) => record,
-        lash_core::ProcessCompletionOutcome::AlreadyApplied { stored }
-        | lash_core::ProcessCompletionOutcome::Superseded { stored } => stored,
-    };
-    record.outcome().ok_or_else(|| {
-        PluginError::Session(format!(
-            "process `{process_id}` completion returned a non-terminal record"
-        ))
-    })
 }
 
 /// Record `request`'s cancellation in the registry.
@@ -1363,7 +1293,12 @@ where
         let handover = match end {
             SegmentRunEnd::Terminal(proposal) => {
                 let output = self
-                    .complete_terminal_step(context, &process_id, proposal)
+                    .complete_terminal_step(
+                        context,
+                        &process_id,
+                        proposal,
+                        Some((started.segment_ordinal(), started.started_at_ms())),
+                    )
                     .await?;
                 resolve_process_cancel_signal(
                     context,
@@ -1430,7 +1365,23 @@ where
                         )
                         .await
                     {
-                        Ok(()) => Ok(Ok(())),
+                        Ok(receipt) => {
+                            if let (Some(tracing), Some(scope)) = (
+                                self.tracing.clone().or_else(|| self.runner.tracing()),
+                                receipt.record.scope.as_ref(),
+                            ) {
+                                completion::emit_segment_completion(
+                                    &tracing,
+                                    scope,
+                                    started.segment_ordinal(),
+                                    started.started_at_ms(),
+                                    receipt.record.committed_at_ms,
+                                    lash_trace::TraceDomainStatus::Yielded,
+                                    receipt.permit().as_ref(),
+                                );
+                            }
+                            Ok(Ok(()))
+                        }
                         Err(error) => step_fault(error),
                     }
                 },

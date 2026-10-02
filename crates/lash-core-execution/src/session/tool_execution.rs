@@ -587,7 +587,7 @@ impl RuntimeExecutionContext<'_> {
     /// caller's positional material (`{iteration}:{index}:{call_id}` on the
     /// protocol path, `{batch_id}:{index}:{call_id}` in a batch) — qualified
     /// against this context's observation base (ADR 0105 §1).
-    pub(crate) fn emit_tool_call_started(
+    pub(crate) async fn emit_tool_call_started(
         &self,
         call_key: &str,
         ids: &ToolCallIds,
@@ -606,7 +606,6 @@ impl RuntimeExecutionContext<'_> {
                 args: args.clone(),
             }),
         );
-        self.emit_tool_call_started_trace(ids, name, &args);
         cursor.observe(
             context.dispatch.observer.as_ref(),
             crate::engine::ObservedEvent::Activity {
@@ -631,7 +630,16 @@ impl RuntimeExecutionContext<'_> {
         call_key: &str,
     ) -> ToolPreparationOutcome {
         let context = self.with_call_observation_key(self.call_observation_key(call_key));
-        prepare_tool_call_with_context(context.dispatch.as_ref(), pending).await
+        let requested_at_ms = self.dispatch.clock.timestamp_ms();
+        let preparation = prepare_tool_call_with_context(context.dispatch.as_ref(), pending).await;
+        if let ToolPreparationOutcome::Completed(outcome) = &preparation
+            && let Err(error) = context
+                .retain_unadmitted_tool_request(&outcome.record, requested_at_ms)
+                .await
+        {
+            context.record_nested_effect_error(error);
+        }
+        preparation
     }
 
     /// Prepares a call on a tool of the turn's recorded surface whose live
@@ -645,12 +653,21 @@ impl RuntimeExecutionContext<'_> {
         call_key: &str,
     ) -> ToolPreparationOutcome {
         let context = self.with_call_observation_key(self.call_observation_key(call_key));
-        crate::tool_dispatch::prepare_recorded_tool_call_with_context(
+        let requested_at_ms = self.dispatch.clock.timestamp_ms();
+        let preparation = crate::tool_dispatch::prepare_recorded_tool_call_with_context(
             context.dispatch.as_ref(),
             binding,
             pending,
         )
-        .await
+        .await;
+        if let ToolPreparationOutcome::Completed(outcome) = &preparation
+            && let Err(error) = context
+                .retain_unadmitted_tool_request(&outcome.record, requested_at_ms)
+                .await
+        {
+            context.record_nested_effect_error(error);
+        }
+        preparation
     }
 
     /// The catalog entry a model-issued call names, if the catalog holds it.
@@ -683,122 +700,133 @@ impl RuntimeExecutionContext<'_> {
         call_key: &str,
         duration_ms: u64,
     ) -> Result<CompletedProtocolToolCall, crate::RuntimeEffectControllerError> {
-        let context = self.with_call_observation_key(self.call_observation_key(call_key));
-        let this = &context;
-        let call_id = &ids.call_id;
-        let tool_correlation_id = tool_activity_id(call_id);
-        let attempts = outcome.attempts.clone();
-        let mut output = outcome.record.output.clone();
-        // The settlement exists before the chain so a step can read its facts;
-        // its `model_return` is overwritten by the presented return below.
-        let mut settlement = crate::runtime::effect::ToolSettlement::from_dispatch(
-            &outcome,
-            ModelToolReturn::from_output(outcome.record.tool.clone(), &output),
-        );
-        // The presentation boundary (ADR 0099 §6, FIG-3420): the ordered
-        // presentation steps run once through the journaled `PresentToolResult`
-        // effect, keyed by `{call_id}:present`, so a replay serves the recorded
-        // `ToolPresentation` and never re-runs a step.
-        let presentation_replay_key = format!("{call_id}:present");
-        let scoped = self.dispatch.effect_controller.clone();
-        let presentation = match crate::EffectAddress::new(
-            scoped.execution_scope().clone(),
-            presentation_replay_key.clone(),
-        ) {
-            Ok(address) => scoped
-                .execute_effect(
-                    crate::RuntimeEffectEnvelope::new(
-                        crate::RuntimeEffectInvocation::new(
-                            address,
-                            self.dispatch.parentless_attribution(),
-                            presentation_replay_key,
+        Box::pin(async {
+            let context = self.with_call_observation_key(self.call_observation_key(call_key));
+            let this = &context;
+            let call_id = &ids.call_id;
+            let tool_correlation_id = tool_activity_id(call_id);
+            let attempts = outcome.attempts.clone();
+            let mut output = outcome.record.output.clone();
+            // The settlement exists before the chain so a step can read its facts;
+            // its `model_return` is overwritten by the presented return below.
+            let mut settlement = crate::runtime::effect::ToolSettlement::from_dispatch(
+                &outcome,
+                ModelToolReturn::from_output(outcome.record.tool.clone(), &output),
+            );
+            // The presentation boundary (ADR 0099 §6, FIG-3420): the ordered
+            // presentation steps run once through the journaled `PresentToolResult`
+            // effect, keyed by `{call_id}:present`, so a replay serves the recorded
+            // `ToolPresentation` and never re-runs a step.
+            let presentation_replay_key = format!("{call_id}:present");
+            let scoped = self.dispatch.effect_controller.clone();
+            let presentation = match crate::EffectAddress::new(
+                scoped.execution_scope().clone(),
+                presentation_replay_key.clone(),
+            ) {
+                Ok(address) => scoped
+                    .execute_effect(
+                        crate::RuntimeEffectEnvelope::new(
+                            crate::RuntimeEffectInvocation::new(
+                                address,
+                                self.dispatch.parentless_attribution(),
+                                presentation_replay_key,
+                            ),
+                            crate::RuntimeEffectCommand::PresentToolResult {
+                                call_id: call_id.clone(),
+                                tool_id,
+                                tool_name: outcome.record.tool.clone(),
+                                render: self.dispatch.execution_env_spec.render.clone(),
+                                args: outcome.record.args.clone(),
+                                output: Box::new(outcome.record.output.clone()),
+                            },
                         ),
-                        crate::RuntimeEffectCommand::PresentToolResult {
-                            call_id: call_id.clone(),
-                            tool_id,
-                            tool_name: outcome.record.tool.clone(),
-                            render: self.dispatch.execution_env_spec.render.clone(),
-                            args: outcome.record.args.clone(),
-                            output: Box::new(outcome.record.output.clone()),
-                        },
-                    ),
-                    crate::RuntimeEffectLocalExecutor::presentation(
-                        std::sync::Arc::clone(&self.dispatch.plugins),
-                        std::sync::Arc::new(settlement.clone()),
-                        std::sync::Arc::clone(&self.dispatch.attachment_store),
-                        self.attachment_acceptance().clone(),
-                        duration_ms,
-                    ),
-                )
-                .await
-                .and_then(crate::RuntimeEffectOutcome::into_tool_presentation),
-            Err(error) => Err(error.into()),
-        }?;
-        let mut model_return = presentation.model_return;
-        // ADR 0099 §6/§13: the applicator owns possession, committed messages,
-        // trigger receipts and usage charging, exactly once per source. A
-        // refusal — an unreadable settlement or a spend with no charge sink —
-        // fails the call closed rather than presenting a result whose
-        // recorded facts were dropped.
-        settlement.model_return = model_return.clone();
-        let settlement_source = crate::session::SettlementSource::Invocation {
-            call_id: call_id.clone(),
-        };
-        if let Err(error) = self.incorporate_tool_settlement(settlement_source, &settlement) {
-            let message = error.message;
-            output = ToolCallOutput::failure(ToolFailure::runtime(
-                ToolFailureClass::Internal,
-                "tool_settlement_incorporation_failed",
-                message.clone(),
-            ));
-            model_return
-                .parts
-                .push(crate::ModelToolReturnPart::text(format!(
-                    "settlement incorporation refused: {message}"
-                )));
-        }
-        {
-            let mut cursor = this.observation_cursor(&format!("tool:{call_id}:intents"));
-            for intent_outcome in crate::tool_dispatch::model_visible_intent_outcomes(&outcome) {
-                model_return.parts.push(crate::ModelToolReturnPart::text(
-                    intent_outcome.model_addendum(),
+                        crate::RuntimeEffectLocalExecutor::presentation(
+                            std::sync::Arc::clone(&self.dispatch.plugins),
+                            std::sync::Arc::new(settlement.clone()),
+                            std::sync::Arc::clone(&self.dispatch.attachment_store),
+                            self.attachment_acceptance().clone(),
+                            duration_ms,
+                        ),
+                    )
+                    .await
+                    .and_then(crate::RuntimeEffectOutcome::into_tool_presentation),
+                Err(error) => Err(error.into()),
+            }?;
+            let mut model_return = presentation.model_return;
+            // ADR 0099 §6/§13: the applicator owns possession, committed messages,
+            // trigger receipts and usage charging, exactly once per source. A
+            // refusal — an unreadable settlement or a spend with no charge sink —
+            // fails the call closed rather than presenting a result whose
+            // recorded facts were dropped.
+            settlement.model_return = model_return.clone();
+            let settlement_source = crate::session::SettlementSource::Invocation {
+                call_id: call_id.clone(),
+            };
+            if let Err(error) = self.incorporate_tool_settlement(settlement_source, &settlement) {
+                let message = error.message;
+                output = ToolCallOutput::failure(ToolFailure::runtime(
+                    ToolFailureClass::Internal,
+                    "tool_settlement_incorporation_failed",
+                    message.clone(),
                 ));
+                model_return
+                    .parts
+                    .push(crate::ModelToolReturnPart::text(format!(
+                        "settlement incorporation refused: {message}"
+                    )));
             }
-            for intent_outcome in &outcome.intent_outcomes {
-                cursor.observe(
-                    this.dispatch.observer.as_ref(),
-                    crate::engine::ObservedEvent::Activity {
-                        correlation_id: Some(tool_correlation_id.clone()),
-                        event: TurnEvent::ToolIntentOutcome {
-                            call_id: call_id.clone(),
-                            outcome: intent_outcome.clone(),
+            {
+                let mut cursor = this.observation_cursor(&format!("tool:{call_id}:intents"));
+                for intent_outcome in crate::tool_dispatch::model_visible_intent_outcomes(&outcome)
+                {
+                    model_return.parts.push(crate::ModelToolReturnPart::text(
+                        intent_outcome.model_addendum(),
+                    ));
+                }
+                for intent_outcome in &outcome.intent_outcomes {
+                    cursor.observe(
+                        this.dispatch.observer.as_ref(),
+                        crate::engine::ObservedEvent::Activity {
+                            correlation_id: Some(tool_correlation_id.clone()),
+                            event: TurnEvent::ToolIntentOutcome {
+                                call_id: call_id.clone(),
+                                outcome: intent_outcome.clone(),
+                            },
                         },
-                    },
-                );
+                    );
+                }
             }
-        }
 
-        let record = ToolCallRecord {
-            call_id: ids.call_id.clone(),
-            provider_call_id: ids.provider_call_id.clone(),
-            tool: outcome.record.tool.clone(),
-            args: outcome.record.args.clone(),
-            output: output.clone(),
-        };
-        this.emit_tool_call_completed(call_key, &record, &attempts, duration_ms);
-        Ok(CompletedProtocolToolCall {
-            completed: crate::sansio::CompletedToolCall {
-                call_id: ids.call_id,
-                provider_call_id: ids.provider_call_id,
-                tool_name: outcome.record.tool,
-                args: outcome.record.args,
-                output,
-                model_return,
-                intent_outcomes: outcome.intent_outcomes,
-                replay,
-            },
-            record,
+            let record = ToolCallRecord {
+                call_id: ids.call_id.clone(),
+                provider_call_id: ids.provider_call_id.clone(),
+                tool: outcome.record.tool.clone(),
+                args: outcome.record.args.clone(),
+                output: output.clone(),
+            };
+            this.emit_tool_call_completed(
+                call_key,
+                &record,
+                &attempts,
+                duration_ms,
+                &outcome.intent_outcomes,
+            )
+            .await;
+            Ok(CompletedProtocolToolCall {
+                completed: crate::sansio::CompletedToolCall {
+                    call_id: ids.call_id,
+                    provider_call_id: ids.provider_call_id,
+                    tool_name: outcome.record.tool,
+                    args: outcome.record.args,
+                    output,
+                    model_return,
+                    intent_outcomes: outcome.intent_outcomes,
+                    replay,
+                },
+                record,
+            })
         })
+        .await
     }
 
     /// `call_key` is the material the call's observation lanes key under; see
@@ -806,14 +834,20 @@ impl RuntimeExecutionContext<'_> {
     /// wall-clock the caller observed for the call — an observation-only
     /// value: recorded content carries no durations, so it arrives on this
     /// path rather than on the record (FIG-3696).
-    fn emit_tool_call_completed(
+    async fn emit_tool_call_completed(
         &self,
         call_key: &str,
         record: &ToolCallRecord,
         attempts: &[lash_trace::TraceRetryAttempt],
         duration_ms: u64,
+        intent_outcomes: &[crate::ToolIntentExecutionOutcome],
     ) {
-        self.emit_tool_call_completed_trace(record, attempts, duration_ms);
+        if let Err(error) = self
+            .emit_tool_call_completed_trace(record, attempts, intent_outcomes)
+            .await
+        {
+            self.record_nested_effect_error(error);
+        }
         let context = self.with_call_observation_key(self.call_observation_key(call_key));
         let mut cursor = context.observation_cursor(&format!("tool:{}:complete", record.call_id));
         cursor.observe(
@@ -846,13 +880,17 @@ impl RuntimeExecutionContext<'_> {
         call_key: &str,
         duration_ms: u64,
     ) -> Result<CompletedProtocolToolCall, crate::RuntimeEffectControllerError> {
+        if let Some(error) = self.peek_nested_effect_error() {
+            return Err(error);
+        }
         self.emit_tool_call_started(
             call_key,
             &ids,
             &outcome.record.tool,
             outcome.record.args.clone(),
             tool_activity_id(&ids.call_id),
-        );
+        )
+        .await;
         self.complete_tool_call(ids, tool_id, replay, outcome, call_key, duration_ms)
             .await
     }
@@ -884,7 +922,8 @@ impl RuntimeExecutionContext<'_> {
             args: args.clone(),
             output: output.clone(),
         };
-        self.emit_tool_call_completed(call_key, &record, &[], duration_ms);
+        self.emit_tool_call_completed(call_key, &record, &[], duration_ms, &[])
+            .await;
         CompletedProtocolToolCall {
             completed: crate::sansio::CompletedToolCall {
                 model_return: ModelToolReturn::from_output(tool.clone(), &output),
@@ -977,7 +1016,8 @@ impl RuntimeExecutionContext<'_> {
             &completed.tool_name,
             completed.args.clone(),
             tool_activity_id(&completed.call_id),
-        );
+        )
+        .await;
         // The call completed host-side; no measured window exists on this
         // path, so the observation reports 0 rather than a live clock read
         // made long after the work ran (FIG-3696).
@@ -992,7 +1032,9 @@ impl RuntimeExecutionContext<'_> {
             },
             &[],
             0,
-        );
+            &completed.intent_outcomes,
+        )
+        .await;
     }
 
     /// `call_key` is the material the settled call's observation lanes key
@@ -1381,6 +1423,7 @@ impl RuntimeExecutionContext<'_> {
         // only onto the Completed observation — the recorded outcome holds no
         // wall-clock fields (FIG-3696).
         let call_started = self.dispatch.clock.now();
+        let requested_at_ms = self.dispatch.clock.timestamp_ms();
         let elapsed_ms = |this: &Self| {
             this.dispatch
                 .clock
@@ -1413,6 +1456,12 @@ impl RuntimeExecutionContext<'_> {
                 captures: Vec::new(),
                 triggers: Vec::new(),
             };
+            if let Err(error) = self
+                .retain_unadmitted_tool_request(&outcome.record, requested_at_ms)
+                .await
+            {
+                self.record_nested_effect_error(error);
+            }
             return self
                 .complete_language_tool_call(
                     AdmittedCallIdentity(call_id, tool_id.clone()),
@@ -1432,7 +1481,8 @@ impl RuntimeExecutionContext<'_> {
             &manifest.name,
             args.clone(),
             tool_correlation_id.clone(),
-        );
+        )
+        .await;
 
         let parent_invocation = Some(command.clone());
         let mut dispatch = (*self.dispatch).clone();
@@ -1479,7 +1529,15 @@ impl RuntimeExecutionContext<'_> {
                 .await;
                 coordinated.launch
             }
-            ToolPreparationOutcome::Completed(outcome) => ToolCallLaunch::Done(outcome),
+            ToolPreparationOutcome::Completed(outcome) => {
+                if let Err(error) = self
+                    .retain_unadmitted_tool_request(&outcome.record, requested_at_ms)
+                    .await
+                {
+                    self.record_nested_effect_error(error);
+                }
+                ToolCallLaunch::Done(outcome)
+            }
         };
         let mut outcome = match launch {
             ToolCallLaunch::Done(outcome) => *outcome,

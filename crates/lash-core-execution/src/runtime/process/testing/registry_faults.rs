@@ -802,7 +802,7 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
         process_id: &ProcessId,
         park: crate::store::ProcessParkWrite,
         authority: &crate::ProcessExecutionWriteAuthority,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+    ) -> Result<crate::store::StoreTransition<crate::ProcessRecord>, crate::PluginError> {
         self.inner
             .park_process_with_authority(process_id, park, authority)
             .await

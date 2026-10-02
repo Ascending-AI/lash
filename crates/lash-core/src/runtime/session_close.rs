@@ -43,6 +43,7 @@ pub struct SessionCloseServices {
     /// The store set's `ControlIntent` obligation ledger (ADR 0109).
     pub intents: Arc<dyn crate::store::ObligationLedger>,
     pub clock: Arc<dyn Clock>,
+    pub metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
     /// The session-delete obligation's stores: the close's acknowledgement
     /// arms it, and the delete's relay delivers it (ADR 0109 §4).
     pub deletes: crate::session_delete::SessionDeleteStores,
@@ -191,7 +192,8 @@ pub async fn close_session(
         Arc::clone(&services.scope_close_obligations),
         Arc::clone(&services.clock),
     )
-    .with_policy(services.policy);
+    .with_policy(services.policy)
+    .with_metrics(services.metrics.clone());
     let applied = match relay.deliver_intent(&intent).await {
         Ok(state) => state,
         Err(error) => {

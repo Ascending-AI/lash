@@ -400,10 +400,12 @@ struct ProcessStartWiring {
     ledger: Arc<dyn crate::store::ObligationLedger>,
     clock: Arc<dyn crate::Clock>,
     policy: crate::runtime::shift::relay::RelayPolicy,
+    metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
 }
 
 #[derive(Clone)]
 pub struct TriggerRouter {
+    tracing: Option<crate::trace::TraceRuntime>,
     store: Arc<dyn TriggerStore>,
     process_work: crate::ProcessWorkWiring,
     process_env_store: Option<Arc<dyn crate::ProcessExecutionEnvStore>>,
@@ -420,6 +422,7 @@ impl TriggerRouter {
             process_env_store: None,
             process_engines: None,
             process_starts: None,
+            tracing: None,
             route_restorer: None,
         }
     }
@@ -434,16 +437,24 @@ impl TriggerRouter {
     /// (ADR 0109 §1.5); one without it leaves the row to the reconcile tick.
     /// `policy` is the host's relay policy, so the immediate delivery runs
     /// under the configured attempt budget.
+    #[must_use]
+    pub fn with_trace_runtime(mut self, tracing: crate::trace::TraceRuntime) -> Self {
+        self.tracing = Some(tracing);
+        self
+    }
+
     pub fn with_process_starts(
         mut self,
         ledger: Arc<dyn crate::store::ObligationLedger>,
         clock: Arc<dyn crate::Clock>,
         policy: crate::runtime::shift::relay::RelayPolicy,
+        metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
     ) -> Self {
         self.process_starts = Some(ProcessStartWiring {
             ledger,
             clock,
             policy,
+            metrics,
         });
         self
     }
@@ -851,6 +862,7 @@ impl TriggerRouter {
                             Arc::clone(&starts.ledger),
                             Arc::clone(&starts.clock),
                             starts.policy,
+                            starts.metrics.clone(),
                         );
                     }
                     if let Some(store) = self.process_env_store.as_ref() {
@@ -1014,7 +1026,8 @@ impl TriggerRouter {
                         Arc::clone(&port),
                         Arc::clone(&starts.clock),
                     )
-                    .with_policy(starts.policy),
+                    .with_policy(starts.policy)
+                    .with_metrics(starts.metrics.clone()),
                 )
             }),
             registry,
@@ -1022,7 +1035,10 @@ impl TriggerRouter {
             process_env_store: self.process_env_store.clone(),
             process_engines: self.process_engines.clone().unwrap_or_default(),
             // A trigger delivery's start is never a host-granted root.
-            host_start: Box::new(crate::runtime::HostStartAdmission::default()),
+            host_start: Box::new(crate::runtime::HostStartAdmission {
+                tracing: self.tracing.clone(),
+                ..Default::default()
+            }),
             turn_cancellation: None,
             effect_controller: None,
             attachments: None,

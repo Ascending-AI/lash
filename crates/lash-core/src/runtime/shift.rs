@@ -161,6 +161,7 @@ pub(crate) struct RunExecution {
     /// the run reads alike, never whether this execution was the writer
     /// (FIG-3893).
     terminal_written: bool,
+    trace_scope: Option<lash_trace::DurableTraceScope>,
 }
 
 impl RunExecution {
@@ -170,6 +171,7 @@ impl RunExecution {
             fence,
             journal_generation: admitted.admitted_generation().clone(),
             terminal_written: false,
+            trace_scope: None,
         }
     }
 
@@ -194,6 +196,7 @@ impl RunExecution {
         Some(ShiftCommit {
             fence: self.fence.clone(),
             run: self.run.clone(),
+            trace_scope: self.trace_scope.clone(),
             terminal: ended.filter(|_| !owes_follow_on).map(|outcome| {
                 crate::store::RunTerminalWrite {
                     run: self.run.clone(),
@@ -243,6 +246,7 @@ pub(crate) struct ShiftCommit {
     pub(crate) run: TurnId,
     /// The run's terminal evidence, when the turn ends the run.
     pub(crate) terminal: Option<crate::store::RunTerminalWrite>,
+    pub(crate) trace_scope: Option<lash_trace::DurableTraceScope>,
 }
 
 /// One admitted run's execution, with the physical turns it assembled.

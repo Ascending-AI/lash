@@ -148,6 +148,7 @@ impl RestateEffectHost {
                 generation,
                 registrations: std::sync::Mutex::new(None),
                 group_executors: OnceLock::new(),
+                wait_receipts: OnceLock::new(),
             }),
             tool_children: Arc::new(OnceLock::new()),
             turn_attach: Arc::new(crate::turn::RestateTurnAttach::in_namespace(
@@ -158,6 +159,14 @@ impl RestateEffectHost {
             turn_control_binding_id,
             journal_authority: Arc::new(OnceLock::new()),
         }
+    }
+
+    pub(crate) fn bind_wait_receipts(
+        &self,
+        store: Arc<dyn lash_core::store::WaitReceiptStore>,
+        clock: Arc<dyn lash_core::Clock>,
+    ) {
+        let _ = self.controller.wait_receipts.set((store, clock));
     }
 
     /// Bind the reads [`EffectHost::journal_replay`] answers from, once; a
@@ -568,6 +577,10 @@ struct RestateEffectHostController {
     /// the lazy handle [`RestateHostGroupExecutors`], so the open, a redriven
     /// child and preflight all consult the same cell.
     group_executors: OnceLock<Arc<dyn GroupExecutors>>,
+    wait_receipts: OnceLock<(
+        Arc<dyn lash_core::store::WaitReceiptStore>,
+        Arc<dyn lash_core::Clock>,
+    )>,
 }
 
 #[async_trait::async_trait]
@@ -684,7 +697,8 @@ impl AwaitEventResolver for RestateEffectHostController {
         if scope.session_id().is_some() {
             return Err(restate_scope_not_retirable(scope));
         }
-        retire_restate_scope_via_ingress(&self.await_event_ingress, scope, false).await
+        retire_restate_scope_via_ingress(&self.await_event_ingress, scope, false).await?;
+        self.retire_wait_receipts(scope).await
     }
 
     /// Revoke and fence the scope's index only if no durable wait under it is
@@ -698,7 +712,8 @@ impl AwaitEventResolver for RestateEffectHostController {
             return Err(restate_scope_not_retirable(scope));
         }
         let index_key = durable_wait_index_key_for_scope(scope);
-        self.await_event_ingress
+        let retired = self
+            .await_event_ingress
             .ingress
             .call_lash_object::<_, bool>(
                 &self
@@ -714,7 +729,11 @@ impl AwaitEventResolver for RestateEffectHostController {
                     lash_core::RuntimeErrorCode::EngineAwaitEventSessionUpdate,
                     err.to_string(),
                 )
-            })
+            })?;
+        if retired {
+            self.retire_wait_receipts(scope).await?;
+        }
+        Ok(retired)
     }
 
     async fn reinstate_await_event_scope(
@@ -1619,3 +1638,21 @@ impl RuntimeEffectController for RestateEffectHostController {
 
 #[cfg(test)]
 mod tests;
+
+impl RestateEffectHostController {
+    async fn retire_wait_receipts(&self, scope: &ExecutionScope) -> Result<(), RuntimeError> {
+        if let Some((store, clock)) = self.wait_receipts.get() {
+            let owner = serde_json::to_string(scope).map_err(|e| {
+                RuntimeError::new(
+                    lash_core::RuntimeErrorCode::EngineEffectController,
+                    e.to_string(),
+                )
+            })?;
+            store
+                .retire_wait_receipts(&owner, clock.timestamp_ms())
+                .await
+                .map_err(|error| RuntimeEffectControllerError::from(error).into_runtime_error())?;
+        }
+        Ok(())
+    }
+}

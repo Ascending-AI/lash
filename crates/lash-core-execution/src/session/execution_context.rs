@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 mod definition_publication;
 mod referrers;
+mod tool_completion;
 mod trigger_scope;
 pub(crate) use referrers::execution_claim_of;
 use trigger_scope::missing_process_execution_error;
@@ -97,7 +98,7 @@ pub struct RuntimeExecutionContext<'run> {
     turn_cancel_scope: Option<crate::ExecutionScope>,
     /// Per-tool trace emission handle for this execution. Present only when the
     /// host installed a trace sink; `None` keeps every trace call a no-op.
-    tracing: Option<RuntimeExecutionTracing>,
+    pub(super) tracing: Option<RuntimeExecutionTracing>,
     /// The live step of the recorded body this context runs in, when it runs
     /// in one: bound by the engine's step wrapper when the body really runs.
     live_step: Option<Arc<crate::trace::LiveStep>>,
@@ -111,7 +112,7 @@ pub struct RuntimeExecutionContext<'run> {
     /// context is not executing a code block.
     code_block_graph_key: Option<String>,
     /// Workflow node that issued tool calls through this context.
-    issuing_language_node_id: Option<Arc<str>>,
+    pub(super) issuing_language_node_id: Option<Arc<str>>,
     /// Work-driver handle for this execution's process wiring, when the
     /// deployment provides one. Threaded through so in-run process
     /// operations (e.g. signalling another process) that build their own
@@ -139,6 +140,12 @@ pub struct RuntimeExecutionContext<'run> {
     /// [`OpenerState`](crate::session::OpenerState): the opener's owner hands
     /// one state to every phase context it builds.
     pub(crate) opener_groups: Arc<std::sync::Mutex<crate::session::OpenerGroupRegistry>>,
+    /// Retained request receipts used to commit each call's logical terminal.
+    pub(crate) tool_requests: Arc<
+        std::sync::Mutex<
+            std::collections::BTreeMap<crate::ToolCallId, crate::store::ToolRequestReceipt>,
+        >,
+    >,
     /// The tool calls this context's cell has made, per group key, counted
     /// against the session's recorded `max_tool_calls` (FIG-4546). A turn
     /// builds a fresh context per cell, so this is the cell's own total; a
@@ -202,9 +209,9 @@ pub struct RuntimeExecutionProcessEventContext {
 /// through.
 #[derive(Clone)]
 pub struct RuntimeExecutionTracing {
-    runtime: crate::trace::TraceRuntime,
-    scope: Option<lash_trace::DurableTraceScope>,
-    scope_context: lash_trace::TraceContext,
+    pub(super) runtime: crate::trace::TraceRuntime,
+    pub(super) scope: Option<lash_trace::DurableTraceScope>,
+    pub(super) scope_context: lash_trace::TraceContext,
     /// Whether this execution's coordination reports its tool calls'
     /// lifecycle. A turn's does; a process execution carries the handle for
     /// what runs in it and reports no per-call lifecycle of its own.
@@ -250,52 +257,6 @@ impl RuntimeExecutionTracing {
         controller: &crate::ScopedEffectController<'_>,
     ) -> crate::trace::TraceStanding {
         self.runtime.shift(self.scope.clone(), controller)
-    }
-
-    /// Observes one lifecycle event of the call `call_id`, under the call's
-    /// own scope where a turn scopes it. No committed boundary record reports
-    /// a call's start or terminal as new yet, so each is observed as the work
-    /// of the attempt that first reaches it rather than as a logical
-    /// transition.
-    fn emit_tool_lifecycle(
-        &self,
-        standing: &crate::trace::TraceStanding,
-        call_id: &crate::ToolCallId,
-        event: impl FnOnce() -> lash_trace::TraceEvent,
-    ) {
-        if !self.tool_lifecycle || !standing.is_observed() {
-            return;
-        }
-        let record = || (self.scope_context.clone(), event());
-        let tool_scope = standing.scope().and_then(|scope| {
-            crate::trace::tool_trace_scope(scope, call_id, self.runtime.clock().timestamp_ms())
-        });
-        match tool_scope {
-            Some(tool_scope) => standing.under(tool_scope).observe(record),
-            None => standing.observe(record),
-        }
-    }
-
-    pub(crate) fn emit_tool_call_completed(
-        &self,
-        standing: &crate::trace::TraceStanding,
-        record: &crate::ToolCallRecord,
-        attempts: &[lash_trace::TraceRetryAttempt],
-        issuing_node_id: Option<&str>,
-        duration_ms: u64,
-    ) {
-        self.emit_tool_lifecycle(standing, &record.call_id, || {
-            lash_trace::TraceEvent::ToolCallCompleted {
-                call_id: record.call_id.clone(),
-                provider_call_id: record.provider_call_id.clone(),
-                name: record.tool.clone(),
-                args: record.args.clone(),
-                output: crate::trace::trace_tool_call_output(&record.output),
-                duration_ms,
-                issuing_node_id: issuing_node_id.map(str::to_string),
-                attempts: (!attempts.is_empty()).then(|| attempts.to_vec()),
-            }
-        });
     }
 }
 
@@ -609,6 +570,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             nested_effect_error: Arc::clone(&self.nested_effect_error),
             incorporation_ledger: Arc::clone(&self.incorporation_ledger),
             opener_groups: Arc::clone(&self.opener_groups),
+            tool_requests: Arc::clone(&self.tool_requests),
             cell_tool_calls: Arc::clone(&self.cell_tool_calls),
             tool_call_limit_refusal: Arc::clone(&self.tool_call_limit_refusal),
             #[cfg(any(test, feature = "testing"))]
@@ -808,7 +770,7 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     /// Where the coordination of this execution's tool calls stands: with the
     /// shift that issues their steps.
-    fn coordination_standing(
+    pub(super) fn coordination_standing(
         &self,
         tracing: &RuntimeExecutionTracing,
     ) -> crate::trace::TraceStanding {
@@ -839,48 +801,6 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// context, or `None` when no code block is executing.
     pub(super) fn code_block_graph_key(&self) -> Option<String> {
         self.code_block_graph_key.clone()
-    }
-
-    /// No-op when nothing observes the runtime, and on a replay of a call
-    /// whose steps an earlier attempt already recorded.
-    pub(super) fn emit_tool_call_started_trace(
-        &self,
-        ids: &crate::tool_dispatch::ToolCallIds,
-        name: &str,
-        args: &serde_json::Value,
-    ) {
-        if let Some(tracing) = self.tracing.as_ref() {
-            tracing.emit_tool_lifecycle(&self.coordination_standing(tracing), &ids.call_id, || {
-                lash_trace::TraceEvent::ToolCallStarted {
-                    call_id: ids.call_id.clone(),
-                    provider_call_id: ids.provider_call_id.clone(),
-                    name: name.to_string(),
-                    args: args.clone(),
-                    issuing_node_id: self.issuing_language_node_id.as_deref().map(str::to_string),
-                }
-            });
-        }
-    }
-
-    /// No-op when nothing observes the runtime, and on a replay of a call
-    /// whose steps an earlier attempt already recorded. `duration_ms` is the
-    /// observed window the caller measured — the record itself carries no
-    /// wall-clock fields (FIG-3696).
-    pub(super) fn emit_tool_call_completed_trace(
-        &self,
-        record: &crate::ToolCallRecord,
-        attempts: &[lash_trace::TraceRetryAttempt],
-        duration_ms: u64,
-    ) {
-        if let Some(tracing) = self.tracing.as_ref() {
-            tracing.emit_tool_call_completed(
-                &self.coordination_standing(tracing),
-                record,
-                attempts,
-                self.issuing_language_node_id.as_deref(),
-                duration_ms,
-            );
-        }
     }
 
     pub fn with_parent_invocation(mut self, metadata: crate::RuntimeInvocation) -> Self {

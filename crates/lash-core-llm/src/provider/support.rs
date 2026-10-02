@@ -23,3 +23,17 @@ pub(super) use super::handle::*;
 pub(super) use super::options::*;
 pub(super) use super::rate_limit::*;
 pub(super) use super::traits::*;
+
+#[cfg(test)]
+pub(super) fn fixture_record(
+    context: lash_trace::TraceContext,
+    event: lash_trace::TraceEvent,
+) -> lash_trace::TraceRecord {
+    lash_trace::TraceRecord {
+        schema_version: lash_trace::TRACE_SCHEMA_VERSION,
+        id: "fixture-record".into(),
+        timestamp: Default::default(),
+        context,
+        event,
+    }
+}

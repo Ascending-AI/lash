@@ -138,6 +138,7 @@ mod tests {
         ));
         let policy = Arc::new(DenyProcessAwaitAttachments::default());
         let dispatch = Arc::new(ToolDispatchContext {
+            tool_receipts: None,
             plugins,
             tools: provider,
             tool_registry: None,
@@ -340,6 +341,7 @@ mod tests {
             .await
             .expect("observe target process");
         let dispatch = Arc::new(ToolDispatchContext {
+            tool_receipts: None,
             plugins,
             tools: provider,
             tool_registry: None,
@@ -462,6 +464,7 @@ mod tests {
                 .with_process_registry(Arc::clone(&registry)),
         );
         let dispatch = Arc::new(ToolDispatchContext {
+            tool_receipts: None,
             plugins,
             tools: provider,
             tool_registry: None,
@@ -635,6 +638,7 @@ mod tests {
             .await
             .expect("register hidden process");
         let dispatch = Arc::new(ToolDispatchContext {
+            tool_receipts: None,
             plugins,
             tools: provider,
             tool_registry: None,
@@ -1012,6 +1016,7 @@ mod tests {
             .await
             .expect("open the presentation handler");
         let dispatch = Arc::new(ToolDispatchContext {
+            tool_receipts: None,
             plugins,
             tools: provider,
             tool_registry: None,

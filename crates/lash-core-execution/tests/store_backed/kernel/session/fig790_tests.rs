@@ -477,6 +477,7 @@ async fn fig790_process_await_context(
         .expect("FIG-790 plugin session");
     let attachment_store = Arc::new(crate::RuntimeAttachmentStore::unavailable());
     let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
+        tool_receipts: None,
         plugins,
         tools: Arc::new(NoopTools),
         tool_registry: None,

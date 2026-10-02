@@ -163,7 +163,7 @@ impl RestateEngine {
             admin.clone(),
             Arc::clone(&stores),
         ));
-
+        effect_host.bind_wait_receipts(stores.session_store_factory(), stores.clock());
         let session_work = Arc::new(RestateSessionWork::new(
             RestateIngressClient::new(connection.clone()),
             crate::RestateSessionShiftsSlot::new().with_run_effect_budget(run_effect_budget),

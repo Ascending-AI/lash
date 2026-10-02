@@ -389,6 +389,7 @@ impl Processes {
                     process_work,
                     self.core.host_process_engines.clone(),
                     lash_core::runtime::HostStartAdmission {
+                        tracing: Some(self.core.env.core.tracing.clone()),
                         session_catalog: Some(Arc::clone(&self.core.store_factory) as _),
                         session_turn_admission,
                     },
@@ -400,6 +401,7 @@ impl Processes {
                         .obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
                     Arc::clone(&self.core.env.core.clock),
                     self.core.env.core.control.relay_policy(),
+                    self.core.env.core.tracing.metrics().clone(),
                 )
                 .with_process_env_store(Arc::clone(
                     &self.core.env.core.durability.process_env_store,

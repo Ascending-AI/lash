@@ -37,113 +37,116 @@ impl RuntimeTurnDriver<'_> {
         calls: Vec<crate::sansio::PendingToolCall>,
         event_tx: &TurnObserver,
     ) -> Result<WaitingToolRound, RuntimeEffectControllerError> {
-        let prepare_context = self
-            .execution_context(
-                event_tx,
-                Arc::new(crate::ChronologicalProjection::default()),
-            )
-            .map_err(|err| {
-                RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::ToolCatalogResolutionFailed,
-                    err.to_string(),
+        Box::pin(async {
+            let prepare_context = self
+                .execution_context(
+                    event_tx,
+                    Arc::new(crate::ChronologicalProjection::default()),
                 )
-            })?
-            .with_tracing(self.execution_tracing(machine.protocol_iteration()));
-        let call_count = calls.len();
-        let mut results = vec![None; call_count];
-        let mut prepared_entries = Vec::new();
-        let mut pending = Vec::new();
-        for (index, call) in calls.into_iter().enumerate() {
-            let ids = crate::tool_dispatch::ToolCallIds::of_pending(&call);
-            let call_id = ids.call_id.clone();
-            let replay = call.replay.clone();
-            // The turn-dispatched protocol path holds no invocation: key each
-            // call's observation lanes on the iteration, its index within it
-            // and its `ToolCallId` (ADR 0105 §1).
-            let call_key = format!("{}:{index}:{call_id}", machine.protocol_iteration());
-            // A call on a tool that drifted from the turn's recorded surface
-            // is prepared under its recorded definition, so the child it
-            // forms is the one the journal recorded. The child judges its own
-            // tool where it runs and is served only from its journal
-            // (FIG-3725).
-            let drift = self.recorded_surface_drift(&prepare_context, &call.tool_name)?;
-            let admitted_tool_id = drift
-                .as_ref()
-                .map(|drift| drift.recorded_binding().manifest().id.clone())
-                .or_else(|| prepare_context.callable_tool_id_by_name(&call.tool_name))
-                .unwrap_or_else(|| crate::ToolId::new(call.tool_name.clone()));
-            let prepare_started = prepare_context.dispatch().clock.now();
-            let preparation = match &drift {
-                Some(drift) => {
-                    prepare_context
-                        .prepare_recorded_tool_call(&drift.recorded_binding(), call, &call_key)
-                        .await
-                }
-                None => prepare_context.prepare_tool_call(call, &call_key).await,
-            };
-            match preparation {
-                crate::tool_dispatch::ToolPreparationOutcome::Prepared(prepared) => {
-                    prepared_entries.push((index, *prepared));
-                }
-                crate::tool_dispatch::ToolPreparationOutcome::Completed(outcome) => {
-                    let completed = prepare_context
-                        .complete_undispatched_tool_call(
-                            ids,
-                            admitted_tool_id,
-                            replay,
-                            *outcome,
-                            &call_key,
-                            prepare_context
-                                .dispatch()
-                                .clock
-                                .now()
-                                .duration_since(prepare_started)
-                                .as_millis() as u64,
-                        )
-                        .await?
-                        .completed;
-                    results[index] = Some(completed);
-                }
-            }
-        }
-
-        if !prepared_entries.is_empty() {
-            // ADR 0099: the turn's tool calls open as one durable effect group
-            // of `ToolInvocation` children; a deferred leaf seals its dispatch
-            // and leaves its original completion key for the Run to wait on. The calls are the step's flat slots: native
-            // calls and the members the protocol expanded from its sugar
-            // (ADR 0116 §2) alike, so every one starts before any is awaited.
-            // A step with no slot left opens no group.
-            let group_invocation = crate::runtime::causal::turn_tool_group_invocation(
-                self.scoped_effect_controller.execution_scope(),
-                &self.session_id,
-                &self.turn_id,
-                self.turn_index,
-                machine.protocol_iteration(),
-                id,
-            );
-            // The group's identity is its invocation's replay key, not the
-            // sansio effect id alone: effect ids restart in every agent frame,
-            // while the admitted scope stays the root turn's, so a follow-on
-            // frame's first tool call would otherwise name the root frame's
-            // group and reopen its settlements.
-            let batch_id = crate::BatchId::parse(group_invocation.effect_replay_key())?;
-            let completions = prepare_context
-                .dispatch_prepared_tool_group(batch_id, group_invocation, prepared_entries)
-                .await?;
-            for (source_index, completed) in completions {
-                match completed {
-                    lash_core_execution::core_internal::ToolDispatchResult::Done(completed) => {
-                        results[source_index] = Some(completed.completed)
+                .map_err(|err| {
+                    RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::ToolCatalogResolutionFailed,
+                        err.to_string(),
+                    )
+                })?
+                .with_tracing(self.execution_tracing(machine.protocol_iteration()));
+            let call_count = calls.len();
+            let mut results = vec![None; call_count];
+            let mut prepared_entries = Vec::new();
+            let mut pending = Vec::new();
+            for (index, call) in calls.into_iter().enumerate() {
+                let ids = crate::tool_dispatch::ToolCallIds::of_pending(&call);
+                let call_id = ids.call_id.clone();
+                let replay = call.replay.clone();
+                // The turn-dispatched protocol path holds no invocation: key each
+                // call's observation lanes on the iteration, its index within it
+                // and its `ToolCallId` (ADR 0105 §1).
+                let call_key = format!("{}:{index}:{call_id}", machine.protocol_iteration());
+                // A call on a tool that drifted from the turn's recorded surface
+                // is prepared under its recorded definition, so the child it
+                // forms is the one the journal recorded. The child judges its own
+                // tool where it runs and is served only from its journal
+                // (FIG-3725).
+                let drift = self.recorded_surface_drift(&prepare_context, &call.tool_name)?;
+                let admitted_tool_id = drift
+                    .as_ref()
+                    .map(|drift| drift.recorded_binding().manifest().id.clone())
+                    .or_else(|| prepare_context.callable_tool_id_by_name(&call.tool_name))
+                    .unwrap_or_else(|| crate::ToolId::new(call.tool_name.clone()));
+                let prepare_started = prepare_context.dispatch().clock.now();
+                let preparation = match &drift {
+                    Some(drift) => {
+                        prepare_context
+                            .prepare_recorded_tool_call(&drift.recorded_binding(), call, &call_key)
+                            .await
                     }
-                    lash_core_execution::core_internal::ToolDispatchResult::Deferred(
-                        completion,
-                    ) => pending.push((source_index, completion)),
+                    None => prepare_context.prepare_tool_call(call, &call_key).await,
+                };
+                match preparation {
+                    crate::tool_dispatch::ToolPreparationOutcome::Prepared(prepared) => {
+                        prepared_entries.push((index, *prepared));
+                    }
+                    crate::tool_dispatch::ToolPreparationOutcome::Completed(outcome) => {
+                        let completed = prepare_context
+                            .complete_undispatched_tool_call(
+                                ids,
+                                admitted_tool_id,
+                                replay,
+                                *outcome,
+                                &call_key,
+                                prepare_context
+                                    .dispatch()
+                                    .clock
+                                    .now()
+                                    .duration_since(prepare_started)
+                                    .as_millis() as u64,
+                            )
+                            .await?
+                            .completed;
+                        results[index] = Some(completed);
+                    }
                 }
             }
-        }
-        drop(prepare_context);
-        Ok(WaitingToolRound { results, pending })
+
+            if !prepared_entries.is_empty() {
+                // ADR 0099: the turn's tool calls open as one durable effect group
+                // of `ToolInvocation` children; a deferred leaf seals its dispatch
+                // and leaves its original completion key for the Run to wait on. The calls are the step's flat slots: native
+                // calls and the members the protocol expanded from its sugar
+                // (ADR 0116 §2) alike, so every one starts before any is awaited.
+                // A step with no slot left opens no group.
+                let group_invocation = crate::runtime::causal::turn_tool_group_invocation(
+                    self.scoped_effect_controller.execution_scope(),
+                    &self.session_id,
+                    &self.turn_id,
+                    self.turn_index,
+                    machine.protocol_iteration(),
+                    id,
+                );
+                // The group's identity is its invocation's replay key, not the
+                // sansio effect id alone: effect ids restart in every agent frame,
+                // while the admitted scope stays the root turn's, so a follow-on
+                // frame's first tool call would otherwise name the root frame's
+                // group and reopen its settlements.
+                let batch_id = crate::BatchId::parse(group_invocation.effect_replay_key())?;
+                let completions = prepare_context
+                    .dispatch_prepared_tool_group(batch_id, group_invocation, prepared_entries)
+                    .await?;
+                for (source_index, completed) in completions {
+                    match completed {
+                        lash_core_execution::core_internal::ToolDispatchResult::Done(completed) => {
+                            results[source_index] = Some(completed.completed)
+                        }
+                        lash_core_execution::core_internal::ToolDispatchResult::Deferred(
+                            completion,
+                        ) => pending.push((source_index, completion)),
+                    }
+                }
+            }
+            drop(prepare_context);
+            Ok(WaitingToolRound { results, pending })
+        })
+        .await
     }
 }
 

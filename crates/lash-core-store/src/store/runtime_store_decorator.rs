@@ -69,7 +69,14 @@ macro_rules! runtime_store_operations {
                 [session] fn set_retention(&self, session_id: &SessionId, retention: Retention) -> Result<(), StoreError>;
                 [catalog] fn delete_session(&self, session_id: &SessionId) -> MaintenanceResult<SessionBlobReclaimReport>;
             }
+            WaitReceiptStore {
+                [catalog] fn record_wait_request(&self, request: &WaitRequestReceipt) -> Result<StoreTransition<WaitRequestReceipt>, StoreError>;
+                [catalog] fn record_wait_resolution(&self, resolution: &WaitResolutionReceipt) -> Result<StoreTransition<WaitResolutionReceipt>, StoreError>;
+                [catalog] fn retire_wait_receipts(&self, owner_key: &str, retired_at_ms: u64) -> Result<(), StoreError>;
+            }
             SessionCommitStore {
+                [carried request] fn record_tool_request(&self, request: &ToolRequestReceipt) -> Result<StoreTransition<ToolRequestReceipt>, StoreError>;
+                [carried completion] fn record_tool_completion(&self, completion: &ToolCompletionReceipt) -> Result<StoreTransition<ToolCompletionReceipt>, StoreError>;
                 [session] fn read_session_state_version(&self, session_id: &SessionId) -> Result<u32, StoreError>;
                 [carried fence] fn admit_session_state(&self, fence: &ShiftFence) -> Result<SessionStateAdmission, StoreError>;
                 [session] fn load_session_head_meta(&self, session_id: &SessionId) -> Result<Option<SessionHeadMeta>, StoreError>;
@@ -80,7 +87,7 @@ macro_rules! runtime_store_operations {
                 [session] fn settle_observer_intents(&self, session_id: &SessionId, remaining: Vec<crate::SessionObserverIntent>) -> Result<(), StoreError>;
                 [session] fn load_session_meta(&self, session_id: &SessionId) -> Result<Option<SessionMeta>, StoreError>;
                 [session] fn load_session_meta_for_commit(&self, session_id: &SessionId) -> Result<Option<SessionMeta>, StoreError>;
-                [carried park] fn record_turn_park(&self, park: &TurnParkWrite) -> Result<TurnPark, StoreError>;
+                [carried park] fn record_turn_park(&self, park: &TurnParkWrite) -> Result<StoreTransition<TurnPark>, StoreError>;
                 [session] fn load_turn_park(&self, session_id: &SessionId) -> Result<Option<TurnPark>, StoreError>;
                 provided:
                 [session] fn load_pending_follow_on(&self, session_id: &SessionId) -> Result<Option<PendingFollowOn>, StoreError>;
@@ -134,6 +141,8 @@ macro_rules! runtime_store_operations {
             }
             RunStore {
                 [session] fn unfinished_run(&self, session_id: &SessionId) -> Result<Option<UnfinishedRun>, StoreError>;
+                [carried request] fn prepare_run_admission(&self, request: &AdmitRunRequest) -> Result<Option<PreparedRunAdmission>, StoreError>;
+                [carried prepared] fn commit_run_admission(&self, prepared: &PreparedRunAdmission, anchor: &lash_trace::TraceAnchor) -> Result<Option<RunAdmission>, StoreError>;
                 [carried request] fn admit_run(&self, request: &AdmitRunRequest) -> Result<Option<RunAdmission>, StoreError>;
                 [carried request] fn admit_at_checkpoint(&self, request: &CheckpointAdmissionRequest) -> Result<CheckpointAdmission, StoreError>;
                 [session] fn run_terminal(&self, session_id: &SessionId, run: &crate::TurnId) -> Result<Option<RunTerminal>, StoreError>;

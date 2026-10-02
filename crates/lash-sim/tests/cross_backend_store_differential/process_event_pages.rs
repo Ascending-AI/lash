@@ -524,3 +524,226 @@ pub(super) async fn compare_bounded_process_event_pages(
         .await
         .expect("clean up PostgreSQL effect process");
 }
+
+async fn prepared_registration_race(
+    registry: &dyn lash_core::ProcessRegistry,
+    nonce: &str,
+) -> String {
+    let registration = lash_core::ProcessRegistration::new(
+        lash_core::ProcessInput::External {
+            metadata: serde_json::json!({"start": "race"}),
+        },
+        lash_core::ProcessProvenance::host(),
+        lash_core::Lifetime::Detached,
+    )
+    .with_start_key(Some(lash_core::StartKey::for_host(format!(
+        "{nonce}:prepared-race"
+    ))));
+    let first = registry
+        .prepare_process_registration(registration.clone(), &[])
+        .await
+        .unwrap_or_else(|error| panic!("first read-only plan: {error}"));
+    let second = registry
+        .prepare_process_registration(registration, &[])
+        .await
+        .unwrap_or_else(|error| panic!("second read-only plan: {error}"));
+    assert_ne!(first.process_id(), second.process_id());
+    assert!(
+        registry
+            .get_process(first.process_id())
+            .await
+            .unwrap_or_else(|error| panic!("pure prepare: {error}"))
+            .is_none()
+    );
+    assert!(
+        registry
+            .get_process(second.process_id())
+            .await
+            .unwrap_or_else(|error| panic!("pure prepare: {error}"))
+            .is_none()
+    );
+    let first_anchor = lash_core::TraceAnchor::Context(
+        lash_core::TraceCarrier::parse_w3c(
+            "00-11111111111111111111111111111111-2222222222222222-01",
+            None,
+        )
+        .unwrap_or_else(|error| panic!("first anchor: {error}")),
+    );
+    let second_anchor = lash_core::TraceAnchor::Context(
+        lash_core::TraceCarrier::parse_w3c(
+            "00-33333333333333333333333333333333-4444444444444444-01",
+            None,
+        )
+        .unwrap_or_else(|error| panic!("second anchor: {error}")),
+    );
+    let (a, b) = tokio::join!(
+        registry.commit_process_registration(first, first_anchor.clone()),
+        registry.commit_process_registration(second, second_anchor.clone())
+    );
+    let (a, b) = (
+        a.unwrap_or_else(|error| panic!("first commit: {error}")),
+        b.unwrap_or_else(|error| panic!("second commit: {error}")),
+    );
+    assert_ne!(a.is_created(), b.is_created());
+    let (winner, loser, expected) = if a.is_created() {
+        (a, b, first_anchor)
+    } else {
+        (b, a, second_anchor)
+    };
+    assert_eq!(winner.record.id, loser.record.id);
+    assert_eq!(winner.record.trace, loser.record.trace);
+    assert_eq!(
+        winner
+            .record
+            .trace
+            .as_ref()
+            .unwrap_or_else(|| panic!("retained scope"))
+            .anchor,
+        expected
+    );
+    let retained = registry
+        .get_process(&winner.record.id)
+        .await
+        .unwrap_or_else(|error| panic!("read winner: {error}"))
+        .unwrap_or_else(|| panic!("retained winner"));
+    assert_eq!(retained.trace, winner.record.trace);
+    "prepared=read-only writers=one anchor=winner".into()
+}
+#[tokio::test]
+async fn prepared_registration_race_keeps_the_first_scope() {
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .unwrap_or_else(|error| panic!("SQLite memory: {error}"));
+    assert_eq!(
+        prepared_registration_race(stores.process_registry().as_ref(), "memory").await,
+        "prepared=read-only writers=one anchor=winner"
+    );
+}
+#[tokio::test]
+#[ignore = "compares three durable backends; requires PostgreSQL in a pg16 gate"]
+async fn prepared_registration_scope_matches_across_backends() {
+    let (_lock, postgres, _url) = open_postgres_differential()
+        .await
+        .unwrap_or_else(|error| panic!("PostgreSQL gate: {error}"));
+    let root = tempfile::tempdir().unwrap_or_else(|error| panic!("SQLite file root: {error}"));
+    let memory = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .unwrap_or_else(|error| panic!("SQLite memory: {error}"));
+    let file = lash_sqlite_store::SqliteStoreSet::open(root.path())
+        .await
+        .unwrap_or_else(|error| panic!("SQLite file: {error}"));
+    let attachments =
+        tempfile::tempdir().unwrap_or_else(|error| panic!("attachment root: {error}"));
+    let pg = lash_postgres_store::PostgresStoreSet::new(
+        &postgres,
+        Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+            attachments.path(),
+        )),
+    );
+    let nonce = run_nonce();
+    let expected = prepared_registration_race(memory.process_registry().as_ref(), &nonce).await;
+    assert_eq!(
+        prepared_registration_race(file.process_registry().as_ref(), &nonce).await,
+        expected
+    );
+    assert_eq!(
+        prepared_registration_race(pg.process_registry().as_ref(), &nonce).await,
+        expected
+    );
+}
+
+async fn segment_handover_commit_law(
+    registry: &dyn lash_core::ProcessRegistry,
+    continuations: &dyn lash_core::ProcessContinuationStore,
+) -> (bool, bool, bool) {
+    let process = registry
+        .register_process(lash_core::ProcessRegistration::new(
+            lash_core::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            lash_core::ProcessProvenance::host(),
+            lash_core::Lifetime::Detached,
+        ))
+        .await
+        .unwrap_or_else(|error| panic!("handover owner: {error}"));
+    let handover = lash_core::PersistedSegmentHandover {
+        writer: "segment-writer".into(),
+        segment_ordinal: 1,
+        written_generation: lash_core::engine::BuildGeneration::for_test("handover-law"),
+        route: "recorded-route".into(),
+        handover: lash_core::SegmentHandover {
+            reason: lash_core::BoundaryReason::JournalBudget,
+            program_hash: "program".into(),
+            engine_state: vec![1],
+        },
+    };
+    let first = continuations
+        .put_segment_handover(&process.id, handover.clone())
+        .await
+        .unwrap_or_else(|error| panic!("committed handover: {error}"));
+    let mut repeated = handover.clone();
+    repeated.handover.engine_state = vec![2];
+    let retained = continuations
+        .put_segment_handover(&process.id, repeated)
+        .await
+        .unwrap_or_else(|error| panic!("same writer retry: {error}"));
+    assert_eq!(first.record.handover, retained.record.handover);
+    assert_eq!(
+        first.record.committed_at_ms,
+        retained.record.committed_at_ms
+    );
+    let mut conflict = handover;
+    conflict.writer = "another-writer".into();
+    let refused = continuations
+        .put_segment_handover(&process.id, conflict)
+        .await
+        .is_err();
+    assert_eq!(
+        continuations
+            .get_segment_handover(&process.id, 1)
+            .await
+            .unwrap_or_else(|error| panic!("retained read: {error}")),
+        Some(first.record.handover.clone())
+    );
+    (
+        first.permit().is_some(),
+        retained.permit().is_some(),
+        refused,
+    )
+}
+#[tokio::test]
+async fn segment_handover_commit_keeps_the_first_time_and_permission() {
+    let memory = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .unwrap_or_else(|error| panic!("SQLite memory: {error}"));
+    let registry = memory.process_registry();
+    assert_eq!(
+        segment_handover_commit_law(registry.as_ref(), registry.as_ref()).await,
+        (true, false, true)
+    );
+}
+#[tokio::test]
+#[ignore = "compares three durable backends; requires PostgreSQL in a pg16 gate"]
+async fn segment_handover_commit_matches_across_backends() {
+    let (_lock, postgres, _url) = open_postgres_differential()
+        .await
+        .unwrap_or_else(|error| panic!("PostgreSQL gate: {error}"));
+    let root = tempfile::tempdir().unwrap_or_else(|error| panic!("SQLite file root: {error}"));
+    let memory = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .unwrap_or_else(|error| panic!("SQLite memory: {error}"));
+    let file = lash_sqlite_store::SqliteStoreSet::open(root.path())
+        .await
+        .unwrap_or_else(|error| panic!("SQLite file: {error}"));
+    let pg = postgres.process_registry();
+    for registry in [memory.process_registry(), file.process_registry()] {
+        assert_eq!(
+            segment_handover_commit_law(registry.as_ref(), registry.as_ref()).await,
+            (true, false, true)
+        );
+    }
+    assert_eq!(
+        segment_handover_commit_law(&pg, &pg).await,
+        (true, false, true)
+    );
+}

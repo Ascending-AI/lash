@@ -373,7 +373,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         process_id: &ProcessId,
         park: lash_core_execution::store::ProcessParkWrite,
         authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessRecord, PluginError> {
+    ) -> Result<lash_core_execution::store::StoreTransition<ProcessRecord>, PluginError> {
         let mut tx = begin_guarded(&self.pool, &self.fence)
             .await
             .map_err(plugin_store_error)?;
@@ -386,7 +386,9 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         )? {
             ProcessTransitionPlan::Unchanged => {
                 tx.commit().await.map_err(plugin_sqlx_error)?;
-                return Ok(record);
+                return Ok(lash_core_execution::store::StoreTransition::unchanged(
+                    record,
+                ));
             }
             ProcessTransitionPlan::Append(request) => *request,
         };
@@ -400,7 +402,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         )
         .await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(record)
+        Ok(lash_core_execution::store::StoreTransition::changed(record))
     }
 
     async fn begin_parked_rerun_with_authority(

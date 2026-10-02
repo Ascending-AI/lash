@@ -194,7 +194,8 @@ pub(crate) fn restate_effect_execution(
             refuse_unhonored_group_membership(group.as_deref(), "restate peek await event")?;
             RestateEffectExecution::PeekAwaitEvent { invocation, key }
         }
-        command @ (RuntimeEffectCommand::Trigger { .. }
+        command @ (RuntimeEffectCommand::TraceBoundary { .. }
+        | RuntimeEffectCommand::Trigger { .. }
         | RuntimeEffectCommand::LanguageRuntimeValue { .. }
         | RuntimeEffectCommand::AcceptTurnInput { .. }
         | RuntimeEffectCommand::DrawRunStart { .. }

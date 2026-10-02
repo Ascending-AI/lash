@@ -28,6 +28,7 @@
 const TOOL_CALL_REQUEST_FAMILY_VERSION: u8 = 1;
 
 use super::*;
+use lash_sansio::sync::MutexExt;
 
 use crate::runtime::effect::{
     GroupWakePolicy, LoserPolicy, ToolChildAdmission, ToolChildCompletionRouting, ToolChildRequest,
@@ -360,7 +361,8 @@ impl RuntimeExecutionContext<'_> {
                 &leaf.call.call.tool_name,
                 leaf.call.call.args.clone(),
                 tool_activity_id(&ids.call_id),
-            );
+            )
+            .await;
         }
 
         let session_facts = self.tool_child_session_facts(opener_context);
@@ -419,7 +421,8 @@ impl RuntimeExecutionContext<'_> {
                 execution_env.clone(),
                 completion_routing,
                 session_facts.clone(),
-            );
+            )
+            .with_trace_request(self.tool_requests.lock_recover().get(&call_id).cloned());
             envelopes.push(crate::RuntimeEffectEnvelope::new(
                 crate::RuntimeEffectInvocation::new(
                     crate::EffectAddress::new(
@@ -477,27 +480,137 @@ impl RuntimeExecutionContext<'_> {
         if formed.iter().all(Option::is_none) {
             return Ok(vec![None; requests.len()]);
         }
-        let live = serde_json::Value::Array(
-            formed
+        let Some(store) = self.dispatch.tool_receipts.clone() else {
+            return Ok(formed
                 .iter()
-                .map(|formed| match formed {
-                    Some((call, digest)) => serde_json::json!({
-                        "call_id": call.call_id.as_str(),
-                        "digest": digest,
-                        "prepared_payload": call.prepared_payload,
-                    }),
-                    None => serde_json::Value::Null,
+                .map(|formed| {
+                    formed
+                        .as_ref()
+                        .map(|(call, _)| call.prepared_payload.clone())
                 })
-                .collect(),
-        );
+                .collect());
+        };
+        let Some(session_id) = self.dispatch.owner.session_id().cloned() else {
+            return Ok(formed
+                .iter()
+                .map(|formed| {
+                    formed
+                        .as_ref()
+                        .map(|(call, _)| call.prepared_payload.clone())
+                })
+                .collect());
+        };
+        let offers = formed
+            .iter()
+            .map(|formed| {
+                formed
+                    .as_ref()
+                    .map(|(call, digest)| ((*call).clone(), digest.clone()))
+            })
+            .collect::<Vec<_>>();
+        let tracing = self.tracing.clone();
+        let standing = tracing
+            .as_ref()
+            .map(|tracing| self.coordination_standing(tracing));
+        let clock = self.dispatch.clock.clone();
+        let context = tracing
+            .as_ref()
+            .map(|tracing| tracing.scope_context.clone())
+            .unwrap_or_default();
+        let parent = tracing.as_ref().and_then(|tracing| tracing.scope.clone());
+        let issuing_node = self.issuing_language_node_id.as_deref().map(str::to_string);
+        let execution_scope_id = self.execution_scope_id().to_string();
         let recorded = self
             .journaled_language_value_with(
                 format!(
                     "{group_key}:{}",
                     crate::runtime::causal::CommandSubKey::AggregateRequests
                 ),
-                RETAINED_REQUEST_OPERATION.to_string(),
-                move || async move { Ok(live) },
+                "retain-tool-requests".to_string(),
+                move || async move {
+                    let mut records = Vec::with_capacity(offers.len());
+                    for offered in offers {
+                        let Some((call, digest)) = offered else {
+                            records.push(serde_json::Value::Null);
+                            continue;
+                        };
+                        let at_ms = clock.timestamp_ms();
+                        let mut candidate = None;
+                        let scope = parent
+                            .as_ref()
+                            .and_then(|parent| {
+                                crate::trace::tool_trace_scope(parent, &call.call_id, at_ms)
+                            })
+                            .map(|mut scope| {
+                                if let Some(tracing) = &tracing {
+                                    let proposed = tracing
+                                        .runtime
+                                        .scopes()
+                                        .propose(&scope.scope, &scope.cause);
+                                    scope.anchor = proposed.anchor();
+                                    candidate = Some(proposed);
+                                }
+                                scope
+                            });
+                        let request = crate::store::ToolRequestReceipt {
+                            session_id: session_id.clone(),
+                            request_key: format!("{}:{}", execution_scope_id, call.call_id),
+                            payload_digest: digest,
+                            payload: serde_json::to_value(&call).map_err(|e| {
+                                crate::RuntimeEffectControllerError::new(
+                                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                                    e.to_string(),
+                                )
+                            })?,
+                            scope,
+                            context: context.clone(),
+                            requested_at_ms: at_ms,
+                        };
+                        let receipt = store.record_tool_request(&request).await;
+                        if let Some(candidate) = candidate {
+                            candidate.settle(match &receipt {
+                                Ok(receipt) if receipt.changed => {
+                                    lash_trace::TraceCandidateOutcome::Selected
+                                }
+                                Ok(_) => lash_trace::TraceCandidateOutcome::Reused,
+                                Err(_) => lash_trace::TraceCandidateOutcome::Refused,
+                            });
+                        }
+                        let receipt = receipt.map_err(|error| match error {
+                            crate::store::StoreError::ToolRequestConflict { .. } => {
+                                retained_request_drift(&call)
+                            }
+                            other => crate::RuntimeEffectControllerError::from(other),
+                        })?;
+                        if let (Some(standing), Some(scope)) = (&standing, &receipt.record.scope) {
+                            standing.under(scope.clone()).transition(
+                                receipt.permit().as_ref(),
+                                receipt.record.requested_at_ms,
+                                lash_trace::TraceTransitionKind::Started,
+                                0,
+                                || {
+                                    (
+                                        receipt.record.context.clone(),
+                                        lash_trace::TraceEvent::ToolCallStarted {
+                                            call_id: call.call_id.clone(),
+                                            provider_call_id: call.provider_call_id.clone(),
+                                            name: call.tool_name.clone(),
+                                            args: call.args.clone(),
+                                            issuing_node_id: issuing_node.clone(),
+                                        },
+                                    )
+                                },
+                            );
+                        }
+                        records.push(serde_json::to_value(receipt.record).map_err(|e| {
+                            crate::RuntimeEffectControllerError::new(
+                                crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                                e.to_string(),
+                            )
+                        })?);
+                    }
+                    Ok(serde_json::Value::Array(records))
+                },
             )
             .await?;
         let recorded = recorded.as_array().map(Vec::as_slice).unwrap_or_default();
@@ -508,21 +621,22 @@ impl RuntimeExecutionContext<'_> {
                 let Some((call, digest)) = formed else {
                     return Ok(None);
                 };
-                let binding = recorded.get(position).filter(|binding| {
-                    binding.get("call_id").and_then(serde_json::Value::as_str)
-                        == Some(call.call_id.as_str())
-                        && binding.get("digest").and_then(serde_json::Value::as_str)
-                            == Some(digest.as_str())
-                });
-                match binding {
-                    Some(binding) => Ok(Some(
-                        binding
-                            .get("prepared_payload")
-                            .cloned()
-                            .unwrap_or(serde_json::Value::Null),
-                    )),
-                    None => Err(retained_request_drift(call)),
+                let receipt: crate::store::ToolRequestReceipt =
+                    serde_json::from_value(recorded.get(position).cloned().unwrap_or_default())
+                        .map_err(|_| retained_request_drift(call))?;
+                if receipt.payload_digest != *digest {
+                    return Err(retained_request_drift(call));
                 }
+                let retained: crate::PreparedToolCall =
+                    serde_json::from_value(receipt.payload.clone())
+                        .map_err(|_| retained_request_drift(call))?;
+                if retained.call_id != call.call_id {
+                    return Err(retained_request_drift(call));
+                }
+                self.tool_requests
+                    .lock_recover()
+                    .insert(call.call_id.clone(), receipt);
+                Ok(Some(retained.prepared_payload))
             })
             .collect()
     }
@@ -1248,7 +1362,14 @@ impl RuntimeExecutionContext<'_> {
             args: outcome.record.args.clone(),
             output: outcome.record.output.clone(),
         };
-        self.emit_tool_call_completed(call_key, &record, &outcome.attempts, duration_ms);
+        self.emit_tool_call_completed(
+            call_key,
+            &record,
+            &outcome.attempts,
+            duration_ms,
+            &settlement.intent_outcomes,
+        )
+        .await;
         Ok(CompletedProtocolToolCall {
             completed: crate::sansio::CompletedToolCall {
                 call_id,
@@ -1562,9 +1683,6 @@ impl RuntimeExecutionContext<'_> {
         }
     }
 }
-
-/// The operation a retained-request binding journals under (ADR 0117 §7).
-const RETAINED_REQUEST_OPERATION: &str = "tool-call-request";
 
 /// The refusal a formation meets when a call's recorded request differs
 /// from the one it formed under the same id (ADR 0117 §7).

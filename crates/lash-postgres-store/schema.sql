@@ -957,6 +957,7 @@ CREATE INDEX IF NOT EXISTS idx_lash_process_tombstones_change
 CREATE TABLE IF NOT EXISTS lash_process_segment_handovers (
     process_id TEXT COLLATE "C" NOT NULL REFERENCES lash_processes(process_id) ON DELETE CASCADE,
     segment_ordinal BIGINT NOT NULL,
+    committed_at_ms BIGINT NOT NULL,
     handover_json TEXT NOT NULL,
     started_json TEXT,
     written_generation TEXT NOT NULL,
@@ -1001,6 +1002,17 @@ CREATE INDEX IF NOT EXISTS idx_lash_parent_end_plans_obligation_due
 CREATE INDEX IF NOT EXISTS idx_lash_parent_end_plans_obligation_stalled
     ON lash_parent_end_plans(obligation_id)
     WHERE obligation_state = 'stalled';
+
+CREATE TABLE IF NOT EXISTS lash_tool_call_receipts (
+    request_key TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    payload_digest TEXT NOT NULL,
+    requested_at_ms BIGINT NOT NULL,
+    request_json TEXT NOT NULL,
+    completion_json TEXT,
+    completed_at_ms BIGINT
+);
+CREATE INDEX IF NOT EXISTS idx_lash_tool_call_receipts_retention ON lash_tool_call_receipts(session_id, completed_at_ms);
 
 CREATE TABLE IF NOT EXISTS lash_tool_intent_submissions (
     replay_key TEXT PRIMARY KEY,
@@ -1256,3 +1268,15 @@ CREATE TABLE IF NOT EXISTS lash_worker_recovery (
     unknown_cpu_attempts INTEGER NOT NULL,
     in_flight INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS lash_wait_receipts (
+    wait_id TEXT PRIMARY KEY,
+    owner_key TEXT NOT NULL,
+    session_id TEXT,
+    started_at_ms BIGINT NOT NULL,
+    request_json TEXT NOT NULL,
+    resolution_json TEXT,
+    resolved_at_ms BIGINT,
+    retired_at_ms BIGINT
+);
+CREATE INDEX IF NOT EXISTS idx_lash_wait_receipts_owner ON lash_wait_receipts(owner_key);

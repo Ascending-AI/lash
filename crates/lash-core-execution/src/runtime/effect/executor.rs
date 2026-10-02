@@ -13,6 +13,7 @@ mod await_event_support;
 pub mod control;
 mod controller_error;
 mod conversions;
+mod direct;
 mod process_local;
 
 mod language_runtime;
@@ -22,7 +23,6 @@ use plugin_state::record_plugin_state;
 mod scoped;
 mod served_only;
 pub use served_only::ServedOnly;
-mod direct;
 mod task_panic;
 mod tool_attempt;
 mod trigger;
@@ -76,18 +76,14 @@ pub use turn_control_authority::{
     TurnCancellationAuthority, TurnControlAttachment, TurnControlBinding,
 };
 
-use crate::LlmRequest as CoreLlmRequest;
 use crate::ProcessRegistry;
 use crate::RuntimeError;
-use crate::provider::ProviderHandle;
-use crate::sansio::LlmCallError;
 use control::{RemoteLocalExecutionRequest, ScopedEffectControllerInner};
 
 use super::envelope::{
-    ProcessCommand, ProcessEffectOutcome, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
-    RuntimeEffectEnvelope, RuntimeEffectOutcome,
+    ProcessCommand, ProcessEffectOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope,
+    RuntimeEffectOutcome,
 };
-use super::outcome::llm_call_error_from_transport;
 
 /// Host controls attached to one external event wait.
 ///
@@ -743,6 +739,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         ledger: Arc<dyn crate::store::ObligationLedger>,
         clock: Arc<dyn crate::Clock>,
         policy: crate::runtime::shift::relay::RelayPolicy,
+        metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
     ) -> Self {
         if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
             &mut self.state
@@ -754,7 +751,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     Arc::clone(&execution.process_work),
                     clock,
                 )
-                .with_policy(policy),
+                .with_policy(policy)
+                .with_metrics(metrics),
             ));
         }
         self
@@ -1498,50 +1496,6 @@ impl RuntimeEffectLocalRunner for RemoteEffectRunner {
                 "spawned effect local executor response was dropped",
             )
         })?
-    }
-}
-
-impl LocalDirectEffectRunner {
-    async fn run_direct_llm_request(
-        &mut self,
-        mut provider: ProviderHandle,
-        request: CoreLlmRequest,
-    ) -> RuntimeDirectLlmOutcome {
-        let request = match crate::attachments::resolve_llm_request_attachments(
-            request,
-            self.attachment_store.as_ref(),
-        )
-        .await
-        {
-            Ok(request) => request,
-            Err(err) => {
-                return (
-                    Err(LlmCallError {
-                        message: err.to_string(),
-                        retryable: false,
-                        kind: crate::ProviderFailureKind::Unknown,
-                        raw: None,
-                        code: Some(crate::FailureCode::lash(
-                            crate::TurnFailureCode::AttachmentResolutionFailed,
-                        )),
-                        terminal_reason: crate::LlmTerminalReason::ProviderError,
-                        request_body: None,
-                        partial_response: None,
-                    }),
-                    None,
-                );
-            }
-        };
-        match provider
-            .complete_with_charge_safety(request, self.charge_safety.clone())
-            .await
-        {
-            Ok(completion) => (Ok(completion.response), Some(completion.call_record)),
-            Err(failure) => (
-                Err(llm_call_error_from_transport(failure.error)),
-                Some(*failure.call_record),
-            ),
-        }
     }
 }
 

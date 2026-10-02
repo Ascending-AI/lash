@@ -141,8 +141,14 @@ pub(crate) async fn realize_declared_start(
     });
     let scope = scope.with_parent_invocation(parent);
     let kind = crate::ToolIntentKind::StartProcess;
+    let request = start
+        .request()
+        .with_trace_cause(scope.effect_controller.trace_scope().map_or(
+            lash_trace::TraceCause::Root,
+            lash_trace::DurableTraceScope::parent_cause,
+        ));
     match processes
-        .start_from_recorded_intent(&start.start().owner, start.request(), scope)
+        .start_from_recorded_intent(&start.start().owner, request, scope)
         .await
     {
         Ok(handle) => {
@@ -444,7 +450,12 @@ async fn execute_one(
             // The declaration carries no id: the sole constructor on this path
             // derives it from this declaration's identity, so a redrive of the
             // same attempt starts the same process id (FIG-2994).
-            let request = intent.into_request(identity);
+            let request = intent.into_request(identity).with_trace_cause(
+                context.effect_controller.trace_scope().map_or(
+                    lash_trace::TraceCause::Root,
+                    lash_trace::DurableTraceScope::parent_cause,
+                ),
+            );
             let summary = context
                 .processes
                 .start_from_recorded_intent(&intent.owner, request, scope)

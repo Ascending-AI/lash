@@ -296,7 +296,13 @@ impl LashRuntime {
             self.state.turn_scope(&run),
             self.host.core.durability.commit_budget,
         )
-        .with_metrics(self.host.core.tracing.metrics().clone());
+        .with_metrics(self.host.core.tracing.metrics().clone())
+        .with_trace(
+            self.host
+                .core
+                .tracing
+                .shift(controller.trace_scope().cloned(), &controller),
+        );
         self.finish_turn(TurnCommitContext {
             opener: None,
             finish: TurnFinishInput {
@@ -702,12 +708,7 @@ impl LashRuntime {
                 crate::runtime::observation::observation_revision(&self.state);
             self.resident_session
                 .record_committed_observation_turn(observation_revision.as_u64(), &trace_turn_id);
-            self.emit_completed_turn_trace(
-                &turn_trace,
-                &assembled.state,
-                &assembled.outcome,
-                &trace_turn_id,
-            );
+            turn_trace.conclude();
             observer.release_terminal();
             observer.published().await;
             publish_terminal_after_commit(
@@ -950,12 +951,7 @@ impl LashRuntime {
         }
         self.mark_phase_end(PostCommitDelivery::RUNTIME_PHASE);
 
-        self.emit_completed_turn_trace(
-            &turn_trace,
-            &delivery.turn.state,
-            &delivery.turn.outcome,
-            &trace_turn_id,
-        );
+        turn_trace.conclude();
         Ok(PhysicalTurnExecution {
             turn: delivery.turn,
             post_commit_delivery_failed: delivery.post_commit_delivery_failed,
@@ -1029,36 +1025,6 @@ impl LashRuntime {
             observer,
         }))
         .await
-    }
-
-    /// A shift that is replaying its journal reconstructs the turn's
-    /// terminal and reports nothing. The commit reports no inserted-or-existing
-    /// verdict yet, so the terminal is observed as the work of the attempt
-    /// that first reaches it rather than as a logical transition.
-    fn emit_completed_turn_trace(
-        &self,
-        turn_trace: &crate::trace::TraceStanding,
-        state: &SessionSnapshot,
-        outcome: &TurnOutcome,
-        trace_turn_id: &TurnId,
-    ) {
-        let Some(trace_outcome) = trace_outcome(outcome) else {
-            return;
-        };
-        turn_trace.observe(|| {
-            (
-                lash_trace::TraceContext::default()
-                    .for_session(state.session_id.clone())
-                    .for_turn_index(state.turn_index)
-                    .for_turn(trace_turn_id.clone()),
-                lash_trace::TraceEvent::TurnCompleted {
-                    outcome: trace_outcome,
-                },
-            )
-        });
-        // The turn reached its end in this attempt: nothing it observed after
-        // the last step its journal answered is a reconstruction.
-        turn_trace.conclude();
     }
 
     pub(in crate::runtime) async fn finish_logical_turn_error(
@@ -1136,7 +1102,11 @@ impl LashRuntime {
             self.host.core.durability.commit_budget,
         )
         .with_definition_engines(self.host.core.process_engines.clone())
-        .with_metrics(self.host.core.tracing.metrics().clone());
+        .with_metrics(self.host.core.tracing.metrics().clone())
+        .with_trace(self.host.core.tracing.shift(
+            scoped_effect_controller.trace_scope().cloned(),
+            &scoped_effect_controller,
+        ));
         turn_pipeline.apply_prepared_messages(&messages);
         Box::pin(self.finish_turn(TurnCommitContext {
             opener: None,

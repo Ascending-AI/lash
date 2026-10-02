@@ -16,7 +16,7 @@ impl RuntimeSessionServices {
         // Engine rows reach their registry through the process wiring the run
         // context builds, so this impl reads it from `self` rather than from
         // the argument the trait passes.
-        _registry: Arc<dyn crate::ProcessRegistry>,
+        registry: Arc<dyn crate::ProcessRegistry>,
         scoped_effect_controller: crate::ScopedEffectController<'_>,
         cancellation: tokio_util::sync::CancellationToken,
         handover: Option<crate::SegmentHandover>,
@@ -25,6 +25,15 @@ impl RuntimeSessionServices {
             registration,
             process_id,
         } = admitted;
+        let retained_scope = registry
+            .get_process(&process_id)
+            .await
+            .map_err(crate::ProcessInfraError::new)?
+            .and_then(|record| record.trace);
+        let scoped_effect_controller = match retained_scope {
+            Some(scope) => scoped_effect_controller.with_trace_scope(scope),
+            None => scoped_effect_controller,
+        };
         // The controller arrived already admitted for the process's minted id
         // (ADR 0099 §1, ADR 0107), so every arm below — a session-turn row's
         // cells reading it through their `RuntimeExecutionContext`, an engine
@@ -73,7 +82,12 @@ impl RuntimeSessionServices {
                     cancellation,
                     handover,
                 )?;
-                engine.run(engine_context, payload.clone()).await
+                let standing = engine_context.trace_standing();
+                let outcome = engine.run(engine_context, payload.clone()).await;
+                if outcome.is_ok() {
+                    standing.conclude();
+                }
+                outcome
             }
             // Externally-owned rows are never executed by lash (ADR 0110): the
             // worker's run path rejects them before dispatch, so this
@@ -125,6 +139,7 @@ impl RuntimeSessionServices {
         let process_work_for_runtime = process_work.clone();
         let cancellation_for_runtime = cancellation.clone();
         let controller_for_context = scoped_effect_controller.clone();
+        let retained_scope = scoped_effect_controller.trace_scope().cloned();
         let tool_surface = plugins.pin_resolved_tool_surface()?;
         let tool_catalog = Arc::clone(&tool_surface.catalog);
         let builder = Box::new(move |requested_catalog: Arc<crate::ToolCatalog>| {
@@ -186,10 +201,7 @@ impl RuntimeSessionServices {
                 context = context.with_tracing(Some(
                     crate::RuntimeExecutionTracing::new(
                         tracing.clone(),
-                        Some(crate::trace::process_trace_scope(
-                            &process_id_for_runtime,
-                            tracing.clock().timestamp_ms(),
-                        )),
+                        retained_scope.clone(),
                         lash_trace::TraceContext::default(),
                     )
                     .without_tool_lifecycle(),

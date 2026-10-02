@@ -43,8 +43,8 @@ impl LashRuntime {
         executor: crate::store::RunExecutor,
     ) -> Result<ExecutedRun, ShiftAbort> {
         let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
-        let run = admitted.run().clone();
-        let abort = |error: RuntimeError| shift_abort(Some(&run), error);
+        let ran_execution = admitted.run().clone();
+        let abort = |error: RuntimeError| shift_abort(Some(&ran_execution), error);
         let store = self.shift_store()?;
         // The admission records the head and the turn index, so the resident
         // head is brought current first; a replay reads both from the journal
@@ -83,7 +83,7 @@ impl LashRuntime {
                     scope: run_controller.admitted_scope().clone(),
                     fence: fence.clone(),
                     head: head.clone(),
-                    run: run.clone(),
+                    run: ran_execution.clone(),
                     max_inputs: self
                         .host
                         .core
@@ -137,7 +137,7 @@ impl LashRuntime {
                     lash_core_execution::core_internal::owned_runner_executor(
                         Box::new(InspectAdmittedHeadRunner {
                             store: store.clone(),
-                            run: run.clone(),
+                            run: ran_execution.clone(),
                             head: head.clone(),
                             base: admission.base.clone(),
                             live,
@@ -159,7 +159,8 @@ impl LashRuntime {
                     .validate_plugin_admission(&admission.plugins)
                 {
                     let error = error.into_turn_failure(RuntimeErrorCode::Plugin);
-                    self.record_turn_park_after_abort(&error, &run, None).await;
+                    self.record_turn_park_after_abort(&error, &ran_execution, None)
+                        .await;
                     return Err(abort(error));
                 }
                 let transition = self
@@ -172,13 +173,14 @@ impl LashRuntime {
                             turn_index: admission.turn_index,
                             generation: admission.generation.as_ref(),
                             plugins: &admission.plugins,
-                            run: &run,
+                            run: &ran_execution,
                         },
                         verdict,
                     )
                     .await
                 {
-                    self.record_turn_park_after_abort(&error, &run, None).await;
+                    self.record_turn_park_after_abort(&error, &ran_execution, None)
+                        .await;
                     return Err(abort(error));
                 }
                 if let Some(record) = transition {
@@ -200,7 +202,7 @@ impl LashRuntime {
             }
             Ok(RunAdmissionAnswer::Refused { .. }) => {
                 return Ok(ExecutedRun {
-                    outcome: RunOutcome::Ceded { run },
+                    outcome: RunOutcome::Ceded { run: ran_execution },
                     run: None,
                     executed_inputs: Vec::new(),
                     empty_drain: None,
@@ -216,6 +218,13 @@ impl LashRuntime {
 
         // Execute the admitted rows. Live per-turn state that cannot cross the
         // durable boundary is re-attached from an in-process caller's input.
+        let run_controller = match &admission.trace {
+            Some(scope) => run_controller.clone().with_trace_scope(scope.clone()),
+            None => run_controller.clone(),
+        };
+        if let Some(execution) = self.shift_run.as_mut() {
+            execution.trace_scope = admission.trace.clone();
+        }
         let executed_inputs = admission.input_ids();
         let inputs = admission.inputs.map(|admitted| *admitted);
         let queued = admission.queued.map(|admitted| *admitted);
@@ -228,7 +237,7 @@ impl LashRuntime {
         {
             executed.turn_context = live.turn_context.clone();
         }
-        executed.trace_turn_id = Some(run.clone());
+        executed.trace_turn_id = Some(ran_execution.clone());
         let frames = Box::pin(self.execute_logical_turn(
             LogicalTurnStart::Input(executed),
             sinks.events,
@@ -244,13 +253,13 @@ impl LashRuntime {
         let frames = frames.map_err(abort)?;
         let outcome = match frames.final_turn() {
             Some(turn) => RunOutcome::Committed {
-                run,
+                run: ran_execution,
                 kind: crate::store::RunTerminalKind::of_stop(match &turn.outcome {
                     crate::TurnOutcome::Stopped(stop) => Some(stop),
                     _ => None,
                 }),
             },
-            None => RunOutcome::Ceded { run },
+            None => RunOutcome::Ceded { run: ran_execution },
         };
         Ok(ExecutedRun {
             outcome,
@@ -1490,34 +1499,30 @@ impl AdmitRunRunner {
 
     /// Observes one decision of the admission body. `payload` is built only
     /// when the record will be emitted.
-    fn emit(&self, name: &str, payload: impl FnOnce() -> serde_json::Value) {
+    fn emit(
+        &self,
+        scope: Option<lash_trace::DurableTraceScope>,
+        name: &str,
+        payload: impl FnOnce() -> serde_json::Value,
+    ) {
         let (Some(live), tracing) = (&self.trace.live, &self.trace.tracing) else {
             return;
         };
         if !tracing.is_observed() {
             return;
         }
-        tracing
-            .body(
-                Some(crate::trace::turn_trace_scope(
-                    self.fence.session(),
-                    &self.run,
-                    tracing.clock().timestamp_ms(),
-                )),
-                live,
+        tracing.body(scope, live).observe(|| {
+            (
+                lash_trace::TraceContext::default()
+                    .for_session(self.fence.session().clone())
+                    .for_turn_index(self.trace.turn_index)
+                    .for_turn(self.run.clone()),
+                lash_trace::TraceEvent::Custom {
+                    name: name.to_string(),
+                    payload: payload(),
+                },
             )
-            .observe(|| {
-                (
-                    lash_trace::TraceContext::default()
-                        .for_session(self.fence.session().clone())
-                        .for_turn_index(self.trace.turn_index)
-                        .for_turn(self.run.clone()),
-                    lash_trace::TraceEvent::Custom {
-                        name: name.to_string(),
-                        payload: payload(),
-                    },
-                )
-            });
+        });
     }
 
     /// Admit the turn-lane run headed by the admitted head.
@@ -1558,10 +1563,7 @@ impl AdmitRunRunner {
             admitted_generation: self.admitted_generation.clone(),
             executor: self.executor.clone(),
             plugins,
-            // No admission candidate is proposed here, so the run is
-            // admitted unanchored. The store still retains the run's scope:
-            // the cause of the rows it admits and its start.
-            trace_anchor: lash_trace::TraceAnchor::Untraced,
+            trace_scopes: std::sync::Arc::clone(self.trace.tracing.scopes()),
         };
         let admission = match self.store.admit_run(&request).await {
             // The record decides (FIG-4765): the run is run by the executor
@@ -1580,7 +1582,7 @@ impl AdmitRunRunner {
                 .as_ref()
                 .map(|queued| queued.materialize_queued_checkpoint_work().turn_causes)
                 .unwrap_or_default();
-            self.emit("ingress.admitted", || {
+            self.emit(admission.trace.clone(), "ingress.admitted", || {
                 crate::runtime::turn_loop::ingress_admitted_trace_payload(
                     &self.run,
                     crate::store::RUN_ADMISSION_STEP,

@@ -207,6 +207,7 @@ pub(super) async fn reconcile_parked_processes(
         registry,
         continuations,
         paused,
+        &Default::default(),
     )
     .await
     .expect("reconcile paused processes")

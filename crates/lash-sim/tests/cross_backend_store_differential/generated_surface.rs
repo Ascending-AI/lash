@@ -405,6 +405,7 @@ impl SurfaceRunner {
                 .runtime
                 .record_turn_park(&surface_turn_park(*key))
                 .await
+                .map(lash_core::store::StoreTransition::into_record)
                 .map(|_park| ())
                 .map_err(|error| error.to_string()),
             SurfaceOperation::TurnParkLoad => {

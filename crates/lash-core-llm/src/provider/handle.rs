@@ -35,17 +35,41 @@ struct ProviderCompletionSidebandState {
 
 /// Replay safety state shared with the runtime independently of the spawned
 /// LLM Provider task's terminal return.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ProviderCompletionSideband {
     state: Arc<Mutex<ProviderCompletionSidebandState>>,
+    attempt_observer: Option<Arc<dyn Fn(lash_trace::TraceLlmAttempt) + Send + Sync>>,
+    attempt_clock: Option<Arc<dyn crate::Clock>>,
+}
+
+impl std::fmt::Debug for ProviderCompletionSideband {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProviderCompletionSideband")
+            .field("state", &self.state)
+            .field("observed", &self.attempt_observer.is_some())
+            .finish()
+    }
 }
 
 impl ProviderCompletionSideband {
+    #[must_use]
+    pub fn with_attempt_observer(
+        mut self,
+        observer: Arc<dyn Fn(lash_trace::TraceLlmAttempt) + Send + Sync>,
+        clock: Arc<dyn crate::Clock>,
+    ) -> Self {
+        self.attempt_observer = Some(observer);
+        self.attempt_clock = Some(clock);
+        self
+    }
+
     fn new(
         serving_route: ProviderRouteIdentity,
         replay_drops: Vec<crate::ProviderReplayDrop>,
     ) -> Self {
         Self {
+            attempt_observer: None,
+            attempt_clock: None,
             state: Arc::new(Mutex::new(ProviderCompletionSidebandState {
                 serving_route,
                 replay_drops,
@@ -371,6 +395,10 @@ impl ProviderHandle {
                 .rate_limiter
                 .admit(self.components.provider.as_ref(), &request)
                 .await;
+            let attempt_started_at_ms = sideband
+                .attempt_clock
+                .as_ref()
+                .map(|clock| clock.timestamp_ms());
             let (mut result, panic_payload) = match std::panic::AssertUnwindSafe(async {
                 self.components.provider.complete(request.clone()).await
             })
@@ -406,6 +434,44 @@ impl ProviderHandle {
                     (Err(sideband.fence_error(error)), Some(original_failure))
                 }
             };
+            if let Some(observer) = &sideband.attempt_observer {
+                let (outcome, error, response) = match &result {
+                    Ok(response) => (
+                        success_outcome(response.terminal_reason),
+                        None,
+                        Some(response),
+                    ),
+                    Err(error) => (
+                        AttemptOutcome::Failed,
+                        Some(NormalizedError {
+                            class: error.kind,
+                            code: error.code.clone(),
+                            http_status: error.http_status,
+                            provider_request_id: None,
+                            retry_after: error.retry_after(),
+                        }),
+                        error.partial_response.as_deref(),
+                    ),
+                };
+                observer(lash_trace::TraceLlmAttempt {
+                    ordinal: attempt_ordinal,
+                    provider: Some(self.kind().to_string()),
+                    request_model: request.model.wire_model().to_string(),
+                    response_model: response
+                        .and_then(|response| response.execution_evidence.as_ref())
+                        .and_then(|evidence| evidence.served_model.clone()),
+                    started_at_ms: attempt_started_at_ms,
+                    ended_at_ms: sideband
+                        .attempt_clock
+                        .as_ref()
+                        .map(|clock| clock.timestamp_ms()),
+                    outcome,
+                    error,
+                    usage: response
+                        .filter(|response| response.provider_usage.is_some())
+                        .map(|response| crate::trace::trace_usage_from_llm(&response.usage)),
+                });
+            }
             match result {
                 Ok(response) => {
                     let outcome = success_outcome(response.terminal_reason);

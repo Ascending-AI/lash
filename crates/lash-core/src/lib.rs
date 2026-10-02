@@ -132,9 +132,11 @@ pub mod facade_support {
     /// The shift-tracing seam a durable substrate implements against (the trace runtime,
     /// a step's issue and its standing), public in every feature variant.
     pub use lash_core_execution::trace::{
-        JournalFrontier, LiveStep, StepIssue, TraceRuntime, TraceStanding, effect_trace_scope,
+        JournalFrontier, LiveStep, StepIssue, TraceBoundaryReceipt, TraceRuntime, TraceStanding,
+        effect_trace_scope,
     };
     pub use lash_core_ids::operational_metrics::StoreObserver;
+    pub use lash_core_llm::core_internal::ProviderCompletionSideband;
     /// Apply the canonical runtime invocation projection to an existing trace
     /// context. Durable hosts use this instead of maintaining a second
     /// projection with different parent or attribution precedence.
@@ -613,9 +615,9 @@ pub use lash_trace::otel::{OtelOptions, OtelPayloadExport, OtelSpanEnricher, Ote
 pub use lash_trace::{
     DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier, InvalidTraceLinks,
     TraceAdmissionCandidate, TraceAnchor, TraceAttemptId, TraceCandidateOutcome, TraceCarrier,
-    TraceCause, TraceLinks, TraceScopeAdmission, TraceScopeFactory, TraceScopeId, TraceScopeKind,
-    TraceScopeOffer, TraceScopeOwner, UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId,
-    W3cTraceState,
+    TraceCause, TraceHostOperation, TraceLinks, TraceScopeAdmission, TraceScopeFactory,
+    TraceScopeId, TraceScopeKind, TraceScopeOffer, TraceScopeOwner, UntracedScopes, W3cSpanId,
+    W3cTraceFlags, W3cTraceId, W3cTraceState,
 };
 pub use lash_trace::{
     TraceAttachment, TraceContentBlock, TraceContext, TraceEffectEnvelopeDiffEntry,
@@ -715,17 +717,18 @@ pub use runtime::{
     ParentEndPlan, PendingTurnInput, PendingTurnInputBatch, PendingTurnInputCancelOutcome,
     PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputDraft,
     PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
-    PersistedSegmentHandover, PreparedLiveReplayPublication, ProcessAwaitOutput,
-    ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessClockRebind, ProcessCommand,
-    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore,
-    ProcessDefinition, ProcessDefinitionDraft, ProcessDefinitionDraftError, ProcessDefinitionId,
-    ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
-    ProcessDefinitionStore, ProcessDefinitionStoredError, ProcessDefinitionTarget,
-    ProcessDefinitionValue, ProcessDriveStep, ProcessEffectNodeReport, ProcessEffectOccurrence,
-    ProcessEffectOmissions, ProcessEffectOmittedCounts, ProcessEffectOutcome,
-    ProcessEffectOutcomeClass, ProcessEffectReport, ProcessEffectReportError, ProcessEngine,
-    ProcessEngineAdmission, ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry,
-    ProcessEngineRunContext, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
+    PersistedSegmentHandover, PreparedLiveReplayPublication, PreparedProcessRegistration,
+    ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor,
+    ProcessClockRebind, ProcessCommand, ProcessCompletionAuthority, ProcessCompletionOutcome,
+    ProcessContinuationStore, ProcessDefinition, ProcessDefinitionDraft,
+    ProcessDefinitionDraftError, ProcessDefinitionId, ProcessDefinitionRef,
+    ProcessDefinitionRefusal, ProcessDefinitionResolution, ProcessDefinitionStore,
+    ProcessDefinitionStoredError, ProcessDefinitionTarget, ProcessDefinitionValue,
+    ProcessDriveStep, ProcessEffectNodeReport, ProcessEffectOccurrence, ProcessEffectOmissions,
+    ProcessEffectOmittedCounts, ProcessEffectOutcome, ProcessEffectOutcomeClass,
+    ProcessEffectReport, ProcessEffectReportError, ProcessEngine, ProcessEngineAdmission,
+    ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry, ProcessEngineRunContext,
+    ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
     ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog, ProcessEventPage,
     ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome,
     ProcessEventRelease, ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionContext,
@@ -760,8 +763,8 @@ pub use runtime::{
     RuntimeError, RuntimeErrorCause, RuntimeErrorCode, RuntimeInvocation, RuntimeReplay,
     RuntimeReplayAttribution, RuntimeSessionState, SCOPE_STORAGE_PAYLOAD_VERSION,
     ScopeBoundController, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, ScopedEffectController,
-    SegmentHandover, SegmentProgress, SegmentStartMarker, ServedOnly, ServedOnlyRange,
-    SessionAdministration, SessionCreationHead, SessionCursor, SessionCursorError,
+    SegmentHandover, SegmentHandoverCommit, SegmentProgress, SegmentStartMarker, ServedOnly,
+    ServedOnlyRange, SessionAdministration, SessionCreationHead, SessionCursor, SessionCursorError,
     SessionDeleteContext, SessionDeleteExecution, SessionEntry, SessionId, SessionListFilter,
     SessionObservationEvent, SessionObservationEventPayload, SessionProcessEventKind,
     SessionQueueEventKind, SessionRelationKind, SessionRevision, SessionScope, SessionShifts,

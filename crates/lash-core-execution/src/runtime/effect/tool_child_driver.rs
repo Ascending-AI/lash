@@ -100,6 +100,7 @@ use crate::{
 #[derive(Clone)]
 pub struct ToolChildHost {
     openers: Arc<LiveOpenerRegistry>,
+    tracing: Arc<std::sync::Mutex<crate::trace::TraceRuntime>>,
     /// Only a handler-driven host can drop an opener at group formation's
     /// awaits. In-process hosts keep their live opener until the group ends.
     pin_handler_groups: Arc<AtomicBool>,
@@ -166,6 +167,9 @@ impl ToolChildHost {
     ) -> Arc<Self> {
         Arc::new(Self {
             openers: Arc::new(LiveOpenerRegistry::new()),
+            tracing: Arc::new(std::sync::Mutex::new(crate::trace::TraceRuntime::new(
+                clock.clone(),
+            ))),
             pin_handler_groups: Arc::new(AtomicBool::new(false)),
             pinned_children: Arc::new(std::sync::Mutex::new(BTreeMap::new())),
             host: Arc::downgrade(host),
@@ -201,6 +205,11 @@ impl ToolChildHost {
         store: Arc<dyn ProcessExecutionEnvStore>,
     ) -> Arc<Self> {
         *self.process_env_store.lock_recover() = store;
+        Arc::clone(self)
+    }
+
+    pub fn with_trace_runtime(self: &Arc<Self>, runtime: crate::trace::TraceRuntime) -> Arc<Self> {
+        *self.tracing.lock_recover() = runtime;
         Arc::clone(self)
     }
 
@@ -465,6 +474,10 @@ impl std::fmt::Debug for ToolChildHost {
 }
 
 impl super::group_executors::GroupExecutors for ToolChildHost {
+    fn trace_runtime(&self) -> crate::trace::TraceRuntime {
+        self.tracing.lock_recover().clone()
+    }
+
     fn pin_group(&self, group: &super::group::RuntimeEffectGroup) {
         let mut pinned = self.pinned_children.lock_recover();
         for child in group.children() {
@@ -1066,6 +1079,18 @@ async fn run_tool_child<'run>(
     // Refused here as well as at decode: a request this build cannot
     // reconstruct completely is a child it would run under partial authority.
     request.validate()?;
+    let controller = match request
+        .trace_request
+        .as_ref()
+        .and_then(|request| request.scope.as_ref())
+    {
+        Some(scope) => controller.with_trace_scope(scope.clone()),
+        None => controller,
+    };
+
+    controller
+        .frontier()
+        .bind_runtime(host.tracing.lock_recover().clone());
 
     let execution_env_spec = load_execution_env(host, request, &controller).await?;
 

@@ -512,6 +512,7 @@ async fn reconcile_tick(
         vec![Arc::new(relay.clone())];
     let report = lash_core::runtime::shift::reconcile_once(
         &lash_core::runtime::shift::ReconcileParts {
+            metrics: &Default::default(),
             sessions: factory.as_ref(),
             work: &work,
             scopes: &scopes,
@@ -782,6 +783,7 @@ pub async fn run_scope_close_runs_after_terminal_evidence_at_least_once_never_fo
             1,
         ))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park the run");
     shift(&runner, &parts, "run-close-parked-shift").await;
     assert_eq!(

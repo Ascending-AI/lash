@@ -291,7 +291,7 @@ impl AdmittedRun {
                 admitted_generation: lash_core::engine::BuildGeneration::for_test("run-control"),
                 executor: lash_core::store::RunExecutor::Run,
                 plugins: Default::default(),
-                trace_anchor: Default::default(),
+                trace_scopes: std::sync::Arc::new(lash_core::UntracedScopes),
             })
             .await
             .expect("admit the run")
@@ -325,6 +325,7 @@ impl Fixture {
                 1,
             ))
             .await
+            .map(lash_core::store::StoreTransition::into_record)
             .expect("park");
         Self::parked(admitted, stores, park).await
     }
@@ -461,6 +462,7 @@ impl Fixture {
         ];
         lash_core::runtime::shift::reconcile_once(
             &lash_core::runtime::shift::ReconcileParts {
+                metrics: &Default::default(),
                 sessions: self.factory.as_ref(),
                 work: work.as_ref(),
                 scopes: close.as_ref(),
@@ -632,7 +634,8 @@ pub async fn a_terminal_run_never_reparks(
                 f.park.reason.clone(),
                 3
             ))
-            .await,
+            .await
+            .map(lash_core::store::StoreTransition::into_record),
         Err(crate::StoreError::RunAlreadyTerminal { .. })
     ));
     assert!(
@@ -769,7 +772,7 @@ pub async fn a_refused_run_ends_once_and_its_next_input_admits_a_new_run(
         admitted_generation: lash_core::engine::BuildGeneration::for_test("refused-end"),
         executor: lash_core::store::RunExecutor::Run,
         plugins: Default::default(),
-        trace_anchor: Default::default(),
+        trace_scopes: std::sync::Arc::new(lash_core::UntracedScopes),
     };
     parts
         .store
@@ -1125,6 +1128,7 @@ pub async fn redrive_under_the_same_build_reparks_the_same_park_with_attempts_pl
             3,
         ))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("repark");
     assert_eq!(again.park_id, f.park.park_id);
     assert_eq!(again.attempts, f.park.attempts + 1);
@@ -1375,7 +1379,8 @@ pub async fn a_stale_redrive_is_fenced_by_a_later_cancel(
                 f.park.reason.clone(),
                 4
             ))
-            .await,
+            .await
+            .map(lash_core::store::StoreTransition::into_record),
         Err(crate::StoreError::RunAlreadyTerminal { .. })
     ));
     // Nor can the stale execution commit: its fence is the one the cancel
@@ -1525,6 +1530,7 @@ pub async fn a_parked_runs_fence_stays_current_until_a_verb(
             4,
         ))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("repark");
     assert_eq!(f.parts.epoch().await, before);
     f.verb(RunVerb::Cancel).await.expect("cancel");
@@ -1558,6 +1564,7 @@ pub async fn a_diverged_run_parks_once_holds_its_admitted_rows_blocks_admission_
             4,
         ))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("same refusal");
     assert_eq!(again.park_id, f.park.park_id);
     assert_eq!(
@@ -1663,6 +1670,7 @@ pub async fn a_redrive_the_run_ran_past_is_never_applied_again(
             3,
         ))
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("repark");
     assert_eq!(again.resume_intent, None);
     let cancel = f

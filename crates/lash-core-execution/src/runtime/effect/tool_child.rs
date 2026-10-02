@@ -437,9 +437,16 @@ pub struct ToolChildRequest {
     /// The session facts the child's authority is bound from on every path
     /// (FIG-3712).
     pub session: ToolChildSessionFacts,
+    pub trace_request: Option<crate::store::ToolRequestReceipt>,
 }
 
 impl ToolChildRequest {
+    #[must_use]
+    pub fn with_trace_request(mut self, request: Option<crate::store::ToolRequestReceipt>) -> Self {
+        self.trace_request = request;
+        self
+    }
+
     /// The completion key this child's deferred attempt parks on, as the
     /// scope and wait identity it is minted from — `None` for an `Inline`
     /// child, which never takes one.
@@ -493,6 +500,7 @@ impl ToolChildRequest {
             execution_env,
             completion_routing,
             session,
+            trace_request: None,
         }
     }
 

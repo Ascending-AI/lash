@@ -83,6 +83,10 @@ store_error_samples! {
             "sampled",
         )),
     },
+    WaitReceiptConflict { .. } => StoreError::WaitReceiptConflict { wait_id: "wait".into() },
+    ToolRequestConflict { .. } => StoreError::ToolRequestConflict { session_id: session(), request_key: "tool-request".into() },
+    PreparedProcessRegistrationStale { .. } => StoreError::PreparedProcessRegistrationStale { process_id: crate::process_id_for_test("prepared-process") },
+    PreparedRunAdmissionStale { .. } => StoreError::PreparedRunAdmissionStale { session_id: session(), run: crate::TurnId::from("stale-run") },
     Contended => StoreError::Contended,
     CommitNodeBudgetExceeded { .. } => StoreError::CommitNodeBudgetExceeded {
         node_count: 2,

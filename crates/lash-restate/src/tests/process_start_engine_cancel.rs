@@ -43,6 +43,7 @@ impl CancelledStart {
                         Arc::clone(&self.stores.start_ledger),
                         Arc::clone(&self.stores.clock),
                         lash_core::shift::relay::RelayPolicy::default(),
+                        Default::default(),
                     ),
             )
             .await

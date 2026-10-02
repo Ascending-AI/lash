@@ -4234,6 +4234,11 @@
         "resolution": {
           "$ref": "#/$defs/TraceDurableWaitResolution"
         },
+        "started_at_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "type": {
           "const": "durable_wait_resolved",
           "type": "string"
@@ -4244,6 +4249,7 @@
       },
       "required": [
         "type",
+        "started_at_ms",
         "wait_kind",
         "resolution"
       ],

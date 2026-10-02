@@ -47,7 +47,7 @@ impl RuntimeTurnDriver<'_> {
         protocol_iteration: usize,
     ) -> Option<crate::RuntimeExecutionTracing> {
         let tracing = &self.host.core.tracing;
-        (tracing.is_observed() || tracing.emitter().has_product_observers()).then(|| {
+        Some({
             crate::RuntimeExecutionTracing::new(
                 tracing.clone(),
                 self.trace.scope().cloned(),

@@ -308,6 +308,11 @@ impl RuntimeEffectCommand {
     /// replay compares.
     pub fn without_trace_provenance(&self) -> Option<Self> {
         match self {
+            Self::ToolInvocation { request } if request.trace_request.is_some() => {
+                let mut request = request.clone();
+                request.trace_request = None;
+                Some(Self::ToolInvocation { request })
+            }
             Self::IngestTriggerOccurrence { request } if !request.trace.is_empty() => {
                 let mut request = request.clone();
                 request.trace = lash_trace::TraceScopeOffer::default();
@@ -443,6 +448,11 @@ pub enum ToolCompletionEvent {
 pub enum RuntimeEffectCommand {
     TransitionPlugins {
         request: Box<crate::plugin::PluginTransitionRequest>,
+    },
+    /// Retain a scope start or terminal beside its owning execution boundary.
+    TraceBoundary {
+        scope: lash_trace::TraceScopeId,
+        transition: lash_trace::TraceTransitionKind,
     },
     /// Record the protocol's decision before the paired model call.
     BeforeLlmCall {
@@ -778,6 +788,7 @@ impl RuntimeEffectCommand {
             Self::ObserveDrainMark { .. } => RuntimeEffectKind::ObserveDrainMark,
             Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
             Self::AdmitShift { .. } => RuntimeEffectKind::AdmitShift,
+            Self::TraceBoundary { .. } => RuntimeEffectKind::TraceBoundary,
             Self::DrawRunStart { .. } => RuntimeEffectKind::DrawRunStart,
             Self::SealShiftAdmission { .. } => RuntimeEffectKind::SealShiftAdmission,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
@@ -1339,6 +1350,10 @@ pub enum RuntimeEffectOutcome {
         kind: RuntimeEffectKind,
         state: Box<crate::plugin::PluginStateEffect>,
         result: Box<Result<RuntimeEffectOutcome, RuntimeEffectControllerError>>,
+    },
+    TraceBoundary {
+        scope: Box<lash_trace::DurableTraceScope>,
+        at_ms: u64,
     },
     BeforeLlmCall {
         decision: Result<Option<crate::ProtocolLlmCallAction>, crate::PluginError>,
@@ -1924,6 +1939,7 @@ impl RuntimeEffectOutcome {
             Self::ObserveDrainMark { .. } => RuntimeEffectKind::ObserveDrainMark,
             Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
             Self::AdmitShift { .. } => RuntimeEffectKind::AdmitShift,
+            Self::TraceBoundary { .. } => RuntimeEffectKind::TraceBoundary,
             Self::DrawRunStart { .. } => RuntimeEffectKind::DrawRunStart,
             Self::SealShiftAdmission { .. } => RuntimeEffectKind::SealShiftAdmission,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,

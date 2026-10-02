@@ -120,6 +120,7 @@ mod tests {
         let mut other_tool = manifest("opener-tool");
         other_tool.retry_policy = ToolRetryPolicy::Never;
         ToolDispatchContext {
+            tool_receipts: None,
             plugins: crate::support::plugin_host(Vec::new())
                 .build_session(PluginSessionRequest::creation(
                     "opener-session",

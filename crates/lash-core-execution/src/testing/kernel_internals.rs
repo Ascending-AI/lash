@@ -85,7 +85,22 @@ pub fn emit_tool_call_completed(
     issuing_node_id: Option<&str>,
     duration_ms: u64,
 ) {
-    tracing.emit_tool_call_completed(standing, record, attempts, issuing_node_id, duration_ms);
+    let _ = tracing;
+    standing.observe(|| {
+        (
+            lash_trace::TraceContext::default(),
+            lash_trace::TraceEvent::ToolCallCompleted {
+                call_id: record.call_id.clone(),
+                provider_call_id: record.provider_call_id.clone(),
+                name: record.tool.clone(),
+                args: record.args.clone(),
+                output: crate::trace::trace_tool_call_output(&record.output),
+                duration_ms,
+                issuing_node_id: issuing_node_id.map(str::to_string),
+                attempts: (!attempts.is_empty()).then(|| attempts.to_vec()),
+            },
+        )
+    });
 }
 
 /// The digest-only start registration after its execution holds the environment.
@@ -166,7 +181,7 @@ pub async fn await_process_with_cancellation(
         .await
 }
 
-pub fn emit_tool_call_started(
+pub async fn emit_tool_call_started(
     context: &crate::RuntimeExecutionContext<'_>,
     call_key: &str,
     ids: &crate::tool_dispatch::ToolCallIds,
@@ -174,7 +189,9 @@ pub fn emit_tool_call_started(
     args: serde_json::Value,
     activity_id: crate::TurnActivityId,
 ) {
-    context.emit_tool_call_started(call_key, ids, name, args, activity_id);
+    context
+        .emit_tool_call_started(call_key, ids, name, args, activity_id)
+        .await;
 }
 
 /// The turn's cancellation-escalation await-event key, so a test can peek or

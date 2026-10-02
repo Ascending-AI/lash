@@ -175,6 +175,11 @@ impl RelayPolicy {
 /// One kind's relay: its ledger, its policy and its engine delivery.
 #[async_trait::async_trait]
 pub trait ObligationRelay: Send + Sync {
+    /// The host's injected instruments for committed delivery transitions.
+    fn metrics(&self) -> lash_trace::telemetry::metrics::TelemetryMetrics {
+        Default::default()
+    }
+
     /// The ledger this relay claims from; its kind is the relay's kind.
     fn ledger(&self) -> &dyn ObligationLedger;
 
@@ -383,8 +388,8 @@ async fn attempt(
         let verdict = RelayVerdict::Requested;
         if let Some(outcome) = outcome_label(&verdict) {
             crate::operational_metrics::record_obligation_attempt(
-                &Default::default(),
-                None,
+                &relay.metrics(),
+                Some(&lash_trace::EmissionPermit::new_transition()),
                 kind.label(),
                 outcome,
             );
@@ -413,10 +418,12 @@ async fn attempt(
             due_at_ms: *due_at_ms,
         },
     };
-    let verdict = match ledger
+    let settlement_receipt = ledger
         .settle(&claimed.id, &claimed.token, settlement, now_ms)
-        .await?
-    {
+        .await?;
+    let permit = (settlement_receipt == SettleOutcome::Applied)
+        .then(lash_trace::EmissionPermit::new_transition);
+    let verdict = match settlement_receipt {
         SettleOutcome::Applied => planned,
         SettleOutcome::ClaimLost => RelayVerdict::ClaimLost,
     };
@@ -433,8 +440,8 @@ async fn attempt(
     }
     if let Some(outcome) = outcome_label(&verdict) {
         crate::operational_metrics::record_obligation_attempt(
-            &Default::default(),
-            None,
+            &relay.metrics(),
+            permit.as_ref(),
             kind.label(),
             outcome,
         );

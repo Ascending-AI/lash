@@ -110,6 +110,7 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         graph_base_leaf_node_id: _, // resident head fact, not request content
         checkpoint: _,              // rebuilt baseline, not the request
         failure_evidence: _,        // refused non-empty by validation
+        trace: _,                   // retained observation data, not business intent
         outcome: _,                 // semantic boundaries do not commit a turn terminal
         turn_commit,
         ingress: _,                  // refused present by validation

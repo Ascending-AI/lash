@@ -1125,6 +1125,7 @@ async fn refolded_process_record_matches_stored_projection(
             &authority,
         )
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park refold process");
     assert_refold_matches_stored_projection(&reader, &base, process_id, "park entered").await;
     writer

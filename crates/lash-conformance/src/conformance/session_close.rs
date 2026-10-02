@@ -100,6 +100,7 @@ pub(super) fn administration(
             )),
             intents: stores.obligation_ledger(ObligationKind::ControlIntent),
             clock: stores.clock(),
+            metrics: Default::default(),
             deletes: lash_core::session_delete::SessionDeleteStores::of_store_set(Arc::clone(
                 stores,
             )),
@@ -287,6 +288,7 @@ pub async fn session_delete_closes_active_and_parked_runs_as_session_deleted(
             build_generation: None,
         })
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("record parked run");
     let factory = stores.session_store_factory();
     let sink = CloseSink::new(Arc::clone(&factory), 0);

@@ -126,6 +126,7 @@ fn restamp_component(bytes: &[u8], version: u32) -> Vec<u8> {
 
 fn write_receipt(fleet: FleetFormat) -> Vec<u8> {
     serde_json::to_vec(&RuntimeCommitReceipt {
+        committed_at_ms: 0,
         schema_version: fleet.writer_version(crate::surface_format!(
             RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION
         )),
@@ -136,6 +137,7 @@ fn write_receipt(fleet: FleetFormat) -> Vec<u8> {
         realized_node_timestamps: Vec::new(),
         failure_evidence: Vec::new(),
         outcome: None,
+        trace: None,
         pending_follow_on: None,
         turn_input_applications: Vec::new(),
         turn_cancel_input_outcome: crate::TurnCancelInputOutcome::default(),

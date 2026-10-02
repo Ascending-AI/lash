@@ -253,6 +253,7 @@ pub type SessionTurnAdmission =
 /// process commands are not host starts.
 #[derive(Default)]
 pub struct HostStartAdmission {
+    pub tracing: Option<crate::trace::TraceRuntime>,
     /// The session catalog a root start's host session-lookup grant is
     /// checked against. `None` refuses every host-granted start: nothing can
     /// prove its session live.
@@ -264,6 +265,7 @@ pub struct HostStartAdmission {
 
 /// The stores one process start writes through.
 pub struct ProcessStartStores<'a> {
+    pub tracing: Option<&'a crate::trace::TraceRuntime>,
     pub registry: &'a dyn ProcessRegistry,
     pub env_store: Option<&'a Arc<dyn ProcessExecutionEnvStore>>,
     /// The engines a start names artifacts through, and the
@@ -552,10 +554,34 @@ async fn stage_and_register(
     Box::pin(stage_input(stores, start_key, registration.input.as_ref())).await?;
     let submitted_env_ref = registration.env_ref.clone();
     let submitted_input = Arc::clone(&registration.input);
-    let registered = stores
+    let prepared = stores
         .registry
-        .register_process_reporting_outcome(registration, observers)
+        .prepare_process_registration(registration, observers)
         .await?;
+    let candidate = stores.tracing.map(|tracing| {
+        tracing.scopes().propose(
+            &lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Process {
+                process_id: prepared.process_id().clone(),
+            }),
+            prepared.trace().cause(),
+        )
+    });
+    let anchor = candidate.as_ref().map_or_else(
+        || prepared.trace().anchor().clone(),
+        |candidate| candidate.anchor(),
+    );
+    let result = stores
+        .registry
+        .commit_process_registration(prepared, anchor)
+        .await;
+    if let Some(candidate) = candidate {
+        candidate.settle(match &result {
+            Ok(receipt) if receipt.is_created() => lash_trace::TraceCandidateOutcome::Selected,
+            Ok(_) => lash_trace::TraceCandidateOutcome::Reused,
+            Err(_) => lash_trace::TraceCandidateOutcome::Refused,
+        });
+    }
+    let registered = result?;
     let disposition = registered.outcome;
     let created = disposition == crate::ProcessRegistrationOutcome::Created;
     let record = registered.record;

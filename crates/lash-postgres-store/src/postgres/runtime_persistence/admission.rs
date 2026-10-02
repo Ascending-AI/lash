@@ -41,6 +41,8 @@ async fn follow_on_blocks_admission_tx(
 pub(crate) async fn admit_run_postgres(
     store: &crate::PostgresStore,
     request: &lash_core_execution::store::AdmitRunRequest,
+    prepared: Option<&lash_core_execution::store::PreparedRunAdmission>,
+    anchor: &lash_core_execution::TraceAnchor,
 ) -> Result<Option<RunAdmission>, StoreError> {
     let session_id = request.session_id();
     let mut connection = acquire_runtime_connection(&store.pool, &store.observer).await?;
@@ -73,6 +75,12 @@ pub(crate) async fn admit_run_postgres(
     }
     if follow_on_blocks_admission_tx(&mut tx, session_id, FollowOnAdmission::Idle).await? {
         tx.rollback().await.map_err(store_sqlx_error)?;
+        if prepared.is_some() {
+            return Err(StoreError::PreparedRunAdmissionStale {
+                session_id: session_id.clone(),
+                run: request.run.clone(),
+            });
+        }
         return Ok(None);
     }
     if let Some(unfinished) = crate::session_runs::unfinished_run_conn(&mut tx, session_id).await? {
@@ -97,9 +105,14 @@ pub(crate) async fn admit_run_postgres(
                 inputs.filter(|inputs| inputs.inputs.iter().any(|input| input.input_id == *head))
             else {
                 tx.rollback().await.map_err(store_sqlx_error)?;
+                if prepared.is_some() {
+                    return Err(StoreError::PreparedRunAdmissionStale {
+                        session_id: session_id.clone(),
+                        run: request.run.clone(),
+                    });
+                }
                 return Ok(None);
             };
-            bind_turn_inputs_tx(&mut tx, now, &request.run, RUN_ADMISSION_STEP, &inputs).await?;
             (Some(Box::new(inputs)), None)
         }
         AdmittedHead::Batch(head) => {
@@ -114,17 +127,14 @@ pub(crate) async fn admit_run_postgres(
             .await?;
             if !batches.iter().any(|batch| batch.batch_id == *head) {
                 tx.rollback().await.map_err(store_sqlx_error)?;
+                if prepared.is_some() {
+                    return Err(StoreError::PreparedRunAdmissionStale {
+                        session_id: session_id.clone(),
+                        run: request.run.clone(),
+                    });
+                }
                 return Ok(None);
             }
-            bind_batches_tx(
-                &mut tx,
-                now,
-                session_id,
-                &request.run,
-                RUN_ADMISSION_STEP,
-                &batches,
-            )
-            .await?;
             (
                 None,
                 Some(Box::new(lash_core_execution::runtime::AdmittedQueuedWork {
@@ -137,18 +147,12 @@ pub(crate) async fn admit_run_postgres(
     let mut base = request.base.clone();
     base.generation =
         read_session_state_version_tx(&mut tx, session_id, true, store.fence.fleet()).await?;
-    sqlx::query(session_sql().meta.retain_admission_base.sql())
-        .bind(session_id.as_str())
-        .bind(base.checkpoint.as_ref().map(|blob_ref| blob_ref.as_str()))
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
     let trace = RunAdmission::trace_scope_of(
         session_id,
         &request.run,
         inputs.as_deref(),
         queued.as_deref(),
-        request.trace_anchor.clone(),
+        anchor.clone(),
         now,
     );
     let admission = RunAdmission {
@@ -161,8 +165,48 @@ pub(crate) async fn admit_run_postgres(
         executor: request.executor.clone(),
         plugins: request.plugins.clone(),
         trace: Some(trace),
-        recorded_by_this_call: true,
+        recorded_by_this_call: prepared.is_some(),
     };
+    let Some(prepared) = prepared else {
+        tx.rollback().await.map_err(store_sqlx_error)?;
+        return Ok(Some(admission));
+    };
+    if !prepared.matches(
+        admission.inputs.as_deref(),
+        admission.queued.as_deref(),
+        &admission.base,
+    )? {
+        return Err(StoreError::PreparedRunAdmissionStale {
+            session_id: session_id.clone(),
+            run: request.run.clone(),
+        });
+    }
+    if let Some(inputs) = admission.inputs.as_deref() {
+        bind_turn_inputs_tx(&mut tx, now, &request.run, RUN_ADMISSION_STEP, inputs).await?;
+    }
+    if let Some(queued) = admission.queued.as_deref() {
+        bind_batches_tx(
+            &mut tx,
+            now,
+            session_id,
+            &request.run,
+            RUN_ADMISSION_STEP,
+            &queued.batches,
+        )
+        .await?;
+    }
+    sqlx::query(session_sql().meta.retain_admission_base.sql())
+        .bind(session_id.as_str())
+        .bind(
+            admission
+                .base
+                .checkpoint
+                .as_ref()
+                .map(|blob_ref| blob_ref.as_str()),
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
     crate::session_runs::bind_run_inputs_conn(
         &mut tx,
         session_id,

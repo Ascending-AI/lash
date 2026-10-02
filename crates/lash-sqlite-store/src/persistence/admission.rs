@@ -51,151 +51,208 @@ pub(super) fn follow_on_blocks_admission_conn(
 pub(crate) async fn admit_run_sqlite(
     store: &crate::SqliteStore,
     request: &lash_core_execution::store::AdmitRunRequest,
+    prepared: Option<&lash_core_execution::store::PreparedRunAdmission>,
+    anchor: &lash_core_execution::TraceAnchor,
 ) -> Result<Option<RunAdmission>, StoreError> {
     let request = request.clone();
+    let prepared = prepared.cloned();
+    let anchor = anchor.clone();
     let now = store.clock.timestamp_ms();
-    store
-        .conn
-        .write_flow(move |tx| {
-            let fleet = tx.fleet();
-            flow((|| {
-                let session_id = request.session_id();
-                super::shift_epoch::require_fence_conn(tx, session_id, &request.fence)?;
-                let runs = crate::session_runs::session_runs_sql();
-                let existing: Option<Option<String>> = tx
-                    .query_row(
-                        runs.runs.select_admission.sql(),
-                        params![session_id.as_str(), request.run.as_str()],
-                        |row| row.get(0),
-                    )
-                    .optional()
-                    .map_err(sqlite_error)?;
-                if let Some(Some(json)) = existing {
-                    let admission = crate::session_runs::decode_run_admission(&json)?;
-                    // The recorded executor decides who executes the run
-                    // (FIG-4765).
-                    if admission.executor.excludes(&request.executor) {
-                        return Err(StoreError::RunHeldByAnotherExecutor {
-                            session_id: session_id.clone(),
-                            run: request.run.clone(),
-                            recorded: Box::new(admission.executor),
-                            admitting: Box::new(request.executor.clone()),
-                        });
-                    }
-                    return Ok(TxOutcome::Commit(Some(admission)));
-                }
-                if follow_on_blocks_admission_conn(tx, session_id, FollowOnAdmission::Idle)? {
-                    return Ok(TxOutcome::Commit(None));
-                }
-                if let Some(unfinished) = crate::session_runs::unfinished_run_conn(tx, session_id)?
-                {
-                    return Err(StoreError::UnfinishedRunConflict {
+    let preparing = prepared.is_none();
+    let fleet = store.conn.fleet();
+    let compose = move |tx: &rusqlite::Connection, fleet| {
+        (|| {
+            let session_id = request.session_id();
+            super::shift_epoch::require_fence_conn(tx, session_id, &request.fence)?;
+            let runs = crate::session_runs::session_runs_sql();
+            let existing: Option<Option<String>> = tx
+                .query_row(
+                    runs.runs.select_admission.sql(),
+                    params![session_id.as_str(), request.run.as_str()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(sqlite_error)?;
+            if let Some(Some(json)) = existing {
+                let admission = crate::session_runs::decode_run_admission(&json)?;
+                // The recorded executor decides who executes the run
+                // (FIG-4765).
+                if admission.executor.excludes(&request.executor) {
+                    return Err(StoreError::RunHeldByAnotherExecutor {
                         session_id: session_id.clone(),
-                        run: unfinished.run,
+                        run: request.run.clone(),
+                        recorded: Box::new(admission.executor),
+                        admitting: Box::new(request.executor.clone()),
                     });
                 }
-                let (inputs, queued) = match &request.head {
-                    AdmittedHead::Input(head) => {
-                        let Some(inputs) = compose_next_turn_inputs_conn(
-                            tx,
-                            now,
-                            session_id,
-                            request.max_inputs,
-                            &request.policy,
-                        )?
-                        else {
-                            return Ok(TxOutcome::Commit(None));
-                        };
-                        if !inputs.inputs.iter().any(|input| input.input_id == *head) {
-                            return Ok(TxOutcome::Commit(None));
-                        }
-                        bind_turn_inputs_conn(tx, now, &request.run, RUN_ADMISSION_STEP, &inputs)?;
-                        (Some(Box::new(inputs)), None)
-                    }
-                    AdmittedHead::Batch(head) => {
-                        let batches = compose_turn_lane_batches_conn(
-                            tx,
-                            now,
-                            session_id,
-                            AdmissionBoundary::Idle,
-                            None,
-                            &request.policy,
-                        )?;
-                        if !batches.iter().any(|batch| batch.batch_id == *head) {
-                            return Ok(TxOutcome::Commit(None));
-                        }
-                        bind_batches_conn(
-                            tx,
-                            now,
-                            session_id,
-                            &request.run,
-                            RUN_ADMISSION_STEP,
-                            &batches,
-                        )?;
-                        (
-                            None,
-                            Some(Box::new(lash_core_execution::runtime::AdmittedQueuedWork {
-                                session_id: session_id.clone(),
-                                batches,
-                            })),
-                        )
-                    }
-                };
-                let mut base = request.base.clone();
-                base.generation = read_session_state_version_conn(tx, session_id, fleet)?;
-                crate::session_meta::retain_admission_base_conn(
-                    tx,
-                    session_id,
-                    base.checkpoint.as_ref(),
-                )?;
-                let trace = RunAdmission::trace_scope_of(
-                    session_id,
-                    &request.run,
-                    inputs.as_deref(),
-                    queued.as_deref(),
-                    request.trace_anchor.clone(),
-                    now,
-                );
-                let admission = RunAdmission {
-                    head: request.head.clone(),
-                    inputs,
-                    queued,
-                    base,
-                    turn_index: request.turn_index,
-                    generation: request.generation.clone(),
-                    executor: request.executor.clone(),
-                    plugins: request.plugins.clone(),
-                    trace: Some(trace),
-                    recorded_by_this_call: true,
-                };
-                crate::session_runs::bind_run_inputs_conn(
-                    tx,
-                    session_id,
-                    &request.run,
-                    &admission.input_ids(),
-                )?;
-                let json = encode_json(&admission)?;
-                let changed = crate::conn::cached_execute(
-                    tx,
-                    runs.runs.write_admission.sql(),
-                    params![
-                        session_id.as_str(),
-                        request.run.as_str(),
-                        json,
-                        request.admitted_generation.as_str()
-                    ],
-                )
-                .map_err(sqlite_error)?;
-                if changed != 1 {
-                    return Err(StoreError::Backend(
-                        "run admission was already recorded".into(),
-                    ));
+                return Ok(TxOutcome::Commit(Some(admission)));
+            }
+            if follow_on_blocks_admission_conn(tx, session_id, FollowOnAdmission::Idle)? {
+                if prepared.is_some() {
+                    return Err(StoreError::PreparedRunAdmissionStale {
+                        session_id: session_id.clone(),
+                        run: request.run.clone(),
+                    });
                 }
-                Ok(TxOutcome::Commit(Some(admission)))
-            })())
-        })
-        .await
-        .map_err(sqlite_error)?
+                return Ok(TxOutcome::Commit(None));
+            }
+            if let Some(unfinished) = crate::session_runs::unfinished_run_conn(tx, session_id)? {
+                return Err(StoreError::UnfinishedRunConflict {
+                    session_id: session_id.clone(),
+                    run: unfinished.run,
+                });
+            }
+            let (inputs, queued) = match &request.head {
+                AdmittedHead::Input(head) => {
+                    let Some(inputs) = compose_next_turn_inputs_conn(
+                        tx,
+                        now,
+                        session_id,
+                        request.max_inputs,
+                        &request.policy,
+                    )?
+                    else {
+                        if prepared.is_some() {
+                            return Err(StoreError::PreparedRunAdmissionStale {
+                                session_id: session_id.clone(),
+                                run: request.run.clone(),
+                            });
+                        }
+                        return Ok(TxOutcome::Commit(None));
+                    };
+                    if !inputs.inputs.iter().any(|input| input.input_id == *head) {
+                        if prepared.is_some() {
+                            return Err(StoreError::PreparedRunAdmissionStale {
+                                session_id: session_id.clone(),
+                                run: request.run.clone(),
+                            });
+                        }
+                        return Ok(TxOutcome::Commit(None));
+                    }
+                    (Some(Box::new(inputs)), None)
+                }
+                AdmittedHead::Batch(head) => {
+                    let batches = compose_turn_lane_batches_conn(
+                        tx,
+                        now,
+                        session_id,
+                        AdmissionBoundary::Idle,
+                        None,
+                        &request.policy,
+                    )?;
+                    if !batches.iter().any(|batch| batch.batch_id == *head) {
+                        if prepared.is_some() {
+                            return Err(StoreError::PreparedRunAdmissionStale {
+                                session_id: session_id.clone(),
+                                run: request.run.clone(),
+                            });
+                        }
+                        return Ok(TxOutcome::Commit(None));
+                    }
+                    (
+                        None,
+                        Some(Box::new(lash_core_execution::runtime::AdmittedQueuedWork {
+                            session_id: session_id.clone(),
+                            batches,
+                        })),
+                    )
+                }
+            };
+            let mut base = request.base.clone();
+            base.generation = read_session_state_version_conn(tx, session_id, fleet)?;
+            let trace = RunAdmission::trace_scope_of(
+                session_id,
+                &request.run,
+                inputs.as_deref(),
+                queued.as_deref(),
+                anchor,
+                now,
+            );
+            let admission = RunAdmission {
+                head: request.head.clone(),
+                inputs,
+                queued,
+                base,
+                turn_index: request.turn_index,
+                generation: request.generation.clone(),
+                executor: request.executor.clone(),
+                plugins: request.plugins.clone(),
+                trace: Some(trace),
+                recorded_by_this_call: prepared.is_some(),
+            };
+            let Some(prepared) = prepared.as_ref() else {
+                return Ok(TxOutcome::Commit(Some(admission)));
+            };
+            if !prepared.matches(
+                admission.inputs.as_deref(),
+                admission.queued.as_deref(),
+                &admission.base,
+            )? {
+                return Err(StoreError::PreparedRunAdmissionStale {
+                    session_id: session_id.clone(),
+                    run: request.run.clone(),
+                });
+            }
+            if let Some(inputs) = admission.inputs.as_deref() {
+                bind_turn_inputs_conn(tx, now, &request.run, RUN_ADMISSION_STEP, inputs)?;
+            }
+            if let Some(queued) = admission.queued.as_deref() {
+                bind_batches_conn(
+                    tx,
+                    now,
+                    session_id,
+                    &request.run,
+                    RUN_ADMISSION_STEP,
+                    &queued.batches,
+                )?;
+            }
+            crate::session_meta::retain_admission_base_conn(
+                tx,
+                session_id,
+                admission.base.checkpoint.as_ref(),
+            )?;
+            crate::session_runs::bind_run_inputs_conn(
+                tx,
+                session_id,
+                &request.run,
+                &admission.input_ids(),
+            )?;
+            let json = encode_json(&admission)?;
+            let changed = crate::conn::cached_execute(
+                tx,
+                runs.runs.write_admission.sql(),
+                params![
+                    session_id.as_str(),
+                    request.run.as_str(),
+                    json,
+                    request.admitted_generation.as_str()
+                ],
+            )
+            .map_err(sqlite_error)?;
+            if changed != 1 {
+                return Err(StoreError::Backend(
+                    "run admission was already recorded".into(),
+                ));
+            }
+            Ok(TxOutcome::Commit(Some(admission)))
+        })()
+    };
+    if preparing {
+        store
+            .conn
+            .read(move |tx| Ok(compose(tx, fleet)))
+            .await
+            .map_err(sqlite_error)?
+            .map(|outcome| match outcome {
+                TxOutcome::Commit(value) | TxOutcome::Rollback(value) => value,
+            })
+    } else {
+        store
+            .conn
+            .write_flow(move |tx| flow(compose(tx, tx.fleet())))
+            .await
+            .map_err(sqlite_error)?
+    }
 }
 
 /// Admit the checkpoint work of `request`'s run, keyed by its step

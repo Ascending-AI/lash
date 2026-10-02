@@ -91,14 +91,14 @@ impl LashRuntime {
         write.build_generation = Some(generation);
         let reason_code = write.reason.code().as_str();
         let effect_kind = write.reason.effect_kind();
-        match lash_core_execution::runtime::record_run_park(store.store().as_ref(), &write).await {
+        match lash_core_execution::runtime::record_run_park(
+            store.store().as_ref(),
+            &write,
+            self.host.core.tracing.metrics(),
+        )
+        .await
+        {
             Ok(park) => {
-                crate::operational_metrics::record_work_parked(
-                    self.host.core.tracing.metrics(),
-                    None,
-                    "turn",
-                    reason_code,
-                );
                 tracing::warn!(
                     session_id = %self.state.session_id,
                     run = %run,

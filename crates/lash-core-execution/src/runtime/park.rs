@@ -18,10 +18,17 @@ pub fn run_park_recorded() -> tokio::sync::futures::Notified<'static> {
 pub async fn record_run_park(
     store: &dyn crate::store::RuntimeStore,
     write: &crate::store::TurnParkWrite,
+    metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
 ) -> Result<crate::store::TurnPark, StoreError> {
     let park = store.record_turn_park(write).await?;
+    crate::operational_metrics::record_work_parked(
+        metrics,
+        park.permit().as_ref(),
+        "turn",
+        park.record.reason.code().as_str(),
+    );
     RUN_PARK_RECORDED.notify_waiters();
-    Ok(park)
+    Ok(park.into_record())
 }
 
 /// The store-backed [`ParkRecoveryWriter`](crate::engine::ParkRecoveryWriter):
@@ -67,17 +74,33 @@ pub async fn record_run_park(
 pub struct StoreParkRecovery<'a> {
     sessions: &'a dyn crate::DeploymentStore,
     clock: &'a dyn crate::Clock,
+    metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
 }
 
 impl<'a> StoreParkRecovery<'a> {
     /// The writer over `sessions`, stamping parks with `clock`.
     pub fn new(sessions: &'a dyn crate::DeploymentStore, clock: &'a dyn crate::Clock) -> Self {
-        Self { sessions, clock }
+        Self {
+            sessions,
+            clock,
+            metrics: Default::default(),
+        }
+    }
+    pub fn with_metrics(
+        mut self,
+        metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
+    ) -> Self {
+        self.metrics = metrics;
+        self
     }
 }
 
 #[async_trait::async_trait]
 impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
+    fn metrics(&self) -> lash_trace::telemetry::metrics::TelemetryMetrics {
+        self.metrics.clone()
+    }
+
     async fn record_engine_park(
         &self,
         target: &crate::engine::ParkTarget,
@@ -186,18 +209,12 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
             ),
         };
         let held = held.map(|park| park.park_id);
-        match record_run_park(store, &write).await {
+        match record_run_park(store, &write, &self.metrics).await {
             Ok(park) if park.resume_intent.is_some() => Ok(EngineParkRecorded::Redriven),
             Ok(park) if held == Some(park.park_id) || !records(&park, &write) => {
                 Ok(EngineParkRecorded::AttachedToExisting(park.park_id))
             }
             Ok(park) => {
-                crate::operational_metrics::record_work_parked(
-                    &Default::default(),
-                    None,
-                    "turn",
-                    park.reason.code().as_str(),
-                );
                 tracing::warn!(
                     session_id = %session,
                     run = %run,
@@ -306,18 +323,12 @@ impl StoreParkRecovery<'_> {
             None,
             after_redrive,
         );
-        match record_run_park(store, &write).await {
+        match record_run_park(store, &write, &self.metrics).await {
             Ok(park) if park.resume_intent.is_some() => Ok(EngineParkRecorded::Redriven),
             Ok(park) if !records(&park, &write) => {
                 Ok(EngineParkRecorded::AttachedToExisting(park.park_id))
             }
             Ok(park) => {
-                crate::operational_metrics::record_work_parked(
-                    &Default::default(),
-                    None,
-                    "turn",
-                    park.reason.code().as_str(),
-                );
                 tracing::warn!(
                     session_id = %session,
                     run = %run,

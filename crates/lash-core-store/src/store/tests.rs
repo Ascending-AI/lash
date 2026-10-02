@@ -944,6 +944,10 @@ fn decorator_surface_covers_every_component_trait_method() {
         "ShiftEpochStore",
     ));
     declared.extend(declared_methods(include_str!("run.rs"), "RunStore"));
+    declared.extend(declared_methods(
+        include_str!("wait_receipts.rs"),
+        "WaitReceiptStore",
+    ));
     assert!(
         declared.contains_key("commit_runtime_state")
             && declared.contains_key("vacuum")

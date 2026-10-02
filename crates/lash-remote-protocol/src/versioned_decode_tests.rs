@@ -119,7 +119,7 @@ fn streamed_observation_event() -> RemoteSessionObservationEvent {
 }
 
 fn process_node_record() -> lash_trace::TraceRecord {
-    lash_trace::TraceRecord::new(
+    fixture_record(
         lash_trace::TraceContext::default(),
         lash_trace::TraceEvent::LanguageExecution {
             language: "lashlang".to_string(),
@@ -708,4 +708,18 @@ fn paged_process_events_wire_contract() {
         .is_err(),
         "a cursor names exactly one process"
     );
+}
+
+#[cfg(test)]
+fn fixture_record(
+    context: lash_trace::TraceContext,
+    event: lash_trace::TraceEvent,
+) -> lash_trace::TraceRecord {
+    lash_trace::TraceRecord {
+        schema_version: lash_trace::TRACE_SCHEMA_VERSION,
+        id: "fixture-record".into(),
+        timestamp: Default::default(),
+        context,
+        event,
+    }
 }

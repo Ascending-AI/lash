@@ -41,6 +41,7 @@ impl<'run> ScopedEffectController<'run> {
         }?;
         // The same shift under another scope: one journal, one frontier.
         rescoped.frontier = self.frontier.clone();
+        rescoped.trace_scope = self.trace_scope.clone();
         Ok(rescoped)
     }
 
@@ -65,6 +66,7 @@ impl<'run> ScopedEffectController<'run> {
                 ordinals: self.ordinals,
                 effects: self.effects,
                 frontier: self.frontier,
+                trace_scope: self.trace_scope,
             }),
         }
     }

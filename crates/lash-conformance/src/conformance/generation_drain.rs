@@ -124,7 +124,7 @@ impl AdmittedRun {
                 admitted_generation: stamp.clone(),
                 executor: crate::store::RunExecutor::Run,
                 plugins: Default::default(),
-                trace_anchor: Default::default(),
+                trace_scopes: std::sync::Arc::new(lash_core::UntracedScopes),
             })
             .await
             .expect("admit the run")

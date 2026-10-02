@@ -16,9 +16,19 @@ pub struct ProcessStartRelay {
     port: Arc<dyn ProcessWorkSubstrate>,
     clock: Arc<dyn Clock>,
     policy: RelayPolicy,
+    metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
 }
 
 impl ProcessStartRelay {
+    #[must_use]
+    pub fn with_metrics(
+        mut self,
+        metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
+    ) -> Self {
+        self.metrics = metrics;
+        self
+    }
+
     pub fn new(
         ledger: Arc<dyn ObligationLedger>,
         registry: Arc<dyn ProcessRegistry>,
@@ -31,6 +41,7 @@ impl ProcessStartRelay {
             port,
             clock,
             policy: RelayPolicy::default(),
+            metrics: Default::default(),
         }
     }
 
@@ -132,6 +143,10 @@ impl ProcessStartRelay {
 
 #[async_trait::async_trait]
 impl ObligationRelay for ProcessStartRelay {
+    fn metrics(&self) -> lash_trace::telemetry::metrics::TelemetryMetrics {
+        self.metrics.clone()
+    }
+
     fn ledger(&self) -> &dyn ObligationLedger {
         self.ledger.as_ref()
     }

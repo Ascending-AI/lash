@@ -11,7 +11,14 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         // of this executor's.
         self.issued.unrecorded();
         match self.state {
-            RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) => {
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(mut execution)) => {
+                if let Some(runtime) = self
+                    .issued
+                    .frontier()
+                    .and_then(crate::trace::JournalFrontier::runtime)
+                {
+                    execution.host_start.tracing = Some(runtime);
+                }
                 Ok(execution)
             }
             _ => Err(RuntimeEffectControllerError::new(
@@ -127,8 +134,9 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         mut self,
         frontier: crate::trace::JournalFrontier,
         attempt: Option<lash_trace::AttemptObservation>,
+        scope: Option<lash_trace::DurableTraceScope>,
     ) -> Self {
-        self.issued = crate::trace::StepIssue::new(frontier, attempt);
+        self.issued = crate::trace::StepIssue::new(frontier, attempt, scope);
         self
     }
 

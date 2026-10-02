@@ -109,6 +109,7 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
                 build_generation: None,
             })
             .await
+            .map(lash_core::store::StoreTransition::into_record)
             .expect("park the turn");
         assert_eq!(stored.since_ms, 1);
         let parked = core
@@ -215,6 +216,7 @@ async fn parked_work_merges_parked_turns_and_processes() {
             &authority,
         )
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park the process");
     let process_park = parked_process.park().cloned().expect("parked");
 
@@ -247,6 +249,7 @@ async fn parked_work_merges_parked_turns_and_processes() {
             build_generation: None,
         })
         .await
+        .map(lash_core::store::StoreTransition::into_record)
         .expect("park the turn");
 
     let parked = core.parked_work();

@@ -185,6 +185,7 @@ impl World {
         let factory = self.stores.session_store_factory();
         let tick = reconcile_once(
             &ReconcileParts {
+                metrics: &Default::default(),
                 sessions: factory.as_ref(),
                 work: self.engine.as_ref(),
                 scopes: &NoScopeClose,

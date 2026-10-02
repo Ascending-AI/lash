@@ -64,6 +64,7 @@ pub struct ToolDispatchContext<'run> {
     pub tool_registry: Option<Arc<crate::ToolRegistry>>,
     pub tool_catalog: Arc<ToolCatalog>,
     pub sessions: Arc<dyn SessionStateService>,
+    pub tool_receipts: Option<Arc<dyn crate::RuntimeStore>>,
     pub session_lifecycle: Arc<dyn SessionLifecycleService>,
     pub session_graph: Arc<dyn SessionGraphService>,
     pub processes: Arc<dyn crate::ProcessService>,
@@ -403,6 +404,7 @@ impl<'run> ToolDispatchContext<'run> {
 
     pub(crate) fn to_static(&self) -> Option<ToolDispatchContext<'static>> {
         Some(ToolDispatchContext {
+            tool_receipts: self.tool_receipts.clone(),
             plugins: Arc::clone(&self.plugins),
             tools: Arc::clone(&self.tools),
             tool_registry: self.tool_registry.clone(),
@@ -451,6 +453,7 @@ impl<'run> ToolDispatchContext<'run> {
         controller: crate::ScopedEffectController<'static>,
     ) -> ToolDispatchContext<'static> {
         ToolDispatchContext {
+            tool_receipts: self.tool_receipts.clone(),
             plugins: Arc::clone(&self.plugins),
             tools: Arc::clone(&self.tools),
             tool_registry: self.tool_registry.clone(),
