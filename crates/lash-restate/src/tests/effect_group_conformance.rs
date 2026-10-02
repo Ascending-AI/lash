@@ -2331,10 +2331,68 @@ pub(super) async fn overwrite_index_state(
     group_key: &str,
     state: &serde_json::Value,
 ) {
-    let bytes = serde_json::to_vec(state).expect("encode the index state");
+    let entry = |value: Vec<u8>| serde_json::to_value(value).expect("state bytes");
+    replace_index_state(
+        admin,
+        group_key,
+        [
+            (
+                "effect-group/v1/state".to_owned(),
+                entry(serde_json::to_vec(state).expect("encode the index state")),
+            ),
+            (
+                "_compat".to_owned(),
+                entry(
+                    serde_json::to_vec(&crate::compat::ObjectCompat::fresh(1))
+                        .expect("compat record"),
+                ),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    )
+    .await;
+}
+
+/// Every entry an effect-group index retains, as the server holds it: what
+/// [`replace_index_state`] puts back.
+pub(super) async fn index_state(
+    admin: &HarnessAdmin,
+    group_key: &str,
+) -> serde_json::Map<String, serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Row {
+        key: String,
+        value_utf8: String,
+    }
+    let rows: Vec<Row> = crate::RestateAdminClient::new(admin.connection())
+        .query_json(&format!(
+            "SELECT key, value_utf8 FROM state WHERE service_name = 'EffectGroupIndex' \
+             AND service_key = {}",
+            crate::ingress::sql_string_literal(group_key),
+        ))
+        .await
+        .expect("read the effect-group index state");
+    rows.into_iter()
+        .map(|row| {
+            (
+                row.key,
+                serde_json::to_value(row.value_utf8.into_bytes()).expect("state bytes"),
+            )
+        })
+        .collect()
+}
+
+/// Replace every entry an effect-group index retains with `new_state`, each
+/// value its bytes, through the Restate admin API.
+pub(super) async fn replace_index_state(
+    admin: &HarnessAdmin,
+    group_key: &str,
+    new_state: serde_json::Map<String, serde_json::Value>,
+) {
     let body = serde_json::json!({
         "object_key": group_key,
-        "new_state": { "effect-group/v1/state": bytes, "_compat": serde_json::to_vec(&crate::compat::ObjectCompat::fresh(1)).expect("compat record") },
+        "new_state": new_state,
     });
     let (status, body) = match admin {
         HarnessAdmin::Live { admin_url } => {

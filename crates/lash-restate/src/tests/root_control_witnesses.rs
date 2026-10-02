@@ -51,7 +51,7 @@ fn redrive_unsettled() -> lash_core::RuntimeError {
 /// of the drive decodes the verdict that execution journaled and never runs
 /// it. A fault of `decide` is the attempt's, never the step's outcome: the
 /// engine's retry decides the admission again.
-async fn recorded_admission<Fut>(
+pub(super) async fn recorded_admission<Fut>(
     controller: &lash_core::ScopedEffectController<'_>,
     request: &DriveRequest,
     admitting_generation: &lash_core::engine::BuildGeneration,
@@ -240,7 +240,7 @@ impl SessionDriver for Driver {
     clippy::result_large_err,
     reason = "matches the ingress client's error API"
 )]
-async fn attach_whole_drive(
+pub(super) async fn attach_whole_drive(
     work: &crate::RestateSessionWork,
     session: &SessionId,
     request: DriveRequestId,
@@ -521,7 +521,7 @@ impl Fixture {
         clippy::result_large_err,
         reason = "matches the ingress client's error API"
     )]
-    async fn attach_whole_drive(
+    pub(super) async fn attach_whole_drive(
         &self,
         request: DriveRequestId,
     ) -> Result<DriveOutcome, crate::SendDriveError> {
