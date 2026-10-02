@@ -301,7 +301,7 @@ impl SessionMetaCodec {
             } => {
                 stored.relation_kind = "fork".to_string();
                 stored.source_session_id = Some(source_session_id.clone());
-                stored.source_node_id = Some(source_node_id.to_string());
+                stored.source_node_id = source_node_id.as_ref().map(ToString::to_string);
             }
         }
         Ok(stored)
@@ -374,9 +374,7 @@ impl SessionMetaCodec {
                 SessionRelation::Fork {
                     source_session_id: self
                         .required(stored.source_session_id, "source_session_id")?,
-                    source_node_id: crate::NodeId::new(
-                        self.required(stored.source_node_id, "source_node_id")?,
-                    ),
+                    source_node_id: stored.source_node_id.map(crate::NodeId::new),
                 }
             }
             other => return Err(self.corrupt(format!("unknown relation_kind `{other}`"))),
@@ -430,7 +428,7 @@ impl SessionMetaCodec {
             },
             "fork" => SessionLineage::Fork {
                 source_session_id: self.required(source_session_id, "source_session_id")?,
-                source_node_id: self.required(source_node_id, "source_node_id")?,
+                source_node_id,
             },
             other => return Err(self.corrupt(format!("unknown relation_kind `{other}`"))),
         })

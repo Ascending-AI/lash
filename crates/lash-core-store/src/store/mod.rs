@@ -80,7 +80,7 @@ pub use record_schema_version::{
 };
 
 pub use crate::session_graph::RealizedNodeTimestamp;
-pub use crate::session_store_factory_types::SessionLookup;
+pub use crate::session_store_factory_types::{RetainedRevision, Retention, SessionLookup, Target};
 pub use admission_plan::{
     IngressRowId, IngressSettlement, ROOT_ADMISSION_STEP, TerminalProcessWake, TurnLaneStop,
     deferred_wake_records, plan_checkpoint_input_admission, plan_next_turn_input_admission,

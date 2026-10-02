@@ -900,10 +900,11 @@ impl PostgresStore {
         // Existing sessions already hold the row lock and the session-keyed
         // advisory lock, so for them it can no longer disagree with the
         // verdict.
+        let head_json = encode_json(&meta.payload())?;
         let head_write = sqlx::query(session_sql().head_postgres.upsert_cas.sql())
             .bind(commit.session_id.as_str())
             .bind(sql_head_revision)
-            .bind(encode_json(&meta.payload())?)
+            .bind(&head_json)
             .bind(checkpoint_ref.as_str())
             .bind(meta.leaf_node_id.as_deref())
             .bind(plan.actual_head_revision() as i64)
@@ -959,12 +960,31 @@ impl PostgresStore {
             now,
         )
         .await?;
-        sqlx::query(session_sql().meta.touch_last_commit.sql())
-            .bind(commit.session_id.as_str())
-            .bind(i64::try_from(now).unwrap_or(i64::MAX))
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
+        let retention =
+            sqlx::query_as::<_, (String, Option<i64>)>(session_sql().meta.touch_last_commit.sql())
+                .bind(commit.session_id.as_str())
+                .bind(i64::try_from(now).unwrap_or(i64::MAX))
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(store_sqlx_error)?
+                .map_or(
+                    Ok(lash_core_execution::Retention::default()),
+                    |(kind, last_turns)| {
+                        lash_core_execution::Retention::from_stored(&kind, last_turns)
+                    },
+                )?;
+        // The published head is a retained revision from this transaction
+        // on. Recording it reads no pin: a pin resolves to it by query
+        // whenever something asks.
+        crate::revisions::record_revision_tx(
+            &mut tx,
+            &commit.session_id,
+            sql_head_revision,
+            meta.leaf_node_id.as_deref(),
+            Some(checkpoint_ref.as_str()),
+            &head_json,
+        )
+        .await?;
         if plan.head_changed()
             && let Some(old_leaf_node_id) = plan.old_leaf_node_id()
         {
@@ -993,6 +1013,13 @@ impl PostgresStore {
                 &write.into_terminal(commit.session_id.clone(), plan.next_head_revision(), now),
             )
             .await?;
+        }
+        // `until_gc` releases nothing here and reads no pin. The other
+        // policies release what this publication moved out of their window,
+        // once the root's terminal names it.
+        if retention.releases_at_commit() {
+            crate::revisions::release_unretained_tx(&mut tx, false, Some(&commit.session_id))
+                .await?;
         }
         let mut result = plan.result(checkpoint_ref, manifest);
         result.turn_cancel_input_outcome = turn_cancel_input_outcome;

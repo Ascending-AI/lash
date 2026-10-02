@@ -569,15 +569,16 @@ pub mod persistence {
     /// Durable session-store inputs and outputs exposed to storage integrators.
     pub use lash_core::runtime::{
         ActiveTurnIngress, AdmissionBoundary, AdmittedQueuedWork, AdmittedTurnInputs,
-        DeliveryPolicy, DeploymentStore, DeploymentStoreDecorator, ForkPoint, ForkSessionReceipt,
+        DeliveryPolicy, DeploymentStore, DeploymentStoreDecorator, ForkSessionReceipt,
         ForkSessionRequest, LiveReplayOutcome, LiveReplaySubscription, PROCESS_WAKE_MERGE_KEY,
         PendingTurnInputBatch, PendingTurnInputDraft, ProcessWakeSource, QueuedCheckpointTurnInput,
         QueuedCheckpointWork, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
         QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkKind, QueuedWorkPayload,
-        RuntimeCheckpointComponents, RuntimeSessionState, SessionCreationHead, SessionCursorError,
-        SessionStoreCreateRequest, TurnInputAdmissionMode, TurnInputCheckpointBoundary,
-        TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputState,
-        TurnInputStateKind, TurnLaneAdmissionPolicy,
+        RetainedRevision, Retention, RuntimeCheckpointComponents, RuntimeSessionState,
+        SessionCreationHead, SessionCursorError, SessionStoreCreateRequest, Target,
+        TurnInputAdmissionMode, TurnInputCheckpointBoundary, TurnInputCompletion,
+        TurnInputCompletionData, TurnInputIngress, TurnInputState, TurnInputStateKind,
+        TurnLaneAdmissionPolicy,
     };
     pub use lash_core::session_graph::RealizedNodeTimestamp;
     /// The artifact-cleanup ledger a [`StoreSet`](crate::StoreSet) hands out
@@ -1669,3 +1670,6 @@ pub mod provider {
 }
 
 pub use crate::core::ForkRequest;
+/// What a pin or a fork names, what a session retains, and a retained point
+/// (FIG-4731).
+pub use lash_core::{RetainedRevision, Retention, Target};

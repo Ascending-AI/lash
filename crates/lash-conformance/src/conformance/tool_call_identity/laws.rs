@@ -1379,10 +1379,11 @@ pub async fn fork_inherits_history_without_execution_queues_waits_or_journals_on
                 .fork_session(&crate::ForkSessionRequest {
                     pending_observer_intents: Vec::new(),
                     session_id: branch.clone(),
-                    node_id: leaf.clone(),
+                    source_session_id: world.session_id.clone(),
+                    head_revision: before.head_revision,
                     relation: crate::SessionRelation::Fork {
                         source_session_id: world.session_id.clone(),
-                        source_node_id: leaf.clone(),
+                        source_node_id: Some(leaf.clone()),
                     },
                     config: crate::testing::mock_session_policy().into(),
                 })

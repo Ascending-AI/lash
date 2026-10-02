@@ -96,8 +96,8 @@ pub use session_manager::take_spawned_child_runtimes;
 mod session_ops;
 use lash_core_store::session_store_factory_types;
 pub use session_store_factory_types::{
-    ForkPoint, ForkSessionReceipt, ForkSessionRequest, SessionCreationHead,
-    SessionStoreCreateRequest,
+    ForkSessionReceipt, ForkSessionRequest, RetainedRevision, Retention, SessionCreationHead,
+    SessionStoreCreateRequest, Target,
 };
 #[cfg(feature = "testing")]
 pub mod state;

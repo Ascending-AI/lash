@@ -96,6 +96,16 @@ crate::statements! {
         /// The control intent session `?1` is closing under, if any.
         select_closing_intent = "SELECT closing_intent FROM session_meta WHERE session_id = ?1";
 
+        /// The retention policy of session `?1`: its kind and, for
+        /// `last_turns`, the window.
+        select_retention = "SELECT retention_kind, retention_last_turns FROM session_meta
+             WHERE session_id = ?1";
+
+        /// Set session `?1`'s retention policy to kind `?2` with window `?3`.
+        set_retention = "UPDATE session_meta
+             SET retention_kind = ?2, retention_last_turns = ?3
+             WHERE session_id = ?1";
+
         /// Retain checkpoint `?2` (or nothing) as the base session `?1`'s
         /// latest turn was admitted on, replacing the previous admission's
         /// (FIG-3682). Maintenance keeps it as a checkpoint root, so a replay
@@ -114,7 +124,12 @@ crate::statements! {
         /// The durable session-state version marker of `?1`.
         select_state_version = "SELECT session_state_version FROM session_meta WHERE session_id = ?1";
 
-        touch_last_commit = "UPDATE session_meta SET last_commit_at_ms = ?2 WHERE session_id = ?1";
+        /// Stamp `?1`'s last commit at `?2` and answer its retention policy,
+        /// which decides whether the commit releases revisions: one
+        /// statement, so a head commit reads the policy without a round trip
+        /// of its own.
+        touch_last_commit = "UPDATE session_meta SET last_commit_at_ms = ?2 WHERE session_id = ?1
+             RETURNING retention_kind, retention_last_turns";
 
         /// Stamp `?1`'s session-state version marker to `?2`.
         ///

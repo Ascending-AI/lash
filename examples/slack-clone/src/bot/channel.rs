@@ -668,13 +668,8 @@ impl ChannelBot {
             // send, so no turn runs and no token is spent for it. A thread
             // rooted at this message forks from the channel head *before* it.
             if record.thread_ts.is_none() {
-                threads::retain_admission_boundary(
-                    &self.core,
-                    &self.ledger,
-                    &session,
-                    &record.event_id,
-                )
-                .await?;
+                threads::retain_admission_boundary(&self.ledger, &session, &record.event_id)
+                    .await?;
             }
             self.settle(record, Stage::Folded { reason: None }).await?;
             return Ok(DeliveryOutcome::Folded {
@@ -836,8 +831,7 @@ impl ChannelBot {
         };
 
         if record.thread_ts.is_none() {
-            threads::retain_applied_turn_boundary(&self.core, &self.ledger, session, input_id)
-                .await?;
+            threads::retain_applied_turn_boundary(&self.ledger, session, input_id).await?;
         }
 
         if matches!(
@@ -892,8 +886,7 @@ impl ChannelBot {
         input_id: &str,
     ) -> Result<DeliveryOutcome> {
         if record.thread_ts.is_none() {
-            threads::retain_applied_turn_boundary(&self.core, &self.ledger, session, input_id)
-                .await?;
+            threads::retain_applied_turn_boundary(&self.ledger, session, input_id).await?;
         }
         // The application was read from the store, so the transcript comes
         // from the same authority: a handle opened before an engine-driven

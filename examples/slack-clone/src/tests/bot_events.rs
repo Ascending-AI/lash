@@ -713,7 +713,7 @@ async fn a_thread_fork_shares_a_committed_channel_turn_by_provenance() {
         .expect("read ledger")
         .expect("root row");
     assert!(
-        root_record.input_id.is_some() && root_record.fork_node_id.is_some(),
+        root_record.input_id.is_some() && root_record.fork_revision.is_some(),
         "typed application correlation records the retained boundary: {root_record:?}"
     );
 
@@ -940,7 +940,7 @@ async fn recovery_records_the_applied_turns_boundary_after_a_later_turn_commits(
         .await
         .expect("read older root")
         .expect("older root row")
-        .fork_node_id
+        .fork_revision
         .expect("older turn boundary was initially recorded");
 
     // Reconstruct a crash after pinning the committed boundary but before the
@@ -958,7 +958,7 @@ async fn recovery_records_the_applied_turns_boundary_after_a_later_turn_commits(
     rusqlite::Connection::open(bot_dir.join("events.db"))
         .expect("open ledger for crash staging")
         .execute(
-            "UPDATE event_routes SET fork_node_id = NULL WHERE fork_node_id = ?1",
+            "UPDATE event_routes SET fork_revision = NULL WHERE fork_revision = ?1",
             rusqlite::params![older_boundary],
         )
         .expect("remove the unrecorded boundary");
@@ -980,7 +980,7 @@ async fn recovery_records_the_applied_turns_boundary_after_a_later_turn_commits(
         .await
         .expect("read later mention")
         .expect("later mention row")
-        .fork_node_id
+        .fork_revision
         .expect("later turn boundary");
     assert_ne!(
         older_boundary, later_boundary,
@@ -996,13 +996,13 @@ async fn recovery_records_the_applied_turns_boundary_after_a_later_turn_commits(
         .expect("read recovered root")
         .expect("recovered root row");
     assert_eq!(
-        recovered_root.fork_node_id.as_deref(),
-        Some(older_boundary.as_str()),
+        recovered_root.fork_revision,
+        Some(older_boundary),
         "recovery must retain the older applied turn, not the channel's current head"
     );
     assert_ne!(
-        recovered_root.fork_node_id.as_deref(),
-        Some(later_boundary.as_str()),
+        recovered_root.fork_revision,
+        Some(later_boundary),
         "post-root channel content must not become part of the root fork"
     );
     assert_eq!(root.to_string(), recovered_root.message_ts);
@@ -1044,22 +1044,22 @@ async fn thread_open_rederives_a_missing_root_boundary_from_its_application() {
         .expect("read committed root")
         .expect("committed root row");
     let root_boundary = recorded_root
-        .fork_node_id
+        .fork_revision
         .expect("root boundary initially recorded");
     assert!(
         recorded_root.input_id.is_some(),
         "root keeps durable input identity"
     );
 
-    // Crash between pin and record_fork_node_for_inputs: the retained point and
-    // application survive, but this root route lacks its fork-node projection.
+    // Crash between pin and record_fork_revision_for_inputs: the pin and the
+    // application survive, but this root route lacks its fork-revision projection.
     rusqlite::Connection::open(bot_dir.join("events.db"))
         .expect("open ledger for crash staging")
         .execute(
-            "UPDATE event_routes SET fork_node_id = NULL WHERE event_id = ?1",
+            "UPDATE event_routes SET fork_revision = NULL WHERE event_id = ?1",
             rusqlite::params![root_event.event_id],
         )
-        .expect("remove root fork-node projection");
+        .expect("remove root fork-revision projection");
 
     platform
         .say(
@@ -1105,8 +1105,8 @@ async fn thread_open_rederives_a_missing_root_boundary_from_its_application() {
         .expect("read repaired root")
         .expect("repaired root row");
     assert_eq!(
-        repaired_root.fork_node_id.as_deref(),
-        Some(root_boundary.as_str()),
+        repaired_root.fork_revision,
+        Some(root_boundary),
         "thread-open repairs the durable root projection"
     );
 }

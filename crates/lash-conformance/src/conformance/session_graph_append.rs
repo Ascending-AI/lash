@@ -250,10 +250,14 @@ async fn abandoned_branch_scenario(
         0,
     ))
     .await;
-    factory
-        .pin(&crate::NodeId::from(fork_point.as_str()))
-        .await
-        .expect("retain the rewind target");
+    // The rewind target is the revision this append published: the source
+    // retains it without a pin until the host collects.
+    let fork_revision = super::helpers::revision_at(
+        factory.as_ref(),
+        &source_request.session_id,
+        fork_point.as_str(),
+    )
+    .await;
     // The base the caller read and derived from, on the line that is about to
     // be abandoned.
     let abandoned_base = Box::pin(append_conformance_plugin_node(
@@ -267,7 +271,8 @@ async fn abandoned_branch_scenario(
     let branch_request = crate::ForkSessionRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(format!("{prefix}-branch")),
-        node_id: fork_point.clone().into(),
+        source_session_id: source_request.session_id.clone(),
+        head_revision: fork_revision,
         relation: crate::SessionRelation::Root,
         config: source_request.config.session_policy().into(),
     };

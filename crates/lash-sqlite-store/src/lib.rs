@@ -97,6 +97,7 @@ mod codec;
 mod conn;
 mod connection_sql;
 mod retention;
+mod revisions;
 pub(crate) use codec::*;
 
 fn commit_count_entropy_seed() -> u64 {

@@ -204,7 +204,7 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
                 &request,
                 crate::SessionRelation::Fork {
                     source_session_id: SessionId::from("admission-parent"),
-                    source_node_id: "admission-node".into(),
+                    source_node_id: Some("admission-node".into()),
                 },
             ))
             .await
@@ -290,7 +290,7 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
         "admission-model",
         crate::SessionRelation::Fork {
             source_session_id: fork_source_session_id.clone(),
-            source_node_id: "admission-fork-node".into(),
+            source_node_id: Some("admission-fork-node".into()),
         },
     );
     let fork_store = factory
@@ -323,7 +323,7 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
                 &fork_request,
                 crate::SessionRelation::Fork {
                     source_session_id: fork_source_session_id.clone(),
-                    source_node_id: "admission-fork-other-node".into(),
+                    source_node_id: Some("admission-fork-other-node".into()),
                 },
             ))
             .await

@@ -427,17 +427,18 @@ pub async fn history_fork_respects_ceiling(store: Arc<dyn ConformanceDeployment>
     let frame = open_frame(&mut source, "history-fork-middle");
     append_nodes(&mut source, 1);
     commit(store.as_ref(), &mut source).await;
-    // A pin retains a live tip, so the fork point is pinned while it is the
-    // source's leaf, before the source grows past it.
+    // The fork point is a revision the source published and then grew past;
+    // it stays forkable with no pin until the host collects.
     let fork_point = active_tail(&source, 1).remove(0);
-    store.pin(&fork_point).await.expect("retain fork point");
+    let fork_revision = source.head_revision;
     append_nodes(&mut source, 1);
     commit(store.as_ref(), &mut source).await;
     let middle = [fork_point, active_tail(&source, 1).remove(0)];
     store
         .fork_session(&ForkSessionRequest {
             session_id: SessionId::from("history-fork-child"),
-            node_id: middle[0].clone(),
+            source_session_id: source.session_id.clone(),
+            head_revision: fork_revision,
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
             config: SessionPolicy::new(TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
@@ -470,7 +471,8 @@ pub async fn history_fork_respects_ceiling(store: Arc<dyn ConformanceDeployment>
     store
         .fork_session(&ForkSessionRequest {
             session_id: grandchild.clone(),
-            node_id: middle[0].clone(),
+            source_session_id: child.clone(),
+            head_revision: 0,
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
             config: SessionPolicy::new(TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
@@ -501,12 +503,20 @@ pub async fn history_fork_respects_ceiling(store: Arc<dyn ConformanceDeployment>
     );
 }
 
-/// Fork `child` from `source` at `node_id` with a root relation.
-async fn fork_at(store: &dyn ConformanceDeployment, child: &SessionId, node_id: &NodeId) {
+/// Fork `child` from `source`'s newest revision at `node_id` with a root
+/// relation.
+async fn fork_at(
+    store: &dyn ConformanceDeployment,
+    source: &SessionId,
+    child: &SessionId,
+    node_id: &NodeId,
+) {
+    let head_revision = super::helpers::revision_at(store, source, node_id.as_str()).await;
     store
         .fork_session(&ForkSessionRequest {
             session_id: child.clone(),
-            node_id: node_id.clone(),
+            source_session_id: source.clone(),
+            head_revision,
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
             config: SessionPolicy::new(TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
@@ -555,7 +565,7 @@ pub async fn inflated_fork_ceiling_cannot_expose_post_fork_source_nodes(
     commit(store.as_ref(), &mut source).await;
     let [a0, a1] = <[NodeId; 2]>::try_from(active_tail(&source, 2)).expect("A0 and A1");
     let child = SessionId::from("inflated-ceiling-child");
-    fork_at(store.as_ref(), &child, &a1).await;
+    fork_at(store.as_ref(), &source.session_id, &child, &a1).await;
     append_nodes(&mut source, 1);
     commit(store.as_ref(), &mut source).await;
     let a2 = active_tail(&source, 1).remove(0);

@@ -22,214 +22,6 @@ async fn open_factory_catalog(
     Ok(conn)
 }
 
-fn retained_fork_config_conn(
-    conn: &rusqlite::Connection,
-    node_id: &str,
-    fleet: lash_core_execution::FleetFormat,
-) -> Result<lash_core_execution::PersistedSessionConfig, lash_core_execution::StoreError> {
-    let frame_node_id =
-        persistence::nearest_frame_node_id_conn(conn, node_id)?.ok_or_else(|| {
-            lash_core_execution::StoreError::MissingFrameOpenAncestor {
-                leaf_node_id: node_id.to_string().into(),
-            }
-        })?;
-    let (parent_node_id, node_json) = conn
-        .query_row(
-            session_sql().graph_sqlite.select_frame_body.sql(),
-            params![frame_node_id],
-            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?)),
-        )
-        .optional()
-        .map_err(sqlite_error)?
-        .ok_or_else(|| {
-            lash_core_execution::StoreError::Backend(format!(
-                "retained frame node `{frame_node_id}` is missing"
-            ))
-        })?;
-    lash_core_execution::SessionNodeRecord::decode_storage_body_for_fleet(
-        frame_node_id.clone(),
-        parent_node_id,
-        &node_json,
-        fleet,
-    )
-    .map_err(|error| {
-        crate::stored_data_corrupt(
-            "SessionNodeRecord",
-            format_args!("failed to decode retained frame node `{frame_node_id}`: {error}"),
-        )
-    })?
-    .frame_config()
-    .ok_or_else(|| {
-        lash_core_execution::StoreError::Backend(format!(
-            "retained frame node `{frame_node_id}` has no frame assignment"
-        ))
-    })
-}
-
-pub(super) async fn pin_in_catalog(
-    catalog: &DatabaseLocation,
-    node_id: &str,
-    policy: SqliteConnectionPolicy,
-) -> Result<lash_core_execution::ForkPoint, lash_core_execution::StoreError> {
-    let conn = open_factory_catalog(catalog, policy).await?;
-    let node_id = node_id.to_string();
-    conn.write_flow(move |tx| {
-        let outcome: Result<lash_core_execution::ForkPoint, lash_core_execution::StoreError> =
-            (|| {
-                let fleet_format =
-                    crate::compat::read_recorded(tx, lash_core_execution::FleetFormat::writable())
-                        .map_err(sqlite_error)?;
-                if let Some((checkpoint_ref, source_session_id)) = tx
-                    .query_row(
-                        session_sql().anchors.select_by_node.sql(),
-                        params![node_id],
-                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-                    )
-                    .optional()
-                    .map_err(sqlite_error)?
-                {
-                    let config = retained_fork_config_conn(tx, &node_id, fleet_format)?;
-                    return Ok(lash_core_execution::ForkPoint {
-                        node_id: node_id.into(),
-                        checkpoint_ref: checkpoint_ref.into(),
-                        source_session_id: SessionId::from(source_session_id),
-                        config,
-                        pinned: true,
-                    });
-                }
-                let retained = tx
-                    .query_row(
-                        session_sql().head_sqlite.select_retained_by_leaf.sql(),
-                        params![node_id],
-                        |row| {
-                            Ok((
-                                SessionId::from(row.get::<_, String>(0)?),
-                                row.get::<_, String>(1)?,
-                            ))
-                        },
-                    )
-                    .optional()
-                    .map_err(sqlite_error)?;
-                let (source_session_id, checkpoint_ref) = retained.ok_or_else(|| {
-                    lash_core_execution::StoreError::ForkPointNotRetained {
-                        node_id: node_id.clone().into(),
-                    }
-                })?;
-                let live = tx
-                    .query_row(
-                        session_sql().graph_sqlite.exists_live.sql(),
-                        params![node_id],
-                        |_| Ok(()),
-                    )
-                    .optional()
-                    .map_err(sqlite_error)?
-                    .is_some();
-                if !live {
-                    return Err(lash_core_execution::StoreError::ForkPointNotRetained {
-                        node_id: node_id.clone().into(),
-                    });
-                }
-                crate::conn::cached_execute(
-                    tx,
-                    session_sql().anchors.insert.sql(),
-                    params![node_id, checkpoint_ref, source_session_id.as_str()],
-                )
-                .map_err(sqlite_error)?;
-                let config = retained_fork_config_conn(tx, &node_id, fleet_format)?;
-                Ok(lash_core_execution::ForkPoint {
-                    node_id: node_id.into(),
-                    checkpoint_ref: checkpoint_ref.into(),
-                    source_session_id,
-                    config,
-                    pinned: true,
-                })
-            })();
-        Ok(match outcome {
-            Ok(value) => TxOutcome::Commit(Ok(value)),
-            Err(err) => TxOutcome::Rollback(Err(err)),
-        })
-    })
-    .await
-    .map_err(sqlite_error)?
-}
-
-pub(super) async fn unpin_in_catalog(
-    catalog: &DatabaseLocation,
-    node_id: &str,
-    policy: SqliteConnectionPolicy,
-) -> Result<(), lash_core_execution::StoreError> {
-    let conn = open_factory_catalog(catalog, policy).await?;
-    let node_id = node_id.to_string();
-    conn.write_flow(move |tx| {
-        let outcome: Result<(), lash_core_execution::StoreError> = (|| {
-            let removed = tx
-                .execute(session_sql().anchors.delete_by_node.sql(), params![node_id])
-                .map_err(sqlite_error)?;
-            if removed == 1 {
-                persistence::retire_unreachable_ancestry_conn(tx, &node_id)?;
-            }
-            Ok(())
-        })();
-        Ok(match outcome {
-            Ok(value) => TxOutcome::Commit(Ok(value)),
-            Err(err) => TxOutcome::Rollback(Err(err)),
-        })
-    })
-    .await
-    .map_err(sqlite_error)?
-}
-
-pub(super) async fn fork_points_in_catalog(
-    catalog: &DatabaseLocation,
-    policy: SqliteConnectionPolicy,
-) -> Result<Vec<lash_core_execution::ForkPoint>, lash_core_execution::StoreError> {
-    let conn = open_factory_catalog(catalog, policy).await?;
-    conn.call(|conn| {
-        let tx = conn.transaction()?;
-        let outcome: Result<Vec<lash_core_execution::ForkPoint>, lash_core_execution::StoreError> =
-            (|| {
-                let fleet_format =
-                    crate::compat::read_recorded(&tx, lash_core_execution::FleetFormat::writable())
-                        .map_err(sqlite_error)?;
-                let mut stmt = tx
-                    .prepare(session_sql().head_sqlite.select_fork_points.sql())
-                    .map_err(sqlite_error)?;
-                let rows = stmt
-                    .query_map([], |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                            row.get::<_, i64>(3)? != 0,
-                        ))
-                    })
-                    .map_err(sqlite_error)?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(sqlite_error)?;
-                rows.into_iter()
-                    .map(|(node_id, checkpoint_ref, source_session_id, pinned)| {
-                        Ok(lash_core_execution::ForkPoint {
-                            config: retained_fork_config_conn(&tx, &node_id, fleet_format)?,
-                            node_id: node_id.into(),
-                            checkpoint_ref: lash_core_execution::BlobRef(checkpoint_ref),
-                            source_session_id: SessionId::from(source_session_id),
-                            pinned,
-                        })
-                    })
-                    .collect()
-            })();
-        match outcome {
-            Ok(points) => {
-                tx.commit()?;
-                Ok(Ok(points))
-            }
-            Err(error) => Ok(Err(error)),
-        }
-    })
-    .await
-    .map_err(sqlite_error)?
-}
-
 pub(super) async fn fork_at_in_catalog(
     catalog: &DatabaseLocation,
     request: &lash_core_execution::ForkSessionRequest,
@@ -251,7 +43,7 @@ pub(super) async fn fork_at_in_catalog(
             )
             .map_err(sqlite_error)?;
             // Keep the fork fences in the shared order: exists -> deleted ->
-            // retained -> live -> frame.
+            // retained revision -> live leaf -> frame.
             let exists = tx
                 .query_row(
                     session_sql().meta_sqlite.exists_materialized.sql(),
@@ -280,151 +72,193 @@ pub(super) async fn fork_at_in_catalog(
                     session_id: request.session_id.clone(),
                 });
             }
+            // The revision row is the retained point. No other revision is
+            // ever forked in its place.
+            let source_session_id = request.source_session_id.clone();
+            let pruned = || lash_core_execution::StoreError::ForkTargetPruned {
+                session_id: source_session_id.clone(),
+                target: lash_core_execution::Target::Revision(request.head_revision),
+            };
+            let sql_revision = i64::try_from(request.head_revision).map_err(|_| pruned())?;
             let retained = tx
                 .query_row(
-                    session_sql().head_sqlite.select_retained_checkpoint.sql(),
-                    params![request.node_id.as_str()],
-                    |row| Ok((SessionId::from(row.get::<_, String>(0)?), row.get::<_, String>(1)?)),
-                )
-                .optional()
-                .map_err(sqlite_error)?;
-            let (source_session_id, mut checkpoint_ref) =
-                retained.ok_or_else(|| lash_core_execution::StoreError::ForkPointNotRetained {
-                    node_id: request.node_id.clone(),
-                })?;
-            // The relation records which session the host branched from, while
-            // the retained point records which session originally wrote the
-            // node. Those identities legitimately differ after a rewind.
-            let live = tx
-                .query_row(
-                    session_sql().graph_sqlite.exists_live.sql(),
-                    params![request.node_id.as_str()],
-                    |_| Ok(()),
-                )
-                .optional()
-                .map_err(sqlite_error)?
-                .is_some();
-            if !live {
-                return Err(lash_core_execution::StoreError::ForkPointNotRetained {
-                    node_id: request.node_id.clone(),
-                });
-            }
-            let node_facts = tx
-                .query_row(
-                    session_sql().graph_sqlite.select_owner_generation.sql(),
-                    params![request.node_id.as_str()],
+                    session_sql().revisions.select.sql(),
+                    params![source_session_id.as_str(), sql_revision],
                     |row| {
                         Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, i64>(1)?,
+                            row.get::<_, Option<String>>(0)?,
+                            row.get::<_, Option<String>>(1)?,
                         ))
                     },
                 )
                 .optional()
                 .map_err(sqlite_error)?;
-            let (_owning_session_id, fork_generation) = node_facts
-                .ok_or_else(|| lash_core_execution::StoreError::ForkPointNotRetained {
-                    node_id: request.node_id.clone(),
-                })?;
-            let current_frame_node_id = persistence::nearest_frame_node_id_conn(tx, &request.node_id)?
-                .ok_or_else(|| lash_core_execution::StoreError::MissingFrameOpenAncestor {
-                    leaf_node_id: request.node_id.clone(),
-                })?;
-            let frame_node_id = lash_core_execution::FrameNodeId::new(current_frame_node_id.clone())
-                .map_err(|error| stored_data_corrupt("fork frame", error))?;
-            let source_frame = lash_core_execution::ArtifactReferrer::FrameEnvironment(
-                lash_core_execution::FrameEnvironmentId::new(source_session_id.clone(), frame_node_id.clone()),
-            );
-            let fork_frame = lash_core_execution::ArtifactReferrer::FrameEnvironment(
-                lash_core_execution::FrameEnvironmentId::new(request.session_id.clone(), frame_node_id.clone()),
-            );
-            let source_frame_ended = crate::artifact_store::artifact_fenced_tx(tx, &source_frame)
-                .map_err(sqlite_error)?;
-            if source_frame_ended {
-                let mut checkpoint = SqliteStore::get_checkpoint_conn(
-                    tx, &BlobRef(checkpoint_ref.clone()), fleet_format,
-                )?.ok_or_else(|| stored_data_corrupt("fork checkpoint", "the retained checkpoint is missing"))?;
-                checkpoint.components.retain(|key, _| {
-                    key != lash_core_execution::store::EXECUTION_STATE_CHECKPOINT_COMPONENT
-                        && !matches!(lash_core_execution::plugin::CheckpointComponentKey::parse(key), lash_core_execution::plugin::CheckpointComponentKey::ExecutionLeaf(_))
-                });
-                checkpoint_ref = SqliteStore::put_checkpoint_conn(tx, &checkpoint, blob_profile, fleet_format)?
-                    .checkpoint_ref.as_str().to_owned();
-            } else {
-                crate::conn::cached_execute(tx,
-                    crate::artifact_store::artifact_sql().edges.copy_referrer_edges.sql(),
-                    params![source_frame.kind().as_str(), source_frame.canonical_id(),
-                        fork_frame.kind().as_str(), fork_frame.canonical_id()],
-                ).map_err(sqlite_error)?;
-            }
-            let fork_generation = u64::try_from(fork_generation).map_err(|_| {
-                stored_data_corrupt(
-                    "SessionGraph node",
-                    format!("negative generation {fork_generation}"),
-                )
-            })?;
-            let mut edge_path = Vec::new();
-            let mut current_node_id = request.node_id.clone();
-            let mut expected_generation = fork_generation;
-            loop {
-                let facts = tx
+            let Some((leaf_node_id, mut checkpoint_ref)) = retained else {
+                persistence::ensure_session_not_deleted_conn(tx, &source_session_id)?;
+                let source_exists = tx
                     .query_row(
-                        session_sql().graph_sqlite.select_edge.sql(),
-                        params![current_node_id.as_str()],
-                        |row| {
-                            Ok((
-                                row.get::<_, String>(0)?,
-                                row.get::<_, Option<String>>(1)?,
-                                row.get::<_, String>(2)?,
-                                row.get::<_, i64>(3)?,
-                            ))
-                        },
+                        session_sql().meta_sqlite.exists_materialized.sql(),
+                        params![source_session_id.as_str()],
+                        |_| Ok(()),
                     )
                     .optional()
                     .map_err(sqlite_error)?
-                    .ok_or_else(|| {
-                        stored_data_corrupt(
-                            "SessionGraph",
-                            format!(
-                                "retained fork path is missing or tombstoned at `{current_node_id}`"
-                            ),
-                        )
-                    })?;
-                let generation = u64::try_from(facts.3).map_err(|_| {
+                    .is_some();
+                return Err(if source_exists {
+                    pruned()
+                } else {
+                    lash_core_execution::StoreError::SessionNotFound {
+                        session_id: source_session_id.clone(),
+                    }
+                });
+            };
+            let mut current_frame_node_id = None;
+            let mut fork_plan = None;
+            if let Some(leaf_node_id) = leaf_node_id.as_deref() {
+                // Retirement never tombstones a retained revision's leaf, so
+                // a dead one is damage, not a collected point.
+                let node_facts = tx
+                    .query_row(
+                        session_sql().graph_sqlite.select_owner_generation.sql(),
+                        params![leaf_node_id],
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                    )
+                    .optional()
+                    .map_err(sqlite_error)?;
+                let (_owning_session_id, fork_generation) = node_facts.ok_or_else(|| {
                     stored_data_corrupt(
-                        "SessionGraph node",
-                        format!("negative generation {}", facts.3),
+                        "SessionRevision",
+                        format!(
+                            "revision {} of session `{source_session_id}` retains leaf \
+                             `{leaf_node_id}`, which is missing or tombstoned",
+                            request.head_revision
+                        ),
                     )
                 })?;
-                if generation != expected_generation {
-                    return Err(stored_data_corrupt(
-                        "SessionGraph",
-                        format!(
-                            "parent generation {generation} does not match expected {expected_generation}"
-                        ),
-                    ));
+                let frame = persistence::nearest_frame_node_id_conn(tx, leaf_node_id)?
+                    .ok_or_else(|| lash_core_execution::StoreError::MissingFrameOpenAncestor {
+                        leaf_node_id: leaf_node_id.to_string().into(),
+                    })?;
+                let frame_node_id = lash_core_execution::FrameNodeId::new(frame)
+                    .map_err(|error| stored_data_corrupt("fork frame", error))?;
+                let source_frame = lash_core_execution::ArtifactReferrer::FrameEnvironment(
+                    lash_core_execution::FrameEnvironmentId::new(source_session_id.clone(), frame_node_id.clone()),
+                );
+                let fork_frame = lash_core_execution::ArtifactReferrer::FrameEnvironment(
+                    lash_core_execution::FrameEnvironmentId::new(request.session_id.clone(), frame_node_id.clone()),
+                );
+                let source_frame_ended = crate::artifact_store::artifact_fenced_tx(tx, &source_frame)
+                    .map_err(sqlite_error)?;
+                if source_frame_ended {
+                    if let Some(retained_ref) = checkpoint_ref.clone() {
+                        let mut checkpoint = SqliteStore::get_checkpoint_conn(
+                            tx, &BlobRef(retained_ref), fleet_format,
+                        )?.ok_or_else(|| stored_data_corrupt("fork checkpoint", "the retained checkpoint is missing"))?;
+                        checkpoint.components.retain(|key, _| {
+                            key != lash_core_execution::store::EXECUTION_STATE_CHECKPOINT_COMPONENT
+                                && !matches!(
+                                    lash_core_execution::plugin::CheckpointComponentKey::parse(key),
+                                    lash_core_execution::plugin::CheckpointComponentKey::ExecutionLeaf(_)
+                                )
+                        });
+                        checkpoint_ref = Some(
+                            SqliteStore::put_checkpoint_conn(tx, &checkpoint, blob_profile, fleet_format)?
+                                .checkpoint_ref.as_str().to_owned(),
+                        );
+                    }
+                } else {
+                    crate::conn::cached_execute(tx,
+                        crate::artifact_store::artifact_sql().edges.copy_referrer_edges.sql(),
+                        params![source_frame.kind().as_str(), source_frame.canonical_id(),
+                            fork_frame.kind().as_str(), fork_frame.canonical_id()],
+                    ).map_err(sqlite_error)?;
                 }
-                let parent_node_id = facts.1.clone();
-                edge_path.push(lash_core_execution::store::ForkNodeFacts {
-                    node_id: facts.0.into(),
-                    parent_node_id: facts.1.map(lash_core_execution::NodeId::from),
-                    owning_session_id: SessionId::from(facts.2),
-                    generation,
-                });
-                if expected_generation == 0 {
-                    break;
-                }
-                current_node_id = parent_node_id.ok_or_else(|| {
+                let fork_generation = u64::try_from(fork_generation).map_err(|_| {
                     stored_data_corrupt(
-                        "SessionGraph",
-                        "retained fork path ended before generation zero",
+                        "SessionGraph node",
+                        format!("negative generation {fork_generation}"),
                     )
-                })?.into();
-                expected_generation -= 1;
+                })?;
+                let mut edge_path = Vec::new();
+                let mut current_node_id = lash_core_execution::NodeId::from(leaf_node_id);
+                let mut expected_generation = fork_generation;
+                loop {
+                    let facts = tx
+                        .query_row(
+                            session_sql().graph_sqlite.select_edge.sql(),
+                            params![current_node_id.as_str()],
+                            |row| {
+                                Ok((
+                                    row.get::<_, String>(0)?,
+                                    row.get::<_, Option<String>>(1)?,
+                                    row.get::<_, String>(2)?,
+                                    row.get::<_, i64>(3)?,
+                                ))
+                            },
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?
+                        .ok_or_else(|| {
+                            stored_data_corrupt(
+                                "SessionGraph",
+                                format!(
+                                    "retained fork path is missing or tombstoned at `{current_node_id}`"
+                                ),
+                            )
+                        })?;
+                    let generation = u64::try_from(facts.3).map_err(|_| {
+                        stored_data_corrupt(
+                            "SessionGraph node",
+                            format!("negative generation {}", facts.3),
+                        )
+                    })?;
+                    if generation != expected_generation {
+                        return Err(stored_data_corrupt(
+                            "SessionGraph",
+                            format!(
+                                "parent generation {generation} does not match expected {expected_generation}"
+                            ),
+                        ));
+                    }
+                    let parent_node_id = facts.1.clone();
+                    edge_path.push(lash_core_execution::store::ForkNodeFacts {
+                        node_id: facts.0.into(),
+                        parent_node_id: facts.1.map(lash_core_execution::NodeId::from),
+                        owning_session_id: SessionId::from(facts.2),
+                        generation,
+                    });
+                    if expected_generation == 0 {
+                        break;
+                    }
+                    current_node_id = parent_node_id.ok_or_else(|| {
+                        stored_data_corrupt(
+                            "SessionGraph",
+                            "retained fork path ended before generation zero",
+                        )
+                    })?.into();
+                    expected_generation -= 1;
+                }
+                edge_path.reverse();
+                fork_plan = Some(lash_core_execution::store::ForkPlan::derive(
+                    &request.session_id,
+                    edge_path,
+                )?);
+                current_frame_node_id = Some(frame_node_id);
             }
-            edge_path.reverse();
-            let fork_plan =
-                lash_core_execution::store::ForkPlan::derive(&request.session_id, edge_path)?;
+            if let Some(checkpoint_ref) = checkpoint_ref.as_deref() {
+                let exists = tx
+                    .query_row(
+                        crate::artifact_store::artifact_sql().blobs_sqlite.select_exists.sql(),
+                        params![checkpoint_ref],
+                        |row| row.get::<_, bool>(0),
+                    )
+                    .map_err(sqlite_error)?;
+                if !exists {
+                    return Err(lash_core_execution::StoreError::CheckpointRootMissing {
+                        blob_ref: BlobRef(checkpoint_ref.to_owned()),
+                    });
+                }
+            }
             let config = request.config.clone();
             let meta = lash_core_execution::store::SessionHeadMeta::assemble(
                 &request.session_id,
@@ -439,21 +273,31 @@ pub(super) async fn fork_at_in_catalog(
                     published_by_drive: false,
                 },
                 0,
-                Some(checkpoint_ref.clone().into()),
-                Some(request.node_id.clone()),
-                Some(frame_node_id.clone()),
+                checkpoint_ref.clone().map(Into::into),
+                leaf_node_id.clone().map(Into::into),
+                current_frame_node_id,
             )?;
+            let head_json = encode_json(&meta.payload())?;
             crate::conn::cached_execute(tx,
                 session_sql().head_sqlite.insert_fork.sql(),
                 params![
                     request.session_id.as_str(),
-                    encode_json(&meta.payload())?,
-                    request.node_id.as_str(),
-                    checkpoint_ref
+                    head_json,
+                    leaf_node_id.as_deref(),
+                    checkpoint_ref.as_deref()
                 ],
             )
             .map_err(sqlite_error)?;
-            {
+            // The fork's own head is its first retained revision.
+            crate::revisions::record_revision_conn(
+                tx,
+                &request.session_id,
+                0,
+                leaf_node_id.as_deref(),
+                checkpoint_ref.as_deref(),
+                &head_json,
+            )?;
+            if let Some(fork_plan) = &fork_plan {
                 let mut stmt = tx
                     .prepare(
                         session_sql().lineage.insert.sql(),
@@ -488,8 +332,9 @@ pub(super) async fn fork_at_in_catalog(
             )?;
             Ok(lash_core_execution::ForkSessionReceipt {
                 session_id: request.session_id,
-                node_id: request.node_id,
                 source_session_id,
+                head_revision: request.head_revision,
+                leaf_node_id: leaf_node_id.map(Into::into),
                 observed_processes: Vec::new(),
             })
         })();

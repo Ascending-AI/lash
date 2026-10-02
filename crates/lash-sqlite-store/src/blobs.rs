@@ -50,7 +50,7 @@ lash_store_sql::statements! {
              WHERE candidate.hash = ?1
                AND NOT EXISTS (SELECT 1 FROM artifact_refs WHERE blob_ref = candidate.hash)
                AND NOT EXISTS (SELECT 1 FROM session_head WHERE checkpoint_ref = candidate.hash)
-               AND NOT EXISTS (SELECT 1 FROM node_anchors WHERE checkpoint_ref = candidate.hash)
+               AND NOT EXISTS (SELECT 1 FROM session_revisions WHERE checkpoint_ref = candidate.hash)
                AND NOT EXISTS (SELECT 1 FROM checkpoint_blob_refs WHERE blob_ref = candidate.hash)";
 
         /// Reclaim the session-delete candidate `?1` if nothing still roots it.
@@ -65,8 +65,8 @@ lash_store_sql::statements! {
                    WHERE head.checkpoint_ref = candidate.hash
                )
                AND NOT EXISTS (
-                   SELECT 1 FROM node_anchors AS anchor
-                   WHERE anchor.checkpoint_ref = candidate.hash
+                   SELECT 1 FROM session_revisions AS revision
+                   WHERE revision.checkpoint_ref = candidate.hash
                )
                AND NOT EXISTS (
                    SELECT 1 FROM session_meta AS meta

@@ -145,16 +145,21 @@ async fn seed(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
+/// Fork `source`'s newest revision at `node_id` into `session_id`.
 async fn fork(
     factory: &Arc<dyn DeploymentStore>,
+    source: &str,
     session_id: &SessionId,
     node_id: &str,
 ) -> SessionStore {
+    let source = SessionId::from(source);
+    let head_revision = super::helpers::revision_at(factory.as_ref(), &source, node_id).await;
     factory
         .fork_session(&ForkSessionRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.to_string()),
-            node_id: node_id.to_string().into(),
+            source_session_id: source,
+            head_revision,
             relation: SessionRelation::Root,
             config: crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
@@ -201,16 +206,20 @@ async fn append(store: &SessionStore, count: usize) -> Vec<lash_core::NodeId> {
 pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
     let factory = handles.factory;
     let injector = handles.injector;
-    let (source, mut source_nodes) = seed(&factory, &SessionId::from("lineage-a"), 1).await;
-    factory
-        .pin(&source_nodes[1])
-        .await
-        .expect("retain the first fork ceiling");
-    source_nodes = append(&source, 1).await;
-    let branch = fork(&factory, &SessionId::from("lineage-b"), &source_nodes[1]).await;
+    // The first fork ceiling is a revision the source grows past; it stays
+    // forkable with no pin.
+    let (source, _) = seed(&factory, &SessionId::from("lineage-a"), 1).await;
+    let source_nodes = append(&source, 1).await;
+    let branch = fork(
+        &factory,
+        "lineage-a",
+        &SessionId::from("lineage-b"),
+        &source_nodes[1],
+    )
+    .await;
     let branch_nodes = append(&branch, 2).await;
     let leaf = branch_nodes.last().expect("branch leaf").clone();
-    let deep = fork(&factory, &SessionId::from("lineage-c"), &leaf).await;
+    let deep = fork(&factory, "lineage-b", &SessionId::from("lineage-c"), &leaf).await;
 
     assert!(
         node_readable(&deep, &source_nodes[0])
@@ -271,7 +280,13 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
             .expect("deny unrelated node")
     );
 
-    let zero = fork(&factory, &SessionId::from("lineage-zero"), &source_nodes[1]).await;
+    let zero = fork(
+        &factory,
+        "lineage-a",
+        &SessionId::from("lineage-zero"),
+        &source_nodes[1],
+    )
+    .await;
     let zero_leaf = zero
         .load_session_window(WindowSelector::Current)
         .await
@@ -281,7 +296,13 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
         .leaf_node_id
         .clone()
         .expect("zero-node fork leaf");
-    let _collapsed = fork(&factory, &SessionId::from("lineage-collapsed"), &zero_leaf).await;
+    let _collapsed = fork(
+        &factory,
+        "lineage-zero",
+        &SessionId::from("lineage-collapsed"),
+        &zero_leaf,
+    )
+    .await;
     assert_eq!(
         injector
             .lineage_ancestors(&SessionId::from("lineage-collapsed"))
@@ -294,9 +315,11 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
     );
 
     let mut prior_leaf = source_nodes[1].clone();
+    let mut prior_session = "lineage-a".to_string();
     for depth in 0..12 {
         let session_id = SessionId::from(format!("lineage-chain-{depth}"));
-        let chained = fork(&factory, &session_id, &prior_leaf).await;
+        let chained = fork(&factory, &prior_session, &session_id, &prior_leaf).await;
+        prior_session = session_id.to_string();
         prior_leaf = append(&chained, 1)
             .await
             .last()
@@ -364,6 +387,7 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
     .await;
     let deleted_owner = fork(
         &factory,
+        "lineage-deleted-carrier-root",
         &SessionId::from("lineage-deleted-owner"),
         &carrier_root_nodes[0],
     )
@@ -373,12 +397,9 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
         .last()
         .expect("deleted owner appended node")
         .clone();
-    factory
-        .pin(&deleted_owner_node)
-        .await
-        .expect("pin deleted-owner fork point");
     let surviving_carrier = fork(
         &factory,
+        "lineage-deleted-owner",
         &SessionId::from("lineage-surviving-carrier"),
         &deleted_owner_node,
     )
@@ -388,8 +409,10 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
         .delete_session(&SessionId::from("lineage-deleted-owner"))
         .await
         .expect("delete node-owning intermediate session");
+    // The carrier's creation revision names the deleted owner's node.
     let recovered = fork(
         &factory,
+        "lineage-surviving-carrier",
         &SessionId::from("lineage-after-owner-delete"),
         &deleted_owner_node,
     )
@@ -429,8 +452,10 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
     );
 }
 
-/// Pin a non-root-owned node, delete its owner with no descendant carrier, and
-/// prove the later fork remains total over the retained edge path.
+/// Pin a non-root-owned revision and delete its owner with no descendant
+/// carrier: the pin is deleted with its session, so a fork of the revision
+/// refuses the deleted session, and the root the owner forked from keeps its
+/// own lineage whole.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -438,28 +463,64 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
 pub async fn fork_lineage_no_carrier_law(handles: LineageConformanceHandles) {
     let factory = handles.factory;
     let injector = handles.injector;
-    let (_root, root_nodes) = seed(&factory, &SessionId::from("no-carrier-root"), 1).await;
+    let root_id = SessionId::from("no-carrier-root");
+    let owner_id = SessionId::from("no-carrier-owner");
+    let (root, root_nodes) = seed(&factory, &root_id, 1).await;
     let owner = fork(
         &factory,
-        &SessionId::from("no-carrier-owner"),
+        "no-carrier-root",
+        &owner_id,
         root_nodes.last().expect("no-carrier root leaf"),
     )
     .await;
     let owner_nodes = append(&owner, 1).await;
     let owner_leaf = owner_nodes.last().expect("no-carrier owner leaf").clone();
+    let owner_revision =
+        super::helpers::revision_at(factory.as_ref(), &owner_id, &owner_leaf).await;
+    let pinned = crate::Target::Revision(owner_revision);
     factory
-        .pin(&owner_leaf)
+        .pin(&owner_id, &pinned)
         .await
         .expect("pin no-carrier owner leaf");
     factory
-        .delete_session(&SessionId::from("no-carrier-owner"))
+        .delete_session(&owner_id)
         .await
         .expect("delete no-carrier owner");
 
+    let refused = factory
+        .fork_session(&ForkSessionRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: SessionId::from("no-carrier-recovered"),
+            source_session_id: owner_id.clone(),
+            head_revision: owner_revision,
+            relation: SessionRelation::Root,
+            config: crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+            )
+            .into(),
+        })
+        .await
+        .expect_err("a deleted owner's pin holds nothing");
+    assert!(
+        matches!(
+            &refused,
+            StoreError::SessionDeleted { session_id } if *session_id == owner_id
+        ),
+        "a pin is deleted with its session: {refused:?}"
+    );
+    assert!(
+        !node_readable(&root, &owner_leaf)
+            .await
+            .expect("read the deleted owner's node through the root"),
+        "the deleted owner's node has no carrier"
+    );
+
     let recovered = fork(
         &factory,
+        "no-carrier-root",
         &SessionId::from("no-carrier-recovered"),
-        &owner_leaf,
+        root_nodes.last().expect("no-carrier root leaf"),
     )
     .await;
     let graph = recovered
@@ -474,12 +535,8 @@ pub async fn fork_lineage_no_carrier_law(handles: LineageConformanceHandles) {
             .iter()
             .map(|node| node.node_id.as_str())
             .collect::<Vec<_>>(),
-        [
-            root_nodes[0].as_str(),
-            root_nodes[1].as_str(),
-            owner_leaf.as_str(),
-        ],
-        "a deleted owner needs no live head or descendant lineage carrier"
+        [root_nodes[0].as_str(), root_nodes[1].as_str()],
+        "the root's own revision is untouched by the owner's deletion"
     );
     assert_plan_matches_edge_walk(&injector, &SessionId::from("no-carrier-recovered")).await;
     assert_readability_equals_edge_reachability(
@@ -502,6 +559,7 @@ pub async fn fork_plan_matches_edge_walk_law(handles: LineageConformanceHandles)
     let (_root, root_nodes) = seed(&factory, &SessionId::from("plan-ground-truth-root"), 1).await;
     let middle = fork(
         &factory,
+        "plan-ground-truth-root",
         &SessionId::from("plan-ground-truth-middle"),
         root_nodes.last().expect("ground-truth root leaf"),
     )
@@ -511,6 +569,12 @@ pub async fn fork_plan_matches_edge_walk_law(handles: LineageConformanceHandles)
         .last()
         .expect("ground-truth middle leaf")
         .clone();
-    let _deep = fork(&factory, &SessionId::from("plan-ground-truth-deep"), &leaf).await;
+    let _deep = fork(
+        &factory,
+        "plan-ground-truth-middle",
+        &SessionId::from("plan-ground-truth-deep"),
+        &leaf,
+    )
+    .await;
     assert_plan_matches_edge_walk(&injector, &SessionId::from("plan-ground-truth-deep")).await;
 }

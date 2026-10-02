@@ -96,10 +96,6 @@ const SESSION_STORE_EXCLUSIONS: &[(&str, &str)] = &[
         "catalog-wide enumeration across the shared PostgreSQL database; owned by the session_store_factory_enumeration conformance suite",
     ),
     (
-        "fork_points",
-        "catalog-wide retained-point enumeration; owned by the session_store_factory conformance suite",
-    ),
-    (
         "contains_active_ancestor",
         "bounded ancestry predicate; owned by the session_history conformance suite",
     ),

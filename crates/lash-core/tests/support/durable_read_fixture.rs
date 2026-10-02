@@ -21,7 +21,7 @@
 //! | --- | --- | --- |
 //! | Session graph and checkpoints | `graph_nodes`, `session_head`/`sessions`, `session_meta`, `blobs`, `runtime_turn_commits` | Ordered graph nodes and every payload field; checkpoint turn, usage, tool, plugin, and execution state; current and legacy receipt replay |
 //! | Usage accounting | `usage_runs`, `usage_facts`, `usage_owner_retirements` | Owner totals and completeness of a settled owner, and a retired owner's retirement |
-//! | Session retention | `node_anchors`, `deleted_sessions` | `fork_points`, deletion probe, and typed `SessionDeleted` refusal to reopen a retired id |
+//! | Session retention | `session_revisions`, `pins`, `deleted_sessions` | `revisions`, deletion probe, and typed `SessionDeleted` refusal to reopen a retired id |
 //! | Attachments | `attachment_referrer_edges`, `attachment_pending_writes`, `attachment_uploads`, SQLite `artifact_refs`, PostgreSQL's artifact table | The committed session's referrer edge plus process-execution-environment reference recovery |
 //! | Receiver queue | `queued_work_batches`, `pending_turn_inputs`, `wake_redelivery_fences` | Queue/input payloads, deterministic ids, and typed wake-rewind refusal |
 //! | Processes | `processes`, `process_events`, `process_change_clock`, `process_observers`, `process_segment_handovers`, `process_tombstones`, `process_wake_deliveries`, `wake_allocation_floors` | Process state; every event payload; observers; continuation; wake delivery/floor; paginated change feed; typed `ProcessNoLongerRetained` tombstone |
@@ -501,14 +501,11 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
     handles
         .store
         .pin(
-            committed
-                .window
-                .leaf_node_id
-                .as_ref()
-                .expect("fixture graph has a leaf"),
+            &SessionId::from(SESSION_ID),
+            &lash_core::Target::Revision(committed.head_revision),
         )
         .await
-        .expect("pin fixture leaf through the catalog");
+        .expect("pin fixture head revision through the catalog");
 
     let deleted_request = fixture_session_request(&SessionId::from(DELETED_SESSION_ID));
     handles
@@ -884,21 +881,37 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         "durable fixture semantic drift: committed session attachment edge disappeared"
     );
 
-    let pinned = handles
+    let retained = handles
         .store
-        .fork_points()
+        .revisions(&SessionId::from(SESSION_ID))
         .await
-        .expect("durable fixture drift: node-anchor read failed");
-    assert_eq!(pinned.len(), 1);
-    assert_eq!(
-        pinned[0].node_id,
-        *expected
-            .node_ids_in_read_order
-            .last()
-            .expect("fixture expected graph has a leaf")
+        .expect("durable fixture drift: retained-revision read failed");
+    assert!(
+        retained.last().is_some_and(|revision| revision.head),
+        "durable fixture semantic drift: the session's head is not its newest retained revision"
     );
-    assert_eq!(pinned[0].source_session_id, SESSION_ID);
-    assert!(pinned[0].pinned);
+    let pinned = retained
+        .iter()
+        .filter(|revision| !revision.pinned_by.is_empty())
+        .collect::<Vec<_>>();
+    let [pinned] = pinned.as_slice() else {
+        panic!("durable fixture semantic drift: the one pinned revision is {pinned:?}");
+    };
+    assert_eq!(
+        pinned.leaf_node_id.as_deref(),
+        Some(
+            expected
+                .node_ids_in_read_order
+                .last()
+                .expect("fixture expected graph has a leaf")
+                .as_str()
+        )
+    );
+    assert_eq!(
+        pinned.pinned_by,
+        vec![lash_core::Target::Revision(pinned.head_revision)],
+        "durable fixture semantic drift: the revision's pin changed"
+    );
     assert!(
         matches!(
             handles

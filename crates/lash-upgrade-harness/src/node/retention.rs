@@ -14,6 +14,9 @@
 //!   session's vacuum and GC, and reports what each reclaimed.
 //! - `inspect` reports what this build reads: each named module, the
 //!   cleanup ledger's stalled rows, and every attachment the store holds.
+//! - `pin` pins a session's head revision, `revisions` lists what the
+//!   session retains, and `fork` forks one retained revision and reports
+//!   the head the new session reads back (FIG-4731).
 //!
 //! No command serves. The leg runs the rollback's steps with no deployment
 //! up, so the only relay that delivers is the one it asks, and it counts
@@ -134,6 +137,73 @@ pub enum RetentionStep {
         #[arg(long, value_enum)]
         module: Vec<HarnessModule>,
     },
+    /// Pin the session's head revision (FIG-4731).
+    Pin {
+        #[arg(long)]
+        session: String,
+    },
+    /// The revisions the session retains.
+    Revisions {
+        #[arg(long)]
+        session: String,
+    },
+    /// Fork a retained revision of the session into a new session.
+    Fork {
+        #[arg(long)]
+        session: String,
+        #[arg(long)]
+        revision: u64,
+        #[arg(long)]
+        branch: String,
+    },
+}
+
+/// One revision a session retains.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RetainedRow {
+    pub revision: u64,
+    pub leaf: Option<String>,
+    pub checkpoint: Option<String>,
+    pub head: bool,
+    pub pinned: bool,
+}
+
+/// What `pin` and `revisions` report: every revision the session retains,
+/// oldest first.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Retained {
+    pub build: BuildLabel,
+    pub revisions: Vec<RetainedRow>,
+}
+
+/// What `fork` reports: the head the new session reads back.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Forked {
+    pub build: BuildLabel,
+    pub leaf: Option<String>,
+    pub checkpoint: Option<String>,
+}
+
+/// The revisions `session_id` retains, as this build reads them.
+async fn retained(
+    factory: &dyn lash_core::DeploymentStore,
+    build: BuildLabel,
+    session_id: &lash::SessionId,
+) -> Result<Retained> {
+    let revisions = factory
+        .revisions(session_id)
+        .await
+        .with_context(|| format!("list the revisions of {session_id}"))?
+        .into_iter()
+        .map(|revision| RetainedRow {
+            revision: revision.head_revision,
+            leaf: revision.leaf_node_id.map(|leaf| leaf.to_string()),
+            checkpoint: revision.checkpoint_ref.map(|blob| blob.as_str().to_owned()),
+            head: revision.head,
+            pinned: !revision.pinned_by.is_empty(),
+        })
+        .collect();
+    Ok(Retained { build, revisions })
 }
 
 /// What `publish` reports.
@@ -348,6 +418,61 @@ pub async fn run(args: RetentionArgs) -> Result<()> {
                 attachments_scanned: attachments.scanned_blob_count,
                 attachments_reclaimed: attachments.reclaimed_count,
                 sessions_reclaimed,
+            })
+        }
+        RetentionStep::Pin { session } => {
+            let factory = stores.session_store_factory();
+            let session_id = lash::SessionId::from(session);
+            let head = retained(factory.as_ref(), build, &session_id)
+                .await?
+                .revisions
+                .pop()
+                .ok_or_else(|| anyhow!("session {session_id} retains no revision"))?;
+            factory
+                .pin(&session_id, &lash_core::Target::Revision(head.revision))
+                .await
+                .context("pin the head revision")?;
+            super::print(&retained(factory.as_ref(), build, &session_id).await?)
+        }
+        RetentionStep::Revisions { session } => {
+            let factory = stores.session_store_factory();
+            super::print(&retained(factory.as_ref(), build, &lash::SessionId::from(session)).await?)
+        }
+        RetentionStep::Fork {
+            session,
+            revision,
+            branch,
+        } => {
+            let factory = stores.session_store_factory();
+            let source = lash::SessionId::from(session);
+            let branch = lash::SessionId::from(branch);
+            let resolved = factory
+                .resolve_target(&source, &lash_core::Target::Revision(revision))
+                .await
+                .with_context(|| format!("resolve revision {revision} of {source}"))?;
+            let config = resolved.fork_config();
+            factory
+                .fork_session(&lash_core::ForkSessionRequest {
+                    session_id: branch.clone(),
+                    source_session_id: source.clone(),
+                    head_revision: revision,
+                    relation: lash_core::SessionRelation::Fork {
+                        source_session_id: source,
+                        source_node_id: resolved.leaf_node_id,
+                    },
+                    pending_observer_intents: Vec::new(),
+                    config,
+                })
+                .await
+                .with_context(|| format!("fork revision {revision} into {branch}"))?;
+            let head =
+                lash_core::SessionCommitStore::load_session_head_meta(factory.as_ref(), &branch)
+                    .await?
+                    .ok_or_else(|| anyhow!("the fork {branch} has no head"))?;
+            super::print(&Forked {
+                build,
+                leaf: head.leaf_node_id.map(|leaf| leaf.to_string()),
+                checkpoint: head.checkpoint_ref.map(|blob| blob.as_str().to_owned()),
             })
         }
         RetentionStep::Inspect { module } => {

@@ -1290,6 +1290,8 @@ fn postgres_statement_name(query: &str) -> &'static str {
         q if q.starts_with("INSERT INTO lash_runtime_turn_commits") => "turn-commit-insert",
         q if q.starts_with("INSERT INTO lash_session_meta") => "session-meta-insert",
         q if q.starts_with("INSERT INTO lash_session_head") => "head-upsert",
+        q if q.starts_with("INSERT INTO lash_session_revisions") => "revision-insert",
+        q if q.starts_with("DELETE FROM lash_session_revisions") => "revision-release",
         q if q.starts_with("SELECT EXISTS") && q.contains("FROM lash_referrer_fences") => {
             "attachment-referrer-fence-check"
         }
@@ -1512,6 +1514,9 @@ async fn root_admission_and_head_commit_round_trips_are_pinned() {
     // The root's commit presents its drive fence (FIG-4202), adding one
     // locked drive-epoch read. It does not sample the PostgreSQL clock, so
     // this fixture does not pass through the testing lease-epoch probe.
+    // Each head commit records its revision in one insert (FIG-4731); the
+    // session's retention policy rides the metadata touch, and no statement
+    // reads a pin.
     let expected_commit: std::collections::BTreeMap<&'static str, i64> =
         std::collections::BTreeMap::from([
             ("begin", 1),
@@ -1533,6 +1538,7 @@ async fn root_admission_and_head_commit_round_trips_are_pinned() {
             ("head-upsert", 1),
             ("attachment-referrer-fence-check", 1),
             ("session-meta-touch", 1),
+            ("revision-insert", 1),
         ]);
     assert_eq!(
         commit_statements, expected_commit,
@@ -1551,15 +1557,17 @@ fn blob_sweep_statement_is_one_retained_set_anti_join() {
 }
 
 /// The statement map `gc_unreachable` must answer for, whatever the dead
-/// set's size: fence, table lock, root read, one manifest read per live root,
-/// the edge sever, the single sweep, commit. A per-dead-body deletion loop
+/// set's size: the revision release in its own fenced transaction
+/// (FIG-4731), then fence, table lock, root read, one manifest read per live
+/// root, the edge sever, the single sweep, commit. A per-dead-body deletion loop
 /// would grow `blob-sweep` past 1, and the all-hashes scan would land as a
 /// `blob-lock` row the pin does not expect.
 fn expected_gc_statements(rooted: bool) -> std::collections::BTreeMap<&'static str, i64> {
     let mut expected = std::collections::BTreeMap::from([
-        ("begin", 1),
-        ("commit", 1),
-        ("writer-fence", 1),
+        ("begin", 2),
+        ("commit", 2),
+        ("writer-fence", 2),
+        ("revision-release", 1),
         ("blob-table-lock", 1),
         ("checkpoint-roots", 1),
         ("checkpoint-edges-sweep", 1),

@@ -33,15 +33,23 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
                             config.clone(),
                             fleet_format,
                         );
+                        let head_json = encode_json(&created_head.payload())?;
                         crate::conn::cached_execute(
                             tx,
                             crate::session_sql::session_sql().head.insert_created.sql(),
-                            rusqlite::params![
-                                created_head.session_id.as_str(),
-                                encode_json(&created_head.payload())?,
-                            ],
+                            rusqlite::params![created_head.session_id.as_str(), head_json],
                         )
                         .map_err(crate::sqlite_error)?;
+                        // The creation revision is an ordinary retained
+                        // revision: an empty session forks at it (FIG-4731).
+                        crate::revisions::record_revision_conn(
+                            tx,
+                            &created_head.session_id,
+                            0,
+                            None,
+                            None,
+                            &head_json,
+                        )?;
                         return Ok(lash_core_execution::SessionAdmission::Created);
                     }
                     let recorded = session_meta::load_recorded_lineage(tx, &meta.session_id)?
@@ -124,29 +132,50 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
         .await
     }
 
+    async fn resolve_target(
+        &self,
+        session_id: &SessionId,
+        target: &lash_core_execution::Target,
+    ) -> Result<lash_core_execution::RetainedRevision, StoreError> {
+        self.resolve_target_in_catalog(session_id, target).await
+    }
+
+    async fn revisions(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<lash_core_execution::RetainedRevision>, StoreError> {
+        self.revisions_in_catalog(session_id).await
+    }
+
     async fn pin(
         &self,
-        node_id: &lash_core_execution::NodeId,
-    ) -> Result<lash_core_execution::ForkPoint, StoreError> {
-        pin_in_catalog(
-            &self.location,
-            node_id.as_str(),
-            self.options.connection_policy,
-        )
-        .await
+        session_id: &SessionId,
+        target: &lash_core_execution::Target,
+    ) -> Result<(), StoreError> {
+        self.pin_in_catalog(session_id, target).await
     }
 
-    async fn unpin(&self, node_id: &lash_core_execution::NodeId) -> Result<(), StoreError> {
-        unpin_in_catalog(
-            &self.location,
-            node_id.as_str(),
-            self.options.connection_policy,
-        )
-        .await
+    async fn unpin(
+        &self,
+        session_id: &SessionId,
+        target: &lash_core_execution::Target,
+    ) -> Result<(), StoreError> {
+        self.unpin_in_catalog(session_id, target).await
     }
 
-    async fn fork_points(&self) -> Result<Vec<lash_core_execution::ForkPoint>, StoreError> {
-        fork_points_in_catalog(&self.location, self.options.connection_policy).await
+    async fn retention(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<lash_core_execution::Retention, StoreError> {
+        self.retention_in_catalog(session_id).await
+    }
+
+    async fn set_retention(
+        &self,
+        session_id: &SessionId,
+        retention: lash_core_execution::Retention,
+    ) -> Result<(), StoreError> {
+        self.set_retention_in_catalog(session_id, retention).await
     }
 
     async fn delete_session(

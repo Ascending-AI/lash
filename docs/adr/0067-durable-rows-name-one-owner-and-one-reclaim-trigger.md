@@ -60,7 +60,7 @@ justify its reclamation.
 
 | Reference-edge class | Owner | Reclaim trigger |
 | --- | --- | --- |
-| `checkpoint_blob_refs` / `lash_checkpoint_blob_refs` | The session-owned checkpoint root named by `checkpoint_ref` | Deleting an unreferenced root cascades its edges in the owning transaction. Explicit global repair also severs edges of roots held by neither a session head nor a node anchor before deleting any component blob. |
+| `checkpoint_blob_refs` / `lash_checkpoint_blob_refs` | The session-owned checkpoint root named by `checkpoint_ref` | Deleting an unreferenced root cascades its edges in the owning transaction. Explicit global repair also severs edges of roots held by no retained revision before deleting any component blob. |
 | Artifact referrer edge | The exact frame, process, subscription, start, execution or host pin holding it | Severance by that referrer; artifact cleanup can free the descriptor after the last edge disappears. An id stored without an edge retains nothing. |
 
 ### 2. Terminal-before-reclaimable
@@ -157,7 +157,7 @@ returns unproven rows, not deletion authority.
 
 The SQLite and PostgreSQL blob collectors consume `CompleteEnumeration` before
 severing dead checkpoint projection edges or deleting unretained blobs. Their
-closed inventories include session heads and node anchors, complete checkpoint
+closed inventories include every retained revision, complete checkpoint
 component traversal, and SQLite's artifact pointers. PostgreSQL stores artifact
 bytes separately. Artifact deletion consumes `CompleteArtifactReferrers`, which
 covers every `ArtifactReferrerKind::ALL` entry after a complete edge read, and
@@ -166,7 +166,7 @@ An unfinished `ReclamationEnumeration` returns `IncompleteEnumeration` with the
 unproven scope and source. It has no conversion to a deletion witness.
 
 Ancestry retirement consumes a private `RetirableAncestryNode`, constructed
-only after the complete child, session-head and anchor check under the same
+only after the complete child and retained-revision check under the same
 writer transaction or node lock as the retirement.
 
 Owner-scoped cascades and terminal-state vacuum do not decide liveness from a

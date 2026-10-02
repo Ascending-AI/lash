@@ -1,5 +1,4 @@
 use super::*;
-use lash_sansio::SessionId;
 
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct DurableNode {
@@ -162,10 +161,16 @@ pub(super) struct AttachmentReferrerObservation {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct NodeAnchorObservation {
-    pub(super) node_id: String,
-    pub(super) checkpoint_ref: BlobRef,
-    pub(super) source_session_id: SessionId,
+pub(super) struct RevisionObservation {
+    pub(super) head_revision: i64,
+    pub(super) leaf_node_id: Option<String>,
+    pub(super) checkpoint_ref: Option<BlobRef>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct PinObservation {
+    pub(super) target_kind: String,
+    pub(super) target_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -196,7 +201,8 @@ pub(super) struct RawDurableState {
     pub(super) durable_nodes: Vec<DurableNode>,
     pub(super) runtime_turn_commits: Vec<RuntimeTurnCommitObservation>,
     pub(super) attachment_referrers: Vec<AttachmentReferrerObservation>,
-    pub(super) node_anchors: Vec<NodeAnchorObservation>,
+    pub(super) revisions: Vec<RevisionObservation>,
+    pub(super) pins: Vec<PinObservation>,
     pub(super) session_meta: Option<SessionMetaObservation>,
     pub(super) pending_turn_inputs: Vec<PendingTurnInputObservation>,
     pub(super) queued_work: Vec<QueuedWorkObservation>,

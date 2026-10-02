@@ -259,25 +259,42 @@ impl RawDurableReader {
                         },
                     )
                     .collect();
-                let anchor_rows: Vec<(String, String, String)> = sqlx::query_as(
-                    "SELECT node_id, checkpoint_ref, source_session_id
-                     FROM lash_node_anchors
-                     WHERE source_session_id = $1
-                     ORDER BY node_id ASC",
+                let revision_rows: Vec<(i64, Option<String>, Option<String>)> = sqlx::query_as(
+                    "SELECT head_revision, leaf_node_id, checkpoint_ref
+                     FROM lash_session_revisions
+                     WHERE session_id = $1
+                     ORDER BY head_revision ASC",
                 )
                 .bind(session_id.as_str())
                 .fetch_all(pool)
                 .await
-                .expect("read Postgres node anchors");
-                let node_anchors = anchor_rows
+                .expect("read Postgres session revisions");
+                let revisions = revision_rows
                     .into_iter()
                     .map(
-                        |(node_id, checkpoint_ref, source_session_id)| NodeAnchorObservation {
-                            node_id,
-                            checkpoint_ref: BlobRef(checkpoint_ref),
-                            source_session_id: SessionId::from(source_session_id),
+                        |(head_revision, leaf_node_id, checkpoint_ref)| RevisionObservation {
+                            head_revision,
+                            leaf_node_id,
+                            checkpoint_ref: checkpoint_ref.map(BlobRef),
                         },
                     )
+                    .collect();
+                let pin_rows: Vec<(String, String)> = sqlx::query_as(
+                    "SELECT target_kind, target_id
+                     FROM lash_pins
+                     WHERE session_id = $1
+                     ORDER BY target_kind ASC, target_id ASC",
+                )
+                .bind(session_id.as_str())
+                .fetch_all(pool)
+                .await
+                .expect("read Postgres pins");
+                let pins = pin_rows
+                    .into_iter()
+                    .map(|(target_kind, target_id)| PinObservation {
+                        target_kind,
+                        target_id,
+                    })
                     .collect();
                 let session_meta = store
                     .load_session_meta(session_id)
@@ -340,7 +357,8 @@ impl RawDurableReader {
                     durable_nodes,
                     runtime_turn_commits,
                     attachment_referrers,
-                    node_anchors,
+                    revisions,
+                    pins,
                     session_meta,
                     pending_turn_inputs,
                     queued_work,
@@ -505,26 +523,46 @@ pub(super) async fn read_sqlite_durable_state(
             )
             .collect()
     };
-    let node_anchors = {
+    let revisions = {
         let mut statement = connection
             .prepare(
-                "SELECT node_id, checkpoint_ref, source_session_id
-                 FROM node_anchors
-                 WHERE source_session_id = ?1
-                 ORDER BY node_id ASC",
+                "SELECT head_revision, leaf_node_id, checkpoint_ref
+                 FROM session_revisions
+                 WHERE session_id = ?1
+                 ORDER BY head_revision ASC",
             )
-            .expect("prepare SQLite node-anchor read");
+            .expect("prepare SQLite session-revision read");
         statement
             .query_map([session_id.as_str()], |row| {
-                Ok(NodeAnchorObservation {
-                    node_id: row.get(0)?,
-                    checkpoint_ref: BlobRef(row.get(1)?),
-                    source_session_id: SessionId::from(row.get::<_, String>(2)?),
+                Ok(RevisionObservation {
+                    head_revision: row.get(0)?,
+                    leaf_node_id: row.get(1)?,
+                    checkpoint_ref: row.get::<_, Option<String>>(2)?.map(BlobRef),
                 })
             })
-            .expect("read SQLite node anchors")
+            .expect("read SQLite session revisions")
             .collect::<Result<Vec<_>, _>>()
-            .expect("decode SQLite node anchors")
+            .expect("decode SQLite session revisions")
+    };
+    let pins = {
+        let mut statement = connection
+            .prepare(
+                "SELECT target_kind, target_id
+                 FROM pins
+                 WHERE session_id = ?1
+                 ORDER BY target_kind ASC, target_id ASC",
+            )
+            .expect("prepare SQLite pin read");
+        statement
+            .query_map([session_id.as_str()], |row| {
+                Ok(PinObservation {
+                    target_kind: row.get(0)?,
+                    target_id: row.get(1)?,
+                })
+            })
+            .expect("read SQLite pins")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode SQLite pins")
     };
     let session_meta = store
         .load_session_meta(session_id)
@@ -632,7 +670,8 @@ pub(super) async fn read_sqlite_durable_state(
         durable_nodes,
         runtime_turn_commits,
         attachment_referrers,
-        node_anchors,
+        revisions,
+        pins,
         session_meta,
         pending_turn_inputs,
         queued_work,

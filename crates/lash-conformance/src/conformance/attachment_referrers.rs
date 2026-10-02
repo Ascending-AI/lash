@@ -479,11 +479,11 @@ pub async fn commit_and_enqueue_acquire_session_edges_all_or_nothing(h: Attachme
     );
 }
 
-/// A pinned prefix keeps its deleted session's attachments (FIG-4156): the
-/// deletion leaves `Session(s)` retained while the pin holds the graph node
-/// that names the attachment, and a sweep keeps the bytes. Once the unpin
-/// retires the graph, the session is `DeletedRetired`, the cleanup executor
-/// may end its edge, and the sweep reclaims the bytes.
+/// A pin holds its session's attachments only while the session lives
+/// (FIG-4156, FIG-4731): a sweep keeps the bytes a pinned revision names, and
+/// the deletion takes the pin with the session, so the graph retires at once,
+/// the cleanup executor may end the session's edge, and the sweep reclaims
+/// the bytes.
 pub async fn attachment_prefix_pin_keeps_the_session_edge_until_unpin(
     h: AttachmentReferrerHandles,
 ) {
@@ -512,8 +512,8 @@ pub async fn attachment_prefix_pin_keeps_the_session_edge_until_unpin(
     let commit = RuntimeCommit::persisted_state_for_test(&current)
         .with_committed_attachments([reference.id.clone()]);
     let receipt = store.commit_runtime_state(commit).await.unwrap();
-    let leaf = receipt.committed_leaf_node_id.unwrap();
-    h.factory.pin(&leaf).await.unwrap();
+    let pinned = lash_core::Target::Revision(receipt.head_revision);
+    h.factory.pin(&session, &pinned).await.unwrap();
     // The unbound put's upload edge is not what this law is about.
     for referrer in store.attachment_referrers(&reference.id).await.unwrap() {
         if matches!(referrer, ArtifactReferrer::Upload(_)) {
@@ -534,12 +534,6 @@ pub async fn attachment_prefix_pin_keeps_the_session_edge_until_unpin(
         .unwrap()
     };
 
-    h.factory.delete_session(&session).await.unwrap();
-    assert_eq!(
-        store.session_referrer_state(&session).await.unwrap(),
-        SessionReferrerState::DeletedRetained,
-        "the pin retains the deleted session's graph"
-    );
     assert_eq!(
         store.attachment_referrers(&reference.id).await.unwrap(),
         vec![referrer.clone()]
@@ -554,11 +548,11 @@ pub async fn attachment_prefix_pin_keeps_the_session_edge_until_unpin(
         vec![42]
     );
 
-    h.factory.unpin(&leaf).await.unwrap();
+    h.factory.delete_session(&session).await.unwrap();
     assert_eq!(
         store.session_referrer_state(&session).await.unwrap(),
         SessionReferrerState::DeletedRetired,
-        "releasing the last pin retires the deleted session's graph"
+        "the pin is deleted with its session, so nothing retains the graph"
     );
     // What the cleanup executor does for a retired session's guard.
     store.end_attachment_referrer(&referrer).await.unwrap();
@@ -600,11 +594,11 @@ pub async fn session_referrer_waits_for_graph_retirement(h: AttachmentReferrerHa
     let commit = RuntimeCommit::persisted_state_for_test(&current)
         .with_committed_attachments([reference.id.clone()]);
     let receipt = store.commit_runtime_state(commit).await.unwrap();
-    let node = receipt.committed_leaf_node_id.unwrap();
     h.factory
         .fork_session(&ForkSessionRequest {
             session_id: "retained-child".into(),
-            node_id: node,
+            source_session_id: session.clone(),
+            head_revision: receipt.head_revision,
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),
             config: SessionPolicy::new(TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))

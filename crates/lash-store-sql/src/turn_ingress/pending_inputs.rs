@@ -83,6 +83,11 @@ crate::statements! {
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND input_id = ?2";
 
+        /// The lifecycle state of input `?2` of session `?1`: what a fork
+        /// target naming an input no root is bound to answers from.
+        select_state_by_id = "SELECT state FROM pending_turn_inputs
+             WHERE session_id = ?1 AND input_id = ?2";
+
         /// The input session `?1` filed under source key `?2`.
         select_by_source_key = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                     state, input_json, enqueued_at_ms, admitted_root, admitted_by, run_spec_hash,

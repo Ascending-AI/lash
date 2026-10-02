@@ -14,9 +14,12 @@ changes, not model prose.
 
 ## Scenario-specific golden rules
 
-1. **Pin before advancing.** The browser must render `Pinned … messages as a retained
-   turn.` before another source turn starts. A past unpinned turn is ordinarily gone and
-   `ForkPointNotRetained` is a valid API outcome, not permission to choose another point.
+1. **A pin is a GC root, not a gate.** The browser must render `Pinned … messages as a
+   retained turn.` for the branch point. The service records a branch point at the chat's
+   current turn because that is when it snapshots its own projection; Lash keeps every
+   revision forkable until the host collects, and a pinned one after that. A refusal
+   (`ForkTargetPruned`, `ForkTargetPending` or `ForkTargetUnavailable`, answered 409) is a
+   valid API outcome, not permission to choose another point.
 2. **The pin spans both stores.** `POST /api/chats/{source}/branch-points` pins the Lash
    continuation and records the app-owned message cutoff plus board snapshot. The
    corresponding `GET` response is the backend truth for the visible selector.
@@ -90,7 +93,8 @@ control is disabled while the chat is busy or no chat is active. Poll for the re
 - the branch-point response as `02-pinned-point.json`.
 
 Require exactly one visible selector option whose message count equals the saved message
-array length. Query `node_anchors` by its node id and require one row. Save the fully
+array length. Query `pins` by the source session id and require one row whose
+`target_kind` is `revision`. Save the fully
 scrolled UI as `02-pinned-source.png`.
 
 The product database publishes a branch only after Lash creates its durable head.

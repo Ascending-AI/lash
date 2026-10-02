@@ -1546,6 +1546,8 @@ mod recovery_leader;
 mod release_stamp;
 #[cfg(test)]
 mod rendered_statement_sets_tests;
+#[path = "postgres/revisions.rs"]
+mod revisions;
 #[path = "postgres/root_verbs.rs"]
 mod root_verbs;
 #[path = "postgres/runtime_persistence/mod.rs"]

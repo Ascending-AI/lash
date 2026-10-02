@@ -1498,6 +1498,14 @@ macro_rules! session_store_factory_tests {
             (turn_cancel_final_commit_intent_cas_is_atomic, "turn-cancel-final-commit-cas"),
             (turn_cancel_conflicting_repeat_leaves_no_durable_trace, "turn-cancel-conflicting-repeat"),
             (turn_cancel_concurrent_opposing_requests_converge, "turn-cancel-concurrent-opposing"),
+            (a_pin_written_before_during_or_after_its_turn_keeps_that_turn_through_collection, "pin-timing"),
+            (a_pin_racing_its_turns_commit_and_the_next_admission_keeps_the_turn, "pin-race"),
+            (a_merged_or_deferred_input_resolves_to_the_root_that_applied_it, "pin-merge-defer"),
+            (every_turn_forks_until_the_host_collects_and_refuses_pruned_after, "fork-retained-until-gc"),
+            (a_session_that_never_ran_a_turn_forks_at_its_creation_revision, "fork-empty-session"),
+            (every_reclaimer_keeps_a_pinned_turn_until_its_last_pin_is_released, "pin-reclaimers"),
+            (the_retention_window_counts_terminal_roots_and_pins_extend_it, "retention-window"),
+            (pending_and_unavailable_targets_refuse_typed_and_never_fork_the_head, "fork-refusals"),
         ]);
         $crate::session_store_factory_tests!(@turn_cancel_hosted $fixture; [
             (turn_cancel_wrong_binding_is_refused_at_every_phase, "turn-cancel-wrong-binding"),

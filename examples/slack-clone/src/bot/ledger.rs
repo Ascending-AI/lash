@@ -119,18 +119,19 @@ CREATE TABLE IF NOT EXISTS event_routes (
     event_id     TEXT PRIMARY KEY REFERENCES handled_events(event_id) ON DELETE CASCADE,
     thread_ts    TEXT,
     input_id     TEXT,
-    fork_node_id TEXT
+    fork_revision INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_event_routes_thread ON event_routes(thread_ts);
 CREATE INDEX IF NOT EXISTS idx_event_routes_input ON event_routes(input_id);
 
 -- A folded top-level message has not committed into the channel graph yet, so
--- its honest fork source is the graph boundary observed while that admission
--- held the channel lock. Keep that evidence separate from `fork_node_id`, which
--- continues to mean the later boundary produced by a committed turn.
+-- its honest fork source is the channel's head revision observed while that
+-- admission held the channel lock. Keep that evidence separate from
+-- `fork_revision`, which continues to mean the later revision a committed turn
+-- published.
 CREATE TABLE IF NOT EXISTS event_admission_boundaries (
     event_id TEXT PRIMARY KEY REFERENCES handled_events(event_id) ON DELETE CASCADE,
-    node_id  TEXT NOT NULL
+    revision INTEGER NOT NULL
 );
 
 -- Ambient messages are context, not turn inputs: a folded message waits here
@@ -154,7 +155,7 @@ CREATE TABLE IF NOT EXISTS mention_sends (
 
 /// Columns every read projects, in the order [`read_row`] expects.
 const BASE_COLUMNS: &str = "event_id, channel_id, message_ts, kind, stage, input_text, reply_ts, detail, deliveries, provider_kind, provider_code, provider_message, provider_retryable";
-const COLUMNS: &str = "handled_events.event_id, handled_events.channel_id, handled_events.message_ts, handled_events.kind, handled_events.stage, handled_events.input_text, handled_events.reply_ts, handled_events.detail, handled_events.deliveries, handled_events.provider_kind, handled_events.provider_code, handled_events.provider_message, handled_events.provider_retryable, event_routes.thread_ts, event_routes.input_id, event_routes.fork_node_id, event_admission_boundaries.node_id";
+const COLUMNS: &str = "handled_events.event_id, handled_events.channel_id, handled_events.message_ts, handled_events.kind, handled_events.stage, handled_events.input_text, handled_events.reply_ts, handled_events.detail, handled_events.deliveries, handled_events.provider_kind, handled_events.provider_code, handled_events.provider_message, handled_events.provider_retryable, event_routes.thread_ts, event_routes.input_id, event_routes.fork_revision, event_admission_boundaries.revision";
 const ROUTE_JOINS: &str =
     "LEFT JOIN event_routes USING(event_id) LEFT JOIN event_admission_boundaries USING(event_id)";
 
@@ -281,11 +282,13 @@ pub struct EventRecord {
     /// Durable Lash admission identity of the send that carried this event:
     /// a mention's own, or the mention an ambient message was folded into.
     pub input_id: Option<String>,
-    /// Retained turn boundary that includes this input, when it has committed.
-    pub fork_node_id: Option<String>,
-    /// Retained channel boundary captured while a folded top-level message held
-    /// the channel lock. Used while no committed turn carries the message yet.
-    pub admission_node_id: Option<String>,
+    /// Pinned head revision of the turn that committed this input, once it
+    /// has: the state a thread rooted here forks.
+    pub fork_revision: Option<u64>,
+    /// Pinned channel head revision captured while a folded top-level message
+    /// held the channel lock. Used while no committed turn carries the
+    /// message yet.
+    pub admission_revision: Option<u64>,
 }
 
 /// The outcome of claiming an event for handling.
@@ -545,34 +548,35 @@ impl EventLedger {
             .await
     }
 
-    pub async fn record_admission_node(&self, event_id: String, node_id: String) -> Result<()> {
+    pub async fn record_admission_revision(&self, event_id: String, revision: u64) -> Result<()> {
         self.database
             .call(move |connection| {
                 connection.execute(
-                    "INSERT INTO event_admission_boundaries (event_id, node_id)
+                    "INSERT INTO event_admission_boundaries (event_id, revision)
                      VALUES (?1, ?2)
                      ON CONFLICT(event_id) DO NOTHING",
-                    params![event_id, node_id],
+                    params![event_id, revision],
                 )?;
                 Ok(())
             })
             .await
     }
 
-    /// Associate every admission committed by a turn with its retained boundary.
-    pub async fn record_fork_node_for_inputs(
+    /// Associate every admission committed by a turn with the pinned revision
+    /// that turn published.
+    pub async fn record_fork_revision_for_inputs(
         &self,
         input_ids: Vec<String>,
-        fork_node_id: String,
+        fork_revision: u64,
     ) -> Result<()> {
         self.database
             .call(move |connection| {
                 let transaction = connection.transaction()?;
                 for input_id in input_ids {
                     transaction.execute(
-                        "UPDATE event_routes SET fork_node_id = COALESCE(fork_node_id, ?2)
+                        "UPDATE event_routes SET fork_revision = COALESCE(fork_revision, ?2)
                          WHERE input_id = ?1",
-                        params![input_id, fork_node_id],
+                        params![input_id, fork_revision],
                     )?;
                 }
                 transaction.commit()?;
@@ -834,8 +838,8 @@ fn read_base_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRecord> {
         deliveries: row.get(8)?,
         thread_ts: None,
         input_id: None,
-        fork_node_id: None,
-        admission_node_id: None,
+        fork_revision: None,
+        admission_revision: None,
     })
 }
 
@@ -843,8 +847,8 @@ fn read_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRecord> {
     let mut record = read_base_row(row)?;
     record.thread_ts = row.get(13)?;
     record.input_id = row.get(14)?;
-    record.fork_node_id = row.get(15)?;
-    record.admission_node_id = row.get(16)?;
+    record.fork_revision = row.get(15)?;
+    record.admission_revision = row.get(16)?;
     Ok(record)
 }
 

@@ -1,10 +1,11 @@
 //! Thread-session lifecycle: a Slack thread is a forked Lash session.
 //!
 //! A fork happens lazily on the first reply in a thread (mention or ambient),
-//! at the channel boundary that precedes the thread root: the boundary a
-//! committed turn that carried the root retained, or the channel head recorded
-//! when an ambient root was folded. Turn-input application provenance
-//! correlates a Slack message to the turn that committed it.
+//! at the channel revision that precedes the thread root: the revision the
+//! committed turn that carried the root published, or the channel head recorded
+//! when an ambient root was folded. Both are pinned, so a collection keeps
+//! them. Turn-input application provenance correlates a Slack message to the
+//! turn that committed it.
 //!
 //! The thread starts with its parent's folded context: the channel messages up
 //! to the root that the fork boundary does not carry, with the root labelled,
@@ -12,12 +13,11 @@
 //! replies and its first mention.
 
 use std::collections::HashSet;
-use std::num::{NonZeroU32, NonZeroU64};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
-use lash::persistence::{ChronologicalPayload, HistoryAnchor, HistoryBudget, StoreError};
-use lash::{LashCore, LashSession};
+use lash::persistence::{ChronologicalPayload, StoreError};
+use lash::{LashCore, LashSession, Target};
 
 use super::ledger::{EventLedger, EventRecord, IgnoreReason, Stage};
 use super::runtime::{session_id, thread_session_id};
@@ -101,7 +101,7 @@ pub enum ThreadSessionOpen {
 }
 
 enum RootRoute {
-    Ready(String),
+    Ready(u64),
     Pending,
     NotSeen,
     PermanentlyUnavailable,
@@ -135,7 +135,7 @@ pub async fn open_thread_session(
     let channel = if !child_exists {
         let started = tokio::time::Instant::now();
         let mut backoff = ROOT_ADMISSION_INITIAL_BACKOFF;
-        let (fork_node, channel) = loop {
+        let (fork_revision, channel) = loop {
             let channel = match open_channel_session(core, session_spec, &record.channel_id).await {
                 Ok(session) => session,
                 Err(error) if anyhow_session_admission_contended(&error) => {
@@ -156,8 +156,8 @@ pub async fn open_thread_session(
                 Err(error) => return Err(error),
             };
             let route = root_route(core, session_spec, ledger, record, thread_ts).await?;
-            if let RootRoute::Ready(fork_node) = route {
-                break (fork_node, channel);
+            if let RootRoute::Ready(fork_revision) = route {
+                break (fork_revision, channel);
             }
             if matches!(route, RootRoute::PermanentlyUnavailable) {
                 return Ok(ThreadSessionOpen::RootNotAvailable);
@@ -182,14 +182,11 @@ pub async fn open_thread_session(
             tokio::time::sleep(nap).await;
             backoff = backoff.saturating_mul(2).min(ROOT_ADMISSION_MAX_BACKOFF);
         };
-        core.pin(&fork_node)
-            .await
-            .with_context(|| format!("retain channel boundary {fork_node} for thread fork"))?;
-        let parent_id = session_id(&record.channel_id);
+        let parent_id = lash::SessionId::from(session_id(&record.channel_id));
         let observed_processes = core
             .process_registry()
             .list_observed_by(
-                &parent_id.clone().into(),
+                &parent_id,
                 &lash::process::ProcessListFilter {
                     status: lash::process::ProcessStatusFilter::Any,
                     ..Default::default()
@@ -199,16 +196,22 @@ pub async fn open_thread_session(
             .into_iter()
             .map(|record| record.id)
             .collect();
+        // The recorded revision was pinned when it was recorded. The lineage
+        // names no node: lash records the forked revision's leaf, and a
+        // channel that has never run a turn has none.
         match core
-            .fork_at(lash::ForkRequest {
-                session_id: thread_id.clone().into(),
-                node_id: fork_node.clone().into(),
-                relation: lash::persistence::SessionRelation::Fork {
-                    source_session_id: parent_id.into(),
-                    source_node_id: fork_node.clone().into(),
+            .fork_at(
+                &parent_id,
+                Target::Revision(fork_revision),
+                lash::ForkRequest {
+                    session_id: thread_id.clone().into(),
+                    relation: lash::persistence::SessionRelation::Fork {
+                        source_session_id: parent_id.clone(),
+                        source_node_id: None,
+                    },
+                    observed_processes,
                 },
-                observed_processes,
-            })
+            )
             .await
         {
             Ok(_) => {}
@@ -282,16 +285,16 @@ async fn root_route(
         .context("locate thread-root admission")?;
     if let Some(input_id) = root
         .as_ref()
-        .filter(|root| root.fork_node_id.is_none())
+        .filter(|root| root.fork_revision.is_none())
         .and_then(|root| root.input_id.clone())
     {
         // A turn application is durable even if the process died after pinning
-        // its boundary and before projecting that node into the Slack ledger.
+        // its input and before projecting the revision into the Slack ledger.
         //
-        // The repair reads the graph through a session opened now, not through
-        // the caller's handle: that handle was opened when this thread reply
-        // started waiting, and its graph predates the root turn this repair is
-        // about. A snapshot that old can never carry the boundary being derived.
+        // The repair reads through a session opened now, not through the
+        // caller's handle: that handle was opened when this thread reply
+        // started waiting, and it predates the root turn this repair is
+        // about.
         let repair_view = match open_channel_session(core, session_spec, &record.channel_id).await {
             Ok(session) => session,
             Err(error) if anyhow_session_admission_contended(&error) => {
@@ -301,7 +304,7 @@ async fn root_route(
                 return Err(error).context("open a current channel view for thread-root repair");
             }
         };
-        try_retain_applied_turn_boundary(core, ledger, &repair_view, &input_id)
+        try_retain_applied_turn_boundary(ledger, &repair_view, &input_id)
             .await
             .context("re-derive committed thread-root boundary")?;
         root = ledger
@@ -310,12 +313,12 @@ async fn root_route(
             .context("reload repaired thread-root admission")?;
     }
     if let Some(root) = root {
-        // A folded root's retained pre-admission boundary is valid fork
+        // A folded root's pinned pre-admission revision is valid fork
         // evidence until a committed turn carries the root; the ledger row is
         // the root's durability, even if the process died before advancing it
         // from Accepted to Folded.
-        if let Some(node_id) = root.fork_node_id.or(root.admission_node_id) {
-            return Ok(RootRoute::Ready(node_id));
+        if let Some(revision) = root.fork_revision.or(root.admission_revision) {
+            return Ok(RootRoute::Ready(revision));
         }
         return Ok(RootRoute::Pending);
     }
@@ -327,8 +330,9 @@ async fn root_route(
     else {
         return Ok(RootRoute::NotSeen);
     };
-    let has_route_evidence =
-        root.input_id.is_some() || root.admission_node_id.is_some() || root.fork_node_id.is_some();
+    let has_route_evidence = root.input_id.is_some()
+        || root.admission_revision.is_some()
+        || root.fork_revision.is_some();
     // `superseded_by_app_mention` does not prove permanent unavailability: the
     // paired app_mention delivery for the same Slack message may still be racing.
     let paired_mention_may_arrive = matches!(
@@ -344,25 +348,24 @@ async fn root_route(
     }
 }
 
-/// Pin and record the boundary produced by the turn that consumed `input_id`.
+/// Pin and record the revision published by the turn that consumed `input_id`.
 ///
-/// The lookup uses typed application records. No Lash id is parsed: the
-/// application names the turn, and every input applied by that turn receives the
-/// same retained leaf boundary.
+/// The pin names the input, so lash resolves it to the root that actually
+/// applied it, and it holds whether it is written before, during or after that
+/// root's turn. The lookup uses typed application records. No Lash id is
+/// parsed: the application names the turn, and every input applied by that
+/// turn receives the same pinned revision.
 ///
-/// The derivation reads the store's committed view, so a handle opened before
-/// the turn committed is no excuse: a boundary that cannot be derived from a
-/// view that post-dates the application is a defect, not a wait, and it fails
-/// loudly here rather than silently skipping the retention and the ledger
-/// write. The polling repair path wants the opposite answer and calls
-/// [`try_retain_applied_turn_boundary`].
+/// A revision that cannot be read from a view that post-dates the application
+/// is a defect, not a wait, and it fails loudly here rather than silently
+/// skipping the ledger write. The polling repair path wants the opposite
+/// answer and calls [`try_retain_applied_turn_boundary`].
 pub async fn retain_applied_turn_boundary(
-    core: &LashCore,
     ledger: &EventLedger,
     session: &LashSession,
     input_id: &str,
 ) -> Result<()> {
-    retain_boundary(core, ledger, session, input_id, Derivation::Required)
+    retain_boundary(ledger, session, input_id, Derivation::Required)
         .await
         .map(|_| ())
 }
@@ -370,20 +373,19 @@ pub async fn retain_applied_turn_boundary(
 /// [`retain_applied_turn_boundary`] for a caller that is still waiting.
 ///
 /// `Ok(false)` means the store holds no application for `input_id` *yet* — the
-/// input is admitted but no turn has committed it — so nothing was retained
+/// input is admitted but no turn has committed it — so nothing was recorded
 /// and the caller should poll again. Only the thread-root repair may treat
 /// that as a legal state: the root's admission is recorded at send time, ahead
 /// of the commit that applies it.
 pub async fn try_retain_applied_turn_boundary(
-    core: &LashCore,
     ledger: &EventLedger,
     session: &LashSession,
     input_id: &str,
 ) -> Result<bool> {
-    retain_boundary(core, ledger, session, input_id, Derivation::MayBePending).await
+    retain_boundary(ledger, session, input_id, Derivation::MayBePending).await
 }
 
-/// Whether an underivable boundary is a defect or a "not yet".
+/// Whether an unresolved revision is a defect or a "not yet".
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Derivation {
     Required,
@@ -391,7 +393,6 @@ enum Derivation {
 }
 
 async fn retain_boundary(
-    core: &LashCore,
     ledger: &EventLedger,
     session: &LashSession,
     input_id: &str,
@@ -409,94 +410,34 @@ async fn retain_boundary(
     else {
         return Ok(false);
     };
-    let Some(leaf) = committed_turn_boundary(&durable, &applications, &turn_id).await? else {
+    let target = Target::Input(input_id.into());
+    durable
+        .pin(target.clone())
+        .await
+        .with_context(|| format!("pin the channel turn that applied input {input_id}"))?;
+    let Some(revision) = durable
+        .revisions()
+        .await
+        .context("read the channel's retained revisions")?
+        .into_iter()
+        .find(|revision| revision.pinned_by.contains(&target))
+        .map(|revision| revision.head_revision)
+    else {
         if derivation == Derivation::MayBePending {
             return Ok(false);
         }
-        bail!("committed turn application message is absent from the active channel graph");
+        bail!("the turn that applied input {input_id} published no retained revision");
     };
-    core.pin(&leaf)
-        .await
-        .with_context(|| format!("pin committed channel turn boundary {leaf}"))?;
     let input_ids = applications
         .into_iter()
         .filter(|application| application.turn_id == turn_id)
         .map(|application| application.input_id.to_string())
         .collect();
     ledger
-        .record_fork_node_for_inputs(input_ids, leaf)
+        .record_fork_revision_for_inputs(input_ids, revision)
         .await
-        .context("record fork boundary for committed Slack inputs")?;
+        .context("record fork revision for committed Slack inputs")?;
     Ok(true)
-}
-
-/// Resolve the graph boundary committed by `turn_id`, even when later turns
-/// have advanced the session head. The parent of the next turn's first
-/// application is this turn's committed leaf. Without a later application,
-/// the current leaf is still this turn's boundary.
-async fn committed_turn_boundary(
-    durable: &lash::DurableSession,
-    applications: &[lash::TurnInputApplication],
-    turn_id: &lash::TurnId,
-) -> Result<Option<String>> {
-    let target_message_ids: HashSet<&str> = applications
-        .iter()
-        .filter(|application| application.turn_id == turn_id)
-        .map(|application| application.committed_message_id.as_str())
-        .collect();
-    let later_application_ids: HashSet<&str> = applications
-        .iter()
-        .filter(|application| application.turn_id != turn_id)
-        .map(|application| application.committed_message_id.as_str())
-        .collect();
-    let mut anchor = HistoryAnchor::Head;
-    let mut leaf = None;
-    let mut next_turn_boundary = None;
-    loop {
-        let page = durable
-            .history(
-                anchor,
-                HistoryBudget {
-                    max_nodes: NonZeroU32::new(128).context("positive history node limit")?,
-                    max_bytes: NonZeroU64::new(32 * 1024 * 1024)
-                        .context("positive history byte limit")?,
-                },
-            )
-            .await
-            .context("read committed channel ancestry for fork boundary")?;
-        if leaf.is_none() {
-            leaf = page.pinned_leaf.map(|id| id.to_string());
-        }
-        for node in &page.nodes {
-            let Some(message_id) = node_message_id(&node.record) else {
-                continue;
-            };
-            if target_message_ids.contains(message_id) {
-                let boundary = match next_turn_boundary {
-                    Some(boundary) => boundary,
-                    None => leaf.context("committed ancestry node implies a leaf")?,
-                };
-                return Ok(Some(boundary));
-            }
-            if later_application_ids.contains(message_id) {
-                next_turn_boundary = Some(
-                    node.record
-                        .parent_node_id
-                        .as_ref()
-                        .context("a later committed turn has no preceding graph boundary")?
-                        .to_string(),
-                );
-            }
-        }
-        let Some(next) = page.next else {
-            return Ok(None);
-        };
-        anchor = HistoryAnchor::Cursor(next);
-    }
-}
-
-fn node_message_id(node: &lash::persistence::SessionNodeRecord) -> Option<&str> {
-    node.message_id()
 }
 
 /// Open (or resume) the channel's session, creating it on the channel's
@@ -519,59 +460,34 @@ pub(crate) async fn open_channel_session(
             return Err(error).with_context(|| format!("create session for channel {channel_id}"));
         }
     }
-    let session = core
-        .session(session_id(channel_id))
+    core.session(session_id(channel_id))
         .open()
         .await
-        .with_context(|| format!("open session for channel {channel_id}"))?;
-    ensure_forkable_channel_head(core, &session).await?;
-    Ok(session)
+        .with_context(|| format!("open session for channel {channel_id}"))
 }
 
-/// Give a newly opened, turn-less channel a real retained boundary without a
-/// model call or a user-visible message. A frame-open node alone has no
-/// continuation checkpoint, so it cannot honestly be the source of a fork.
-pub async fn ensure_forkable_channel_head(core: &LashCore, session: &LashSession) -> Result<()> {
-    let session_id = session.session_id();
-    if core
-        .fork_points()
-        .await
-        .context("inspect channel fork points")?
-        .iter()
-        .any(|point| point.source_session_id == session_id)
-    {
-        return Ok(());
-    }
-    session
-        .admin()
-        .state()
-        .append_plugin_body(
-            "slack_clone_channel_anchor",
-            serde_json::json!({ "purpose": "forkable channel baseline" }),
-        )
-        .await
-        .context("commit forkable channel baseline")?;
-    Ok(())
-}
-
-/// Retain and record the exact channel boundary preceding a folded admission.
+/// Pin and record the channel head revision preceding a folded admission. A
+/// channel that has never run a turn is forkable too: its creation revision is
+/// an ordinary retained revision.
 pub async fn retain_admission_boundary(
-    core: &LashCore,
     ledger: &EventLedger,
     session: &LashSession,
     event_id: &str,
 ) -> Result<()> {
-    let node_id = session
-        .read_view()
-        .session_graph()
-        .leaf_node_id
-        .clone()
-        .context("channel session has no admission boundary")?;
-    core.pin(&node_id)
+    let head = session
+        .revisions()
         .await
-        .with_context(|| format!("retain channel admission boundary {node_id}"))?;
+        .context("read the channel's retained revisions")?
+        .into_iter()
+        .find(|revision| revision.head)
+        .context("channel session records no head revision")?
+        .head_revision;
+    session
+        .pin(Target::Revision(head))
+        .await
+        .with_context(|| format!("pin channel admission revision {head}"))?;
     ledger
-        .record_admission_node(event_id.to_string(), node_id.to_string())
+        .record_admission_revision(event_id.to_string(), head)
         .await
         .context("record channel admission boundary")
 }

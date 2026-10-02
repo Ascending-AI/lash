@@ -20,8 +20,8 @@ use lash_core_store::session_catalog;
 pub use lash_core_store::session_state as state;
 use lash_core_store::session_store_factory_types;
 pub use session_store_factory_types::{
-    ForkPoint, ForkSessionReceipt, ForkSessionRequest, SessionCreationHead,
-    SessionStoreCreateRequest,
+    ForkSessionReceipt, ForkSessionRequest, RetainedRevision, Retention, SessionCreationHead,
+    SessionStoreCreateRequest, Target,
 };
 pub mod turn_control;
 use lash_core_store::turn_failure_evidence;

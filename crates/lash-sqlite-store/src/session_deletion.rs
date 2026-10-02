@@ -146,9 +146,29 @@ pub(super) async fn delete_session_from_catalog(
                     crate::obligation_ledger::CleanupStorage::DurableCore,
                 )?;
             }
+            // What the session roots: its head, and every revision it still
+            // retains. Its pins and revisions go with it, so each root they
+            // held becomes a reclaim candidate here.
+            let text_column = |sql: &str| -> Result<Vec<String>, lash_core_execution::StoreError> {
+                let mut stmt = tx.prepare(sql).map_err(sqlite_error)?;
+                let rows = stmt
+                    .query_map(params![session_id.as_str()], |row| row.get::<_, String>(0))
+                    .map_err(sqlite_error)?;
+                rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)
+            };
+            let mut roots: std::collections::BTreeSet<String> =
+                text_column(session_sql().revisions.select_session_checkpoints.sql())?
+                    .into_iter()
+                    .collect();
+            roots.extend(checkpoint_ref);
+            let mut retained_leaves: std::collections::BTreeSet<String> =
+                text_column(session_sql().revisions.select_session_leaves.sql())?
+                    .into_iter()
+                    .collect();
+            retained_leaves.extend(leaf_node_id);
             let mut candidates = std::collections::BTreeSet::new();
-            if let Some(checkpoint_ref) = checkpoint_ref.as_deref() {
-                candidates.insert(checkpoint_ref.to_string());
+            for checkpoint_ref in &roots {
+                candidates.insert(checkpoint_ref.clone());
                 let mut stmt = tx
                     .prepare(session_sql().checkpoint_edges.select_components.sql())
                     .map_err(sqlite_error)?;
@@ -176,14 +196,16 @@ pub(super) async fn delete_session_from_catalog(
                 }
             }
             report.enumerated_blob_count = candidates.len();
-            crate::conn::cached_execute(
-                tx,
+            for statement in [
                 session_sql().head.delete_by_session.sql(),
-                params![session_id.as_str()],
-            )
-            .map_err(sqlite_error)?;
-            if let Some(leaf_node_id) = leaf_node_id {
-                persistence::retire_unreachable_ancestry_conn(tx, &leaf_node_id)?;
+                session_sql().revisions.delete_by_session.sql(),
+                session_sql().pins.delete_by_session.sql(),
+            ] {
+                crate::conn::cached_execute(tx, statement, params![session_id.as_str()])
+                    .map_err(sqlite_error)?;
+            }
+            for leaf_node_id in &retained_leaves {
+                persistence::retire_unreachable_ancestry_conn(tx, leaf_node_id)?;
             }
             let unreachable_candidates = {
                 let mut stmt = tx
@@ -199,8 +221,8 @@ pub(super) async fn delete_session_from_catalog(
             }
             // Delete-time reclaim covers this session's tombstoned rows plus any
             // tombstoned row owned by an already-deleted session. A node can be
-            // tombstoned *after* its owner is gone (unpin of a pinned leaf whose
-            // session was deleted, or ancestry retired at a fork child's delete),
+            // tombstoned *after* its owner is gone (ancestry retired at a fork
+            // child's delete or collection),
             // and no session-scoped vacuum could ever reach it: the owning id is
             // permanently unbindable. Live sessions' rows stay resident for their
             // own vacuum, so this is not a catalog-wide sweep.

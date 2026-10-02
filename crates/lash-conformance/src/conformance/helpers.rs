@@ -12,6 +12,27 @@ pub(crate) fn assert_fresh_instances<T: ?Sized>(left: &Arc<T>, right: &Arc<T>, s
     );
 }
 
+/// The newest revision `session_id` still retains that published `leaf`: the
+/// state a law forks or pins when it holds a leaf rather than a revision.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub(crate) async fn revision_at<S>(catalog: &S, session_id: &SessionId, leaf: &str) -> u64
+where
+    S: crate::SessionCatalogStore + ?Sized,
+{
+    catalog
+        .revisions(session_id)
+        .await
+        .expect("list the session's retained revisions")
+        .into_iter()
+        .rev()
+        .find(|revision| revision.leaf_node_id.as_deref() == Some(leaf))
+        .unwrap_or_else(|| panic!("`{session_id}` retains no revision at leaf `{leaf}`"))
+        .head_revision
+}
+
 /// Admit a scope for a host entry point: conformance suites mint scopes
 /// directly, so this stands in for the admission authority's answer — a
 /// process scope pins the fabricated first-registration incarnation the

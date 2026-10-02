@@ -153,8 +153,9 @@ pub const TABLES: &[&str] = &[
     session::head::TABLE,
     session::meta::TABLE,
     session::meta_pending_observer_intents::TABLE,
-    session::node_anchors::TABLE,
+    session::pins::TABLE,
     session::release_stamp::TABLE,
+    session::revisions::TABLE,
     session::turn_commits::TABLE,
     session_roots::control_intents::TABLE,
     session_roots::root_inputs::TABLE,
@@ -208,7 +209,8 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(
         session::meta_pending_observer_intents::ObserverIntentStatements::NEUTRAL,
     );
-    statements.extend_from_slice(session::node_anchors::NodeAnchorStatements::NEUTRAL);
+    statements.extend_from_slice(session::pins::PinStatements::NEUTRAL);
+    statements.extend_from_slice(session::revisions::SessionRevisionStatements::NEUTRAL);
     statements.extend_from_slice(session::turn_commits::TurnCommitStatements::NEUTRAL);
     statements.extend_from_slice(session_ingress::SessionIngressStatements::NEUTRAL);
     statements.extend_from_slice(session_roots::roots::SessionRootStatements::NEUTRAL);

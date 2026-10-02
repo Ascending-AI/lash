@@ -436,139 +436,50 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         Ok(report)
     }
 
+    async fn resolve_target(
+        &self,
+        session_id: &SessionId,
+        target: &lash_core_execution::Target,
+    ) -> Result<lash_core_execution::RetainedRevision, StoreError> {
+        self.resolve_target_in_catalog(session_id, target).await
+    }
+
+    async fn revisions(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<lash_core_execution::RetainedRevision>, StoreError> {
+        self.revisions_in_catalog(session_id).await
+    }
+
     async fn pin(
         &self,
-        node_id: &lash_core_execution::NodeId,
-    ) -> Result<lash_core_execution::ForkPoint, StoreError> {
-        let node_id = node_id.as_str();
-        let mut tx = begin_guarded(&self.pool, &self.fence).await?;
-        let (source_session_id, checkpoint_ref) =
-            crate::support::retained_checkpoint_tx(&mut tx, node_id)
-                .await?
-                .ok_or_else(|| StoreError::ForkPointNotRetained {
-                    node_id: node_id.to_string().into(),
-                })?;
-        crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, &source_session_id)
-            .await?;
-        crate::support::lock_retained_checkpoint_blob_tx(
-            &mut tx,
-            node_id,
-            &source_session_id,
-            &checkpoint_ref,
-        )
-        .await?;
-        let live_node = sqlx::query_scalar::<_, bool>(session_sql().graph_postgres.lock_live.sql())
-            .bind(node_id)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        if live_node.is_none() {
-            return Err(StoreError::ForkPointNotRetained {
-                node_id: node_id.to_string().into(),
-            });
-        }
-        if let Some((checkpoint_ref, source_session_id)) =
-            sqlx::query_as::<_, (String, String)>(session_sql().anchors.select_by_node.sql())
-                .bind(node_id)
-                .fetch_optional(&mut **tx)
-                .await
-                .map_err(store_sqlx_error)?
-        {
-            let config =
-                crate::support::retained_fork_config_tx(&mut tx, node_id, self.fence.fleet())
-                    .await?;
-            tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok(lash_core_execution::ForkPoint {
-                node_id: node_id.to_string().into(),
-                checkpoint_ref: checkpoint_ref.into(),
-                source_session_id: SessionId::from(source_session_id),
-                config,
-                pinned: true,
-            });
-        }
-        if !crate::support::retention_source_holds_checkpoint_tx(
-            &mut tx,
-            node_id,
-            &source_session_id,
-            &checkpoint_ref,
-        )
-        .await?
-        {
-            return Err(StoreError::ForkPointNotRetained {
-                node_id: node_id.to_string().into(),
-            });
-        }
-        sqlx::query(session_sql().anchors.insert.sql())
-            .bind(node_id)
-            .bind(&checkpoint_ref)
-            .bind(source_session_id.as_str())
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        let config =
-            crate::support::retained_fork_config_tx(&mut tx, node_id, self.fence.fleet()).await?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(lash_core_execution::ForkPoint {
-            node_id: node_id.to_string().into(),
-            checkpoint_ref: checkpoint_ref.into(),
-            source_session_id,
-            config,
-            pinned: true,
-        })
+        session_id: &SessionId,
+        target: &lash_core_execution::Target,
+    ) -> Result<(), StoreError> {
+        self.pin_in_catalog(session_id, target).await
     }
 
-    async fn unpin(&self, node_id: &lash_core_execution::NodeId) -> Result<(), StoreError> {
-        let node_id = node_id.as_str();
-        let mut tx = begin_guarded(&self.pool, &self.fence).await?;
-        sqlx::query(session_sql().graph_postgres.lock_live_id.sql())
-            .bind(node_id)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        let removed = sqlx::query(session_sql().anchors.delete_by_node.sql())
-            .bind(node_id)
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?
-            .rows_affected();
-        if removed == 1 {
-            crate::runtime_persistence::retire_unreachable_ancestry_tx(&mut tx, node_id).await?;
-        }
-        tx.commit().await.map_err(store_sqlx_error)
+    async fn unpin(
+        &self,
+        session_id: &SessionId,
+        target: &lash_core_execution::Target,
+    ) -> Result<(), StoreError> {
+        self.unpin_in_catalog(session_id, target).await
     }
 
-    async fn fork_points(&self) -> Result<Vec<lash_core_execution::ForkPoint>, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        sqlx::query(
-            crate::connection_sql::connection_sql()
-                .begin_repeatable_read
-                .sql(),
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        let rows = sqlx::query(session_sql().head_postgres.select_fork_points.sql())
-            .fetch_all(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        let mut points = Vec::with_capacity(rows.len());
-        for row in rows {
-            let node_id: String = row.get(0);
-            points.push(lash_core_execution::ForkPoint {
-                config: crate::support::retained_fork_config_tx(
-                    &mut tx,
-                    &node_id,
-                    self.fence.fleet(),
-                )
-                .await?,
-                node_id: node_id.into(),
-                checkpoint_ref: BlobRef(row.get(1)),
-                source_session_id: SessionId::from(row.get::<String, _>(2)),
-                pinned: row.get(3),
-            });
-        }
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(points)
+    async fn retention(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<lash_core_execution::Retention, StoreError> {
+        self.retention_in_catalog(session_id).await
+    }
+
+    async fn set_retention(
+        &self,
+        session_id: &SessionId,
+        retention: lash_core_execution::Retention,
+    ) -> Result<(), StoreError> {
+        self.set_retention_in_catalog(session_id, retention).await
     }
 
     async fn fork_session(
@@ -599,17 +510,18 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                 session_id: request.session_id.clone(),
             });
         }
-        let (source_session_id, mut checkpoint_ref) =
-            crate::support::retained_checkpoint_tx(&mut tx, &request.node_id)
-                .await?
-                .ok_or_else(|| StoreError::ForkPointNotRetained {
-                    node_id: request.node_id.clone(),
-                })?;
+        let source_session_id = request.source_session_id.clone();
+        let pruned = || StoreError::ForkTargetPruned {
+            session_id: source_session_id.clone(),
+            target: lash_core_execution::Target::Revision(request.head_revision),
+        };
+        let sql_revision = i64::try_from(request.head_revision).map_err(|_| pruned())?;
         let session_ids = vec![request.session_id.clone(), source_session_id.clone()];
         crate::runtime_persistence::lock_session_history_mutations_tx(&mut tx, &session_ids)
             .await?;
         // Keep the fork fences in the global order: every session advisory
-        // fence first, then the retained checkpoint root, then graph and head.
+        // fence first, then the retained revision, then its checkpoint root,
+        // then graph and head.
         let exists =
             sqlx::query_scalar::<_, bool>(session_sql().meta_postgres.exists_materialized.sql())
                 .bind(request.session_id.as_str())
@@ -631,158 +543,198 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                 session_id: request.session_id.clone(),
             });
         }
-        crate::support::lock_retained_checkpoint_blob_tx(
-            &mut tx,
-            &request.node_id,
-            &source_session_id,
-            &checkpoint_ref,
+        // The revision row is the retained point, share-locked until this
+        // fork's own head roots what it names. No other revision is ever
+        // forked in its place.
+        let retained = sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>)>(
+            session_sql().revisions_postgres.select_for_share.sql(),
         )
-        .await?;
-        let node_facts = sqlx::query_as::<_, (String, i64)>(
-            session_sql()
-                .graph_postgres
-                .select_owner_generation_for_update
-                .sql(),
-        )
-        .bind(&*request.node_id)
+        .bind(source_session_id.as_str())
+        .bind(sql_revision)
         .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-        let (_owning_session_id, fork_generation) =
-            node_facts.ok_or_else(|| StoreError::ForkPointNotRetained {
-                node_id: request.node_id.clone(),
-            })?;
-        if !crate::support::retention_source_holds_checkpoint_tx(
-            &mut tx,
-            &request.node_id,
-            &source_session_id,
-            &checkpoint_ref,
-        )
-        .await?
-        {
-            return Err(StoreError::ForkPointNotRetained {
-                node_id: request.node_id.clone(),
+        let Some((leaf_node_id, mut checkpoint_ref, _head_json)) = retained else {
+            let (source_exists, source_deleted) = sqlx::query_as::<_, (bool, bool)>(
+                session_sql()
+                    .meta_postgres
+                    .exists_materialized_or_deleted
+                    .sql(),
+            )
+            .bind(source_session_id.as_str())
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+            return Err(if source_deleted {
+                StoreError::SessionDeleted {
+                    session_id: source_session_id.clone(),
+                }
+            } else if source_exists {
+                pruned()
+            } else {
+                StoreError::SessionNotFound {
+                    session_id: source_session_id.clone(),
+                }
             });
+        };
+        if let Some(checkpoint_ref) = checkpoint_ref.as_deref() {
+            crate::support::lock_checkpoint_blob_tx(&mut tx, checkpoint_ref, None).await?;
         }
-        let current_frame_node_id =
-            crate::runtime_persistence::nearest_frame_node_id_tx(&mut tx, &request.node_id)
-                .await?
-                .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
-                    leaf_node_id: request.node_id.clone(),
-                })?;
-        let frame_node_id = lash_core_execution::FrameNodeId::new(current_frame_node_id.clone())
-            .map_err(|error| StoreError::Backend(error.to_string()))?;
-        let source_frame = lash_core_execution::ArtifactReferrer::FrameEnvironment(
-            lash_core_execution::FrameEnvironmentId::new(
-                source_session_id.clone(),
-                frame_node_id.clone(),
-            ),
-        );
-        let fork_frame = lash_core_execution::ArtifactReferrer::FrameEnvironment(
-            lash_core_execution::FrameEnvironmentId::new(
-                request.session_id.clone(),
-                frame_node_id.clone(),
-            ),
-        );
-        let mut frame_locks = [source_frame.clone(), fork_frame.clone()];
-        frame_locks.sort_by_key(|referrer| {
-            format!(
-                "lash-artifact-referrer:{}:{}",
-                referrer.kind().as_str(),
-                referrer.canonical_id()
+        let mut current_frame_node_id = None;
+        let mut fork_plan = None;
+        let mut copy_frame_edges = None;
+        if let Some(leaf_node_id) = leaf_node_id.as_deref() {
+            // Retirement never tombstones a retained revision's leaf, so a
+            // dead one is damage, not a collected point.
+            let node_facts = sqlx::query_as::<_, (String, i64)>(
+                session_sql()
+                    .graph_postgres
+                    .select_owner_generation_for_update
+                    .sql(),
             )
-        });
-        for referrer in &frame_locks {
-            crate::artifact_store::lock_referrer_tx(&mut tx, referrer)
-                .await
-                .map_err(store_sqlx_error)?;
-        }
-        let source_ended: bool = sqlx::query_scalar(
-            crate::artifact_store::artifact_sql()
-                .fences
-                .select_is_fenced
-                .sql(),
-        )
-        .bind(source_frame.kind().as_str())
-        .bind(source_frame.canonical_id())
-        .fetch_one(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        if source_ended {
-            let mut checkpoint = crate::support::get_checkpoint_tx(
-                &mut tx,
-                &BlobRef(checkpoint_ref.clone()),
-                self.fence.fleet(),
-            )
-            .await?
-            .ok_or_else(|| StoreError::CheckpointRootMissing {
-                blob_ref: BlobRef(checkpoint_ref.clone()),
-            })?;
-            checkpoint.components.retain(|key, _| {
-                key != lash_core_execution::store::EXECUTION_STATE_CHECKPOINT_COMPONENT
-                    && !matches!(
-                        lash_core_execution::plugin::CheckpointComponentKey::parse(key),
-                        lash_core_execution::plugin::CheckpointComponentKey::ExecutionLeaf(_)
-                    )
-            });
-            checkpoint_ref =
-                crate::support::put_checkpoint_tx(&mut tx, &checkpoint, self.fence.fleet())
-                    .await?
-                    .0
-                    .as_str()
-                    .to_owned();
-        }
-        // Relation and retention-source identities are metadata, not ancestry.
-        // Reconstruct every inherited ceiling from the retained parent edges so
-        // deleted owners need no surviving head or descendant carrier row.
-        let fork_generation = u64_from_sql("SessionGraph node", "generation", fork_generation)?;
-        let mut edge_path = Vec::new();
-        let mut current_node_id = request.node_id.clone();
-        let mut expected_generation = fork_generation;
-        loop {
-            let facts = sqlx::query_as::<_, (String, Option<String>, String, i64)>(
-                session_sql().graph_postgres.select_edge_for_share.sql(),
-            )
-            .bind(&*current_node_id)
+            .bind(leaf_node_id)
             .fetch_optional(&mut **tx)
             .await
-            .map_err(store_sqlx_error)?
-            .ok_or_else(|| StoreError::StoredDataCorrupt {
-                record_kind: "SessionGraph",
-                message: format!(
-                    "retained fork path is missing or tombstoned at `{current_node_id}`"
-                ),
-            })?;
-            let generation = u64_from_sql("SessionGraph node", "generation", facts.3)?;
-            if generation != expected_generation {
-                return Err(StoreError::StoredDataCorrupt {
-                    record_kind: "SessionGraph",
+            .map_err(store_sqlx_error)?;
+            let (_owning_session_id, fork_generation) =
+                node_facts.ok_or_else(|| StoreError::StoredDataCorrupt {
+                    record_kind: "SessionRevision",
                     message: format!(
-                        "parent generation {generation} does not match expected {expected_generation}"
+                        "revision {} of session `{source_session_id}` retains leaf \
+                         `{leaf_node_id}`, which is missing or tombstoned",
+                        request.head_revision
                     ),
-                });
-            }
-            let parent_node_id = facts.1.clone();
-            edge_path.push(lash_core_execution::store::ForkNodeFacts {
-                node_id: facts.0.into(),
-                parent_node_id: facts.1.map(lash_core_execution::NodeId::from),
-                owning_session_id: SessionId::from(facts.2),
-                generation,
+                })?;
+            let frame = crate::runtime_persistence::nearest_frame_node_id_tx(&mut tx, leaf_node_id)
+                .await?
+                .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
+                    leaf_node_id: leaf_node_id.to_string().into(),
+                })?;
+            let frame_node_id = lash_core_execution::FrameNodeId::new(frame)
+                .map_err(|error| StoreError::Backend(error.to_string()))?;
+            let source_frame = lash_core_execution::ArtifactReferrer::FrameEnvironment(
+                lash_core_execution::FrameEnvironmentId::new(
+                    source_session_id.clone(),
+                    frame_node_id.clone(),
+                ),
+            );
+            let fork_frame = lash_core_execution::ArtifactReferrer::FrameEnvironment(
+                lash_core_execution::FrameEnvironmentId::new(
+                    request.session_id.clone(),
+                    frame_node_id.clone(),
+                ),
+            );
+            let mut frame_locks = [source_frame.clone(), fork_frame.clone()];
+            frame_locks.sort_by_key(|referrer| {
+                format!(
+                    "lash-artifact-referrer:{}:{}",
+                    referrer.kind().as_str(),
+                    referrer.canonical_id()
+                )
             });
-            if expected_generation == 0 {
-                break;
+            for referrer in &frame_locks {
+                crate::artifact_store::lock_referrer_tx(&mut tx, referrer)
+                    .await
+                    .map_err(store_sqlx_error)?;
             }
-            current_node_id = parent_node_id
+            let source_ended: bool = sqlx::query_scalar(
+                crate::artifact_store::artifact_sql()
+                    .fences
+                    .select_is_fenced
+                    .sql(),
+            )
+            .bind(source_frame.kind().as_str())
+            .bind(source_frame.canonical_id())
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+            if source_ended {
+                if let Some(retained_ref) = checkpoint_ref.clone() {
+                    let mut checkpoint = crate::support::get_checkpoint_tx(
+                        &mut tx,
+                        &BlobRef(retained_ref.clone()),
+                        self.fence.fleet(),
+                    )
+                    .await?
+                    .ok_or(StoreError::CheckpointRootMissing {
+                        blob_ref: BlobRef(retained_ref),
+                    })?;
+                    checkpoint.components.retain(|key, _| {
+                        key != lash_core_execution::store::EXECUTION_STATE_CHECKPOINT_COMPONENT
+                            && !matches!(
+                                lash_core_execution::plugin::CheckpointComponentKey::parse(key),
+                                lash_core_execution::plugin::CheckpointComponentKey::ExecutionLeaf(
+                                    _
+                                )
+                            )
+                    });
+                    checkpoint_ref = Some(
+                        crate::support::put_checkpoint_tx(&mut tx, &checkpoint, self.fence.fleet())
+                            .await?
+                            .0
+                            .as_str()
+                            .to_owned(),
+                    );
+                }
+            } else {
+                copy_frame_edges = Some((source_frame, fork_frame));
+            }
+            // Relation and retention-source identities are metadata, not
+            // ancestry. Reconstruct every inherited ceiling from the retained
+            // parent edges so deleted owners need no surviving head or
+            // descendant carrier row.
+            let fork_generation = u64_from_sql("SessionGraph node", "generation", fork_generation)?;
+            let mut edge_path = Vec::new();
+            let mut current_node_id = lash_core_execution::NodeId::from(leaf_node_id);
+            let mut expected_generation = fork_generation;
+            loop {
+                let facts = sqlx::query_as::<_, (String, Option<String>, String, i64)>(
+                    session_sql().graph_postgres.select_edge_for_share.sql(),
+                )
+                .bind(&*current_node_id)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(store_sqlx_error)?
                 .ok_or_else(|| StoreError::StoredDataCorrupt {
                     record_kind: "SessionGraph",
-                    message: "retained fork path ended before generation zero".to_string(),
-                })?
-                .into();
-            expected_generation -= 1;
+                    message: format!(
+                        "retained fork path is missing or tombstoned at `{current_node_id}`"
+                    ),
+                })?;
+                let generation = u64_from_sql("SessionGraph node", "generation", facts.3)?;
+                if generation != expected_generation {
+                    return Err(StoreError::StoredDataCorrupt {
+                        record_kind: "SessionGraph",
+                        message: format!(
+                            "parent generation {generation} does not match expected {expected_generation}"
+                        ),
+                    });
+                }
+                let parent_node_id = facts.1.clone();
+                edge_path.push(lash_core_execution::store::ForkNodeFacts {
+                    node_id: facts.0.into(),
+                    parent_node_id: facts.1.map(lash_core_execution::NodeId::from),
+                    owning_session_id: SessionId::from(facts.2),
+                    generation,
+                });
+                if expected_generation == 0 {
+                    break;
+                }
+                current_node_id = parent_node_id
+                    .ok_or_else(|| StoreError::StoredDataCorrupt {
+                        record_kind: "SessionGraph",
+                        message: "retained fork path ended before generation zero".to_string(),
+                    })?
+                    .into();
+                expected_generation -= 1;
+            }
+            edge_path.reverse();
+            fork_plan = Some(lash_core_execution::store::ForkPlan::derive(
+                &request.session_id,
+                edge_path,
+            )?);
+            current_frame_node_id = Some(frame_node_id);
         }
-        edge_path.reverse();
-        let fork_plan =
-            lash_core_execution::store::ForkPlan::derive(&request.session_id, edge_path)?;
         let config = request.config.clone();
         let head = lash_core_execution::store::SessionHeadMeta::assemble(
             &request.session_id,
@@ -797,31 +749,44 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                 published_by_drive: false,
             },
             0,
-            Some(checkpoint_ref.clone().into()),
-            Some(request.node_id.clone()),
-            Some(frame_node_id.clone()),
+            checkpoint_ref.clone().map(Into::into),
+            leaf_node_id.clone().map(Into::into),
+            current_frame_node_id,
         )?;
+        let head_json = encode_json(&head.payload())?;
         sqlx::query(session_sql().head_postgres.insert_fork.sql())
             .bind(request.session_id.as_str())
-            .bind(encode_json(&head.payload())?)
-            .bind(&checkpoint_ref)
-            .bind(&*request.node_id)
+            .bind(&head_json)
+            .bind(checkpoint_ref.as_deref())
+            .bind(leaf_node_id.as_deref())
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
-        for ancestor in fork_plan.ancestors() {
-            sqlx::query(session_sql().lineage.insert.sql())
-                .bind(fork_plan.session_id())
-                .bind(ancestor.ancestor_session_id.as_str())
-                .bind(&*ancestor.fork_node_id)
-                .bind(i64::try_from(ancestor.fork_generation).map_err(|_| {
-                    StoreError::Backend(
-                        "fork generation does not fit PostgreSQL BIGINT".to_string(),
-                    )
-                })?)
-                .execute(&mut **tx)
-                .await
-                .map_err(store_sqlx_error)?;
+        // The fork's own head is its first retained revision.
+        crate::revisions::record_revision_tx(
+            &mut tx,
+            &request.session_id,
+            0,
+            leaf_node_id.as_deref(),
+            checkpoint_ref.as_deref(),
+            &head_json,
+        )
+        .await?;
+        if let Some(fork_plan) = &fork_plan {
+            for ancestor in fork_plan.ancestors() {
+                sqlx::query(session_sql().lineage.insert.sql())
+                    .bind(fork_plan.session_id())
+                    .bind(ancestor.ancestor_session_id.as_str())
+                    .bind(&*ancestor.fork_node_id)
+                    .bind(i64::try_from(ancestor.fork_generation).map_err(|_| {
+                        StoreError::Backend(
+                            "fork generation does not fit PostgreSQL BIGINT".to_string(),
+                        )
+                    })?)
+                    .execute(&mut **tx)
+                    .await
+                    .map_err(store_sqlx_error)?;
+            }
         }
         let meta = SessionMeta {
             owning_process_id: None,
@@ -837,7 +802,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             self.fence.fleet(),
         )
         .await?;
-        if !source_ended {
+        if let Some((source_frame, fork_frame)) = copy_frame_edges {
             sqlx::query(
                 crate::artifact_store::artifact_sql()
                     .edges
@@ -855,8 +820,9 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core_execution::ForkSessionReceipt {
             session_id: request.session_id.clone(),
-            node_id: request.node_id.clone(),
             source_session_id,
+            head_revision: request.head_revision,
+            leaf_node_id: leaf_node_id.map(Into::into),
             observed_processes: Vec::new(),
         })
     }
@@ -1197,10 +1163,27 @@ pub(crate) async fn delete_session_tx(
     .await
     .map_err(store_sqlx_error)?;
     let (leaf_node_id, checkpoint_ref) = head.unwrap_or((None, None));
-    let mut checkpoint_refs = std::collections::BTreeSet::new();
-    if let Some(checkpoint_ref) = checkpoint_ref.as_deref() {
-        checkpoint_refs.insert(checkpoint_ref.to_string());
-    }
+    // What the session roots: its head, and every revision it still retains.
+    // Its pins and revisions go with it, so each root they held becomes a
+    // reclaim candidate here.
+    let mut checkpoint_refs: std::collections::BTreeSet<String> =
+        sqlx::query_scalar(session_sql().revisions.select_session_checkpoints.sql())
+            .bind(session_id.as_str())
+            .fetch_all(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .into_iter()
+            .collect();
+    checkpoint_refs.extend(checkpoint_ref);
+    let mut retained_leaves: std::collections::BTreeSet<String> =
+        sqlx::query_scalar(session_sql().revisions.select_session_leaves.sql())
+            .bind(session_id.as_str())
+            .fetch_all(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .into_iter()
+            .collect();
+    retained_leaves.extend(leaf_node_id);
     let candidates =
         crate::session_blob_reclaim::enumerate_checkpoint_blob_candidates_tx(tx, &checkpoint_refs)
             .await?;
@@ -1211,13 +1194,19 @@ pub(crate) async fn delete_session_tx(
     )
     .await?;
     report.enumerated_blob_count = candidates.len();
-    sqlx::query(session_sql().head.delete_by_session.sql())
-        .bind(session_id.as_str())
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    if let Some(leaf_node_id) = leaf_node_id {
-        crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, &leaf_node_id).await?;
+    for statement in [
+        session_sql().head.delete_by_session.sql(),
+        session_sql().revisions.delete_by_session.sql(),
+        session_sql().pins.delete_by_session.sql(),
+    ] {
+        sqlx::query(statement)
+            .bind(session_id.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    }
+    for leaf_node_id in &retained_leaves {
+        crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, leaf_node_id).await?;
     }
     let unreachable_candidates = sqlx::query_scalar::<_, String>(
         session_sql().graph_postgres.select_unreachable_leaves.sql(),
@@ -1231,8 +1220,8 @@ pub(crate) async fn delete_session_tx(
     }
     // Delete-time reclaim covers this session's tombstoned rows plus any
     // tombstoned row owned by an already-deleted session. A node can be
-    // tombstoned *after* its owner is gone (unpin of a pinned leaf whose session
-    // was deleted, or ancestry retired at a fork child's delete), and no
+    // tombstoned *after* its owner is gone (ancestry retired at a fork child's
+    // delete or collection), and no
     // session-scoped vacuum could ever reach it: the owning id is permanently
     // unbindable. Live sessions' rows stay resident for their own vacuum, so
     // this is not a catalog-wide sweep.

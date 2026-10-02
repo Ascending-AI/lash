@@ -289,14 +289,17 @@ pub enum SessionRelation {
     Fork {
         /// Host-declared lineage: the session this fork branched from as the
         /// host understands it. Stores persist it as durable fork lineage
-        /// and never validate it against the fork point's anchor provenance —
-        /// repeated rewinds legitimately name superseded intermediate
-        /// sessions, while [`crate::ForkSessionReceipt::source_session_id`]
-        /// always reports the original writer.
+        /// and never validate it against the forked revision — repeated
+        /// rewinds legitimately name superseded intermediate sessions, while
+        /// [`crate::ForkSessionReceipt::source_session_id`] always reports
+        /// the session whose revision was forked.
         source_session_id: SessionId,
         /// Host-declared source node, persisted alongside
-        /// [`Self::Fork::source_session_id`] and equally unvalidated.
-        source_node_id: crate::NodeId,
+        /// [`Self::Fork::source_session_id`] and equally unvalidated. A fork
+        /// of a revision with no history, such as a session that has never
+        /// run a turn, has none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_node_id: Option<crate::NodeId>,
     },
 }
 /// Durable lineage identity of a [`SessionRelation`].
@@ -313,7 +316,7 @@ pub enum SessionLineage {
     },
     Fork {
         source_session_id: SessionId,
-        source_node_id: String,
+        source_node_id: Option<String>,
     },
 }
 impl SessionLineage {
@@ -332,7 +335,7 @@ impl SessionLineage {
                 ..
             } => Self::Fork {
                 source_session_id: source_session_id.clone(),
-                source_node_id: source_node_id.to_string(),
+                source_node_id: source_node_id.as_ref().map(ToString::to_string),
             },
         }
     }
@@ -347,7 +350,12 @@ impl SessionLineage {
             Self::Fork {
                 source_session_id,
                 source_node_id,
-            } => format!("a fork of session `{source_session_id}` at node `{source_node_id}`"),
+            } => match source_node_id {
+                Some(source_node_id) => {
+                    format!("a fork of session `{source_session_id}` at node `{source_node_id}`")
+                }
+                None => format!("a fork of session `{source_session_id}` before its first node"),
+            },
         }
     }
 

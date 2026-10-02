@@ -83,6 +83,17 @@ impl PostgresStore {
     }
     async fn gc_unreachable_blobs(&self) -> Result<GcReport, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
+        // A host collection is what ends `until_gc`'s hold: release every
+        // revision no head, pin or retention window keeps, in a transaction
+        // of its own. It takes revision and node locks, which a commit takes
+        // before its blob locks, so it must finish before the sweep takes
+        // the table lock below. A crash between the two leaves released
+        // revisions whose bytes the next collection sweeps.
+        {
+            let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
+            crate::revisions::release_unretained_tx(&mut tx, true, None).await?;
+            tx.commit().await.map_err(store_sqlx_error)?;
+        }
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         // Serialize against concurrent checkpoint-blob writers. Every commit
         // INSERTs its new manifest into `lash_blobs` (holding a ROW EXCLUSIVE
@@ -171,7 +182,7 @@ impl PostgresStore {
             String,
         >,
     ) -> Result<usize, StoreError> {
-        // Projection edges belong to live head/anchor roots. Sever every dead
+        // Projection edges belong to retained-revision roots. Sever every dead
         // root's complete outgoing set before the blob sweep: a strict
         // component FK must never be weakened to accommodate stale ownership
         // data.

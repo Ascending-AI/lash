@@ -758,11 +758,12 @@ impl SqliteStore {
                     } else {
                         end_frames_tx(tx, &commit.session_id, &left, None, now)?;
                     }
+                    let head_json = encode_json(&meta.payload())?;
                     crate::conn::cached_execute(tx,
                         session_sql().head_sqlite.upsert.sql(),
                         params![
                             meta.session_id.as_str(),
-                            encode_json(&meta.payload())?,
+                            head_json,
                             sql_head_revision,
                             meta.leaf_node_id.as_deref(),
                             meta.checkpoint_ref.as_ref().map(BlobRef::as_str),
@@ -772,11 +773,32 @@ impl SqliteStore {
                         ],
                     )
                     .map_err(sqlite_error)?;
-                    crate::conn::cached_execute(tx,
-                        session_sql().meta.touch_last_commit.sql(),
-                        params![commit.session_id.as_str(), crate::clamp_epoch_ms(now)],
-                    )
-                    .map_err(sqlite_error)?;
+                    let retention = tx
+                        .prepare_cached(session_sql().meta.touch_last_commit.sql())
+                        .map_err(sqlite_error)?
+                        .query_row(
+                            params![commit.session_id.as_str(), crate::clamp_epoch_ms(now)],
+                            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?)),
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?
+                        .map_or(
+                            Ok(lash_core_execution::Retention::default()),
+                            |(kind, last_turns)| {
+                                lash_core_execution::Retention::from_stored(&kind, last_turns)
+                            },
+                        )?;
+                    // The published head is a retained revision from this
+                    // transaction on. Recording it reads no pin: a pin
+                    // resolves to it by query whenever something asks.
+                    crate::revisions::record_revision_conn(
+                        tx,
+                        &commit.session_id,
+                        sql_head_revision,
+                        meta.leaf_node_id.as_deref(),
+                        meta.checkpoint_ref.as_ref().map(BlobRef::as_str),
+                        &head_json,
+                    )?;
                     if plan.head_changed()
                         && let Some(old_leaf_node_id) = plan.old_leaf_node_id()
                     {
@@ -787,6 +809,16 @@ impl SqliteStore {
                     let claim = lash_core_execution::ReferrerClaim::unguarded(lash_core_execution::ArtifactReferrer::Session(commit.session_id.clone())).map_err(|error| error.into_store_error("attachment session referrer"))?;
                     crate::attachments::acquire_attachment_refs_conn(tx, &claim, &commit.committed_attachment_ids, now)?;
                     crate::session_roots::write_commit_root_terminal_conn(tx, commit, plan.next_head_revision(), now)?;
+                    // `until_gc` releases nothing here and reads no pin. The
+                    // other policies release what this publication moved out
+                    // of their window, once the root's terminal names it.
+                    if retention.releases_at_commit() {
+                        crate::revisions::release_unretained_conn(
+                            tx,
+                            false,
+                            Some(&commit.session_id),
+                        )?;
+                    }
                     let mut result = plan.result(
                         stored_checkpoint.checkpoint_ref,
                         stored_checkpoint.manifest,

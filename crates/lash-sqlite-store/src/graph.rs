@@ -72,9 +72,10 @@ impl SqliteStore {
 
     /// Collect the checkpoint-manifest roots that must survive GC.
     ///
-    /// The session head's current `checkpoint_ref` is the live checkpoint; its
-    /// manifest blob (and, transitively, the tool/plugin/execution snapshot
-    /// blobs it references) is reachable and must be kept. Synchronous: runs
+    /// Every retained revision's `checkpoint_ref` is a live checkpoint, the
+    /// session head's among them; its manifest blob (and, transitively, the
+    /// tool/plugin/execution snapshot blobs it references) is reachable and
+    /// must be kept. Synchronous: runs
     /// inside the GC `conn.write` closure on the connection thread.
     fn live_checkpoint_roots(conn: &Connection) -> Result<Vec<GcRoot>, StoreError> {
         let mut roots = Vec::new();
@@ -135,6 +136,10 @@ impl SqliteStore {
         use lash_core_execution::store::{
             EnumerationProgress, ReclamationEnumeration, SqliteBlobRootSource,
         };
+        // A host collection is what ends `until_gc`'s hold: release every
+        // revision no head, pin or retention window keeps before reading the
+        // roots, so the sweep below collects what only they named.
+        crate::revisions::release_unretained_conn(tx, true, None)?;
         let mut enumeration = ReclamationEnumeration::<SqliteBlobRootSource, String>::new();
         let mut roots = Self::live_checkpoint_roots(tx)?;
         enumeration.page(

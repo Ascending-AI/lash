@@ -203,6 +203,19 @@ pub(super) enum SurfaceMethod {
     ProbeAttachmentReferrers,
     ProbeSessionReferrerState,
     EndAttachmentReferrer,
+    /// [`SessionCatalogStore::resolve_target`](lash_core::SessionCatalogStore::resolve_target)
+    /// of the session's head revision, or of the revision past it
+    /// (`published: false`), which every backend refuses as pending without
+    /// residue (FIG-4731).
+    ResolveTarget {
+        published: bool,
+    },
+    /// [`SessionCatalogStore::retention`](lash_core::SessionCatalogStore::retention)
+    /// of the case's session.
+    ReadRetention,
+    /// [`SessionCatalogStore::set_retention`](lash_core::SessionCatalogStore::set_retention)
+    /// to a two-turn window.
+    SetRetention,
     Vacuum,
 }
 
@@ -302,6 +315,10 @@ impl SurfaceMethod {
             Self::ProbeAttachmentReferrers => "surface:attachment_referrers",
             Self::ProbeSessionReferrerState => "surface:session_referrer_state",
             Self::EndAttachmentReferrer => "surface:end_attachment_referrer",
+            Self::ResolveTarget { published: true } => "surface:resolve_target",
+            Self::ResolveTarget { published: false } => "surface:resolve_target_pending",
+            Self::ReadRetention => "surface:retention",
+            Self::SetRetention => "surface:set_retention",
             Self::Vacuum => "surface:vacuum",
         }
     }
@@ -553,6 +570,13 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             // `FollowOnNotPending` refusal.
             surface(SurfaceMethod::RaisePendingFollowOnAttempts { owed: true }),
             surface(SurfaceMethod::LoadPendingFollowOn),
+            // The head resolves to itself; the revision past it names no
+            // state yet. The policy reads back its default, then what was set.
+            surface(SurfaceMethod::ResolveTarget { published: true }),
+            surface(SurfaceMethod::ResolveTarget { published: false }),
+            surface(SurfaceMethod::ReadRetention),
+            surface(SurfaceMethod::SetRetention),
+            surface(SurfaceMethod::ReadRetention),
             surface(SurfaceMethod::Vacuum),
         ],
     }
@@ -1696,6 +1720,33 @@ impl BackendRunner {
                 );
                 store.end_attachment_referrer(&referrer).await?;
                 "ended".to_string()
+            }
+            SurfaceMethod::ResolveTarget { published } => {
+                let head = self.head_revision().await?;
+                let target = lash_core::Target::Revision(if published { head } else { head + 1 });
+                let revision = self.factory().resolve_target(&session_id, &target).await?;
+                format!(
+                    "revision={} leaf_present={} checkpoint_present={} head={} pins={}",
+                    revision.head_revision,
+                    revision.leaf_node_id.is_some(),
+                    revision.checkpoint_ref.is_some(),
+                    revision.head,
+                    revision.pinned_by.len()
+                )
+            }
+            SurfaceMethod::ReadRetention => {
+                format!("{:?}", self.factory().retention(&session_id).await?)
+            }
+            SurfaceMethod::SetRetention => {
+                self.factory()
+                    .set_retention(
+                        &session_id,
+                        lash_core::Retention::LastTurns(
+                            std::num::NonZeroU32::MIN.saturating_add(1),
+                        ),
+                    )
+                    .await?;
+                "set".to_string()
             }
             SurfaceMethod::Vacuum => {
                 let report = store

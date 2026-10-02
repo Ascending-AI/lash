@@ -131,6 +131,22 @@ impl BackendRunner {
         Ok(None)
     }
 
+    /// The revision this case's session heads: the state a fork or a pin of
+    /// its current leaf names.
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
+    pub(super) async fn head_revision(&self) -> Result<u64, StoreError> {
+        Ok(self
+            .factory()
+            .revisions(&self.session_id)
+            .await?
+            .pop()
+            .expect("generated sequence created the session before forking or pinning")
+            .head_revision)
+    }
+
     #[expect(
         clippy::expect_used,
         reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
@@ -146,7 +162,11 @@ impl BackendRunner {
                     .fork_session(&ForkSessionRequest {
                         pending_observer_intents: Vec::new(),
                         session_id: self.session_id.clone(),
-                        node_id: format!("{}:missing-fork-node", self.session_id).into(),
+                        source_session_id: SessionId::from(format!(
+                            "{}:missing-fork-source",
+                            self.session_id
+                        )),
+                        head_revision: 0,
                         relation: SessionRelation::Root,
                         config: lash_core::SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
@@ -164,22 +184,22 @@ impl BackendRunner {
                 Err(error)
             }
             StoreOperation::ForkAtForeignLineage => {
-                let node_id = self
-                    .current_leaf_node_id
-                    .clone()
-                    .expect("generated sequence committed a leaf before foreign-lineage fork");
+                let head_revision = self.head_revision().await?;
                 let result = self
                     .factory()
                     .fork_session(&ForkSessionRequest {
                         pending_observer_intents: Vec::new(),
                         session_id: SessionId::from(format!("{}:foreign-lineage", self.session_id)),
-                        node_id: node_id.clone().into(),
+                        source_session_id: self.session_id.clone(),
+                        head_revision,
                         relation: SessionRelation::Fork {
                             source_session_id: SessionId::from(format!(
                                 "{}:foreign-source",
                                 self.session_id
                             )),
-                            source_node_id: format!("{}:foreign-node", self.session_id).into(),
+                            source_node_id: Some(
+                                format!("{}:foreign-node", self.session_id).into(),
+                            ),
                         },
                         config: lash_core::SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
@@ -188,10 +208,11 @@ impl BackendRunner {
                         .into(),
                     })
                     .await
-                    .expect("foreign lineage must not gate a retained fork point");
+                    .expect("foreign lineage must not gate a retained revision");
                 assert_eq!(
-                    result.source_session_id, self.session_id,
-                    "fork result must report retained-anchor provenance"
+                    (result.source_session_id, result.head_revision),
+                    (self.session_id.clone(), head_revision),
+                    "fork result must name the forked state, not relation lineage"
                 );
                 Ok(None)
             }
@@ -205,6 +226,7 @@ impl BackendRunner {
                     .current_leaf_node_id
                     .clone()
                     .expect("generated sequence committed a leaf before rewind");
+                let head_revision = self.head_revision().await?;
                 let branch_session_id =
                     SessionId::from(format!("{}:rewind-branch", self.session_id));
                 let branch = self
@@ -212,10 +234,11 @@ impl BackendRunner {
                     .fork_session(&ForkSessionRequest {
                         pending_observer_intents: Vec::new(),
                         session_id: branch_session_id.clone(),
-                        node_id: node_id.clone().into(),
+                        source_session_id: self.session_id.clone(),
+                        head_revision,
                         relation: SessionRelation::Fork {
                             source_session_id: self.session_id.clone(),
-                            source_node_id: node_id.clone().into(),
+                            source_node_id: Some(node_id.clone().into()),
                         },
                         config: lash_core::SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
@@ -227,7 +250,7 @@ impl BackendRunner {
                     .expect("rewind must create its first branch");
                 assert_eq!(
                     branch.source_session_id, self.session_id,
-                    "first rewind fork must report retained-anchor provenance"
+                    "first rewind fork must name the forked state"
                 );
                 self.factory()
                     .delete_session(&self.session_id)
@@ -247,11 +270,13 @@ impl BackendRunner {
                     .fork_session(&ForkSessionRequest {
                         pending_observer_intents: Vec::new(),
                         session_id: SessionId::from(format!("{}:rewind", self.session_id)),
-                        node_id: node_id.into(),
+                        source_session_id: branch_session_id.clone(),
+                        head_revision: 0,
                         relation: SessionRelation::Fork {
-                            source_session_id: branch_session_id,
-                            source_node_id: format!("{}:rewind-source-node", self.session_id)
-                                .into(),
+                            source_session_id: branch_session_id.clone(),
+                            source_node_id: Some(
+                                format!("{}:rewind-source-node", self.session_id).into(),
+                            ),
                         },
                         config: lash_core::SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
@@ -262,8 +287,9 @@ impl BackendRunner {
                     .await
                     .expect("rewind must re-fork after deleting the superseded source");
                 assert_eq!(
-                    rewound.source_session_id, self.session_id,
-                    "re-fork must report retained-anchor provenance, not relation lineage"
+                    (rewound.source_session_id, rewound.leaf_node_id),
+                    (branch_session_id, Some(node_id.into())),
+                    "re-fork must name the surviving branch's creation revision"
                 );
                 Ok(None)
             }
@@ -292,7 +318,8 @@ pub(super) async fn prepare_retention_case(case: CaseName, runners: &[BackendRun
     }
 }
 
-/// Pin a leaf, fork at it, then unpin: the node anchor must move with the fork.
+/// Pin the head revision, fork at it, then unpin: the fork keeps the history
+/// through its own creation revision, and the pin row comes and goes.
 /// Declared here beside the other fork shapes so the parent file stays inside
 /// the test file-size budget.
 pub(super) fn pin_fork_unpin() -> GeneratedCase {
@@ -378,7 +405,7 @@ pub(super) async fn selected_observer_intents(
             session_id: session_id.clone(),
             relation: SessionRelation::Fork {
                 source_session_id: "host-selected-lineage".into(),
-                source_node_id: "foreign-history-provenance".into(),
+                source_node_id: Some("foreign-history-provenance".into()),
             },
             pending_observer_intents: vec![intent.clone()],
             config: lash_core::SessionPolicy::new(
@@ -403,31 +430,27 @@ pub(super) async fn selected_observer_intents(
         let mut state = RuntimeSessionState::new(request.config.session_policy());
         state.session_id = source_id.clone();
         state.ensure_agent_frame_initialized();
-        source
+        let head_revision = source
             .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
             .await
-            .expect("commit fork point");
-        let node_id = state
-            .session_graph
-            .leaf_node_id
-            .clone()
-            .expect("forkable node");
-        factory.pin(&node_id).await.expect("retain writer history");
-        factory
-            .delete_session(&source_id)
-            .await
-            .expect("delete original writer");
+            .expect("commit fork point")
+            .head_revision;
         let receipt = factory
             .fork_session(&ForkSessionRequest {
                 session_id: session_id.clone(),
-                node_id,
+                source_session_id: source_id.clone(),
+                head_revision,
                 relation: request.relation.clone(),
                 pending_observer_intents: request.pending_observer_intents.clone(),
                 config: request.config.session_policy().into(),
             })
             .await
-            .expect("fork deleted-writer history with exact intent");
+            .expect("fork the writer's history with exact intent");
         assert_eq!(receipt.source_session_id, source_id);
+        factory
+            .delete_session(&source_id)
+            .await
+            .expect("delete original writer");
         let store = look_up_test_session(factory.clone(), &request.session_id)
             .await
             .expect("reopen interrupted fork")

@@ -80,12 +80,6 @@ const SCOPED_READS: &[(&str, &str, &str, &str)] = &[
                 WHERE checkpoint_ref IN
                     (SELECT checkpoint_ref FROM lash_session_head WHERE session_id = $1))",
     ),
-    (
-        "node_anchors",
-        "node_anchors",
-        "SELECT * FROM node_anchors WHERE source_session_id = ?1",
-        "SELECT to_jsonb(t)::text FROM lash_node_anchors t WHERE source_session_id = $1",
-    ),
 ];
 
 /// The SQLite logical name of a Postgres table: the `lash_` prefix dropped,

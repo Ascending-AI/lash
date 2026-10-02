@@ -161,7 +161,7 @@ impl CaseName {
             Self::CheckpointBodiesThenCleared => "checkpoint_bodies_then_cleared",
             Self::MissingCheckpointComponentRef => "missing_checkpoint_component_ref",
             Self::ForkFencePrecedence => "fork_fence_exists_precedes_other_fences",
-            Self::PinForkUnpin => "pin_fork_unpin_moves_node_anchor",
+            Self::PinForkUnpin => "pin_fork_unpin_leaves_no_pin_row",
             Self::ForeignLineageFork => "fork_accepts_foreign_lineage",
             Self::Rewind => "rewind_fork_delete_source_refork",
             Self::AttachmentAdoption => "attachment_intent_adopted_by_commit",
@@ -1375,12 +1375,8 @@ impl BackendRunner {
                 Ok(None)
             }
             StoreOperation::PinLeaf => {
-                let node_id = lash_core::NodeId::from(
-                    self.current_leaf_node_id
-                        .as_deref()
-                        .expect("generated sequence committed a leaf before pin"),
-                );
-                self.factory().pin(&node_id).await?;
+                let head = lash_core::Target::Revision(self.head_revision().await?);
+                self.factory().pin(&self.session_id, &head).await?;
                 Ok(None)
             }
             StoreOperation::ForkAtLeaf => {
@@ -1388,14 +1384,16 @@ impl BackendRunner {
                     .current_leaf_node_id
                     .clone()
                     .expect("generated sequence committed a leaf before fork");
+                let head_revision = self.head_revision().await?;
                 self.factory()
                     .fork_session(&ForkSessionRequest {
                         pending_observer_intents: Vec::new(),
                         session_id: SessionId::from(format!("{}:fork", self.session_id)),
-                        node_id: node_id.clone().into(),
+                        source_session_id: self.session_id.clone(),
+                        head_revision,
                         relation: SessionRelation::Fork {
                             source_session_id: self.session_id.clone(),
-                            source_node_id: node_id.into(),
+                            source_node_id: Some(node_id.into()),
                         },
                         config: lash_core::SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
@@ -1410,12 +1408,8 @@ impl BackendRunner {
             | StoreOperation::ForkAtForeignLineage
             | StoreOperation::Rewind => self.apply_fork_operation(operation).await,
             StoreOperation::UnpinLeaf => {
-                let node_id = lash_core::NodeId::from(
-                    self.current_leaf_node_id
-                        .as_deref()
-                        .expect("generated sequence committed a leaf before unpin"),
-                );
-                self.factory().unpin(&node_id).await?;
+                let head = lash_core::Target::Revision(self.head_revision().await?);
+                self.factory().unpin(&self.session_id, &head).await?;
                 Ok(None)
             }
             StoreOperation::EnqueueNextTurnInput => self
@@ -2361,7 +2355,7 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "checkpoint_bodies_then_cleared",
             "missing_checkpoint_component_ref",
             "fork_fence_exists_precedes_other_fences",
-            "pin_fork_unpin_moves_node_anchor",
+            "pin_fork_unpin_leaves_no_pin_row",
             "fork_accepts_foreign_lineage",
             "rewind_fork_delete_source_refork",
             "attachment_intent_adopted_by_commit",

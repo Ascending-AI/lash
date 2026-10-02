@@ -1037,7 +1037,7 @@ async fn a_creation_without_max_tool_calls_is_refused() -> Result<()> {
     Ok(())
 }
 
-/// A fork records its fork point's recorded config in full (FIG-4594). The
+/// A fork records the forked revision's recorded config in full (FIG-4594). The
 /// source is created from one spec and runs a root; the host then changes
 /// what it passes (another session is created from a different spec, on a
 /// second core over the same stores), and the fork made there records
@@ -1066,17 +1066,13 @@ async fn a_fork_records_its_fork_points_config_whatever_the_host_passes_now() ->
     engine_driven_turn(&core, SOURCE, "before the fork").await?;
     let source = recorded_config(&core, SOURCE).await?;
     assert_eq!(source.turn_budget, crate::TurnBudget::bounded(7));
-    let point = {
-        let id = SessionId::from(SOURCE);
-        let store = crate::session::resolve_existing_session(&core.store_factory, &id).await?;
-        crate::session::load_state_from_store(&id, &store)
-            .await?
-            .session_graph
-            .leaf_node_id
-            .clone()
-            .expect("the source has a leaf")
-    };
-    core.pin(&point).await?;
+    let point = core
+        .store_factory
+        .revisions(&SessionId::from(SOURCE))
+        .await?
+        .pop()
+        .expect("the source has published its head")
+        .head_revision;
 
     // What the host passes changes: its next session states other controls.
     let later = core_over(backend, mock_provider())?;
@@ -1091,15 +1087,18 @@ async fn a_fork_records_its_fork_points_config_whatever_the_host_passes_now() ->
         .create(crate::SessionCreation::root(changed))
         .await?;
     later
-        .fork_at(crate::ForkRequest {
-            session_id: FORK.into(),
-            node_id: point.clone(),
-            relation: lash_core::SessionRelation::Fork {
-                source_session_id: SOURCE.into(),
-                source_node_id: point,
+        .fork_at(
+            &SessionId::from(SOURCE),
+            lash_core::Target::Revision(point),
+            crate::ForkRequest {
+                session_id: FORK.into(),
+                relation: lash_core::SessionRelation::Fork {
+                    source_session_id: SOURCE.into(),
+                    source_node_id: None,
+                },
+                observed_processes: Vec::new(),
             },
-            observed_processes: Vec::new(),
-        })
+        )
         .await?;
 
     let fork = recorded_config(&later, FORK).await?;

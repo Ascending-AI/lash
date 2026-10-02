@@ -170,7 +170,7 @@ impl DurableSessionOps {
         source_key: Option<String>,
         run_spec: crate::RunSpec,
     ) -> Result<crate::PendingTurnInput, crate::RuntimeError> {
-        self.enqueue_turn_inputs(store, vec![(input, source_key)], ingress, run_spec)
+        self.enqueue_turn_inputs(store, vec![(input, source_key)], ingress, run_spec, false)
             .await?
             .pop()
             .ok_or_else(|| store_error("a batch of one admitted no pending turn input"))
@@ -184,12 +184,17 @@ impl DurableSessionOps {
     /// answers returns that row; the others are enqueued in request order as
     /// one contiguous block. A conflict, or one id named twice, refuses the
     /// whole request and accepts nothing.
+    ///
+    /// `pin` pins every input in the transaction that accepts it, so the
+    /// revision each one's root publishes is retained before the root can
+    /// start (FIG-4731).
     pub async fn enqueue_turn_inputs(
         &self,
         store: &crate::store::SessionStore,
         inputs: Vec<(crate::TurnInput, Option<String>)>,
         ingress: crate::TurnInputIngress,
         run_spec: crate::RunSpec,
+        pin: bool,
     ) -> Result<Vec<crate::PendingTurnInput>, crate::RuntimeError> {
         let is_next_turn = matches!(ingress, crate::TurnInputIngress::NextTurn);
         let (enqueued, revision) = enqueue_turn_inputs_to_store(
@@ -199,6 +204,7 @@ impl DurableSessionOps {
             inputs,
             ingress,
             run_spec,
+            pin,
         )
         .await?;
         self.publish_queue_changed(
@@ -379,6 +385,7 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
         vec![(input, source_key)],
         ingress,
         run_spec,
+        false,
     )
     .await?
     .0
@@ -409,6 +416,7 @@ pub(in crate::runtime) async fn enqueue_turn_inputs_to_store(
     inputs: Vec<(crate::TurnInput, Option<String>)>,
     ingress: crate::TurnInputIngress,
     run_spec: crate::RunSpec,
+    pin: bool,
 ) -> Result<(Vec<crate::PendingTurnInput>, Option<SessionRevision>), crate::RuntimeError> {
     let mut drafts = Vec::with_capacity(inputs.len());
     for (input, source_key) in inputs {
@@ -423,6 +431,7 @@ pub(in crate::runtime) async fn enqueue_turn_inputs_to_store(
             ));
         }
         draft.source_key = source_key;
+        draft.pin = pin;
         drafts.push(draft);
     }
     let batch = crate::PendingTurnInputBatch::new(session_id, drafts)

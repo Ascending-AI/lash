@@ -3,6 +3,7 @@
 use lash_sansio::SessionId;
 
 mod append_identity;
+mod fork_target;
 mod head_path;
 mod process_lifecycle_sql;
 mod queued_work_admission;
@@ -14,6 +15,7 @@ mod turn_input_lifecycle_sql;
 mod usage_records;
 
 pub use append_identity::decode_append_request_identity;
+pub use fork_target::TargetResolution;
 pub use head_path::{HeadPathProbe, OwnerExit, OwnerExitParent, OwnerLowestNode, PathNode};
 pub use process_lifecycle_sql::{
     live_process_status_predicate_sql, nonterminal_process_status_predicate_sql,

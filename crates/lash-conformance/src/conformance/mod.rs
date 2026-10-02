@@ -126,6 +126,7 @@ pub use turn_commit_outcome::{
 };
 mod batch_sugar;
 mod recorded_batch;
+mod revision_pins;
 mod session_store_factory_vacuum;
 mod store_contract_state_machine;
 mod store_maintenance_outcome;
@@ -193,6 +194,7 @@ pub use queued_after_commit_redrive::*;
 pub use queued_input_roots::*;
 pub use release_stamp::{ReleaseStampDeployment, release_stamp_conformance};
 pub use retention::*;
+pub use revision_pins::*;
 pub use root_start_marker::*;
 pub use runtime_persistence::*;
 pub use runtime_persistence_state_machine::*;

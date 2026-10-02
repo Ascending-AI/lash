@@ -44,7 +44,7 @@ pub async fn fork_observer_transient_failure_retains_intent_until_publication(
             session_id: SessionId::from(SESSION_ID.to_string()),
             relation: crate::SessionRelation::Fork {
                 source_session_id: SessionId::from("fork-observer-transient-source"),
-                source_node_id: "fork-observer-transient-node".into(),
+                source_node_id: Some("fork-observer-transient-node".into()),
             },
             config: crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,

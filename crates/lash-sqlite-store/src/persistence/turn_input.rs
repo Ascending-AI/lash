@@ -1048,6 +1048,17 @@ fn enqueue_pending_turn_inputs_conn(
                 input_id
             }
         };
+        if draft.pin {
+            // The pin is written with the acceptance, new or replayed, so
+            // the input is pinned before its root can start.
+            crate::revisions::pin_conn(
+                tx,
+                session_id,
+                &lash_core_execution::Target::Input(lash_core_execution::InputId::from(
+                    input_id.as_str(),
+                )),
+            )?;
+        }
         admitted.push(
             load_pending_turn_input_by_id_conn(tx, session_id, &input_id)?.ok_or_else(|| {
                 StoreError::Backend("admitted pending turn input disappeared".to_string())

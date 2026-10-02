@@ -72,12 +72,24 @@ impl PostgresStore {
                 request.config.clone(),
                 self.fence.fleet(),
             );
+            let head_json = encode_json(&created_head.payload())?;
             sqlx::query(session_sql().head.insert_created.sql())
                 .bind(request.session_id.as_str())
-                .bind(encode_json(&created_head.payload())?)
+                .bind(&head_json)
                 .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
+            // The creation revision is an ordinary retained revision: an
+            // empty session forks at it (FIG-4731).
+            crate::revisions::record_revision_tx(
+                &mut tx,
+                &request.session_id,
+                0,
+                None,
+                None,
+                &head_json,
+            )
+            .await?;
         } else {
             let recorded =
                 crate::session_meta::load_recorded_lineage_tx(&mut tx, &request.session_id)

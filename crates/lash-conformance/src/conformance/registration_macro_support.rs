@@ -46,6 +46,7 @@ pub use super::queue_observation::*;
 pub use super::queued_after_commit_redrive::*;
 pub use super::queued_input_roots::*;
 pub use super::retention::*;
+pub use super::revision_pins::*;
 pub use super::root_answers_its_rows::*;
 pub use super::root_start_marker::*;
 pub use super::root_terminal::*;

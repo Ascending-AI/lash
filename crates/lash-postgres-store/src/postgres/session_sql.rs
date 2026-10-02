@@ -6,8 +6,8 @@ use lash_store_sql::Dialect;
 use lash_store_sql::session::{
     fork_lineage::ForkLineageStatements, graph_nodes::GraphNodeStatements,
     head::SessionHeadStatements as SharedHeadStatements, meta::SessionMetaStatements,
-    meta_pending_observer_intents::ObserverIntentStatements, node_anchors::NodeAnchorStatements,
-    turn_commits::TurnCommitStatements,
+    meta_pending_observer_intents::ObserverIntentStatements, pins::PinStatements,
+    revisions::SessionRevisionStatements, turn_commits::TurnCommitStatements,
 };
 
 lash_store_sql::statements! {
@@ -210,51 +210,6 @@ lash_store_sql::statements! {
          WHERE session_id = ANY(?1) AND checkpoint_ref IS NOT NULL
          ORDER BY checkpoint_ref";
 
-        /// The retained checkpoint for node `?1`: an explicit anchor if there
-        /// is one, otherwise the lowest-numbered session head that points at
-        /// it.
-        select_retained_checkpoint = "SELECT source_session_id, checkpoint_ref FROM (
-             SELECT source_session_id, checkpoint_ref, 0 AS priority
-             FROM node_anchors WHERE node_id = ?1
-             UNION ALL
-             SELECT session_id, checkpoint_ref, 1 AS priority FROM session_head
-             WHERE leaf_node_id = ?1 AND checkpoint_ref IS NOT NULL
-         ) retained
-         ORDER BY priority, source_session_id LIMIT 1";
-
-        /// Whether session `?2` still retains node `?1` at checkpoint `?3`,
-        /// through an anchor or through its own head.
-        exists_retention_source = "SELECT EXISTS(
-             SELECT 1 FROM node_anchors
-             WHERE node_id = ?1
-               AND source_session_id = ?2
-               AND checkpoint_ref = ?3
-             UNION ALL
-             SELECT 1 FROM session_head
-             WHERE session_id = ?2
-               AND leaf_node_id = ?1
-               AND checkpoint_ref = ?3
-         )";
-
-        /// Every retained fork point, pinned ones first.
-        select_fork_points = "SELECT node_id, checkpoint_ref, source_session_id, pinned
-             FROM (
-                 SELECT DISTINCT ON (node_id)
-                        node_id, checkpoint_ref, source_session_id, pinned
-                 FROM (
-                     SELECT node_id, checkpoint_ref, source_session_id,
-                            TRUE AS pinned, 0 AS priority
-                     FROM node_anchors
-                     UNION ALL
-                     SELECT leaf_node_id, checkpoint_ref, session_id,
-                            FALSE AS pinned, 1 AS priority
-                     FROM session_head
-                     WHERE leaf_node_id IS NOT NULL AND checkpoint_ref IS NOT NULL
-                 ) candidates
-                 ORDER BY node_id, priority, source_session_id
-             ) retained
-             ORDER BY node_id";
-
         /// The first page of sessions that have published a checkpoint root,
         /// `?1` rows of it.
         ///
@@ -320,13 +275,28 @@ lash_store_sql::statements! {
 }
 
 lash_store_sql::statements! {
+    /// `session_revisions` statements only PostgreSQL issues.
+    pub(crate) struct SessionRevisionPostgresStatements @ "session_revision" {
+        /// Revision `?2` of session `?1`, share-locked: a fork reads the
+        /// retained point under a lock the collection's release waits on, so
+        /// the fork's own head roots the checkpoint before the row can go.
+        /// SQLite reads the same row with the shared statement, under its
+        /// single-writer lock.
+        select_for_share = "SELECT leaf_node_id, checkpoint_ref, head_json
+             FROM session_revisions
+             WHERE session_id = ?1 AND head_revision = ?2
+             FOR SHARE";
+    }
+}
+
+lash_store_sql::statements! {
     /// `graph_nodes` statements only PostgreSQL issues.
     pub(crate) struct GraphNodePostgresStatements @ "graph_node" {
         /// The same root classes as checkpoint reclamation. An admission
         /// conservatively protects its committed session nodes until released.
         artifact_frame_is_retained = "WITH RECURSIVE roots AS (
             SELECT leaf_node_id AS node_id FROM session_head WHERE leaf_node_id IS NOT NULL
-            UNION SELECT node_id FROM node_anchors
+            UNION SELECT leaf_node_id FROM session_revisions WHERE leaf_node_id IS NOT NULL
             UNION SELECT node.node_id FROM graph_nodes AS node
                 JOIN session_meta AS meta ON meta.session_id = node.session_id
                 WHERE meta.admission_base_checkpoint_ref IS NOT NULL AND node.tombstoned = FALSE
@@ -340,13 +310,6 @@ lash_store_sql::statements! {
 
         /// Take the row lock on live node `?1`, reporting whether it is there.
         lock_live = "SELECT TRUE FROM graph_nodes
-             WHERE node_id = ?1 AND tombstoned = FALSE
-             FOR UPDATE";
-
-        /// Take the row lock on live node `?1` without reading anything from
-        /// it: the unpin path needs the lock ordered before the anchor delete,
-        /// and nothing else.
-        lock_live_id = "SELECT node_id FROM graph_nodes
              WHERE node_id = ?1 AND tombstoned = FALSE
              FOR UPDATE";
 
@@ -405,7 +368,7 @@ lash_store_sql::statements! {
              FOR UPDATE";
 
         /// Whether node `?1` is still reachable: a live child, a head pointing
-        /// at it, or an anchor holding it.
+        /// at it, or a retained revision publishing it.
         exists_reachable = "SELECT
                 EXISTS(
                     SELECT 1 FROM graph_nodes
@@ -415,7 +378,7 @@ lash_store_sql::statements! {
                     SELECT 1 FROM session_head WHERE leaf_node_id = ?1
                 )
                 OR EXISTS(
-                    SELECT 1 FROM node_anchors WHERE node_id = ?1
+                    SELECT 1 FROM session_revisions WHERE leaf_node_id = ?1
                 )";
 
         retire = "UPDATE graph_nodes SET tombstoned = TRUE WHERE node_id = ?1";
@@ -438,8 +401,8 @@ lash_store_sql::statements! {
                WHERE head.leaf_node_id = node.node_id
            )
            AND NOT EXISTS (
-               SELECT 1 FROM node_anchors AS anchor
-               WHERE anchor.node_id = node.node_id
+               SELECT 1 FROM session_revisions AS revision
+               WHERE revision.leaf_node_id = node.node_id
            )
          ORDER BY node.generation DESC";
 
@@ -462,8 +425,8 @@ lash_store_sql::statements! {
                    WHERE head.leaf_node_id = node.node_id
                )
                AND NOT EXISTS (
-                   SELECT 1 FROM node_anchors AS anchor
-                   WHERE anchor.node_id = node.node_id
+                   SELECT 1 FROM session_revisions AS revision
+                   WHERE revision.leaf_node_id = node.node_id
                )
              ORDER BY node.session_id, node.generation DESC";
 
@@ -599,8 +562,8 @@ lash_store_sql::statements! {
                        WHERE head.checkpoint_ref = edge.checkpoint_ref
                    )
                AND NOT EXISTS (
-                       SELECT 1 FROM node_anchors AS anchor
-                       WHERE anchor.checkpoint_ref = edge.checkpoint_ref
+                       SELECT 1 FROM session_revisions AS revision
+                       WHERE revision.checkpoint_ref = edge.checkpoint_ref
                    )
                AND NOT EXISTS (
                        SELECT 1 FROM session_meta AS meta
@@ -619,8 +582,8 @@ lash_store_sql::statements! {
                    WHERE head.checkpoint_ref = edge.checkpoint_ref
                )
                AND NOT EXISTS (
-                   SELECT 1 FROM node_anchors AS anchor
-                   WHERE anchor.checkpoint_ref = edge.checkpoint_ref
+                   SELECT 1 FROM session_revisions AS revision
+                   WHERE revision.checkpoint_ref = edge.checkpoint_ref
                )
                AND NOT EXISTS (
                    SELECT 1 FROM session_meta AS meta
@@ -742,8 +705,13 @@ pub(crate) struct SessionSql {
     pub(crate) graph: GraphNodeStatements,
     /// `graph_nodes` statements only PostgreSQL issues.
     pub(crate) graph_postgres: GraphNodePostgresStatements,
-    /// `node_anchors` statements.
-    pub(crate) anchors: NodeAnchorStatements,
+    /// `session_revisions` statements, the retained-revisions relation
+    /// among them.
+    pub(crate) revisions: SessionRevisionStatements,
+    /// `session_revisions` statements only PostgreSQL issues.
+    pub(crate) revisions_postgres: SessionRevisionPostgresStatements,
+    /// `pins` statements.
+    pub(crate) pins: PinStatements,
     /// `fork_lineage` statements.
     pub(crate) lineage: ForkLineageStatements,
     /// `runtime_turn_commits` statements both backends issue verbatim.
@@ -770,7 +738,9 @@ static SESSION_SQL: LazyLock<SessionSql> = LazyLock::new(|| {
         head_postgres: SessionHeadPostgresStatements::render(dialect),
         graph: GraphNodeStatements::render(dialect),
         graph_postgres: GraphNodePostgresStatements::render(dialect),
-        anchors: NodeAnchorStatements::render(dialect),
+        revisions: SessionRevisionStatements::render(dialect),
+        revisions_postgres: SessionRevisionPostgresStatements::render(dialect),
+        pins: PinStatements::render(dialect),
         lineage: ForkLineageStatements::render(dialect),
         turn_commits: TurnCommitStatements::render(dialect),
         turn_commits_postgres: TurnCommitPostgresStatements::render(dialect),

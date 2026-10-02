@@ -135,8 +135,8 @@ impl SqliteDatabase {
 /// must be deleted before opening with this binary. Lash's broader durable
 /// contract still lives one level up in per-record `schema_version` stamps,
 /// not in compatibility reads.
-/// Each `checkpoint_blob_refs` row is owned by the session whose head or anchor
-/// owns the checkpoint root named by `checkpoint_ref`. Owner-scoped session
+/// Each `checkpoint_blob_refs` row is owned by the session whose retained
+/// revision owns the checkpoint root named by `checkpoint_ref`. Owner-scoped session
 /// delete or process prune deletes an unreferenced root and cascades its edges
 /// in the same transaction. Component blobs are shared and have no
 /// component-side cascade.
@@ -169,16 +169,37 @@ CREATE INDEX IF NOT EXISTS idx_session_head_leaf
 CREATE INDEX IF NOT EXISTS idx_session_head_checkpoint_ref
     ON session_head(checkpoint_ref);
 
-CREATE TABLE IF NOT EXISTS node_anchors (
-    node_id           TEXT PRIMARY KEY,
-    checkpoint_ref    TEXT NOT NULL,
-    source_session_id TEXT NOT NULL
+-- One row per published head revision a session still retains (FIG-4731).
+-- The name of a state is (session_id, head_revision). Membership is the
+-- retained-revisions relation every reclaimer roots what it keeps in. Each
+-- row carries the head document its revision was published with: the
+-- configuration a fork of it copies.
+CREATE TABLE IF NOT EXISTS session_revisions (
+    session_id     TEXT NOT NULL,
+    head_revision  INTEGER NOT NULL,
+    leaf_node_id   TEXT,
+    checkpoint_ref TEXT,
+    head_json      TEXT NOT NULL,
+    PRIMARY KEY (session_id, head_revision)
 );
-CREATE INDEX IF NOT EXISTS idx_node_anchors_checkpoint_ref
-    ON node_anchors(checkpoint_ref);
+CREATE INDEX IF NOT EXISTS idx_session_revisions_leaf
+    ON session_revisions(leaf_node_id);
+CREATE INDEX IF NOT EXISTS idx_session_revisions_checkpoint_ref
+    ON session_revisions(checkpoint_ref);
+
+-- One row per target a host asked a session to retain: an input, a turn or a
+-- head revision. A pin names a target, never a state, so it can be written
+-- before the target exists. Pins are deleted with their session.
+CREATE TABLE IF NOT EXISTS pins (
+    session_id  TEXT NOT NULL,
+    target_kind TEXT NOT NULL,
+    target_id   TEXT NOT NULL,
+    PRIMARY KEY (session_id, target_kind, target_id),
+    CONSTRAINT ck_pins_target_kind CHECK (target_kind IN ('input', 'turn', 'revision'))
+);
 
 -- Indexed projection of the exact manifest -> component edges carried in each
--- checkpoint blob. Each row is owned by the session whose head or anchor owns
+-- checkpoint blob. Each row is owned by the session whose retained revision owns
 -- the checkpoint root named by checkpoint_ref. Owner-scoped session delete or
 -- process prune deletes an unreferenced root and cascades its edges in the same
 -- transaction. Components are shared and have no component-side cascade. This
@@ -344,6 +365,8 @@ CREATE TABLE IF NOT EXISTS session_meta (
     admission_base_checkpoint_ref     TEXT,
     closing_intent                    INTEGER,
     owning_process_id                 TEXT,
+    retention_kind                    TEXT NOT NULL DEFAULT 'until_gc',
+    retention_last_turns              INTEGER,
     obligation_id                    TEXT,
     obligation_state                 TEXT,
     obligation_attempts              INTEGER NOT NULL DEFAULT 0,
@@ -358,9 +381,10 @@ CREATE TABLE IF NOT EXISTS session_meta (
     -- (no marker). A closing session was raised by its close.
     CONSTRAINT ck_session_meta_drive_authority CHECK ((drive_epoch = 0 AND drive_admission_id IS NULL AND drive_root_start IS NULL AND closing_intent IS NULL) OR (drive_epoch > 0 AND drive_admission_id IS NOT NULL AND (drive_root_start IS NULL OR closing_intent IS NULL))),
     CONSTRAINT ck_session_meta_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
+    CONSTRAINT ck_session_meta_retention CHECK ((retention_kind IN ('until_gc', 'head_only') AND retention_last_turns IS NULL) OR (retention_kind = 'last_turns' AND retention_last_turns > 0)),
     CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
     CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),
-    CONSTRAINT ck_session_meta_relation_family CHECK ((relation_kind = 'root' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'child' AND parent_session_id IS NOT NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'fork' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NOT NULL AND source_node_id IS NOT NULL) OR (relation_kind IS NOT NULL AND NOT (relation_kind IN ('root', 'child', 'fork')))),
+    CONSTRAINT ck_session_meta_relation_family CHECK ((relation_kind = 'root' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'child' AND parent_session_id IS NOT NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'fork' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NOT NULL) OR (relation_kind IS NOT NULL AND NOT (relation_kind IN ('root', 'child', 'fork')))),
     CONSTRAINT ck_session_meta_caused_by_family CHECK ((caused_by_kind IS NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'turn' AND caused_by_session_id IS NOT NULL AND caused_by_turn_id IS NOT NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'effect_address' AND caused_by_effect_id IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'tool_call' AND caused_by_session_id IS NOT NULL AND caused_by_call_id IS NOT NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'process' AND caused_by_process_id IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'process_event' AND caused_by_process_id IS NOT NULL AND caused_by_process_event_sequence IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'trigger_occurrence' AND caused_by_occurrence_id IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'session_node' AND caused_by_session_id IS NOT NULL AND caused_by_node_id IS NOT NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL) OR (caused_by_kind IS NOT NULL AND NOT (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node'))))
 );
 

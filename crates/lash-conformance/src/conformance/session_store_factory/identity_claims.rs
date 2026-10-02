@@ -68,18 +68,21 @@ pub async fn fork_inherits_history_without_execution_queues_waits_or_journals(
     )
     .await
     .expect("settle source wait");
-    let source_head = format!(
-        "{:?}",
-        source.load_session_head_meta().await.expect("source head")
-    );
+    let source_head_meta = source.load_session_head_meta().await.expect("source head");
+    let source_revision = source_head_meta
+        .as_ref()
+        .expect("the source has a head")
+        .head_revision;
+    let source_head = format!("{source_head_meta:?}");
     factory
         .fork_session(&crate::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
             session_id: fork_id.clone(),
-            node_id: leaf.clone(),
+            source_session_id: source_id.clone(),
+            head_revision: source_revision,
             relation: crate::SessionRelation::Fork {
                 source_session_id: source_id.clone(),
-                source_node_id: leaf.clone(),
+                source_node_id: Some(leaf.clone()),
             },
             config: state.policy.clone().into(),
         })
@@ -181,7 +184,8 @@ pub async fn reclaim_races_fork_and_unpin_without_using_process_roots(
         .await
         .expect("prefix");
     let leaf = state.session_graph.leaf_node_id.clone().expect("leaf");
-    factory.pin(&leaf).await.expect("pin prefix");
+    let prefix = crate::Target::Revision(state.head_revision);
+    factory.pin(&id, &prefix).await.expect("pin prefix");
     let process = registry
         .register_process(crate::ProcessRegistration::new(
             crate::ProcessInput::External {
@@ -198,16 +202,25 @@ pub async fn reclaim_races_fork_and_unpin_without_using_process_roots(
     let request = crate::ForkSessionRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("reclaim-race-fork"),
-        node_id: leaf.clone(),
+        source_session_id: id.clone(),
+        head_revision: state.head_revision,
         relation: crate::SessionRelation::Root,
         config: state.policy.clone().into(),
     };
     let (fork, unpin, delete) = tokio::join!(
         factory.fork_session(&request),
-        factory.unpin(&leaf),
+        factory.unpin(&id, &prefix),
         factory.delete_session(&id)
     );
-    unpin.expect("remove pin during reclamation");
+    // The delete takes the pin with the session, so an unpin that loses the
+    // race finds the session gone.
+    assert!(
+        matches!(
+            unpin,
+            Ok(()) | Err(crate::StoreError::SessionDeleted { .. })
+        ),
+        "remove pin during reclamation: {unpin:?}"
+    );
     delete.expect("delete producer during fork");
     match fork {
         Ok(_) => {
@@ -226,7 +239,7 @@ pub async fn reclaim_races_fork_and_unpin_without_using_process_roots(
                 .await
                 .expect("delete last graph root");
         }
-        Err(crate::StoreError::ForkPointNotRetained { node_id }) => assert_eq!(node_id, leaf),
+        Err(crate::StoreError::SessionDeleted { session_id }) => assert_eq!(session_id, id),
         Err(error) => panic!("unexpected reclamation race refusal: {error:?}"),
     }
     assert!(
@@ -241,11 +254,10 @@ pub async fn reclaim_races_fork_and_unpin_without_using_process_roots(
         Err(crate::StoreError::SessionDeleted { .. })
     ));
     assert!(
-        !factory
-            .fork_points()
-            .await
-            .expect("reclaimed graph has no anchors")
-            .iter()
-            .any(|point| point.node_id == leaf)
+        matches!(
+            factory.revisions(&id).await,
+            Err(crate::StoreError::SessionDeleted { .. })
+        ),
+        "the reclaimed session retains no revision"
     );
 }

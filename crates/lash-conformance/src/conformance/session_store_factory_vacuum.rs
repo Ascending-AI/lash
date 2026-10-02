@@ -9,22 +9,26 @@ use super::*;
 use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 
+/// A pin is deleted with its session (FIG-4731): it does not keep the deleted
+/// session's graph, so the delete itself reclaims the pinned revision's
+/// ancestry, a fork of that revision refuses the deleted session, and a stale
+/// handle's vacuum finds nothing left to remove.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(super) async fn session_store_factory_vacuums_organic_retained_tombstone(
+pub(super) async fn session_store_factory_delete_takes_the_sessions_pins(
     factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
-        &SessionId::from("retained-tombstone-source"),
+        &SessionId::from("pinned-at-delete-source"),
         "tombstone-model",
         crate::SessionRelation::Root,
     );
     let source = factory
         .admit_view(&request)
         .await
-        .expect("create retained-tombstone source");
+        .expect("create pinned-at-delete source");
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
         ..crate::RuntimeSessionState::new(request.config.session_policy())
@@ -34,58 +38,55 @@ pub(super) async fn session_store_factory_vacuums_organic_retained_tombstone(
         .session_graph
         .leaf_node_id
         .clone()
-        .expect("retained-tombstone leaf");
-    source
+        .expect("pinned-at-delete leaf");
+    let pinned_revision = source
         .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))
         .await
-        .expect("commit retained-tombstone source");
+        .expect("commit pinned-at-delete source")
+        .head_revision;
     factory
-        .pin(&leaf_node_id)
+        .pin(
+            &request.session_id,
+            &crate::Target::Revision(pinned_revision),
+        )
         .await
-        .expect("pin retained-tombstone leaf");
+        .expect("pin the committed revision");
     factory
         .delete_session(&request.session_id)
         .await
-        .expect("delete retained-tombstone source");
-    factory
-        .unpin(&leaf_node_id)
-        .await
-        .expect("unpin deleted source leaf to zero");
+        .expect("delete the pinned source");
 
     assert!(
         !crate::conformance::helpers::node_readable_through_deleted(&source, &leaf_node_id)
             .await
-            .expect("read retained tombstone"),
-        "decrement-to-zero tombstones must be hidden before vacuum"
+            .expect("read through the deleted session"),
+        "a deleted session's pinned node must not stay readable"
     );
     let fork_error = factory
         .fork_session(&crate::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
-            session_id: SessionId::from("retained-tombstone-fork"),
-            node_id: leaf_node_id.clone(),
+            session_id: SessionId::from("pinned-at-delete-fork"),
+            source_session_id: request.session_id.clone(),
+            head_revision: pinned_revision,
             relation: crate::SessionRelation::Root,
             config: request.config.session_policy().into(),
         })
         .await
-        .expect_err("a retained tombstone must not be forkable");
-    assert!(matches!(
-        fork_error,
-        crate::StoreError::ForkPointNotRetained { node_id } if node_id == leaf_node_id
-    ));
-
-    let report = source.vacuum().await.expect("vacuum retained tombstone");
-    assert_eq!(
-        report.removed_node_count, 1,
-        "vacuum must physically remove the organically created tombstone"
+        .expect_err("a deleted session's pinned revision must not be forkable");
+    assert!(
+        matches!(
+            &fork_error,
+            crate::StoreError::SessionDeleted { session_id }
+                if *session_id == request.session_id
+        ),
+        "the pin went with its session: {fork_error:?}"
     );
+
+    let report = source.vacuum().await.expect("vacuum after delete");
     assert_eq!(
-        source
-            .vacuum()
-            .await
-            .expect("repeat retained-tombstone vacuum")
-            .removed_node_count,
-        0,
-        "vacuum must consume each retained tombstone exactly once"
+        report.removed_node_count, 0,
+        "the delete reclaimed the pinned ancestry; a stale handle's vacuum \
+         is not the reclaiming step"
     );
 }
 
@@ -96,7 +97,7 @@ pub(super) async fn session_store_factory_vacuums_organic_retained_tombstone(
 pub(super) async fn session_store_factory_vacuum_is_scoped_to_bound_session(
     factory: Arc<dyn crate::DeploymentStore>,
 ) {
-    // 1. Live sessions: scope agreement over pending turn input tombstones
+    // Scope agreement over pending turn input tombstones.
     let req_a = session_store_request(
         &SessionId::from("vacuum-scope-live-a"),
         "tombstone-model",
@@ -190,111 +191,11 @@ pub(super) async fn session_store_factory_vacuum_is_scoped_to_bound_session(
     let repeat_b = store_b.vacuum().await.expect("repeat vacuum session b");
     assert_eq!(repeat_b.removed_node_count, 0);
     assert_eq!(repeat_b.removed_pending_turn_input_tombstone_count, 0);
-
-    // 2. Deleted sessions: scope agreement over tombstoned graph nodes
-    let req_c = session_store_request(
-        &SessionId::from("vacuum-scope-nodes-c"),
-        "tombstone-model",
-        crate::SessionRelation::Root,
-    );
-    let req_d = session_store_request(
-        &SessionId::from("vacuum-scope-nodes-d"),
-        "tombstone-model",
-        crate::SessionRelation::Root,
-    );
-    let store_c = factory.admit_view(&req_c).await.expect("create store c");
-    let store_d = factory.admit_view(&req_d).await.expect("create store d");
-
-    let mut state_c = crate::RuntimeSessionState {
-        session_id: req_c.session_id.clone(),
-        ..crate::RuntimeSessionState::new(req_c.config.session_policy())
-    };
-    state_c.ensure_agent_frame_initialized();
-    let leaf_c = state_c
-        .session_graph
-        .leaf_node_id
-        .clone()
-        .expect("session c leaf");
-    store_c
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state_c))
-        .await
-        .expect("commit session c");
-    factory.pin(&leaf_c).await.expect("pin leaf c");
-
-    let mut state_d = crate::RuntimeSessionState {
-        session_id: req_d.session_id.clone(),
-        ..crate::RuntimeSessionState::new(req_d.config.session_policy())
-    };
-    state_d.ensure_agent_frame_initialized();
-    let leaf_d = state_d
-        .session_graph
-        .leaf_node_id
-        .clone()
-        .expect("session d leaf");
-    store_d
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state_d))
-        .await
-        .expect("commit session d");
-    factory.pin(&leaf_d).await.expect("pin leaf d");
-
-    // Both deletes happen before either unpin on purpose. `delete_session` also
-    // reclaims tombstoned rows owned by already-deleted sessions (otherwise a
-    // tombstone created after its owner's delete could never be reclaimed), so
-    // deleting D after unpinning C would legitimately reclaim C's tombstone and
-    // leave this case with nothing to say about vacuum scope. Tombstoning both
-    // nodes after both deletes keeps each row waiting for its own session's
-    // vacuum, which is the property under test.
-    factory
-        .delete_session(&req_c.session_id)
-        .await
-        .expect("delete session c");
-    factory
-        .delete_session(&req_d.session_id)
-        .await
-        .expect("delete session d");
-    factory
-        .unpin(&leaf_c)
-        .await
-        .expect("unpin leaf c to tombstone");
-    factory
-        .unpin(&leaf_d)
-        .await
-        .expect("unpin leaf d to tombstone");
-
-    // Vacuum store C: removes session C's tombstoned node only
-    let report_c = store_c.vacuum().await.expect("vacuum session c");
-    assert_eq!(
-        report_c.removed_node_count, 1,
-        "session C vacuum must remove session C's tombstoned node"
-    );
-    assert_eq!(
-        report_c.removed_pending_turn_input_tombstone_count, 0,
-        "session C had no pending input tombstones"
-    );
-
-    let repeat_c = store_c.vacuum().await.expect("repeat vacuum session c");
-    assert_eq!(repeat_c.removed_node_count, 0);
-    assert_eq!(repeat_c.removed_pending_turn_input_tombstone_count, 0);
-
-    // Vacuum store D: removes session D's tombstoned node (was untouched by session C vacuum)
-    let report_d = store_d.vacuum().await.expect("vacuum session d");
-    assert_eq!(
-        report_d.removed_node_count, 1,
-        "session D vacuum must remove session D's tombstoned node (was untouched by session C vacuum)"
-    );
-    assert_eq!(
-        report_d.removed_pending_turn_input_tombstone_count, 0,
-        "session D had no pending input tombstones"
-    );
-
-    let repeat_d = store_d.vacuum().await.expect("repeat vacuum session d");
-    assert_eq!(repeat_d.removed_node_count, 0);
-    assert_eq!(repeat_d.removed_pending_turn_input_tombstone_count, 0);
 }
 
-/// Unpinning *before* the delete makes the delete itself the tombstoning step,
-/// so the backend's delete-time reclaim — not a later vacuum through a stale
-/// handle — must be what physically drops the rows. Every backend has to report
+/// With its pin released before the delete, the delete is the tombstoning
+/// step, so the backend's delete-time reclaim — not a later vacuum through a
+/// stale handle — must be what physically drops the rows. Every backend has to report
 /// the same post-delete vacuum count for this order, otherwise a stale handle is
 /// load-bearing for reclaim on some backends and inert on others.
 #[expect(
@@ -316,21 +217,22 @@ pub(super) async fn session_store_factory_vacuum_agrees_on_unpin_before_delete(
         ..crate::RuntimeSessionState::new(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
-    let leaf = state
-        .session_graph
-        .leaf_node_id
-        .clone()
-        .expect("session leaf");
-    store
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))
-        .await
-        .expect("commit session");
+    let pinned = crate::Target::Revision(
+        store
+            .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))
+            .await
+            .expect("commit session")
+            .head_revision,
+    );
 
-    factory.pin(&leaf).await.expect("pin leaf");
     factory
-        .unpin(&leaf)
+        .pin(&request.session_id, &pinned)
         .await
-        .expect("unpin leaf before delete");
+        .expect("pin the committed revision");
+    factory
+        .unpin(&request.session_id, &pinned)
+        .await
+        .expect("unpin before delete");
     factory
         .delete_session(&request.session_id)
         .await

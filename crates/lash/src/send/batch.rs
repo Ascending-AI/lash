@@ -120,6 +120,7 @@ impl SendBatchBuilder {
                 submissions,
                 TurnInputIngress::NextTurn,
                 run_spec,
+                false,
             )
             .await?;
         Ok(enqueued

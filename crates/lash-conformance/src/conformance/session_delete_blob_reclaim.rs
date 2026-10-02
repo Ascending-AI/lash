@@ -366,7 +366,13 @@ where
             .fork_session(&crate::ForkSessionRequest {
                 pending_observer_intents: Vec::new(),
                 session_id: fork_id.clone(),
-                node_id: source.leaf_node_id.clone().into(),
+                source_session_id: source.request.session_id.clone(),
+                head_revision: crate::conformance::helpers::revision_at(
+                    handles.factory.as_ref(),
+                    &source.request.session_id,
+                    &source.leaf_node_id,
+                )
+                .await,
                 relation: crate::SessionRelation::Root,
                 config: source.request.config.session_policy().into(),
             })
@@ -471,8 +477,7 @@ pub async fn session_delete_blob_reclaim_conformance<F>(backend: &str, make: F)
 where
     F: Fn() -> SessionDeleteBlobHandles,
 {
-    attachment_prefix_retention(backend, make(), false).await;
-    attachment_prefix_retention(backend, make(), true).await;
+    attachment_prefix_retention(backend, make()).await;
     session_delete_reclaims_exclusive_checkpoint_blobs(backend, make()).await;
     session_delete_keeps_fork_shared_checkpoint_blobs(backend, make()).await;
     session_delete_reclaims_content_aliased_checkpoint_roots(backend, make()).await;
@@ -585,10 +590,17 @@ async fn session_delete_keeps_fork_shared_checkpoint_blobs(
 ) {
     let committed =
         committed_checkpoint(&handles.factory, &SessionId::from("delete-shared-source")).await;
+    let head_revision = crate::conformance::helpers::revision_at(
+        handles.factory.as_ref(),
+        &committed.request.session_id,
+        &committed.leaf_node_id,
+    )
+    .await;
     let fork_request = crate::ForkSessionRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("delete-shared-fork"),
-        node_id: committed.leaf_node_id.into(),
+        source_session_id: committed.request.session_id.clone(),
+        head_revision,
         relation: crate::SessionRelation::Root,
         config: committed.request.config.session_policy().into(),
     };
@@ -728,11 +740,7 @@ async fn session_delete_ignores_broken_factory_gc_scope(
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn attachment_prefix_retention(
-    backend_name: &str,
-    handles: SessionDeleteBlobHandles,
-    pinned: bool,
-) {
+async fn attachment_prefix_retention(backend_name: &str, handles: SessionDeleteBlobHandles) {
     let request = session_store_request(
         &SessionId::from("attachment-prefix-parent"),
         "session-delete-blob-reclaim-model",
@@ -812,7 +820,6 @@ async fn attachment_prefix_retention(
     let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
     commit.committed_attachment_ids = vec![reference.id.clone()];
     let receipt = store.commit_runtime_state(commit).await.unwrap();
-    let leaf_node_id = receipt.committed_leaf_node_id.unwrap();
     for referrer in staging {
         store
             .store()
@@ -825,13 +832,11 @@ async fn attachment_prefix_retention(
         .end_attachment_referrer(&orphan_referrer)
         .await
         .unwrap();
-    if pinned {
-        handles.factory.pin(&leaf_node_id).await.unwrap();
-    }
     let fork_request = crate::ForkSessionRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("attachment-prefix-child"),
-        node_id: leaf_node_id.clone(),
+        source_session_id: request.session_id.clone(),
+        head_revision: receipt.head_revision,
         relation: crate::SessionRelation::Root,
         config: request.config.session_policy().into(),
     };
@@ -883,13 +888,6 @@ async fn attachment_prefix_retention(
         .delete_session(&request.session_id)
         .await
         .unwrap();
-    if pinned {
-        handles
-            .factory
-            .delete_session(&fork_request.session_id)
-            .await
-            .unwrap();
-    }
     let retained = handles
         .factory
         .reclaim_retained_evidence(crate::RetentionBound {
@@ -899,7 +897,7 @@ async fn attachment_prefix_retention(
         .unwrap();
     assert_eq!(
         retained.removed_receipt_count, 1,
-        "terminal parent receipt is pruned while fork/pin retains its image"
+        "terminal parent receipt is pruned while the fork retains its image"
     );
     let policy = crate::AttachmentReclamationPolicy {
         grace_period_ms: 0,
@@ -921,20 +919,16 @@ async fn attachment_prefix_retention(
         child
             .get(&reference.id)
             .await
-            .expect("surviving fork/pin retains attachment after parent deletion")
+            .expect("surviving fork retains attachment after parent deletion")
             .bytes,
         vec![1, 2, 3],
         "{backend_name}"
     );
-    if pinned {
-        handles.factory.unpin(&leaf_node_id).await.unwrap();
-    } else {
-        handles
-            .factory
-            .delete_session(&fork_request.session_id)
-            .await
-            .unwrap();
-    }
+    handles
+        .factory
+        .delete_session(&fork_request.session_id)
+        .await
+        .unwrap();
     assert_eq!(
         store
             .store()

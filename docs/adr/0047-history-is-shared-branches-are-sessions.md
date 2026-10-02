@@ -41,9 +41,9 @@ head changes. Commit budgets are explicit host policy under ADR 0058, not a
 backend's unconditional fixed cap. Checkpoints replace resumable state rather
 than accumulate observation history (ADR 0048).
 
-Reachability comes from parent edges, session heads and retained anchors.
+Reachability comes from parent edges and each session's retained revisions.
 A fork adds a root over the shared prefix. A process registry row does not
-implicitly root stored history; retained anchors remain explicit. Effect journals
+implicitly root stored history; pins remain explicit. Effect journals
 are owned by the configured engine, with stable identities joining their outcomes to
 session commits across transaction domains.
 
@@ -65,7 +65,7 @@ it from the new node's position.
 
 ## ADR 0024 applies directly at deletion
 
-Destructive decisions derive live children, session heads and anchors in the
+Destructive decisions derive live children and retained revisions in the
 same transaction. Removing a head reclaims only ancestry that has no remaining
 root or child. The walk stops at a shared prefix. There is no cached incoming
 reference count or scrub authority. PostgreSQL serializes affected graph rows

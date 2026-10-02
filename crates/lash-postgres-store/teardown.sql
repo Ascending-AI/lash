@@ -22,7 +22,9 @@ DROP TABLE IF EXISTS lash_blobs CASCADE;
 
 DROP TABLE IF EXISTS lash_session_head CASCADE;
 
-DROP TABLE IF EXISTS lash_node_anchors CASCADE;
+DROP TABLE IF EXISTS lash_session_revisions CASCADE;
+
+DROP TABLE IF EXISTS lash_pins CASCADE;
 
 DROP TABLE IF EXISTS lash_checkpoint_blob_refs CASCADE;
 

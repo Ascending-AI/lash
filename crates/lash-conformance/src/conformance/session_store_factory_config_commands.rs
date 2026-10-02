@@ -95,18 +95,17 @@ pub async fn ingress_follow_on_fork_and_command_run_matrix(
         ))
         .await
         .expect("enqueue later transaction");
-    let node = store
+    let switched = store
         .load_session_head_meta()
         .await
         .expect("switch head")
-        .expect("head")
-        .leaf_node_id
-        .expect("switch leaf");
+        .expect("head");
     let fork_id = SessionId::from("follow-on-matrix-fork");
     factory
         .fork_session(&crate::ForkSessionRequest {
             session_id: fork_id.clone(),
-            node_id: node,
+            source_session_id: request.session_id.clone(),
+            head_revision: switched.head_revision,
             pending_observer_intents: Vec::new(),
             relation: crate::SessionRelation::Root,
             config: request.config.session_policy().into(),

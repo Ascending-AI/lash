@@ -7,11 +7,12 @@ use super::{
     CommitBudget, FleetFormat, MaintenanceResult, RuntimeCommit, SessionAdmission,
     SessionBlobReclaimReport, StoreError,
 };
+use crate::SessionId;
 use crate::session_catalog::{SessionListFilter, SessionView};
 use crate::session_store_factory_types::{
-    ForkPoint, ForkSessionReceipt, ForkSessionRequest, SessionLookup, SessionStoreCreateRequest,
+    ForkSessionReceipt, ForkSessionRequest, RetainedRevision, Retention, SessionLookup,
+    SessionStoreCreateRequest, Target,
 };
-use crate::{NodeId, SessionId};
 
 /// Session admission, lookup, enumeration, forks and deletion.
 ///
@@ -53,27 +54,65 @@ pub trait SessionCatalogStore: Send + Sync {
         filter: &SessionListFilter,
     ) -> Result<Vec<SessionView>, StoreError>;
 
-    /// Add a new session head at a retained point without writing graph
-    /// nodes. `request.session_id` names the new session.
+    /// Add a new session head at a retained revision without writing graph
+    /// nodes. `request.session_id` names the new session, and
+    /// `(request.source_session_id, request.head_revision)` names the state
+    /// it starts at. The fork gets fresh session and execution identities and
+    /// copies no pending ingress, pin or retention policy.
+    ///
+    /// A revision the source no longer retains refuses
+    /// [`StoreError::ForkTargetPruned`]; no other revision is substituted.
     async fn fork_session(
         &self,
         request: &ForkSessionRequest,
     ) -> Result<ForkSessionReceipt, StoreError>;
 
-    /// Catalog-wide: retain the continuation checkpoint for `node_id`.
+    /// The retained revision `target` of `session_id` names.
     ///
-    /// A new pin can be created only while some live head is exactly at the
-    /// node, because an unpinned past checkpoint is ordinarily already
-    /// collectible. Re-pinning an existing point is idempotent.
-    async fn pin(&self, node_id: &NodeId) -> Result<ForkPoint, StoreError>;
+    /// The answer is computed by query and stored nowhere:
+    ///
+    /// * [`StoreError::ForkTargetPending`]: the target's root has not
+    ///   finished, or nothing has recorded the target yet;
+    /// * [`StoreError::ForkTargetUnavailable`]: the root ended without a
+    ///   commit, or the input was withdrawn;
+    /// * [`StoreError::ForkTargetPruned`]: the revision was collected.
+    ///
+    /// A refusal never answers another revision in the target's place.
+    async fn resolve_target(
+        &self,
+        session_id: &SessionId,
+        target: &Target,
+    ) -> Result<RetainedRevision, StoreError>;
 
-    /// Catalog-wide: release an explicit continuation pin. A live head at
-    /// the same node keeps that tip forkable.
-    async fn unpin(&self, node_id: &NodeId) -> Result<(), StoreError>;
+    /// Every retained revision of `session_id`, oldest first: the points it
+    /// can be forked at.
+    async fn revisions(&self, session_id: &SessionId) -> Result<Vec<RetainedRevision>, StoreError>;
 
-    /// Catalog-wide: every retained continuation point, pinned past turns
-    /// and unpinned live tips, de-duplicated by node id.
-    async fn fork_points(&self) -> Result<Vec<ForkPoint>, StoreError>;
+    /// Pin `target` of `session_id`: the revision it resolves to is retained
+    /// through every collection until it is unpinned or its session is
+    /// deleted.
+    ///
+    /// The write is idempotent and names only the target. It may precede the
+    /// target, run beside it or follow it; it takes no execution authority
+    /// and never reads or moves the head. A session the catalog does not
+    /// hold refuses [`StoreError::SessionNotFound`].
+    async fn pin(&self, session_id: &SessionId, target: &Target) -> Result<(), StoreError>;
+
+    /// Release the pin on `target` of `session_id`. Releasing a pin that is
+    /// not there changes nothing. The revision stays retained while another
+    /// pin, the head or the retention policy holds it.
+    async fn unpin(&self, session_id: &SessionId, target: &Target) -> Result<(), StoreError>;
+
+    /// The retention policy of `session_id`.
+    async fn retention(&self, session_id: &SessionId) -> Result<Retention, StoreError>;
+
+    /// Set the retention policy of `session_id`. It takes effect at the
+    /// session's next commit and at the host's next collection.
+    async fn set_retention(
+        &self,
+        session_id: &SessionId,
+        retention: Retention,
+    ) -> Result<(), StoreError>;
 
     /// Delete `session_id` and reclaim blobs whose final exact reference edge
     /// that transaction severs.

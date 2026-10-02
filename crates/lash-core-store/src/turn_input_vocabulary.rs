@@ -356,6 +356,12 @@ pub struct PendingTurnInputDraft {
     /// session config and is stored as no spec at all.
     #[serde(default, skip_serializing_if = "crate::run_spec::RunSpec::is_default")]
     pub run_spec: crate::run_spec::RunSpec,
+    /// Pin the input in the transaction that accepts it: the revision its
+    /// root's terminal commit publishes is retained from the start. The pin
+    /// is no part of the submission, so a retry that asks for it pins an
+    /// input its first attempt left unpinned.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pin: bool,
 }
 impl PendingTurnInputDraft {
     /// Constructs a `PendingTurnInputDraft` for store and durable-substrate implementors while
@@ -372,7 +378,14 @@ impl PendingTurnInputDraft {
             ingress,
             input,
             run_spec: crate::run_spec::RunSpec::default(),
+            pin: false,
         }
+    }
+
+    /// Pins the input in its acceptance transaction.
+    pub fn pinned(mut self) -> Self {
+        self.pin = true;
+        self
     }
 
     /// Sets the spec the input runs under (FIG-3838).

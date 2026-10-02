@@ -480,6 +480,7 @@ impl LashRuntime {
                 inputs,
                 crate::TurnInputIngress::NextTurn,
                 crate::RunSpec::default(),
+                false,
             )
             .await
             .map_err(|error| PluginOperationInvokeError::AdmissionRefused(Box::new(error)))?

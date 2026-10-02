@@ -603,8 +603,29 @@ pub enum StoreError {
     },
     #[error("runtime commit leaf {:?} does not resolve to a live graph node", .leaf_node_id.as_deref())]
     InvalidGraphLeaf { leaf_node_id: Option<NodeId> },
-    #[error("node `{node_id}` has no retained continuation anchor")]
-    ForkPointNotRetained { node_id: NodeId },
+    /// The fork target's root has not finished, or nothing has recorded the
+    /// target yet. The previous head is never forked in its place.
+    #[error("{target} of session `{session_id}` has not finished; there is no state to fork yet")]
+    ForkTargetPending {
+        session_id: SessionId,
+        target: crate::session_store_factory_types::Target,
+    },
+    /// The fork target names no state: its root ended without a commit, or
+    /// its input was withdrawn.
+    #[error(
+        "{target} of session `{session_id}` names no state: its root ended without a commit \
+         or its input was withdrawn"
+    )]
+    ForkTargetUnavailable {
+        session_id: SessionId,
+        target: crate::session_store_factory_types::Target,
+    },
+    /// The revision the fork target names was collected.
+    #[error("{target} of session `{session_id}` was collected; pin a target to keep it")]
+    ForkTargetPruned {
+        session_id: SessionId,
+        target: crate::session_store_factory_types::Target,
+    },
     /// A replay asked for the head its turn was admitted on, and the store no
     /// longer holds that head's checkpoint or graph leaf (FIG-3682).
     #[error(
@@ -1077,7 +1098,9 @@ impl StoreError {
             | Self::InvalidGraphNodeId { .. }
             | Self::GraphGenerationCollision { .. }
             | Self::InvalidGraphLeaf { .. }
-            | Self::ForkPointNotRetained { .. }
+            | Self::ForkTargetPending { .. }
+            | Self::ForkTargetUnavailable { .. }
+            | Self::ForkTargetPruned { .. }
             | Self::TurnBaseNotRetained { .. }
             | Self::ForkSessionAlreadyExists { .. }
             | Self::InvalidGraphParent { .. }
@@ -1197,7 +1220,9 @@ impl StoreError {
             Self::InvalidGraphNodeId { .. } => "InvalidGraphNodeId",
             Self::GraphGenerationCollision { .. } => "GraphGenerationCollision",
             Self::InvalidGraphLeaf { .. } => "InvalidGraphLeaf",
-            Self::ForkPointNotRetained { .. } => "ForkPointNotRetained",
+            Self::ForkTargetPending { .. } => "ForkTargetPending",
+            Self::ForkTargetUnavailable { .. } => "ForkTargetUnavailable",
+            Self::ForkTargetPruned { .. } => "ForkTargetPruned",
             Self::TurnBaseNotRetained { .. } => "TurnBaseNotRetained",
             Self::ForkSessionAlreadyExists { .. } => "ForkSessionAlreadyExists",
             Self::InvalidGraphParent { .. } => "InvalidGraphParent",

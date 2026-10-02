@@ -66,77 +66,6 @@ pub(crate) fn clamp_sequence_bound(value: impl TryInto<i64>) -> i64 {
     value.try_into().unwrap_or(i64::MAX)
 }
 
-pub(crate) async fn retained_checkpoint_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    node_id: &str,
-) -> Result<Option<(SessionId, String)>, StoreError> {
-    sqlx::query_as::<_, (String, String)>(
-        session_sql().head_postgres.select_retained_checkpoint.sql(),
-    )
-    .bind(node_id)
-    .fetch_optional(&mut **tx)
-    .await
-    .map(|row| {
-        row.map(|(session_id, checkpoint_ref)| (SessionId::from(session_id), checkpoint_ref))
-    })
-    .map_err(store_sqlx_error)
-}
-
-pub(crate) async fn retention_source_holds_checkpoint_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    node_id: &str,
-    source_session_id: &SessionId,
-    checkpoint_ref: &str,
-) -> Result<bool, StoreError> {
-    sqlx::query_scalar(session_sql().head_postgres.exists_retention_source.sql())
-        .bind(node_id)
-        .bind(source_session_id.as_str())
-        .bind(checkpoint_ref)
-        .fetch_one(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)
-}
-
-/// `fleet` is the store's recorded `F`: the retained frame node's body admits
-/// the `[N-1, N]` reader window `F` names (FIG-3796).
-pub(crate) async fn retained_fork_config_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    node_id: &str,
-    fleet: lash_core_execution::FleetFormat,
-) -> Result<lash_core_execution::PersistedSessionConfig, StoreError> {
-    let frame_node_id = crate::runtime_persistence::nearest_frame_node_id_tx(tx, node_id)
-        .await?
-        .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
-            leaf_node_id: node_id.to_string().into(),
-        })?;
-    let row = sqlx::query(session_sql().graph_postgres.select_frame_body.sql())
-        .bind(&frame_node_id)
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?
-        .ok_or_else(|| {
-            StoreError::Backend(format!("retained frame node `{frame_node_id}` is missing"))
-        })?;
-    let parent_node_id = row.get(0);
-    let node_json: String = row.get(1);
-    lash_core_execution::SessionNodeRecord::decode_storage_body_for_fleet(
-        frame_node_id.clone(),
-        parent_node_id,
-        &node_json,
-        fleet,
-    )
-    .map_err(|error| StoreError::StoredDataCorrupt {
-        record_kind: "SessionNodeRecord",
-        message: format!("failed to decode retained frame node `{frame_node_id}`: {error}"),
-    })?
-    .frame_config()
-    .ok_or_else(|| {
-        StoreError::Backend(format!(
-            "retained frame node `{frame_node_id}` has no frame assignment"
-        ))
-    })
-}
-
 pub(crate) fn store_sqlx_error(err: sqlx::Error) -> StoreError {
     if is_contention_error(&err) {
         StoreError::Contended
@@ -389,28 +318,6 @@ async fn get_blob_tx(
 // chunk is four times the largest required depth while bounding each encoded
 // request to roughly one MiB of SHA-256 text plus array framing.
 const CHECKPOINT_COMPONENT_REF_CHUNK_SIZE: usize = 16_384;
-
-pub(crate) async fn lock_retained_checkpoint_blob_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    node_id: &str,
-    source_session_id: &SessionId,
-    checkpoint_ref: &str,
-) -> Result<(), StoreError> {
-    match lock_checkpoint_blob_tx(tx, checkpoint_ref, None).await {
-        Err(error @ StoreError::CheckpointRootMissing { .. }) => {
-            if retention_source_holds_checkpoint_tx(tx, node_id, source_session_id, checkpoint_ref)
-                .await?
-            {
-                Err(error)
-            } else {
-                Err(StoreError::ForkPointNotRetained {
-                    node_id: node_id.into(),
-                })
-            }
-        }
-        result => result,
-    }
-}
 
 pub(crate) async fn lock_checkpoint_blob_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,

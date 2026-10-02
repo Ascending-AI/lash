@@ -364,7 +364,8 @@ the root's unique ambient marker. Open the same parent in **A's** tab. Gate all 
   author prefix (`Thread root (…): ada: <marker>…`). Committed mention text is author-prefixed
   the same way, with the `<@U…>` chip stripped, so comparing raw platform text to the
   transcript fails on a correct host. Read
-  inheritance through `fork_lineage` — the ancestor chain from the recorded `fork_node_id` —
+  inheritance through `fork_lineage` — the ancestor chain from the leaf of the recorded
+  `fork_revision` (`session_revisions.leaf_node_id`) —
   never as rows in the child's own `graph_nodes`: `fork_at` adds a session head *without
   writing graph nodes*, so ancestor content never appears under the child's session id, and
   an inclusion gate written that way fails on a correct fork while the matching exclusion gate

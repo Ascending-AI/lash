@@ -208,6 +208,7 @@ cwd = "crates/lash"
 filters = [
   "tests::response_phase_replay::live_",
   "tests::recorded_execution_controls::live_a_recorded_budget_bounds_every_root_after_a_deployment_restart",
+  "tests::send_handle::pins::live_",
 ]
 endpoints = ["RR"]
 shards = 1

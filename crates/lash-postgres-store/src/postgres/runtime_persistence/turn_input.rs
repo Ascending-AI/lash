@@ -600,6 +600,18 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                     input_id
                 }
             };
+            if draft.pin {
+                // The pin is written with the acceptance, new or replayed,
+                // so the input is pinned before its root can start.
+                crate::revisions::pin_tx(
+                    &mut tx,
+                    session_id,
+                    &lash_core_execution::Target::Input(lash_core_execution::InputId::from(
+                        input_id.as_str(),
+                    )),
+                )
+                .await?;
+            }
             admitted.push(
                 load_pending_turn_input(&mut tx, session_id, &input_id)
                     .await?

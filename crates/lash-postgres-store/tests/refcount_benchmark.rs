@@ -86,15 +86,29 @@ async fn commit_state(
     (root_node_id.to_string(), leaf_node_id.to_string())
 }
 
+/// A session's head, named as the state a fork starts at.
+type ForkSource = (SessionId, u64);
+
+async fn head_of(factory: &Arc<dyn DeploymentStore>, session_id: &SessionId) -> ForkSource {
+    let head = factory
+        .revisions(session_id)
+        .await
+        .expect("list benchmark revisions")
+        .pop()
+        .expect("benchmark session has a head");
+    (session_id.clone(), head.head_revision)
+}
+
 async fn fork_store(
     factory: &Arc<dyn DeploymentStore>,
-    node_id: &str,
+    source: &ForkSource,
     session_id: &SessionId,
 ) -> Arc<dyn RuntimeStore> {
     let fork_request = ForkSessionRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
-        node_id: node_id.to_string().into(),
+        source_session_id: source.0.clone(),
+        head_revision: source.1,
         relation: SessionRelation::Root,
         config: lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
@@ -137,7 +151,7 @@ async fn create_chain(
     factory: &Arc<dyn DeploymentStore>,
     session_id: &SessionId,
     depth: usize,
-) -> (String, String) {
+) -> ForkSource {
     let (store, mut state) = create_state(factory, session_id).await;
     state.ensure_agent_frame_initialized();
     for ordinal in 1..depth {
@@ -146,34 +160,27 @@ async fn create_chain(
             serde_json::json!({ "ordinal": ordinal }),
         );
     }
-    commit_state(&store, &state, "seed-chain").await
+    commit_state(&store, &state, "seed-chain").await;
+    head_of(factory, session_id).await
 }
 
 async fn create_fork_chain(
     factory: &Arc<dyn DeploymentStore>,
     prefix: &str,
-) -> (String, String, Arc<dyn RuntimeStore>) {
-    let source_id = format!("{prefix}-fork-chain-source");
-    let (source, mut state) = create_state(factory, &SessionId::from(source_id)).await;
+) -> (String, ForkSource, Arc<dyn RuntimeStore>) {
+    let source_id = SessionId::from(format!("{prefix}-fork-chain-source"));
+    let (source, mut state) = create_state(factory, &source_id).await;
     state.ensure_agent_frame_initialized();
-    let (root_node_id, mut leaf_node_id) = commit_state(&source, &state, "seed-fork-chain").await;
+    let (root_node_id, _) = commit_state(&source, &state, "seed-fork-chain").await;
+    let mut leaf = head_of(factory, &source_id).await;
     let mut terminal = source;
     for depth in 0..DEEP_FORK_CHAIN_DEPTH {
         let session_id = SessionId::from(format!("{prefix}-fork-chain-{depth}"));
-        terminal = fork_store(factory, &leaf_node_id, &session_id).await;
+        terminal = fork_store(factory, &leaf, &session_id).await;
         append_child(&terminal, &session_id, &format!("fork-chain-{depth}")).await;
-        leaf_node_id = terminal
-            .load_session_window(&session_id, WindowSelector::Current)
-            .await
-            .expect("load fork-chain session")
-            .expect("fork-chain session exists")
-            .window
-            .leaf_node_id
-            .clone()
-            .expect("fork-chain leaf")
-            .to_string();
+        leaf = head_of(factory, &session_id).await;
     }
-    (root_node_id, leaf_node_id, terminal)
+    (root_node_id, leaf, terminal)
 }
 
 fn percentile(samples: &mut [Duration], percentile: f64) -> Duration {
@@ -201,15 +208,11 @@ fn print_samples(
 
 async fn benchmark_backend(backend: &str, factory: Arc<dyn DeploymentStore>, run_id: &str) {
     let prefix = format!("refcount-bench-{run_id}-{backend}");
-    let wide_source_id = format!("{prefix}-wide-source");
-    let (wide_source, mut wide_state) =
-        create_state(&factory, &SessionId::from(wide_source_id)).await;
+    let wide_source_id = SessionId::from(format!("{prefix}-wide-source"));
+    let (wide_source, mut wide_state) = create_state(&factory, &wide_source_id).await;
     wide_state.ensure_agent_frame_initialized();
-    let (wide_root, _) = commit_state(&wide_source, &wide_state, "seed-wide").await;
-    factory
-        .pin(&wide_root.clone().into())
-        .await
-        .expect("pin wide root");
+    commit_state(&wide_source, &wide_state, "seed-wide").await;
+    let wide_root = head_of(&factory, &wide_source_id).await;
     for ordinal in 0..WIDE_SIBLING_COUNT {
         let branch_id = format!("{prefix}-wide-sibling-{ordinal}");
         let branch_id = SessionId::from(branch_id);
@@ -218,7 +221,7 @@ async fn benchmark_backend(backend: &str, factory: Arc<dyn DeploymentStore>, run
     }
 
     let deep_source_id = format!("{prefix}-deep-source");
-    let (_, deep_leaf) =
+    let deep_leaf =
         create_chain(&factory, &SessionId::from(deep_source_id), DEEP_CHAIN_DEPTH).await;
     let (fork_chain_root, fork_chain_leaf, fork_chain_terminal) =
         create_fork_chain(&factory, &prefix).await;

@@ -598,21 +598,19 @@ pub async fn a_fork_made_during_an_open_never_sees_its_seed(
     law.enqueue("first question").await;
     law.run_root("root-1").await;
     let forked_from = law.head().await;
-    let leaf = forked_from
-        .graph
-        .leaf_node_id
-        .clone()
-        .expect("the session has a leaf");
     let fork_id = SessionId::from(format!("{}-fork", law.session_id));
 
     let store = Arc::clone(&law.store);
     let fork = fork_id.clone();
+    let source = law.session_id.clone();
+    let forked_revision = forked_from.head_revision;
     let (drove, receipt) = law
         .compact_holding("compact", async move {
             store
                 .fork_session(&crate::ForkSessionRequest {
                     session_id: fork,
-                    node_id: leaf,
+                    source_session_id: source,
+                    head_revision: forked_revision,
                     relation: crate::SessionRelation::Root,
                     pending_observer_intents: Vec::new(),
                     config: crate::SessionPolicy::new(

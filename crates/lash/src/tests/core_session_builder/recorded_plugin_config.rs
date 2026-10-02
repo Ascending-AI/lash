@@ -712,21 +712,18 @@ async fn a_fork_captures_the_config_of_its_fork_point() -> Result<()> {
         .output()
         .await?;
     let source = recorded_state(&core, "probe-fork-source").await?;
-    let point = source
-        .session_graph
-        .leaf_node_id
-        .clone()
-        .expect("the source has a leaf");
-    core.pin(&point).await?;
-    core.fork_at(crate::ForkRequest {
-        session_id: "probe-fork".into(),
-        node_id: point.clone(),
-        relation: lash_core::SessionRelation::Fork {
-            source_session_id: "probe-fork-source".into(),
-            source_node_id: point,
+    core.fork_at(
+        &SessionId::from("probe-fork-source"),
+        lash_core::Target::Revision(source.head_revision),
+        crate::ForkRequest {
+            session_id: "probe-fork".into(),
+            relation: lash_core::SessionRelation::Fork {
+                source_session_id: "probe-fork-source".into(),
+                source_node_id: None,
+            },
+            observed_processes: Vec::new(),
         },
-        observed_processes: Vec::new(),
-    })
+    )
     .await?;
     let fork = recorded_state(&core, "probe-fork").await?;
     assert_eq!(fork.authority.plugin_config.get(PROBE), Some(&capped(12)));

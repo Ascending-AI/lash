@@ -965,7 +965,7 @@ async fn assert_parked_forever(tier: &UsageAccountingTier, world: &World, point:
     assert_admission_refused(tier, world).await;
 }
 
-/// A fork of the session at its leaf is a new owner: it has no facts, and
+/// A fork of the session at its head is a new owner: it has no facts, and
 /// the parent keeps its own.
 async fn assert_fork_carries_no_usage(tier: &UsageAccountingTier, world: &World, law: &str) {
     let factory = tier.stores.session_store_factory();
@@ -974,14 +974,12 @@ async fn assert_fork_carries_no_usage(tier: &UsageAccountingTier, world: &World,
         .await
         .unwrap_or_else(|error| panic!("{law}: read the parent's head: {error}"))
         .unwrap_or_else(|| panic!("{law}: the parent has a head"));
-    let leaf = head
-        .leaf_node_id
-        .unwrap_or_else(|| panic!("{law}: the parent's head has a leaf"));
     let child = SessionId::from(format!("{}-fork", world.session_id));
     factory
         .fork_session(&crate::ForkSessionRequest {
             session_id: child.clone(),
-            node_id: leaf,
+            source_session_id: world.session_id.clone(),
+            head_revision: head.head_revision,
             relation: crate::SessionRelation::Root,
             pending_observer_intents: Vec::new(),
             config: crate::SessionPolicy::new(
@@ -991,7 +989,7 @@ async fn assert_fork_carries_no_usage(tier: &UsageAccountingTier, world: &World,
             .into(),
         })
         .await
-        .unwrap_or_else(|error| panic!("{law}: fork the parent at its leaf: {error}"));
+        .unwrap_or_else(|error| panic!("{law}: fork the parent at its head: {error}"));
     let parent = world.settled().await;
     let forked = settled_usage(tier, &crate::RuntimeOwner::Session(child)).await;
     assert!(forked.rows.is_empty(), "{law}: the fork child has no facts");

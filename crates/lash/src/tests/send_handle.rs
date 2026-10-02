@@ -10,6 +10,8 @@ use super::*;
 use futures_util::StreamExt;
 use tokio::sync::Notify;
 
+mod pins;
+
 const SEED: u64 = 0x5b_5e_4d;
 
 /// The text the scripted provider holds its answer on until released.

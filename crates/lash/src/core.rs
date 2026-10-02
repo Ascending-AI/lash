@@ -576,65 +576,65 @@ impl LashCore {
         )
     }
 
-    /// Retain the current continuation checkpoint for a turn-boundary node.
+    /// Create `request.session_id` at the state `target` of `session` names,
+    /// without writing graph nodes.
     ///
-    /// A point must still be retained when this is called: ordinarily that
-    /// means it is the leaf of a live session. Pin before advancing the head if
-    /// a host wants to make a past turn forkable later.
-    pub async fn pin(&self, node_id: impl AsRef<str>) -> Result<lash_core::ForkPoint> {
-        self.store_factory
-            .pin(&lash_core::NodeId::from(node_id.as_ref()))
-            .await
-            .map_err(Into::into)
-    }
-
-    /// Release an explicit continuation pin. A live tip at the same node
-    /// remains forkable through its session-head checkpoint.
-    pub async fn unpin(&self, node_id: impl AsRef<str>) -> Result<()> {
-        self.store_factory
-            .unpin(&lash_core::NodeId::from(node_id.as_ref()))
-            .await
-            .map_err(Into::into)
-    }
-
-    /// Enumerate pinned past turns and unpinned live tips that can be forked.
-    pub async fn fork_points(&self) -> Result<Vec<lash_core::ForkPoint>> {
-        self.store_factory.fork_points().await.map_err(Into::into)
-    }
-
-    /// Create `session_id` at a retained turn boundary without writing graph
-    /// nodes.
+    /// The name of a state is `(session, head revision)`. A
+    /// [`Target::Input`](lash_core::Target::Input) names the root that
+    /// applied the input, a [`Target::Turn`](lash_core::Target::Turn) the
+    /// revision that root's terminal commit published, and a
+    /// [`Target::Revision`](lash_core::Target::Revision) the revision
+    /// itself. A session that has never run a turn forks at its creation
+    /// revision and records the config it was created with.
     ///
-    /// Unpinned past turns are ordinarily not retained. That normal outcome is
-    /// returned as
-    /// `EmbedError::Store(StoreError::ForkPointNotRetained { .. })`; Lash never
-    /// silently substitutes a different checkpoint. An explicit pin remains
-    /// forkable after its source session is deleted because the retained frame
-    /// carries the recorded config needed to create the branch.
+    /// The fork is taken only if the revision is still retained. Under the
+    /// default [`Retention::UntilGc`](lash_core::Retention::UntilGc) every
+    /// past turn is, until the host collects; a pin keeps one through
+    /// collections. A target that names no retained state refuses with a
+    /// typed `EmbedError::Store`, and Lash never substitutes another state:
     ///
-    /// The fork records its fork point's recorded config in full (FIG-4594):
-    /// model, turn budget, autonomy, no-progress budget, charge safety,
-    /// generation, attachment acceptance, tool access and plugin
-    /// configuration are the frame's, and nothing this core or its host
+    /// * [`StoreError::ForkTargetPending`](lash_core::StoreError::ForkTargetPending):
+    ///   the target's root has not finished;
+    /// * [`StoreError::ForkTargetUnavailable`](lash_core::StoreError::ForkTargetUnavailable):
+    ///   the root ended without a commit, or the input was withdrawn;
+    /// * [`StoreError::ForkTargetPruned`](lash_core::StoreError::ForkTargetPruned):
+    ///   the revision was collected.
+    ///
+    /// The fork records the forked revision's recorded config in full
+    /// (FIG-4594): model, turn budget, autonomy, no-progress budget, charge
+    /// safety, generation, attachment acceptance, tool access and plugin
+    /// configuration are the revision's, and nothing this core or its host
     /// states today stands in for any of them. Change the fork's config
     /// afterwards with a config transaction.
-    pub async fn fork_at(&self, request: ForkRequest) -> Result<lash_core::ForkSessionReceipt> {
+    ///
+    /// The fork gets fresh session and execution identities and copies no
+    /// pending ingress, pin or retention policy. A
+    /// [`SessionRelation::Fork`](lash_core::SessionRelation::Fork) that
+    /// names no source node records the forked revision's leaf.
+    pub async fn fork_at(
+        &self,
+        session: &SessionId,
+        target: lash_core::Target,
+        request: ForkRequest,
+    ) -> Result<lash_core::ForkSessionReceipt> {
         let store_factory = &self.store_factory;
         let ForkRequest {
             session_id,
-            node_id,
             relation,
             observed_processes,
         } = request;
-        let point = store_factory
-            .fork_points()
-            .await?
-            .into_iter()
-            .find(|point| point.node_id == node_id)
-            .ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
-                node_id: node_id.clone(),
-            })?;
-        let config = point.fork_config();
+        let revision = store_factory.resolve_target(session, &target).await?;
+        let relation = match relation {
+            lash_core::SessionRelation::Fork {
+                source_session_id,
+                source_node_id: None,
+            } => lash_core::SessionRelation::Fork {
+                source_session_id,
+                source_node_id: revision.leaf_node_id.clone(),
+            },
+            relation => relation,
+        };
+        let config = revision.fork_config();
         let mut selected = std::collections::HashSet::new();
         let mut pending_observer_intents = Vec::new();
         for process_id in observed_processes {
@@ -647,12 +647,28 @@ impl LashCore {
         }
         let request = lash_core::ForkSessionRequest {
             session_id,
-            node_id,
+            source_session_id: session.clone(),
+            head_revision: revision.head_revision,
             relation,
             pending_observer_intents,
             config,
         };
-        let mut fork = store_factory.fork_session(&request).await?;
+        let mut fork = store_factory
+            .fork_session(&request)
+            .await
+            .map_err(|error| {
+                // The store names the revision it was asked for; the host asked
+                // for a target.
+                match error {
+                    lash_core::StoreError::ForkTargetPruned { session_id, .. } => {
+                        lash_core::StoreError::ForkTargetPruned {
+                            session_id,
+                            target: target.clone(),
+                        }
+                    }
+                    error => error,
+                }
+            })?;
         match store_factory.lookup_session(&request.session_id).await? {
             lash_core::store::SessionLookup::Live(_) => {}
             lash_core::store::SessionLookup::Deleted | lash_core::store::SessionLookup::Absent => {
@@ -1376,14 +1392,15 @@ impl LashCore {
     }
 }
 
-/// Explicit host selection for a retained-history fork.
+/// Explicit host selection for a fork: the new session's id, its declared
+/// lineage and the process runs it observes. What it forks is the
+/// [`Target`](lash_core::Target) [`fork_at`](LashCore::fork_at) takes.
 ///
-/// Lineage is independent of the history node's writer. Observers are the exact
+/// Lineage is independent of the forked session. Observers are the exact
 /// runs the host selected; an empty list creates a history-only fork.
 #[derive(Clone, Debug)]
 pub struct ForkRequest {
     pub session_id: SessionId,
-    pub node_id: lash_core::NodeId,
     pub relation: lash_core::SessionRelation,
     pub observed_processes: Vec<lash_core::ProcessId>,
 }

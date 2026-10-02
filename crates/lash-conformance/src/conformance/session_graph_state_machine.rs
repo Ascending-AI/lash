@@ -38,25 +38,27 @@ pub enum SessionGraphContractOp {
         node_count: u8,
         requirement: u8,
     },
+    /// Fork `source` at one of its retained revisions (the selector picks
+    /// the head, an earlier leaf, the oldest retained, or one not retained).
     Fork {
         source: u8,
         target: u8,
-        node: u8,
+        revision: u8,
     },
     Pin {
         session: u8,
-        node: u8,
+        revision: u8,
     },
     Unpin {
         session: u8,
-        node: u8,
+        revision: u8,
     },
     Delete {
         session: u8,
     },
     TruncateRewind {
         session: u8,
-        node: u8,
+        revision: u8,
     },
     ReachabilitySweep,
     /// Raise one live session's fork ceiling on an ancestor owner to a node
@@ -100,13 +102,63 @@ struct ModelSession {
     physical_id: String,
     path: Vec<lash_core::NodeId>,
     head_revision: u64,
+    /// The revisions the store still retains, each with the leaf it
+    /// published. A sweep drops every one that is neither head nor pinned.
+    revisions: BTreeMap<u64, Option<lash_core::NodeId>>,
+    pins: BTreeSet<u64>,
+}
+
+impl ModelSession {
+    fn created(physical_id: String, path: Vec<lash_core::NodeId>) -> Self {
+        let revisions = BTreeMap::from([(0, path.last().cloned())]);
+        Self {
+            physical_id,
+            path,
+            head_revision: 0,
+            revisions,
+            pins: BTreeSet::new(),
+        }
+    }
+
+    fn sweep(&mut self) {
+        let head = self.head_revision;
+        let pins = &self.pins;
+        self.revisions
+            .retain(|revision, _| *revision == head || pins.contains(revision));
+    }
+}
+
+/// What a revision selector names in one session.
+enum SelectedRevision {
+    Retained(u64, Option<lash_core::NodeId>),
+    /// Published once and collected since.
+    Pruned(u64),
+    /// Past the head: nothing has published it yet.
+    Pending(u64),
+}
+
+impl SelectedRevision {
+    fn revision(&self) -> u64 {
+        match self {
+            Self::Retained(revision, _) | Self::Pruned(revision) | Self::Pending(revision) => {
+                *revision
+            }
+        }
+    }
+
+    fn refused_as(&self, error: &crate::StoreError) -> bool {
+        match self {
+            Self::Retained(..) => false,
+            Self::Pruned(_) => matches!(error, crate::StoreError::ForkTargetPruned { .. }),
+            Self::Pending(_) => matches!(error, crate::StoreError::ForkTargetPending { .. }),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
 struct ReferenceModel {
     sessions: BTreeMap<u8, ModelSession>,
     nodes: BTreeMap<lash_core::NodeId, ModelNode>,
-    pins: BTreeSet<lash_core::NodeId>,
     next_session_generation: u64,
     next_operation: u64,
 }
@@ -299,7 +351,7 @@ fn generated_prefix() -> Vec<SessionGraphContractOp> {
         },
         SessionGraphContractOp::Pin {
             session: 0,
-            node: 0,
+            revision: 0,
         },
         SessionGraphContractOp::Append {
             session: 0,
@@ -310,7 +362,7 @@ fn generated_prefix() -> Vec<SessionGraphContractOp> {
         SessionGraphContractOp::Fork {
             source: 0,
             target: 1,
-            node: 1,
+            revision: 1,
         },
         SessionGraphContractOp::Append {
             session: 1,
@@ -323,7 +375,7 @@ fn generated_prefix() -> Vec<SessionGraphContractOp> {
         },
         SessionGraphContractOp::Pin {
             session: 1,
-            node: 0,
+            revision: 0,
         },
         SessionGraphContractOp::Append {
             session: 1,
@@ -332,11 +384,11 @@ fn generated_prefix() -> Vec<SessionGraphContractOp> {
         },
         SessionGraphContractOp::TruncateRewind {
             session: 1,
-            node: 1,
+            revision: 1,
         },
         SessionGraphContractOp::Unpin {
             session: 1,
-            node: 0,
+            revision: 0,
         },
         SessionGraphContractOp::ColdReload { session: 0 },
         SessionGraphContractOp::ReachabilitySweep,
@@ -372,15 +424,15 @@ fn operation() -> impl Strategy<Value = SessionGraphContractOp> {
             },
         ),
         3 => (0..SESSION_COUNT, 0..SESSION_COUNT, 0_u8..4).prop_map(
-            |(source, target, node)| SessionGraphContractOp::Fork { source, target, node },
+            |(source, target, revision)| SessionGraphContractOp::Fork { source, target, revision },
         ),
         2 => (0..SESSION_COUNT, 0_u8..4)
-            .prop_map(|(session, node)| SessionGraphContractOp::Pin { session, node }),
+            .prop_map(|(session, revision)| SessionGraphContractOp::Pin { session, revision }),
         2 => (0..SESSION_COUNT, 0_u8..4)
-            .prop_map(|(session, node)| SessionGraphContractOp::Unpin { session, node }),
+            .prop_map(|(session, revision)| SessionGraphContractOp::Unpin { session, revision }),
         1 => (0..SESSION_COUNT).prop_map(|session| SessionGraphContractOp::Delete { session }),
-        2 => (0..SESSION_COUNT, 0_u8..4).prop_map(|(session, node)| {
-            SessionGraphContractOp::TruncateRewind { session, node }
+        2 => (0..SESSION_COUNT, 0_u8..4).prop_map(|(session, revision)| {
+            SessionGraphContractOp::TruncateRewind { session, revision }
         }),
         2 => Just(SessionGraphContractOp::ReachabilitySweep),
         2 => (0..SESSION_COUNT, 0_u8..8)
@@ -440,13 +492,17 @@ impl SessionGraphScenario {
             SessionGraphContractOp::Fork {
                 source,
                 target,
-                node,
-            } => self.fork(*source, *target, *node).await,
-            SessionGraphContractOp::Pin { session, node } => self.pin(*session, *node).await,
-            SessionGraphContractOp::Unpin { session, node } => self.unpin(*session, *node).await,
+                revision,
+            } => self.fork(*source, *target, *revision).await,
+            SessionGraphContractOp::Pin { session, revision } => {
+                self.pin(*session, *revision).await
+            }
+            SessionGraphContractOp::Unpin { session, revision } => {
+                self.unpin(*session, *revision).await
+            }
             SessionGraphContractOp::Delete { session } => self.delete(*session).await,
-            SessionGraphContractOp::TruncateRewind { session, node } => {
-                self.truncate_rewind(*session, *node).await
+            SessionGraphContractOp::TruncateRewind { session, revision } => {
+                self.truncate_rewind(*session, *revision).await
             }
             SessionGraphContractOp::ReachabilitySweep => self.reachability_sweep().await,
             SessionGraphContractOp::InflateCeiling { session, node } => {
@@ -485,14 +541,9 @@ impl SessionGraphScenario {
         self.handles_by_physical_id
             .insert(physical_id.clone(), store.clone());
         self.live.insert(slot, LiveSession { request, store });
-        self.model.sessions.insert(
-            slot,
-            ModelSession {
-                physical_id,
-                path: Vec::new(),
-                head_revision: 0,
-            },
-        );
+        self.model
+            .sessions
+            .insert(slot, ModelSession::created(physical_id, Vec::new()));
         Ok(())
     }
 
@@ -616,85 +667,81 @@ impl SessionGraphScenario {
         Ok(())
     }
 
+    /// A pin is a name, written whether or not its revision exists: a pin of
+    /// a revision the session has not published holds it once it is, and a
+    /// pin of a collected one holds nothing.
     async fn pin(&mut self, slot: u8, selector: u8) -> Result<(), String> {
         let slot = slot % SESSION_COUNT;
-        let Some(node_id) = self.selected_node(slot, selector) else {
+        let (Some(selected), Some(live)) =
+            (self.selected_revision(slot, selector), self.live.get(&slot))
+        else {
             return Ok(());
         };
-        let is_retainable = self
-            .model
-            .sessions
-            .get(&slot)
-            .and_then(|session| session.path.last())
-            == Some(&node_id)
-            || self.model.pins.contains(&node_id);
-        let result = self.factory.pin(&node_id).await;
-        if is_retainable {
-            let point = result.map_err(|error| error.to_string())?;
-            if point.node_id != node_id || !point.pinned {
-                return Err("pin/refcount: successful pin returned the wrong root".to_string());
-            }
-            self.model.pins.insert(node_id);
-            self.shape[RunShapeCounter::PinsCommitted] += 1;
-        } else {
-            if !matches!(result, Err(crate::StoreError::ForkPointNotRetained { .. })) {
-                return Err(format!(
-                    "pin/refcount: unretained past node was accepted: {result:?}"
-                ));
-            }
-            self.shape[RunShapeCounter::TypedRejections] += 1;
+        let revision = selected.revision();
+        // A second pin of the same target is the first one.
+        for _ in 0..2 {
+            live.store
+                .pin(&crate::Target::Revision(revision))
+                .await
+                .map_err(|error| format!("pin of revision {revision}: {error}"))?;
         }
+        self.model
+            .sessions
+            .get_mut(&slot)
+            .ok_or("pinned session is not modeled")?
+            .pins
+            .insert(revision);
+        self.shape[RunShapeCounter::PinsCommitted] += 1;
         Ok(())
     }
 
     async fn unpin(&mut self, slot: u8, selector: u8) -> Result<(), String> {
         let slot = slot % SESSION_COUNT;
-        let Some(node_id) = self.selected_node(slot, selector) else {
+        let (Some(selected), Some(live)) =
+            (self.selected_revision(slot, selector), self.live.get(&slot))
+        else {
             return Ok(());
         };
-        self.factory
-            .unpin(&node_id)
+        let revision = selected.revision();
+        live.store
+            .unpin(&crate::Target::Revision(revision))
             .await
             .map_err(|error| error.to_string())?;
-        self.model.pins.remove(&node_id);
+        if let Some(session) = self.model.sessions.get_mut(&slot) {
+            session.pins.remove(&revision);
+        }
         self.shape[RunShapeCounter::UnpinsCommitted] += 1;
         Ok(())
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "conformance-law fixture: each result is established by the setup above"
-    )]
-    async fn fork(&mut self, source: u8, target: u8, selector: u8) -> Result<(), String> {
-        let source = source % SESSION_COUNT;
-        let target = target % SESSION_COUNT;
-        let Some(node_id) = self.selected_node(source, selector) else {
-            return Ok(());
-        };
-        if self.live.contains_key(&target) {
-            return Ok(());
-        }
-        let retained = self.model.pins.contains(&node_id)
-            || self
-                .model
+    /// Fork `source_slot`'s `selected` revision into a new physical session.
+    /// Returns the fork's request and store, or `None` after the store
+    /// refused a revision it no longer (or does not yet) hold with the typed
+    /// cause the model expects.
+    async fn fork_revision(
+        &mut self,
+        source_slot: u8,
+        selected: &SelectedRevision,
+        physical_id: &str,
+    ) -> Result<Option<(LiveSession, Vec<lash_core::NodeId>)>, String> {
+        let source_session_id = SessionId::from(
+            self.model
                 .sessions
-                .get(&source)
-                .and_then(|session| session.path.last())
-                == Some(&node_id);
-        let physical_id = self.next_session_id(target);
-        let source_session_id = self
-            .model
-            .sessions
-            .get(&source)
-            .expect("selected source is live")
-            .physical_id
-            .clone();
+                .get(&source_slot)
+                .ok_or("fork source is not modeled")?
+                .physical_id
+                .clone(),
+        );
+        let leaf = match selected {
+            SelectedRevision::Retained(_, leaf) => leaf.clone(),
+            SelectedRevision::Pruned(_) | SelectedRevision::Pending(_) => None,
+        };
         let relation = crate::SessionRelation::Fork {
-            source_session_id: SessionId::from(source_session_id),
-            source_node_id: node_id.clone(),
+            source_session_id: source_session_id.clone(),
+            source_node_id: leaf.clone(),
         };
         let request = session_store_request(
-            &SessionId::from(physical_id.clone()),
+            &SessionId::from(physical_id.to_string()),
             "session-graph-property-model",
             relation.clone(),
         );
@@ -702,133 +749,96 @@ impl SessionGraphScenario {
             .factory
             .fork_session(&crate::ForkSessionRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: SessionId::from(physical_id.clone()),
-                node_id: node_id.clone(),
+                session_id: SessionId::from(physical_id.to_string()),
+                source_session_id,
+                head_revision: selected.revision(),
                 relation,
                 config: request.config.session_policy().into(),
             })
             .await;
-        if !retained {
-            if !matches!(result, Err(crate::StoreError::ForkPointNotRetained { .. })) {
+        let receipt = match result {
+            Ok(receipt) if matches!(selected, SelectedRevision::Retained(..)) => receipt,
+            Err(error) if selected.refused_as(&error) => {
+                self.shape[RunShapeCounter::TypedRejections] += 1;
+                return Ok(None);
+            }
+            other => {
                 return Err(format!(
-                    "fork isolation: unretained node was forked: {result:?}"
+                    "fork isolation: revision {} answered the wrong way: {other:?}",
+                    selected.revision()
                 ));
             }
-            self.shape[RunShapeCounter::TypedRejections] += 1;
-            return Ok(());
+        };
+        if receipt.leaf_node_id != leaf {
+            return Err(format!(
+                "fork isolation: revision {} forked at leaf {:?}, the revision published {leaf:?}",
+                selected.revision(),
+                receipt.leaf_node_id
+            ));
         }
-        result.map_err(|error| error.to_string())?;
         let store = self
             .factory
             .live_view_for(&request)
             .await
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "fork created no reopenable store".to_string())?;
-        let source_path = self
-            .model
-            .sessions
-            .get(&source)
-            .expect("source model")
-            .path
-            .clone();
-        let target_index = source_path
-            .iter()
-            .position(|candidate| candidate == node_id)
-            .ok_or_else(|| "fork target left the modeled source path".to_string())?;
+        let path = self.path_to(leaf.as_ref());
+        Ok(Some((LiveSession { request, store }, path)))
+    }
+
+    async fn fork(&mut self, source: u8, target: u8, selector: u8) -> Result<(), String> {
+        let source = source % SESSION_COUNT;
+        let target = target % SESSION_COUNT;
+        let Some(selected) = self.selected_revision(source, selector) else {
+            return Ok(());
+        };
+        if self.live.contains_key(&target) {
+            return Ok(());
+        }
+        let physical_id = self.next_session_id(target);
+        let Some((live, path)) = self.fork_revision(source, &selected, &physical_id).await? else {
+            return Ok(());
+        };
         self.handles_by_physical_id
-            .insert(physical_id.clone(), store.clone());
-        self.live.insert(target, LiveSession { request, store });
-        self.model.sessions.insert(
-            target,
-            ModelSession {
-                physical_id,
-                path: source_path[..=target_index].to_vec(),
-                head_revision: 0,
-            },
-        );
+            .insert(physical_id.clone(), live.store.clone());
+        self.live.insert(target, live);
+        self.model
+            .sessions
+            .insert(target, ModelSession::created(physical_id, path));
         self.shape[RunShapeCounter::ForksCommitted] += 1;
         Ok(())
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "conformance-law fixture: each result is established by the setup above"
-    )]
+    /// Rewind is fork-then-delete: any revision the session still retains is
+    /// a rewind target, with no pin taken beforehand.
     async fn truncate_rewind(&mut self, slot: u8, selector: u8) -> Result<(), String> {
         let slot = slot % SESSION_COUNT;
-        let Some(node_id) = self.selected_node(slot, selector) else {
+        let Some(selected) = self.selected_revision(slot, selector) else {
             return Ok(());
         };
-        if !self.model.pins.contains(&node_id) {
-            let result = self.factory.pin(&node_id).await;
-            let is_leaf = self
-                .model
-                .sessions
-                .get(&slot)
-                .and_then(|session| session.path.last())
-                == Some(&node_id);
-            if !is_leaf {
-                if !matches!(result, Err(crate::StoreError::ForkPointNotRetained { .. })) {
-                    return Err(format!(
-                        "rewind: unretained ancestor pin was not typed: {result:?}"
-                    ));
-                }
-                self.shape[RunShapeCounter::TypedRejections] += 1;
-                return Ok(());
-            }
-            result.map_err(|error| error.to_string())?;
-            self.model.pins.insert(node_id.clone());
-            self.shape[RunShapeCounter::PinsCommitted] += 1;
-        }
-
-        let old = self.live.remove(&slot).expect("selected session is live");
-        let old_model = self.model.sessions.remove(&slot).expect("selected model");
         let physical_id = self.next_session_id(slot);
-        let relation = crate::SessionRelation::Fork {
-            source_session_id: SessionId::from(old_model.physical_id.clone()),
-            source_node_id: node_id.clone(),
+        let Some((live, path)) = self.fork_revision(slot, &selected, &physical_id).await? else {
+            return Ok(());
         };
-        let request = session_store_request(
-            &SessionId::from(physical_id.clone()),
-            "session-graph-property-model",
-            relation.clone(),
-        );
-        self.factory
-            .fork_session(&crate::ForkSessionRequest {
-                pending_observer_intents: Vec::new(),
-                session_id: SessionId::from(physical_id.clone()),
-                node_id: node_id.clone(),
-                relation,
-                config: request.config.session_policy().into(),
-            })
-            .await
-            .map_err(|error| error.to_string())?;
-        let store = self
-            .factory
-            .live_view_for(&request)
-            .await
-            .map_err(|error| error.to_string())?
-            .ok_or_else(|| "rewind fork created no reopenable store".to_string())?;
+        let old = self
+            .live
+            .insert(slot, live)
+            .ok_or("rewound session was not live")?;
         self.factory
             .delete_session(&old.request.session_id)
             .await
             .map_err(|error| error.to_string())?;
-        let index = old_model
-            .path
-            .iter()
-            .position(|candidate| candidate == node_id)
-            .expect("rewind node belongs to old path");
-        self.handles_by_physical_id
-            .insert(physical_id.clone(), store.clone());
-        self.live.insert(slot, LiveSession { request, store });
-        self.model.sessions.insert(
-            slot,
-            ModelSession {
-                physical_id,
-                path: old_model.path[..=index].to_vec(),
-                head_revision: 0,
-            },
+        self.handles_by_physical_id.insert(
+            physical_id.clone(),
+            self.live
+                .get(&slot)
+                .ok_or("rewind fork is not live")?
+                .store
+                .clone(),
         );
+        self.model
+            .sessions
+            .insert(slot, ModelSession::created(physical_id, path));
         self.shape[RunShapeCounter::RewindsCommitted] += 1;
         self.shape[RunShapeCounter::DeletesCommitted] += 1;
         Ok(())
@@ -882,11 +892,15 @@ impl SessionGraphScenario {
         commit_runtime_state_for_property(live.store.store(), commit, "checkpoint")
             .await
             .map_err(|error| error.to_string())?;
-        self.model
+        let model = self
+            .model
             .sessions
             .get_mut(&slot)
-            .expect("checkpoint model")
-            .head_revision += 1;
+            .expect("checkpoint model");
+        model.head_revision += 1;
+        model
+            .revisions
+            .insert(model.head_revision, model.path.last().cloned());
         self.shape[RunShapeCounter::CheckpointCommits] += 1;
         Ok(())
     }
@@ -927,6 +941,11 @@ impl SessionGraphScenario {
                 .gc_unreachable()
                 .await
                 .map_err(|error| error.to_string())?;
+            // Host GC is the one place the default policy releases: every
+            // revision that is neither a head nor pinned goes.
+            for session in self.model.sessions.values_mut() {
+                session.sweep();
+            }
         }
         self.assert_reachability().await?;
         self.shape[RunShapeCounter::ReachabilitySweeps] += 1;
@@ -1138,17 +1157,53 @@ impl SessionGraphScenario {
         Ok(())
     }
 
-    fn selected_node(&self, slot: u8, selector: u8) -> Option<lash_core::NodeId> {
-        let path = &self.model.sessions.get(&(slot % SESSION_COUNT))?.path;
+    /// Selector 0 names the head, 1 the newest retained revision whose leaf
+    /// is not the head's, 2 the oldest retained revision, and 3 a revision
+    /// the session does not retain: a collected one when there is one, else
+    /// one past the head.
+    fn selected_revision(&self, slot: u8, selector: u8) -> Option<SelectedRevision> {
+        let session = self.model.sessions.get(&(slot % SESSION_COUNT))?;
+        let retained = |(revision, leaf): (&u64, &Option<lash_core::NodeId>)| {
+            SelectedRevision::Retained(*revision, leaf.clone())
+        };
         match selector % 4 {
-            0 => path.last().cloned(),
-            1 => path.iter().rev().nth(1).cloned(),
-            2 => path.first().cloned(),
-            _ => Some(lash_core::NodeId::new(format!(
-                "missing-node-{slot}-{}",
-                self.model.next_operation
-            ))),
+            0 => session
+                .revisions
+                .get_key_value(&session.head_revision)
+                .map(retained),
+            1 => session
+                .revisions
+                .iter()
+                .rev()
+                .find(|(_, leaf)| leaf.as_ref() != session.path.last())
+                .map(retained),
+            2 => session.revisions.iter().next().map(retained),
+            _ => Some(
+                (0..session.head_revision)
+                    .rev()
+                    .find(|revision| !session.revisions.contains_key(revision))
+                    .map_or(
+                        SelectedRevision::Pending(session.head_revision + 7),
+                        SelectedRevision::Pruned,
+                    ),
+            ),
         }
+    }
+
+    /// The path from the root to `leaf`, by the modeled parent edges.
+    fn path_to(&self, leaf: Option<&lash_core::NodeId>) -> Vec<lash_core::NodeId> {
+        let mut path = Vec::new();
+        let mut cursor = leaf.cloned();
+        while let Some(node_id) = cursor {
+            cursor = self
+                .model
+                .nodes
+                .get(&node_id)
+                .and_then(|node| node.parent_node_id.clone());
+            path.push(node_id);
+        }
+        path.reverse();
+        path
     }
 
     async fn read_live(&self, slot: u8) -> Result<crate::store::SessionWindowRead, String> {
@@ -1223,6 +1278,9 @@ impl SessionGraphScenario {
             .expect("recorded session");
         model.path = path;
         model.head_revision = read.head_revision;
+        model
+            .revisions
+            .insert(read.head_revision, model.path.last().cloned());
         Ok(())
     }
 
@@ -1294,32 +1352,51 @@ impl SessionGraphScenario {
         self.assert_fork_roots().await
     }
 
+    /// Every live session lists exactly the revisions the model retains, with
+    /// the leaf each published, its head flagged and its pins named.
     async fn assert_fork_roots(&self) -> Result<(), String> {
-        let actual = self
-            .factory
-            .fork_points()
-            .await
-            .map_err(|error| error.to_string())?;
-        let actual = actual
-            .into_iter()
-            .map(|point| (point.node_id, point.pinned))
-            .collect::<BTreeMap<_, _>>();
-        let mut expected = self
-            .model
-            .pins
-            .iter()
-            .cloned()
-            .map(|node_id| (node_id, true))
-            .collect::<BTreeMap<_, _>>();
-        for session in self.model.sessions.values() {
-            if let Some(leaf) = session.path.last() {
-                expected.entry(leaf.clone()).or_insert(false);
+        for (slot, expected) in &self.model.sessions {
+            let live = self
+                .live
+                .get(slot)
+                .ok_or_else(|| format!("modeled session slot {slot} has no live handle"))?;
+            let actual = live
+                .store
+                .revisions()
+                .await
+                .map_err(|error| error.to_string())?
+                .into_iter()
+                .map(|revision| {
+                    (
+                        revision.head_revision,
+                        (
+                            revision.leaf_node_id,
+                            revision.head,
+                            !revision.pinned_by.is_empty(),
+                        ),
+                    )
+                })
+                .collect::<BTreeMap<_, _>>();
+            let modeled = expected
+                .revisions
+                .iter()
+                .map(|(revision, leaf)| {
+                    (
+                        *revision,
+                        (
+                            leaf.clone(),
+                            *revision == expected.head_revision,
+                            expected.pins.contains(revision),
+                        ),
+                    )
+                })
+                .collect::<BTreeMap<_, _>>();
+            if actual != modeled {
+                return Err(format!(
+                    "retained revisions of `{}` differ: actual={actual:?}, expected={modeled:?}",
+                    expected.physical_id
+                ));
             }
-        }
-        if actual != expected {
-            return Err(format!(
-                "fork isolation/refcount roots differ: actual={actual:?}, expected={expected:?}"
-            ));
         }
         Ok(())
     }
@@ -1340,8 +1417,10 @@ impl SessionGraphScenario {
                     break;
                 }
             }
-            if !loadable && let Some(pin) = self.retaining_pin_for(node_id) {
-                self.probe_retained_node(&pin, node_id).await?;
+            if !loadable && let Some((slot, revision, leaf)) = self.retaining_revision_for(node_id)
+            {
+                self.probe_retained_node(slot, revision, leaf, node_id)
+                    .await?;
                 loadable = true;
             }
             if !loadable {
@@ -1365,78 +1444,60 @@ impl SessionGraphScenario {
         Ok(())
     }
 
-    fn retaining_pin_for(&self, node_id: &str) -> Option<lash_core::NodeId> {
-        for pin in &self.model.pins {
-            let mut cursor = Some(pin.as_str());
-            let mut visited = BTreeSet::new();
-            while let Some(candidate) = cursor {
-                if candidate == node_id {
-                    return Some(pin.to_string().into());
-                }
-                if !visited.insert(candidate) {
-                    break;
-                }
-                cursor = self
-                    .model
-                    .nodes
-                    .get(candidate)
-                    .and_then(|node| node.parent_node_id.as_deref());
-            }
-        }
-        None
+    /// A retained revision whose history holds `node_id`.
+    fn retaining_revision_for(
+        &self,
+        node_id: &lash_core::NodeId,
+    ) -> Option<(u8, u64, Option<lash_core::NodeId>)> {
+        self.model.sessions.iter().find_map(|(slot, session)| {
+            session.revisions.iter().find_map(|(revision, leaf)| {
+                self.path_to(leaf.as_ref())
+                    .contains(node_id)
+                    .then(|| (*slot, *revision, leaf.clone()))
+            })
+        })
     }
 
     async fn probe_retained_node(
         &mut self,
-        pinned_node_id: &str,
+        slot: u8,
+        revision: u64,
+        leaf: Option<lash_core::NodeId>,
         expected_node_id: &str,
     ) -> Result<(), String> {
         let probe_id = self.next_operation_id("retention-probe");
-        let request = session_store_request(
-            &SessionId::from(probe_id.clone()),
-            "session-graph-property-retention-probe",
-            crate::SessionRelation::Root,
-        );
-        self.factory
-            .fork_session(&crate::ForkSessionRequest {
-            pending_observer_intents: Vec::new(),
-                session_id: SessionId::from(probe_id.clone()),
-                node_id: pinned_node_id.to_string().into(),
-                relation: request.relation.clone(),
-                config: request.config.session_policy().into(),
-            })
+        let Some((probe, _)) = self
+            .fork_revision(
+                slot,
+                &SelectedRevision::Retained(revision, leaf.clone()),
+                &probe_id,
+            )
             .await
             .map_err(|error| {
                 format!(
-                    "reachability equals retention: pinned node `{pinned_node_id}` was not forkable: {error}"
+                    "reachability equals retention: retained revision {revision} was not forkable: {error}"
                 )
-            })?;
-        let probe = self
-            .factory
-            .live_view_for(&request)
-            .await
-            .map_err(|error| error.to_string())?
-            .ok_or_else(|| {
-                format!(
-                    "reachability equals retention: pinned node `{pinned_node_id}` produced no probe store"
-                )
-            })?;
+            })?
+        else {
+            return Err(format!(
+                "reachability equals retention: retained revision {revision} was refused"
+            ));
+        };
         let read = probe
+            .store
             .load_session_window(crate::store::WindowSelector::Current)
             .await
             .map_err(|error| error.to_string())?
             .ok_or_else(|| {
-                format!(
-                    "reachability equals retention: pinned node `{pinned_node_id}` produced no probe head"
-                )
+                format!("reachability equals retention: revision {revision} produced no probe head")
             })?;
-        if read.window.leaf_node_id.as_deref() != Some(pinned_node_id)
-            || !crate::conformance::helpers::node_readable(&probe, expected_node_id)
+        if read.window.leaf_node_id != leaf
+            || !crate::conformance::helpers::node_readable(&probe.store, expected_node_id)
                 .await
                 .map_err(|error| error.to_string())?
         {
             return Err(format!(
-                "reachability equals retention: node `{expected_node_id}` retained by pin `{pinned_node_id}` did not survive in its probe fork"
+                "reachability equals retention: node `{expected_node_id}` retained by revision {revision} did not survive in its probe fork"
             ));
         }
         self.factory
@@ -1446,16 +1507,15 @@ impl SessionGraphScenario {
         Ok(())
     }
 
+    /// The nodes some retained revision of a live session still reaches.
     fn reachable_nodes(&self) -> BTreeSet<lash_core::NodeId> {
-        let mut roots = self.model.pins.clone();
-        roots.extend(
-            self.model
-                .sessions
-                .values()
-                .filter_map(|session| session.path.last().cloned()),
-        );
+        let roots = self
+            .model
+            .sessions
+            .values()
+            .flat_map(|session| session.revisions.values().flatten().cloned());
         let mut reachable = BTreeSet::new();
-        let mut pending = roots.into_iter().collect::<Vec<_>>();
+        let mut pending = roots.collect::<Vec<_>>();
         while let Some(node_id) = pending.pop() {
             if !reachable.insert(node_id.clone()) {
                 continue;
@@ -1776,8 +1836,8 @@ where
             .map(|_| ())
     })
     .await?;
-    // FIG-1174: a retained leaf remains rewindable after the first rewind
-    // replaces and deletes the session that pinned it.
+    // FIG-1174: the rewound session's head stays rewindable after the first
+    // rewind replaces and deletes the session it was forked from.
     assert_on_fresh_factory(make, seed.wrapping_add(2), |factory| async move {
         let operations = vec![
             SessionGraphContractOp::Append {
@@ -1787,11 +1847,11 @@ where
             },
             SessionGraphContractOp::TruncateRewind {
                 session: 0,
-                node: 0,
+                revision: 0,
             },
             SessionGraphContractOp::TruncateRewind {
                 session: 0,
-                node: 0,
+                revision: 0,
             },
         ];
         Box::pin(replay_case(seed.wrapping_add(2), factory, &operations))

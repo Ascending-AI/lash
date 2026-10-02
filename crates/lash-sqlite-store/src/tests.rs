@@ -330,7 +330,7 @@ async fn session_listing_statement_count_is_session_count_invariant() {
         } else {
             lash_core_execution::SessionRelation::Fork {
                 source_session_id: SessionId::from("listing-statement-count-0"),
-                source_node_id: format!("source-node-{index}").into(),
+                source_node_id: Some(format!("source-node-{index}").into()),
             }
         };
         store

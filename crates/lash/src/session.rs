@@ -1019,6 +1019,48 @@ impl LashSession {
         crate::CancelBuilder::new(crate::send::SendTarget::Live(self.clone()), target)
     }
 
+    /// The session's unfinished root, if a turn is under way: the name a
+    /// host pins out of band while the turn runs
+    /// ([`Target::Turn`](lash_core::Target::Turn)).
+    pub async fn current_turn(&self) -> Result<Option<TurnId>> {
+        self.durable().current_turn().await
+    }
+
+    /// Pin `target`: the revision it resolves to is retained through every
+    /// collection until it is unpinned or the session is deleted.
+    ///
+    /// A pin names an input, a turn or a head revision, and may be written
+    /// before its target exists, while it runs or after it ended. Writing it
+    /// is idempotent, takes no execution authority and never reads or moves
+    /// the head. Pins and retention decide only what a collection keeps.
+    pub async fn pin(&self, target: lash_core::Target) -> Result<()> {
+        self.durable().pin(target).await
+    }
+
+    /// Release the pin on `target`. The revision stays retained while
+    /// another pin, the head or the retention policy holds it.
+    pub async fn unpin(&self, target: lash_core::Target) -> Result<()> {
+        self.durable().unpin(target).await
+    }
+
+    /// Every revision the session retains, oldest first: the points
+    /// [`fork_at`](crate::LashCore::fork_at) accepts.
+    pub async fn revisions(&self) -> Result<Vec<lash_core::RetainedRevision>> {
+        self.durable().revisions().await
+    }
+
+    /// What the session keeps besides its head and its pins.
+    pub async fn retention(&self) -> Result<lash_core::Retention> {
+        self.durable().retention().await
+    }
+
+    /// Set what the session keeps besides its head and its pins
+    /// ([`Retention`](lash_core::Retention)). It takes effect at the
+    /// session's next commit and at the host's next collection.
+    pub async fn set_retention(&self, retention: lash_core::Retention) -> Result<()> {
+        self.durable().set_retention(retention).await
+    }
+
     pub fn admin(&self) -> SessionAdmin {
         SessionAdmin {
             runtime: self.runtime.clone(),

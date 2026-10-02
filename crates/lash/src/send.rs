@@ -278,6 +278,7 @@ pub struct SendBuilder {
     pub(crate) id: Option<TurnId>,
     pub(crate) ingress: TurnInputIngress,
     pub(crate) run_spec: RunSpec,
+    pub(crate) pin: bool,
 }
 
 impl SendBuilder {
@@ -288,7 +289,20 @@ impl SendBuilder {
             id: None,
             ingress: TurnInputIngress::NextTurn,
             run_spec: RunSpec::default(),
+            pin: false,
         }
+    }
+
+    /// Pin this input in the transaction that accepts it: the state its
+    /// root commits is retained through every collection, from before the
+    /// root can start, until it is unpinned or the session is deleted.
+    /// [`Target::Input`](lash_core::Target::Input) of
+    /// [`SendHandle::input_id`] names it afterwards, for
+    /// [`fork_at`](crate::LashCore::fork_at) and
+    /// [`unpin`](crate::LashSession::unpin).
+    pub fn pin(mut self) -> Self {
+        self.pin = true;
+        self
     }
 
     /// The host's id for this input. It is the idempotency key **and** the
@@ -381,6 +395,7 @@ impl SendBuilder {
             id,
             ingress,
             run_spec,
+            pin,
         } = self;
         let context = target.context().await?;
         // The host id names the root; the drive runs the root's turns under
@@ -395,14 +410,21 @@ impl SendBuilder {
         let enqueued = context
             .parts
             .ops
-            .enqueue_turn_input(
+            .enqueue_turn_inputs(
                 &context.parts.store,
-                input,
+                vec![(input, id.as_ref().map(ToString::to_string))],
                 ingress,
-                id.as_ref().map(ToString::to_string),
                 run_spec,
+                pin,
             )
-            .await?;
+            .await?
+            .pop()
+            .ok_or_else(|| {
+                EmbedError::Runtime(lash_core::RuntimeError::new(
+                    lash_core::RuntimeErrorCode::StoreCommitFailed,
+                    "a batch of one admitted no pending turn input",
+                ))
+            })?;
         let receipt = TurnInputAcceptanceReceipt::from(&enqueued);
         Ok(SendHandle {
             target,
@@ -800,6 +822,34 @@ impl SendHandle {
             self.target.clone(),
             CancelTarget::Input(self.receipt.input_id.clone()),
         )
+    }
+
+    /// Pin this input: the state the root that applies it commits is
+    /// retained through every collection. It can be called before the root
+    /// starts, while it runs or after it ended, any number of times; it
+    /// never touches the turn. A merged or re-deferred input pins the root
+    /// that actually applies it.
+    pub async fn pin(&self) -> Result<()> {
+        let context = self.target.context().await?;
+        context
+            .parts
+            .store
+            .pin(&lash_core::Target::Input(self.receipt.input_id.clone()))
+            .await
+            .map_err(EmbedError::Store)
+    }
+
+    /// The root this input is bound to, once a root has taken it: the root
+    /// that drives it, which under a merging drain or a steer is not the
+    /// input's own. `None` until then, and for a withdrawn input.
+    pub async fn root(&self) -> Result<Option<TurnId>> {
+        let context = self.target.context().await?;
+        context
+            .parts
+            .store
+            .root_binding(&self.receipt.input_id)
+            .await
+            .map_err(EmbedError::Store)
     }
 }
 

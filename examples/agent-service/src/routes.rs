@@ -294,13 +294,25 @@ pub(crate) async fn pin_chat_branch_point(
     let session = state
         .open_session(&chat_id, model_choice_for_chat_selection(&selection))
         .await?;
-    let snapshot = session.admin().state().export().await;
-    let node_id = snapshot
-        .session_graph
+    // The chat names a branch point by the node its last turn ended at; lash
+    // names the same state by the head revision that published it. Pinning
+    // the revision keeps it through every collection.
+    let head = session
+        .revisions()
+        .await
+        .map_err(branch_error)?
+        .into_iter()
+        .find(|revision| revision.head)
+        .ok_or_else(|| AppError::internal("the chat session records no head revision"))?;
+    let node_id = head
         .leaf_node_id
-        .clone()
+        .as_ref()
+        .map(ToString::to_string)
         .ok_or_else(|| AppError::bad_request("the chat has no completed turn to pin"))?;
-    state.core().pin(&node_id).await.map_err(branch_error)?;
+    session
+        .pin(lash::Target::Revision(head.head_revision))
+        .await
+        .map_err(branch_error)?;
     state
         .with_db(move |db| db.save_branch_point(&chat_id, &node_id))
         .await
@@ -340,25 +352,34 @@ pub(crate) async fn fork_chat(
             move |db| db.prepare_chat_fork(&source_chat_id, &node_id, &target_chat_id)
         })
         .await?;
-    if let Err(error) = state
-        .core()
-        .fork_at(lash::ForkRequest {
-            session_id: target_chat_id.clone().into(),
-            node_id: node_id.clone().into(),
-            relation: lash::persistence::SessionRelation::Fork {
-                source_session_id: source_chat_id.into(),
-                source_node_id: node_id.into(),
-            },
-            observed_processes,
-        })
-        .await
-    {
+    let source_session_id = SessionId::from(source_chat_id);
+    let forked = async {
+        let target = branch_point_target(&state, &source_session_id, &node_id).await?;
+        state
+            .core()
+            .fork_at(
+                &source_session_id,
+                target,
+                lash::ForkRequest {
+                    session_id: target_chat_id.clone().into(),
+                    relation: lash::persistence::SessionRelation::Fork {
+                        source_session_id: source_session_id.clone(),
+                        source_node_id: Some(node_id.clone().into()),
+                    },
+                    observed_processes,
+                },
+            )
+            .await
+            .map_err(branch_error)
+    }
+    .await;
+    if let Err(error) = forked {
         // Both abort paths run the same compensator: `fork_at` can fail after
         // the fork's session store exists, and only `discard_pending_chat_fork`
         // reclaims it. A compensator failure must not mask the fork error the
         // caller is answered with.
         let _ = state.discard_pending_chat_fork(&target_chat_id).await;
-        return Err(branch_error(error));
+        return Err(error);
     }
     let chat = match state
         .with_db({
@@ -945,10 +966,56 @@ fn normalize_model_variant(model_variant: Option<&str>) -> Option<String> {
         .map(str::to_string)
 }
 
+/// The retained revision of `session_id` whose turn ended at `node_id`: the
+/// name lash forks the chat's branch point by. A session the catalog does
+/// not hold, or one that no longer retains that turn, has nothing to fork.
+async fn branch_point_target(
+    state: &AppStateData,
+    session_id: &SessionId,
+    node_id: &str,
+) -> AppResult<lash::Target> {
+    let not_retained = || AppError {
+        status: StatusCode::CONFLICT,
+        message: format!("branch point `{node_id}` is no longer retained"),
+    };
+    let session = state
+        .core()
+        .session(session_id.clone())
+        .durable()
+        .await
+        .map_err(branch_error)?;
+    let revisions = match session.revisions().await {
+        Ok(revisions) => revisions,
+        Err(
+            lash::EmbedError::UnknownSession { .. }
+            | lash::EmbedError::Store(
+                lash::persistence::StoreError::SessionNotFound { .. }
+                | lash::persistence::StoreError::SessionDeleted { .. },
+            ),
+        ) => return Err(not_retained()),
+        Err(error) => return Err(branch_error(error)),
+    };
+    revisions
+        .into_iter()
+        .rev()
+        .find(|revision| {
+            revision
+                .leaf_node_id
+                .as_ref()
+                .is_some_and(|leaf| leaf.as_str() == node_id)
+        })
+        .map(|revision| lash::Target::Revision(revision.head_revision))
+        .ok_or_else(not_retained)
+}
+
 fn branch_error(error: lash::EmbedError) -> AppError {
     if matches!(
         &error,
-        lash::EmbedError::Store(lash::persistence::StoreError::ForkPointNotRetained { .. })
+        lash::EmbedError::Store(
+            lash::persistence::StoreError::ForkTargetPending { .. }
+                | lash::persistence::StoreError::ForkTargetUnavailable { .. }
+                | lash::persistence::StoreError::ForkTargetPruned { .. }
+        )
     ) {
         return AppError {
             status: StatusCode::CONFLICT,

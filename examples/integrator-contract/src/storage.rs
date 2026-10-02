@@ -133,13 +133,30 @@ impl SessionCatalogStore for Integrator {
     ) -> Result<ForkSessionReceipt, StoreError> {
         unreachable!("external signature witness")
     }
-    async fn pin(&self, node_id: &NodeId) -> Result<ForkPoint, StoreError> {
+    async fn resolve_target(
+        &self,
+        session_id: &SessionId,
+        target: &Target,
+    ) -> Result<RetainedRevision, StoreError> {
         unreachable!("external signature witness")
     }
-    async fn unpin(&self, node_id: &NodeId) -> Result<(), StoreError> {
+    async fn revisions(&self, session_id: &SessionId) -> Result<Vec<RetainedRevision>, StoreError> {
         unreachable!("external signature witness")
     }
-    async fn fork_points(&self) -> Result<Vec<ForkPoint>, StoreError> {
+    async fn pin(&self, session_id: &SessionId, target: &Target) -> Result<(), StoreError> {
+        unreachable!("external signature witness")
+    }
+    async fn unpin(&self, session_id: &SessionId, target: &Target) -> Result<(), StoreError> {
+        unreachable!("external signature witness")
+    }
+    async fn retention(&self, session_id: &SessionId) -> Result<Retention, StoreError> {
+        unreachable!("external signature witness")
+    }
+    async fn set_retention(
+        &self,
+        session_id: &SessionId,
+        retention: Retention,
+    ) -> Result<(), StoreError> {
         unreachable!("external signature witness")
     }
     async fn delete_session(

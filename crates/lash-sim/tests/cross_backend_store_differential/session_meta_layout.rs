@@ -315,7 +315,7 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 session_id: SessionId::from("layout-fork-history-literal"),
                 relation: SessionRelation::Fork {
                     source_session_id: SessionId::from("layout-source-history-literal"),
-                    source_node_id: "layout-source-node-history-literal".to_string().into(),
+                    source_node_id: Some("layout-source-node-history-literal".to_string().into()),
                 },
             },
             row: RawSessionMetaRow {
@@ -339,7 +339,7 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 session_id: SessionId::from("layout-fork-selected-literal"),
                 relation: SessionRelation::Fork {
                     source_session_id: SessionId::from("layout-source-selected-literal"),
-                    source_node_id: "layout-source-node-selected-literal".to_string().into(),
+                    source_node_id: Some("layout-source-node-selected-literal".to_string().into()),
                 },
             },
             row: RawSessionMetaRow {

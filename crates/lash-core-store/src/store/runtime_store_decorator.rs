@@ -2,7 +2,8 @@ use super::*;
 use crate::SessionId;
 use crate::session_catalog::{SessionListFilter, SessionView};
 use crate::session_store_factory_types::{
-    ForkPoint, ForkSessionReceipt, ForkSessionRequest, SessionLookup, SessionStoreCreateRequest,
+    ForkSessionReceipt, ForkSessionRequest, RetainedRevision, Retention, SessionLookup,
+    SessionStoreCreateRequest, Target,
 };
 use std::num::NonZeroU32;
 
@@ -60,9 +61,12 @@ macro_rules! runtime_store_operations {
                 [catalog] fn lookup_session(&self, session_id: &SessionId) -> Result<SessionLookup, StoreError>;
                 [catalog] fn list_sessions(&self, filter: &SessionListFilter) -> Result<Vec<SessionView>, StoreError>;
                 [catalog] fn fork_session(&self, request: &ForkSessionRequest) -> Result<ForkSessionReceipt, StoreError>;
-                [catalog] fn pin(&self, node_id: &crate::NodeId) -> Result<ForkPoint, StoreError>;
-                [catalog] fn unpin(&self, node_id: &crate::NodeId) -> Result<(), StoreError>;
-                [catalog] fn fork_points(&self) -> Result<Vec<ForkPoint>, StoreError>;
+                [session] fn resolve_target(&self, session_id: &SessionId, target: &Target) -> Result<RetainedRevision, StoreError>;
+                [session] fn revisions(&self, session_id: &SessionId) -> Result<Vec<RetainedRevision>, StoreError>;
+                [session] fn pin(&self, session_id: &SessionId, target: &Target) -> Result<(), StoreError>;
+                [session] fn unpin(&self, session_id: &SessionId, target: &Target) -> Result<(), StoreError>;
+                [session] fn retention(&self, session_id: &SessionId) -> Result<Retention, StoreError>;
+                [session] fn set_retention(&self, session_id: &SessionId, retention: Retention) -> Result<(), StoreError>;
                 [catalog] fn delete_session(&self, session_id: &SessionId) -> MaintenanceResult<SessionBlobReclaimReport>;
             }
             SessionCommitStore {

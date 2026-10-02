@@ -44,9 +44,9 @@ cancel rows, and each control deployment's gate resolutions.
    administration owner. The retry completes cleanup without reopening the
    session. Repeat through the Restate-installed administration inside a real
    handler; preserve its existing direct `DeleteSession` process command.
-6. Retain a fork point, delete its source session, and fork from the retained
-   point. The owning catalog still creates the destination and applies its own
-   admission and fences.
+6. Fork a session's revision, delete the source session, and fork again from
+   the surviving fork's creation revision. The owning catalog still creates the
+   destination and applies its own admission and fences.
 
 ## Evidence
 

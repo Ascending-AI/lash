@@ -129,36 +129,36 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
         leaf.to_string()
     }
 
-    // Flow 1: unpin after the owning session's delete.
+    // Flow 1: a pin held at the owning session's delete. The pin is deleted
+    // with its session, so the delete reclaims the pinned leaf itself.
     let owner_leaf =
         commit_single_root_node(&factory, &SessionId::from("orphan-owner"), &policy).await;
     factory
-        .pin(&owner_leaf.clone().into())
+        .pin(
+            &SessionId::from("orphan-owner"),
+            &lash_core_execution::Target::Revision(1),
+        )
         .await
-        .expect("pin owner leaf");
+        .expect("pin the owner's committed revision");
     factory
         .delete_session(&SessionId::from("orphan-owner"))
         .await
         .expect("delete owner session");
-    factory
-        .unpin(&owner_leaf.clone().into())
-        .await
-        .expect("unpin after owner delete");
-    assert_eq!(
-        resident_tombstoned_node_ids(&pool).await,
-        vec![owner_leaf.clone()],
-        "the unpin must tombstone the deleted owner's leaf"
+    assert!(
+        !resident_node_ids(&pool).await.contains(&owner_leaf),
+        "a pin must not keep its deleted session's leaf"
     );
 
     // Flow 2: fork ancestry tombstoned only at the child's delete, after its
-    // owner was already deleted. The same delete also drains flow 1's orphan.
+    // owner was already deleted.
     let parent_leaf =
         commit_single_root_node(&factory, &SessionId::from("orphan-fork-parent"), &policy).await;
     factory
         .fork_session(&lash_core_execution::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("orphan-fork-child"),
-            node_id: parent_leaf.clone().into(),
+            source_session_id: SessionId::from("orphan-fork-parent"),
+            head_revision: 1,
             relation: lash_core_execution::SessionRelation::Root,
             config: policy.clone().into(),
         })

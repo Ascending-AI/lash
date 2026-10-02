@@ -59,11 +59,17 @@ async fn derived_notes_survive_an_advanced_head_and_are_dropped_by_a_rewind_inne
         .expect("open the annotated session");
     run_derived_notes_turn(&session, "first question").await;
     let first_leaf = derived_notes_leaf(&session).await;
-    // The operator marks this turn as a branch point while it is still the
-    // head; that retention is what a later rewind forks from.
-    core.pin(&first_leaf)
+    // The revision the first turn published: what a later rewind forks.
+    // The session retains it with no pin until the host collects.
+    let first_revision = session
+        .revisions()
         .await
-        .expect("retain the first turn as a branch point");
+        .expect("list the retained revisions")
+        .into_iter()
+        .rev()
+        .find(|revision| revision.leaf_node_id.as_deref() == Some(first_leaf.as_str()))
+        .expect("the first turn's revision is retained")
+        .head_revision;
     assert!(
         notes.settled().is_empty(),
         "the first turn's summary is still being derived; nothing has been \
@@ -134,18 +140,21 @@ async fn derived_notes_survive_an_advanced_head_and_are_dropped_by_a_rewind_inne
     session.close().await.expect("close the annotated session");
 
     // An operator rewinds the conversation to the first turn. Under ADR 0047
-    // that retains the node and continues from it as a new session, so the
+    // that continues from the first turn's revision as a new session, so the
     // second turn's line of history is abandoned — and the note still in
     // flight was derived from it.
-    core.fork_at(lash::ForkRequest {
-        session_id: ("workbench-derived-notes-rewound").into(),
-        node_id: (first_leaf.clone()).into(),
-        relation: lash::persistence::SessionRelation::Fork {
-            source_session_id: ("workbench-derived-notes").into(),
-            source_node_id: (first_leaf.clone()).into(),
+    core.fork_at(
+        &("workbench-derived-notes").into(),
+        lash::Target::Revision(first_revision),
+        lash::ForkRequest {
+            session_id: ("workbench-derived-notes-rewound").into(),
+            relation: lash::persistence::SessionRelation::Fork {
+                source_session_id: ("workbench-derived-notes").into(),
+                source_node_id: None,
+            },
+            observed_processes: Vec::new(),
         },
-        observed_processes: Vec::new(),
-    })
+    )
     .await
     .expect("rewind the conversation to the first turn");
     let rewound = crate::created_session(&core, "workbench-derived-notes-rewound")

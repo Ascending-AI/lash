@@ -519,10 +519,14 @@ async fn measure_store_hardening_history_reads(
                 anyhow::bail!("the hardening session has a head leaf to fork at");
             };
             let fork_session_id = SessionId::from(format!("{session_id}-history-fork"));
+            let Some(head) = store.load_session_head_meta(session_id).await? else {
+                anyhow::bail!("the hardening session has a head to fork");
+            };
             store
                 .fork_session(&lash_core::ForkSessionRequest {
                     session_id: fork_session_id.clone(),
-                    node_id: fork_point.clone(),
+                    source_session_id: session_id.clone(),
+                    head_revision: head.head_revision,
                     relation: lash_core::SessionRelation::Root,
                     pending_observer_intents: Vec::new(),
                     config: lash_core::SessionPolicy::new(

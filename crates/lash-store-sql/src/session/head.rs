@@ -7,15 +7,6 @@ pub const TABLE: &str = "session_head";
 pub const INSERT_COLUMNS: &str =
     "session_id, head_json, head_revision, leaf_node_id, checkpoint_ref, pending_follow_on_json";
 
-/// The head half of the retained-checkpoint union, ranked behind an explicit
-/// anchor.
-///
-/// See [`super::node_anchors::RETAINED_PRIORITY_COLUMNS`]: the literal `1` is
-/// the rank the enclosing `ORDER BY priority, source_session_id LIMIT 1`
-/// consumes, which is what makes "an anchor outranks a head" a property of the
-/// statement.
-pub const RETAINED_PRIORITY_COLUMNS: &str = "session_id, checkpoint_ref, 1 AS priority";
-
 /// The head leaf and the readable generation range around one candidate node,
 /// read as one statement.
 ///
@@ -63,10 +54,10 @@ crate::statements! {
 
 
         /// Every live checkpoint root: heads that have published one, every
-        /// explicit anchor, and every retained admission base (FIG-3682).
+        /// retained revision, and every retained admission base (FIG-3682).
         select_checkpoint_roots = "SELECT checkpoint_ref FROM session_head WHERE checkpoint_ref IS NOT NULL
                  UNION
-                 SELECT checkpoint_ref FROM node_anchors
+                 SELECT checkpoint_ref FROM session_revisions WHERE checkpoint_ref IS NOT NULL
                  UNION
                  SELECT admission_base_checkpoint_ref FROM session_meta
                  WHERE admission_base_checkpoint_ref IS NOT NULL";

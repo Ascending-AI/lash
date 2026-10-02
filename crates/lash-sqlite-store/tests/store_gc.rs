@@ -635,15 +635,15 @@ async fn commit_single_root_node(
     (store, leaf)
 }
 
-/// Unpinning a pinned leaf *after* its owning session was deleted tombstones a
-/// row whose owner can never be bound again, so no session-scoped vacuum can
-/// reach it. The next session delete must drain that residue.
+/// A pin is deleted with its session, so the owner's delete reclaims the
+/// pinned leaf itself: no row is left tombstoned for a later delete to drain,
+/// and no pin or revision row outlives the session.
 ///
 /// The owner's store handle is dropped before its delete on purpose: a live
-/// handle can still vacuum its own session and would mask the leak.
+/// handle can still vacuum its own session and would mask a leak.
 #[tokio::test]
-async fn sqlite_delete_reclaims_tombstone_orphaned_by_unpin_after_owner_delete() {
-    let root = unique_temp_dir("orphan-unpin-after-delete");
+async fn sqlite_delete_reclaims_a_pinned_leaf_with_its_session() {
+    let root = unique_temp_dir("pinned-at-delete");
     let factory = std::sync::Arc::new(SqliteStore::open(&root).await.expect("open catalog"));
 
     let leaf = {
@@ -652,36 +652,37 @@ async fn sqlite_delete_reclaims_tombstone_orphaned_by_unpin_after_owner_delete()
         drop(store);
         leaf
     };
-    factory.pin(&leaf).await.expect("pin owner leaf");
+    factory
+        .pin(
+            &SessionId::from("orphan-owner"),
+            &lash_core_execution::Target::Revision(1),
+        )
+        .await
+        .expect("pin the owner's committed revision");
     factory
         .delete_session(&SessionId::from("orphan-owner"))
         .await
         .expect("delete owner session");
-    factory
-        .unpin(&leaf)
-        .await
-        .expect("unpin after owner delete");
-
-    assert_eq!(
-        resident_tombstoned_node_ids(&root),
-        vec![leaf.to_string()],
-        "the unpin must tombstone the deleted owner's leaf"
-    );
-
-    drop(commit_single_root_node(&factory, &SessionId::from("orphan-sweeper")).await);
-    factory
-        .delete_session(&SessionId::from("orphan-sweeper"))
-        .await
-        .expect("delete sweeper session");
 
     assert!(
         resident_tombstoned_node_ids(&root).is_empty(),
-        "a delete must reclaim tombstones owned by already-deleted sessions"
+        "the delete must not leave the pinned leaf tombstoned"
     );
     assert!(
         !resident_graph_node_ids(&root).contains(&leaf.to_string()),
-        "the orphaned tombstone row must be physically gone, not just hidden"
+        "the pinned leaf must be physically gone with its session"
     );
+    let conn = rusqlite::Connection::open(catalog_uri(&root)).expect("open catalog");
+    for table in ["pins", "session_revisions"] {
+        let rows: i64 = conn
+            .query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE session_id = 'orphan-owner'"),
+                [],
+                |row| row.get(0),
+            )
+            .expect("count the deleted session's rows");
+        assert_eq!(rows, 0, "{table} must hold nothing of a deleted session");
+    }
 }
 
 /// Fork ancestry owned by a session deleted *before* its child is the second
@@ -706,7 +707,8 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
         .fork_session(&lash_core_execution::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("orphan-fork-child"),
-            node_id: parent_leaf.clone(),
+            source_session_id: SessionId::from("orphan-fork-parent"),
+            head_revision: 1,
             relation: lash_core_execution::SessionRelation::Root,
             config: policy.clone().into(),
         })

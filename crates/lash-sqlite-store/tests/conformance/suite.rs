@@ -452,7 +452,8 @@ async fn fork_session_rejects_a_malformed_target_session_id() {
     let store = backend.store().await;
     let request = lash_core_execution::ForkSessionRequest {
         session_id: SessionId::from("bad\0session"),
-        node_id: lash_core_execution::NodeId::from("missing-fork-point"),
+        source_session_id: SessionId::from("missing-fork-source"),
+        head_revision: 0,
         relation: lash_core_execution::SessionRelation::Root,
         pending_observer_intents: Vec::new(),
         config: lash_core_execution::SessionPolicy::new(

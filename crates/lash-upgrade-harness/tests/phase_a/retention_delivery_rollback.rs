@@ -11,6 +11,11 @@
 //! sweep and the attachment GC run, and N answers a turn on the session
 //! N+1 wrote. N+1 returns, relays, sweeps and answers a turn of its own.
 //!
+//! Before the rollback N+1 also pins the state its turn committed (FIG-4731).
+//! N's own turn moves the head past it, and N's collector then keeps exactly
+//! the pinned revision and its head; N+1 returns, collects, and forks the
+//! turn it pinned, reading back that turn's leaf and checkpoint.
+//!
 //! The leg counts rows and deliveries, never time: the session's graph
 //! nodes, turn commits and attachment roots only grow; the kept pin's edge,
 //! the shared module and the fence survive every step; the released pin's
@@ -35,7 +40,7 @@ use lash_sqlite_store::SqliteDatabase;
 use lash_upgrade_harness::harness::{Case, LASHCTL_N_ENV, LASHCTL_NEXT_ENV, Operator, block_on};
 use lash_upgrade_harness::identity::BuildLabel;
 use lash_upgrade_harness::node::retention::{
-    InspectReport, MaintainReport, Orphaned, Published, RelayReport, Released,
+    Forked, InspectReport, MaintainReport, Orphaned, Published, RelayReport, Released, Retained,
 };
 use lash_upgrade_harness::node::served_by;
 use serde::Serialize;
@@ -247,6 +252,14 @@ struct Evidence {
     maintain_next: MaintainReport,
     inspect_n: InspectReport,
     inspect_next: InspectReport,
+    /// The session's revisions once N+1 pinned its turn.
+    pinned: Retained,
+    /// What N's collector left once N's own turn had moved the head on.
+    retained_n: Retained,
+    /// What N+1 reads on its return, after its own collection and turn.
+    retained_return: Retained,
+    /// N+1's fork of the turn it pinned before the rollback.
+    forked: Forked,
 }
 
 /// The cleanup rows a snapshot holds for the unknown kind, stalled or not.
@@ -289,6 +302,20 @@ fn roll(leg: &Leg, case: &Case, operator: Option<&Operator>) -> Result<Evidence>
     ensure!(
         !rooted.attachments.is_empty(),
         "N+1's turn stored no attachment: {rooted:?}"
+    );
+
+    // N+1 pins the state its turn committed (FIG-4731). The head is always
+    // kept, so the pin starts to matter once N's turn moves the head on.
+    let pinned: Retained = next.retention(case, &["pin", "--session", &session])?;
+    let kept_revision = pinned
+        .revisions
+        .last()
+        .filter(|revision| revision.head && revision.pinned && revision.checkpoint.is_some())
+        .cloned()
+        .with_context(|| format!("N+1 did not pin its head: {pinned:?}"))?;
+    ensure!(
+        pinned.revisions.len() > 1,
+        "N+1's turn left no revision but the head for N's collector to release: {pinned:?}"
     );
 
     // N+1, as a host: two pins over two modules, one pin released.
@@ -454,6 +481,23 @@ fn roll(leg: &Leg, case: &Case, operator: Option<&Operator>) -> Result<Evidence>
     // Return to N+1 as a roll does: N+1 comes up, N's generation drains,
     // and N stops. Nothing is due, nothing is collected, and N+1 answers.
     quiesce(case, &session)?;
+
+    // N's turn moved the head past the revision N+1 pinned, so N's collector
+    // now decides what the rollback keeps: the pinned revision, with the
+    // leaf and checkpoint N+1 published, and N's head; nothing else.
+    n.retention::<MaintainReport>(case, &["maintain", "--session", &session])?;
+    let retained_n: Retained = n.retention(case, &["revisions", "--session", &session])?;
+    ensure!(
+        retained_n.revisions.len() == 2
+            && retained_n.revisions[0].revision == kept_revision.revision
+            && retained_n.revisions[0].leaf == kept_revision.leaf
+            && retained_n.revisions[0].checkpoint == kept_revision.checkpoint
+            && retained_n.revisions[0].pinned
+            && !retained_n.revisions[0].head
+            && retained_n.revisions[1].head
+            && !retained_n.revisions[1].pinned,
+        "N's collector left {retained_n:?} of {pinned:?}"
+    );
     let next_node = next.serve(case)?;
     let next_generation = next_node.generation()?.to_owned();
     if let Some(operator) = operator {
@@ -533,7 +577,38 @@ fn roll(leg: &Leg, case: &Case, operator: Option<&Operator>) -> Result<Evidence>
             calls.len()
         );
     }
+    // N+1 collects after its own turn and still forks the turn it pinned
+    // before the rollback: the fork reads back that turn's leaf and
+    // checkpoint.
+    next.retention::<MaintainReport>(case, &["maintain", "--session", &session])?;
+    let retained_return: Retained = next.retention(case, &["revisions", "--session", &session])?;
+    ensure!(
+        retained_return.revisions.len() == 2
+            && retained_return.revisions[0] == retained_n.revisions[0]
+            && retained_return.revisions[1].head,
+        "N+1 retains {retained_return:?} after N retained {retained_n:?}"
+    );
+    let forked: Forked = next.retention(
+        case,
+        &[
+            "fork",
+            "--session",
+            &session,
+            "--revision",
+            &kept_revision.revision.to_string(),
+            "--branch",
+            &format!("{session}-pinned"),
+        ],
+    )?;
+    ensure!(
+        forked.leaf == kept_revision.leaf && forked.checkpoint == kept_revision.checkpoint,
+        "N+1 forked {forked:?}, not the turn it pinned: {kept_revision:?}"
+    );
     Ok(Evidence {
+        pinned,
+        retained_n,
+        retained_return,
+        forked,
         before_rollback: before,
         after_n,
         after_return,

@@ -26,7 +26,7 @@ use lash::runtime::SessionPolicy;
 use lash::{CommitBudget, LashCore, ModelMetadata, QueuedWorkBatchingConfig, TurnBudget};
 
 #[tokio::test]
-async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
+async fn host_can_rewind_from_a_surviving_branch_after_deleting_the_source() {
     const SOURCE_SESSION: &str = "fork-contract-source";
     const FOREIGN_TARGET: &str = "fork-contract-foreign-target";
     const FIRST_BRANCH: &str = "fork-contract-first-branch";
@@ -107,21 +107,41 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
         .clone()
         .expect("committed frame has a leaf");
 
-    let pinned = core
-        .pin(&retained_node_id)
+    // The committed head is a retained revision; the pin keeps it through
+    // every collection for as long as the source session lives.
+    let source_handle = core
+        .session(SOURCE_SESSION)
+        .durable()
         .await
-        .expect("pin live source continuation");
-    assert_eq!(pinned.node_id, retained_node_id);
-    assert!(
-        pinned.pinned,
-        "pin must return an explicitly retained point"
+        .expect("durable handle for the source session");
+    let retained = source_handle
+        .revisions()
+        .await
+        .expect("enumerate the source's retained revisions")
+        .into_iter()
+        .find(|revision| revision.head)
+        .expect("the committed head is a retained revision");
+    assert_eq!(
+        retained.leaf_node_id.as_ref().map(|leaf| leaf.as_str()),
+        Some(retained_node_id.as_str())
     );
-
-    let points = core
-        .fork_points()
+    let target = lash::Target::Revision(retained.head_revision);
+    source_handle
+        .pin(target.clone())
         .await
-        .expect("enumerate retained host fork points");
-    assert_eq!(points, vec![pinned.clone()]);
+        .expect("pin the source continuation");
+    source_handle
+        .pin(target.clone())
+        .await
+        .expect("pinning again changes nothing");
+    let pinned = source_handle
+        .revisions()
+        .await
+        .expect("enumerate retained host fork points")
+        .into_iter()
+        .find(|revision| revision.head_revision == retained.head_revision)
+        .expect("the pinned revision is retained");
+    assert_eq!(pinned.pinned_by, vec![target.clone()]);
 
     let observed_process = processes
         .register_process(ProcessRegistration::new(
@@ -157,30 +177,36 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
         .map(|record| record.id)
         .collect::<Vec<_>>();
     let first_branch = core
-        .fork_at(lash::ForkRequest {
-            session_id: (FIRST_BRANCH).into(),
-            node_id: (&retained_node_id).into(),
-            relation: SessionRelation::Fork {
-                source_session_id: (SOURCE_SESSION).into(),
-                source_node_id: (&retained_node_id).into(),
+        .fork_at(
+            &SOURCE_SESSION.into(),
+            target.clone(),
+            lash::ForkRequest {
+                session_id: (FIRST_BRANCH).into(),
+                relation: SessionRelation::Fork {
+                    source_session_id: (SOURCE_SESSION).into(),
+                    source_node_id: Some((&retained_node_id).into()),
+                },
+                observed_processes: selected.clone(),
             },
-            observed_processes: selected.clone(),
-        })
+        )
         .await
         .expect("fork retained continuation");
     assert_eq!(first_branch.session_id, FIRST_BRANCH);
     assert_eq!(first_branch.source_session_id, SOURCE_SESSION);
 
     let foreign_target_error = core
-        .fork_at(lash::ForkRequest {
-            session_id: (FOREIGN_TARGET).into(),
-            node_id: (&retained_node_id).into(),
-            relation: SessionRelation::Fork {
-                source_session_id: (SOURCE_SESSION).into(),
-                source_node_id: (&retained_node_id).into(),
+        .fork_at(
+            &SOURCE_SESSION.into(),
+            target.clone(),
+            lash::ForkRequest {
+                session_id: (FOREIGN_TARGET).into(),
+                relation: SessionRelation::Fork {
+                    source_session_id: (SOURCE_SESSION).into(),
+                    source_node_id: Some((&retained_node_id).into()),
+                },
+                observed_processes: selected.clone(),
             },
-            observed_processes: selected.clone(),
-        })
+        )
         .await
         .expect_err("an existing target must win over later fork validation");
     assert!(matches!(
@@ -191,15 +217,18 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
     ));
 
     let explicit_branch = core
-        .fork_at(lash::ForkRequest {
-            session_id: (EXPLICIT_BRANCH).into(),
-            node_id: (&retained_node_id).into(),
-            relation: SessionRelation::Fork {
-                source_session_id: (SOURCE_SESSION).into(),
-                source_node_id: (&retained_node_id).into(),
+        .fork_at(
+            &SOURCE_SESSION.into(),
+            target.clone(),
+            lash::ForkRequest {
+                session_id: (EXPLICIT_BRANCH).into(),
+                relation: SessionRelation::Fork {
+                    source_session_id: (SOURCE_SESSION).into(),
+                    source_node_id: Some((&retained_node_id).into()),
+                },
+                observed_processes: selected.clone(),
             },
-            observed_processes: selected.clone(),
-        })
+        )
         .await
         .expect("fork with explicit selected runs");
     assert_eq!(explicit_branch.session_id, EXPLICIT_BRANCH);
@@ -284,38 +313,57 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
             .expect("read retirement fence")
     );
 
-    let retained_after_delete = core
-        .fork_points()
+    // A session's pins and retained revisions go with it: the deleted source
+    // names no state any more, and nothing is forked in its place.
+    let deleted_source = core
+        .fork_at(
+            &SOURCE_SESSION.into(),
+            target.clone(),
+            lash::ForkRequest {
+                session_id: (REWOUND_BRANCH).into(),
+                relation: SessionRelation::Fork {
+                    source_session_id: (SOURCE_SESSION).into(),
+                    source_node_id: Some((&retained_node_id).into()),
+                },
+                observed_processes: Vec::new(),
+            },
+        )
         .await
-        .expect("enumerate retained anchor after deleting its source")
-        .into_iter()
-        .find(|point| point.node_id == retained_node_id)
-        .expect("pin survives deletion of its source session");
-    assert_eq!(retained_after_delete.source_session_id, SOURCE_SESSION);
-    assert!(
-        retained_after_delete.pinned,
-        "deleted-source anchor remains explicitly retained"
-    );
+        .expect_err("a deleted session has no revision to fork");
+    assert!(matches!(
+        deleted_source,
+        lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted { session_id })
+            if session_id == SOURCE_SESSION
+    ));
 
     // Selection is a snapshot: deleting its source does not revoke it.
     crate::chat_discard::discard_chat_session(&double.ingress(), EXPLICIT_BRANCH)
         .await
         .expect("delete selected source after selection");
+    // The surviving branch's own head still names the same state: its
+    // creation revision is an ordinary retained revision.
     let rewound = core
-        .fork_at(lash::ForkRequest {
-            session_id: (REWOUND_BRANCH).into(),
-            node_id: (&retained_node_id).into(),
-            relation: SessionRelation::Fork {
-                source_session_id: (EXPLICIT_BRANCH).into(),
-                source_node_id: (&retained_node_id).into(),
+        .fork_at(
+            &FIRST_BRANCH.into(),
+            lash::Target::Revision(0),
+            lash::ForkRequest {
+                session_id: (REWOUND_BRANCH).into(),
+                relation: SessionRelation::Fork {
+                    source_session_id: (EXPLICIT_BRANCH).into(),
+                    source_node_id: None,
+                },
+                observed_processes: selected.clone(),
             },
-            observed_processes: selected.clone(),
-        })
+        )
         .await
-        .expect("re-fork retained anchor after source deletion");
+        .expect("re-fork the surviving branch after the source's deletion");
     assert_eq!(rewound.session_id, REWOUND_BRANCH);
-    assert_eq!(rewound.node_id, retained_node_id);
-    assert_eq!(rewound.source_session_id, SOURCE_SESSION);
+    assert_eq!(
+        rewound.leaf_node_id.as_ref().map(|leaf| leaf.as_str()),
+        Some(retained_node_id.as_str())
+    );
+    assert_eq!(rewound.source_session_id, FIRST_BRANCH);
+    assert_eq!(rewound.head_revision, 0);
     let observed = processes
         .list_observed_by(
             &SessionId::from(REWOUND_BRANCH),
@@ -346,6 +394,7 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
         SessionStore::new(runtime, REWOUND_BRANCH.into()).expect("a valid session id");
     assert!(
         matches!(rewind_store.load_session_meta().await.expect("metadata").expect("metadata exists").relation,
-        SessionRelation::Fork { source_session_id, .. } if source_session_id == EXPLICIT_BRANCH)
+        SessionRelation::Fork { source_session_id, source_node_id } if source_session_id == EXPLICIT_BRANCH
+            && source_node_id.as_ref().map(|node| node.as_str()) == Some(retained_node_id.as_str()))
     );
 }

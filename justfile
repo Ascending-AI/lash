@@ -481,8 +481,9 @@ _upgrade-harness-builds artifacts:
   node_next="$(python3 scripts/resolve_buck2_target.py //crates/lash-upgrade-harness lash-upgrade-node__bin --feature synthetic-next)"
   lashctl_next="$(python3 scripts/resolve_buck2_target.py //crates/lashctl lashctl --feature synthetic-next)"
   report="$artifacts/build-report.json"
+  worker=//crates/lash-vm-worker:lash-vm-worker__bin
   scripts/hermetic-build.sh build --materializations final --build-report "$report" \
-    "$node_next" "$node_n" //crates/lashctl:lashctl "$lashctl_next"
+    "$node_next" "$node_n" //crates/lashctl:lashctl "$lashctl_next" "$worker"
   output() {
     python3 tools/buck2/outputs.py --report "$report" --label "$1" --single
   }
@@ -490,6 +491,8 @@ _upgrade-harness-builds artifacts:
   cp "$(output "$node_n")" "$artifacts/bin/n/lash-upgrade-node"
   cp "$(output //crates/lashctl:lashctl)" "$artifacts/bin/n/lashctl"
   cp "$(output "$lashctl_next")" "$artifacts/bin/n+1/lashctl"
+  # Build N links Lashlang modules through the worker shipped beside it.
+  cp "$(output "$worker")" "$artifacts/bin/n/lash-vm-worker"
 
 # Phase A's rolling upgrade (ADR 0115 §6, FIG-3805): head built twice, N
 # (the default build) and N+1 (the `synthetic-next` feature), run as separate
@@ -551,6 +554,12 @@ phase-a *legs:
   esac
   rm -rf "$artifacts"
   just _upgrade-harness-builds "$artifacts"
+  # Build N+1's worker writes N+1's Lashlang formats over the worker protocol
+  # the node speaks: the harness forwards `synthetic-next` to Lashlang, not to
+  # the worker client. Buck2 has no such worker target, so Cargo builds it.
+  cargo build --locked -p lash-internal-vm-worker --bin lash-vm-worker \
+    --features lashlang/synthetic-next,lash-core-execution/synthetic-next
+  cp "${CARGO_TARGET_DIR:-{{repo}}/target}/debug/lash-vm-worker" "$artifacts/bin/n+1/lash-vm-worker"
   cargo test --locked -p lash-upgrade-harness --test phase_a --no-run
 
   export LASH_UPGRADE_NODE_N="$artifacts/bin/n/lash-upgrade-node"

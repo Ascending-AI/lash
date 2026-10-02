@@ -434,8 +434,8 @@ impl NodeBinary {
     }
 
     /// Run one `retention` step (`publish`, `release`, `orphan`, `relay`,
-    /// `maintain` or `inspect` and its arguments) as this build over
-    /// `case`'s store, with no deployment serving.
+    /// `maintain`, `inspect`, `pin`, `revisions` or `fork` and its
+    /// arguments) as this build over `case`'s store.
     pub fn retention<T: DeserializeOwned>(&self, case: &Case, step: &[&str]) -> Result<T> {
         let output = Command::new(&self.path)
             .arg("retention")

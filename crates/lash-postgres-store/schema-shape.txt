@@ -166,11 +166,6 @@ table lash_migrations
   column state text not-null
   column to_version integer not-null
   primary-key (phase, migration)
-table lash_node_anchors
-  column checkpoint_ref text not-null
-  column node_id text not-null
-  column source_session_id text not-null
-  primary-key (node_id)
 table lash_parent_end_plans
   column ended_at_ms bigint not-null
   column obligation_attempts integer not-null default
@@ -215,6 +210,11 @@ table lash_pending_turn_inputs
   unique (obligation_id)
   unique (session_id, source_key)
   primary-key (session_id, enqueue_seq)
+table lash_pins
+  column session_id text not-null
+  column target_id text not-null
+  column target_kind text not-null
+  primary-key (session_id, target_kind, target_id)
 table lash_process_change_clock
   column current_seq bigint not-null
   column singleton boolean not-null default
@@ -439,6 +439,8 @@ table lash_session_meta
   column owning_process_id text nullable
   column parent_session_id text nullable
   column relation_kind text not-null
+  column retention_kind text not-null default
+  column retention_last_turns bigint nullable
   column session_id text not-null
   column session_state_version integer nullable
   column source_node_id text nullable
@@ -452,6 +454,13 @@ table lash_session_meta_pending_observer_intents
   unique (session_id, process_index)
   primary-key (session_id, process_id)
   foreign-key (session_id) references lash_session_meta (session_id) on delete cascade
+table lash_session_revisions
+  column checkpoint_ref text nullable
+  column head_json text not-null
+  column head_revision bigint not-null
+  column leaf_node_id text nullable
+  column session_id text not-null
+  primary-key (session_id, head_revision)
 table lash_session_root_inputs
   column input_id text not-null
   column root text not-null

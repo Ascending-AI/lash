@@ -68,8 +68,8 @@ lash_store_sql::statements! {
                    WHERE head.checkpoint_ref = candidate.hash
                )
                AND NOT EXISTS (
-                   SELECT 1 FROM node_anchors AS anchor
-                   WHERE anchor.checkpoint_ref = candidate.hash
+                   SELECT 1 FROM session_revisions AS revision
+                   WHERE revision.checkpoint_ref = candidate.hash
                )
                AND NOT EXISTS (
                    SELECT 1 FROM session_meta AS meta

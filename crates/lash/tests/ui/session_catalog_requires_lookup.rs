@@ -5,8 +5,9 @@
 
 use lash::{SessionId, SessionListFilter, SessionView};
 use lash::persistence::{
-    ForkPoint, ForkSessionReceipt, ForkSessionRequest, MaintenanceResult, SessionAdmission,
-    SessionBlobReclaimReport, SessionCatalogStore, SessionStoreCreateRequest, StoreError,
+    ForkSessionReceipt, ForkSessionRequest, MaintenanceResult, RetainedRevision, Retention,
+    SessionAdmission, SessionBlobReclaimReport, SessionCatalogStore, SessionStoreCreateRequest,
+    StoreError, Target,
 };
 
 struct SilentLookup;
@@ -34,15 +35,35 @@ impl SessionCatalogStore for SilentLookup {
         unreachable!()
     }
 
-    async fn pin(&self, _node_id: &lash::NodeId) -> Result<ForkPoint, StoreError> {
+    async fn resolve_target(
+        &self,
+        _session_id: &SessionId,
+        _target: &Target,
+    ) -> Result<RetainedRevision, StoreError> {
         unreachable!()
     }
 
-    async fn unpin(&self, _node_id: &lash::NodeId) -> Result<(), StoreError> {
+    async fn revisions(&self, _session_id: &SessionId) -> Result<Vec<RetainedRevision>, StoreError> {
         unreachable!()
     }
 
-    async fn fork_points(&self) -> Result<Vec<ForkPoint>, StoreError> {
+    async fn pin(&self, _session_id: &SessionId, _target: &Target) -> Result<(), StoreError> {
+        unreachable!()
+    }
+
+    async fn unpin(&self, _session_id: &SessionId, _target: &Target) -> Result<(), StoreError> {
+        unreachable!()
+    }
+
+    async fn retention(&self, _session_id: &SessionId) -> Result<Retention, StoreError> {
+        unreachable!()
+    }
+
+    async fn set_retention(
+        &self,
+        _session_id: &SessionId,
+        _retention: Retention,
+    ) -> Result<(), StoreError> {
         unreachable!()
     }
 

@@ -3,9 +3,9 @@
 
 use super::session_store_factory_enumeration::session_store_factory_enumeration_is_read_only_and_keeps_tombstones;
 use super::session_store_factory_vacuum::{
+    session_store_factory_delete_takes_the_sessions_pins,
     session_store_factory_vacuum_agrees_on_unpin_before_delete,
     session_store_factory_vacuum_is_scoped_to_bound_session,
-    session_store_factory_vacuums_organic_retained_tombstone,
 };
 use super::*;
 use lash_core::testing::RuntimeStoreTestDriveExt as _;
@@ -123,7 +123,7 @@ where
     session_store_factory_fenced_sweep_collects_and_records_reclaimed(factory, attachments).await;
     session_store_factory_rejects_cross_session_graph_parents(make()).await;
     session_store_factory_fork_semantics(make()).await;
-    session_store_factory_vacuums_organic_retained_tombstone(make()).await;
+    session_store_factory_delete_takes_the_sessions_pins(make()).await;
     session_store_factory_vacuum_is_scoped_to_bound_session(make()).await;
     session_store_factory_vacuum_agrees_on_unpin_before_delete(make()).await;
     session_store_factory_delete_removes_store_and_is_idempotent(make()).await;
@@ -1114,7 +1114,14 @@ async fn session_store_factory_round_trips_every_relation_shape(
             "fork-empty",
             crate::SessionRelation::Fork {
                 source_session_id: SessionId::from("declared-missing-session"),
-                source_node_id: "declared-missing-node".into(),
+                source_node_id: Some("declared-missing-node".into()),
+            },
+        ),
+        (
+            "fork-leafless",
+            crate::SessionRelation::Fork {
+                source_session_id: SessionId::from("declared-missing-session"),
+                source_node_id: None,
             },
         ),
     ];
@@ -1316,10 +1323,11 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
     );
 }
 
-/// First-class fork contract shared by in-memory, SQLite, and PostgreSQL:
-/// pins are roots, past unpinned checkpoints are normally unavailable,
-/// forks write no graph nodes, and deleting either sibling cannot reclaim the
-/// prefix still reachable from the other.
+/// First-class fork contract shared by SQLite and PostgreSQL: a fork names a
+/// retained revision of its source, every published revision is retained until
+/// the host collects, pins are idempotent names, forks write no graph nodes,
+/// and deleting either sibling cannot reclaim the prefix still reachable from
+/// the other.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1358,11 +1366,25 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
     state.apply_persisted_commit_result(first);
     state.mark_node_ids_persisted(root_ids);
 
-    let pinned = factory.pin(&root_node_id).await.expect("pin fork root");
-    assert_eq!(pinned.node_id, root_node_id);
-    assert_eq!(pinned.source_session_id, source_request.session_id);
+    let source_id = source_request.session_id.clone();
+    let root_revision = state.head_revision;
+    let root_target = crate::Target::Revision(root_revision);
+    factory
+        .pin(&source_id, &root_target)
+        .await
+        .expect("pin fork root");
+    let pinned = factory
+        .resolve_target(&source_id, &root_target)
+        .await
+        .expect("resolve pinned root");
+    assert_eq!(pinned.leaf_node_id.as_ref(), Some(&root_node_id));
+    assert_eq!(pinned.session_id, source_id);
     assert_eq!(pinned.config.model, state.policy.model);
-    assert!(pinned.pinned);
+    assert_eq!(pinned.pinned_by, vec![root_target.clone()]);
+    assert!(
+        pinned.head,
+        "the committed root is the head until it advances"
+    );
 
     append_conformance_event_node(&mut state, "source-child", "source child");
     commit_conformance_state(source.store(), &mut state)
@@ -1373,6 +1395,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         .leaf_node_id
         .clone()
         .expect("source child leaf");
+    let unpinned_past_revision = state.head_revision;
     append_conformance_event_node(&mut state, "source-tip", "source tip");
     commit_conformance_state(source.store(), &mut state)
         .await
@@ -1382,32 +1405,47 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         .leaf_node_id
         .clone()
         .expect("source tip leaf");
+    let tip_revision = state.head_revision;
+    let tip_target = crate::Target::Revision(tip_revision);
     let (first_pin, second_pin) = tokio::join!(
-        factory.pin(&source_tip_node_id),
-        factory.pin(&source_tip_node_id)
+        factory.pin(&source_id, &tip_target),
+        factory.pin(&source_id, &tip_target)
     );
     first_pin.expect("first concurrent pin succeeds");
     second_pin.expect("second concurrent pin is idempotent");
+    let revisions = factory
+        .revisions(&source_id)
+        .await
+        .expect("enumerate the source's retained revisions");
     assert_eq!(
-        factory
-            .fork_points()
-            .await
-            .expect("enumerate concurrent pin")
+        revisions
             .iter()
-            .filter(|point| point.node_id == source_tip_node_id)
-            .count(),
-        1,
-        "fork-point enumeration deduplicates shared node ids"
+            .map(|revision| revision.head_revision)
+            .collect::<Vec<_>>(),
+        (0..=tip_revision).collect::<Vec<_>>(),
+        "every published revision is retained until the host collects"
+    );
+    let tip = revisions.last().expect("the tip is retained");
+    assert!(tip.head);
+    assert_eq!(
+        tip.pinned_by,
+        vec![tip_target.clone()],
+        "a pin written twice is one pin"
     );
     factory
-        .unpin(&source_tip_node_id)
+        .unpin(&source_id, &tip_target)
         .await
         .expect("remove concurrent pin");
+    factory
+        .unpin(&source_id, &tip_target)
+        .await
+        .expect("releasing a pin that is not there changes nothing");
 
     let delete_first_request = crate::ForkSessionRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("aaa-fork-delete-first"),
-        node_id: source_tip_node_id.clone(),
+        source_session_id: source_id.clone(),
+        head_revision: tip_revision,
         relation: crate::SessionRelation::Root,
         config: source_request.config.session_policy().into(),
     };
@@ -1415,17 +1453,6 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         .fork_session(&delete_first_request)
         .await
         .expect("fork live source tip");
-    let deduplicated_tip = factory
-        .fork_points()
-        .await
-        .expect("enumerate shared live tip")
-        .into_iter()
-        .find(|point| point.node_id == source_tip_node_id)
-        .expect("shared live tip remains forkable");
-    assert_eq!(
-        deduplicated_tip.source_session_id, delete_first_request.session_id,
-        "unpinned shared heads use a lexicographic source-session tie-break"
-    );
     factory
         .delete_session(&delete_first_request.session_id)
         .await
@@ -1437,26 +1464,59 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         "deleting a branch first must not reclaim its live source sibling"
     );
 
-    let unretained_error = factory
+    // A past turn nobody pinned is still a retained revision until the host
+    // collects, so it forks.
+    let past_fork = factory
         .fork_session(&crate::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
-            session_id: SessionId::from("fork-unretained"),
-            node_id: unpinned_past_node_id.clone(),
+            session_id: SessionId::from("fork-unpinned-past"),
+            source_session_id: source_id.clone(),
+            head_revision: unpinned_past_revision,
             relation: crate::SessionRelation::Root,
             config: source_request.config.session_policy().into(),
         })
         .await
-        .expect_err("unpinned past turn must not be forkable");
+        .expect("an unpinned past turn forks before any collection");
+    assert_eq!(
+        past_fork.leaf_node_id.as_ref(),
+        Some(&unpinned_past_node_id)
+    );
+    factory
+        .delete_session(&past_fork.session_id)
+        .await
+        .expect("remove the past-turn fork");
+
+    // A revision the source has not published refuses; the head is never
+    // forked in its place.
+    let unpublished = factory
+        .fork_session(&crate::ForkSessionRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: SessionId::from("fork-unpublished"),
+            source_session_id: source_id.clone(),
+            head_revision: tip_revision + 1,
+            relation: crate::SessionRelation::Root,
+            config: source_request.config.session_policy().into(),
+        })
+        .await
+        .expect_err("a revision the source never published must not fork");
     assert!(matches!(
-        unretained_error,
-        crate::StoreError::ForkPointNotRetained { node_id }
-            if node_id == unpinned_past_node_id
+        unpublished,
+        crate::StoreError::ForkTargetPruned { session_id, target }
+            if session_id == source_id
+                && target == crate::Target::Revision(tip_revision + 1)
+    ));
+    assert!(matches!(
+        factory
+            .resolve_target(&source_id, &crate::Target::Revision(tip_revision + 1))
+            .await,
+        Err(crate::StoreError::ForkTargetPending { .. })
     ));
 
     let fork_request = crate::ForkSessionRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("fork-branch"),
-        node_id: root_node_id.clone(),
+        source_session_id: source_id.clone(),
+        head_revision: root_revision,
         relation: crate::SessionRelation::Root,
         config: source_request.config.session_policy().into(),
     };
@@ -1464,27 +1524,29 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         .fork_session(&fork_request)
         .await
         .expect("fork pinned root");
-    assert_eq!(forked.node_id, root_node_id);
+    assert_eq!(forked.leaf_node_id.as_ref(), Some(&root_node_id));
+    assert_eq!(forked.head_revision, root_revision);
 
-    // A `Fork` relation's `source_session_id` is host-declared lineage, not a
-    // store-validated argument: forks are addressed by node id, and repeated
-    // rewinds legitimately name superseded intermediate sessions (FIG-1174).
+    // A `Fork` relation is host-declared lineage, not a store-validated
+    // argument: forks are addressed by revision, and repeated rewinds
+    // legitimately name superseded intermediate sessions (FIG-1174).
     let lineage_relation_fork = factory
         .fork_session(&crate::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("fork-relation-lineage"),
-            node_id: root_node_id.clone(),
+            source_session_id: source_id.clone(),
+            head_revision: root_revision,
             relation: crate::SessionRelation::Fork {
                 source_session_id: SessionId::from("no-such-session"),
-                source_node_id: "no-such-node".into(),
+                source_node_id: Some("no-such-node".into()),
             },
             config: source_request.config.session_policy().into(),
         })
         .await
-        .expect("fork relation lineage must not gate a retained fork point");
+        .expect("fork relation lineage must not gate a retained revision");
     assert_eq!(
-        lineage_relation_fork.source_session_id, source_request.session_id,
-        "fork result reports anchor provenance, never the relation's declared lineage"
+        lineage_relation_fork.source_session_id, source_id,
+        "fork result reports the forked session, never the relation's declared lineage"
     );
     factory
         .delete_session(&SessionId::from("fork-relation-lineage"))
@@ -1544,37 +1606,29 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         "siblings must navigate independently"
     );
 
-    // Composed rewind: the host pinned the target, forked there, then deletes
-    // the superseded source. The fork remains a valid, independently writable
-    // session and the shared prefix survives.
+    // Composed rewind: the host forked the target, then deletes the
+    // superseded source. The fork remains a valid, independently writable
+    // session and the shared prefix survives. The source's pins and retained
+    // revisions go with it.
     factory
         .delete_session(&source_request.session_id)
         .await
         .expect("delete superseded source");
-    let orphaned_source_point = factory
-        .fork_points()
-        .await
-        .expect("enumerate retained point after source deletion")
-        .into_iter()
-        .find(|point| point.node_id == root_node_id)
-        .expect("pin must outlive its deleted source session");
-    assert_eq!(orphaned_source_point.config.model, state.policy.model);
+    assert!(matches!(
+        factory.resolve_target(&source_id, &root_target).await,
+        Err(crate::StoreError::SessionDeleted { session_id }) if session_id == source_id
+    ));
     assert!(
         crate::conformance::helpers::node_readable(&branch, &root_node_id)
             .await
             .expect("load shared prefix after source delete"),
         "deleting one branch must stop at the first still-referenced node"
     );
-    factory
-        .unpin(&root_node_id)
+    let branch_origin = factory
+        .resolve_target(&fork_request.session_id, &crate::Target::Revision(0))
         .await
-        .expect("release rewind pin");
-    assert!(
-        crate::conformance::helpers::node_readable(&branch, &root_node_id)
-            .await
-            .expect("load prefix after unpin"),
-        "the live branch child edge retains the prefix after unpin"
-    );
+        .expect("the fork's own first revision is retained");
+    assert_eq!(branch_origin.leaf_node_id.as_ref(), Some(&root_node_id));
 
     let recreate_error = match factory.admit_view(&source_request).await {
         Ok(_) => panic!("a deleted source session id must never be reused"),
@@ -1586,7 +1640,8 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         .fork_session(&crate::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
             session_id: source_request.session_id.clone(),
-            node_id: root_node_id,
+            source_session_id: fork_request.session_id.clone(),
+            head_revision: 0,
             relation: crate::SessionRelation::Root,
             config: source_request.config.session_policy().into(),
         })

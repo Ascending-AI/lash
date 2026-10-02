@@ -413,8 +413,9 @@ the route's next mention.
 The reference mapping is **workspace → one Lash core, channel → one durable
 session, thread → one forked child session**. A thread id is deterministic:
 `thread:<C…>:<thread_ts>`, but that id is never opened as a fresh root. The bot
-creates it only through `LashCore::pin` plus `fork_at`, so the child shares the
-channel graph through its source boundary and owns a new branch after it.
+creates it only through `LashCore::fork_at` at a pinned revision of the channel
+session, so the child shares the channel graph through its source revision and
+owns a new branch after it.
 
 The lazy trigger is the **first reply in the thread**, whether ambient or a
 mention. This is slightly more eager than waiting for the first mention, but it
@@ -447,24 +448,27 @@ same bytes.
 
 ### Locating the fork boundary
 
-The ledger records two different boundaries because they mean different things.
-A folded top-level message records and retains the exact channel graph boundary
-observed while it held the channel lock; the folded root is copied into the
-first send of a child forked there. After a channel turn commits, the bot instead reads
-`turn_input_applications`, finds the application for the root's `input_id`, groups
-every application with the same typed `turn_id`, pins the committed leaf, and
-records that later boundary. If a crash lands after the pin but before that
-ledger write, thread-open uses the durable application to re-derive and repair
-the missing boundary before it forks. Nothing parses an input, turn, message, or
-node id.
+The name of a session state is its head revision, and the ledger records two
+different revisions because they mean different things. A folded top-level
+message pins and records the channel's head revision observed while it held the
+channel lock; the folded root is copied into the first send of a child forked
+there. A channel that has never run a turn is forkable too: its creation
+revision is an ordinary retained revision. After a channel turn commits, the bot
+instead reads `turn_input_applications`, finds the application for the root's
+`input_id`, groups every application with the same typed `turn_id`, pins the
+input (`Target::Input`, which Lash resolves to the root that applied it), and
+records the revision that root published. If a crash lands after the pin but
+before that ledger write, thread-open uses the durable application to resolve
+and repair the missing revision before it forks. Nothing parses an input, turn,
+message, or node id.
 
 Thread-open chooses only from evidence durably tied to the root:
 
 | Durable root evidence | Fork boundary and context policy |
 | --- | --- |
-| Recorded `fork_node_id` | Fork at that retained turn boundary. |
-| `input_id` with a committed application, but no `fork_node_id` | Re-derive the applied turn boundary, repair the ledger row, then fork there. |
-| Folded root with a recorded admission boundary | Fork at that retained pre-root boundary; the thread's first send copies the pre-root top-level messages that are not already in the child graph, with the root labelled. The ledger row is the root's durability, even if the process died before advancing it to Folded. |
+| Recorded `fork_revision` | Fork at that pinned turn revision. |
+| `input_id` with a committed application, but no `fork_revision` | Pin the input, resolve the revision its root published, repair the ledger row, then fork there. |
+| Folded root with a recorded admission revision | Fork at that pinned pre-root revision; the thread's first send copies the pre-root top-level messages that are not already in the child graph, with the root labelled. The ledger row is the root's durability, even if the process died before advancing it to Folded. |
 | Non-terminal root without an authoritative boundary yet | Poll from 250ms with exponential backoff capped at 8s, for at most 45s. |
 | Terminal ignored root with no admission evidence | Fail immediately; this ledger state proves the bot will never route it. |
 | No root row | Keep the bounded wait because delivery may be racing; record `thread_root_not_available` on exhaustion. |

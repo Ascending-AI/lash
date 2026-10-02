@@ -6,9 +6,9 @@
 
 ## History-node reachability
 
-History liveness derives from indexed parent edges, live session heads and explicit anchors in the destructive transaction. Shared prefixes belong to every retaining root. Session deletion removes its head and reclaims only producer nodes without a child, head or anchor, stopping at a shared prefix. PostgreSQL locks affected history rows to serialize root and edge changes.
+History liveness derives from indexed parent edges and each session's retained revisions (its head, its resolved pins and its retention window) in the destructive transaction. Shared prefixes belong to every retaining root. Session deletion removes its head and reclaims only producer nodes without a child or a retained revision, stopping at a shared prefix. PostgreSQL locks affected history rows to serialize root and edge changes.
 
-A pin captures a head node, checkpoint and source session as an immutable anchor. Unpin releases that root; `fork_at` adds a head without copying graph nodes. Checkpoint-blob reclamation considers live heads and anchors. Process version drainage remains an independent store-family read.
+Every head publication records a row in `session_revisions`. A pin names an input, a turn or a revision of its session and is a root only for host collection; it can be written before, during or after its target, and it is deleted with its session. `fork_at` adds a head at a retained revision without copying graph nodes. Checkpoint-blob reclamation considers the retained revisions (FIG-4731). Process version drainage remains an independent store-family read.
 
 ## Why and alternatives
 
