@@ -12,6 +12,7 @@ mod external_ref;
 mod identity_claims;
 mod lifecycle;
 pub use identity_claims::*;
+pub use lifecycle::lifecycle_event_timestamps_follow_the_registry_clock;
 mod observer_transfer;
 mod parent_end;
 mod registration;

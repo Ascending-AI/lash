@@ -2,6 +2,109 @@ use super::*;
 use lash_core::{LifetimeDecision, ScopeGrant, ScopeId};
 use pretty_assertions::assert_eq;
 
+/// Lifecycle event timestamps belong to the injected registry clock, including
+/// wait entry and exit. Advancing it between writes pins each write's source.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn lifecycle_event_timestamps_follow_the_registry_clock(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    let clock = Arc::new(lash_core::testing::TestClock::new(10_000));
+    let registry = registry
+        .with_runtime_clock(clock.clone())
+        .expect("persistent registries support clock rebinding");
+    let process_id = registry
+        .register_process(executed_registration("lifecycle-clock"))
+        .await
+        .expect("register clock process")
+        .id;
+    let authority = crate::ProcessExecutionWriteAuthority::invocation(
+        process_id.clone(),
+        "lifecycle-clock:execution",
+    )
+    .bind_attempt(1);
+    clock.advance(10);
+    registry
+        .record_first_started_with_authority(
+            &process_id,
+            authority.invocation_started().expect("bound invocation"),
+            &authority,
+        )
+        .await
+        .expect("record first start");
+    clock.advance(10);
+    registry
+        .set_process_wait_with_authority(
+            &process_id,
+            crate::WaitState {
+                since_ms: 10_020,
+                kind: crate::WaitKind::Signal {
+                    name: "ready".to_string(),
+                    event_type: "signal.ready".to_string(),
+                    key: lash_core::runtime::process_signal_wait_key(&process_id, "ready", 1),
+                    ordinal: 1,
+                },
+            },
+            Vec::new(),
+            &authority,
+        )
+        .await
+        .expect("enter wait");
+    clock.advance(10);
+    registry
+        .clear_process_wait_with_authority(&process_id, Vec::new(), &authority)
+        .await
+        .expect("clear wait");
+    clock.advance(10);
+    registry
+        .park_process_with_authority(
+            &process_id,
+            crate::store::ParkReason::ReplayDivergence {
+                message: "clock provenance fixture".to_string(),
+            }
+            .into(),
+            &authority,
+        )
+        .await
+        .expect("park process");
+    clock.advance(10);
+    registry
+        .begin_parked_rerun_with_authority(&process_id, &authority)
+        .await
+        .expect("begin parked rerun");
+    let page = registry
+        .event_page(
+            &process_id,
+            std::num::NonZeroUsize::new(10).expect("nonzero page bound"),
+            crate::ProcessEventQueryMode::Full,
+        )
+        .await
+        .expect("read durable lifecycle events");
+    let crate::ProcessEventReadOutcome::Retained(crate::ProcessEventPage {
+        events: crate::ProcessEventPageEvents::Full(events),
+        more: crate::ProcessEventPageMore::Complete,
+    }) = page
+    else {
+        panic!("the complete lifecycle history must be retained");
+    };
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| (event.event_type.as_str(), event.occurred_at))
+            .collect::<Vec<_>>(),
+        vec![
+            ("process.first_started", 10_010),
+            ("process.waiting", 10_020),
+            ("process.resumed", 10_030),
+            ("process.parked", 10_040),
+            ("process.park_rerun_began", 10_050),
+        ],
+        "every lifecycle event must retain its injected clock instant"
+    );
+}
+
 /// The recorded lifetime and ancestry of a registration, and admission
 /// against closure (FIG-3607 R3, R4b, R11).
 #[expect(

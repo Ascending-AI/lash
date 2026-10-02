@@ -1,4 +1,4 @@
-//! Live behavioral checks for the PostgreSQL/server-clock boundary.
+//! Behavioral laws and lexical fences for PostgreSQL clock provenance.
 
 use lash_sansio::{ProcessId, SessionId};
 use std::sync::Arc;
@@ -42,7 +42,9 @@ const RUNTIME_PERSISTENCE_TURN_INPUT_SOURCE: &str =
 const RUNTIME_PERSISTENCE_SESSION_COMMIT_SOURCE: &str =
     include_str!("../src/postgres/runtime_persistence/session_commit.rs");
 const PROCESS_HELPERS_SOURCE: &str = include_str!("../src/postgres/process_helpers.rs");
-const CONNECTION_SQL_SOURCE: &str = include_str!("../src/postgres/connection_sql.rs");
+const PROCESS_REGISTRY_SOURCE: &str = include_str!("../src/postgres/process_registry.rs");
+const PROCESS_LIFECYCLE_SOURCE: &str =
+    include_str!("../src/postgres/process_registry/lifecycle.rs");
 
 fn unique_id(prefix: &str) -> String {
     let nonce = std::time::SystemTime::now()
@@ -163,46 +165,40 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
             );
         }
     }
+}
 
-    // The process-registry clock read itself. It sits after every fenced region, so
-    // without this tail check its body (and anything appended after it) would
-    // be the one unfenced spot in the file: a client-clock body here passed the
-    // fence before this assertion existed. The region runs to end-of-file,
-    // which also self-enforces the "nothing after the sanctioned read"
-    // convention — a helper appended below it lands inside this region.
-    let sanctioned_start = "async fn process_registry_now_epoch_ms_tx(";
-    let sanctioned_index = PROCESS_HELPERS_SOURCE
-        .find(sanctioned_start)
-        .unwrap_or_else(|| panic!("missing source marker `{sanctioned_start}`"));
-    let sanctioned_tail = &PROCESS_HELPERS_SOURCE[sanctioned_index..];
-    for read in CLIENT_CLOCK_READS {
+#[test]
+fn lint_process_event_timestamps_use_the_injected_clock() {
+    // Fence the complete entry-point files and shared append helpers so a
+    // second timestamp source cannot hide in a new method or helper (ADR 0044).
+    for (name, source) in [
+        ("process_registry.rs", PROCESS_REGISTRY_SOURCE),
+        ("process_registry/lifecycle.rs", PROCESS_LIFECYCLE_SOURCE),
+        ("process_helpers.rs", PROCESS_HELPERS_SOURCE),
+    ] {
+        for read in [
+            "process_registry_now_epoch_ms_tx",
+            "select_statement_epoch_ms",
+            "select_transaction_epoch_ms",
+            "clock_timestamp()",
+            "transaction_timestamp()",
+            "statement_timestamp()",
+            "current_epoch_ms()",
+            "SystemTime::now()",
+            "SystemClock",
+        ] {
+            assert!(
+                !source.contains(read),
+                "process-event clock fence: `{name}` must not read `{read}`"
+            );
+        }
+    }
+    for source in [PROCESS_REGISTRY_SOURCE, PROCESS_LIFECYCLE_SOURCE] {
         assert!(
-            !sanctioned_tail.contains(read),
-            "lexical clock fence: the process-registry clock read (and everything \
-             after it) must not use the client wall clock (`{read}`)"
+            source.contains("self.clock.timestamp_ms()"),
+            "process-event entry points must sample the injected registry clock"
         );
     }
-    // The sanctioned read issues a *named* statement rather than a literal
-    // (FIG-3387), so the contract is two links: this body issues
-    // `select_statement_epoch_ms`, and that statement's declared text samples
-    // the server clock. Both are asserted, so neither link can be cut without
-    // this test going red.
-    assert!(
-        sanctioned_tail.contains("select_statement_epoch_ms"),
-        "the process-registry clock read must issue `select_statement_epoch_ms`"
-    );
-    let declaration_start = CONNECTION_SQL_SOURCE
-        .find("select_statement_epoch_ms =")
-        .unwrap_or_else(|| panic!("missing `select_statement_epoch_ms` declaration"));
-    let declaration = &CONNECTION_SQL_SOURCE[declaration_start
-        ..declaration_start
-            + CONNECTION_SQL_SOURCE[declaration_start..]
-                .find(';')
-                .expect("unterminated statement declaration")];
-    assert!(
-        declaration.contains("clock_timestamp()"),
-        "the process-registry clock read must sample the PostgreSQL server clock"
-    );
 }
 
 fn clock_contract_wake(session_id: &SessionId) -> lash_core_execution::ProcessWakeDelivery {
