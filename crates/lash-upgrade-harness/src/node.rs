@@ -7,10 +7,10 @@
 //! - `serve` opens a store, serves lash's Restate services over it on a
 //!   fresh loopback port, registers that deployment and parks until it is
 //!   killed. It writes the deployment's address to its ready file.
+//!   A later registration request also runs through the serving engine,
+//!   whose core has bound this build's generation.
 //! - `turn` is a host: it sends one input to a session through Restate and
 //!   waits for the turn to settle, wherever it ran.
-//! - `register` registers an endpoint URI as this build would, and reports
-//!   the typed refusal of a URI another generation's deployment holds.
 //! - `call` and `sweep` call lash's own handlers directly ([`objects`]).
 //! - `remote-client` and `remote-host` speak the remote protocol between
 //!   two builds ([`remote`]).
@@ -68,8 +68,6 @@ pub enum Command {
     Serve(ServeArgs),
     /// Send one input to a session and wait for its turn to settle.
     Turn(TurnArgs),
-    /// Register an endpoint URI as this build's deployment.
-    Register(RegisterArgs),
     /// Call one of lash's own handlers directly.
     Call(CallArgs),
     /// Upgrade every object still at an older family format (lash's object
@@ -137,24 +135,13 @@ pub struct ServeArgs {
     #[arg(long)]
     pub no_register: bool,
     /// Register later, through this node's own engine and its registration
-    /// guard, once this file exists; the outcome is written beside it, to
-    /// the same path with `.done` appended. A node that opened the store
-    /// before finalize registers after it, as an operator keeping it would.
+    /// guard, once this file contains the requested URI; the outcome is
+    /// written beside it, to the same path with `.done` appended. A node that
+    /// opened the store before finalize registers after it, as an operator keeping it would.
     #[arg(long)]
     pub register_when: Option<PathBuf>,
     #[command(flatten)]
     pub provider: ProviderArgs,
-}
-
-#[derive(Clone, Debug, Args)]
-pub struct RegisterArgs {
-    #[command(flatten)]
-    pub store: StoreArgs,
-    #[command(flatten)]
-    pub restate: RestateArgs,
-    /// The endpoint URI to register.
-    #[arg(long)]
-    pub uri: String,
 }
 
 #[derive(Clone, Debug, Args)]
@@ -272,7 +259,7 @@ pub struct EndpointServesAnotherGeneration {
     pub local: String,
 }
 
-/// What `register` reports.
+/// What a serving node's registration request reports.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RegisterReport {
     pub build: BuildLabel,
@@ -313,7 +300,6 @@ pub async fn run(cli: Cli) -> Result<()> {
         Command::SqliteUpgrade(args) => print(&sqlite_upgrade(args).await?),
         Command::Serve(args) => serve(args).await,
         Command::Turn(args) => print(&turn(args).await?),
-        Command::Register(args) => print(&register(args).await?),
         Command::Call(args) => print(&objects::call(args).await?),
         Command::Sweep(args) => objects::sweep(args).await.map(drop),
         Command::RemoteHost(args) => remote::host(args).await,
@@ -749,17 +735,18 @@ async fn serve(args: ServeArgs) -> Result<()> {
     write_atomically(&args.ready_file, &serde_json::to_vec(&serving.ready)?)?;
     if let Some(trigger) = args.register_when {
         let engine = Arc::clone(&serving.engine);
-        let uri = serving.ready.uri.clone();
         tokio::spawn(async move {
             while !trigger.exists() {
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
             let outcome = RegisterWhenDone {
-                error: engine
-                    .register_deployment(&uri)
-                    .await
-                    .err()
-                    .map(|error| error.to_string()),
+                report: async {
+                    let uri = std::fs::read_to_string(&trigger)
+                        .with_context(|| format!("read {}", trigger.display()))?;
+                    register(&engine, &uri).await
+                }
+                .await
+                .map_err(|error: anyhow::Error| format!("{error:#}")),
             };
             let mut done = trigger.into_os_string();
             done.push(".done");
@@ -776,8 +763,8 @@ async fn serve(args: ServeArgs) -> Result<()> {
 /// What a `serve --register-when` node's later registration answered.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RegisterWhenDone {
-    /// The registration's error, when it was refused or failed.
-    pub error: Option<String>,
+    /// A typed registration answer, or an unexpected transport or fixture failure.
+    pub report: Result<RegisterReport, String>,
 }
 
 /// SIGTERM or SIGINT, whichever comes first.
@@ -793,7 +780,7 @@ async fn shutdown_signal() -> Result<()> {
 
 /// Write `bytes` beside `path` and rename it into place, so a poller never
 /// reads a half-written file.
-fn write_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn write_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
     let staging = path.with_extension("partial");
     std::fs::write(&staging, bytes).with_context(|| format!("write {}", staging.display()))?;
     std::fs::rename(&staging, path)
@@ -868,10 +855,8 @@ async fn turn(args: TurnArgs) -> Result<TurnReport> {
     })
 }
 
-async fn register(args: RegisterArgs) -> Result<RegisterReport> {
-    let stores = open_stores(&args.store).await?;
-    let engine = engine(stores, &args.restate)?;
-    let registered = match engine.register_deployment(&args.uri).await {
+async fn register(engine: &lash_restate::RestateEngine, uri: &str) -> Result<RegisterReport> {
+    let registered = match engine.register_deployment(uri).await {
         Ok(()) => Ok(()),
         Err(lash_restate::RestateRegistrationError::EndpointServesAnotherGeneration {
             uri,
@@ -882,11 +867,11 @@ async fn register(args: RegisterArgs) -> Result<RegisterReport> {
             held: held.map(|held| held.to_string()),
             local: local.to_string(),
         }),
-        Err(error) => bail!("register {}: {error}", args.uri),
+        Err(error) => bail!("register {uri}: {error}"),
     };
     Ok(RegisterReport {
         build: BuildLabel::current(),
-        uri: args.uri,
+        uri: uri.to_owned(),
         registered,
     })
 }

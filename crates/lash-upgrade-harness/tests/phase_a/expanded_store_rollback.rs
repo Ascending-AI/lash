@@ -130,7 +130,12 @@ async fn expanded_store_rollback() -> Result<()> {
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
         ensure!(
-            stamp == (2, 1, 1),
+            stamp
+                == (
+                    database.expected_version() + 1,
+                    database.expected_version(),
+                    1
+                ),
             "{} has stamp {stamp:?}",
             database.name()
         );
@@ -333,8 +338,8 @@ async fn expanded_store_rollback() -> Result<()> {
             SqliteDatabase::Triggers => ComponentId::SQLITE_TRIGGERS,
         };
         rusqlite::Connection::open(&path)?.execute(
-            "INSERT INTO lash_compat (singleton, component, version, min_reader, fleet_format) VALUES (1, ?1, 2, 1, 1)",
-            [component.as_str()],
+            "INSERT INTO lash_compat (singleton, component, version, min_reader, fleet_format) VALUES (1, ?1, ?2, ?3, 1)",
+            rusqlite::params![component.as_str(), database.expected_version() + 1, database.expected_version()],
         )?;
     }
     pg.close().await?;

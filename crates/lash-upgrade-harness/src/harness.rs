@@ -186,7 +186,7 @@ pub struct ServeOptions {
     pub bind: Option<String>,
     /// Serve without registering the endpoint.
     pub unregistered: bool,
-    /// Let [`ServingNode::register_now`] register the node later, through
+    /// Let [`ServingNode::register`] request a later registration, through
     /// its own engine.
     pub register_later: bool,
 }
@@ -489,19 +489,6 @@ impl NodeBinary {
             path: self.path.clone(),
             child,
         })
-    }
-
-    /// Register `uri` as this build's deployment, through lash's own
-    /// registration guard.
-    pub fn register(&self, case: &Case, uri: &str) -> Result<RegisterReport> {
-        let output = Command::new(&self.path)
-            .arg("register")
-            .args(case.store_args())
-            .args(case.restate_args())
-            .args(["--uri", uri])
-            .output()
-            .with_context(|| format!("run {} register", self.label()))?;
-        report(&self.path, "register", output)
     }
 
     /// Call one of lash's own handlers as a caller of this build.
@@ -832,27 +819,26 @@ pub struct ServingNode {
 }
 
 impl ServingNode {
-    /// Register a node served with [`ServeOptions::register_later`] now,
-    /// through its own engine and the registration guard.
-    pub fn register_now(&self) -> Result<()> {
+    /// Request one later registration of `uri` from a node served with
+    /// [`ServeOptions::register_later`], through its own bound engine.
+    pub fn register(&mut self, uri: &str) -> Result<RegisterReport> {
         let trigger = self
             .register_trigger
-            .as_ref()
-            .context("the node was not served to register later")?;
+            .take()
+            .context("the node has no later registration request left")?;
         let mut done = trigger.clone().into_os_string();
         done.push(".done");
         let done = PathBuf::from(done);
-        std::fs::write(trigger, b"").with_context(|| format!("write {}", trigger.display()))?;
+        crate::node::write_atomically(&trigger, uri.as_bytes())?;
         let outcome: crate::node::RegisterWhenDone =
             wait_for("the node to register", || match std::fs::read(&done) {
                 Ok(bytes) => Ok(Some(serde_json::from_slice(&bytes)?)),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
                 Err(error) => Err(error).with_context(|| format!("read {}", done.display())),
             })?;
-        match outcome.error {
-            None => Ok(()),
-            Some(error) => bail!("the node's registration failed: {error}"),
-        }
+        outcome
+            .report
+            .map_err(|error| anyhow!("the node's registration failed: {error}"))
     }
 
     /// What the node registered.

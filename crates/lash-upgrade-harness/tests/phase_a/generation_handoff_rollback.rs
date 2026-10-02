@@ -163,7 +163,13 @@ fn pinned_drive_root(
                 .then_some(()),
         )
     })?;
-    let next_node = next.serve(case)?;
+    let next_node = next.serve_with(
+        case,
+        &ServeOptions {
+            register_later: true,
+            ..ServeOptions::default()
+        },
+    )?;
     let g_next = next_node.generation()?.to_owned();
     let next_deployment = block_on(view.deployment_at(next_node.uri()?))?;
     case.release(gate)?;
@@ -491,7 +497,7 @@ fn generation_handoff_rollback() -> Result<()> {
     let n_restored =
         foreign_journal_parks(&leg, &case, &view, n_first).context("the foreign journal")?;
     let racers = start_racers(&case, n, &view, &n_deployment.id).context("the racers' start")?;
-    let next_node = pinned_drive_root(&leg, &case, &view, &n_deployment.id, &g_n)
+    let mut next_node = pinned_drive_root(&leg, &case, &view, &n_deployment.id, &g_n)
         .context("the pinned drive")?;
     let g_next = next_node.generation()?.to_owned();
     let next_deployment = block_on(view.deployment_at(next_node.uri()?))?;
@@ -507,7 +513,7 @@ fn generation_handoff_rollback() -> Result<()> {
 
     // N+1 may not take N's URI.
     let before = block_on(view.deployments())?;
-    let refused = next.register(&case, &n_uri)?;
+    let refused = next_node.register(&n_uri)?;
     record(&leg, "registration-refused.json", &refused)?;
     ensure!(
         refused.registered

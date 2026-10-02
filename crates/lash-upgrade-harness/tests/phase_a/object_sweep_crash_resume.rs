@@ -209,7 +209,7 @@ fn object_sweep_crash_resume() -> Result<()> {
 
     // An N deployment an operator will keep: it opened the store at N's
     // epoch, and serves unregistered for now.
-    let kept_n = n.serve_with(
+    let mut kept_n = n.serve_with(
         &case,
         &ServeOptions {
             unregistered: true,
@@ -268,17 +268,44 @@ fn object_sweep_crash_resume() -> Result<()> {
     );
 
     // Sweep, and crash the sweep and N+1 mid-sweep.
+    let mut pending_objects = std::collections::BTreeSet::new();
+    for family in preflight["result"]["families"]
+        .as_array()
+        .context("the preflight lists its families")?
+    {
+        let service = family["service"]
+            .as_str()
+            .context("the preflight family names its service")?;
+        for object in family["pending"]
+            .as_array()
+            .context("the preflight family lists its pending objects")?
+        {
+            let key = object["key"]
+                .as_str()
+                .context("the preflight object names its key")?;
+            ensure!(
+                object["format"] == 1
+                    && pending_objects.insert((service.to_owned(), key.to_owned())),
+                "unexpected preflight object in {service}: {object}"
+            );
+        }
+    }
     let mut sweeper = next.spawn_sweep(&case)?;
+    let mut visited = Vec::new();
     let mut swept = Vec::new();
-    for _ in 0..SWEPT_BEFORE_CRASH {
+    while swept.len() < SWEPT_BEFORE_CRASH {
         let line = sweeper.next_object()?.context("the sweep ended early")?;
         ensure!(
-            line.service == GROUP
+            pending_objects.remove(&(line.service.clone(), line.key.clone()))
                 && line.outcome == ObjectUpgradeResponse::Upgraded { from: 1, format: 2 },
             "the sweep answered {line:?}"
         );
-        swept.push(line.key);
+        if line.service == GROUP {
+            swept.push(line.key.clone());
+        }
+        visited.push(line);
     }
+    record(&leg, "swept-before-crash.json", &visited)?;
     let bind = next_final.bind()?;
     next_final.stop()?;
     sweeper.crash()?;
@@ -353,7 +380,12 @@ fn object_sweep_crash_resume() -> Result<()> {
 
     // An operator keeps the N deployment: its handlers are refused by
     // `_compat`, typed, and change nothing.
-    kept_n.register_now()?;
+    let kept_uri = kept_n.uri()?.to_owned();
+    let registered = kept_n.register(&kept_uri)?;
+    ensure!(
+        registered.registered == Ok(()),
+        "N's registration: {registered:?}"
+    );
     let kept = block_on(view.deployment_at(kept_n.uri()?))?;
     let key = &groups[0];
     let before = block_on(view.object_state(GROUP, key))?;
