@@ -1017,8 +1017,9 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()>
     let mut plugin_options = lash_core::PluginOptions {
         plugins: BTreeMap::new(),
     };
-    plugin_options.plugins.insert(
+    plugin_options.insert_versioned(
         lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+        crate::plugin::FormatVersion::ONE,
         serde_json::json!({
             "termination": {
                 "kind": "unknown"

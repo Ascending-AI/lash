@@ -194,6 +194,8 @@ pub enum PluginError {
     /// An atomic plugin-state refusal, retained across journal transport.
     #[error("plugin state: {0}")]
     State(#[source] super::PluginStateError),
+    #[error(transparent)]
+    Format(#[from] super::FormatRefusal),
     /// A store compatibility refusal, preserved through plugin-facing ports.
     #[error(transparent)]
     StoreRefusal(#[from] crate::store::StoreRefusal),
@@ -417,6 +419,9 @@ impl PluginError {
     /// spelled as `refusal`, recorded or settled once instead of retried.
     pub fn into_turn_failure(self, refusal: crate::RuntimeErrorCode) -> crate::RuntimeError {
         match self {
+            error @ Self::Format(_) => {
+                crate::RuntimeEffectControllerError::from(error).into_runtime_error()
+            }
             error @ Self::StoredDataCorrupt { .. } => {
                 crate::RuntimeEffectControllerError::from(error).into_runtime_error()
             }
@@ -432,6 +437,10 @@ impl PluginError {
                     )
                     || error.is_session_retirement()
                     || error.store_refusal().is_some()
+                    || matches!(
+                        error.cause.as_ref(),
+                        Some(crate::RuntimeErrorCause::PluginFormat { .. })
+                    )
                     || matches!(
                         error.code,
                         crate::RuntimeErrorCode::RuntimeStoreCorrupt
@@ -450,6 +459,10 @@ impl PluginError {
                     )
                     || error.is_session_retirement()
                     || error.store_refusal().is_some()
+                    || matches!(
+                        error.cause.as_ref(),
+                        Some(crate::RuntimeErrorCause::PluginFormat { .. })
+                    )
                     || matches!(
                         error.code,
                         crate::RuntimeErrorCode::RuntimeStoreCorrupt
@@ -571,6 +584,7 @@ impl PluginError {
     pub fn is_terminal(&self) -> bool {
         match self {
             Self::StoreRefusal(_) => true,
+            Self::Format(_) => true,
             Self::State(error) => error.is_terminal(),
             Self::Runtime(error) => error.is_terminal(),
             Self::RuntimeEffectController(error) => error.is_terminal(),

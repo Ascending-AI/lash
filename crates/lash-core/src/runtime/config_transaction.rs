@@ -191,7 +191,8 @@ impl LashRuntime {
             })?;
         let outcome = publish_config_resolution(&resolution, &mut next);
         if matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. }) {
-            self.install_resident_state(next);
+            self.install_resident_state(next)
+                .map_err(RuntimeError::from)?;
             self.notify_session_config_changed(previous)
                 .await
                 .map_err(|error| {
@@ -248,7 +249,7 @@ impl LashRuntime {
         // recorded view of the root it ran last is still installed: the
         // transaction resolves over the sticky config under it and
         // publishes onto it, never the root's overrides.
-        self.uninstall_root_view();
+        self.uninstall_root_view()?;
         let host = Arc::clone(&self.host.core.control.effect_host);
         let controller = super::drive::step_controller(
             root_controller,
@@ -274,7 +275,7 @@ impl LashRuntime {
         let outcome = publish_config_resolution(&resolution, &mut self.state);
         let applied = matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. });
         if applied {
-            self.publish_resident_authority();
+            self.publish_resident_authority()?;
         }
         let committed =
             Box::pin(

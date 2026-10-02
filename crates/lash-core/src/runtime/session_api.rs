@@ -83,10 +83,19 @@ impl LashRuntime {
     ///   live plugin session, invalidating discovery caches only when it
     ///   changed, so live discovery always reflects the settled authority
     ///   (FIG-2415, FIG-2987).
-    pub(in crate::runtime) fn install_resident_state(&mut self, state: crate::RuntimeSessionState) {
+    pub(in crate::runtime) fn install_resident_state(
+        &mut self,
+        mut state: crate::RuntimeSessionState,
+    ) -> Result<(), crate::FormatRefusal> {
+        if let Some(session) = &self.session {
+            state.authority.plugin_config = session
+                .plugins()
+                .host()
+                .decode_config(&state.authority.plugin_config)?;
+        }
         self.state = state;
         self.reapply_tool_state_preservation_marker();
-        self.publish_resident_authority();
+        self.publish_resident_authority()
     }
 
     /// Install a root's recorded [`ResolvedRun`](crate::ResolvedRun) as the
@@ -97,9 +106,18 @@ impl LashRuntime {
     /// plugin session just as a whole-state swap does (FIG-4022). This,
     /// [`Self::uninstall_root_view`] and [`Self::install_resident_state`]
     /// are the only writers of the resident authority.
-    pub(in crate::runtime) fn install_resolved_run(&mut self, resolved: &crate::ResolvedRun) {
+    pub(in crate::runtime) fn install_resolved_run(
+        &mut self,
+        resolved: &crate::ResolvedRun,
+    ) -> Result<(), crate::FormatRefusal> {
+        if let Some(session) = &self.session {
+            session
+                .plugins()
+                .host()
+                .decode_config(&resolved.config().plugin_config)?;
+        }
         self.state.install_root_view(resolved);
-        self.publish_resident_authority();
+        self.publish_resident_authority()
     }
 
     /// Uninstall the recorded view of the root this runtime ran last and
@@ -107,10 +125,11 @@ impl LashRuntime {
     /// session as the install was. Whatever resolves or publishes config
     /// over the resident state afterwards reads the session's, never a
     /// root's overrides.
-    pub(in crate::runtime) fn uninstall_root_view(&mut self) {
+    pub(in crate::runtime) fn uninstall_root_view(&mut self) -> Result<(), crate::FormatRefusal> {
         if self.state.take_root_view().is_some() {
-            self.publish_resident_authority();
+            self.publish_resident_authority()?;
         }
+        Ok(())
     }
 
     /// Test hook: applies `edit` to a copy of the resident state and installs
@@ -121,26 +140,32 @@ impl LashRuntime {
     pub fn edit_resident_state_for_test(&mut self, edit: impl FnOnce(&mut RuntimeSessionState)) {
         let mut state = self.state.clone();
         edit(&mut state);
-        self.install_resident_state(state);
+        self.install_resident_state(state)
+            .expect("test config formats decode");
     }
 
     /// Publish the resident authority to the live plugin session: its tool
     /// authority, and the plugin configuration its hooks run under — the
     /// installed view's, which inside a root is the root's recorded
     /// admission (FIG-4379).
-    pub(super) fn publish_resident_authority(&self) {
+    pub(super) fn publish_resident_authority(&mut self) -> Result<(), crate::FormatRefusal> {
         let Some(session) = self.session.as_ref() else {
-            return;
+            return Ok(());
         };
+        self.state.authority.plugin_config = session
+            .plugins()
+            .host()
+            .decode_config(&self.state.authority.plugin_config)?;
         session
             .plugins()
-            .publish_plugin_config(self.state.admitted_plugin_config());
+            .publish_plugin_config(self.state.admitted_plugin_config())?;
         if session.plugins().replace_authority(
             &self.state.authority.tool_access,
             self.state.authority.subagent.as_ref(),
         ) {
             session.invalidate_runtime_caches();
         }
+        Ok(())
     }
     pub fn active_tool_catalog_shared(
         &self,
@@ -563,11 +588,18 @@ impl LashRuntime {
         ))
         .await
         .map_err(|(_stage, error)| {
-            SessionError::Protocol(format!(
-                "failed to restore the adopted session head: {error}"
-            ))
+            if matches!(
+                error.cause.as_ref(),
+                Some(crate::RuntimeErrorCause::PluginFormat { .. })
+            ) {
+                SessionError::Plugin(crate::PluginError::Runtime(error))
+            } else {
+                SessionError::Protocol(format!(
+                    "failed to restore the adopted session head: {error}"
+                ))
+            }
         })?;
-        self.install_resident_state(adopted);
+        self.install_resident_state(adopted)?;
         if tool_restore.is_some() {
             self.tool_restore_report = tool_restore;
         }

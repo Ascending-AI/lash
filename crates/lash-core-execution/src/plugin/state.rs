@@ -302,6 +302,38 @@ fn validate_key(key: &str) -> Result<(), PluginStateError> {
     }
 }
 
+pub(super) fn validate_namespace(values: &BTreeMap<String, Value>) -> Result<(), PluginStateError> {
+    for (key, value) in values {
+        validate_key(key)?;
+        let bytes = serde_json::to_vec(value)
+            .map_err(|error| PluginStateError::Encode {
+                key: key.clone(),
+                message: error.to_string(),
+            })?
+            .len();
+        if bytes > VALUE_LIMIT {
+            return Err(PluginStateError::ValueTooLarge {
+                key: key.clone(),
+                bytes,
+                limit: VALUE_LIMIT,
+            });
+        }
+    }
+    let bytes = serde_json::to_vec(values)
+        .map_err(|error| PluginStateError::Encode {
+            key: String::new(),
+            message: error.to_string(),
+        })?
+        .len();
+    if bytes > STORE_LIMIT {
+        return Err(PluginStateError::StoreTooLarge {
+            bytes,
+            limit: STORE_LIMIT,
+        });
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests;
 
@@ -363,6 +395,17 @@ impl PluginStateRegistry {
                 source: None,
                 acceptance_generations: BTreeMap::new(),
             }));
+            {
+                let mut candidate = candidate.lock_recover();
+                for (id, namespace) in &self.data.plugins {
+                    candidate.data.plugins.entry(id.clone()).or_insert_with(|| {
+                        PluginNamespaceState {
+                            format_version: namespace.format_version,
+                            ..Default::default()
+                        }
+                    });
+                }
+            }
             for (id, edits) in &log {
                 PluginStateStore::bind(
                     &crate::RuntimeOwner::Session(SessionId::from("")),
@@ -372,8 +415,14 @@ impl PluginStateRegistry {
                 .apply(edits.clone())?;
             }
             let mut hydrated = candidate.lock_recover().data.clone();
-            for id in self.data.plugins.keys() {
-                hydrated.plugins.entry(id.clone()).or_default();
+            for (id, namespace) in &self.data.plugins {
+                hydrated
+                    .plugins
+                    .entry(id.clone())
+                    .or_insert_with(|| PluginNamespaceState {
+                        format_version: namespace.format_version,
+                        ..Default::default()
+                    });
             }
             self.data = hydrated;
             self.source = Some(state_ref(snapshot));
@@ -405,7 +454,21 @@ impl PluginStateRegistry {
             StatePhase::Registering(log) | StatePhase::Ready(log) => log,
         };
         for (id, edits) in log {
-            let namespace = hydrated.plugins.entry(id.clone()).or_default();
+            let format_version = self
+                .data
+                .plugins
+                .get(id)
+                .map_or(super::FormatVersion::ONE, |namespace| {
+                    namespace.format_version
+                });
+            let namespace =
+                hydrated
+                    .plugins
+                    .entry(id.clone())
+                    .or_insert_with(|| PluginNamespaceState {
+                        format_version,
+                        ..Default::default()
+                    });
             for edit in edits {
                 match edit {
                     PluginStateEdit::Set { key, value } => {
@@ -423,8 +486,14 @@ impl PluginStateRegistry {
                 .checked_add(1)
                 .expect("plugin generation exhausted");
         }
-        for id in self.data.plugins.keys() {
-            hydrated.plugins.entry(id.clone()).or_default();
+        for (id, namespace) in &self.data.plugins {
+            hydrated
+                .plugins
+                .entry(id.clone())
+                .or_insert_with(|| PluginNamespaceState {
+                    format_version: namespace.format_version,
+                    ..Default::default()
+                });
         }
         hydrated
     }

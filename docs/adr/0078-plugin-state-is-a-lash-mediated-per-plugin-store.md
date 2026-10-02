@@ -10,8 +10,8 @@ captured at a boundary includes every accepted mutation.
 
 Lash owns a JSON key-value namespace for each runtime owner and plugin id.
 For a session plugin the owner is its session. `PluginStateStore` binds that
-identity once; reads and writes do not accept another plugin id. Plugin version
-is diagnostic information, rather than a partition of durable state.
+identity once; reads and writes do not accept another plugin id. A namespace carries the plugin's declared nonzero `format_version`. State and
+recorded config share that stamp and the factory's pure format codecs.
 
 ### 1. The surface
 
@@ -65,8 +65,16 @@ captured counter without the old resident's uncommitted tokens.
 `SessionReadyContext.state` supplies it at readiness. Hook closures retain the
 registration handle; shared hook contexts need no plugin-id selector.
 
+Materialization validates state and config stamps before factory build, registration
+or readiness. An unreadable active namespace returns `FormatRefusal`; no durable
+bytes change. Readable older namespaces pass through the factory's pure
+`migrate_format` at decode, including resident checkpoint adoption. Inactive
+namespaces retain their stamp and values. A migrated state advances its capture
+generation so the next normal commit writes the converted representation.
+Registration and readiness perform no durable writes; their accepted in-memory
+edits reach storage through the first normal recorded commit.
 Materialization hydrates namespaces before registration so reads and size checks
-see durable data. `session_ready` observes registration's accepted edits on
+see decoded data. `session_ready` observes registration's accepted edits on
 that snapshot.
 Initialization finalizes the accepted registration and readiness edits as one
 materialization log. Later writes invalidate its hydration source. The plugin
@@ -84,7 +92,7 @@ appropriate committed-path hook.
 ### 6. The checkpoint component
 
 The `plugin_state` keyed component contains ordered plugin namespaces, each
-with generation and ordered values. Content addressing gives the body its
+with format version, generation and ordered values. Content addressing gives the body its
 `BlobRef`; the generation is part of that body, rather than a manifest column.
 The runtime recaptures when namespaces exist and the component is absent or
 its captured generations differ. Otherwise it retains the reference.
@@ -123,7 +131,10 @@ outside the runtime-owned boundary; larger state belongs in host storage.
 
 ## Consequences
 
-The plugin owns its JSON schema and any value migration inside the namespace.
+The plugin owns its JSON schema and its pure migration and writer encoders.
+Encoding takes the caller's explicit writer version. The host never selects it
+from a live fleet read. Config stamps travel with options, recorded config and
+process environments; state stamps travel with every captured `SessionPluginInit`.
 Lash owns acceptance generations, serialization, and checkpoint capture.
 Derived caches can be rebuilt from the store. Accepted writes become durable
 at a later runtime boundary, so acceptance and commit have distinct lifetimes.

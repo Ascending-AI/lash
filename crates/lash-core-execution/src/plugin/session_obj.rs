@@ -244,8 +244,13 @@ impl PluginSession {
 
     /// Publish the configuration view the runtime installed — a root's
     /// recorded one, or the head's — to this session's hooks.
-    pub fn publish_plugin_config(&self, plugin_config: super::AdmittedPluginConfig) {
+    pub fn publish_plugin_config(
+        &self,
+        mut plugin_config: super::AdmittedPluginConfig,
+    ) -> Result<(), super::FormatRefusal> {
+        plugin_config.config = Arc::new(self.host.decode_config(&plugin_config.config)?);
         self.authority.write_recover().plugin_config = plugin_config;
+        Ok(())
     }
 
     pub(super) fn live_authority(&self) -> LiveSessionAuthority {
@@ -887,7 +892,8 @@ impl PluginSession {
     }
 
     pub fn require_hydrated_state(&self, snapshot: &PluginState) -> Result<(), PluginError> {
-        if self.state.lock_recover().was_hydrated_from(snapshot) {
+        let snapshot = self.host.decode_state(snapshot)?;
+        if self.state.lock_recover().was_hydrated_from(&snapshot) {
             Ok(())
         } else {
             Err(PluginError::Session("persisted plugin state requires a rematerialization request before runtime construction".into()))
@@ -897,12 +903,14 @@ impl PluginSession {
     /// Adopt `snapshot`, a recorded head's plugin state, as the live state:
     /// an accepted write the head does not carry is dropped, as a cold
     /// rebuild from that head drops it (FIG-4392).
-    pub fn hydrate_state(&self, snapshot: &PluginState) {
+    pub fn hydrate_state(&self, snapshot: &PluginState) -> Result<(), PluginError> {
+        let snapshot = self.host.decode_state(snapshot)?;
         let mut live = self.state.lock_recover();
-        live.hydrate_live(snapshot);
+        live.hydrate_live(&snapshot);
         for plugin in &self.plugins {
             live.data.plugins.entry(plugin.id().into()).or_default();
         }
+        Ok(())
     }
 
     pub fn fork_for_session(

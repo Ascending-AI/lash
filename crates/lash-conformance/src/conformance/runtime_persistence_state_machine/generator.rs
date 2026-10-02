@@ -31,6 +31,7 @@ pub(super) fn plugin_state(value: u8) -> PluginState {
         plugins: BTreeMap::from([(
             "property-plugin".to_string(),
             PluginNamespaceState {
+                format_version: crate::FormatVersion::ONE,
                 generation: u64::from(value),
                 values: std::collections::BTreeMap::from([(
                     "state".into(),

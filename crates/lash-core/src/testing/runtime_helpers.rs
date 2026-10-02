@@ -1409,12 +1409,7 @@ pub fn record_creation_plugin_config(
     state: &mut RuntimeSessionState,
 ) {
     let requested = crate::PluginOptions {
-        plugins: state
-            .authority
-            .plugin_config
-            .iter()
-            .map(|(plugin_id, value)| (plugin_id.clone(), value.clone()))
-            .collect(),
+        plugins: state.authority.plugin_config.namespaces().clone(),
     };
     state.authority.plugin_config = host
         .resolve_creation_plugin_config(Some(protocol_plugin_id), &requested, None, true)

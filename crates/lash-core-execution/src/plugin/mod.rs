@@ -1,3 +1,4 @@
+mod formats;
 use std::future::Future;
 use std::sync::Arc;
 
@@ -988,3 +989,7 @@ mod tests {
         );
     }
 }
+
+pub use lash_core_store::plugin_state::{
+    FormatNamespace, FormatRefusal, FormatVersion, PluginConfigNamespace,
+};

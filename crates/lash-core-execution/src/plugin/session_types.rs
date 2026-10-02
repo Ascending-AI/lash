@@ -158,6 +158,7 @@ mod session_plugin_init_tests {
         plugins.insert(
             "fat-plugin".to_string(),
             crate::PluginNamespaceState {
+                format_version: lash_core_ids::FormatVersion::ONE,
                 generation: 0,
                 values,
             },

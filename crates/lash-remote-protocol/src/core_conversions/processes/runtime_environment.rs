@@ -297,7 +297,18 @@ impl From<lash_core::AdmittedPluginConfig> for RemoteProcessPluginConfig {
         Self {
             revision,
             protocol,
-            namespaces,
+            namespaces: namespaces
+                .into_iter()
+                .map(|(id, ns)| {
+                    (
+                        id,
+                        RemotePluginConfigNamespace {
+                            format_version: ns.format_version.into(),
+                            value: ns.value,
+                        },
+                    )
+                })
+                .collect(),
         }
     }
 }
@@ -310,7 +321,21 @@ impl From<RemoteProcessPluginConfig> for lash_core::AdmittedPluginConfig {
             namespaces,
         } = value;
         Self::new(
-            lash_core::PluginConfig::from_recorded_parts(protocol, namespaces),
+            lash_core::PluginConfig::from_recorded_parts(
+                protocol,
+                namespaces
+                    .into_iter()
+                    .map(|(id, ns)| {
+                        (
+                            id,
+                            lash_core::PluginConfigNamespace {
+                                format_version: ns.format_version.into(),
+                                value: ns.value,
+                            },
+                        )
+                    })
+                    .collect(),
+            ),
             revision,
         )
     }

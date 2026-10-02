@@ -608,6 +608,45 @@ pub trait PluginFactory: Send + Sync {
     /// share a lane with the build it changed. Must be cheap and perform no
     /// I/O; it is read before any session is built.
     fn declaration(&self) -> PluginDeclaration;
+    /// Pure conversion of this namespace into the factory's native format.
+    /// No I/O or access to other namespaces is permitted.
+    fn migrate_format(
+        &self,
+        from: super::FormatVersion,
+        namespace: super::FormatNamespace,
+        value: serde_json::Value,
+    ) -> Result<serde_json::Value, super::FormatRefusal> {
+        if from == self.declaration().format_version {
+            Ok(value)
+        } else {
+            Err(super::FormatRefusal {
+                plugin: self.id().into(),
+                namespace,
+                stored: from,
+                readable: self.declaration().format_version,
+            })
+        }
+    }
+
+    /// Pure encoding into the writer version supplied by the admission.
+    /// Encoding the native format must preserve the value unchanged.
+    fn encode_format(
+        &self,
+        to: super::FormatVersion,
+        namespace: super::FormatNamespace,
+        value: &serde_json::Value,
+    ) -> Result<serde_json::Value, super::FormatRefusal> {
+        if to == self.declaration().format_version {
+            Ok(value.clone())
+        } else {
+            Err(super::FormatRefusal {
+                plugin: self.id().into(),
+                namespace,
+                stored: to,
+                readable: self.declaration().format_version,
+            })
+        }
+    }
 
     /// Release host-visible resources owned by this factory after intake stops.
     ///

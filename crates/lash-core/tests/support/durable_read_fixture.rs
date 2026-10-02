@@ -1408,6 +1408,7 @@ fn fixture_plugin_state() -> PluginState {
         plugins: BTreeMap::from([(
             "durable-read-snapshot-plugin".to_string(),
             PluginNamespaceState {
+                format_version: lash_core_ids::FormatVersion::ONE,
                 generation: 887,
                 values: std::collections::BTreeMap::from([(
                     "state".into(),

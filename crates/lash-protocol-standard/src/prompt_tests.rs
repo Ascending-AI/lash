@@ -16,8 +16,9 @@ fn creation(
 ) -> lash_core::PluginConfig {
     let mut options = lash_core::PluginOptions::default();
     if let Some(prompt) = prompt {
-        options.plugins.insert(
-            STANDARD_PROTOCOL_PLUGIN_ID.into(),
+        options.insert_versioned(
+            STANDARD_PROTOCOL_PLUGIN_ID,
+            lash_core::FormatVersion::ONE,
             serde_json::json!({"prompt": prompt}),
         );
     }

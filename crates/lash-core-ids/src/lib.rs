@@ -49,6 +49,18 @@ impl std::fmt::Display for FormatVersion {
     }
 }
 
+impl From<std::num::NonZeroU32> for FormatVersion {
+    fn from(value: std::num::NonZeroU32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<FormatVersion> for std::num::NonZeroU32 {
+    fn from(value: FormatVersion) -> Self {
+        value.0
+    }
+}
+
 /// The declared, nonzero revision of what a plugin does. Any behaviour
 /// change moves it, and a moved revision is a new build generation.
 #[derive(

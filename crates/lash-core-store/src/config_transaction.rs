@@ -179,6 +179,8 @@ impl ConfigValueRole {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ConfigRefusalReason {
+    /// The namespace's stored or requested writer format is unavailable.
+    Format { refusal: crate::plugin_state::FormatRefusal },
     /// The owner refused: `refusal` is its registered refusal type,
     /// serialized, and `message` that refusal's display text.
     Owner {
@@ -207,6 +209,7 @@ impl Eq for ConfigRefusalReason {}
 impl std::fmt::Display for ConfigRefusalReason {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Format { refusal } => refusal.fmt(formatter),
             Self::Owner { message, .. } => formatter.write_str(message),
             Self::UnknownOwner => formatter.write_str("no installed plugin registers this owner"),
             Self::UnknownCommand => formatter.write_str("the owner registers no such command"),
@@ -370,7 +373,7 @@ pub enum ConfigResolutionDecision {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         core: Option<Box<CoreConfig>>,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-        namespaces: BTreeMap<String, serde_json::Value>,
+        namespaces: BTreeMap<String, crate::plugin_state::PluginConfigNamespace>,
         outputs: Vec<serde_json::Value>,
     },
     Stale {
@@ -437,7 +440,10 @@ mod tests {
                 core: core.map(Box::new),
                 namespaces: BTreeMap::from([(
                     "counter".to_string(),
-                    serde_json::json!({ "count": 2 }),
+                    crate::plugin_state::PluginConfigNamespace {
+                        format_version: crate::plugin_state::FormatVersion::ONE,
+                        value: serde_json::json!({ "count": 2 }),
+                    },
                 )]),
                 outputs: vec![serde_json::json!(2)],
             },

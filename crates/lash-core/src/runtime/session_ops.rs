@@ -35,7 +35,7 @@ impl LashRuntime {
         let mut installed_tool_restore = None;
         if let Some(session) = self.session.as_ref() {
             if let Some(snapshot) = state.plugin_state() {
-                session.plugins().hydrate_state(snapshot);
+                session.plugins().hydrate_state(snapshot)?;
             } else if let Some(reference) = state.plugin_state_ref()
                 && self.state.plugin_state_ref() != Some(reference)
                 && !session.plugins().matches_state_ref(reference)
@@ -79,7 +79,7 @@ impl LashRuntime {
         // Whole-state adoption rebuilds the marker field; the install
         // reasserts the per-open `PreservePersisted` claim from host
         // configuration (FIG-3353).
-        self.install_resident_state(state);
+        self.install_resident_state(state)?;
         Ok(())
     }
 

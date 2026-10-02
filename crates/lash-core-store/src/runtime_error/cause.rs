@@ -16,6 +16,9 @@ pub enum RuntimeErrorCause {
     VmWorker {
         outcome: Box<lash_vm_protocol::InfrastructureOutcome>,
     },
+    PluginFormat {
+        refusal: Box<crate::plugin_state::FormatRefusal>,
+    },
     /// The attachment-store family and structured source of a required retention failure.
     AttachmentRetention {
         failure: Box<super::AttachmentRetentionFailure>,

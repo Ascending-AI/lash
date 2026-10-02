@@ -1,5 +1,341 @@
 use super::*;
+use crate::PluginFactory;
 use crate::plugin::PluginSessionRequest;
+
+#[derive(Clone)]
+struct FormatProbe(Arc<std::sync::atomic::AtomicUsize>);
+
+impl crate::PluginFactory for FormatProbe {
+    fn id(&self) -> &'static str {
+        "format-probe"
+    }
+
+    fn declaration(&self) -> crate::PluginDeclaration {
+        let mut declaration = crate::PluginDeclaration::initial(self.id());
+        declaration.format_version = crate::FormatVersion::new(2).unwrap();
+        declaration.writable_formats = vec![crate::FormatVersion::ONE, declaration.format_version];
+        declaration
+    }
+
+    fn migrate_format(
+        &self,
+        from: crate::FormatVersion,
+        namespace: crate::FormatNamespace,
+        mut value: Value,
+    ) -> Result<Value, crate::FormatRefusal> {
+        if from == crate::FormatVersion::ONE {
+            let value = value.as_object_mut().unwrap();
+            if let Some(old) = value.remove("old") {
+                value.insert("native".into(), old);
+            }
+            Ok(Value::Object(value.clone()))
+        } else if from == self.declaration().format_version {
+            Ok(value)
+        } else {
+            Err(crate::FormatRefusal {
+                plugin: "format-probe".into(),
+                namespace,
+                stored: from,
+                readable: self.declaration().format_version,
+            })
+        }
+    }
+
+    fn encode_format(
+        &self,
+        to: crate::FormatVersion,
+        namespace: crate::FormatNamespace,
+        value: &Value,
+    ) -> Result<Value, crate::FormatRefusal> {
+        let mut value = value.clone();
+        if to == crate::FormatVersion::ONE {
+            let object = value.as_object_mut().unwrap();
+            if let Some(native) = object.remove("native") {
+                object.insert("old".into(), native);
+            }
+            Ok(value)
+        } else if to == self.declaration().format_version {
+            Ok(value)
+        } else {
+            Err(crate::FormatRefusal {
+                plugin: "format-probe".into(),
+                namespace,
+                stored: to,
+                readable: self.declaration().format_version,
+            })
+        }
+    }
+
+    fn register_config(
+        &self,
+        _: &mut crate::ConfigRegistrar,
+    ) -> Result<(), crate::ConfigRegistrationError> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn build(
+        &self,
+        _: &crate::PluginSessionContext,
+    ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(Arc::new(self.clone()))
+    }
+}
+
+impl crate::SessionPlugin for FormatProbe {
+    fn id(&self) -> &'static str {
+        "format-probe"
+    }
+
+    fn register(&self, _: &mut crate::PluginRegistrar) -> Result<(), crate::PluginError> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn session_ready(
+        &self,
+        _: crate::plugin::SessionReadyContext,
+    ) -> Result<(), crate::PluginError> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+#[test]
+fn plugin_formats_refuse_before_callbacks_and_preserve_bytes() {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let host = crate::PluginHost::new(vec![Arc::new(FormatProbe(calls.clone()))]);
+    let snapshot: PluginState = serde_json::from_value(serde_json::json!({
+        "format-probe": {"generation": 7, "format_version": 4294967295_u32, "values": {"old": 17}}
+    }))
+    .unwrap();
+    let bytes = rmp_serde::to_vec_named(&snapshot).unwrap();
+    let result = host.build_session(PluginSessionRequest::rematerialization(
+        "unreadable",
+        &snapshot,
+        Default::default(),
+    ));
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert!(
+        result.is_err(),
+        "an unreadable stamp must refuse materialization"
+    );
+    assert_eq!(rmp_serde::to_vec_named(&snapshot).unwrap(), bytes);
+    let refusal = result.err().unwrap();
+    let crate::PluginError::Format(expected) = refusal else {
+        panic!("typed format refusal");
+    };
+    assert_eq!(expected.stored.get(), u32::MAX);
+    assert_eq!(expected.namespace, crate::FormatNamespace::State);
+    let plugin: crate::PluginError = rmp_serde::from_slice(
+        &rmp_serde::to_vec_named(&crate::PluginError::Format(expected.clone())).unwrap(),
+    )
+    .unwrap();
+    let controller = crate::RuntimeEffectControllerError::from(plugin);
+    let runtime = controller.clone().into_runtime_error();
+    let cause = Some(crate::RuntimeErrorCause::PluginFormat {
+        refusal: Box::new(expected),
+    });
+    assert_eq!(runtime.cause, cause);
+    assert!(runtime.is_terminal());
+    assert_eq!(
+        crate::PluginError::Runtime(runtime)
+            .into_turn_failure(crate::RuntimeErrorCode::Plugin)
+            .cause,
+        cause
+    );
+    assert_eq!(
+        crate::PluginError::RuntimeEffectController(controller)
+            .into_turn_failure(crate::RuntimeErrorCode::Plugin)
+            .cause,
+        cause
+    );
+
+    let mut config = crate::PluginConfig::default();
+    config.insert_versioned(
+        "format-probe",
+        crate::FormatVersion::new(u32::MAX).unwrap(),
+        serde_json::json!({"old": 17}),
+    );
+    let config_bytes = rmp_serde::to_vec_named(&config).unwrap();
+    let result = host.build_session(PluginSessionRequest::creation(
+        "bad-config",
+        crate::plugin::SessionAuthorityContext {
+            plugin_config: crate::AdmittedPluginConfig::new(config.clone(), 3),
+            ..Default::default()
+        },
+    ));
+    assert!(matches!(
+        result,
+        Err(crate::PluginError::Format(crate::FormatRefusal {
+            namespace: crate::FormatNamespace::Config,
+            ..
+        }))
+    ));
+    let options = crate::PluginOptions {
+        plugins: config.namespaces().clone(),
+    };
+    let error = host
+        .resolve_creation_plugin_config(None, &options, None, true)
+        .unwrap_err();
+    assert!(matches!(error, crate::plugin::CreationConfigError::Format(_)));
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert_eq!(rmp_serde::to_vec_named(&config).unwrap(), config_bytes);
+}
+
+#[test]
+fn plugin_formats_migrate_on_decode_and_replay_identically() {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let host = crate::PluginHost::new(vec![Arc::new(FormatProbe(calls))]);
+    let snapshot: PluginState = serde_json::from_value(serde_json::json!({
+        "format-probe": {"generation": 7, "format_version": 1, "values": {"old": 17}}
+    }))
+    .unwrap();
+    let before = rmp_serde::to_vec_named(&snapshot).unwrap();
+    let mut config = crate::PluginConfig::default();
+    config.insert_versioned(
+        "format-probe",
+        crate::FormatVersion::ONE,
+        serde_json::json!({"old": 17}),
+    );
+    let mut results = Vec::new();
+    for owner in ["first-decode", "replay-decode"] {
+        let session = host
+            .isolated_registry()
+            .build_session(PluginSessionRequest::rematerialization(
+                owner,
+                &snapshot,
+                crate::plugin::SessionAuthorityContext {
+                    plugin_config: crate::AdmittedPluginConfig::new(config.clone(), 3),
+                    ..Default::default()
+                },
+            ))
+            .unwrap();
+        let decoded = session.export_state();
+        assert_eq!(
+            decoded.plugins["format-probe"].values.get("native"),
+            Some(&serde_json::json!(17))
+        );
+        assert!(!decoded.plugins["format-probe"].values.contains_key("old"));
+        let decoded_config = session.admitted_plugin_config();
+        assert_eq!(
+            decoded_config.config.get("format-probe"),
+            Some(&serde_json::json!({"native": 17}))
+        );
+        assert_eq!(
+            decoded_config
+                .config
+                .namespace("format-probe")
+                .unwrap()
+                .format_version
+                .get(),
+            2
+        );
+        assert_eq!(decoded_config.revision, 3);
+        assert_eq!(decoded.plugins["format-probe"].generation, 8);
+        session.hydrate_state(&snapshot).unwrap();
+        assert_eq!(session.export_state(), decoded);
+        results.push(rmp_serde::to_vec_named(&(decoded, decoded_config)).unwrap());
+    }
+    assert_eq!(results[0], results[1]);
+    assert_eq!(rmp_serde::to_vec_named(&snapshot).unwrap(), before);
+}
+
+#[test]
+fn plugin_formats_stamp_every_state_write() {
+    let state = store();
+    state.set("value", serde_json::json!(17)).unwrap();
+    let encoded = serde_json::to_value(&state.state.lock_recover().data).unwrap();
+    assert_eq!(encoded["mock"]["format_version"], serde_json::json!(1));
+    let host = crate::PluginHost::new(vec![Arc::new(FormatProbe(Arc::new(
+        std::sync::atomic::AtomicUsize::new(0),
+    )))]);
+    let native: PluginState = serde_json::from_value(serde_json::json!({
+        "format-probe": {"generation": 8, "format_version": 2, "values": {"native": 18}},
+        "inactive": {"generation": 7, "format_version": 99, "values": {"opaque": 5}}
+    }))
+    .unwrap();
+    let mut config = crate::PluginConfig::default();
+    config.insert_versioned(
+        "format-probe",
+        crate::FormatVersion::new(2).unwrap(),
+        serde_json::json!({"native": 18}),
+    );
+    config.insert_versioned(
+        "inactive",
+        crate::FormatVersion::new(99).unwrap(),
+        serde_json::json!({"opaque": 5}),
+    );
+    for version in [1, 2] {
+        let writer = crate::FormatVersion::new(version).unwrap();
+        let writers = BTreeMap::from([("format-probe".into(), writer)]);
+        let encoded_state = host.encode_state(&native, &writers).unwrap();
+        let encoded_config = host.encode_config(&config, &writers).unwrap();
+        let key = if version == 1 { "old" } else { "native" };
+        assert_eq!(
+            encoded_state.plugins["format-probe"].values[key],
+            serde_json::json!(18)
+        );
+        assert_eq!(encoded_state.plugins["format-probe"].format_version, writer);
+        assert_eq!(
+            encoded_state.plugins["inactive"],
+            native.plugins["inactive"]
+        );
+        assert_eq!(
+            encoded_config.get("format-probe").unwrap()[key],
+            serde_json::json!(18)
+        );
+        assert_eq!(
+            encoded_config
+                .namespace("format-probe")
+                .unwrap()
+                .format_version,
+            writer
+        );
+        assert_eq!(
+            encoded_config.namespace("inactive"),
+            config.namespace("inactive")
+        );
+        let init = crate::SessionPluginInit::captured(
+            encoded_state.clone(),
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap();
+        let init: crate::SessionPluginInit =
+            rmp_serde::from_slice(&rmp_serde::to_vec_named(&init).unwrap()).unwrap();
+        assert_eq!(init.plugin_state, encoded_state);
+        let options = crate::PluginOptions {
+            plugins: encoded_config.namespaces().clone(),
+        };
+        let options: crate::PluginOptions =
+            rmp_serde::from_slice(&rmp_serde::to_vec_named(&options).unwrap()).unwrap();
+        assert_eq!(options.plugins["format-probe"].format_version, writer);
+        let environment = crate::ProcessExecutionEnvSpec::new(
+            crate::AdmittedPluginConfig::new(encoded_config, 3),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
+        );
+        let environment: crate::ProcessExecutionEnvSpec =
+            rmp_serde::from_slice(&rmp_serde::to_vec_named(&environment).unwrap()).unwrap();
+        assert_eq!(
+            environment
+                .plugin_config
+                .config
+                .namespace("format-probe")
+                .unwrap()
+                .format_version,
+            writer
+        );
+    }
+    assert!(
+        host.encode_state(
+            &native,
+            &BTreeMap::from([("format-probe".into(), crate::FormatVersion::new(3).unwrap())])
+        )
+        .is_err()
+    );
+}
 
 fn store() -> PluginStateStore {
     PluginStateStore::bind(
@@ -90,6 +426,7 @@ fn materialization_uses_spawn_capture_after_parent_changes_and_unregisters() {
         plugins: BTreeMap::from([(
             "absent-plugin".into(),
             PluginNamespaceState {
+                format_version: lash_core_ids::FormatVersion::ONE,
                 generation: 17,
                 values: BTreeMap::from([("value".into(), serde_json::json!("at-spawn"))]),
             },
@@ -113,7 +450,7 @@ fn materialization_uses_spawn_capture_after_parent_changes_and_unregisters() {
     namespace
         .values
         .insert("value".into(), serde_json::json!("after-spawn"));
-    parent.hydrate_state(&later);
+    parent.hydrate_state(&later).unwrap();
     host.unregister_session(&"parent".into()).unwrap();
     drop(parent);
     let child = host
@@ -308,6 +645,7 @@ fn fork_preserves_absent_namespaces_and_canonical_order() {
         plugins: BTreeMap::from([(
             "absent-plugin".into(),
             PluginNamespaceState {
+                format_version: lash_core_ids::FormatVersion::ONE,
                 generation: 17,
                 values,
             },
@@ -532,6 +870,7 @@ fn register_remove_rebuilt_generation_five() {
         plugins: BTreeMap::from([(
             "mock".into(),
             PluginNamespaceState {
+                format_version: lash_core_ids::FormatVersion::ONE,
                 generation: 5,
                 values: BTreeMap::from([("seed".into(), Value::Bool(true))]),
             },
@@ -574,6 +913,7 @@ fn hydration_head() -> PluginState {
         plugins: BTreeMap::from([(
             "mock".into(),
             PluginNamespaceState {
+                format_version: lash_core_ids::FormatVersion::ONE,
                 generation: 5,
                 values: BTreeMap::from([("seed".into(), Value::Bool(true))]),
             },

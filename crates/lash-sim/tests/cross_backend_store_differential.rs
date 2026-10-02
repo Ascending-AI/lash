@@ -758,6 +758,7 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
         plugins: [(
             "differential-plugin".to_string(),
             PluginNamespaceState {
+                format_version: lash_core::FormatVersion::ONE,
                 generation: 11,
                 values: std::collections::BTreeMap::from([(
                     "state".into(),

@@ -13,9 +13,10 @@ pub struct PluginHost {
     pub(super) export_plugin_namespaces: bool,
     extensions: PluginExtensions,
     sessions: Arc<StdMutex<BTreeMap<RuntimeOwner, Weak<PluginSession>>>>,
-    /// Every factory's config registration, collected when the host is
-    /// built (FIG-4379).
-    config_registry: Arc<Result<Arc<super::ConfigRegistry>, super::ConfigRegistrationError>>,
+    /// Config registration is collected on first use, after format preflight.
+    config_registry: Arc<
+        std::sync::OnceLock<Result<Arc<super::ConfigRegistry>, super::ConfigRegistrationError>>,
+    >,
 }
 
 /// Inputs shared by new-session creation and reconstruction from durable
@@ -136,7 +137,7 @@ impl PluginHost {
                 .iter()
                 .flat_map(|factory| factory.extension_contributions()),
         );
-        let config_registry = Arc::new(super::ConfigRegistry::build(&all_factories).map(Arc::new));
+        let config_registry = Arc::new(std::sync::OnceLock::new());
         Self {
             factories: Arc::new(all_factories),
             export_plugin_namespaces: true,
@@ -182,7 +183,9 @@ impl PluginHost {
     pub fn config_registry(
         &self,
     ) -> Result<Arc<super::ConfigRegistry>, super::ConfigRegistrationError> {
-        self.config_registry.as_ref().clone()
+        self.config_registry
+            .get_or_init(|| super::ConfigRegistry::build(self.factories()).map(Arc::new))
+            .clone()
     }
 
     /// The recorded plugin configuration of a session created on this host
@@ -195,6 +198,11 @@ impl PluginHost {
         parent: Option<&super::PluginConfig>,
         is_root_session: bool,
     ) -> Result<super::PluginConfig, super::CreationConfigError> {
+        let options = super::PluginConfig::from_recorded_parts(None, requested.plugins.clone());
+        self.decode_config(&options)?;
+        if let Some(parent) = parent {
+            self.decode_config(parent)?;
+        }
         Ok(self.config_registry()?.resolve_creation(
             protocol_plugin_id,
             requested,
@@ -260,6 +268,17 @@ impl PluginHost {
                 false,
             ),
         };
+        self.validate_config_formats(&authority.plugin_config.config)?;
+        if let Some(snapshot) = snapshot {
+            self.validate_state_formats(snapshot)?;
+        }
+        let mut authority = authority;
+        authority.plugin_config.config =
+            Arc::new(self.decode_config(&authority.plugin_config.config)?);
+        let decoded_snapshot = snapshot
+            .map(|snapshot| self.decode_state(snapshot))
+            .transpose()?;
+        let snapshot = decoded_snapshot.as_ref();
         let ctx = PluginSessionContext {
             owner,
             tool_access: authority.tool_access.clone(),
@@ -335,7 +354,18 @@ impl PluginHost {
         ctx: &PluginSessionContext,
         snapshot: Option<&PluginState>,
     ) -> Result<BuiltSessionContributions, PluginError> {
-        let state = Arc::new(StdMutex::new(PluginStateRegistry::registering(snapshot)));
+        let mut registry = PluginStateRegistry::registering(snapshot);
+        for factory in self.factories() {
+            registry
+                .data
+                .plugins
+                .entry(factory.id().into())
+                .or_insert_with(|| super::PluginNamespaceState {
+                    format_version: factory.declaration().format_version,
+                    ..Default::default()
+                });
+        }
+        let state = Arc::new(StdMutex::new(registry));
         let mut plugins = Vec::new();
         let mut reg = PluginRegistrar::new();
         for factory in self.factories() {

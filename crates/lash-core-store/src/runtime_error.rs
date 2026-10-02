@@ -1516,7 +1516,8 @@ impl RuntimeError {
             | RuntimeErrorCause::RunShapeRefused { .. }
             | RuntimeErrorCause::ConfigRefused { .. }
             | RuntimeErrorCause::MissingRecordedProcessConfig { .. }
-            | RuntimeErrorCause::StoreRefusal { .. } => None,
+            | RuntimeErrorCause::StoreRefusal { .. }
+            | RuntimeErrorCause::PluginFormat { .. } => None,
         }
     }
 

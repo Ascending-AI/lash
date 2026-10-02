@@ -43,7 +43,7 @@ impl LashRuntime {
             .await
             .map_err(session_head_refresh_error)?;
         if let Some(resolved) = resolved_run {
-            self.install_resolved_run(&resolved);
+            self.install_resolved_run(&resolved)?;
         }
         Ok(())
     }

@@ -135,6 +135,10 @@ async fn commit(store: &Arc<dyn RuntimeStore>, state: &mut RuntimeSessionState) 
 }
 
 pub async fn plugin_state_boundary(make: impl Fn(&str) -> Arc<dyn RuntimeStore>, label: &str) {
+    for version in [1, 3] {
+        let id = format!("{label}-format-{version}");
+        plugin_format_boundary(make(&id), &id, version).await;
+    }
     let register_remove = format!("{label}-register-remove");
     registration_state_law(
         make(&register_remove),
@@ -522,4 +526,204 @@ async fn registration_state_law(
         }
         Registration::None => unreachable!(),
     }
+}
+
+#[derive(Clone)]
+struct FormatPlugin(Arc<std::sync::atomic::AtomicUsize>);
+
+#[expect(
+    clippy::unwrap_used,
+    reason = "format law uses known versions and exact object fixtures"
+)]
+impl PluginFactory for FormatPlugin {
+    fn id(&self) -> &'static str {
+        "format-state"
+    }
+    fn declaration(&self) -> lash_core::PluginDeclaration {
+        let mut declaration = lash_core::PluginDeclaration::initial(self.id());
+        declaration.format_version = lash_core::FormatVersion::new(2).unwrap();
+        declaration.writable_formats = vec![lash_core::FormatVersion::ONE, declaration.format_version];
+        declaration
+    }
+    fn migrate_format(
+        &self,
+        from: lash_core::FormatVersion,
+        namespace: lash_core::FormatNamespace,
+        mut value: serde_json::Value,
+    ) -> Result<serde_json::Value, lash_core::FormatRefusal> {
+        if from != lash_core::FormatVersion::ONE {
+            return Err(lash_core::FormatRefusal {
+                plugin: "format-state".into(),
+                namespace,
+                stored: from,
+                readable: self.declaration().format_version,
+            });
+        }
+        let map = value.as_object_mut().unwrap();
+        let old = map.remove("count").unwrap();
+        map.insert("total".into(), old);
+        Ok(value)
+    }
+    fn encode_format(
+        &self,
+        to: lash_core::FormatVersion,
+        namespace: lash_core::FormatNamespace,
+        value: &serde_json::Value,
+    ) -> Result<serde_json::Value, lash_core::FormatRefusal> {
+        let mut value = value.clone();
+        if to == lash_core::FormatVersion::ONE {
+            let map = value.as_object_mut().unwrap();
+            let total = map.remove("total").unwrap();
+            map.insert("count".into(), total);
+        } else if to != self.declaration().format_version {
+            return Err(lash_core::FormatRefusal {
+                plugin: "format-state".into(),
+                namespace,
+                stored: to,
+                readable: self.declaration().format_version,
+            });
+        }
+        Ok(value)
+    }
+    fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(Arc::new(self.clone()))
+    }
+}
+impl SessionPlugin for FormatPlugin {
+    fn id(&self) -> &'static str {
+        "format-state"
+    }
+    fn register(&self, _: &mut PluginRegistrar) -> Result<(), PluginError> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+    fn session_ready(&self, _: SessionReadyContext) -> Result<(), PluginError> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+/// FIG-4745's refusal and migration at a real persisted checkpoint boundary.
+#[expect(
+    clippy::unwrap_used,
+    reason = "format law asserts every persisted fixture and commit"
+)]
+async fn plugin_format_boundary(store: Arc<dyn RuntimeStore>, session_id: &str, version: u32) {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut factories = crate::testing::test_standard_protocol_factories();
+    factories.push(Arc::new(FormatPlugin(calls.clone())));
+    let host = crate::PluginHost::new(factories);
+    let mut state = RuntimeSessionState {
+        session_id: session_id.into(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+        ))
+    };
+    // Include all bound namespaces so migration alone must dirty the component.
+    let seed = host
+        .build_session(PluginSessionRequest::creation(
+            "format-seed",
+            Default::default(),
+        ))
+        .unwrap();
+    let mut snapshot = seed.export_state();
+    snapshot.plugins.insert(
+        "format-state".into(),
+        lash_core::PluginNamespaceState {
+            format_version: lash_core::FormatVersion::new(version).unwrap(),
+            generation: 7,
+            values: std::collections::BTreeMap::from([("count".into(), serde_json::json!(17))]),
+        },
+    );
+    state.set_plugin_state(Some(snapshot));
+    state.authority.plugin_config.insert_versioned(
+        "format-state",
+        lash_core::FormatVersion::new(version).unwrap(),
+        serde_json::json!({"count": 17}),
+    );
+    commit(&store, &mut state).await;
+    let mut durable =
+        crate::conformance::helpers::load_window_state(&store, &SessionId::from(session_id))
+            .await
+            .unwrap()
+            .unwrap();
+    let original = durable.plugin_state().unwrap().clone();
+    let bytes = rmp_serde::to_vec_named(&original).unwrap();
+    let original_head = durable.head_revision;
+    calls.store(0, std::sync::atomic::Ordering::SeqCst);
+    let request = PluginSessionRequest::rematerialization(
+        session_id,
+        &original,
+        SessionAuthorityContext {
+            plugin_config: durable.admitted_plugin_config(),
+            ..Default::default()
+        },
+    );
+    let result = host.isolated_registry().build_session(request.clone());
+    if version > 2 {
+        assert!(matches!(result, Err(PluginError::Format(_))));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let after =
+            crate::conformance::helpers::load_window_state(&store, &SessionId::from(session_id))
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(after.head_revision, original_head);
+        assert_eq!(
+            rmp_serde::to_vec_named(after.plugin_state().unwrap()).unwrap(),
+            bytes
+        );
+        return;
+    }
+    let decoded = result.unwrap();
+    let replay = host.isolated_registry().build_session(request).unwrap();
+    assert_eq!(decoded.export_state(), replay.export_state());
+    assert_eq!(
+        decoded.admitted_plugin_config(),
+        replay.admitted_plugin_config()
+    );
+    // Materialization publishes nothing.
+    let before_commit =
+        crate::conformance::helpers::load_window_state(&store, &SessionId::from(session_id))
+            .await
+            .unwrap()
+            .unwrap();
+    assert_eq!(before_commit.head_revision, original_head);
+    assert_eq!(
+        rmp_serde::to_vec_named(before_commit.plugin_state().unwrap()).unwrap(),
+        bytes
+    );
+    durable.refresh_plugin_states(&decoded);
+    let pending = RuntimeCommit::persisted_state_for_test(&durable);
+    assert!(matches!(
+        pending.checkpoint.components[crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT],
+        crate::HydratedCheckpointComponent::Changed { .. }
+    ));
+    durable.authority.plugin_config = decoded.admitted_plugin_config().config.as_ref().clone();
+    commit(&store, &mut durable).await;
+    let after =
+        crate::conformance::helpers::load_window_state(&store, &SessionId::from(session_id))
+            .await
+            .unwrap()
+            .unwrap();
+    let namespace = &after.plugin_state().unwrap().plugins["format-state"];
+    assert_eq!(namespace.format_version.get(), 2);
+    assert_eq!(namespace.generation, 8);
+    assert_eq!(namespace.values["total"], serde_json::json!(17));
+    assert_eq!(
+        after
+            .authority
+            .plugin_config
+            .namespace("format-state")
+            .unwrap()
+            .format_version
+            .get(),
+        2
+    );
+    assert_eq!(
+        after.authority.plugin_config.get("format-state").unwrap()["total"],
+        serde_json::json!(17)
+    );
 }

@@ -1273,7 +1273,7 @@ pub struct RemoteProcessPluginConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub namespaces: BTreeMap<String, serde_json::Value>,
+    pub namespaces: BTreeMap<String, RemotePluginConfigNamespace>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1489,4 +1489,12 @@ impl RemoteProcessListResponse {
         }
         Ok(())
     }
+}
+
+/// A recorded plugin config namespace, including its declared format stamp.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemotePluginConfigNamespace {
+    pub format_version: std::num::NonZeroU32,
+    pub value: serde_json::Value,
 }

@@ -12,6 +12,7 @@ use crate::runtime::{RuntimeError, RuntimeErrorCode};
 impl From<PluginError> for RuntimeEffectControllerError {
     fn from(err: PluginError) -> Self {
         match err {
+            PluginError::Format(refusal) => refusal.into(),
             PluginError::StoredDataCorrupt {
                 record_kind,
                 message,

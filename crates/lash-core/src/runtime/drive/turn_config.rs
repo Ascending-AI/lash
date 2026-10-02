@@ -131,18 +131,22 @@ impl LashRuntime {
             .await
             .and_then(RuntimeEffectOutcome::into_resolve_turn_config)
             .map_err(RuntimeEffectControllerError::into_runtime_error)?;
-        self.apply_turn_config(&resolved);
+        self.apply_turn_config(&resolved)?;
         Ok(())
     }
 
     /// Preserve the sticky config before installing the recorded execution
     /// view. A replay may name a config that differs from the current head.
-    fn apply_turn_config(&mut self, resolved: &crate::ResolvedRun) {
-        self.install_resolved_run(resolved);
+    fn apply_turn_config(
+        &mut self,
+        resolved: &crate::ResolvedRun,
+    ) -> Result<(), crate::FormatRefusal> {
+        self.install_resolved_run(resolved)?;
         debug_assert_eq!(
             self.state.config_revision, resolved.base.config_revision,
             "a root's resident config revision moved inside the root"
         );
+        Ok(())
     }
 }
 
@@ -432,11 +436,13 @@ mod tests {
         view.tool_access = tool_access.clone();
         view.subagent = Some(subagent.clone());
 
-        runtime.apply_turn_config(&crate::ResolvedRun::snapshot(
-            view,
-            crate::runtime::TerminationPolicy::default(),
-            crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
-        ));
+        runtime
+            .apply_turn_config(&crate::ResolvedRun::snapshot(
+                view,
+                crate::runtime::TerminationPolicy::default(),
+                crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
+            ))
+            .expect("root view formats decode");
 
         let plugins = runtime.plugin_session().expect("live plugin session");
         assert_eq!(

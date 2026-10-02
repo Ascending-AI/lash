@@ -25,7 +25,8 @@ impl RuntimeErrorCause {
             | Self::EffectGroupChildUnroutable { .. }
             | Self::RunShapeRefused { .. }
             | Self::ConfigRefused { .. }
-            | Self::MaxToolCallsExceeded { .. } => true,
+            | Self::MaxToolCallsExceeded { .. }
+            | Self::PluginFormat { .. } => true,
         }
     }
 

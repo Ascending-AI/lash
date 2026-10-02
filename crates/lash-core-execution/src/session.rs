@@ -343,6 +343,7 @@ pub enum SessionError {
 impl From<crate::plugin::CreationConfigError> for SessionError {
     fn from(error: crate::plugin::CreationConfigError) -> Self {
         match error {
+            crate::plugin::CreationConfigError::Format(refusal) => refusal.into(),
             crate::plugin::CreationConfigError::Refused(refusal) => {
                 Self::SessionConfigRefused(refusal)
             }
@@ -1592,5 +1593,11 @@ mod tool_catalog_cache_tests {
                 if tool_id.as_str() == "tool:missing-route" && name == "missing_route"
         ));
         assert_eq!(prepare_calls.load(Ordering::SeqCst), 0);
+    }
+}
+
+impl From<crate::FormatRefusal> for SessionError {
+    fn from(refusal: crate::FormatRefusal) -> Self {
+        Self::Plugin(refusal.into())
     }
 }

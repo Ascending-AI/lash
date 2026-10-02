@@ -6,8 +6,8 @@
 //! tool access). Each
 //! namespace has one owner:
 //!
-//! - An owner registers before any session exists
-//!   ([`PluginFactory::register_config`](super::PluginFactory::register_config)):
+//! - The host collects owners when configuration is first used, after format
+//!   preflight ([`PluginFactory::register_config`](super::PluginFactory::register_config)):
 //!   its [`ConfigOwner`] creates the namespace from the creator's input, its
 //!   defaults and its parent's recorded value, and validates every candidate.
 //! - The owner's typed [`ConfigCommand`]s are the only changes the namespace
@@ -389,6 +389,11 @@ fn unreadable(role: ConfigValueRole, error: impl std::fmt::Display) -> ConfigRef
     }
 }
 
+fn format_fault(refusal: super::FormatRefusal, at: RefusalSite) -> ConfigFault {
+    let owner = refusal.plugin.clone();
+    refused(&owner, at, ConfigRefusalReason::Format { refusal })
+}
+
 fn refused(owner_id: &str, at: RefusalSite, reason: ConfigRefusalReason) -> ConfigFault {
     ConfigFault::Refused(ConfigRefusal {
         owner: owner_id.to_string(),
@@ -638,6 +643,8 @@ fn reduce_typed<C: ConfigCommand>(
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum CreationConfigError {
     #[error(transparent)]
+    Format(#[from] super::FormatRefusal),
+    #[error(transparent)]
     Refused(#[from] ConfigRefusal),
     #[error(transparent)]
     RecordedCorrupt(#[from] RecordedNamespaceCorrupt),
@@ -752,6 +759,7 @@ impl ConfigTransaction {
 #[derive(Clone)]
 pub struct ConfigRegistry {
     owners: BTreeMap<String, RegisteredOwner>,
+    factories: Vec<Arc<dyn PluginFactory>>,
 }
 
 impl std::fmt::Debug for ConfigRegistry {
@@ -781,7 +789,10 @@ impl ConfigRegistry {
                 owners.insert(plugin_id.to_string(), owner);
             }
         }
-        Ok(Self { owners })
+        Ok(Self {
+            owners,
+            factories: factories.to_vec(),
+        })
     }
 
     /// The recorded plugin configuration of a session being created: every
@@ -806,6 +817,13 @@ impl ConfigRegistry {
                 ConfigRefusalReason::UnknownOwner,
             ));
         }
+        let requested_config = PluginConfig::from_recorded_parts(None, requested.plugins.clone());
+        let requested = super::formats::decode_config_for(&self.factories, &requested_config)
+            .map_err(|refusal| format_fault(refusal, RefusalSite::Creation))?;
+        let parent = parent
+            .map(|parent| super::formats::decode_config_for(&self.factories, parent))
+            .transpose()
+            .map_err(|refusal| format_fault(refusal, RefusalSite::Creation))?;
         let mut config = PluginConfig::for_protocol(protocol_plugin_id.map(str::to_string));
         for (plugin_id, registered) in &self.owners {
             if plugin_id == CORE_CONFIG_OWNER {
@@ -813,12 +831,23 @@ impl ConfigRegistry {
             }
             let created = registered.owner.create(
                 plugin_id,
-                requested.plugins.get(plugin_id),
-                parent.and_then(|parent| parent.get(plugin_id)),
+                requested.get(plugin_id),
+                parent.as_ref().and_then(|parent| parent.get(plugin_id)),
                 is_root_session,
             )?;
             if let Some(value) = created {
-                config.insert(plugin_id.clone(), value);
+                let Some(factory) = self
+                    .factories
+                    .iter()
+                    .find(|factory| factory.id() == plugin_id)
+                else {
+                    return Err(refused(plugin_id, RefusalSite::Creation, ConfigRefusalReason::UnknownOwner));
+                };
+                let writer = factory.declaration().format_version;
+                let encoded = factory
+                    .encode_format(writer, super::FormatNamespace::Config, &value)
+                    .map_err(|refusal| format_fault(refusal, RefusalSite::Creation))?;
+                config.insert_versioned(plugin_id.clone(), writer, encoded);
             }
         }
         Ok(config)
@@ -992,6 +1021,12 @@ impl ConfigRegistry {
         transaction: &ConfigTransactionRecord,
         models: &dyn crate::RuntimeModels,
     ) -> Result<ConfigResolutionDecision, ConfigFault> {
+        let mut decoded_base = base.clone();
+        decoded_base.plugin_config =
+            super::formats::decode_config_for(&self.factories, &base.plugin_config)
+                .map_err(|refusal| format_fault(refusal, RefusalSite::Candidate))?;
+        let original_base = base;
+        let base = &decoded_base;
         let base_core = CoreConfig::of(base);
         let mut candidate: BTreeMap<String, serde_json::Value> = BTreeMap::new();
         let mut outputs = Vec::with_capacity(transaction.entries.len());
@@ -1057,7 +1092,9 @@ impl ConfigRegistry {
         let namespaces = candidate;
         let final_core = core.clone().unwrap_or_else(|| base_core.clone());
         let mut final_plugins = base.plugin_config.clone();
-        final_plugins.apply_namespace_updates(&namespaces);
+        for (id, value) in &namespaces {
+            final_plugins.insert(id.clone(), value.clone());
+        }
         let facts = CandidateFacts {
             core: &final_core,
             plugin_config: &final_plugins,
@@ -1078,9 +1115,31 @@ impl ConfigRegistry {
                 .owner
                 .validate(owner, value, base.plugin_config.get(owner), &facts)?;
         }
+        let mut encoded_namespaces = BTreeMap::new();
+        for factory in &self.factories {
+            let id = factory.id();
+            let Some(value) = final_plugins.get(id) else {
+                continue;
+            };
+            if !namespaces.contains_key(id)
+                && original_base.plugin_config.namespace(id) == final_plugins.namespace(id)
+            {
+                continue;
+            }
+            let writer = factory.declaration().format_version;
+            let value = factory.encode_format(writer, super::FormatNamespace::Config, value)
+                .map_err(|refusal| format_fault(refusal, RefusalSite::Candidate))?;
+            encoded_namespaces.insert(
+                id.into(),
+                super::PluginConfigNamespace {
+                    format_version: writer,
+                    value,
+                },
+            );
+        }
         Ok(ConfigResolutionDecision::Applied {
             core: core.map(Box::new),
-            namespaces,
+            namespaces: encoded_namespaces,
             outputs,
         })
     }
@@ -1117,6 +1176,16 @@ impl ConfigRegistry {
         base: &crate::PersistedSessionConfig,
         derived: &crate::PersistedSessionConfig,
     ) -> Result<(), ConfigFault> {
+        let mut native_base = base.clone();
+        native_base.plugin_config =
+            super::formats::decode_config_for(&self.factories, &base.plugin_config)
+                .map_err(|refusal| format_fault(refusal, RefusalSite::Candidate))?;
+        let mut native_derived = derived.clone();
+        native_derived.plugin_config =
+            super::formats::decode_config_for(&self.factories, &derived.plugin_config)
+                .map_err(|refusal| format_fault(refusal, RefusalSite::Candidate))?;
+        let base = &native_base;
+        let derived = &native_derived;
         let core = CoreConfig::of(derived);
         let facts = CandidateFacts {
             core: &core,

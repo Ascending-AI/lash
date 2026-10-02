@@ -1,4 +1,5 @@
 //! Durable protocol-owned execution state carried in a session checkpoint.
+use crate::plugin_state::{FormatVersion, PluginConfigNamespace};
 use serde::de::DeserializeOwned;
 
 use serde::{Deserialize, Serialize};
@@ -77,7 +78,7 @@ pub struct PluginConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     protocol: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    namespaces: BTreeMap<String, serde_json::Value>,
+    namespaces: BTreeMap<String, PluginConfigNamespace>,
 }
 impl PluginConfig {
     /// A configuration recorded under the protocol plugin `protocol`.
@@ -96,7 +97,7 @@ impl PluginConfig {
     /// namespaces exactly as recorded where it was encoded.
     pub fn from_recorded_parts(
         protocol: Option<String>,
-        namespaces: BTreeMap<String, serde_json::Value>,
+        namespaces: BTreeMap<String, PluginConfigNamespace>,
     ) -> Self {
         Self {
             protocol,
@@ -105,7 +106,7 @@ impl PluginConfig {
     }
 
     /// The protocol owner and the namespaces, for a transport to encode.
-    pub fn into_recorded_parts(self) -> (Option<String>, BTreeMap<String, serde_json::Value>) {
+    pub fn into_recorded_parts(self) -> (Option<String>, BTreeMap<String, PluginConfigNamespace>) {
         (self.protocol, self.namespaces)
     }
 
@@ -116,7 +117,32 @@ impl PluginConfig {
 
     /// The namespace `plugin_id` recorded, if any.
     pub fn get(&self, plugin_id: &str) -> Option<&serde_json::Value> {
+        self.namespaces
+            .get(plugin_id)
+            .map(|namespace| &namespace.value)
+    }
+
+    pub fn namespace(&self, plugin_id: &str) -> Option<&PluginConfigNamespace> {
         self.namespaces.get(plugin_id)
+    }
+
+    pub fn namespaces(&self) -> &BTreeMap<String, PluginConfigNamespace> {
+        &self.namespaces
+    }
+
+    pub fn insert_versioned(
+        &mut self,
+        plugin_id: impl Into<String>,
+        format_version: FormatVersion,
+        value: serde_json::Value,
+    ) {
+        self.namespaces.insert(
+            plugin_id.into(),
+            PluginConfigNamespace {
+                format_version,
+                value,
+            },
+        );
     }
 
     /// Decode the namespace `plugin_id` recorded, if any.
@@ -124,15 +150,16 @@ impl PluginConfig {
     where
         T: DeserializeOwned,
     {
-        self.namespaces
-            .get(plugin_id)
+        self.get(plugin_id)
             .cloned()
             .map(serde_json::from_value)
             .transpose()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&String, &serde_json::Value)> {
-        self.namespaces.iter()
+        self.namespaces
+            .iter()
+            .map(|(id, namespace)| (id, &namespace.value))
     }
 
     /// The session's protocol turn options: a view of the protocol plugin's
@@ -140,7 +167,7 @@ impl PluginConfig {
     pub fn protocol_turn_options(&self) -> crate::ProtocolTurnOptions {
         self.protocol
             .as_deref()
-            .and_then(|protocol| self.namespaces.get(protocol))
+            .and_then(|protocol| self.get(protocol))
             .cloned()
             .map(crate::ProtocolTurnOptions::from_payload)
             .unwrap_or_default()
@@ -150,11 +177,16 @@ impl PluginConfig {
     /// Only an owner's output reaches this: what it created, or its recorded
     /// namespace with a run's options applied.
     pub fn insert(&mut self, plugin_id: impl Into<String>, value: serde_json::Value) {
-        self.namespaces.insert(plugin_id.into(), value);
+        let plugin_id = plugin_id.into();
+        let format_version = self
+            .namespaces
+            .get(&plugin_id)
+            .map_or(FormatVersion::ONE, |ns| ns.format_version);
+        self.insert_versioned(plugin_id, format_version, value);
     }
 
     /// Replace each namespace `updates` names with its value.
-    pub fn apply_namespace_updates(&mut self, updates: &BTreeMap<String, serde_json::Value>) {
+    pub fn apply_namespace_updates(&mut self, updates: &BTreeMap<String, PluginConfigNamespace>) {
         for (plugin_id, value) in updates {
             self.namespaces.insert(plugin_id.clone(), value.clone());
         }
@@ -194,7 +226,7 @@ impl AdmittedPluginConfig {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PluginOptions {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub plugins: BTreeMap<String, serde_json::Value>,
+    pub plugins: BTreeMap<String, PluginConfigNamespace>,
 }
 impl PluginOptions {
     pub fn empty() -> Self {
@@ -219,9 +251,23 @@ impl PluginOptions {
     where
         T: Serialize,
     {
-        self.plugins
-            .insert(plugin_id.into(), serde_json::to_value(extras)?);
+        self.insert_versioned(plugin_id, FormatVersion::ONE, serde_json::to_value(extras)?);
         Ok(())
+    }
+
+    pub fn insert_versioned(
+        &mut self,
+        plugin_id: impl Into<String>,
+        format_version: FormatVersion,
+        value: serde_json::Value,
+    ) {
+        self.plugins.insert(
+            plugin_id.into(),
+            PluginConfigNamespace {
+                format_version,
+                value,
+            },
+        );
     }
 
     pub fn is_empty(&self) -> bool {
@@ -235,11 +281,16 @@ impl PluginOptions {
     #[must_use]
     pub fn over(self, mut under: Self) -> Self {
         for (plugin_id, top) in self.plugins {
-            match (under.plugins.get_mut(&plugin_id), top) {
-                (Some(serde_json::Value::Object(base)), serde_json::Value::Object(top)) => {
-                    base.extend(top);
+            match under.plugins.get_mut(&plugin_id) {
+                Some(base) if base.format_version == top.format_version => {
+                    match (&mut base.value, top.value) {
+                        (serde_json::Value::Object(base), serde_json::Value::Object(top)) => {
+                            base.extend(top)
+                        }
+                        (base, top) => *base = top,
+                    }
                 }
-                (_, top) => {
+                _ => {
                     under.plugins.insert(plugin_id, top);
                 }
             }
@@ -253,7 +304,7 @@ impl PluginOptions {
     {
         self.plugins
             .get(plugin_id)
-            .cloned()
+            .map(|namespace| namespace.value.clone())
             .map(serde_json::from_value)
             .transpose()
     }

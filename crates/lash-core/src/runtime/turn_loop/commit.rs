@@ -196,18 +196,22 @@ impl CommittedTurn {
     /// Synchronize the accepted durable commit into the resident runtime.
     /// This transition intentionally cannot await; consuming `self` is the
     /// only way to obtain the post-commit delivery phase.
-    fn adopt(self, runtime: &mut LashRuntime, trace_turn_id: &TurnId) -> PostCommitDelivery {
-        runtime.install_resident_state(self.resident_state);
+    fn adopt(
+        self,
+        runtime: &mut LashRuntime,
+        trace_turn_id: &TurnId,
+    ) -> Result<PostCommitDelivery, RuntimeError> {
+        runtime.install_resident_state(self.resident_state)?;
         let observation_revision =
             crate::runtime::observation::observation_revision(&runtime.state);
         runtime
             .resident_session
             .record_committed_observation_turn(observation_revision.as_u64(), trace_turn_id);
-        PostCommitDelivery {
+        Ok(PostCommitDelivery {
             turn: self.turn,
             events: self.events,
             post_commit_delivery_failed: false,
-        }
+        })
     }
 }
 
@@ -267,7 +271,7 @@ impl LashRuntime {
         root: TurnId,
         opts: TurnOptions<'_>,
     ) -> Result<(), RuntimeError> {
-        self.uninstall_root_view();
+        self.uninstall_root_view()?;
         let controller = opts.scoped_effect_controller();
         let binding =
             turn_control_binding(self.host.core.control.effect_host.as_ref(), &controller).await?;
@@ -710,7 +714,7 @@ impl LashRuntime {
         };
         self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);
         self.mark_phase_begin(CommittedTurn::RUNTIME_PHASE);
-        let mut delivery = committed.adopt(self, &trace_turn_id);
+        let mut delivery = committed.adopt(self, &trace_turn_id)?;
         self.mark_phase_end(CommittedTurn::RUNTIME_PHASE);
         self.mark_phase_begin(PostCommitDelivery::RUNTIME_PHASE);
 

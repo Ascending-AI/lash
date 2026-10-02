@@ -374,6 +374,46 @@ impl LashRuntime {
                 ),
             )
         })?;
+        session
+            .plugins()
+            .host()
+            .validate_config_formats(&durable_state.authority.plugin_config)
+            .map_err(|error| {
+                (
+                    ResidentReloadStage::ProtocolSessionRestore,
+                    RuntimeError::from(error),
+                )
+            })?;
+        if let Some(snapshot) = durable_state.plugin_state() {
+            session
+                .plugins()
+                .host()
+                .validate_state_formats(snapshot)
+                .map_err(|error| {
+                    (
+                        ResidentReloadStage::ProtocolSessionRestore,
+                        RuntimeError::from(error),
+                    )
+                })?;
+        }
+        durable_state.authority.plugin_config = session
+            .plugins()
+            .host()
+            .decode_config(&durable_state.authority.plugin_config)
+            .map_err(|error| {
+                (
+                    ResidentReloadStage::ProtocolSessionRestore,
+                    RuntimeError::from(error),
+                )
+            })?;
+        if let Some(snapshot) = durable_state.plugin_state() {
+            session.plugins().hydrate_state(snapshot).map_err(|error| {
+                (
+                    ResidentReloadStage::ProtocolSessionRestore,
+                    crate::RuntimeEffectControllerError::from(error).into_runtime_error(),
+                )
+            })?;
+        }
         session.invalidate_runtime_caches();
         // A `PreservePersisted` open never installed its snapshot, so the
         // reload does not reconcile it either (FIG-3353).
@@ -421,9 +461,6 @@ impl LashRuntime {
                     ),
                 )
             })?;
-        }
-        if let Some(snapshot) = durable_state.plugin_state() {
-            session.plugins().hydrate_state(snapshot);
         }
         let protocol_session = Arc::clone(session.plugins().protocol_session());
         let session_id = durable_state.session_id.clone();
@@ -548,7 +585,13 @@ impl LashRuntime {
             // install reasserts the per-open `PreservePersisted` claim from
             // host configuration so later stamps keep the loaded snapshot
             // (FIG-3353).
-            self.install_resident_state(durable_state);
+            self.install_resident_state(durable_state)
+                .map_err(|error| {
+                    (
+                        ResidentReloadStage::ProtocolSessionRestore,
+                        RuntimeError::from(error),
+                    )
+                })?;
             // A successful reload is a full durable adoption: settle the
             // freshness facts so the turn loop does not issue a second
             // durable probe right after this reload (FIG-1875).

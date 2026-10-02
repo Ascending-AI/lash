@@ -249,6 +249,9 @@ impl EmbeddedRuntimeBuilder {
             super::lifecycle::recorded_parent_session_id(self.store.as_ref()).await?;
         let is_root_session = parent_session_id.is_none();
         let plugins = self.resolve_plugins(&state, parent_session_id)?;
+        state.authority.plugin_config = plugins
+            .host()
+            .decode_config(&state.authority.plugin_config)?;
         if created {
             // A new session records what every installed owner resolves for
             // it, under the protocol its plugins registered (FIG-4379).
@@ -258,7 +261,7 @@ impl EmbeddedRuntimeBuilder {
                 None,
                 is_root_session,
             )?;
-            plugins.publish_plugin_config(state.admitted_plugin_config());
+            plugins.publish_plugin_config(state.admitted_plugin_config())?;
         }
         let mut persistence = super::lifecycle::RuntimePersistenceBindings::new(self.store);
         if let Some(manifest_store) = self.attachment_referrers_store {

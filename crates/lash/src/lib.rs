@@ -829,7 +829,8 @@ pub mod plugins {
     };
     /// Host-mediated JSON state, accepted in memory and persisted at boundary commits.
     pub use lash_core::plugin::{
-        KeyRejection, PluginStateEdit, PluginStateError, PluginStateStore, SessionReadyContext,
+        FormatNamespace, FormatRefusal, FormatVersion, KeyRejection, PluginConfigNamespace,
+        PluginStateEdit, PluginStateError, PluginStateStore, SessionReadyContext,
     };
     /// Plugin operations: the query / command / task vocabulary. A plugin
     /// author declares an operation by implementing [`PluginOperation`] plus
@@ -1058,11 +1059,11 @@ pub mod remote {
             RemoteLifetimeDecision, RemoteModelConfig, RemoteModelMetadata, RemoteNoProgressBudget,
             RemoteObservedProcess, RemoteObservedProcessEvent, RemoteObservedProcessFailure,
             RemoteObservedWorkItemState, RemoteParkReason, RemotePersistProcessEnvReceipt,
-            RemotePersistProcessEnvRequest, RemoteProcessAwaitOutcome, RemoteProcessAwaitOutput,
-            RemoteProcessAwaitRequest, RemoteProcessCancelReceipt, RemoteProcessCancelRequest,
-            RemoteProcessDefinition, RemoteProcessEvent, RemoteProcessEventSemantics,
-            RemoteProcessEventSemanticsSpec, RemoteProcessEventType, RemoteProcessEventsRequest,
-            RemoteProcessEventsResponse, RemoteProcessExecutionEnvRef,
+            RemotePersistProcessEnvRequest, RemotePluginConfigNamespace, RemoteProcessAwaitOutcome,
+            RemoteProcessAwaitOutput, RemoteProcessAwaitRequest, RemoteProcessCancelReceipt,
+            RemoteProcessCancelRequest, RemoteProcessDefinition, RemoteProcessEvent,
+            RemoteProcessEventSemantics, RemoteProcessEventSemanticsSpec, RemoteProcessEventType,
+            RemoteProcessEventsRequest, RemoteProcessEventsResponse, RemoteProcessExecutionEnvRef,
             RemoteProcessExecutionEnvSpec, RemoteProcessExecutionPolicy, RemoteProcessExternalRef,
             RemoteProcessHandleView, RemoteProcessIdentity, RemoteProcessInput,
             RemoteProcessListFilter, RemoteProcessListResponse, RemoteProcessModelLimits,
