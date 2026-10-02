@@ -31,16 +31,6 @@ constant_path = "crates/lash-postgres-store/src/lib.rs"
 reason = "the registered POSTGRES_SCHEMA_VERSION in the stamp column's type: an alias, not a number of its own"
 
 [[unregistered]]
-constant = "LASH_TRACE_SCHEMA_VERSION"
-constant_path = "crates/lash-trace/src/otel/attribute_keys.rs"
-reason = "OpenTelemetry attribute key name, not a version"
-
-[[unregistered]]
-constant = "LASH_TRACE_END_SCHEMA_VERSION"
-constant_path = "crates/lash-trace/src/otel/attribute_keys.rs"
-reason = "OpenTelemetry attribute key name, not a version"
-
-[[unregistered]]
 constant = "APP_VERSION"
 constant_path = "crates/lash-perf/src/main.rs"
 reason = "mirrors the package version"
