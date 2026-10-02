@@ -539,10 +539,11 @@ impl PluginFactory for FormatPlugin {
     fn id(&self) -> &'static str {
         "format-state"
     }
-    fn declaration(&self) -> lash_core::PluginDeclaration {
-        let mut declaration = lash_core::PluginDeclaration::initial(self.id());
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        let mut declaration = lash_core::plugin::PluginDeclaration::initial("format-state");
         declaration.format_version = lash_core::FormatVersion::new(2).unwrap();
-        declaration.writable_formats = vec![lash_core::FormatVersion::ONE, declaration.format_version];
+        declaration.writable_formats =
+            vec![lash_core::FormatVersion::ONE, declaration.format_version];
         declaration
     }
     fn migrate_format(

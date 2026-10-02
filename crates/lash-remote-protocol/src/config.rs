@@ -86,6 +86,9 @@ pub enum RemoteConfigValueRole {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RemoteConfigRefusalReason {
+    Format {
+        refusal: RemoteFormatRefusal,
+    },
     /// The owner refused: `refusal` is in the shape of its registered
     /// refusal schema, and `message` is that refusal's display text.
     Owner {
@@ -103,6 +106,21 @@ pub enum RemoteConfigRefusalReason {
         role: RemoteConfigValueRole,
         message: String,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteFormatNamespace {
+    State,
+    Config,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RemoteFormatRefusal {
+    pub plugin: String,
+    pub namespace: RemoteFormatNamespace,
+    pub stored: std::num::NonZeroU32,
+    pub readable: std::num::NonZeroU32,
 }
 
 /// A refused config transaction: the owner it names, where it was refused

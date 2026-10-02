@@ -13,7 +13,9 @@ pub enum FormatNamespace {
 }
 
 /// A plugin cannot interpret or encode this namespace's requested format.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, thiserror::Error)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, thiserror::Error,
+)]
 #[error(
     "plugin `{plugin}` {namespace:?} format {stored} is unreadable by native format {readable}"
 )]

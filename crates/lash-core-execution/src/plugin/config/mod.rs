@@ -841,7 +841,11 @@ impl ConfigRegistry {
                     .iter()
                     .find(|factory| factory.id() == plugin_id)
                 else {
-                    return Err(refused(plugin_id, RefusalSite::Creation, ConfigRefusalReason::UnknownOwner));
+                    return Err(refused(
+                        plugin_id,
+                        RefusalSite::Creation,
+                        ConfigRefusalReason::UnknownOwner,
+                    ));
                 };
                 let writer = factory.declaration().format_version;
                 let encoded = factory
@@ -1127,7 +1131,8 @@ impl ConfigRegistry {
                 continue;
             }
             let writer = factory.declaration().format_version;
-            let value = factory.encode_format(writer, super::FormatNamespace::Config, value)
+            let value = factory
+                .encode_format(writer, super::FormatNamespace::Config, value)
                 .map_err(|refusal| format_fault(refusal, RefusalSite::Candidate))?;
             encoded_namespaces.insert(
                 id.into(),
@@ -1154,6 +1159,8 @@ impl ConfigRegistry {
         protocol: &str,
         options: &crate::ProtocolTurnOptions,
     ) -> Result<serde_json::Value, ConfigFault> {
+        let config = super::formats::decode_config_for(&self.factories, config)
+            .map_err(|refusal| format_fault(refusal, RefusalSite::Candidate))?;
         let refuse = |reason| refused(protocol, RefusalSite::Candidate, reason);
         let registered = self
             .owners

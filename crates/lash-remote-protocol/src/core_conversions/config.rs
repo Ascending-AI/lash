@@ -97,6 +97,17 @@ impl From<RemoteConfigValueRole> for lash_core::ConfigValueRole {
 impl From<lash_core::ConfigRefusalReason> for RemoteConfigRefusalReason {
     fn from(value: lash_core::ConfigRefusalReason) -> Self {
         match value {
+            lash_core::ConfigRefusalReason::Format { refusal } => Self::Format {
+                refusal: RemoteFormatRefusal {
+                    plugin: refusal.plugin,
+                    namespace: match refusal.namespace {
+                        lash_core::FormatNamespace::State => RemoteFormatNamespace::State,
+                        lash_core::FormatNamespace::Config => RemoteFormatNamespace::Config,
+                    },
+                    stored: refusal.stored.into(),
+                    readable: refusal.readable.into(),
+                },
+            },
             lash_core::ConfigRefusalReason::Owner { refusal, message } => {
                 Self::Owner { refusal, message }
             }
@@ -114,6 +125,17 @@ impl From<lash_core::ConfigRefusalReason> for RemoteConfigRefusalReason {
 impl From<RemoteConfigRefusalReason> for lash_core::ConfigRefusalReason {
     fn from(value: RemoteConfigRefusalReason) -> Self {
         match value {
+            RemoteConfigRefusalReason::Format { refusal } => Self::Format {
+                refusal: lash_core::FormatRefusal {
+                    plugin: refusal.plugin,
+                    namespace: match refusal.namespace {
+                        RemoteFormatNamespace::State => lash_core::FormatNamespace::State,
+                        RemoteFormatNamespace::Config => lash_core::FormatNamespace::Config,
+                    },
+                    stored: refusal.stored.into(),
+                    readable: refusal.readable.into(),
+                },
+            },
             RemoteConfigRefusalReason::Owner { refusal, message } => {
                 Self::Owner { refusal, message }
             }

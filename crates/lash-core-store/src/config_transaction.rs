@@ -180,7 +180,9 @@ impl ConfigValueRole {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ConfigRefusalReason {
     /// The namespace's stored or requested writer format is unavailable.
-    Format { refusal: crate::plugin_state::FormatRefusal },
+    Format {
+        refusal: crate::plugin_state::FormatRefusal,
+    },
     /// The owner refused: `refusal` is its registered refusal type,
     /// serialized, and `message` that refusal's display text.
     Owner {
@@ -272,7 +274,8 @@ impl ConfigRefusal {
             ConfigRefusalReason::Owner { refusal, .. } => {
                 serde_json::from_value(refusal.clone()).ok()
             }
-            ConfigRefusalReason::UnknownOwner
+            ConfigRefusalReason::Format { .. }
+            | ConfigRefusalReason::UnknownOwner
             | ConfigRefusalReason::UnknownCommand
             | ConfigRefusalReason::UnrecordedNamespace
             | ConfigRefusalReason::Unreadable { .. } => None,

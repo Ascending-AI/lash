@@ -1403,6 +1403,10 @@ where
         registrar.owner(ShapedOwner::<R>(std::marker::PhantomData))
     }
 
+    fn declaration(&self) -> crate::plugin::PluginDeclaration {
+        crate::plugin::PluginDeclaration::initial(crate::plugin::PluginFactory::id(self))
+    }
+
     fn build(
         &self,
         _ctx: &crate::plugin::PluginSessionContext,

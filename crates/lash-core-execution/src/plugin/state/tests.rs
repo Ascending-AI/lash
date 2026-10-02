@@ -10,8 +10,8 @@ impl crate::PluginFactory for FormatProbe {
         "format-probe"
     }
 
-    fn declaration(&self) -> crate::PluginDeclaration {
-        let mut declaration = crate::PluginDeclaration::initial(self.id());
+    fn declaration(&self) -> crate::plugin::PluginDeclaration {
+        let mut declaration = crate::plugin::PluginDeclaration::initial(self.id());
         declaration.format_version = crate::FormatVersion::new(2).unwrap();
         declaration.writable_formats = vec![crate::FormatVersion::ONE, declaration.format_version];
         declaration
@@ -179,7 +179,10 @@ fn plugin_formats_refuse_before_callbacks_and_preserve_bytes() {
     let error = host
         .resolve_creation_plugin_config(None, &options, None, true)
         .unwrap_err();
-    assert!(matches!(error, crate::plugin::CreationConfigError::Format(_)));
+    assert!(matches!(
+        error,
+        crate::plugin::CreationConfigError::Format(_)
+    ));
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
     assert_eq!(rmp_serde::to_vec_named(&config).unwrap(), config_bytes);
 }

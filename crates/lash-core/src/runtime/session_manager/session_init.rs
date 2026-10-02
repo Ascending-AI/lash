@@ -308,6 +308,7 @@ pub(in crate::runtime::session_manager) fn resolve_child_facts(
             !is_child,
         )
         .map_err(|error| match error {
+            crate::CreationConfigError::Format(refusal) => crate::PluginError::Format(refusal),
             crate::CreationConfigError::Refused(refusal) => crate::PluginError::Runtime(
                 crate::RuntimeError::session_config_refused(session_id, refusal),
             ),
