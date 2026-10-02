@@ -1,7 +1,7 @@
 //! Google OAuth authorize-URL / code-exchange / refresh-token flow.
 //! Public so Host Applications can drive interactive login.
 
-use lash_provider_auth::{OAuthError, OAuthTokens, now_secs, url_form_encode};
+use lash_provider_auth::{OAuthError, OAuthTokens, now_secs, oauth_send, url_form_encode};
 
 use crate::GoogleOAuthClient;
 
@@ -61,23 +61,22 @@ pub async fn exchange_code(
             "no authorization code found in pasted input".to_string(),
         ));
     }
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(GOOGLE_TOKEN_URL)
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(url_form_encode(&[
-            ("grant_type", "authorization_code"),
-            ("code", auth_code.as_str()),
-            ("redirect_uri", GOOGLE_REDIRECT_URI),
-            ("client_id", oauth_client.id.as_str()),
-            ("client_secret", oauth_client.secret.expose_secret()),
-            ("code_verifier", verifier),
-        ]))
-        .send()
-        .await?;
+    let (status, response_body) = oauth_send(
+        reqwest::Client::new()
+            .post(GOOGLE_TOKEN_URL)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(url_form_encode(&[
+                ("grant_type", "authorization_code"),
+                ("code", auth_code.as_str()),
+                ("redirect_uri", GOOGLE_REDIRECT_URI),
+                ("client_id", oauth_client.id.as_str()),
+                ("client_secret", oauth_client.secret.expose_secret()),
+                ("code_verifier", verifier),
+            ])),
+    )
+    .await?;
 
-    let status = resp.status();
-    let body: serde_json::Value = resp.json().await?;
+    let body: serde_json::Value = serde_json::from_str(&response_body)?;
     if !status.is_success() {
         let err = body["error_description"]
             .as_str()
@@ -93,22 +92,29 @@ pub async fn refresh_tokens(
     oauth_client: &GoogleOAuthClient,
     refresh: &str,
 ) -> Result<OAuthTokens, OAuthError> {
-    validate_client_credentials(oauth_client)?;
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(GOOGLE_TOKEN_URL)
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(url_form_encode(&[
-            ("grant_type", "refresh_token"),
-            ("refresh_token", refresh),
-            ("client_id", oauth_client.id.as_str()),
-            ("client_secret", oauth_client.secret.expose_secret()),
-        ]))
-        .send()
-        .await?;
+    refresh_tokens_at(oauth_client, GOOGLE_TOKEN_URL, refresh).await
+}
 
-    let status = resp.status();
-    let response_body = resp.text().await?;
+/// The refresh exchange against an explicit token endpoint, so tests can
+/// point the flow at a fake peer.
+async fn refresh_tokens_at(
+    oauth_client: &GoogleOAuthClient,
+    token_url: &str,
+    refresh: &str,
+) -> Result<OAuthTokens, OAuthError> {
+    validate_client_credentials(oauth_client)?;
+    let (status, response_body) = oauth_send(
+        reqwest::Client::new()
+            .post(token_url)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(url_form_encode(&[
+                ("grant_type", "refresh_token"),
+                ("refresh_token", refresh),
+                ("client_id", oauth_client.id.as_str()),
+                ("client_secret", oauth_client.secret.expose_secret()),
+            ])),
+    )
+    .await?;
     if !status.is_success() {
         return Err(OAuthError::token_endpoint(
             status.as_u16(),
@@ -238,5 +244,106 @@ mod tests {
         // rejects genuinely empty pastes locally.
         assert_eq!(extract_auth_code("code="), "code=");
         assert_eq!(extract_auth_code("plain-code"), "plain-code");
+    }
+
+    /// Serve exactly one HTTP request on a loopback socket, then run
+    /// `respond`. The fake peer may stall (hold the socket silent) or flood
+    /// (write past the body cap); both are endpoint shapes the deadline and
+    /// byte cap exist for (FIG-4708 P2).
+    fn serve_once(
+        respond: impl FnOnce(std::net::TcpStream) + Send + 'static,
+    ) -> (String, std::thread::JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut head = Vec::new();
+            let mut buf = [0u8; 1024];
+            // The request body can arrive in the same segment as the headers,
+            // so look for the terminator anywhere rather than at the tail.
+            while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+                let read = std::io::Read::read(&mut stream, &mut buf).unwrap();
+                if read == 0 {
+                    return;
+                }
+                head.extend_from_slice(&buf[..read]);
+            }
+            respond(stream);
+        });
+        (url, server)
+    }
+
+    fn test_oauth_client() -> GoogleOAuthClient {
+        GoogleOAuthClient {
+            id: "client-id".to_string(),
+            secret: lash_provider_auth::Redacted::new("client-secret"),
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stalled_token_endpoint_fails_refresh_with_typed_timeout() {
+        let (url, server) = serve_once(|mut stream| {
+            // Accept the request then stay silent until the client gives up:
+            // the refresh deadline must end the wait rather than hang the
+            // credential refresh gate.
+            let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+            let mut buf = [0u8; 64];
+            let _ = std::io::Read::read(&mut stream, &mut buf);
+        });
+        let error = tokio::time::timeout(
+            std::time::Duration::from_secs(300),
+            refresh_tokens_at(
+                &test_oauth_client(),
+                &format!("{url}/token"),
+                "refresh-token",
+            ),
+        )
+        .await
+        .expect("the refresh deadline bounds the wait")
+        .expect_err("a stalled endpoint is a typed timeout");
+        assert!(matches!(error, OAuthError::Timeout), "{error:?}");
+        assert_eq!(
+            lash_provider_auth::classify_oauth_refresh_error(error).kind,
+            lash_provider_auth::CredentialErrorKind::Transient
+        );
+        // The deadline may fire before the fake peer's accept/read completes;
+        // detach rather than join so the law cannot hang on its own fixture.
+        drop(server);
+    }
+
+    #[tokio::test]
+    async fn oversized_token_response_fails_refresh_with_typed_cause() {
+        let padded = serde_json::json!({
+            "access_token": "access",
+            "refresh_token": "rotated",
+            "expires_in": 3600,
+            "pad": "x".repeat(256 * 1024),
+        })
+        .to_string();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{padded}",
+            padded.len()
+        );
+        let (url, server) = serve_once(move |mut stream| {
+            use std::io::Write as _;
+            let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(5)));
+            let _ = stream.write_all(response.as_bytes());
+        });
+        let error = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            refresh_tokens_at(
+                &test_oauth_client(),
+                &format!("{url}/token"),
+                "refresh-token",
+            ),
+        )
+        .await
+        .expect("the refresh deadline bounds the wait")
+        .expect_err("an oversized body is a typed failure");
+        assert!(
+            matches!(error, OAuthError::ResponseTooLarge { .. }),
+            "{error:?}"
+        );
+        let _ = server.join();
     }
 }

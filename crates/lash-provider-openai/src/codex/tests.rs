@@ -128,11 +128,27 @@ fn websocket_test_provider_with_chunk_timeout(
     websocket_url: String,
     chunk_timeout_ms: Option<u64>,
 ) -> CodexProvider {
+    websocket_test_provider_with_timeouts(
+        transport,
+        responses_url,
+        websocket_url,
+        5_000,
+        chunk_timeout_ms,
+    )
+}
+
+fn websocket_test_provider_with_timeouts(
+    transport: CodexTransport,
+    responses_url: String,
+    websocket_url: String,
+    request_timeout_ms: u64,
+    chunk_timeout_ms: Option<u64>,
+) -> CodexProvider {
     CodexProvider::new("access", "refresh", 0)
         .with_transport(transport)
         .with_options(ProviderOptions {
             reliability: ProviderReliability::codex()
-                .request_timeout(Some(RequestTimeout::Millis(5_000)))
+                .request_timeout(Some(RequestTimeout::Millis(request_timeout_ms)))
                 .stream_chunk_timeout_ms(chunk_timeout_ms),
             ..ProviderOptions::default()
         })

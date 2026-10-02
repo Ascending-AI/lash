@@ -123,3 +123,40 @@ async fn codex_scripted_websocket_idle_after_output_is_terminal_error() {
     assert_eq!(http.captured_len(), 0);
     assert_eq!(ws.captured().len(), 1);
 }
+
+#[tokio::test]
+async fn codex_websocket_regular_frames_cannot_outlive_request_deadline() {
+    // Non-terminal frames arrive well inside every idle/chunk window, so the
+    // per-frame deadline never lapses. Only the absolute request deadline may
+    // end the stream.
+    let ws = spawn_scripted_websocket(vec![ScriptedWsAction::Heartbeat {
+        interval: Duration::from_millis(10),
+    }])
+    .await;
+    let mut provider = websocket_test_provider_with_timeouts(
+        CodexTransport::Websocket,
+        "http://127.0.0.1:9/unused".to_string(),
+        ws.url.clone(),
+        300,
+        Some(60),
+    );
+    let started = std::time::Instant::now();
+
+    let err = tokio::time::timeout(
+        Duration::from_secs(5),
+        provider.complete(request(vec![LlmMessage::text(LlmRole::User, "hello")])),
+    )
+    .await
+    .expect("regular frames must not let the stream outlive the request deadline")
+    .expect_err("a nonterminal heartbeat stream must end at the request deadline");
+
+    assert_eq!(
+        err.code.as_ref().map(|code| code.to_string()),
+        Some("lash:timeout".to_string())
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "the request deadline, not the outer test timeout, ended the stream"
+    );
+    assert_eq!(ws.captured().len(), 1);
+}

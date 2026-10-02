@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 
 use http::{HeaderName, HeaderValue};
+use lash_sansio::sync::MutexExt;
 use rmcp::ServiceError;
 use rmcp::service::{RoleClient, RunningService, ServiceExt};
 use rmcp::transport::streamable_http_client::{
@@ -17,7 +18,7 @@ use tokio::time::Instant;
 use crate::config::{McpServerConfig, McpStdioTransport, McpTransport};
 use crate::error::McpError;
 use crate::host::{LashMcpClientHandler, McpHostServices, McpToolListChangedHandler};
-use crate::stdio_transport::ManagedChildTransport;
+use crate::stdio_transport::{ManagedChildTransport, StdioCloseCause, stdio_close_cause};
 
 type HandshakeFuture = Pin<
     Box<
@@ -29,6 +30,10 @@ type HandshakeFuture = Pin<
 pub(crate) struct ConnectingService {
     pub(crate) handshake: HandshakeFuture,
     pub(crate) stdio_child: Option<StdioChildGuard>,
+    /// Transport-recorded read cause for stdio children; rmcp's `waiting`
+    /// reports only a generic quit reason, so this cell carries the real one
+    /// (e.g. an over-limit inbound message) to the lifecycle actor.
+    pub(crate) stdio_close_cause: Option<StdioCloseCause>,
 }
 
 pub(crate) fn connect_service(
@@ -50,6 +55,7 @@ pub(crate) fn connect_service(
             // ownership of the exact child handle and can always reap it.
             let mut stdio_child = StdioChildGuard::new(server_name, child, shutdown_requested);
             active_pid.store(stdio_child.pid(), Ordering::SeqCst);
+            let stdio_close_cause = stdio_close_cause();
             let io = match (
                 stdio_child.child.stdout.take(),
                 stdio_child.child.stdin.take(),
@@ -57,6 +63,7 @@ pub(crate) fn connect_service(
                 (Some(stdout), Some(stdin)) => Ok(ManagedChildTransport::new(
                     tokio::fs::File::from_std(child_stdout_file(stdout)),
                     tokio::fs::File::from_std(child_stdin_file(stdin)),
+                    stdio_close_cause.clone(),
                 )),
                 (None, _) => Err(McpError::Protocol(format!(
                     "failed to capture stdout for `{command}` MCP server `{server_name}`"
@@ -66,15 +73,22 @@ pub(crate) fn connect_service(
                 ))),
             };
             let server_name = server_name.to_string();
+            let handshake_cause = stdio_close_cause.clone();
             let handshake = Box::pin(async move {
                 let transport = io?;
                 client_handler.serve(transport).await.map_err(|err| {
-                    McpError::Protocol(format!("MCP handshake with `{server_name}`: {err}"))
+                    let detail = handshake_cause
+                        .lock_recover()
+                        .as_ref()
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| err.to_string());
+                    McpError::Protocol(format!("MCP handshake with `{server_name}`: {detail}"))
                 })
             });
             Ok(ConnectingService {
                 handshake,
                 stdio_child: Some(stdio_child),
+                stdio_close_cause: Some(stdio_close_cause),
             })
         }
         McpTransport::StreamableHttp(transport) => {
@@ -94,6 +108,7 @@ pub(crate) fn connect_service(
             Ok(ConnectingService {
                 handshake,
                 stdio_child: None,
+                stdio_close_cause: None,
             })
         }
     }

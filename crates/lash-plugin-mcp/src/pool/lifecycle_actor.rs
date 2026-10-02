@@ -11,7 +11,7 @@ use std::sync::Weak;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use lash_sansio::sync::RwLockExt;
+use lash_sansio::sync::{MutexExt, RwLockExt};
 use rmcp::service::QuitReason;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, timeout};
@@ -20,6 +20,7 @@ use super::{McpEntry, McpServerFault, McpToolListRefresh, PublishedService, impo
 use crate::config::McpShutdownPolicy;
 use crate::error::McpError;
 use crate::service_lifecycle::{ConnectingService, StdioChildGuard, connect_service};
+use crate::stdio_transport::StdioCloseCause;
 
 pub(super) enum LifecycleCommand {
     Establish {
@@ -160,7 +161,27 @@ struct Connection {
     request_tasks: Arc<crate::host::McpHostRequestTasks>,
     waiting: ServiceWaiting,
     child: Option<StdioChildGuard>,
+    stdio_close_cause: Option<StdioCloseCause>,
     refresh: Option<CatalogRefresh>,
+}
+
+/// The transport's recorded read cause beats rmcp's generic quit reason: an
+/// over-limit inbound message ends `receive` as `None`, which `waiting`
+/// reports only as an unnamed transport close.
+fn quit_cause(
+    connection: &Connection,
+    server_name: &str,
+    context: &str,
+    reason: &Result<QuitReason, tokio::task::JoinError>,
+) -> String {
+    let recorded = connection
+        .stdio_close_cause
+        .as_ref()
+        .and_then(|cell| cell.lock_recover().as_ref().map(ToString::to_string));
+    match recorded {
+        Some(cause) => format!("MCP server `{server_name}` service quit{context}: {cause}"),
+        None => format!("MCP server `{server_name}` service quit{context}: {reason:?}"),
+    }
 }
 
 impl Connection {
@@ -415,6 +436,7 @@ impl LifecycleActor {
         let ConnectingService {
             handshake,
             mut stdio_child,
+            stdio_close_cause,
         } = match connect_service(
             &server_name,
             &config,
@@ -495,6 +517,7 @@ impl LifecycleActor {
             request_tasks: running.service().request_tasks(),
             waiting: ServiceWaiting::new(Box::pin(running.waiting())),
             child: stdio_child.take(),
+            stdio_close_cause,
             refresh: None,
         };
         if self.pause_mid_establish().await {
@@ -539,7 +562,7 @@ impl LifecycleActor {
                     }
                 }
                 reason = &mut connection.waiting => {
-                    let cause = format!("MCP server `{server_name}` service quit during discovery: {reason:?}");
+                    let cause = quit_cause(&connection, &server_name, " during discovery", &reason);
                     self.record_error(cause.clone());
                     let shutdown = connection.cancel_and_reap(self, &server_name).await;
                     if shutdown {
@@ -649,7 +672,7 @@ impl LifecycleActor {
                     }
                 }
                 reason = &mut connection.waiting => {
-                    let cause = format!("MCP server `{server_name}` service quit: {reason:?}");
+                    let cause = quit_cause(&connection, &server_name, "", &reason);
                     self.record_error(cause);
                     self.unpublish(generation);
                     let shutdown = connection.cancel_and_reap(self, &server_name).await;

@@ -10,7 +10,9 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, ReadBuf};
 use tokio::sync::Notify;
 
-use super::ManagedChildTransport;
+use lash_sansio::sync::MutexExt;
+
+use super::{ManagedChildTransport, StdioReadError, stdio_close_cause};
 
 struct ObservedRead<R> {
     inner: R,
@@ -80,6 +82,7 @@ async fn split_response(chunks: &[&[u8]], newline: bool) {
             waiting: waiting.clone(),
         },
         write,
+        stdio_close_cause(),
     );
     let mut server_read = BufReader::new(server_read);
     let mut total = 0;
@@ -176,7 +179,7 @@ async fn cancelled_receive_preserves_partial_response_at_eof() {
 async fn framing_preserves_sdk_compatibility_and_parse_error_recovery() {
     let (client, mut server) = tokio::io::duplex(4096);
     let (read, write) = tokio::io::split(client);
-    let mut transport = ManagedChildTransport::new(read, write);
+    let mut transport = ManagedChildTransport::new(read, write, stdio_close_cause());
     server.write_all(b"\n\r\n{\"jsonrpc\":\"2.0\",\"method\":\"notifications/vendor\"}\nnot json\n\xff\n\xef\xbb\xbf{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\r\n{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}\n")
         .await.expect("compatibility frames");
     server.shutdown().await.expect("server EOF");
@@ -211,4 +214,75 @@ async fn framing_preserves_sdk_compatibility_and_parse_error_recovery() {
         );
     }
     assert!(transport.receive().await.is_none());
+}
+
+#[tokio::test]
+async fn oversized_inbound_message_closes_with_typed_cause() {
+    const CAP: usize = 64;
+    let (client, mut server) = tokio::io::duplex(65_536);
+    let (read, write) = tokio::io::split(client);
+    let close_cause = stdio_close_cause();
+    let mut transport = ManagedChildTransport::new(read, write, close_cause.clone());
+    transport.reader.max_line_bytes = CAP;
+    // One newline-free write past the cap: the reader must stop at the limit
+    // rather than keep buffering bytes it can never decode.
+    server
+        .write_all(&[b'x'; CAP + 1])
+        .await
+        .expect("oversized payload");
+    let message = tokio::time::timeout(Duration::from_secs(5), transport.receive())
+        .await
+        .expect("overflow ends receive promptly");
+    assert!(message.is_none(), "over-limit input closes the transport");
+    let cause = close_cause
+        .lock_recover()
+        .take()
+        .expect("typed close cause");
+    assert!(
+        matches!(cause, StdioReadError::MessageTooLarge { limit: CAP }),
+        "overflow records its typed cause, got {cause}"
+    );
+    // Closing severs sends too: nothing can be written to the child again.
+    let notification: TxJsonRpcMessage<RoleClient> = serde_json::from_value(json!({
+        "jsonrpc": "2.0", "method": "notifications/roots/list_changed"
+    }))
+    .expect("notification");
+    assert_eq!(
+        transport
+            .send(notification)
+            .await
+            .expect_err("severed send")
+            .kind(),
+        std::io::ErrorKind::NotConnected
+    );
+}
+
+#[tokio::test]
+async fn message_at_byte_cap_still_decodes() {
+    const CAP: usize = 64;
+    let (client, mut server) = tokio::io::duplex(65_536);
+    let (read, write) = tokio::io::split(client);
+    let mut transport = ManagedChildTransport::new(read, write, stdio_close_cause());
+    transport.reader.max_line_bytes = CAP;
+    // The cap counts the whole line including its terminator, so a message
+    // padded to fill it exactly still decodes.
+    let skeleton = "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"pad\":\"\"}}";
+    let pad = "x".repeat(CAP - 1 - skeleton.len());
+    let mut line = serde_json::to_vec(&json!({
+        "jsonrpc": "2.0", "id": 1, "result": { "pad": pad }
+    }))
+    .expect("padded message");
+    line.push(b'\n');
+    assert_eq!(line.len(), CAP);
+    server.write_all(&line).await.expect("full line");
+    server.shutdown().await.expect("server EOF");
+    let message = transport
+        .receive()
+        .await
+        .expect("message at the cap decodes");
+    assert_eq!(
+        serde_json::to_value(message).expect("received JSON"),
+        json!({"jsonrpc":"2.0","id":1,"result":{"pad":pad}})
+    );
+    assert!(transport.receive().await.is_none(), "EOF after the message");
 }

@@ -294,28 +294,51 @@ impl CodexProvider {
         )
         .unwrap_or(timeouts.response_start_timeout);
         let response_start_deadline = tokio::time::Instant::now() + stream_start_timeout;
+        // One absolute cap for the whole request, as SSE keeps: once output
+        // starts, the per-frame idle window must not let a steadily producing
+        // stream outlive the configured request timeout.
+        let absolute_deadline = timeouts
+            .request_timeout
+            .map(|timeout| tokio::time::Instant::now() + timeout);
         loop {
-            let read_deadline = if events_seen {
+            let idle_deadline = if events_seen {
                 tokio::time::Instant::now() + timeouts.chunk_timeout
             } else {
                 response_start_deadline
+            };
+            let (read_deadline, absolute_deadline_wins) = match absolute_deadline {
+                Some(absolute_deadline) if absolute_deadline <= idle_deadline => {
+                    (absolute_deadline, true)
+                }
+                _ => (idle_deadline, false),
             };
             let next_message =
                 tokio::time::timeout_at(read_deadline, attempt.lease_mut().websocket.next()).await;
             let Some(message) = (match next_message {
                 Ok(message) => message,
                 Err(_) => {
-                    let message = if events_seen {
-                        "Codex WebSocket stream chunk timed out"
+                    let (message, code) = if absolute_deadline_wins {
+                        (
+                            "Codex WebSocket request timed out",
+                            TurnFailureCode::Timeout,
+                        )
+                    } else if events_seen {
+                        (
+                            "Codex WebSocket stream chunk timed out",
+                            TurnFailureCode::WebsocketIdleTimeout,
+                        )
                     } else {
-                        "Codex WebSocket response start timed out"
+                        (
+                            "Codex WebSocket response start timed out",
+                            TurnFailureCode::WebsocketIdleTimeout,
+                        )
                     };
                     return Err(CodexWebSocketAttemptError::during_stream(
                         LlmTransportError::new(message)
                             .with_kind(ProviderFailureKind::Timeout)
                             .with_request_body(request_body.clone())
                             .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-                            .with_lash_code(TurnFailureCode::WebsocketIdleTimeout),
+                            .with_lash_code(code),
                         events_seen,
                         &state,
                     ));

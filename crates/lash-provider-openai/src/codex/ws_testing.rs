@@ -128,6 +128,10 @@ pub enum ScriptedWsAction {
         message_id: &'static str,
         text: &'static str,
     },
+    /// Emit a benign non-terminal frame every `interval` forever. Each frame
+    /// lands inside the per-frame idle window, so only the absolute request
+    /// deadline can end the stream.
+    Heartbeat { interval: Duration },
 }
 
 /// Captured request headers, one inner vec of `(name, value)` pairs per
@@ -468,6 +472,21 @@ pub async fn spawn_scripted_websocket_with_injected_accept_faults(
                             )
                             .await;
                             tokio::time::sleep(Duration::from_secs(60)).await;
+                        }
+                        ScriptedWsAction::Heartbeat { interval } => {
+                            let mut cadence = tokio::time::interval(interval);
+                            loop {
+                                cadence.tick().await;
+                                if ws
+                                    .send(WsMessage::Text(
+                                        json!({"type":"response.keepalive"}).to_string().into(),
+                                    ))
+                                    .await
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                            }
                         }
                     }
                 }

@@ -40,6 +40,14 @@ pub enum OAuthError {
     Io(#[from] std::io::Error),
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+    /// The endpoint did not finish the exchange within the shared deadline
+    /// (`oauth_send`), surfaced while the credential refresh gate is held.
+    #[error("OAuth endpoint did not respond within the request deadline")]
+    Timeout,
+    /// The endpoint's response body exceeded the shared byte cap
+    /// (`oauth_send`).
+    #[error("OAuth endpoint response exceeded the {limit}-byte limit")]
+    ResponseTooLarge { limit: usize },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -112,6 +120,8 @@ pub fn classify_oauth_refresh_error(error: OAuthError) -> CredentialError {
     } else if matches!(
         error,
         OAuthError::Http(_)
+            | OAuthError::Timeout
+            | OAuthError::ResponseTooLarge { .. }
             | OAuthError::TokenEndpoint {
                 status: 408 | 429 | 500..=599,
                 ..
@@ -121,6 +131,51 @@ pub fn classify_oauth_refresh_error(error: OAuthError) -> CredentialError {
     } else {
         CredentialError::new(CredentialErrorKind::Other)
     }
+}
+
+/// Shared deadline for one built-in OAuth endpoint exchange, covering connect
+/// through the end of the response body (reqwest's per-request timeout is
+/// total). The credential manager holds its refresh gate across refresh
+/// (FIG-4708), so a stalled endpoint must surface a typed timeout instead of
+/// hanging every caller queued behind the gate.
+const OAUTH_ENDPOINT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Shared cap on one OAuth endpoint response body. Token and device endpoints
+/// speak small JSON; a larger body is a malfunctioning or spoofed endpoint,
+/// not a token response.
+const OAUTH_RESPONSE_BODY_LIMIT: usize = 64 * 1024;
+
+fn oauth_http_error(error: reqwest::Error) -> OAuthError {
+    if error.is_timeout() {
+        OAuthError::Timeout
+    } else {
+        OAuthError::Http(error)
+    }
+}
+
+/// Send `request` under the shared OAuth deadline and return its status and
+/// response body read under the shared byte cap. Every built-in OAuth call
+/// goes through here so a stalled or flooding endpoint always ends as a
+/// typed [`OAuthError`] rather than an unbounded wait or read.
+pub async fn oauth_send(
+    request: reqwest::RequestBuilder,
+) -> Result<(reqwest::StatusCode, String), OAuthError> {
+    let mut response = request
+        .timeout(OAUTH_ENDPOINT_TIMEOUT)
+        .send()
+        .await
+        .map_err(oauth_http_error)?;
+    let status = response.status();
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(oauth_http_error)? {
+        if body.len() + chunk.len() > OAUTH_RESPONSE_BODY_LIMIT {
+            return Err(OAuthError::ResponseTooLarge {
+                limit: OAUTH_RESPONSE_BODY_LIMIT,
+            });
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok((status, String::from_utf8_lossy(&body).into_owned()))
 }
 
 /// PKCE verifier is 32 bytes of OS entropy (via two UUID v4s) base64url-encoded; the challenge

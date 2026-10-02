@@ -2,6 +2,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use futures_util::SinkExt;
+use lash_sansio::sync::MutexExt;
 use rmcp::model::ErrorData;
 use rmcp::service::{RoleClient, RxJsonRpcMessage, TxJsonRpcMessage};
 use rmcp::transport::Transport;
@@ -11,15 +12,45 @@ use tokio::sync::Mutex;
 use tokio_util::bytes::BytesMut;
 use tokio_util::codec::{Decoder, FramedWrite};
 
+/// Upper bound on one inbound stdio message. A line's bytes accumulate before
+/// its JSON is decoded, so without a cap a malfunctioning child grows the
+/// receive buffer without limit.
+pub(crate) const MAX_STDIO_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
+
+/// Why reading the child's stdout ended. rmcp's `receive` reports only
+/// `Option`, so the transport records the cause on [`StdioCloseCause`] for the
+/// lifecycle actor to name when the service quits.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum StdioReadError {
+    #[error("MCP stdio read failed: {0}")]
+    Io(#[from] std::io::Error),
+    /// The child produced a message past [`MAX_STDIO_MESSAGE_BYTES`]; the
+    /// transport closes rather than keep accumulating bytes it can never
+    /// decode.
+    #[error("MCP stdio inbound message exceeded the {limit}-byte limit")]
+    MessageTooLarge { limit: usize },
+}
+
+/// Receive-side close cause shared between the transport (written once, on
+/// the rmcp service task) and the lifecycle actor (read when the service's
+/// `waiting` reports a quit).
+pub(crate) type StdioCloseCause = Arc<std::sync::Mutex<Option<StdioReadError>>>;
+
+/// A fresh, unwritten close-cause cell for one stdio transport.
+pub(crate) fn stdio_close_cause() -> StdioCloseCause {
+    Arc::new(std::sync::Mutex::new(None))
+}
+
 /// Partial bytes belong to the reader, so dropping a receive future cannot
 /// discard them when the SDK selects a concurrent send completion.
 struct LineReader<R> {
     read: BufReader<R>,
     line: BytesMut,
+    max_line_bytes: usize,
 }
 
 impl<R: AsyncRead + Unpin> LineReader<R> {
-    async fn next_line(&mut self) -> std::io::Result<bool> {
+    async fn next_line(&mut self) -> Result<bool, StdioReadError> {
         loop {
             let available = self.read.fill_buf().await?;
             if available.is_empty() {
@@ -27,6 +58,11 @@ impl<R: AsyncRead + Unpin> LineReader<R> {
             }
             let newline = available.iter().position(|byte| *byte == b'\n');
             let consumed = newline.map_or(available.len(), |index| index + 1);
+            if self.line.len() + consumed > self.max_line_bytes {
+                return Err(StdioReadError::MessageTooLarge {
+                    limit: self.max_line_bytes,
+                });
+            }
             self.line.extend_from_slice(&available[..consumed]);
             self.read.consume(consumed);
             if newline.is_some() {
@@ -39,6 +75,7 @@ impl<R: AsyncRead + Unpin> LineReader<R> {
 pub(crate) struct ManagedChildTransport<R: AsyncRead, W: AsyncWrite> {
     reader: LineReader<R>,
     writer: Arc<Mutex<Option<TransportWriter<RoleClient, W>>>>,
+    close_cause: StdioCloseCause,
 }
 
 impl<R, W> ManagedChildTransport<R, W>
@@ -46,16 +83,18 @@ where
     R: AsyncRead + Unpin + Send,
     W: AsyncWrite + Unpin + Send + 'static,
 {
-    pub(crate) fn new(read: R, write: W) -> Self {
+    pub(crate) fn new(read: R, write: W, close_cause: StdioCloseCause) -> Self {
         Self {
             reader: LineReader {
                 read: BufReader::new(read),
                 line: BytesMut::new(),
+                max_line_bytes: MAX_STDIO_MESSAGE_BYTES,
             },
             writer: Arc::new(Mutex::new(Some(FramedWrite::new(
                 write,
                 JsonRpcMessageCodec::default(),
             )))),
+            close_cause,
         }
     }
 }
@@ -91,6 +130,10 @@ where
                 Ok(true) => {}
                 Err(error) => {
                     tracing::error!(%error, "Error reading from MCP stdio");
+                    *self.close_cause.lock_recover() = Some(error);
+                    // Sever writes at once; rmcp only learns of this quit as
+                    // `None`, so the cause above is what names it.
+                    drop(self.writer.lock().await.take());
                     return None;
                 }
             }

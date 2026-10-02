@@ -1913,3 +1913,66 @@ async fn concurrent_calls_are_not_serialized_by_the_service_mutex() {
 
     pool.shutdown_all().await;
 }
+
+/// FIG-4708 P1: a stdio child that floods stdout past the inbound message cap
+/// is closed by the transport and the disconnect is recorded with the typed
+/// cause rather than rmcp's generic quit reason.
+#[cfg(unix)]
+#[tokio::test]
+async fn oversized_stdio_message_disconnects_with_typed_cause() {
+    let initialize = json!({
+        "jsonrpc": "2.0",
+        "id": 0,
+        "result": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": { "tools": {} },
+            "serverInfo": { "name": "flooder", "version": "1.0.0" }
+        }
+    });
+    let list = json!({ "jsonrpc": "2.0", "id": 1, "result": { "tools": [] } });
+    // Answer initialize and tools/list, then write one newline-free message
+    // larger than MAX_STDIO_MESSAGE_BYTES and stay alive so the pool — not
+    // the child's own exit — does the closing.
+    let script = "\
+        read -r _; printf '%s\\n' \"$INITIALIZE\"; \
+        read -r _; \
+        read -r _; printf '%s\\n' \"$LIST\"; \
+        head -c 9000000 /dev/zero | tr '\\000' 'x'; \
+        cat >/dev/null";
+    let pool = McpConnectionPool::connect(BTreeMap::from([(
+        "flooder".to_string(),
+        McpServerConfig {
+            startup_timeout_ms: 2_000,
+            call_policy: McpCallPolicy::default(),
+            shutdown_policy: Default::default(),
+            transport: McpTransport::Stdio(McpStdioTransport {
+                command: "sh".to_string(),
+                args: vec!["-c".to_string(), script.to_string()],
+                env: BTreeMap::from([
+                    ("INITIALIZE".to_string(), initialize.to_string()),
+                    ("LIST".to_string(), list.to_string()),
+                ]),
+                cwd: None,
+            }),
+        },
+    )]))
+    .await
+    .expect("the flood starts only after the handshake completes");
+
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let status = &pool.server_statuses()[0];
+            if let Some(fault) = &status.last_error
+                && fault
+                    .message()
+                    .contains("inbound message exceeded the 8388608-byte limit")
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the typed overflow cause reaches the server's fault record");
+    pool.shutdown_all().await;
+}
