@@ -618,6 +618,22 @@ async fn law_session(
     stores: &Arc<dyn crate::StoreSet>,
     models: Arc<dyn crate::RuntimeModels>,
 ) -> ConfigParts {
+    law_session_created_with(prefix, name, effect_host, stores, models, Vec::new()).await
+}
+
+/// [`law_session`], except the session is created with `tools` installed:
+/// the created head records the plugin configuration a creator on that
+/// plugin set resolves — the protocol pointer and every installed owner's
+/// namespace (FIG-4379) — so a runtime that opens it later reads exactly the
+/// namespaces creation recorded (FIG-4764).
+async fn law_session_created_with(
+    prefix: &str,
+    name: &str,
+    effect_host: &Arc<dyn crate::EffectHost>,
+    stores: &Arc<dyn crate::StoreSet>,
+    models: Arc<dyn crate::RuntimeModels>,
+    tools: Vec<Arc<dyn crate::plugin::PluginFactory>>,
+) -> ConfigParts {
     law_session_recording(
         prefix,
         name,
@@ -625,14 +641,20 @@ async fn law_session(
         stores,
         models,
         crate::testing::mock_session_policy(),
+        tools,
     )
     .await
 }
 
-/// [`law_session`], except the created head records `policy`: the session is
-/// created under the policy a creating deployment would mint, so a runtime
-/// that opens it later adopts exactly the config the law means to record
-/// (FIG-4553).
+/// [`law_session`], except the created head records `policy` and the session
+/// is created with `tools` installed: the session is created under the
+/// policy and plugin set a creating deployment would mint, so a runtime that
+/// opens it later adopts exactly the config the law means to record
+/// (FIG-4553, FIG-4764).
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the law's own plugin set's creation config resolves"
+)]
 async fn law_session_recording(
     prefix: &str,
     name: &str,
@@ -640,6 +662,7 @@ async fn law_session_recording(
     stores: &Arc<dyn crate::StoreSet>,
     models: Arc<dyn crate::RuntimeModels>,
     policy: crate::SessionPolicy,
+    tools: Vec<Arc<dyn crate::plugin::PluginFactory>>,
 ) -> ConfigParts {
     let session_id = SessionId::from(format!("{prefix}-turn-config-{name}-session"));
     let mut host = crate::LawBackend::over_stores(Arc::clone(stores), Arc::clone(effect_host))
@@ -648,10 +671,27 @@ async fn law_session_recording(
             crate::QueuedWorkBatchingConfig::new(1),
         );
     host.providers.models = models;
-    // These laws run the standard fake protocol, which owns no plugin
-    // configuration; a creator would record only its protocol pointer.
+    // The created head records what a creator on the session's plugin set
+    // resolves (FIG-4379). These laws run the standard fake protocol, which
+    // owns no plugin configuration; the law's tools are installed at
+    // creation because an owner installed only afterwards never reaches the
+    // recorded head.
+    let protocol = crate::testing::test_standard_protocol_factories();
     let mut config = crate::PersistedSessionConfig::from(&policy);
-    config.plugin_config = crate::PluginConfig::for_protocol(Some("test_protocol".to_string()));
+    config.plugin_config = crate::plugin::PluginHost::new(
+        protocol
+            .iter()
+            .cloned()
+            .chain(tools.iter().cloned())
+            .collect(),
+    )
+    .resolve_creation_plugin_config(
+        Some("test_protocol"),
+        &crate::PluginOptions::default(),
+        None,
+        true,
+    )
+    .expect("the law's plugin set resolves its creation plugin config");
     let store =
         crate::conformance::law_session_store_with_config(stores.as_ref(), &session_id, config)
             .await;
@@ -659,8 +699,8 @@ async fn law_session_recording(
         session_id,
         host,
         store,
-        protocol: crate::testing::test_standard_protocol_factories(),
-        tools: Vec::new(),
+        protocol,
+        tools,
     }
 }
 
@@ -1001,18 +1041,18 @@ pub async fn one_config_resolution_per_root(
             .build()
             .into_handle()
     };
-    let mut parts = law_session(
+    let parts = law_session_created_with(
         prefix,
         "one-resolution",
         &effect_host,
         &stores,
         turn_config_models(model),
+        vec![Arc::new(crate::plugin::StaticPluginFactory::new(
+            "conformance-turn-config-switch-probe",
+            crate::facade_support::PluginSpec::new().with_tool_provider(Arc::new(SwitchTool)),
+        ))],
     )
     .await;
-    parts.tools = vec![Arc::new(crate::plugin::StaticPluginFactory::new(
-        "conformance-turn-config-switch-probe",
-        crate::facade_support::PluginSpec::new().with_tool_provider(Arc::new(SwitchTool)),
-    ))];
     let root = TurnId::from(format!("{prefix}-turn-config-one-resolution-root"));
     let run = run_text_turn(
         &runner,
@@ -1388,17 +1428,17 @@ pub async fn a_corrupt_recorded_namespace_is_corruption_and_never_a_recorded_ref
     const REQUEST: &str = "turn-config-corrupt-namespace";
     let calls = Arc::new(AtomicUsize::new(0));
     let models = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let mut parts = law_session(
+    let parts = law_session_created_with(
         prefix,
         "corrupt-namespace",
         &effect_host,
         &stores,
         turn_config_models(recording_model(&calls, &models)),
+        ShapedFactory::<RecordedShape>::installed(),
     )
     .await;
-    // The session records its namespace as one shape, and a first command
-    // commits the head that carries it.
-    parts.tools = ShapedFactory::<RecordedShape>::installed();
+    // The session recorded its namespace as one shape at creation, and a
+    // first command commits the head that carries it.
     command_second_model(&runner, &parts).await;
     let recorded_head = parts
         .store
@@ -1769,8 +1809,8 @@ fn looping_model(calls: &Arc<AtomicUsize>) -> crate::ProviderHandle {
         .into_handle()
 }
 
-/// A looping-model law's session: [`LookupTool`] installed and `calls`
-/// counting the model's calls, the created head recording `recorded`.
+/// A looping-model law's session: [`LookupTool`] installed at creation and
+/// `calls` counting the model's calls, the created head recording `recorded`.
 async fn looping_session(
     prefix: &str,
     name: &str,
@@ -1779,20 +1819,19 @@ async fn looping_session(
     calls: &Arc<AtomicUsize>,
     recorded: crate::SessionPolicy,
 ) -> ConfigParts {
-    let mut parts = law_session_recording(
+    law_session_recording(
         prefix,
         name,
         effect_host,
         stores,
         turn_config_models(looping_model(calls)),
         recorded,
+        vec![Arc::new(crate::plugin::StaticPluginFactory::new(
+            "conformance-turn-config-lookup-probe",
+            crate::facade_support::PluginSpec::new().with_tool_provider(Arc::new(LookupTool)),
+        ))],
     )
-    .await;
-    parts.tools = vec![Arc::new(crate::plugin::StaticPluginFactory::new(
-        "conformance-turn-config-lookup-probe",
-        crate::facade_support::PluginSpec::new().with_tool_provider(Arc::new(LookupTool)),
-    ))];
-    parts
+    .await
 }
 
 /// A policy whose execution controls are `turn_budget`, over the mock route.

@@ -92,6 +92,7 @@ pub async fn a_redrive_calls_the_model_with_the_request_defaults_its_root_record
         &stores,
         turn_config_models(capturing_model(&requests)),
         policy_with_request_defaults(recorded_defaults()),
+        Vec::new(),
     )
     .await;
     let root = TurnId::from(format!(

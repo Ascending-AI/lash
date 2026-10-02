@@ -65,22 +65,72 @@ fn frame_transition(
     }
 }
 
-async fn assert_no_frame_commit_rows(storage: &PostgresStorage, session_id: &SessionId) {
-    // Admission wrote the one catalog row; the refused commit adds nothing.
-    for (table, admitted) in [
-        ("lash_sessions", 0),
-        ("lash_graph_nodes", 0),
-        ("lash_session_meta", 1),
-    ] {
-        let count: i64 = sqlx::query_scalar(&format!(
-            "SELECT COUNT(*) FROM {table} WHERE session_id = $1"
-        ))
-        .bind(session_id.as_str())
-        .fetch_one(storage.pool())
-        .await
-        .expect("count refused commit rows");
-        assert_eq!(count, admitted, "refused commit wrote {table}");
+/// `(head_revision, head_json, checkpoint_ref, leaf_node_id,
+/// pending_follow_on_json)`, in the order `committed_rows` selects them.
+type SessionHeadRow = (i64, String, Option<String>, Option<String>, Option<String>);
+
+/// A session's committed rows as admission leaves them: the catalog row and
+/// the created head row written in the same transaction (FIG-4561). A
+/// refused commit must leave every one identical.
+#[derive(Debug, PartialEq)]
+struct AdmittedRows {
+    /// `lash_sessions`' head row beside the key.
+    head: Option<SessionHeadRow>,
+    graph_nodes: i64,
+    session_meta: i64,
+}
+
+/// The session's committed rows as they stand; snapshot them right after
+/// admission to get `admitted`.
+async fn committed_rows(storage: &PostgresStorage, session_id: &SessionId) -> AdmittedRows {
+    let head = sqlx::query_as(
+        "SELECT head_revision, head_json, checkpoint_ref, leaf_node_id, pending_follow_on_json
+         FROM lash_sessions WHERE session_id = $1",
+    )
+    .bind(session_id.as_str())
+    .fetch_optional(storage.pool())
+    .await
+    .expect("read the session's head row");
+    let graph_nodes: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM lash_graph_nodes WHERE session_id = $1")
+            .bind(session_id.as_str())
+            .fetch_one(storage.pool())
+            .await
+            .expect("count graph rows");
+    let session_meta: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM lash_session_meta WHERE session_id = $1")
+            .bind(session_id.as_str())
+            .fetch_one(storage.pool())
+            .await
+            .expect("count catalog rows");
+    AdmittedRows {
+        head,
+        graph_nodes,
+        session_meta,
     }
+}
+
+/// The refused commit changed nothing the admission wrote: the head row is
+/// still admission's created head (revision 0, `is_created`), and no fence
+/// or cleanup obligation exists.
+async fn assert_no_frame_commit_rows(
+    storage: &PostgresStorage,
+    session_id: &SessionId,
+    admitted: &AdmittedRows,
+) {
+    let after = committed_rows(storage, session_id).await;
+    assert_eq!(
+        &after, admitted,
+        "the refused commit changed the admitted rows"
+    );
+    let (head_revision, _, checkpoint_ref, leaf_node_id, _) = after
+        .head
+        .as_ref()
+        .expect("admission wrote the created head");
+    assert!(
+        *head_revision == 0 && checkpoint_ref.is_none() && leaf_node_id.is_none(),
+        "the head row is still admission's created head"
+    );
     let fences: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM lash_referrer_fences")
         .fetch_one(storage.pool())
         .await
@@ -166,11 +216,13 @@ async fn postgres_first_commit_rejects_unappended_transition_source() {
     let missing = lash_core_execution::FrameNodeId::new("not-appended").expect("frame id");
     let commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state)
         .with_frame_transition(frame_transition(&session_id, missing, successor));
+    let store = session_store(&storage, session_id.clone()).await;
+    let admitted = committed_rows(&storage, &session_id).await;
     assert!(matches!(
-        session_store(&storage, session_id.clone()).await.commit_runtime_state(commit).await,
+        store.commit_runtime_state(commit).await,
         Err(StoreError::Backend(message)) if message == "frame transition does not match the committed head"
     ));
-    assert_no_frame_commit_rows(&storage, &session_id).await;
+    assert_no_frame_commit_rows(&storage, &session_id, &admitted).await;
 }
 
 #[tokio::test]
@@ -224,11 +276,13 @@ async fn postgres_first_commit_rejects_transition_successor_other_than_committed
     let wrong = lash_core_execution::FrameNodeId::new("wrong-successor").expect("frame id");
     let commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state)
         .with_frame_transition(frame_transition(&session_id, ended, wrong));
+    let store = session_store(&storage, session_id.clone()).await;
+    let admitted = committed_rows(&storage, &session_id).await;
     assert!(matches!(
-        session_store(&storage, session_id.clone()).await.commit_runtime_state(commit).await,
+        store.commit_runtime_state(commit).await,
         Err(StoreError::Backend(message)) if message == "frame transition does not match the committed head"
     ));
-    assert_no_frame_commit_rows(&storage, &session_id).await;
+    assert_no_frame_commit_rows(&storage, &session_id, &admitted).await;
 }
 
 /// Commit every pending frame open in `state`, with `transition` attached.
