@@ -27,6 +27,9 @@ pub use config::{
     OpenAiReasoningDialect, OpenAiWireConfig, ProviderRoutingPrefs, UsageReconciliation,
 };
 pub use driver::CompletionEndpoint;
+// The vocabulary this crate's exported signatures name (the facade-completeness
+// rule): hosts write `extra_headers` on `OpenAiWireConfig` and `CodexProvider`.
+pub use lash_llm_transport::ExtraHeaders;
 
 #[cfg(test)]
 mod attachment_capability_fixture;

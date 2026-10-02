@@ -1558,6 +1558,9 @@ pub mod sqlite {
 /// PostgreSQL durable store backend.
 #[cfg(feature = "postgres")]
 pub mod postgres {
+    // The vocabulary this module's signatures name (the facade-completeness rule).
+    pub use lash_core_store::store::fleet_finalize::FinalizeMode;
+
     pub use lash_postgres_store::*;
 }
 

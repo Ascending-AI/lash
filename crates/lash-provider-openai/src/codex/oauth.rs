@@ -3,7 +3,10 @@
 
 use base64::Engine;
 
-use lash_provider_auth::{OAuthError, now_secs, oauth_send, url_form_encode};
+// The flow's failures are part of the host-facing login surface: hosts drive
+// these functions and name the error (and its token-endpoint code) themselves.
+pub use lash_provider_auth::{OAuthError, OAuthTokenErrorCode};
+use lash_provider_auth::{now_secs, oauth_send, url_form_encode};
 use lash_sansio::Redacted;
 
 const CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
