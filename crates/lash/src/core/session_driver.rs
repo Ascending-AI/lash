@@ -103,7 +103,7 @@ impl CoreSessionDriver {
         let _ = self.substrate_slot.set(slot);
     }
 
-    /// The runtime a drive step of `session_id` runs on.
+    /// The runtime a root of `session_id` runs on.
     async fn drive_runtime(
         &self,
         session_id: &SessionId,
@@ -186,9 +186,9 @@ impl CoreSessionDriver {
     }
 }
 
-/// The runtime a drive step runs on: the host's open session, borrowed for
-/// the step; the one a drive attempt holds open across its steps; or one
-/// opened from the store for this step alone.
+/// The runtime a root runs on: the host's open session, borrowed for the
+/// root; the one a drive attempt holds open across its roots; or one opened
+/// from the store for this root alone.
 enum DriveRuntime {
     Resident(super::residents::ResidentBorrow),
     Held {
@@ -406,55 +406,47 @@ impl lash_core::SessionDriver for CoreSessionDriver {
         ordinal: u32,
         draining: Option<&lash_core::engine::BuildGeneration>,
     ) -> std::result::Result<lash_core::engine::AdmitVerdict, lash_core::engine::DriveAbort> {
-        let runtime = match self.drive_runtime(&request.session).await {
-            // The drive's held runtime may be running a root this drive
-            // called, which keeps the writer until it ends: the root's
-            // attempt outlived the drive attempt that called it, or it
-            // replayed beside this one and reached the runtime first. The
-            // admission ahead of that root is recorded, and an attempt that
-            // waited here for the writer would not reach the recorded call
-            // it waits for the root on, for as long as the root runs
-            // (FIG-4729). So the admission runs on a runtime opened for it
-            // alone, as it does in a process that holds none.
-            Ok(DriveRuntime::Held { handle, .. }) => {
-                if let Some(verdict) = crate::turn::admit_drive_observed_unless_busy(
-                    &handle,
-                    &controller,
-                    request,
-                    ordinal,
-                    draining,
-                )
-                .await
-                {
-                    return verdict;
+        // The admission runs on no runtime of the session, whether a host
+        // holds it open, this drive holds it, or nothing does: its recorded
+        // step reads only the session's store. A root keeps its runtime's
+        // writer for as long as it runs, and a drive that replays beside a
+        // root it called must reach the recorded call it waits for that root
+        // on, so an admission never waits for a writer (FIG-4729, FIG-4755).
+        let store = match crate::session::resolve_existing_session(
+            &self.config.store_factory,
+            &request.session,
+        )
+        .await
+        {
+            Ok(store) => store,
+            Err(error) => match OpenFailure::of_open_read(&request.session, error) {
+                // A session that is already deleted still owes the journal
+                // the recorded step at this position: an attempt that
+                // stopped short of it would diverge from the `run` command
+                // an earlier attempt journaled, and the step's recorded body
+                // answers the same retirement every redrive replays
+                // (ADR 0104 O1, FIG-3630).
+                OpenFailure::SessionRetired(_) => {
+                    return lash_core::drive::admit_drive_retired(
+                        &controller,
+                        request,
+                        ordinal,
+                        Arc::clone(&self.config.store_factory),
+                    )
+                    .await;
                 }
-                self.open_runtime(&request.session)
-                    .await
-                    .map(DriveRuntime::Opened)
-            }
-            runtime => runtime,
+                failure => return Err(failure.into_abort()),
+            },
         };
-        let runtime = match runtime {
-            Ok(runtime) => runtime,
-            // A session that is already deleted — or closed past admission —
-            // still owes the journal the recorded step at this position: an
-            // attempt that stopped short of it would diverge from the `run`
-            // command an earlier attempt journaled, and the step's recorded
-            // body answers the same retirement every redrive replays
-            // (ADR 0104 O1, FIG-3630).
-            Err(OpenFailure::SessionRetired(_)) => {
-                return lash_core::drive::admit_drive_retired(
-                    &controller,
-                    request,
-                    ordinal,
-                    Arc::clone(&self.config.store_factory),
-                )
-                .await;
-            }
-            Err(failure) => return Err(failure.into_abort()),
-        };
-        crate::turn::admit_drive_observed(runtime.handle(), &controller, request, ordinal, draining)
-            .await
+        lash_core::drive::admit_drive_on_store(
+            &self.config.env.core,
+            store,
+            &controller,
+            request,
+            ordinal,
+            draining,
+        )
+        .await
     }
 
     async fn run_root(

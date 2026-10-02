@@ -732,8 +732,11 @@ mod typed_open {
         }
     }
 
-    /// The session's head is bytes its decoder refuses: the open is refused
-    /// once, as corrupt stored data, and the sender is answered.
+    /// The session's head is bytes its decoder refuses: the drive is
+    /// refused once, as corrupt stored data, and the sender is answered. The
+    /// drive's admission reads the session's store before any runtime of it
+    /// opens (FIG-4755), so its generation gate is the read that meets the
+    /// head, and no open follows.
     async fn undecodable_head_is_refused_corrupt(storage: Storage) {
         const ID: &str = "undecodable-head";
         let (double, _held, seams) = double_over(storage).await;
@@ -763,7 +766,7 @@ mod typed_open {
             .expect("resolve before the corruption");
         let id = SessionId::from(ID);
         // The input is accepted over a readable head and its drive is held,
-        // so the first read of the corrupt head is the engine's open.
+        // so the first read of the corrupt head is the drive's admission.
         let hold = double.hold_session_drive(&id).await;
         let accepted = durable
             .send(TurnInput::text("accepted before the head is corrupt"))
@@ -787,7 +790,7 @@ mod typed_open {
             .await
             .expect("the drive ends without a paused invocation");
         assert_nothing_paused(&double);
-        let error = drive_refusal(ID, answer.expect_err("the open is refused"));
+        let error = drive_refusal(ID, answer.expect_err("the drive is refused"));
         assert_eq!(
             error.code,
             lash_core::RuntimeErrorCode::RuntimeStoreCorrupt,
@@ -799,8 +802,11 @@ mod typed_open {
         );
         assert!(error.is_terminal() && !error.is_retryable(), "{error:?}");
         assert_eq!(
-            store.window_reads.load(Ordering::SeqCst),
-            1,
+            (
+                store.version_reads.load(Ordering::SeqCst),
+                store.window_reads.load(Ordering::SeqCst)
+            ),
+            (1, 0),
             "corrupt stored data is not read again"
         );
     }

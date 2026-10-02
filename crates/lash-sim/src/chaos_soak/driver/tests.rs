@@ -142,6 +142,116 @@ async fn a_drive_replayed_under_its_running_root_waits_on_the_engine() {
     driver.world.finish().await;
 }
 
+/// The same replay on a session a host holds open (FIG-4755). The host's
+/// open session is the runtime the drive's root runs on, and the root
+/// keeps that runtime's writer for as long as it runs. The drive's
+/// attempt is dropped under the held root: its replay re-serves the
+/// recorded admission and waits on its recorded call. An admission reads
+/// the session's store and takes no runtime's writer, the host's
+/// included, so the replay does not wait in the process for a root that
+/// never answers.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_drive_replayed_under_a_root_on_a_resident_session_waits_on_the_engine() {
+    /// The server's inactivity timeout (its default, which the double
+    /// keeps).
+    const INACTIVITY: Duration = Duration::from_secs(60);
+    let seed = 0x4755;
+    let mut driver = Driver::new(seed).await.expect("world");
+    driver
+        .step(
+            seed,
+            &Step::Open {
+                session: 0,
+                lane: Lane::Held,
+                parent: None,
+            },
+        )
+        .await
+        .expect("open the session");
+    let id = driver.ledger.sessions[0].id.clone();
+    // The host holds the session open: the engine drives it on the
+    // host's runtime from here on.
+    let resident = driver
+        .world
+        .core()
+        .expect("core")
+        .session(id.clone())
+        .open()
+        .await
+        .expect("the host opens the session");
+    driver
+        .send_held(&id, "held-0", false)
+        .await
+        .expect("send the held root");
+    assert!(driver.reached("held-0"), "the root is in its model call");
+    let target = format!("LashSession/{id}/drive");
+    let drive = |driver: &Driver| {
+        driver
+            .world
+            .double()
+            .expect("double")
+            .server()
+            .invocations()
+            .into_iter()
+            .find(|view| view.target == target)
+            .expect("the session's drive")
+    };
+    let first = drive(&driver);
+    assert_eq!((first.status, first.attempts), ("running", 1), "{first:?}");
+    assert!(
+        driver.world.drop_attempt(&first.id).expect("double"),
+        "the drive's first attempt was running"
+    );
+
+    let settled = tokio::time::Instant::now() + Duration::from_secs(10);
+    while driver.works().expect("double") && tokio::time::Instant::now() < settled {
+        driver.world.quiesce().await;
+    }
+    let replayed = drive(&driver);
+    assert_eq!(
+        (
+            replayed.status,
+            replayed.attempts,
+            replayed.blocked_on_server
+        ),
+        ("running", 2, Some(true)),
+        "the replayed drive waits on the engine for the root it called: {replayed:?}"
+    );
+    assert!(driver.reached("held-0"), "the root runs on");
+
+    // An attempt that waits on the engine is one the server suspends
+    // when its inactivity timeout passes: no attempt fails, so however
+    // long the root runs, the wait never spends the drive's retries.
+    driver
+        .world
+        .engine()
+        .advance(INACTIVITY + Duration::from_secs(1));
+    driver.world.quiesce().await;
+    let suspended = drive(&driver);
+    assert_eq!(
+        (suspended.status, suspended.attempts, suspended.retry_count),
+        ("suspended", 2, 0),
+        "the waiting drive is suspended, not retried: {suspended:?}"
+    );
+    assert!(driver.reached("held-0"), "the root runs on");
+
+    // The host lets the session go and deletes it: the close ends the
+    // root, and the drive that waited for it on the engine ends with it.
+    drop(resident);
+    let old = driver.deployment.clone();
+    let deleted = driver.delete(0).await.expect("delete the session");
+    let rolled = driver
+        .step(seed, &Step::Roll)
+        .await
+        .expect("the old generation drains");
+    assert!(
+        pinned_open(&driver.world, &old).is_empty(),
+        "{deleted}; {rolled}"
+    );
+    assert_eq!(driver.ledger.retired.len(), 1, "{deleted}; {rolled}");
+    driver.world.finish().await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_host_answer_drives_its_manual_time_retry() {
     let mut driver = Driver::new(0x4402).await.expect("world");

@@ -146,14 +146,14 @@ pub trait SessionDriver: Send + Sync {
     /// invocation (FIG-3825).
     ///
     /// The engine takes the hold before the attempt's first admission and
-    /// drops it when the attempt ends. While it is held, the attempt's
-    /// admissions, replayed ones included, and every root it calls that runs
-    /// in this process share one runtime, opened by the first of them. An
-    /// attempt ends where the engine stops polling it, so nothing held
-    /// crosses into the next attempt: that one opens the session afresh, as
-    /// a redrive in a fresh process does. A replayed admission never waits
-    /// for a root still running on the held runtime (FIG-4729). The default
-    /// holds nothing.
+    /// drops it when the attempt ends. While it is held, every root the
+    /// attempt calls that runs in this process shares one runtime, opened by
+    /// the first of them. An attempt ends where the engine stops polling
+    /// it, so nothing held crosses into the next attempt: that one opens
+    /// the session afresh, as a redrive in a fresh process does. An
+    /// admission runs on no runtime, so a replayed one never waits for a
+    /// root still running on the held runtime (FIG-4729, FIG-4755). The
+    /// default holds nothing.
     fn hold_drive(&self, _session: &SessionId) -> crate::engine::DriveHold {
         crate::engine::DriveHold::empty()
     }
@@ -161,6 +161,9 @@ pub trait SessionDriver: Send + Sync {
     /// Admission `ordinal` of `request`: one recorded `AdmitDrive` step
     /// through `controller`, which serves
     /// [`drive_admission_scope`](crate::engine::drive_admission_scope).
+    /// The step reads the session's store and takes no runtime's writer:
+    /// an admission never waits for a root running in this process
+    /// (FIG-4755).
     ///
     /// `request.build_generation` is the generation of the build that
     /// admits, which the admitted root is stamped with (FIG-4742): an engine

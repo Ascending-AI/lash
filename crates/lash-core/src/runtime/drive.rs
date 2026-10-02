@@ -348,6 +348,45 @@ pub async fn admit_drive(
     Box::pin(runtime.admit_drive_step(controller, request, ordinal, draining)).await
 }
 
+/// [`admit_drive`] on no runtime of the session: the step reads only
+/// `store`, the session's history store, and `host`'s control-intent ledger
+/// and drain marks. Nothing here takes a runtime's writer, so an admission,
+/// a replayed one included, never waits for a root that is running on one
+/// (FIG-4755).
+#[doc(hidden)]
+pub async fn admit_drive_on_store(
+    host: &crate::RuntimeHostConfig,
+    store: crate::store::SessionStore,
+    controller: &ScopedEffectController<'_>,
+    request: &DriveRequest,
+    ordinal: u32,
+    draining: Option<&crate::engine::BuildGeneration>,
+) -> Result<AdmitVerdict, DriveAbort> {
+    // A generation this build cannot run is refused typed before anything
+    // is admitted (FIG-3619): the recorded step's first read is that same
+    // gate, so no unrecorded read precedes it here. The session's own
+    // retirement is not refused here either: the journaled step below is
+    // the durable answer a redrive replays, and `admit_drive_retired` emits
+    // the same step when the engine could not open a store for the retired
+    // session at all (FIG-3630, ADR 0104 O1).
+    let scope = drive_admission_scope(&request.session, &request.request);
+    let admission_controller =
+        step_controller(controller, host.control.effect_host.as_ref(), scope)
+            .map_err(DriveAbort::Refused)?;
+    emit_admission_step(
+        &admission_controller,
+        request,
+        ordinal,
+        Some(store),
+        host.session_store_factory(),
+        draining.map(|generation| admission::DrainRead {
+            marks: host.backend().generation_drain(),
+            generation: generation.clone(),
+        }),
+    )
+    .await
+}
+
 /// Emit admission `ordinal`'s journaled `AdmitDrive` step through
 /// `controller`, which must serve the request's
 /// [`drive_admission_scope`](crate::engine::drive_admission_scope). `store`
@@ -834,33 +873,18 @@ impl LashRuntime {
                 ),
             )));
         }
+        // The body records the store's head as the admission's view of the
+        // session; the root's recorded admission, taken under the lease on a
+        // head refreshed there, is the head the root runs on (FIG-3682).
         let store = self.drive_store()?;
-        // A generation this build cannot run is refused typed before
-        // anything is admitted (FIG-3619): the recorded step's first read is
-        // that same gate, so no unrecorded read precedes it here. The body
-        // records the resident head as the admission's view of the session;
-        // the root's recorded admission, taken under the lease on a head
-        // refreshed there, is the head the root runs on (FIG-3682). The
-        // session's own retirement is not refused here either: the journaled
-        // step below is the durable answer a redrive replays, and
-        // `admit_drive_retired` emits the same step when the engine could
-        // not open a store for the retired session at all (FIG-3630,
-        // ADR 0104 O1).
-        let scope = drive_admission_scope(&request.session, &request.request);
-        let host = Arc::clone(&self.host.core.control.effect_host);
-        let admission_controller = step_controller(controller, host.as_ref(), scope.clone())
-            .map_err(DriveAbort::Refused)?;
-        emit_admission_step(
-            &admission_controller,
+        Box::pin(admit_drive_on_store(
+            &self.host.core,
+            store,
+            controller,
             request,
             ordinal,
-            Some(store),
-            self.host.core.session_store_factory(),
-            draining.map(|generation| admission::DrainRead {
-                marks: self.host.core.backend().generation_drain(),
-                generation: generation.clone(),
-            }),
-        )
+            draining,
+        ))
         .await
     }
 
