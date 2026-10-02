@@ -38,8 +38,11 @@ provider network call or produces a judged dialect row.
 
 ## The two builds
 
-Buck2 builds the two `lash-upgrade-node` variants and `lashctl` for the
-run. The node binaries are:
+Buck2 builds `lash-upgrade-node`, `lashctl` and `lash-vm-worker` for each
+build and stages them together in `<artifacts>/bin/n/` and
+`<artifacts>/bin/n+1/`. Each node finds its worker beside its executable.
+N+1's node and worker both enable `synthetic-next`, so they speak the same
+VM protocol. The node binaries are:
 
 - **N** is the default build.
 - **N+1** is the same tree with the `synthetic-next` Cargo feature. It moves
@@ -58,8 +61,9 @@ reports the CLI build; the fleet generation comes from each node's ready file.
 
 ## What the run does
 
-`just e2e-rolling` builds both node and operator binaries into `<artifacts>/bin/n/` and
-`<artifacts>/bin/n+1/`. It starts one pinned `restate-server`, plus a pg16
+`just e2e-rolling` builds each node, operator and VM worker into
+`<artifacts>/bin/n/` and `<artifacts>/bin/n+1/`. It starts one pinned
+`restate-server`, plus a pg16
 container unless `LASH_POSTGRES_DATABASE_URL` names a server. Then it runs
 `roll_and_rollback_smoke`, `sqlite_migration_overlap_refused`, and
 `sqlite_stop_then_start_roll_and_rollback` in
@@ -122,7 +126,7 @@ each roll, the run requires every turn answered and each turn's model call
 recorded exactly once in the case's effects log: nothing lost, nothing
 duplicated.
 
-The eight `phase_a` legs in `crates/lash-upgrade-harness/tests/phase_a/` run
+The ten `phase_a` legs in `crates/lash-upgrade-harness/tests/phase_a/` run
 under `just phase-a`. The legs that finalize (`history_after_finalize`,
 `object_sweep_crash_resume`) retire N's deployments and run `lashctl
 finalize` the same way; `finalize_races_every_writer` races writers against
