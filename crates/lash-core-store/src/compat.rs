@@ -782,6 +782,21 @@ const RESTATE_OBJECT_FAMILY_FORMATS: VersionRange = VersionRange::exactly(1);
 #[cfg(feature = "synthetic-next")]
 const RESTATE_OBJECT_FAMILY_FORMATS: VersionRange = VersionRange::between(1, 2);
 
+/// The release line this build writes into every Restate `_compat` record
+/// and call envelope: 1 from the 1.0 release on.
+///
+/// The 1.0 cut restarts every format counter at 1, so a number a pre-release
+/// build wrote and the same number from a release build name different
+/// shapes. The line tells them apart: state and calls that state no line, or
+/// line 0, are pre-release and refused as [`CompatRefusal::PreRelease`]
+/// before anything is decoded. Counters never restart again, so the line
+/// stays 1.
+pub const RELEASE_LINE: u32 = 1;
+
+/// The component a Restate call envelope's refusal names: the wire is no
+/// stored component and declares no descriptor.
+pub const RESTATE_WIRE_COMPONENT: &str = "restate-wire";
+
 /// The descriptor this build declares for `component`.
 pub fn descriptor(component: ComponentId) -> Option<&'static CompatDescriptor> {
     DESCRIPTORS
@@ -981,6 +996,24 @@ pub enum CompatRefusal {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         writing_release: Option<String>,
     },
+    /// State or a call a pre-release build wrote (FIG-4819). The 1.0 cut
+    /// restarted every counter, so its numbers do not mean what this
+    /// build's do, and no release reads it: a Restate object or call that
+    /// states no release line, or a store whose floor is above this build's
+    /// range although an older release stamped it.
+    #[error(
+        "{component} holds pre-release state: a lash build from before the 1.0 release wrote \
+         it, and 1.0 restarted every format counter, so its numbers do not mean what this \
+         build's do. No release reads pre-release state and none migrates it; it is refused \
+         unchanged. Recreate the store, and serve this build from a Restate namespace no \
+         pre-release build has used{}",
+        release_suffix(.writing_release)
+    )]
+    PreRelease {
+        component: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        writing_release: Option<String>,
+    },
     /// A stored label this build has no name for (an obligation state or
     /// kind, an attachment owner kind, a referrer kind): a newer build wrote
     /// it. Classified apart from corruption so no pass treats it as absent.
@@ -1055,6 +1088,9 @@ impl CompatRefusal {
             }
             | Self::PartiallyAdvanced {
                 writing_release, ..
+            }
+            | Self::PreRelease {
+                writing_release, ..
             } => *writing_release = release,
             Self::WriterFloorAbove { .. }
             | Self::UnknownVocabulary { .. }
@@ -1063,6 +1099,33 @@ impl CompatRefusal {
             | Self::PluginWriterRangeMalformed { .. } => {}
         }
         self
+    }
+
+    /// This refusal as the store's release evidence corrects it.
+    ///
+    /// Within one release line counters only grow, so a floor above this
+    /// build's range means a newer release contracted the store. A floor
+    /// above the range on a store that a release older than `build_release`
+    /// stamped can only predate the 1.0 counter restart: the refusal is
+    /// [`Self::PreRelease`], not "newer". The store is refused either way;
+    /// the stamp is evidence for the reason, never an admission input (ADR
+    /// 0115 §1.2). A store with no readable stamp, or one this build cannot
+    /// order against its own release, keeps the floor refusal.
+    pub fn read_against_release(self, writing_release: Option<&str>, build_release: &str) -> Self {
+        let older = writing_release.is_some_and(|writing| {
+            crate::store::compare_releases(writing, build_release) == Some(std::cmp::Ordering::Less)
+        });
+        match self {
+            Self::ReaderFloorAbove {
+                component,
+                writing_release: attached,
+                ..
+            } if older => Self::PreRelease {
+                component,
+                writing_release: attached,
+            },
+            other => other,
+        }
     }
 }
 
@@ -1306,6 +1369,62 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<CompatRefusal>(&json).expect("decode"),
             refusal
+        );
+    }
+
+    /// FIG-4819: a floor above this build's range on a store an older
+    /// release stamped predates the counter restart. The same floor under
+    /// this release, a newer one, or no readable stamp stays "newer".
+    #[test]
+    fn a_floor_refusal_of_an_older_releases_store_reads_as_pre_release() {
+        let floor = || CompatRefusal::ReaderFloorAbove {
+            component: "sqlite-core".into(),
+            found: 99,
+            min_reader: 99,
+            reads: VersionRange::exactly(1),
+            writing_release: None,
+        };
+        for older in ["0.0.0-dev", "0.9.3", "0.0.0-alpha"] {
+            assert_eq!(
+                floor().read_against_release(Some(older), "1.0.0"),
+                CompatRefusal::PreRelease {
+                    component: "sqlite-core".into(),
+                    writing_release: None,
+                },
+                "{older}"
+            );
+        }
+        for (writing, build) in [
+            (Some("1.1.0"), "1.0.0"),
+            (Some("1.0.0"), "1.0.0"),
+            (Some("0.0.0-dev"), "0.0.0-dev"),
+            (Some("not-a-version"), "1.0.0"),
+            (None, "1.0.0"),
+        ] {
+            assert_eq!(
+                floor().read_against_release(writing, build),
+                floor(),
+                "{writing:?} under {build}"
+            );
+        }
+        // Only the floor refusal claims "newer"; no other reason changes.
+        let too_old = CompatRefusal::TooOld {
+            component: "sqlite-core".into(),
+            found: 1,
+            reads: VersionRange::exactly(2),
+            writing_release: None,
+        };
+        assert_eq!(
+            too_old.clone().read_against_release(Some("0.9.0"), "1.0.0"),
+            too_old
+        );
+        let refusal = CompatRefusal::PreRelease {
+            component: "restate-wire".into(),
+            writing_release: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&refusal).expect("encode"),
+            r#"{"refusal":"pre_release","component":"restate-wire"}"#
         );
     }
 

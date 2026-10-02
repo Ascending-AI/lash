@@ -121,7 +121,8 @@ Store compatibility errors use `StoreError::Incompatible { refusal }`.
 Writer rejection uses `WriterFenced { recorded, writable }`.
 `CompatRefusal` distinguishes absent or malformed stamps, old versions,
 reader and writer floors, shape refusal, missing or unwritable fleet epochs,
-pending SQLite migration, partial store advancement and unknown vocabulary.
+pending SQLite migration, partial store advancement, unknown vocabulary and
+pre-release state (§3.6).
 Messages name operator remedies. Readable release evidence accompanies
 applicable refusals
 (`crates/lash-core-store/src/compat.rs:189`, `:335`,
@@ -269,11 +270,12 @@ generation routes. Finalize also requires drain and deployment retirement.
 
 #### 3.1 Every cross-build call carries the caller's range
 
-Every Lash handler takes `Call<T> { wire, body }` and answers
+Every Lash handler takes `Call<T> { wire, line, body }` and answers
 `Reply<T> { wire, body }`. The frozen request range selects the highest
 common `RESTATE_WIRE` version before typed body decoding; a disjoint range
-refuses `lash.wire_unsupported` with both ranges. Replies carry the selected
-version (`crates/lash-restate/src/compat.rs:41`, `:127`,
+refuses `lash.wire_unsupported` with both ranges. `line` is the caller's
+release line (§3.6) and is checked before the range. Replies carry the
+selected version (`crates/lash-restate/src/compat.rs:41`, `:127`,
 `crates/lash-restate/src/wire.rs:33`, `:137`).
 
 Ingress may state the full readable range. A journaled call states exactly
@@ -294,7 +296,9 @@ Journal generation remains a separate routing concern.
 #### 3.2 The per-object `_compat` record
 
 The effect-group index, effect-group payload and durable-wait index carry
-`{ "format": 1, "min_reader": 1, "min_writer": 1 }` under `_compat`.
+`{ "format": 1, "min_reader": 1, "min_writer": 1, "line": 1 }` under
+`_compat`. `line` is the release line of the build that stamped the object
+(§3.6); admission checks it before any floor.
 The record is separate from each value's `{format, body}` envelope
 (`crates/lash-restate/src/compat.rs:140`, `:149`,
 `crates/lash-restate/src/object_state.rs:53`, `:70`).
@@ -363,6 +367,29 @@ registered deployment serves the retired generation. An unreadable deployment
 registry fails closed
 (`crates/lash-core-store/src/store/generation_drain.rs:214`,
 `crates/lash-core-store/src/store/fleet_finalize.rs:182`).
+
+#### 3.6 The release line refuses pre-release state
+
+The 1.0 cut restarts every counter at 1, so a `_compat` record or a call a
+pre-release build wrote carries the numbers a release build reads, over
+shapes that changed in place under the freeze. `RELEASE_LINE` is 1 from 1.0
+on. Every `_compat` record and every `Call` states it. A record or call
+that states no line, or line 0, refuses `lash.incompatible` with
+`CompatRefusal::PreRelease` before any floor is compared, any body is
+decoded or any state is written. Counters do not restart again, so the line
+does not move (`crates/lash-core-store/src/compat.rs`,
+`crates/lash-restate/src/object_state.rs`, `crates/lash-restate/src/wire.rs`).
+
+SQL stores need no line. A pre-release store's version and floor are above
+a release build's range, so admission already refuses it; within one line
+counters only grow, so that floor refusal would read as "a newer release
+contracted it". When the store's release stamp names a release older than
+the opening build's, the refusal is `PreRelease` instead. The stamp still
+decides no admission (§1.2): it corrects the reason of a refusal the
+numbers made. A store with no readable stamp keeps the floor refusal.
+
+Pre-release state is never migrated: recreate the stores, and serve 1.0
+from a Restate namespace no pre-release build has used.
 
 ### 4. Remote protocol negotiation
 

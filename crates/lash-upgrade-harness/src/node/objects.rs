@@ -198,7 +198,7 @@ pub(super) async fn call(args: CallArgs) -> Result<CallReport> {
         args.kind,
         &args.key,
         &args.handler,
-        &Call { wire, body },
+        &Call::stating(wire, body),
     )
     .await;
     Ok(CallReport {

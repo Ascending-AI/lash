@@ -24,15 +24,17 @@
 //! Beside its values every object keeps one [`ObjectCompat`] record under
 //! [`COMPAT_KEY`], which every handler reads first ([`admit_exclusive`],
 //! [`admit_shared`]): it names the oldest family formats a build must read
-//! to read the object, or write to mutate it. The record is never
-//! enveloped, and clearing an object keeps it.
+//! to read the object, or write to mutate it, and the release line that
+//! stamped it: a record with no line is a pre-release build's and refuses
+//! every handler. The record is never enveloped, and clearing an object
+//! keeps it.
 
 use std::sync::Arc;
 
 use lash_core::{
     FleetFormat, FleetFormatStore, RuntimeEffectControllerError, RuntimeErrorCode, SurfaceFormat,
 };
-use lash_core_store::compat::{CompatRefusal, ComponentId, descriptor};
+use lash_core_store::compat::{CompatRefusal, ComponentId, RELEASE_LINE, descriptor};
 use restate_sdk::context::{
     ContextReadState, ContextWriteState, ObjectContext, SharedObjectContext,
 };
@@ -163,7 +165,8 @@ pub(crate) fn is_value_key(key: &str) -> bool {
 /// The `_compat` gate of an exclusive handler (ADR 0115 §3.2), run after the
 /// wire selection and before any other state is read.
 ///
-/// The record must admit this build as a reader and a writer. An object with
+/// The record must state this build's release line and admit the build as a
+/// reader and a writer. An object with
 /// no record and no other keys is fresh: the handler stamps it at the format
 /// the fleet selects and proceeds. A populated object without one is
 /// `Unstamped`. A refusal is terminal and changes nothing.
@@ -284,6 +287,14 @@ fn check_compat(
     access: Access,
 ) -> Result<(), CompatRefusal> {
     let component = || family.component.as_str().to_owned();
+    // Before any number is read: a pre-release record's numbers are not
+    // this build's (FIG-4819).
+    if compat.line < RELEASE_LINE {
+        return Err(CompatRefusal::PreRelease {
+            component: component(),
+            writing_release: None,
+        });
+    }
     if compat.format == 0 || compat.min_reader == 0 || compat.min_writer == 0 {
         return Err(CompatRefusal::MalformedStamp {
             component: component(),

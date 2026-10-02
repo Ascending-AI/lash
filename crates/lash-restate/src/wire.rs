@@ -6,14 +6,17 @@
 //! decodes and encodes them itself: a request's `wire` is read, and the
 //! version selected, before its body is decoded. A caller whose range does
 //! not meet this build's is refused with `lash.wire_unsupported`, carrying
-//! both ranges, however its body is shaped. The discovery manifest names
-//! both shapes ([`CALL_SCHEMA_TITLE`], [`REPLY_SCHEMA_TITLE`]), so a test
-//! reads from what the binder binds that every handler takes one and
-//! answers the other.
+//! both ranges, however its body is shaped. A caller that states no release
+//! line is a pre-release build's, and is refused with `lash.incompatible`
+//! carrying [`CompatRefusal::PreRelease`] the same way: its wire version is
+//! this build's only because 1.0 restarted the counter. The discovery
+//! manifest names both shapes ([`CALL_SCHEMA_TITLE`], [`REPLY_SCHEMA_TITLE`]),
+//! so a test reads from what the binder binds that every handler takes one
+//! and answers the other.
 
 use bytes::Bytes;
 use lash_core::{RuntimeEffectControllerError, RuntimeErrorCode};
-use lash_core_store::compat::CompatRefusal;
+use lash_core_store::compat::{CompatRefusal, RELEASE_LINE, RESTATE_WIRE_COMPONENT};
 pub use lash_sansio::json_decode::{JsonDecodeError, JsonDecodeLimits};
 use restate_sdk::errors::TerminalError;
 use restate_sdk::serde::PayloadMetadata;
@@ -39,7 +42,8 @@ pub(crate) enum RestateCompatError {
         local: VersionRange,
         peer: VersionRange,
     },
-    /// The object's `_compat` record (or its absence) refuses this build.
+    /// The object's `_compat` record (or its absence) refuses this build, or
+    /// the call is a pre-release build's.
     #[serde(rename = "lash.incompatible")]
     Incompatible { refusal: CompatRefusal },
 }
@@ -113,10 +117,24 @@ pub(crate) fn incompatible(refusal: CompatRefusal) -> TerminalError {
     RestateCompatError::Incompatible { refusal }.terminal()
 }
 
+/// The refusal of a call that states no release line, or one before this
+/// build's: a pre-release build wrote it.
+fn pre_release_call() -> RestateCompatError {
+    RestateCompatError::Incompatible {
+        refusal: CompatRefusal::PreRelease {
+            component: RESTATE_WIRE_COMPONENT.to_owned(),
+            writing_release: None,
+        },
+    }
+}
+
 impl<T> Call<T> {
     /// The version this handler answers at, and the body: the wire
     /// selection every handler makes before it reads or writes any state.
     pub(crate) fn open(self) -> Result<(u32, T), TerminalError> {
+        if self.line < RELEASE_LINE {
+            return Err(pre_release_call().terminal());
+        }
         match self.select() {
             Some(wire) => Ok((wire, self.body)),
             None => Err(wire_unsupported(self.wire)),
@@ -132,8 +150,11 @@ impl<T> Reply<T> {
 }
 
 /// Why a [`Call`] did not decode. Its `Debug` is what the SDK's terminal
-/// error carries, so an unsupported range reads as the typed refusal.
+/// error carries, so a pre-release call and an unsupported range each read
+/// as the typed refusal.
 pub enum CallDecodeError {
+    /// The call states no release line, or one before this build's.
+    PreRelease,
     Unsupported(VersionRange),
     Json(serde_json::Error),
     Budget(JsonDecodeError),
@@ -142,6 +163,7 @@ pub enum CallDecodeError {
 impl std::fmt::Debug for CallDecodeError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::PreRelease => formatter.write_str(&pre_release_call().encode()),
             Self::Unsupported(peer) => formatter.write_str(
                 &RestateCompatError::WireUnsupported {
                     local: RESTATE_WIRE,
@@ -164,7 +186,7 @@ impl std::fmt::Display for CallDecodeError {
 impl std::error::Error for CallDecodeError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Unsupported(_) => None,
+            Self::PreRelease | Self::Unsupported(_) => None,
             Self::Json(error) => Some(error),
             Self::Budget(error) => Some(error),
         }
@@ -172,7 +194,8 @@ impl std::error::Error for CallDecodeError {
 }
 
 impl<T: DeserializeOwned> Call<T> {
-    /// Check structural allowances and the wire before constructing the body.
+    /// Check structural allowances, the release line and the wire before
+    /// constructing the body.
     /// The SDK ingress uses the same path with [`JsonDecodeLimits::default`].
     pub fn decode_json_with_limits(
         bytes: &[u8],
@@ -185,8 +208,13 @@ impl<T: DeserializeOwned> Call<T> {
         #[derive(serde::Deserialize)]
         struct WireProbe {
             wire: VersionRange,
+            #[serde(default)]
+            line: u32,
         }
         let probe: WireProbe = serde_json::from_slice(bytes).map_err(CallDecodeError::Json)?;
+        if probe.line < RELEASE_LINE {
+            return Err(CallDecodeError::PreRelease);
+        }
         if RESTATE_WIRE.select(probe.wire).is_none() {
             return Err(CallDecodeError::Unsupported(probe.wire));
         }
@@ -215,7 +243,7 @@ impl<T> PayloadMetadata for Call<T> {
         Some(serde_json::json!({
             "title": CALL_SCHEMA_TITLE,
             "type": "object",
-            "required": ["wire", "body"],
+            "required": ["wire", "line", "body"],
             "properties": {
                 "wire": {
                     "type": "object",
@@ -225,6 +253,7 @@ impl<T> PayloadMetadata for Call<T> {
                         "max": {"type": "integer", "minimum": 1}
                     }
                 },
+                "line": {"type": "integer", "minimum": 1},
                 "body": {}
             }
         }))
@@ -278,7 +307,8 @@ mod tests {
     fn a_disjoint_call_is_refused_before_its_body_decodes() {
         // A newer caller's body this build cannot type: the range refuses
         // first, and the refusal carries both ranges.
-        let mut bytes = Bytes::from_static(br#"{"wire":{"min":3,"max":4},"body":{"shape":"new"}}"#);
+        let mut bytes =
+            Bytes::from_static(br#"{"wire":{"min":3,"max":4},"line":1,"body":{"shape":"new"}}"#);
         let error = Call::<u64>::deserialize(&mut bytes).expect_err("a disjoint range refuses");
         let message = format!("Cannot decode input payload: {error:?}");
         assert_eq!(
@@ -289,9 +319,46 @@ mod tests {
             })
         );
 
-        let mut bytes = Bytes::from_static(br#"{"wire":{"min":1,"max":2},"body":7}"#);
+        let mut bytes = Bytes::from_static(br#"{"wire":{"min":1,"max":2},"line":1,"body":7}"#);
         let call = Call::<u64>::deserialize(&mut bytes).expect("an overlapping range decodes");
         assert_eq!(call.open().expect("selected"), (RESTATE_WIRE.max(), 7));
+    }
+
+    /// FIG-4819: a call that states no release line, or line 0, is a
+    /// pre-release build's. It is refused before its body decodes, whatever
+    /// its wire range, and the refusal reads back typed.
+    #[test]
+    fn a_pre_release_call_is_refused_before_its_body_decodes() {
+        let refusal = RestateCompatError::Incompatible {
+            refusal: CompatRefusal::PreRelease {
+                component: "restate-wire".to_owned(),
+                writing_release: None,
+            },
+        };
+        for json in [
+            r#"{"wire":{"min":1,"max":1},"body":{"shape":"pre-release"}}"#,
+            r#"{"wire":{"min":1,"max":1},"line":0,"body":{"shape":"pre-release"}}"#,
+            r#"{"wire":{"min":3,"max":4},"body":[1e999]}"#,
+        ] {
+            let mut bytes = Bytes::from_static(json.as_bytes());
+            let error = Call::<u64>::deserialize(&mut bytes).expect_err("a pre-release call");
+            assert!(matches!(error, CallDecodeError::PreRelease), "{error}");
+            let message = format!("Cannot decode input payload: {error:?}");
+            assert_eq!(restate_compat_error_in(&message), Some(refusal.clone()));
+            assert_eq!(
+                typed_terminal(&message).map(|error| error.code),
+                Some(RuntimeErrorCode::EngineObjectStateFormatUnsupported),
+                "the refusal crosses a service boundary typed"
+            );
+        }
+        // A call built in code is checked where the handler opens it.
+        let call = Call {
+            wire: RESTATE_WIRE,
+            line: 0,
+            body: 7_u64,
+        };
+        let error = call.open().expect_err("a pre-release call");
+        assert_eq!(restate_compat_error_in(error.message()), Some(refusal));
     }
 
     #[test]
@@ -304,7 +371,9 @@ mod tests {
             }
         }
         let body = "0,".repeat(1_000_000) + "0";
-        let mut bytes = Bytes::from(format!(r#"{{"wire":{{"min":1,"max":1}},"body":[{body}]}}"#));
+        let mut bytes = Bytes::from(format!(
+            r#"{{"wire":{{"min":1,"max":1}},"line":1,"body":[{body}]}}"#
+        ));
         let error = Call::<Dto>::deserialize(&mut bytes).expect_err("wide call refuses");
         assert!(
             error.to_string().contains("JSON decode nodes limit"),
@@ -314,14 +383,15 @@ mod tests {
 
     #[test]
     fn unsupported_call_never_materializes_numbers_in_its_body() {
-        let mut bytes = Bytes::from_static(br#"{"body":[1e999],"wire":{"min":3,"max":4}}"#);
+        let mut bytes =
+            Bytes::from_static(br#"{"body":[1e999],"line":1,"wire":{"min":3,"max":4}}"#);
         let error = Call::<u64>::deserialize(&mut bytes).expect_err("unsupported wire");
         assert!(matches!(error, CallDecodeError::Unsupported(_)), "{error}");
     }
 
     #[test]
     fn call_accepts_exact_limits_and_refuses_each_overrun() {
-        let bytes = br#"{"wire":{"min":1,"max":1},"body":[1,2]}"#;
+        let bytes = br#"{"wire":{"min":1,"max":1},"line":1,"body":[1,2]}"#;
         let usage = JsonDecodeLimits::default().check(bytes).unwrap();
         let limits = JsonDecodeLimits {
             max_bytes: usage.bytes,

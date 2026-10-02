@@ -193,7 +193,10 @@ fn project_schema_status(
         StampRead::Present(stamp) if stamp.version == descriptor.writes.max()
     );
     let verdict = match compat::admit(descriptor, stamp) {
-        Err(refusal) => StoreSchemaVerdict::Refused { refusal },
+        Err(refusal) => StoreSchemaVerdict::Refused {
+            refusal: refusal
+                .read_against_release(release.release(), crate::release_stamp::BUILD_RELEASE),
+        },
         Ok(CompatAdmission::Provision) => StoreSchemaVerdict::Absent,
         #[cfg(feature = "synthetic-next")]
         Ok(CompatAdmission::Native) if synthetic_expanded => {

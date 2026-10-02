@@ -1455,9 +1455,9 @@ async fn a_call_on_a_wire_this_build_does_not_read_is_refused_before_any_journal
             SESSION_DRIVER_SERVICE,
             session.as_str(),
             "drive",
-            &Call {
-                wire: newer,
-                body: RestateSessionDriveRequest {
+            &Call::stating(
+                newer,
+                RestateSessionDriveRequest {
                     request: DriveRequest {
                         session: session.clone(),
                         request: request("newer-wire"),
@@ -1465,7 +1465,7 @@ async fn a_call_on_a_wire_this_build_does_not_read_is_refused_before_any_journal
                     },
                     handed_off: None,
                 },
-            },
+            ),
         )
         .await;
     let refusal = refused.expect_err("a disjoint wire is refused by LashSession");
@@ -1478,9 +1478,9 @@ async fn a_call_on_a_wire_this_build_does_not_read_is_refused_before_any_journal
             TURN_DRIVER_SERVICE,
             &format!("{}:{}a", session.as_str().len(), session.as_str()),
             "run",
-            &Call {
-                wire: newer,
-                body: RestateTurnDriveRequest {
+            &Call::stating(
+                newer,
+                RestateTurnDriveRequest {
                     sender_generation: Some(lash_core::engine::BuildGeneration::for_test("any")),
                     admitted: admission_body::admitted(
                         session.clone(),
@@ -1494,7 +1494,7 @@ async fn a_call_on_a_wire_this_build_does_not_read_is_refused_before_any_journal
                         },
                     ),
                 },
-            },
+            ),
         )
         .await;
     let refusal = turn.expect_err("a disjoint wire is refused by LashTurn");

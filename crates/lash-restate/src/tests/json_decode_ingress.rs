@@ -74,7 +74,7 @@ async fn ingress_law(backend: &LiveRestateBackend<dyn lash_core::StoreSet>) {
     );
 
     let peer = crate::RESTATE_WIRE.max() + 1;
-    let unsupported = r#"{"body":{"bytes":[1e999]},"wire":{"min":PEER,"max":PEER}}"#
+    let unsupported = r#"{"body":{"bytes":[1e999]},"line":1,"wire":{"min":PEER,"max":PEER}}"#
         .replace("PEER", &peer.to_string());
     let response = reqwest::Client::new()
         .post(format!(

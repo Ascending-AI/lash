@@ -22,6 +22,15 @@ pub(crate) fn writing_release(conn: &Connection, database: SqliteDatabase) -> Op
     crate::release_stamp::read_release(conn)
 }
 
+/// A stamp refusal with the store's release evidence: the writing release,
+/// and the reason as that release corrects it
+/// ([`CompatRefusal::read_against_release`]).
+fn attribute(refusal: CompatRefusal, release: Option<String>) -> CompatRefusal {
+    refusal
+        .read_against_release(release.as_deref(), crate::release_stamp::BUILD_RELEASE)
+        .with_writing_release(release)
+}
+
 pub(crate) fn malformed(database: SqliteDatabase, detail: impl Into<String>) -> rusqlite::Error {
     incompatible(CompatRefusal::MalformedStamp {
         component: database.component().as_str().to_owned(),
@@ -113,7 +122,7 @@ pub(crate) fn admit(
     })?;
     let release = writing_release(conn, database);
     let admission = compat::admit(descriptor, stamp)
-        .map_err(|refusal| incompatible(refusal.with_writing_release(release.clone())))?;
+        .map_err(|refusal| incompatible(attribute(refusal, release.clone())))?;
     let fleet = match row {
         Some((_, fleet)) => FleetFormat::admit(fleet, writable).map_err(|error| match error {
             StoreError::Incompatible { refusal } => {
@@ -182,9 +191,8 @@ pub(crate) fn fence(
         min_reader: u32::try_from(min_reader)
             .map_err(|error| malformed_on(conn, database, error.to_string()))?,
     };
-    compat::admit(descriptor, StampRead::Present(stamp)).map_err(|refusal| {
-        incompatible(refusal.with_writing_release(writing_release(conn, database)))
-    })?;
+    compat::admit(descriptor, StampRead::Present(stamp))
+        .map_err(|refusal| incompatible(attribute(refusal, writing_release(conn, database))))?;
     let fleet =
         u32::try_from(fleet).map_err(|error| malformed_on(conn, database, error.to_string()))?;
     FleetFormat::fence(fleet, writable).map_err(crate::sqlite_conversion_error)

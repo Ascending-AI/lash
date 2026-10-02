@@ -110,7 +110,12 @@ pub(crate) async fn ensure_schema(
     #[cfg(not(feature = "synthetic-next"))]
     let synthetic_expanded = false;
     let admission = lash_core_execution::compat::admit(descriptor, stamp).map_err(|refusal| {
-        let refusal = refusal.with_writing_release(writing_release.clone());
+        let refusal = refusal
+            .read_against_release(
+                writing_release.as_deref(),
+                crate::release_stamp::BUILD_RELEASE,
+            )
+            .with_writing_release(writing_release.clone());
         record_schema_gate_refusal(&report, check, &refusal);
         StoreError::Incompatible { refusal }
     })?;

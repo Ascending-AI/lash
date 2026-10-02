@@ -334,6 +334,16 @@ impl StorePreflight for SqliteStorePreflight {
         let mut databases = Vec::with_capacity(SqliteDatabase::ALL.len());
         for database in SqliteDatabase::ALL {
             let mut row = verify_schema_target(&self.location.target(database), database).await;
+            // The stamp is the whole store's: every database's floor refusal
+            // reads against the release that wrote the set.
+            if let StoreSchemaVerdict::Refused { refusal } = row.verdict {
+                row.verdict = StoreSchemaVerdict::Refused {
+                    refusal: refusal.read_against_release(
+                        release.release(),
+                        crate::release_stamp::BUILD_RELEASE,
+                    ),
+                };
+            }
             if let Some(refusal) = incomplete.as_ref().filter(|_| missing.contains(&database)) {
                 row.min_reader = None;
                 row.verdict = StoreSchemaVerdict::Refused {

@@ -98,11 +98,13 @@ An incompatible store may report a typed refusal:
 | `fleet_unrecorded` | The PostgreSQL store records no `F`. `lashctl migrate` seeds it and a worker open never records one. Run `lashctl migrate`, then open again. |
 | `partially_advanced` | The three SQLite databases disagree after a partial migration. Reopen with a build able to complete the set forward. |
 | `unknown_vocabulary` | A stored kind or state is unknown to this build. Keep the record and route to a build that understands it. |
+| `pre_release` | A build from before 1.0 wrote the store, the Restate object or the call. 1.0 restarted every counter, so nothing reads or migrates it. Recreate the stores and serve this build from a Restate namespace no pre-release build has used. |
 
 A writer that observes a finalized `F` outside its range stops with
 `WriterFenced` before making a mutation. A Restate call with disjoint wire
 ranges returns `lash.wire_unsupported`; an object whose `_compat` floor is too
-high returns `lash.incompatible`. Preserve the old deployment and the affected
+high, or that a pre-release build stamped, returns `lash.incompatible`, as
+does a call from a pre-release build. Preserve the old deployment and the affected
 state while investigating either refusal.
 
 ## Roll PostgreSQL workers from N to N+1

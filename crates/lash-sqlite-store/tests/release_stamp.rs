@@ -151,3 +151,52 @@ async fn an_unstamped_store_is_refused_without_inventing_a_release() {
     assert_eq!(status.release, StoreReleaseState::Unstamped);
     assert!(SqliteStore::open_file_for_testing(&path).await.is_err());
 }
+
+/// FIG-4819: the 1.0 cut restarts every counter, so a store a pre-release
+/// build stamped carries numbers above a release build's. The floor refusal
+/// would call it newer; the release stamp says an older release wrote it, and
+/// the open refuses it as pre-release state.
+#[tokio::test]
+async fn a_store_stamped_by_a_pre_release_build_is_refused_as_pre_release() {
+    let root = tempfile::tempdir().expect("scratch directory");
+    let path = root.path().join("durable-core.db");
+    drop(
+        SqliteStore::open_file_for_testing(&path)
+            .await
+            .expect("provision and stamp"),
+    );
+
+    // Older than any build this test compiles from, `0.0.0-dev` included.
+    let pre_release = "0.0.0-alpha";
+    let connection = rusqlite::Connection::open(&path).expect("open the stamped database");
+    connection
+        .execute(
+            "UPDATE release_stamp SET release_version = ?1 WHERE singleton = 1",
+            [pre_release],
+        )
+        .expect("stamp the store as a pre-release build's");
+    raise_reader_floor_above_this_build(&connection);
+    drop(connection);
+
+    let status = SqliteStorePreflight::for_store_root(root.path())
+        .schema_status()
+        .await
+        .expect("inspect refused store");
+    assert_eq!(
+        status.databases[0].verdict,
+        StoreSchemaVerdict::Refused {
+            refusal: CompatRefusal::PreRelease {
+                component: "sqlite-core".to_owned(),
+                writing_release: None,
+            },
+        }
+    );
+    assert!(
+        matches!(status.release, StoreReleaseState::Stamped(stamp) if stamp.release == pre_release)
+    );
+    let error = SqliteStore::open_file_for_testing(&path)
+        .await
+        .err()
+        .expect("a pre-release store is refused");
+    assert!(error.to_string().contains("pre-release"), "{error}");
+}

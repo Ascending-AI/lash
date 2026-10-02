@@ -10,6 +10,13 @@
 //! - every Lash object carries an [`ObjectCompat`] record under
 //!   [`COMPAT_KEY`], which names the oldest family formats a build must
 //!   support to read or to mutate the object.
+//!
+//! Both also state the release line that wrote them ([`RELEASE_LINE`]). The
+//! 1.0 cut restarted every counter at 1, so a pre-release call or record
+//! carries the numbers a release build reads; it states no line, and that
+//! refuses it before anything is decoded (FIG-4819).
+
+pub use lash_core_store::compat::RELEASE_LINE;
 
 pub use lash_sansio::VersionRange;
 
@@ -82,8 +89,8 @@ pub const RESTATE_WIRE_VERSION: u32 = 2;
 #[cfg(feature = "synthetic-next")]
 pub const RESTATE_WIRE: VersionRange = VersionRange::between(1, RESTATE_WIRE_VERSION);
 
-/// Every cross-build request. JSON `{"wire":{"min":1,"max":1},"body":…}`;
-/// the outer shape is frozen.
+/// Every cross-build request. JSON
+/// `{"wire":{"min":1,"max":1},"line":1,"body":…}`; the outer shape is frozen.
 ///
 /// The body is encoded at the caller's selected wire version, and `wire`
 /// states every version the caller reads, so any build in the compatibility
@@ -91,6 +98,10 @@ pub const RESTATE_WIRE: VersionRange = VersionRange::between(1, RESTATE_WIRE_VER
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Call<T> {
     pub wire: VersionRange,
+    /// The release line of the build that wrote the call. A pre-release
+    /// caller states none, which reads as 0 and is refused.
+    #[serde(default)]
+    pub line: u32,
     pub body: T,
 }
 
@@ -98,10 +109,7 @@ impl<T> Call<T> {
     /// A request from this build through ingress: it reads every version of
     /// [`RESTATE_WIRE`]. An ingress request is in no caller's journal.
     pub fn new(body: T) -> Self {
-        Self {
-            wire: RESTATE_WIRE,
-            body,
-        }
+        Self::stating(RESTATE_WIRE, body)
     }
 
     /// A request a lash handler sends from its journal.
@@ -111,8 +119,14 @@ impl<T> Call<T> {
     /// cannot depend on the build: it states only the wire version the
     /// deployment's fleet epoch selects ([`DeploymentWire::journaled`]).
     pub(crate) fn journaled(body: T) -> Self {
+        Self::stating(DeploymentWire::current().journaled(), body)
+    }
+
+    /// A request from this build that states it reads `wire`.
+    pub fn stating(wire: VersionRange, body: T) -> Self {
         Self {
-            wire: DeploymentWire::current().journaled(),
+            wire,
+            line: RELEASE_LINE,
             body,
         }
     }
@@ -260,7 +274,8 @@ impl<T> Reply<T> {
 pub const COMPAT_KEY: &str = "_compat";
 
 /// An object's `_compat` record. JSON
-/// `{"format":1,"min_reader":1,"min_writer":1}`; frozen and never enveloped.
+/// `{"format":1,"min_reader":1,"min_writer":1,"line":1}`; frozen and never
+/// enveloped.
 ///
 /// Every handler reads it first, after the wire selection and before any
 /// other state. Clearing or retiring an object keeps it, and only the next
@@ -273,6 +288,10 @@ pub struct ObjectCompat {
     pub min_reader: u32,
     /// The oldest family format a build must write to mutate the object.
     pub min_writer: u32,
+    /// The release line of the build that stamped the object. A pre-release
+    /// record states none, which reads as 0 and refuses every handler.
+    #[serde(default)]
+    pub line: u32,
 }
 
 impl ObjectCompat {
@@ -283,24 +302,25 @@ impl ObjectCompat {
             format,
             min_reader: format,
             min_writer: format,
+            line: RELEASE_LINE,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{COMPAT_KEY, Call, ObjectCompat, RESTATE_WIRE, Reply, VersionRange};
+    use super::{COMPAT_KEY, Call, ObjectCompat, RELEASE_LINE, RESTATE_WIRE, Reply, VersionRange};
 
     #[test]
     fn restate_call_and_reply_json_is_frozen() {
-        let call = Call {
-            wire: VersionRange::exactly(1),
-            body: serde_json::json!({"session_id": "s"}),
-        };
+        let call = Call::stating(
+            VersionRange::exactly(1),
+            serde_json::json!({"session_id": "s"}),
+        );
         let json = serde_json::to_string(&call).expect("encode");
         assert_eq!(
             json,
-            r#"{"wire":{"min":1,"max":1},"body":{"session_id":"s"}}"#
+            r#"{"wire":{"min":1,"max":1},"line":1,"body":{"session_id":"s"}}"#
         );
         assert_eq!(
             serde_json::from_str::<Call<serde_json::Value>>(&json).expect("decode"),
@@ -319,8 +339,24 @@ mod tests {
         assert_eq!(COMPAT_KEY, "_compat");
         assert_eq!(
             serde_json::to_string(&compat).expect("encode"),
-            r#"{"format":1,"min_reader":1,"min_writer":1}"#
+            r#"{"format":1,"min_reader":1,"min_writer":1,"line":1}"#
         );
+    }
+
+    /// FIG-4819: what a pre-release build wrote states no release line. It
+    /// decodes, as line 0, so the refusal is the typed one a handler makes
+    /// and never a decode fault.
+    #[test]
+    fn a_pre_release_call_and_record_read_as_line_zero() {
+        assert_eq!(RELEASE_LINE, 1);
+        let call: Call<()> =
+            serde_json::from_str(r#"{"wire":{"min":1,"max":1},"body":null}"#).expect("decode");
+        assert_eq!(call.line, 0);
+        let compat: ObjectCompat =
+            serde_json::from_str(r#"{"format":1,"min_reader":1,"min_writer":1}"#).expect("decode");
+        assert_eq!(compat.line, 0);
+        assert_eq!(Call::new(()).line, RELEASE_LINE);
+        assert_eq!(ObjectCompat::fresh(1).line, RELEASE_LINE);
     }
 
     /// RT0016 (FIG-3805): a journaled call's bytes are the same whatever
@@ -371,15 +407,9 @@ mod tests {
     #[test]
     fn a_call_selects_the_highest_common_wire() {
         assert_eq!(Call::new(()).select(), Some(RESTATE_WIRE.max()));
-        let newer = Call {
-            wire: VersionRange::new(1, 2).expect("range"),
-            body: (),
-        };
+        let newer = Call::stating(VersionRange::new(1, 2).expect("range"), ());
         assert_eq!(newer.select(), Some(RESTATE_WIRE.max()));
-        let disjoint = Call {
-            wire: VersionRange::exactly(RESTATE_WIRE.max() + 1),
-            body: (),
-        };
+        let disjoint = Call::stating(VersionRange::exactly(RESTATE_WIRE.max() + 1), ());
         assert_eq!(disjoint.select(), None);
         assert!(
             serde_json::from_str::<Call<()>>(r#"{"wire":{"min":0,"max":1},"body":null}"#).is_err()

@@ -118,7 +118,8 @@ pub use lash_http_transport::{
 pub use restate_sdk;
 
 pub use compat::{
-    COMPAT_KEY, Call, ObjectCompat, RESTATE_WIRE, RESTATE_WIRE_VERSION, Reply, VersionRange,
+    COMPAT_KEY, Call, ObjectCompat, RELEASE_LINE, RESTATE_WIRE, RESTATE_WIRE_VERSION, Reply,
+    VersionRange,
 };
 
 pub use usage_accounting::{

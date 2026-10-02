@@ -1195,6 +1195,29 @@
           "type": "object"
         },
         {
+          "description": "State or a call a pre-release build wrote (FIG-4819). The 1.0 cut\nrestarted every counter, so its numbers do not mean what this\nbuild's do, and no release reads it: a Restate object or call that\nstates no release line, or a store whose floor is above this build's\nrange although an older release stamped it.",
+          "properties": {
+            "component": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "pre_release",
+              "type": "string"
+            },
+            "writing_release": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "refusal",
+            "component"
+          ],
+          "type": "object"
+        },
+        {
           "description": "A stored label this build has no name for (an obligation state or\nkind, an attachment owner kind, a referrer kind): a newer build wrote\nit. Classified apart from corruption so no pass treats it as absent.",
           "properties": {
             "label": {

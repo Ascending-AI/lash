@@ -18,7 +18,9 @@ use super::session_drive_roll_on_the_double::{
     BUILD_N_URI, SessionRoll, generation, stable_session,
 };
 use super::test_restate_authority_id;
-use crate::compat::{COMPAT_KEY, Call, ObjectCompat, RESTATE_WIRE, Reply, VersionRange};
+use crate::compat::{
+    COMPAT_KEY, Call, ObjectCompat, RELEASE_LINE, RESTATE_WIRE, Reply, VersionRange,
+};
 use crate::durable_wait::{
     LashDurableWaitRegistry as _, RestateDurableWaitEffectRequest, RestateDurableWaitIndexRequest,
     RestateDurableWaitRegistration, RestateTurnGatePeek,
@@ -123,6 +125,7 @@ fn compat_bytes(format: u32, min_reader: u32, min_writer: u32) -> Vec<u8> {
         format,
         min_reader,
         min_writer,
+        line: RELEASE_LINE,
     })
     .expect("encode a _compat record")
 }
@@ -417,10 +420,10 @@ async fn a_disjoint_wire_is_refused_typed_before_any_state() {
             "EffectGroupIndex",
             "disjoint",
             "admit_child",
-            &Call {
-                wire: peer,
-                body: serde_json::json!({ "a": "shape this build has never seen" }),
-            },
+            &Call::stating(
+                peer,
+                serde_json::json!({ "a": "shape this build has never seen" }),
+            ),
         )
         .await
         .expect_err("a disjoint wire is refused");
@@ -750,5 +753,112 @@ async fn a_shared_read_never_refuses_an_index_its_writer_stamps_concurrently() {
     assert!(
         server.stats().crashes > 0,
         "the peek replayed across the register"
+    );
+}
+
+/// The typed refusal of what a pre-release build wrote to `component`.
+fn pre_release(component: &str) -> RestateCompatError {
+    RestateCompatError::Incompatible {
+        refusal: CompatRefusal::PreRelease {
+            component: component.to_owned(),
+            writing_release: None,
+        },
+    }
+}
+
+/// FIG-4819: the 1.0 cut restarts every counter at 1, so the `_compat`
+/// record a pre-release build wrote carries the same numbers as a 1.0
+/// object's. It states no release line, and that is what refuses it: typed,
+/// on every handler, before any value is decoded and with nothing written.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn each_family_refuses_a_pre_release_compat_record_with_zero_state_change() {
+    let (server, ingress) = object_families().await;
+    for family in families() {
+        let service = family.service;
+        let (exclusive, exclusive_body) = &family.exclusive;
+        let object = format!("{service}-pre-release");
+        // Byte for byte what `ObjectCompat::fresh` wrote before the record
+        // stated a line.
+        server.set_object_state(
+            service,
+            &object,
+            [
+                (
+                    COMPAT_KEY.to_owned(),
+                    format!(r#"{{"format":{NEWEST},"min_reader":{NEWEST},"min_writer":{NEWEST}}}"#)
+                        .into_bytes(),
+                ),
+                (
+                    family.value_key.to_owned(),
+                    stamped(serde_json::json!({"shape": "changed in place before the cut"})),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let before = server.object_state(service, &object);
+        let error = call(&ingress, service, &object, exclusive, exclusive_body)
+            .await
+            .expect_err("a pre-release object refuses the exclusive handler");
+        assert_eq!(
+            compat_refusal(&error),
+            pre_release(family.component),
+            "{service}/{exclusive}"
+        );
+        if let Some((shared, shared_body)) = &family.shared {
+            let error = call(&ingress, service, &object, shared, shared_body)
+                .await
+                .expect_err("a pre-release object refuses the shared handler");
+            assert_eq!(
+                compat_refusal(&error),
+                pre_release(family.component),
+                "{service}/{shared}"
+            );
+        }
+        assert_eq!(
+            server.object_state(service, &object),
+            before,
+            "{service}: a refused call changed nothing"
+        );
+    }
+}
+
+/// FIG-4819: a pre-release worker still draining on the same service names
+/// calls at wire 1, the version 1.0 answers. Its envelope states no release
+/// line, and the handler refuses it typed before it decodes the body or
+/// reads or writes any state.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_pre_release_call_is_refused_typed_before_any_state() {
+    let (server, ingress) = object_families().await;
+    for (handler, body) in [
+        ("probe", serde_json::Value::Null),
+        (
+            "admit_child",
+            serde_json::json!({ "a": "shape changed in place before the cut" }),
+        ),
+    ] {
+        let error = ingress
+            .call_object_json::<_, serde_json::Value>(
+                "EffectGroupIndex",
+                "pre-release-caller",
+                handler,
+                &serde_json::json!({
+                    "wire": { "min": RESTATE_WIRE.min(), "max": RESTATE_WIRE.max() },
+                    "body": body,
+                }),
+            )
+            .await
+            .expect_err("a pre-release call is refused");
+        assert_eq!(
+            compat_refusal(&error),
+            pre_release(lash_core_store::compat::RESTATE_WIRE_COMPONENT),
+            "{handler}"
+        );
+    }
+    assert!(
+        server
+            .object_state("EffectGroupIndex", "pre-release-caller")
+            .is_empty(),
+        "nothing was written, not even a _compat record"
     );
 }
