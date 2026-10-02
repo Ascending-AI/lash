@@ -1508,15 +1508,374 @@ class DevTestScope:
     facade: bool
     repository: bool
     script_tests: tuple[str, ...]
+    # The precise projection only (`dev_test_scope(..., base_text=...)`):
+    # exact Buck2 labels and tracked files whose reverse dependencies the
+    # change can move. A file stands for the targets that declare it as an
+    # input (Buck2 `owner`). When Buck2 names no owner, a path in `files`
+    # widens to the whole suite and a path in `machinery` selects nothing.
+    targets: tuple[str, ...] = ()
+    files: tuple[str, ...] = ()
+    machinery: tuple[str, ...] = ()
+
+
+# The inputs that select the whole developer suite even under the precise
+# projection, with the reason no narrower selection is exact. Patterns are
+# `fnmatch` globs over repository paths. Every other shared input has a rule in
+# `_precise_selection`; a path with neither a rule nor a row here keeps the
+# projection `dev_test_scope` gives it without a base.
+DEV_TEST_GLOBAL_INPUTS: Mapping[str, str] = {
+    "rust-toolchain*": "the compiler every action runs",
+    ".buckconfig": "flags and cells of every Buck2 action",
+    "tools/*": "Buck2 rules, toolchains, the generator, action sizes and test wrappers",
+    "third-party/src/*": "the synthetic crate every third-party target resolves through",
+    ".cargo/*": "Cargo configuration shared by every package",
+    ".config/*": "nextest configuration shared by every package",
+    "clippy.toml": "an input of every Rust target's lint action",
+    "rustfmt.toml": "the format of every Rust source",
+    "deny.toml": "the workspace-wide dependency policy",
+    ".github/workflows/ci.yml": "the definition of every CI job",
+    ".gitattributes": "checkout normalization of every file",
+    ".pre-commit-config.yaml": "hooks over every file",
+    ".gitleaksignore": "the hygiene scan over every file",
+    "deploy/helm/*": "chart inputs with no declared reader",
+}
+
+ROOT_BUCK = "BUCK"
+THIRD_PARTY_BUCK = "third-party/rust/BUCK"
+# The generator's resolution inputs for `THIRD_PARTY_BUCK`. Buck2 reads the
+# BUCK file, never these, so a change here moves a test only through the
+# targets it regenerates, and those are diffed by target.
+THIRD_PARTY_RESOLUTION = frozenset({"third-party/Cargo.toml", "third-party/Cargo.lock"})
+
+_BUCK_STATEMENT = re.compile(r"[A-Za-z_][\w.]*\(")
+_BUCK_NAME = re.compile(r'^\s+name = "([^"]+)",$', re.MULTILINE)
+
+
+def buck_targets(text: str) -> tuple[dict[str, str], str] | None:
+    """A generated BUCK file as ({target name: its rule call}, everything else).
+
+    The generators write each rule call from a column-0 `rule(` line to a
+    column-0 `)` line and name it on a `name = "..."` line. Everything outside
+    a named call (loads, comments; blank lines dropped) is the second value.
+    None when the text does not have that shape, so the caller selects the
+    whole suite.
+    """
+
+    targets: dict[str, str] = {}
+    rest: list[str] = []
+    block: list[str] | None = None
+    for line in text.splitlines():
+        if block is not None:
+            block.append(line)
+            if line != ")":
+                continue
+            body = "\n".join(block)
+            block = None
+            match = _BUCK_NAME.search(body)
+            if match is None:
+                rest.append(body)
+            elif match[1] in targets:
+                return None
+            else:
+                targets[match[1]] = body
+        elif _BUCK_STATEMENT.match(line) and line.count("(") > line.count(")"):
+            block = [line]
+        elif line[:1].isspace() or line == ")":
+            # A continuation with no open call: not the generated shape.
+            return None
+        elif line:
+            rest.append(line)
+    return None if block is not None else (targets, "\n".join(rest))
+
+
+def changed_buck_targets(old: str | None, new: str) -> frozenset[str] | None:
+    """The targets of a generated BUCK file whose rule call was added or edited.
+
+    A removed target is not listed: whatever depended on it names it in its
+    own `deps`, so that rule call changed too. None when either side is not
+    the generated shape or anything outside the rule calls differs.
+    """
+
+    before = buck_targets(old or "")
+    after = buck_targets(new)
+    if before is None or after is None or before[1] != after[1]:
+        return None
+    return frozenset(name for name, body in after[0].items() if before[0].get(name) != body)
+
+
+def _lock_packages(text: str) -> dict[tuple[str, str, str | None], Mapping]:
+    return {
+        (package["name"], package["version"], package.get("source")): package
+        for package in tomllib.loads(text).get("package", [])
+    }
+
+
+def changed_lock_packages(
+    old: str | None, new: str
+) -> frozenset[tuple[str, str, str | None]] | None:
+    """The (name, version, source) of each `Cargo.lock` package whose entry
+    was added or edited. A removed package is not listed: each package that
+    depended on it has an edited `dependencies` list. None for an unreadable
+    lock. `source` is None for a workspace member.
+    """
+
+    try:
+        before = _lock_packages(old or "")
+        after = _lock_packages(new)
+    except (tomllib.TOMLDecodeError, KeyError, TypeError):
+        return None
+    return frozenset(key for key, package in after.items() if before.get(key) != package)
+
+
+def changed_workspace_manifest(
+    old: str | None, new: str
+) -> tuple[frozenset[str], dict[str, tuple[object, object]]] | None:
+    """What a root `Cargo.toml` edit changed, when that is only the member list
+    or `[workspace.dependencies]` rows: (added members, {dependency key: (old
+    row, new row)}). None when any shared section differs (`[workspace.package]`,
+    lints, profiles, patches, the root package), which every crate inherits.
+    A comment or layout edit changes nothing and returns two empty values.
+    """
+
+    try:
+        before = tomllib.loads(old or "")
+        after = tomllib.loads(new)
+    except tomllib.TOMLDecodeError:
+        return None
+    before_workspace = dict(before.pop("workspace", {}))
+    after_workspace = dict(after.pop("workspace", {}))
+    before_members = before_workspace.pop("members", [])
+    after_members = after_workspace.pop("members", [])
+    before_rows = before_workspace.pop("dependencies", {})
+    after_rows = after_workspace.pop("dependencies", {})
+    if before != after or before_workspace != after_workspace:
+        return None
+    rows = {
+        key: (before_rows.get(key), after_rows.get(key))
+        for key in sorted(set(before_rows) | set(after_rows))
+        if before_rows.get(key) != after_rows.get(key)
+    }
+    return frozenset(after_members) - frozenset(before_members), rows
+
+
+def _worktree_text(root: Path, path: str) -> str:
+    return (root / path).read_text(encoding="utf-8")
+
+
+def _third_party_labels(root: Path, name: str, version: str | None = None) -> set[str]:
+    """The third-party targets built from the crates.io archive of `name`
+    (every locked version, or one). A locked package no target builds returns
+    nothing: it cannot move a Buck2 test."""
+
+    try:
+        parsed = buck_targets(_worktree_text(root, THIRD_PARTY_BUCK))
+    except OSError:
+        parsed = None
+    if parsed is None:
+        raise ValueError(f"cannot read the targets of {THIRD_PARTY_BUCK}")
+    locked = re.escape(version) if version else r'[0-9][^"]*'
+    archive = re.compile(rf'":{re.escape(name)}-{locked}\.crate"')
+    return {
+        f"//third-party/rust:{target}"
+        for target, body in parsed[0].items()
+        if archive.search(body)
+    }
+
+
+@dataclass
+class _Precise:
+    packages: set[str]
+    targets: set[str]
+    files: set[str]
+    scripts: set[str]
+    machinery: set[str]
+    broad: bool = False
+    facade: bool = False
+    repository: bool = False
+
+
+def _precise_package(root: Path, directory: str, selection: _Precise) -> None:
+    directory = PurePosixPath(directory).as_posix()
+    if _is_buck2_package(str(root), directory):
+        selection.packages.add("//" + directory)
+    else:
+        selection.broad = True
+
+
+def _precise_selection(
+    path: str,
+    path_class: PathClass,
+    root: Path,
+    base_text,
+    script_tests: frozenset[str],
+) -> _Precise | None:
+    """What one whole-suite trigger selects when its change can be read
+    exactly, or None for a path with no precise rule.
+
+    * A package's `BUCK` or `Cargo.toml` selects the package; the reverse
+      dependency query adds what depends on it. A generated BUCK file changes
+      with the manifest it is generated from, so both name the same package.
+    * The root `BUCK` and `third-party/rust/BUCK` are diffed by target
+      (`changed_buck_targets`); the synthetic third-party manifest and lock
+      follow the BUCK file generated from them. All four keep the repository
+      gates, which hold the generator's contracts.
+    * `Cargo.lock` is diffed by package: a changed workspace member selects
+      its package, a changed crates.io package the third-party targets built
+      from that archive.
+    * The root `Cargo.toml` is diffed by section (`changed_workspace_manifest`):
+      a new member selects its package and a `[workspace.dependencies]` row the
+      path package or every third-party target of that crate name.
+    * A tracked data file (`schemas/`, `fixtures/`, `fuzz/`) or runtime doc
+      input selects the targets that declare it as an input. The caller widens
+      when Buck2 knows no owner, and `//:schema_checks` is built either way.
+    * `justfile` selects the script self-tests that read it; no Buck2 target
+      declares it as an input.
+    * A source file in a package directory with no BUCK file (shared example
+      sources) selects the targets that declare it, like a data file.
+    * CI machinery (`scripts/`, `.github/`) keeps the repository gates and
+      selects the targets that declare it as an input, if any. The Buck2 half
+      of dev-test runs `kiln` (under `tools/`, a whole-suite input) and remote
+      actions over declared inputs, so a script no target declares cannot
+      change a dev-suite verdict: running the suite for it proved nothing
+      about the CI job that runs the script.
+
+    The lock and the root manifest are also Buck2 inputs of their own
+    (`//:cargo_metadata`), so both are returned as files too.
+    """
+
+    selection = _Precise(set(), set(), set(), set(), set())
+    try:
+        if path_class.kind is PathKind.PACKAGE and path_class.manifest:
+            assert path_class.package is not None
+            selection.facade = _is_facade_path(path)
+            _precise_package(root, path_class.package, selection)
+        elif path in {ROOT_BUCK, THIRD_PARTY_BUCK}:
+            # The generator's own contracts are repository gates.
+            selection.repository = True
+            package = PurePosixPath(path).parent.as_posix()
+            changed = changed_buck_targets(
+                base_text(path), _worktree_text(root, path)
+            )
+            if changed is None:
+                selection.broad = True
+            else:
+                prefix = "//:" if package == "." else f"//{package}:"
+                selection.targets.update(prefix + name for name in changed)
+        elif path in THIRD_PARTY_RESOLUTION:
+            selection.repository = True
+        elif path == "Cargo.lock":
+            selection.facade = True
+            selection.files.add(path)
+            changed_packages = changed_lock_packages(
+                base_text(path), _worktree_text(root, path)
+            )
+            if changed_packages is None:
+                selection.broad = True
+                return selection
+            members = _workspace_package_dirs(str(root))
+            for name, version, source in sorted(
+                changed_packages, key=lambda key: (key[0], key[1], key[2] or "")
+            ):
+                if source is not None:
+                    selection.targets |= _third_party_labels(root, name, version)
+                elif name in members:
+                    _precise_package(root, members[name], selection)
+                else:
+                    selection.broad = True
+        elif path == "Cargo.toml":
+            selection.facade = True
+            selection.files.add(path)
+            changed_manifest = changed_workspace_manifest(
+                base_text(path), _worktree_text(root, path)
+            )
+            if changed_manifest is None:
+                selection.broad = True
+                return selection
+            members, rows = changed_manifest
+            for member in sorted(members):
+                _precise_package(root, member, selection)
+            for key, sides in rows.items():
+                for row in sides:
+                    if row is None:
+                        continue
+                    table = row if isinstance(row, dict) else {}
+                    if "path" in table:
+                        _precise_package(root, table["path"], selection)
+                    else:
+                        selection.targets |= _third_party_labels(
+                            root, table.get("package", key)
+                        )
+        elif path == "justfile":
+            selection.scripts.update(_justfile_contract_tests(str(root), script_tests))
+        elif path_class.kind is PathKind.CI:
+            selection.repository = True
+            if (root / path).is_file():
+                selection.machinery.add(path)
+        elif path_class.kind in {PathKind.DATA, PathKind.DOC_INPUT} or (
+            path_class.kind is PathKind.PACKAGE and not path_class.buck2_package
+        ):
+            if (root / path).is_file():
+                selection.files.add(path)
+            else:
+                # A deleted input changes a glob, which no file query can ask.
+                selection.broad = True
+        else:
+            return None
+    except (OSError, ValueError, KeyError):
+        selection.broad = True
+    return selection
+
+
+@lru_cache(maxsize=None)
+def _workspace_package_dirs(root: str) -> Mapping[str, str]:
+    """Each workspace member's Cargo package name -> its directory."""
+
+    inventory = json.loads((Path(root) / TARGET_INVENTORY).read_text(encoding="utf-8"))
+    return {
+        package["package"]: PurePosixPath(package["manifest"]).parent.as_posix()
+        for package in inventory["packages"]
+        if "package" in package
+    }
+
+
+@lru_cache(maxsize=None)
+def _justfile_contract_tests(root: str, script_tests: frozenset[str]) -> frozenset[str]:
+    """The script self-tests that read `justfile`: its recipes' contracts."""
+
+    readers = set()
+    for test in script_tests:
+        if not PurePosixPath(test).name.startswith("test_"):
+            continue
+        try:
+            text = (Path(root) / test).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if "justfile" in text:
+            readers.add(test)
+    return frozenset(readers)
+
+
+def _is_dev_test_global(path: str) -> bool:
+    return any(fnmatch.fnmatchcase(path, pattern) for pattern in DEV_TEST_GLOBAL_INPUTS)
 
 
 def dev_test_scope(
-    paths: list[str], root: Path, script_tests: frozenset[str]
+    paths: list[str], root: Path, script_tests: frozenset[str], base_text=None
 ) -> DevTestScope:
-    """Select dev-test's scope. `script_tests` is CI's script self-test inventory."""
+    """Select dev-test's scope. `script_tests` is CI's script self-test inventory.
+
+    `base_text(path)` returns a path's text at the comparison base (None when
+    it did not exist) and turns on the precise projection, which reads what a
+    shared input's change is instead of widening to the whole suite. Only a
+    caller that asks Buck2 for reverse dependencies may pass it: the precise
+    rules name seeds, not every test they reach.
+    """
 
     packages: set[str] = set()
     scripts: set[str] = set()
+    targets: set[str] = set()
+    files: set[str] = set()
+    machinery: set[str] = set()
     broad = facade = repository = False
     for path in paths:
         path_class = classify_path(path, root)
@@ -1525,7 +1884,23 @@ def dev_test_scope(
         proof = SCRIPT_PROOFS.get(path, path)
         if proof in script_tests and PurePosixPath(proof).name.startswith("test_"):
             scripts.add(proof)
-        elif path in {"Cargo.toml", "Cargo.lock"}:
+            continue
+        if base_text is not None:
+            if _is_dev_test_global(path):
+                broad = repository = True
+                continue
+            precise = _precise_selection(path, path_class, root, base_text, script_tests)
+            if precise is not None:
+                packages |= precise.packages
+                targets |= precise.targets
+                files |= precise.files
+                machinery |= precise.machinery
+                scripts |= precise.scripts
+                broad |= precise.broad
+                facade |= precise.facade
+                repository |= precise.repository
+                continue
+        if path in {"Cargo.toml", "Cargo.lock"}:
             broad = facade = True
         elif path_class.kind is PathKind.PACKAGE:
             facade |= _is_facade_path(path)
@@ -1545,7 +1920,47 @@ def dev_test_scope(
         else:
             broad = repository = True
     return DevTestScope(
-        tuple(sorted(packages)), broad, facade, repository, tuple(sorted(scripts))
+        tuple(sorted(packages)), broad, facade, repository, tuple(sorted(scripts)),
+        tuple(sorted(targets)), tuple(sorted(files)), tuple(sorted(machinery)),
+    )
+
+
+# Repository gates whose read set is closed, so the pre-land gate skips one
+# when the change touches nothing it reads. The key is the command exactly as
+# the gate inventory lists it. A gate with no row reads the tree in ways no
+# table states (globs over scripts, the workflow, every manifest) and always
+# runs. CI runs every gate regardless.
+#
+# `test_check_version_bumps.py` runs the version-bump gate over the working
+# tree: its own modules, the surface registry, every Rust source and Cargo
+# manifest under the package roots (`RUST_SOURCE_PATTERNS`,
+# `CARGO_MANIFEST_PATTERNS`), and the files the registered guards name, all of
+# which lie under the package roots (`test_ci_plan.py` holds that). It is the
+# slowest gate by far: 260-385 s of pure-Python Rust parsing.
+REPOSITORY_GATE_INPUTS: Mapping[str, tuple[str, ...]] = {
+    "python3 scripts/test_check_version_bumps.py": (
+        "scripts/test_check_version_bumps.py",
+        "scripts/check_version_bumps.py",
+        "scripts/discover_version_surfaces.py",
+        "scripts/release_baseline.py",
+        "scripts/versioned-surfaces.toml",
+        "Cargo.toml",
+        "crates/*",
+        "examples/*",
+        "runbooks/*",
+    ),
+}
+
+
+def unaffected_repository_gates(paths: list[str]) -> tuple[str, ...]:
+    """The repository gate commands no path in `paths` is an input of."""
+
+    return tuple(
+        command
+        for command, patterns in REPOSITORY_GATE_INPUTS.items()
+        if not any(
+            fnmatch.fnmatchcase(path, pattern) for path in paths for pattern in patterns
+        )
     )
 
 
@@ -1719,7 +2134,8 @@ def affected_buck2_labels(
     expectations file went red on main otherwise). A broad scope means the
     whole `//:dev_tests` suite; the facade seal rides a facade diff; a touched
     package no selected label covers gets its inventory build labels. The
-    `//:schema_checks` build aggregate runs whenever either list is non-empty.
+    `//:schema_checks` build aggregate runs whenever either list is non-empty
+    or the precise projection named a target or a file.
     `include_deferred` lets the local pre-land gate leave the tail to the
     hourly main run; CI keeps the default selection.
     """
@@ -1748,7 +2164,7 @@ def affected_buck2_labels(
         )
     else:
         builds = []
-    if labels or builds:
+    if labels or builds or scope.targets or scope.files or scope.machinery:
         builds.append("//:schema_checks")
     return labels, builds
 

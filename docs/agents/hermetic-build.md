@@ -76,10 +76,33 @@ python3 scripts/dev-test.py --dependents
 ```
 
 It diffs the merge base with `origin/main` against the commits, the working
-tree and untracked files together. A Buck2 `rdeps` query over the touched
-packages selects every dev-suite test that depends on them; a shared input,
-a package manifest or a failed query selects `//:dev_tests` instead.
-It names the affected `dev-deferred` labels it skips, which run hourly on
+tree and untracked files together. A Buck2 `rdeps` query selects every
+dev-suite test that depends on what the diff changed, read file by file:
+
+| Changed path | Selects (plus reverse dependencies) |
+|---|---|
+| A package source, `BUCK` or `Cargo.toml` | That package's targets. |
+| Root `BUCK`, `third-party/rust/BUCK` | The targets whose rule call changed. Repository gates run. |
+| `Cargo.lock` | Changed workspace members' packages and the third-party targets of changed crates. |
+| Root `Cargo.toml` | New members and changed `[workspace.dependencies]` rows. Any other section selects the suite. |
+| `schemas/`, `fixtures/`, `fuzz/`, a runtime doc input, shared example sources | The targets that declare the file as an input, plus `//:schema_checks`. |
+| `justfile` | The script self-tests that read it. |
+| `scripts/`, `.github/` | The repository gates, plus the targets that declare the file as an input. |
+
+The whole suite, `//:dev_tests`, still runs for the inputs in
+`DEV_TEST_GLOBAL_INPUTS` (`scripts/ci_plan.py`): the toolchain pin,
+`.buckconfig`, everything under `tools/`, Cargo and lint configuration and
+`ci.yml`. It also runs for a path nothing classifies, a deleted data file, a
+data file no target declares, and a failed query. Without `--dependents`
+nothing is queried, so a shared input or a package manifest selects the suite.
+
+The repository gates run at the same time as the Buck2 build and tests. Each
+command keeps its own log, and one summary and one exit code cover both
+halves. A gate listed in `REPOSITORY_GATE_INPUTS` is skipped when the diff
+touches none of its inputs: `test_check_version_bumps.py` runs only for a
+package, a root manifest or its own modules. CI runs every gate.
+
+The gate names the affected `dev-deferred` labels it skips, which run hourly on
 main. Add `--include-deferred` to restore their selection, including all deferred
 labels on a broad plan. CI's PR selection still includes the tail labels.
 The tests run through `kiln test` on the

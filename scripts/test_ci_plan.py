@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Unit tests for ci_plan.py."""
 
+import fnmatch
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -1058,6 +1059,291 @@ class DevTestScopeTests(unittest.TestCase):
         scope = self.scope("scripts/ci_plan.py", "scripts/test_dev_test.py", scripts=tests)
         self.assertEqual(("scripts/test_ci_plan.py", "scripts/test_dev_test.py"), scope.script_tests)
         self.assertFalse(scope.broad or scope.repository)
+
+
+class PreciseDevTestScopeTests(unittest.TestCase):
+    """The projection `dev-test.py --dependents` asks for: a shared input's
+    change is read, not widened to the whole suite."""
+
+    def scope(self, *paths: str, base=None, head=None, scripts=frozenset()):
+        base = base or {}
+        if head is not None:
+            real = ci_plan._worktree_text
+            patch = mock.patch.object(
+                ci_plan, "_worktree_text",
+                side_effect=lambda root, path: head.get(path) or real(root, path),
+            )
+            patch.start()
+            self.addCleanup(patch.stop)
+        return ci_plan.dev_test_scope(
+            list(paths), ROOT, scripts,
+            lambda path: base[path] if path in base else (ROOT / path).read_text(),
+        )
+
+    def test_a_package_buck_file_or_manifest_selects_its_package(self) -> None:
+        for name in ("BUCK", "Cargo.toml"):
+            with self.subTest(name=name):
+                scope = self.scope(f"crates/lash-render/{name}")
+                self.assertEqual(("//crates/lash-render",), scope.packages)
+                self.assertFalse(scope.broad or scope.repository or scope.facade)
+        self.assertTrue(self.scope("crates/lash/Cargo.toml").facade)
+
+    def test_generated_buck_text_splits_into_named_rule_calls(self) -> None:
+        text = (
+            '# @generated\nload("//tools:x.bzl", "rule")\n\n'
+            'rule(\n    name = "one",\n    deps = [\n        ":two"\n],\n)\n\n'
+            'rule(\n    name = "two",\n)\n'
+        )
+        targets, rest = ci_plan.buck_targets(text)
+        self.assertEqual(["one", "two"], sorted(targets))
+        self.assertIn('load("//tools:x.bzl", "rule")', rest)
+        edited = text.replace('":two"', '":two", ":three"')
+        self.assertEqual({"one"}, ci_plan.changed_buck_targets(text, edited))
+        added = text + '\nrule(\n    name = "three",\n)\n'
+        self.assertEqual({"three"}, ci_plan.changed_buck_targets(text, added))
+        # A removed target changes whatever named it, so it adds nothing.
+        self.assertEqual(frozenset(), ci_plan.changed_buck_targets(added, text))
+        # A new file, a load, an unterminated call and a duplicate name are
+        # not diffable.
+        self.assertIsNone(ci_plan.changed_buck_targets(None, text))
+        self.assertIsNone(ci_plan.changed_buck_targets(text, text.replace("x.bzl", "y.bzl")))
+        self.assertIsNone(ci_plan.buck_targets('rule(\n    name = "one",\n'))
+        self.assertIsNone(ci_plan.buck_targets(text + 'rule(\n    name = "two",\n)\n'))
+        self.assertIsNone(ci_plan.buck_targets('    name = "stray",\n'))
+
+    def test_the_checked_in_generated_buck_files_have_the_diffable_shape(self) -> None:
+        for path in (ci_plan.ROOT_BUCK, ci_plan.THIRD_PARTY_BUCK):
+            with self.subTest(path=path):
+                parsed = ci_plan.buck_targets((ROOT / path).read_text())
+                self.assertIsNotNone(parsed)
+                self.assertGreater(len(parsed[0]), 10)
+        root_targets = ci_plan.buck_targets((ROOT / "BUCK").read_text())[0]
+        self.assertIn("host_schemas", root_targets)
+        self.assertIn("schema_checks", root_targets)
+
+    def test_a_generated_buck_file_selects_its_changed_targets(self) -> None:
+        for path, target, label in (
+            ("BUCK", "host_schemas", "//:host_schemas"),
+            ("third-party/rust/BUCK", "tokio-1", "//third-party/rust:tokio-1"),
+        ):
+            with self.subTest(path=path):
+                text = (ROOT / path).read_text()
+                body = ci_plan.buck_targets(text)[0][target]
+                base = text.replace(body, body.replace("visibility", "# old\n    visibility", 1))
+                self.assertNotEqual(text, base)
+                scope = self.scope(path, base={path: base})
+                self.assertEqual((label,), scope.targets)
+                # The generator's contracts are repository gates.
+                self.assertTrue(scope.repository)
+                self.assertFalse(scope.broad)
+        text = (ROOT / "BUCK").read_text()
+        widened = self.scope("BUCK", base={"BUCK": text.replace("load(", "load (", 1)})
+        self.assertTrue(widened.broad)
+
+    def test_the_synthetic_third_party_resolution_follows_its_buck_file(self) -> None:
+        scope = self.scope("third-party/Cargo.toml", "third-party/Cargo.lock")
+        self.assertTrue(scope.repository)
+        self.assertFalse(scope.broad)
+        self.assertEqual(((), (), ()), (scope.packages, scope.targets, scope.files))
+
+    def test_lock_entries_are_diffed_by_package(self) -> None:
+        old = (
+            '[[package]]\nname = "a"\nversion = "1.0.0"\nsource = "registry"\n'
+            'dependencies = ["b"]\n\n'
+            '[[package]]\nname = "b"\nversion = "0.2.0"\nsource = "registry"\n\n'
+            '[[package]]\nname = "member"\nversion = "0.1.0"\ndependencies = ["a"]\n'
+        )
+        bumped = old.replace('"0.2.0"', '"0.2.1"')
+        self.assertEqual({("b", "0.2.1", "registry")}, ci_plan.changed_lock_packages(old, bumped))
+        # Removing `b` edits the entry of the package that depended on it.
+        removed = old.replace('dependencies = ["b"]\n', "").replace(
+            '[[package]]\nname = "b"\nversion = "0.2.0"\nsource = "registry"\n\n', ""
+        )
+        self.assertEqual({("a", "1.0.0", "registry")}, ci_plan.changed_lock_packages(old, removed))
+        self.assertEqual(frozenset(), ci_plan.changed_lock_packages(old, old))
+        self.assertIsNone(ci_plan.changed_lock_packages(old, "[[package"))
+
+    def test_the_lock_selects_changed_members_and_third_party_targets(self) -> None:
+        lock = (ROOT / "Cargo.lock").read_text()
+        packages = tomllib.loads(lock)["package"]
+        tokio = next(package for package in packages if package["name"] == "tokio")
+        render = next(package for package in packages if package["name"] == "lash-internal-render")
+        base = lock.replace(
+            f'name = "tokio"\nversion = "{tokio["version"]}"',
+            'name = "tokio"\nversion = "1.0.0"',
+        ).replace(
+            f'name = "lash-internal-render"\nversion = "{render["version"]}"',
+            'name = "lash-internal-render"\nversion = "0.0.1"',
+        )
+        self.assertNotEqual(lock, base)
+        scope = self.scope("Cargo.lock", base={"Cargo.lock": base})
+        self.assertFalse(scope.broad or scope.repository)
+        self.assertTrue(scope.facade)
+        self.assertEqual(("//crates/lash-render",), scope.packages)
+        self.assertEqual(("//third-party/rust:tokio-1",), scope.targets)
+        # The lock is a declared input of its own (`//:cargo_metadata`).
+        self.assertEqual(("Cargo.lock",), scope.files)
+        self.assertTrue(self.scope("Cargo.lock", base={"Cargo.lock": "[[package"}).broad)
+
+    def test_the_root_manifest_is_diffed_by_section(self) -> None:
+        old = (
+            '[workspace]\nmembers = ["crates/a"]\n\n'
+            '[workspace.package]\nedition = "2024"\n\n'
+            '[workspace.dependencies]\nserde = "1"\n'
+            'a = { path = "crates/a" }\n\n'
+            '[profile.dev]\ndebug = 1\n'
+        )
+        self.assertEqual(
+            (frozenset(), {}), ci_plan.changed_workspace_manifest(old, "# note\n" + old)
+        )
+        members, rows = ci_plan.changed_workspace_manifest(
+            old,
+            old.replace('["crates/a"]', '["crates/a", "crates/b"]').replace(
+                'serde = "1"', 'serde = { version = "1", features = ["derive"] }'
+            ),
+        )
+        self.assertEqual({"crates/b"}, members)
+        self.assertEqual(["serde"], list(rows))
+        for shared in ('edition = "2021"', "debug = 2"):
+            with self.subTest(shared=shared):
+                edited = old.replace('edition = "2024"', shared) if "edition" in shared else old.replace("debug = 1", shared)
+                self.assertIsNone(ci_plan.changed_workspace_manifest(old, edited))
+        self.assertIsNone(ci_plan.changed_workspace_manifest(old, "[workspace"))
+
+    def test_the_root_manifest_selects_changed_dependency_rows(self) -> None:
+        manifest = (ROOT / "Cargo.toml").read_text()
+        rows = tomllib.loads(manifest)["workspace"]["dependencies"]
+        self.assertIn("tokio", rows)
+        path_key = next(
+            key for key, row in sorted(rows.items())
+            if isinstance(row, dict) and row.get("path") == "crates/lash-render"
+        )
+        head = manifest + f'\n[workspace.dependencies.tokio-extra]\npackage = "tokio"\nversion = "1"\n'
+        head += f'\n[workspace.dependencies.render-again]\npath = "crates/lash-render"\n'
+        scope = self.scope("Cargo.toml", base={"Cargo.toml": manifest}, head={"Cargo.toml": head})
+        self.assertIsNotNone(path_key)
+        self.assertFalse(scope.broad or scope.repository)
+        self.assertTrue(scope.facade)
+        self.assertEqual(("//crates/lash-render",), scope.packages)
+        self.assertEqual(("//third-party/rust:tokio-1",), scope.targets)
+        self.assertEqual(("Cargo.toml",), scope.files)
+        shared = self.scope(
+            "Cargo.toml", base={"Cargo.toml": manifest + "\n[profile.release]\nlto = true\n"}
+        )
+        self.assertTrue(shared.broad)
+
+    def test_a_schema_file_selects_its_declared_readers(self) -> None:
+        path = "schemas/host/workflow-graph/v21.schema.json"
+        scope = self.scope(path)
+        self.assertEqual((path,), scope.files)
+        self.assertFalse(scope.broad or scope.repository)
+        # The schema checks ride every precise selection.
+        _labels, builds = ci_plan.affected_buck2_labels(scope, set(), [], {})
+        self.assertEqual(["//:schema_checks"], builds)
+        # A deleted schema changes a glob; no file query can ask about it.
+        self.assertTrue(self.scope("schemas/host/workflow-graph/v0.schema.json").broad)
+
+    def test_the_justfile_selects_only_its_recipes_contract_tests(self) -> None:
+        tests = frozenset({"scripts/test_with_service.py", "scripts/test_test_xml.py"})
+        scope = self.scope("justfile", scripts=tests)
+        self.assertEqual(("scripts/test_with_service.py",), scope.script_tests)
+        self.assertFalse(scope.broad or scope.repository)
+        self.assertEqual(((), (), ()), (scope.packages, scope.targets, scope.files))
+
+    def test_ci_machinery_keeps_the_gates_and_selects_only_declared_readers(self) -> None:
+        for path in ("scripts/restate-suites.toml", "scripts/ci/buck2_event_digest.py"):
+            with self.subTest(path=path):
+                scope = self.scope(path)
+                self.assertTrue(scope.repository)
+                self.assertFalse(scope.broad)
+                self.assertEqual((path,), scope.machinery)
+        # Without a base the same script still widens: nothing asks Buck2.
+        self.assertTrue(
+            ci_plan.dev_test_scope(["scripts/ci/buck2_event_digest.py"], ROOT, frozenset()).broad
+        )
+
+    def test_shared_example_sources_select_their_declared_readers(self) -> None:
+        path = "examples/shared/shutdown_marker.rs"
+        self.assertTrue((ROOT / path).is_file())
+        scope = self.scope(path)
+        self.assertEqual((path,), scope.files)
+        self.assertFalse(scope.broad)
+
+    def test_global_inputs_still_select_everything(self) -> None:
+        for path in (
+            "rust-toolchain.toml", ".buckconfig", "tools/buck2/deps.bzl",
+            "tools/buck2/toolchains/BUCK", "clippy.toml", ".github/workflows/ci.yml",
+            "third-party/src/lib.rs", ".cargo/config.toml",
+        ):
+            with self.subTest(path=path):
+                scope = self.scope(path)
+                self.assertTrue(scope.broad and scope.repository)
+        # Each row names a path the base-less projection widens too: the table
+        # only lists what stays whole-suite, it never adds a trigger.
+        for pattern in ci_plan.DEV_TEST_GLOBAL_INPUTS:
+            with self.subTest(pattern=pattern):
+                sample = pattern.replace("*", "sample.toml" if pattern.endswith("/*") else "")
+                self.assertTrue(ci_plan.dev_test_scope([sample], ROOT, frozenset()).broad)
+
+    def test_an_unknown_path_still_fails_open(self) -> None:
+        scope = self.scope("scripts/unknown.py")
+        self.assertTrue(scope.broad and scope.repository)
+
+
+class RepositoryGateInputTests(unittest.TestCase):
+    """A gate is skipped only when the change touches nothing it reads."""
+
+    GATE = "python3 scripts/test_check_version_bumps.py"
+
+    def test_the_version_bump_gate_runs_for_each_of_its_inputs(self) -> None:
+        for path in (
+            "crates/lash-core/src/lib.rs", "examples/toolbench/Cargo.toml", "Cargo.toml",
+            "scripts/check_version_bumps.py", "scripts/discover_version_surfaces.py",
+            "scripts/release_baseline.py", "scripts/versioned-surfaces.toml",
+            "scripts/test_check_version_bumps.py",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual((), ci_plan.unaffected_repository_gates(["docs/a.md", path]))
+
+    def test_the_version_bump_gate_is_skipped_for_other_tooling(self) -> None:
+        paths = ["tools/buck2/deps.bzl", "scripts/ci_plan.py", ".github/workflows/ci.yml"]
+        self.assertEqual((self.GATE,), ci_plan.unaffected_repository_gates(paths))
+
+    def test_every_guarded_path_is_an_input_of_the_version_bump_gate(self) -> None:
+        patterns = ci_plan.REPOSITORY_GATE_INPUTS[self.GATE]
+        for guarded in sorted(ci_plan.versioned_surface_paths()):
+            # A guard path may itself be a glob; its literal prefix decides.
+            prefix = re.split(r"[*?\[]", guarded)[0]
+            with self.subTest(guarded=guarded):
+                self.assertTrue(
+                    any(fnmatch.fnmatchcase(prefix, pattern) for pattern in patterns)
+                )
+        import check_version_bumps
+        for pattern in (
+            *check_version_bumps.RUST_SOURCE_PATTERNS,
+            *check_version_bumps.CARGO_MANIFEST_PATTERNS,
+        ):
+            with self.subTest(pattern=pattern):
+                self.assertTrue(
+                    any(
+                        fnmatch.fnmatchcase(re.split(r"[*?\[]", pattern)[0] + "x", row)
+                        or pattern == row
+                        for row in patterns
+                    )
+                )
+
+    def test_every_row_names_a_gate_command_and_tracked_inputs(self) -> None:
+        sys.path.insert(0, str(ROOT / "scripts/ci"))
+        import repository_gate_commands
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        listed = {line.strip() for line in workflow.splitlines()}
+        listed.update(repository_gate_commands.commands(ROOT))
+        for command, patterns in ci_plan.REPOSITORY_GATE_INPUTS.items():
+            with self.subTest(command=command):
+                self.assertIn(command, listed)
+                for pattern in patterns:
+                    if "*" not in pattern:
+                        self.assertTrue((ROOT / pattern).is_file(), pattern)
 
 
 class PrTailLabelTests(unittest.TestCase):

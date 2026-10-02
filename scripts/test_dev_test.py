@@ -39,6 +39,9 @@ class DevTestTests(unittest.TestCase):
         (self.root / "scripts").mkdir()
         shutil.copyfile(SOURCE, self.root / "scripts/dev-test.py")
         shutil.copyfile(SOURCE.with_name("ci_plan.py"), self.root / "scripts/ci_plan.py")
+        (self.root / "scripts/ci").mkdir()
+        shutil.copyfile(SOURCE.parent / "ci/repository_gate_commands.py",
+                        self.root / "scripts/ci/repository_gate_commands.py")
         self.source = self.root / "crates/example/src/lib.rs"
         self.source.parent.mkdir(parents=True)
         self.source.write_text("pub fn example() {}\n")
@@ -543,6 +546,183 @@ class DevTestTests(unittest.TestCase):
         receipt = json.loads((self.root / ".git/lash-validation/latest.json").read_text())
         self.assertEqual(receipt["exit_code"], 130)
 
+    def fake_buck2(self, owners=None, dependents=()):
+        """A Buck2 client answering `uquery owner(...)` and `cquery rdeps(...)`."""
+        query = self.bin / "buck2"
+        query.write_text(
+            "#!/usr/bin/env python3\nimport json, sys\nfrom pathlib import Path\n"
+            "with Path('.git/query-args').open('a') as log:\n"
+            " log.write(' '.join(sys.argv[1:]) + '\\n')\n"
+            "if 'uquery' in sys.argv:\n"
+            f" owners = {owners!r}\n"
+            " if owners is None: raise SystemExit(1)\n"
+            " print(json.dumps(owners))\n"
+            "else:\n"
+            f" print('\\n'.join(label + ' (cfg:linux#0123)' for label in {list(dependents)!r}))\n")
+        query.chmod(0o755)
+
+    def test_dependents_read_a_package_manifest_as_its_package(self):
+        (self.source.parents[1] / "Cargo.toml").write_text("[package]\n")
+        self.fake_buck2(dependents=[
+            "root//crates/example:first", "root//crates/example:second",
+            "root//crates/dependent:dependent__test",
+        ])
+        planned = json.loads(self.invoke("--dependents", "--dry-run").stdout)
+        self.assertEqual(planned["selection"], "dependents")
+        self.assertEqual(planned["commands"], [
+            ["kiln", "build", "//:schema_checks"],
+            ["kiln", "test", "//crates/dependent:dependent__test", "//crates/example:test_batch"],
+        ])
+        self.assertIn("set(//crates/example:)", (self.root / ".git/query-args").read_text())
+        # Package iteration asks Buck2 nothing, so the manifest still widens.
+        self.assertEqual(json.loads(self.invoke("--dry-run").stdout)["commands"][-1],
+                         ["kiln", "test", "//:dev_tests"])
+
+    def test_dependents_select_the_declared_readers_of_a_schema_file(self):
+        schema = self.root / "schemas/host/demo/v1.schema.json"
+        schema.parent.mkdir(parents=True)
+        schema.write_text("{}\n")
+        self.git("checkout", "--", "crates/example/src/lib.rs")
+        self.git("add", ".")
+        self.git("commit", "-qm", "schema")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        schema.write_text('{"title": "demo"}\n')
+        relative = "schemas/host/demo/v1.schema.json"
+        self.fake_buck2(owners={relative: ["root//:host_schemas"]},
+                        dependents=["root//crates/dependent:dependent__test"])
+        planned = json.loads(self.invoke("--dependents", "--dry-run").stdout)
+        self.assertEqual(planned["commands"], [
+            ["kiln", "build", "//:schema_checks"],
+            ["kiln", "test", "//crates/dependent:dependent__test"],
+        ])
+        arguments = (self.root / ".git/query-args").read_text()
+        self.assertIn(f"uquery --json owner('%s') {relative}", arguments)
+        self.assertIn("set(//:host_schemas)", arguments)
+        # No reader at all still checks the schemas and runs no test.
+        self.fake_buck2(owners={relative: ["root//:host_schemas"]})
+        self.assertEqual(json.loads(self.invoke("--dependents", "--dry-run").stdout)["commands"],
+                         [["kiln", "build", "//:schema_checks"]])
+        # A file no target declares cannot be selected exactly.
+        self.fake_buck2(owners={relative: []})
+        result = self.invoke("--dependents", "--dry-run")
+        self.assertEqual(json.loads(result.stdout)["commands"][-1], ["kiln", "test", "//:dev_tests"])
+        self.assertIn(f"no Buck2 target declares {relative}", result.stderr)
+        self.fake_buck2(owners=None)
+        self.assertEqual(json.loads(self.invoke("--dependents", "--dry-run").stdout)["selection"], "suite")
+
+    def test_dependents_run_no_suite_for_a_script_no_target_declares(self):
+        self.git("checkout", "--", "crates/example/src/lib.rs")
+        script = self.root / "scripts/ci/helper.sh"
+        script.write_text("true\n")
+        workflow = self.root / ".github/workflows/ci.yml"
+        workflow.write_text(workflow.read_text() + "jobs:\n  rust:\n    if: needs.plan.outputs.rust == 'true'\n"
+                            "    steps:\n      - run: bash scripts/ci/helper.sh\n")
+        (self.root / "justfile").write_text("")
+        self.git("add", ".")
+        self.git("commit", "-qm", "helper")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        script.write_text("true # edited\n")
+        self.fake_buck2(owners={"scripts/ci/helper.sh": []})
+        planned = json.loads(self.invoke("--dependents", "--dry-run").stdout)
+        self.assertEqual(planned["commands"], [
+            ["bash", "scripts/ci/repository-gates.sh"],
+            ["kiln", "build", "//:schema_checks"],
+        ])
+        # Declared as a test input, it selects that input's dependents.
+        self.fake_buck2(owners={"scripts/ci/helper.sh": ["root//:workspace_test_scripts"]},
+                        dependents=["root//crates/dependent:dependent__test"])
+        planned = json.loads(self.invoke("--dependents", "--dry-run").stdout)
+        self.assertEqual(planned["commands"][-1], ["kiln", "test", "//crates/dependent:dependent__test"])
+        # Package iteration keeps the whole suite for a script a Rust job runs.
+        self.assertEqual(json.loads(self.invoke("--dry-run").stdout)["commands"][-1],
+                         ["kiln", "test", "//:dev_tests"])
+
+    def test_unaffected_repository_gates_are_skipped(self):
+        gate = "python3 scripts/test_check_version_bumps.py"
+        workflow = self.root / ".github/workflows/ci.yml"
+        workflow.write_text("bash scripts/ci/run-gate-commands.sh --jobs 4 <<'GATES'\n"
+                            f"python3 scripts/test_dev_test.py\n{gate}\nGATES\n")
+        self.git("checkout", "--", "crates/example/src/lib.rs")
+        planned = json.loads(self.invoke("--dependents", "--dry-run").stdout)
+        self.assertEqual(planned["commands"][0],
+                         ["bash", "scripts/ci/repository-gates.sh", "--skip", gate])
+        # A package source is an input of the version-bump gate.
+        self.source.write_text("pub fn example() { let _ = 2; }\n")
+        planned = json.loads(self.invoke("--dependents", "--dry-run").stdout)
+        self.assertEqual(planned["commands"][0], ["bash", "scripts/ci/repository-gates.sh"])
+
+    def both_halves(self, script):
+        """A diff that plans one script proof and the Buck2 commands."""
+        (self.root / "scripts/test_dev_test.py").write_text(script)
+        planned = json.loads(self.invoke("--dry-run").stdout)
+        self.assertEqual(planned["commands"], [
+            ["python3", "scripts/test_dev_test.py"],
+            ["kiln", "build", "//:schema_checks"],
+            ["kiln", "test", "//crates/example:test_batch"],
+        ])
+
+    def test_repository_and_buck2_halves_run_side_by_side(self):
+        # The script proof waits for the executor to start and then releases
+        # it: run one after the other, the proof would time out.
+        self.both_halves(
+            "import time\nfrom pathlib import Path\n"
+            "deadline = time.monotonic() + 10\n"
+            "while not Path('.git/started').exists():\n"
+            "    if time.monotonic() > deadline: raise SystemExit(9)\n"
+            "    time.sleep(0.01)\n"
+            "Path('.git/hold').unlink()\n")
+        (self.root / ".git/hold").touch()
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("dev-test: PASS: 0 test targets (0 from cache), 3 commands", result.stdout)
+        # Each command keeps its own log.
+        logs = sorted(path.name for path in (self.root / ".git/lash-validation").glob("command-*.log"))
+        self.assertEqual(logs, ["command-0.log", "command-1.log", "command-2.log"])
+
+    def test_a_failed_repository_gate_still_reports_the_buck2_verdicts(self):
+        self.both_halves("print('script proof output')\nraise SystemExit(7)\n")
+        self.report({"//crates/example:first": ("FAIL", False)})
+        self.env["TEST_EXIT"] = "32"
+        result = self.invoke()
+        # One verdict over both halves; the first failure in plan order exits.
+        self.assertEqual(result.returncode, 7)
+        self.assertIn("dev-test: `python3 scripts/test_dev_test.py` failed with exit 7", result.stdout)
+        self.assertIn("script proof output", result.stdout)
+        self.assertIn("dev-test: ERROR: `python3 scripts/test_dev_test.py` exit 7", result.stdout)
+        self.assertIn("dev-test: FAIL: 1 of 1 test targets did not pass", result.stdout)
+        self.assertNotIn("NOT RUN", result.stdout)
+        receipt = json.loads((self.root / ".git/lash-validation/latest.json").read_text())
+        self.assertEqual(receipt["exit_code"], 7)
+        self.assertEqual(receipt["plan"]["commands"][0], ["python3", "scripts/test_dev_test.py"])
+        # Streamed, the half that does not own the terminal prints as one block.
+        verbose = self.invoke("--verbose")
+        self.assertEqual(verbose.returncode, 7)
+        self.assertIn("dev-test: output of `python3 scripts/test_dev_test.py` (exit 7):\n"
+                      "script proof output\n", verbose.stdout)
+
+    def test_interrupt_stops_both_halves(self):
+        self.both_halves(
+            "import os, time\nfrom pathlib import Path\n"
+            "Path('.git/script-pid').write_text(str(os.getpid()))\ntime.sleep(60)\n")
+        (self.root / ".git/hold").touch()
+        process = self.start()
+        self.wait_started()
+        deadline = time.monotonic() + 10
+        while not (self.root / ".git/script-pid").exists() or not (self.root / ".git/script-pid").read_text():
+            self.assertLess(time.monotonic(), deadline, "script proof never started")
+            time.sleep(0.01)
+        pids = [int((self.root / name).read_text()) for name in (".git/pid", ".git/script-pid")]
+        process.terminate()
+        output, _ = process.communicate(timeout=15)
+        self.assertEqual(process.returncode, 130)
+        for pid in pids:
+            with self.assertRaises(ProcessLookupError):
+                os.kill(pid, 0)
+        self.assertIn("dev-test: NOT RUN: python3 scripts/test_dev_test.py; kiln build //:schema_checks; "
+                      "kiln test //crates/example:test_batch", output)
+        receipt = json.loads((self.root / ".git/lash-validation/latest.json").read_text())
+        self.assertEqual(receipt["exit_code"], 130)
+
     def test_live_store_environment_is_refused(self):
         self.env["LASH_POSTGRES_DATABASE_URL"] = "postgres://fixture"
         self.assertEqual(self.invoke().returncode, 2)
@@ -677,6 +857,41 @@ class DevTestTests(unittest.TestCase):
         commands = json.loads(self.invoke("--dry-run").stdout)["commands"]
         self.assertFalse(
             any(arg.startswith("--test_env=") for c in commands for arg in c))
+
+
+class RepositoryGatesRunnerTests(unittest.TestCase):
+    """`repository-gates.sh --skip` leaves out exactly the named gate."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        (self.root / "scripts/ci").mkdir(parents=True)
+        for name in ("repository-gates.sh", "run-gate-commands.sh", "repository_gate_commands.py"):
+            shutil.copyfile(SOURCE.parent / "ci" / name, self.root / "scripts/ci" / name)
+        workflow = self.root / ".github/workflows/ci.yml"
+        workflow.parent.mkdir(parents=True)
+        workflow.write_text("        run: |\n          bash scripts/ci/run-gate-commands.sh --jobs 4 <<'GATES'\n"
+                            "          echo kept gate\n          exit 3\n          GATES\n")
+
+    def gates(self, *args):
+        return subprocess.run(["bash", str(self.root / "scripts/ci/repository-gates.sh"), *args],
+                              cwd=self.root, capture_output=True, text=True, timeout=60)
+
+    def test_a_skipped_gate_does_not_run_and_is_named(self):
+        self.assertEqual(self.gates().returncode, 1)
+        result = self.gates("--skip", "exit 3")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("1 gate commands passed", result.stdout)
+        self.assertIn("skipped as unaffected by this change (CI still runs them):\n- exit 3\n",
+                      result.stdout)
+
+    def test_a_skip_that_names_no_gate_is_refused(self):
+        result = self.gates("--skip", "exit 4")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--skip names no gate command: exit 4", result.stderr)
+        self.assertEqual(self.gates("--skip").returncode, 2)
+        self.assertEqual(self.gates("--unknown").returncode, 2)
 
 
 class FormatterTests(unittest.TestCase):

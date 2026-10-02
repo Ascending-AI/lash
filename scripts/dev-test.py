@@ -14,6 +14,7 @@ import signal
 import shlex
 import subprocess
 import sys
+import threading
 import time
 import xml.etree.ElementTree as ElementTree
 
@@ -23,7 +24,9 @@ ROOT = Path(__file__).resolve().parents[1]
 # path to the very selection this import makes.
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT / "scripts/ci"))
 import ci_plan  # noqa: E402
+import repository_gate_commands  # noqa: E402
 LIVE_STORES = (
     "LASH_POSTGRES_DATABASE_URL", "LASH_REQUIRE_POSTGRES", "LASH_S3_ENDPOINT",
     "LASH_REQUIRE_S3",
@@ -106,18 +109,25 @@ def input_id(base: str) -> str:
 
 
 def script_gates() -> dict[str, list[list[str]]]:
-    """Read the executable script inventory shared by CI and repository-gates."""
-    commands: dict[str, list[list[str]]] = {}
+    """Read the executable script inventory shared by CI and repository-gates:
+    the checks CI lists and the self-tests both entrypoints discover."""
+    lines = []
     capture = False
     for line in (ROOT / ".github/workflows/ci.yml").read_text().splitlines():
         if "run-gate-commands.sh " in line and "<<'GATES'" in line:
             capture = True
         elif capture and line.strip() == "GATES":
             capture = False
-        elif capture and line.strip():
-            command = shlex.split(line.strip())
-            if len(command) >= 2 and command[0] == "python3":
-                commands.setdefault(command[1], []).append(command)
+        elif capture and line.strip() and not line.strip().startswith("#"):
+            lines.append(line.strip())
+    commands: dict[str, list[list[str]]] = {}
+    for line in [*lines, *repository_gate_commands.commands(ROOT)]:
+        command = shlex.split(line)
+        if len(command) >= 2 and command[0] == "python3":
+            listed = commands.setdefault(command[1], [])
+            # The runner executes a command both sources name only once.
+            if command not in listed:
+                listed.append(command)
     if not commands:
         raise RuntimeError("CI repository gate inventory is empty")
     return commands
@@ -173,20 +183,33 @@ def root_cell_label(label: str) -> str:
     return label.removeprefix("root") if label.startswith("root//") else label
 
 
-def select(paths: list[str], gates: dict[str, list[list[str]]]) -> tuple[list[str], bool, bool, list[list[str]]]:
+def text_at(base: str):
+    """Read a path's text at `base`: what the precise selection diffs against."""
+    def read(path: str) -> str | None:
+        result = subprocess.run(
+            ["git", "show", f"{base}:{path}"], cwd=ROOT, capture_output=True)
+        return result.stdout.decode(errors="replace") if result.returncode == 0 else None
+    return read
+
+
+def select(paths: list[str], gates: dict[str, list[list[str]]], base_text=None) -> tuple[ci_plan.DevTestScope, list[list[str]]]:
     # `scripts/ci_plan.py` is the repository's one change classifier; this is
     # its dev-test projection plus the commands each part of it runs.
-    scope = ci_plan.dev_test_scope(paths, ROOT, frozenset(gates))
-    commands = ([["bash", "scripts/ci/repository-gates.sh"]] if scope.repository else
-                [command for name in scope.script_tests for command in gates[name]])
-    return list(scope.packages), scope.broad, scope.facade, commands
+    scope = ci_plan.dev_test_scope(paths, ROOT, frozenset(gates), base_text)
+    if scope.repository:
+        # Leave out the gates the change provably does not reach.
+        inventory = [command for commands in gates.values() for command in commands]
+        skips = [gate for gate in ci_plan.unaffected_repository_gates(paths)
+                 if shlex.split(gate) in inventory]
+        commands = [["bash", "scripts/ci/repository-gates.sh",
+                     *(part for gate in skips for part in ("--skip", gate))]]
+    else:
+        commands = [command for name in scope.script_tests for command in gates[name]]
+    return scope, commands
 
 
-def reverse_dependencies(packages: list[str]) -> set[str] | None:
-    """Every test that depends on a touched package, or None if Buck2 cannot say."""
-    # Restrict the query universe to first-party packages so generated and
-    # third-party cells cannot widen the selection.
-    expression = 'kind("test", rdeps(set(//crates/... //examples/... //runbooks/...), set(' + " ".join(p + ":" for p in packages) + ')))'
+def buck2_client() -> list[str] | None:
+    """The bootstrapped Buck2 client on the daemon `kiln test` uses."""
     bootstrap = subprocess.run(
         [sys.executable, "tools/buck2/bootstrap.py"],
         cwd=ROOT,
@@ -194,13 +217,51 @@ def reverse_dependencies(packages: list[str]) -> set[str] | None:
         text=True,
     )
     client = bootstrap.stdout.strip()
+    if bootstrap.returncode or not client:
+        print(bootstrap.stderr, file=sys.stderr)
+        return None
+    return [client, "--isolation-dir", os.environ.get("BUCK_ISOLATION_DIR", "kiln")]
+
+
+def file_owners(files: list[str]) -> dict[str, list[str]] | None:
+    """The targets that declare each file as an input, or None if Buck2 cannot say."""
+    client = buck2_client()
+    # `owner` loads only the owning package, so the unconfigured query never
+    # reaches the `select` branches that `reverse_dependencies` avoids.
+    result = subprocess.run(
+        [*client, "uquery", "--json", "owner('%s')", *files] if client else ["false"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    try:
+        owners = json.loads(result.stdout) if result.returncode == 0 else None
+    except ValueError:
+        owners = None
+    if not isinstance(owners, dict):
+        print(result.stderr, file=sys.stderr)
+        return None
+    return {
+        path: [root_cell_label(label) for label in owners.get(path) or []]
+        for path in files
+    }
+
+
+def reverse_dependencies(seeds: list[str]) -> set[str] | None:
+    """Every test that depends on a seed target, or None if Buck2 cannot say.
+
+    A seed is a package pattern (`//package:`) or one label.
+    """
+    # Restrict the query universe to first-party packages so generated and
+    # third-party cells cannot widen the selection.
+    expression = 'kind("test", rdeps(set(//crates/... //examples/... //runbooks/...), set(' + " ".join(seeds) + ')))'
+    client = buck2_client()
     # A configured query against the daemon and configuration `kiln test`
     # uses. `uquery` follows every `select` branch, including the prelude's
     # `toolchains//:cxx_no_default_deps`, which this graph does not define.
     result = subprocess.run(
-        [client, "--isolation-dir", os.environ.get("BUCK_ISOLATION_DIR", "kiln"),
-         "cquery", "-c", "kiln.execution_mode=remote", expression]
-        if bootstrap.returncode == 0 and client else ["false"],
+        [*client, "cquery", "-c", "kiln.execution_mode=remote", expression]
+        if client else ["false"],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -216,13 +277,30 @@ def reverse_dependencies(packages: list[str]) -> set[str] | None:
 def plan(base: str, dependents: bool, include_deferred: bool = False) -> dict:
     identity = input_id(base)
     paths = changed_files(base)
-    packages, broad, facade, commands = select(paths, script_gates())
+    # Only a run that asks Buck2 for reverse dependencies reads what a shared
+    # input's change is; package iteration keeps the whole-suite widening.
+    scope, commands = select(paths, script_gates(), text_at(base) if dependents else None)
+    packages, broad, facade = list(scope.packages), scope.broad, scope.facade
     allowed, batches = ci_plan.dev_test_inventory(ROOT)
     members = {label for label in allowed if label.split(":")[0] in packages}
     deferred: list[str] = []
     skipped: list[str] = []
-    if dependents and (packages or broad):
-        query = None if broad else reverse_dependencies(packages)
+    seeds = [package + ":" for package in packages] + list(scope.targets)
+    if dependents and (scope.files or scope.machinery) and not broad:
+        owners = file_owners([*scope.files, *scope.machinery])
+        # A query that failed owns nothing, so it widens like an unowned file.
+        unowned = sorted(
+            path for path in ([*scope.files, *scope.machinery] if owners is None else scope.files)
+            if not (owners or {}).get(path))
+        if unowned:
+            # Buck2 names no reader, so no selection narrower than the suite is exact.
+            print("dev-test: no Buck2 target declares " + " ".join(unowned)
+                  + "; selecting the whole suite", file=sys.stderr)
+            broad = True
+        else:
+            seeds += sorted({label for labels in owners.values() for label in labels})
+    if dependents and (seeds or broad):
+        query = None if broad else reverse_dependencies(seeds)
         broad = query is None
         # Split the reachable tests so deferred and manual skips are reported
         # separately. The shared assembler applies the deferred policy.
@@ -233,7 +311,9 @@ def plan(base: str, dependents: bool, include_deferred: bool = False) -> dict:
     # `--dependents` leaves it to the hourly main run unless opted back in.
     tail = sorted({*ci_plan.pr_tail_labels(paths, ROOT), *deferred})
     run_deferred = not dependents or include_deferred
-    scope = ci_plan.DevTestScope(tuple(sorted(packages)), broad, facade, False, ())
+    scope = ci_plan.DevTestScope(
+        tuple(sorted(packages)), broad, facade, False, (),
+        scope.targets, scope.files, scope.machinery)
     package_builds = ci_plan.package_build_labels(set(packages), ROOT)
     labels, builds = ci_plan.affected_buck2_labels(
         scope, members, tail, batches, package_builds,
@@ -404,7 +484,8 @@ def gate_summary(planned: dict, ran: list[tuple[list[str], int, Path]], seconds:
         if result.get("status") not in {"PASS", "SUCCESS"}
     )
     errors = [(command, code) for command, code, _report in ran if code]
-    not_run = planned["commands"][len(ran):]
+    finished = [command for command, _code, _report in ran]
+    not_run = [command for command in planned["commands"] if command not in finished]
     lines = []
     if failed:
         lines.append(f"dev-test: FAIL: {len(failed)} of {len(results)} test targets did not pass ({seconds:.0f}s)")
@@ -448,12 +529,24 @@ def run(planned: dict, verbose: bool) -> int:
         started = time.time_ns()
         save(directory / "plan.json", planned)
         print(f"dev-test: checkout/config snapshot {planned['inputs'][:12]}, {planned['selection']}", flush=True)
-        process = None
-        ran: list[tuple[list[str], int, Path]] = []
-        try:
-            code = 0
-            for index, command in enumerate(planned["commands"]):
-                print("+ " + shlex.join(command), flush=True)
+        # The repository half (script gates) and the Buck2 half (`kiln`
+        # commands) share no input but the checkout, so they run side by
+        # side, each in plan order. Every command keeps its own log and
+        # digest, and one summary and one exit code cover both halves.
+        halves = [
+            [index for index, command in enumerate(planned["commands"]) if (command[0] == "kiln") == buck2]
+            for buck2 in (True, False)
+        ]
+        halves = [half for half in halves if half]
+        results: dict[int, tuple[list[str], int, Path]] = {}
+        live: set[subprocess.Popen] = set()
+        guard = threading.Lock()
+        stop = threading.Event()
+        faults: list[OSError] = []
+
+        def run_half(indices: list[int], stream: bool) -> None:
+            for index in indices:
+                command = planned["commands"][index]
                 log_path = directory / f"command-{index}.log"
                 report_path = directory / f"test-report-{index}.json"
                 output_dir = directory / f"test-results-{index}"
@@ -466,38 +559,81 @@ def run(planned: dict, verbose: bool) -> int:
                         "--test-report", str(report_path),
                         "--test-output-dir", str(output_dir),
                     ]
-                if verbose:
-                    process = subprocess.Popen(executed, cwd=ROOT, start_new_session=True)
-                else:
-                    # Command output goes to a per-command log; a failure
-                    # prints the digest of it, not the whole log.
-                    with log_path.open("wb") as sink:
-                        process = subprocess.Popen(
-                            executed, cwd=ROOT, start_new_session=True,
-                            stdout=sink, stderr=subprocess.STDOUT)
+                try:
+                    with guard:
+                        if stop.is_set():
+                            return
+                        print("+ " + shlex.join(command), flush=True)
+                        if stream:
+                            process = subprocess.Popen(executed, cwd=ROOT, start_new_session=True)
+                        else:
+                            # Command output goes to a per-command log; a
+                            # failure prints the digest of it, not the whole log.
+                            with log_path.open("wb") as sink:
+                                process = subprocess.Popen(
+                                    executed, cwd=ROOT, start_new_session=True,
+                                    stdout=sink, stderr=subprocess.STDOUT)
+                        live.add(process)
+                except OSError as error:
+                    faults.append(error)
+                    return
                 status = process.wait()
-                ran.append((command, status, report_path))
-                if status:
-                    if not verbose:
-                        print(failure_summary(command, status, log_path, report_path))
-                    # Keep going: one gate run names every failure, and a
-                    # failed script proof does not hide the Rust verdicts.
-                    code = code or status
-                    continue
-                if not verbose:
-                    print(f"dev-test: exit 0, output {log_path}", flush=True)
+                with guard:
+                    live.discard(process)
+                    if stop.is_set():
+                        return
+                    results[index] = (command, status, report_path)
+                    # Keep going after a failure: one gate run names every
+                    # failure, and a failed script proof does not hide the
+                    # Rust verdicts.
+                    if stream:
+                        continue
+                    if verbose:
+                        # The half that did not own the terminal: its output
+                        # is one block, not interleaved with the stream.
+                        print(f"dev-test: output of `{shlex.join(command)}` (exit {status}):", flush=True)
+                        sys.stdout.write(log_path.read_text(errors="replace"))
+                        sys.stdout.flush()
+                    elif status:
+                        print(failure_summary(command, status, log_path, report_path), flush=True)
+                    else:
+                        print(f"dev-test: exit 0, output {log_path}", flush=True)
+
+        code = 0
+        # The first half owns this thread, so an interrupt lands in its wait.
+        others = [
+            threading.Thread(target=run_half, args=(half, False), daemon=True)
+            for half in halves[1:]
+        ]
+        try:
+            for thread in others:
+                thread.start()
+            if halves:
+                run_half(halves[0], verbose)
+            for thread in others:
+                thread.join()
         except KeyboardInterrupt:
-            if process is not None and process.poll() is None:
-                os.killpg(process.pid, signal.SIGTERM)
+            with guard:
+                stop.set()
+                owned = list(live)
+            for process in owned:
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGTERM)
+            for process in owned:
                 try:
                     process.wait(timeout=10)
                 except subprocess.TimeoutExpired:
                     os.killpg(process.pid, signal.SIGKILL)
                     process.wait()
+            for thread in others:
+                thread.join(timeout=10)
             code = 130
-        except OSError as error:
-            print(f"dev-test: {error}", file=sys.stderr)
-            code = 2
+        ran = [results[index] for index in sorted(results)]
+        if faults:
+            print(f"dev-test: {faults[0]}", file=sys.stderr)
+            code = code or 2
+        # The first failure in plan order is the exit code.
+        code = code or next((status for _command, status, _report in ran if status), 0)
         passed, summary = gate_summary(planned, ran, (time.time_ns() - started) / 1e9)
         print("\n".join(summary), flush=True)
         if not passed and code == 0:
