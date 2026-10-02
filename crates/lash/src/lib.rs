@@ -394,8 +394,9 @@ pub mod triggers {
 
 /// Tool definitions, providers, and execution types.
 ///
-/// Tools are at-least-once: a crash between a tool's effect and the durable
-/// record of its outcome runs the call again, and a reported failure may be
+/// Tools are at-least-once — lash makes no exactly-once claim for a tool's
+/// external effects: a crash between a tool's effect and the durable record
+/// of its outcome runs the call again, and a reported failure may be
 /// retried. A tool keys its idempotency on
 /// [`AttemptContext::call_id`](crate::tools::AttemptContext::call_id), the
 /// `ToolCallId` lash mints for the call: it is the same on every run of one

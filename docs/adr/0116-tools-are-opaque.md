@@ -104,6 +104,27 @@ outcomes, pending resolvers and intent types
 sessions through their facade. Tool bodies express durable work through
 results and declarations.
 
+#### 1.6 Delivery is at least once
+
+The runtime may run `execute` more than once for one logical call: a crash
+between the body's external effect and the attempt's recorded outcome runs
+it again, and a reported failure the retry policy allows is retried. Every
+run of the call sees the same `call_id`; `attempt_number` counts the runs
+apart (ADR 0117 §1). A tool whose effects must not repeat deduplicates
+them on that id, the idempotency key only the external service can
+enforce. Lash makes no exactly-once claim for a body's effects: the body
+is opaque, so no journal covers what happens inside it, and an
+at-most-once marker would trade an unrecorded result for permanently
+missing work (ADR 0110 §3). A fresh id per run is likewise rejected — it
+would defeat deduplication when a failure follows a successful external
+write (ADR 0117).
+
+`tool_identity_survives_unrecorded_effect_crash` proves the window on the
+in-process Restate server double over SQLite: it drops the handler after
+the probe's body ran and before the server stores its result, and every
+re-run sees the call id the first run saw
+(`crates/lash-conformance/src/conformance/tool_call_identity/laws.rs:167`).
+
 ### 2. `batch` is protocol sugar
 
 #### 2.1 Where the expansion happens
