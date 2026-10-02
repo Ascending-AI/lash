@@ -35,6 +35,76 @@ use crate::{log_err, log_out};
 const DEMO_MCP_SERVER_NAME: &str = crate::mcp_server::SERVER_NAME;
 const DEMO_MCP_SERVER_BINARY: &str = "slack-clone-mcp-server";
 
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChannelRunContext {
+    channel_id: String,
+    thread_ts: Option<String>,
+    mention_ts: String,
+}
+
+struct ChannelRunDefinition;
+
+impl lash::RunDefinition for ChannelRunDefinition {
+    fn reference(&self) -> lash::DefinitionRef {
+        lash::DefinitionRef::new("slack-clone-channel", 1)
+    }
+
+    fn resolve(
+        &self,
+        _snapshot: &lash::persistence::PersistedSessionConfig,
+        context: &serde_json::Value,
+    ) -> std::result::Result<lash::RunOverrides, lash::RunDefinitionRefusal> {
+        let route = serde_json::from_value::<ChannelRunContext>(context.clone()).map_err(|_| {
+            lash::RunDefinitionRefusal::new(self.reference(), &ChannelRunRefusal::InvalidRoute)
+        })?;
+        if route.channel_id.is_empty()
+            || route.mention_ts.is_empty()
+            || route.thread_ts.as_deref() == Some("")
+        {
+            return Err(lash::RunDefinitionRefusal::new(
+                self.reference(),
+                &ChannelRunRefusal::InvalidRoute,
+            ));
+        }
+        // Each route runs under its session's recorded config, including the
+        // prompt commands applied before admission. No live MCP state is read.
+        Ok(lash::RunOverrides::default())
+    }
+}
+
+#[derive(serde::Serialize)]
+#[serde(tag = "code", rename_all = "snake_case")]
+enum ChannelRunRefusal {
+    InvalidRoute,
+}
+
+impl std::fmt::Display for ChannelRunRefusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(
+            "a channel run needs a channel id, a mention timestamp and a valid thread route",
+        )
+    }
+}
+
+pub(crate) fn channel_run_spec(
+    channel_id: &str,
+    thread_ts: Option<&str>,
+    mention_ts: &str,
+) -> lash::RunSpec {
+    use lash::RunDefinition as _;
+    // A mention's context and question share a spec. Adjacent mentions have
+    // different specs, so the drain cannot combine their independent replies.
+    lash::RunSpec::definition(
+        ChannelRunDefinition.reference(),
+        serde_json::json!({
+            "channel_id": channel_id,
+            "thread_ts": thread_ts,
+            "mention_ts": mention_ts,
+        }),
+    )
+}
+
 /// Where the bot's durable Lash state lives, and how this boot identifies itself.
 #[derive(Clone, Debug)]
 pub struct RuntimeConfig {
@@ -247,9 +317,12 @@ pub async fn build_core(
     )
     .context("encode the bot's prompt")?;
     let builder = LashCore::standard_builder(backend)
+        .run_definition(ChannelRunDefinition)
         .llm_profiles(Arc::new(models))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .queued_work_batching(
+            lash::QueuedWorkBatchingConfig::new(1024).with_drain_mode(lash::DrainMode::All),
+        )
         .tools(tools::workspace_tools(api))
         .trace_sink(trace_sink(config))
         .trace_level(TraceLevel::Extended)

@@ -11,6 +11,158 @@ use crate::bot::tools::{CHANNEL_HISTORY, LIST_CHANNELS};
 use super::support::{BotHost, Script, Step, TestPlatform, bot_dir, only_event, scratch};
 
 #[tokio::test]
+async fn a_channel_mention_records_its_run_definition_and_replays_the_shape() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let script = Script::new([
+        Step::Gated("interrupted answer".to_string()),
+        Step::Text("Replayed answer.".to_string()),
+    ]);
+    let host = BotHost::open(&bot_dir(scratch.path())).await;
+    let bot = host.start(&platform, &script).await;
+    let channel = platform.channel("recorded-run").await;
+    let ada = platform.identify("ada").await;
+    platform.say(&channel, &ada, "the deploy finished").await;
+    for envelope in platform.drain_envelopes().await {
+        bot.ingest(envelope, None)
+            .await
+            .expect("retain ambient context");
+    }
+    assert_eq!(script.calls(), 0);
+    platform
+        .say(&channel, &ada, &format!("{} status?", platform.mention()))
+        .await;
+    let envelope = only_event(&platform.drain_envelopes().await, "app_mention");
+    let expected_spec = lash::RunSpec::definition(
+        lash::DefinitionRef::new("slack-clone-channel", 1),
+        serde_json::json!({
+            "channel_id": channel,
+            "thread_ts": null,
+            "mention_ts": envelope.event.ts(),
+        }),
+    );
+    let work = {
+        let bot = Arc::clone(&bot);
+        tokio::spawn(async move { bot.ingest(envelope, None).await })
+    };
+    script.wait_gated().await;
+    let invocation = host
+        .server()
+        .invocations()
+        .into_iter()
+        .find(|invocation| {
+            invocation
+                .target
+                .starts_with(lash_restate_test::TURN_DRIVER_SERVICE)
+                && invocation.status == "running"
+        })
+        .expect("the mention's running turn");
+    let recorded_shape = |journal: Vec<lash_restate_test::JournalEntryView>| {
+        let shapes = journal
+            .iter()
+            .filter_map(|entry| entry.run_completion()?.ok())
+            .filter_map(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .filter_map(|record| {
+                serde_json::from_value::<lash::runtime::RuntimeEffectOutcome>(
+                    record["outcome"]["Ok"].clone(),
+                )
+                .ok()
+            })
+            .filter_map(|outcome| match outcome {
+                lash::runtime::RuntimeEffectOutcome::ResolveTurnConfig { resolved } => {
+                    Some(resolved)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(shapes.len(), 1, "one recorded shape per logical run");
+        serde_json::to_value(&shapes[0]).expect("encode recorded shape")
+    };
+    let before = recorded_shape(host.server().journal(&invocation.id).expect("turn journal"));
+    assert!(host.server().crash(&invocation.id));
+    let outcome = work.await.expect("join replay").expect("finish mention");
+    script.release_gate();
+    assert!(matches!(outcome, DeliveryOutcome::Replied { .. }));
+    let after = recorded_shape(
+        host.server()
+            .journal(&invocation.id)
+            .expect("replayed journal"),
+    );
+    assert_eq!(before, after, "replay reads the recorded shape unchanged");
+    assert_eq!(
+        before["spec"],
+        serde_json::to_value(expected_spec.hash().expect("spec hash")).expect("encode hash"),
+        "the recorded shape names the channel definition and its route context"
+    );
+    assert_eq!(script.calls(), 2, "only the interrupted model call repeats");
+    assert_eq!(platform.bot_messages(&channel).await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_conflicting_mention_refuses_the_whole_ambient_batch() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let script = Script::new([
+        Step::Gated("Existing answer.".to_string()),
+        Step::Text("Unexpected answer.".to_string()),
+    ]);
+    let host = BotHost::open(&bot_dir(scratch.path())).await;
+    let bot = host.start(&platform, &script).await;
+    let channel = platform.channel("atomic-burst").await;
+    let ada = platform.identify("ada").await;
+    platform.say(&channel, &ada, "first ambient line").await;
+    platform.say(&channel, &ada, "second ambient line").await;
+    for envelope in platform.drain_envelopes().await {
+        bot.ingest(envelope, None)
+            .await
+            .expect("retain ambient context");
+    }
+    assert_eq!(script.calls(), 0, "retaining a burst calls no model");
+    platform
+        .say(&channel, &ada, &format!("{} status?", platform.mention()))
+        .await;
+    let envelope = only_event(&platform.drain_envelopes().await, "app_mention");
+    let mention_id =
+        lash::TurnId::prefixed("mention:", format!("{}:{}", channel, envelope.event.ts()));
+    let session = bot
+        .core()
+        .session(session_id(&channel))
+        .durable()
+        .await
+        .expect("durable channel");
+    let existing = session
+        .send(lash::TurnInput::text(
+            "different content already owns this id",
+        ))
+        .id(mention_id.clone())
+        .await
+        .expect("seed the identity conflict");
+    script.wait_gated().await;
+    let refusal = bot
+        .ingest(envelope, None)
+        .await
+        .expect_err("refuse the batch");
+    let pending = session.pending_turn_inputs().await.expect("pending inputs");
+    script.release_gate();
+    existing.outcome().await.expect("finish seeded input");
+    assert!(
+        refusal.chain().any(|cause| matches!(
+            cause.downcast_ref::<lash::EmbedError>(),
+            Some(lash::EmbedError::Runtime(error))
+                if error.code == lash::runtime::RuntimeErrorCode::DurableIdentityConflict
+        )),
+        "preserve the typed refusal: {refusal:#}"
+    );
+    assert_eq!(pending.len(), 1, "the new ambient member rolled back");
+    assert_eq!(
+        pending[0].input.source_key.as_deref(),
+        Some(mention_id.as_str())
+    );
+    assert_eq!(script.calls(), 1, "the refused batch starts no work");
+    assert!(platform.bot_messages(&channel).await.is_empty());
+}
+
+#[tokio::test]
 async fn a_mention_runs_one_turn_and_posts_one_reply() {
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
@@ -212,6 +364,21 @@ async fn ambient_traffic_folds_into_the_session_without_a_turn_or_a_reply() {
         "the ambient context must reach the prompt: {:?}",
         script.requests()
     );
+    let applied = session
+        .durable()
+        .turn_input_applications()
+        .await
+        .expect("batch applications");
+    assert_eq!(
+        applied.len(),
+        2,
+        "one context member and one mention member"
+    );
+    assert_eq!(
+        applied[0].turn_id, applied[1].turn_id,
+        "one engine-owned root"
+    );
+    assert_ne!(applied[0].input_id, applied[1].input_id);
 }
 
 #[tokio::test]

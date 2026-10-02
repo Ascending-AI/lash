@@ -134,19 +134,17 @@ CREATE TABLE IF NOT EXISTS event_admission_boundaries (
     revision INTEGER NOT NULL
 );
 
--- Ambient messages are context, not turn inputs: a folded message waits here
--- until a mention on its route binds it, and the mention's send carries it.
+-- A folded message waits here until a mention binds it into an atomic batch.
 CREATE TABLE IF NOT EXISTS event_folds (
     event_id         TEXT PRIMARY KEY REFERENCES handled_events(event_id) ON DELETE CASCADE,
     mention_event_id TEXT NOT NULL REFERENCES handled_events(event_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_event_folds_mention ON event_folds(mention_event_id);
 
--- The exact text a mention sent: its folded context and the mention. Stored
--- on first use so a retry sends the same bytes under the same Lash id.
+-- The context and mention admitted together. Frozen on first use for retries.
 CREATE TABLE IF NOT EXISTS mention_sends (
     event_id  TEXT PRIMARY KEY REFERENCES handled_events(event_id) ON DELETE CASCADE,
-    send_text TEXT NOT NULL
+    inputs_json TEXT NOT NULL
 );
 
 "
@@ -317,6 +315,13 @@ pub struct EventLedger {
     database: SqliteHandle,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MentionInputs {
+    pub context: String,
+    pub mention: String,
+}
+
 impl EventLedger {
     /// Wrap an already-open handle whose schema includes [`SCHEMA`].
     pub fn new(database: SqliteHandle) -> Self {
@@ -397,32 +402,31 @@ impl EventLedger {
         })
     }
 
-    /// Bind the mention's route's unbound ambient rows to it and compose the
-    /// text its send carries: `inherited` (a thread's parent context, used
-    /// only by the route's first mention), the bound ambient lines oldest
-    /// first, then `mention_text`.
+    /// Bind the route's waiting ambient rows and freeze its context and mention.
+    /// The context starts with `inherited` on the first mention in a thread,
+    /// followed by the bound ambient lines in order.
     ///
-    /// The first call stores the composed text and every later call returns
-    /// it unchanged, so a retry sends the same bytes: an ambient message that
+    /// The first call stores both members and every later call returns
+    /// them unchanged, so a retry sends the same bytes: an ambient message that
     /// arrives after the binding waits for the route's next mention.
     pub async fn bind_mention_send(
         &self,
         mention_event_id: String,
         mention_text: String,
         inherited: String,
-    ) -> Result<String> {
+    ) -> Result<MentionInputs> {
         self.database
             .call(move |connection| {
                 let transaction = connection.transaction()?;
-                if let Some(text) = transaction
+                if let Some(inputs) = transaction
                     .query_row(
-                        "SELECT send_text FROM mention_sends WHERE event_id = ?1",
+                        "SELECT inputs_json FROM mention_sends WHERE event_id = ?1",
                         params![mention_event_id],
                         |row| row.get::<_, String>(0),
                     )
                     .optional()?
                 {
-                    return Ok(text);
+                    return Ok(serde_json::from_str(&inputs)?);
                 }
                 let (channel_id, message_ts, thread_ts): (String, String, Option<String>) =
                     transaction.query_row(
@@ -481,13 +485,16 @@ impl EventLedger {
                     text.push_str(line);
                     text.push('\n');
                 }
-                text.push_str(&mention_text);
+                let inputs = MentionInputs {
+                    context: text,
+                    mention: mention_text,
+                };
                 transaction.execute(
-                    "INSERT INTO mention_sends (event_id, send_text) VALUES (?1, ?2)",
-                    params![mention_event_id, text],
+                    "INSERT INTO mention_sends (event_id, inputs_json) VALUES (?1, ?2)",
+                    params![mention_event_id, serde_json::to_string(&inputs)?],
                 )?;
                 transaction.commit()?;
-                Ok(text)
+                Ok(inputs)
             })
             .await
     }
@@ -526,23 +533,30 @@ impl EventLedger {
             .await
     }
 
-    /// Record the Lash admission identity of a mention's send on the mention
-    /// and on every ambient row folded into it: the turn that commits the
-    /// send commits them too.
-    pub async fn record_mention_input_id(
+    /// Record each batch member's identity on the Slack events it carries.
+    pub async fn record_mention_inputs(
         &self,
         mention_event_id: String,
-        input_id: String,
+        mention_input_id: lash::InputId,
+        context_input_id: Option<lash::InputId>,
     ) -> Result<()> {
         self.database
             .call(move |connection| {
-                connection.execute(
+                let transaction = connection.transaction()?;
+                transaction.execute(
                     "UPDATE event_routes SET input_id = COALESCE(input_id, ?2)
-                     WHERE event_id = ?1
-                        OR event_id IN (SELECT event_id FROM event_folds
-                                        WHERE mention_event_id = ?1)",
-                    params![mention_event_id, input_id],
+                     WHERE event_id = ?1",
+                    params![mention_event_id, mention_input_id.as_str()],
                 )?;
+                if let Some(input_id) = context_input_id {
+                    transaction.execute(
+                        "UPDATE event_routes SET input_id = COALESCE(input_id, ?2)
+                         WHERE event_id IN (SELECT event_id FROM event_folds
+                                            WHERE mention_event_id = ?1)",
+                        params![mention_event_id, input_id.as_str()],
+                    )?;
+                }
+                transaction.commit()?;
                 Ok(())
             })
             .await
