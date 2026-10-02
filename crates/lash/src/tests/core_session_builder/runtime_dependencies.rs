@@ -456,7 +456,7 @@ async fn fork_distinguishes_collected_revision_from_unknown_and_deleted_sources(
         .expect("orphaned source leaf");
     let retained = lash_core::Target::Revision(retained_revision);
     let fork_request = |branch: &str| crate::ForkRequest {
-        session_id: branch.into(),
+        session_id: branch.parse().unwrap(),
         relation: lash_core::SessionRelation::Fork {
             source_session_id: ("orphaned-fork-source").into(),
             source_node_id: None,
@@ -995,8 +995,8 @@ async fn duplicate_only_fork_intents_are_canonical(
     case: &str,
     backend: lash_core::Backend,
 ) -> Result<()> {
-    let source_session_id = SessionId::from(format!("duplicate-only-source-{case}"));
-    let branch_session_id = SessionId::from(format!("duplicate-only-branch-{case}"));
+    let source_session_id = SessionId::fixture(format!("duplicate-only-source-{case}"));
+    let branch_session_id = SessionId::fixture(format!("duplicate-only-branch-{case}"));
     let factory = backend.session_store_factory();
     let registry = backend.process_registry();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
@@ -1132,7 +1132,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
                     process_id.clone(),
                 ),
             ],
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: SessionId::fixture(session_id.to_string()),
             relation: lash_core::SessionRelation::Root,
             config: lash_core::SessionPolicy {
                 model: Some(recorded_llm_profile(mock_llm_profile_spec())),
@@ -1220,7 +1220,7 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
         .build(crate::testing::runtime_lease_owner())?;
 
     for (case, simulate_crash_between_layers) in [("fresh", false), ("crash-resume", true)] {
-        let session_id = SessionId::from(format!("nested-observer-intent-{case}"));
+        let session_id = SessionId::fixture(format!("nested-observer-intent-{case}"));
         let mut registered = Vec::new();
         for _ in 0..2 {
             let process_id = registry
@@ -1251,8 +1251,10 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
                 ],
                 session_id: session_id.clone(),
                 relation: lash_core::SessionRelation::Fork {
-                    source_session_id: SessionId::from(format!("nested-source-{case}")),
-                    source_node_id: Some(format!("nested-source-node-{case}").into()),
+                    source_session_id: SessionId::fixture(format!("nested-source-{case}")),
+                    source_node_id: Some(lash_core::NodeId::fixture(format!(
+                        "nested-source-node-{case}"
+                    ))),
                 },
                 config: lash_core::SessionPolicy {
                     model: Some(recorded_llm_profile(mock_llm_profile_spec())),

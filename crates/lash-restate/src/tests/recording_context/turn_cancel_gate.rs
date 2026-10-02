@@ -105,7 +105,7 @@ impl TestTurnCancelGate {
         self.state
             .lock_recover()
             .revoked_sessions
-            .insert(SessionId::from(session_id.to_string()));
+            .insert(session_id.clone());
         self.wake_matching(
             |entry| entry.session_id == session_id,
             RestateTurnCancelWake::SessionRevoked,

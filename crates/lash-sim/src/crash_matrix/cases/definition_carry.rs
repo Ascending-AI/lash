@@ -250,9 +250,12 @@ async fn deferred_cleanup(
     };
     use lash_core::runtime::drive::relay::{RelayPolicy, relay_due};
     let backend = world.backend();
-    let journal = lash_core::ExecutionScope::turn(session.clone(), root)
-        .journal_identity()
-        .map_err(|error| error.to_string())?;
+    let journal = lash_core::ExecutionScope::turn(
+        session.clone(),
+        lash_core::TurnId::fixture(root.to_string()),
+    )
+    .journal_identity()
+    .map_err(|error| error.to_string())?;
     if backend
         .effect_host()
         .journal_replay(&journal)

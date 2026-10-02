@@ -28,7 +28,7 @@ fn budget(nodes: u32, bytes: u64) -> HistoryBudget {
 
 fn state(session_id: &str) -> RuntimeSessionState {
     RuntimeSessionState {
-        session_id: SessionId::from(session_id),
+        session_id: SessionId::fixture(session_id),
         ..RuntimeSessionState::new(SessionPolicy::new(
             TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
@@ -56,7 +56,7 @@ async fn commit_with_evidence(
 ) {
     let operation = OperationId::turn(
         &state.session_id,
-        format!("history-{}", state.head_revision),
+        crate::TurnId::fixture(format!("history-{}", state.head_revision)),
         "commit",
     );
     let (mut commit, new_ids) = RuntimeCommit::persisted_state_with_operation(state, operation)
@@ -356,7 +356,7 @@ where
             "base-not-frame" => {
                 store
                     .corrupt_graph_row_for_testing(
-                        &frame.clone().into_inner().into(),
+                        frame.node_id(),
                         GraphRowCorruption::SetPayloadKindToPlugin,
                     )
                     .await
@@ -377,7 +377,7 @@ where
             "gen0-parent" => {
                 store
                     .corrupt_graph_row_for_testing(
-                        &frame.clone().into_inner().into(),
+                        frame.node_id(),
                         GraphRowCorruption::SetParent(Some(NodeId::from("missing-parent"))),
                     )
                     .await
@@ -385,7 +385,7 @@ where
             "base-no-parent" => {
                 store
                     .corrupt_graph_row_for_testing(
-                        &frame.clone().into_inner().into(),
+                        frame.node_id(),
                         GraphRowCorruption::SetParent(None),
                     )
                     .await

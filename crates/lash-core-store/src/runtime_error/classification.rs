@@ -192,8 +192,6 @@ impl RuntimeErrorCode {
             Self::EffectGroupLifecyclePinned => Terminal,
             // the scope's await events forbid retirement.
             Self::AwaitEventScopeNotRetirable => Terminal,
-            // a malformed session id in the wait identity.
-            Self::InvalidAwaitEventSessionId => Terminal,
             // a malformed wait identity.
             Self::InvalidAwaitEventWaitIdentity => Terminal,
             // a malformed cancel request.

@@ -39,7 +39,10 @@ fn deleted_commit_is_typed_terminal_and_retains_the_session_id() {
     });
 
     assert_eq!(deleted.code, RuntimeErrorCode::SessionDeleted);
-    assert_eq!(deleted.deleted_session_id(), Some("retired-during-commit"));
+    assert_eq!(
+        deleted.deleted_session_id().map(|id| id.as_str()),
+        Some("retired-during-commit")
+    );
     assert!(!deleted.is_retryable());
     assert!(deleted.is_terminal());
 }

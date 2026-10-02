@@ -166,7 +166,7 @@ async fn inject_message_scopes_emission_to_requested_session() {
         AxumPath(slug.clone()),
         State(state.clone()),
         Query(SessionQuery {
-            session_id: Some(SessionId::from(scoped_session_id.to_string())),
+            session_id: Some(SessionId::fixture(scoped_session_id.to_string())),
         }),
         Json(InjectMessageRequest {
             title: "Important Update".to_string(),
@@ -203,7 +203,7 @@ async fn inject_message_scopes_emission_to_requested_session() {
         lash::runtime::AdmittedScope::runtime_operation(format!("trigger:{operation_id}")),
         Arc::new({
             let state = state.clone();
-            let session_id = SessionId::from(req_session_id);
+            let session_id = SessionId::fixture(req_session_id);
             move |scoped| {
                 let state = state.clone();
                 let session_id = session_id.clone();

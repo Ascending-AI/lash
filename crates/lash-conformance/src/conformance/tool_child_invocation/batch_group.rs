@@ -28,7 +28,7 @@ async fn run_batch(
     prefix: &str,
     calls: impl FnOnce(&crate::SessionId) -> Vec<crate::ToolInvocation>,
 ) -> (crate::SessionId, crate::session::ToolBatchReplies) {
-    let session_id = crate::SessionId::from(format!("{prefix}-batch-group"));
+    let session_id = crate::SessionId::fixture(format!("{prefix}-batch-group"));
     // Call ids carry the session id, so a durable registry shared across
     // runs never sees two calls under one name.
     let calls = calls(&session_id);
@@ -40,7 +40,7 @@ async fn run_batch(
     .await;
     let scope = crate::ExecutionScope::turn(
         session_id.clone(),
-        crate::TurnId::from(format!("{session_id}-turn")),
+        crate::TurnId::fixture(format!("{session_id}-turn")),
     );
     let admitted = crate::admit(scope);
     let controller = host

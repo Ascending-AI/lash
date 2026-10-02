@@ -155,7 +155,7 @@ async fn run_factory_contention_scenario(
     store_factory: &str,
     factory: Arc<dyn DeploymentStore>,
 ) -> Result<BackendContentionScenario, String> {
-    let session_id = SessionId::from(format!("lash-sim-backend-contention-{backend}"));
+    let session_id = SessionId::fixture(format!("lash-sim-backend-contention-{backend}"));
     factory
         .delete_session(&session_id)
         .await
@@ -215,7 +215,7 @@ fn store_request(session_id: &SessionId) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         relation: SessionRelation::Root,
         config: SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -304,7 +304,7 @@ async fn stale_head_transaction_is_rejected(
         .map_err(|err| format!("load current session head: {err}"))?
         .map_or(0, |read| read.head_revision);
     let current = RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: SessionId::fixture(session_id.to_string()),
         head_revision: expected_head_revision,
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -316,7 +316,7 @@ async fn stale_head_transaction_is_rejected(
         .await
         .map_err(|err| format!("establish current session head: {err}"))?;
     let stale = RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: SessionId::fixture(session_id.to_string()),
         head_revision: expected_head_revision,
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -354,7 +354,7 @@ async fn final_commit_retry_and_conflict_are_fenced(
     store: Arc<dyn RuntimeStore>,
 ) -> Result<BackendContentionOperation, String> {
     let state = RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
@@ -378,7 +378,7 @@ async fn final_commit_retry_and_conflict_are_fenced(
     }
 
     let changed_state = RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: SessionId::fixture(session_id.to_string()),
         turn_index: 1,
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,

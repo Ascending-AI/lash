@@ -101,7 +101,7 @@ async fn one_lifecycle(seed: u64) -> std::sync::Weak<lash_sqlite_store::SqliteSt
                 if value.to_json_value() == json!({"fixture": "complete"}))
     ));
     let session_id = format!("capacity-{seed}");
-    core.session(session_id.clone())
+    core.session(lash_core::SessionId::fixture(session_id.clone()))
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             "mock-model",
             lash::TurnBudget::Unbounded,
@@ -109,7 +109,11 @@ async fn one_lifecycle(seed: u64) -> std::sync::Weak<lash_sqlite_store::SqliteSt
         )))
         .await
         .expect("create session");
-    let session = core.session(session_id).open().await.expect("open session");
+    let session = core
+        .session(lash_core::SessionId::fixture(session_id))
+        .open()
+        .await
+        .expect("open session");
     session.close().await.expect("close session");
     backend.server().settle().await;
     for invocation in backend.server().invocations() {

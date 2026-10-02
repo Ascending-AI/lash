@@ -116,7 +116,7 @@ impl Case {
     async fn admit_root(&self, root: &str) -> Result<Option<RootAdmission>, StoreError> {
         let mut request = lash_core::testing::store_fixtures::admit_root_request_for_test(
             &self.fence,
-            &TurnId::from(root),
+            &TurnId::fixture(root),
             AdmittedHead::Batch(self.ids[0].clone()),
         );
         request.policy = lash_core::testing::queued_work_admission_policy(10);

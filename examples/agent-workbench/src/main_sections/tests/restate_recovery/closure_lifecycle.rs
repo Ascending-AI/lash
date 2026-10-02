@@ -29,7 +29,7 @@ async fn authorize_restate_completion_closure(
     lash::persistence::DriveFence,
     lash::TurnCancelClosureAuthorization,
 ) {
-    let address = lash::TurnAddress::new(session, "turn");
+    let address = lash::TurnAddress::new(lash::SessionId::fixture(session.to_string()), "turn");
     factory
         .admit_session(&lash::persistence::SessionStoreCreateRequest {
             owning_process_id: None,

@@ -133,7 +133,7 @@ impl WorkloadProcessCleanup for SessionProcessCleanup<'_, '_> {
         Ok(self
             .processes
             .list_originated_by(
-                &lash_core::SessionScope::new(SessionId::from(session)),
+                &lash_core::SessionScope::new(SessionId::parse(session)?),
                 &lash_core::ProcessListFilter {
                     status: lash_core::ProcessStatusFilter::any_of([
                         lash_core::ProcessStatus::Running,
@@ -314,7 +314,12 @@ impl LoadWorker {
         let ctx = controller.context();
         let id = &plan.operation;
         let operation = id.key();
-        let session = journaled_session(ctx, &self.core, session_id.clone()).await?;
+        let session = journaled_session(
+            ctx,
+            &self.core,
+            lash::SessionId::parse(session_id.clone()).map_err(terminal)?,
+        )
+        .await?;
         let input = generator
             .record(id.actor, id.ordinal, "input", plan.input_bytes)
             .map_err(terminal_chain)?;
@@ -326,7 +331,7 @@ impl LoadWorker {
                 "Run the synthetic load turn. {TURN_MARKER}{operation} {WORKLOAD_MARKER}{}\n{input}\n## Synthetic load context\n\n{context}",
                 self.load.sha256()
             )))
-            .id(turn_id_for(&operation))
+            .id(lash::TurnId::parse(turn_id_for(&operation)).map_err(terminal)?)
             .accept_restate(ctx)
             .await?;
         // A queued input or a cancel is meant for a running root: wait until
@@ -415,7 +420,7 @@ impl LoadWorker {
                 input.idempotency_key,
                 self.load.sha256()
             )))
-            .id(turn_id_for(&input.idempotency_key))
+            .id(lash::TurnId::parse(turn_id_for(&input.idempotency_key)).map_err(terminal)?)
             .accept_restate(ctx)
             .await
     }
@@ -581,13 +586,18 @@ impl LoadWorker {
         session_id: String,
     ) -> HandlerResult<CronSetupReport> {
         let ctx = controller.context();
-        let session = journaled_session(ctx, &self.core, session_id).await?;
+        let session = journaled_session(
+            ctx,
+            &self.core,
+            lash::SessionId::parse(session_id).map_err(terminal)?,
+        )
+        .await?;
         let outcome = session
             .send(TurnInput::text(format!(
                 "Register the synthetic cron schedules. {CRON_SETUP_MARKER}{run} {WORKLOAD_MARKER}{}",
                 self.load.sha256()
             )))
-            .id(turn_id_for(&format!("{run}/cron")))
+            .id(lash::TurnId::parse(turn_id_for(&format!("{run}/cron"))).map_err(terminal)?)
             .accept_restate(ctx)
             .await?
             .outcome_restate(ctx, RestateWait::new())
@@ -680,7 +690,9 @@ impl LoadWorker {
         println!("load cleanup session={session_id} model_children_cancelled={cleaned}");
         execution
             .controller()
-            .revoke_await_events_for_session(&SessionId::from(session_id.clone()))
+            .revoke_await_events_for_session(
+                &SessionId::parse(session_id.clone()).map_err(terminal)?,
+            )
             .await
             .map_err(terminal)?;
         let context = execution.delete_context(&session_id).map_err(terminal)?;
@@ -701,7 +713,12 @@ impl LoadWorker {
         // wait for it, bounded, before proving a fresh open is refused.
         let started = Instant::now();
         let reopen_refusal = loop {
-            match self.core.session(session_id.clone()).open().await {
+            match self
+                .core
+                .session(lash::SessionId::parse(session_id.clone()).map_err(terminal)?)
+                .open()
+                .await
+            {
                 Err(error) => break Some(format!("{error:?}")),
                 Ok(session) => {
                     session

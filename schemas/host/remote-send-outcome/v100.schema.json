@@ -1663,10 +1663,12 @@
             },
             "session_id": {
               "description": "The session the turn belongs to.",
+              "minLength": 1,
               "type": "string"
             },
             "turn_id": {
               "description": "The turn's durable identity.",
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -1690,6 +1692,7 @@
             },
             "session_id": {
               "description": "The session the operation is on.",
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -1790,9 +1793,11 @@
         {
           "properties": {
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "turn_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -1830,6 +1835,7 @@
               "type": "string"
             },
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -1847,6 +1853,7 @@
         {
           "properties": {
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -3849,9 +3856,11 @@
         {
           "properties": {
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "turn_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -3888,6 +3897,7 @@
               "type": "string"
             },
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -3982,6 +3992,7 @@
               "type": "string"
             },
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -4008,9 +4019,11 @@
               "type": "string"
             },
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "turn_id": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -4031,6 +4044,7 @@
               "type": "string"
             },
             "session_id": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -4280,6 +4294,7 @@
           "type": "string"
         },
         "session_id": {
+          "minLength": 1,
           "type": "string"
         }
       },
@@ -4419,6 +4434,7 @@
               "type": "string"
             },
             "turn_id": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -4438,6 +4454,7 @@
               "$ref": "#/$defs/RemoteTurnOutputSource"
             },
             "turn_id": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -4662,6 +4679,7 @@
           "$ref": "#/$defs/RemoteTurnParkReason"
         },
         "root": {
+          "minLength": 1,
           "type": "string"
         },
         "since_ms": {
@@ -5276,6 +5294,7 @@
               ]
             },
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -5458,6 +5477,7 @@
         },
         "session_capability": {
           "description": "The session capability the process's descendants inherit.",
+          "minLength": 1,
           "type": [
             "string",
             "null"
@@ -6460,12 +6480,14 @@
           ]
         },
         "session_id": {
+          "minLength": 1,
           "type": [
             "string",
             "null"
           ]
         },
         "turn_id": {
+          "minLength": 1,
           "type": [
             "string",
             "null"
@@ -6674,6 +6696,7 @@
               "type": "string"
             },
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -6724,6 +6747,7 @@
               "type": "string"
             },
             "scope": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -6744,6 +6768,7 @@
           ]
         },
         "session_id": {
+          "minLength": 1,
           "type": "string"
         }
       },
@@ -7863,6 +7888,7 @@
         {
           "properties": {
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -8141,6 +8167,7 @@
         {
           "properties": {
             "turn_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -8875,6 +8902,7 @@
           "type": "array"
         },
         "trace_turn_id": {
+          "minLength": 1,
           "type": [
             "string",
             "null"
@@ -8909,6 +8937,7 @@
           ]
         },
         "turn_id": {
+          "minLength": 1,
           "type": "string"
         }
       },
@@ -9169,6 +9198,7 @@
           "$ref": "#/$defs/RemoteTurnOutcome"
         },
         "session_id": {
+          "minLength": 1,
           "type": "string"
         },
         "tool_calls": {
@@ -9178,6 +9208,7 @@
           "type": "array"
         },
         "turn_id": {
+          "minLength": 1,
           "type": "string"
         },
         "usage": {
@@ -10129,6 +10160,7 @@
               "type": "string"
             },
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "source_key": {
@@ -10221,6 +10253,7 @@
               "type": "string"
             },
             "session_id": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -10341,6 +10374,7 @@
           "additionalProperties": false,
           "properties": {
             "session": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -10460,6 +10494,7 @@
               "type": "string"
             },
             "scope": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -10512,6 +10547,7 @@
               "type": "string"
             },
             "root": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -10525,6 +10561,7 @@
           "description": "The follow-on the head owes.",
           "properties": {
             "follow_on": {
+              "minLength": 1,
               "type": "string"
             },
             "owner": {
@@ -10704,9 +10741,11 @@
         {
           "properties": {
             "loaded": {
+              "minLength": 1,
               "type": "string"
             },
             "requested": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -10779,6 +10818,7 @@
               "type": "string"
             },
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -11624,6 +11664,7 @@
               "additionalProperties": false,
               "properties": {
                 "session_id": {
+                  "minLength": 1,
                   "type": "string"
                 }
               },
@@ -11654,6 +11695,7 @@
                   "$ref": "#/$defs/SessionHeadOwner"
                 },
                 "session_id": {
+                  "minLength": 1,
                   "type": "string"
                 }
               },
@@ -12019,6 +12061,7 @@
               "additionalProperties": false,
               "properties": {
                 "session_id": {
+                  "minLength": 1,
                   "type": "string"
                 }
               },
@@ -12051,6 +12094,7 @@
                 },
                 "session_id": {
                   "description": "Session whose append operation identity conflicted.",
+                  "minLength": 1,
                   "type": "string"
                 }
               },
@@ -12090,6 +12134,7 @@
                 },
                 "session_id": {
                   "description": "Session whose append receipt is corrupt.",
+                  "minLength": 1,
                   "type": "string"
                 },
                 "stored": {
@@ -13093,9 +13138,11 @@
           "$ref": "#/$defs/TurnInputIngress"
         },
         "input_id": {
+          "minLength": 1,
           "type": "string"
         },
         "session_id": {
+          "minLength": 1,
           "type": "string"
         },
         "source_key": {
@@ -13132,6 +13179,7 @@
               "type": "string"
             },
             "turn_id": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -13376,6 +13424,7 @@
           "$ref": "#/$defs/RemoteTurnReport"
         },
         "session_id": {
+          "minLength": 1,
           "type": "string"
         },
         "type": {
@@ -13407,6 +13456,7 @@
           "$ref": "#/$defs/RemoteParkedTurn"
         },
         "session_id": {
+          "minLength": 1,
           "type": "string"
         },
         "type": {
@@ -13435,6 +13485,7 @@
           "type": "string"
         },
         "session_id": {
+          "minLength": 1,
           "type": "string"
         },
         "stalled": {
@@ -13466,6 +13517,7 @@
           "type": "string"
         },
         "session_id": {
+          "minLength": 1,
           "type": "string"
         },
         "type": {

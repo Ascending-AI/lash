@@ -146,7 +146,7 @@ impl ActiveTurnSubmissionGuard {
             active_turns: state.active_turns.clone(),
             failure_publisher: state.clone(),
             session_id: session_id.clone(),
-            turn_id: TurnId::from(turn_id.to_string()),
+            turn_id: turn_id.clone(),
             armed: true,
         }
     }

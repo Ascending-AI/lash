@@ -279,7 +279,7 @@ pub struct SessionMeta {
 impl SessionMeta {
     /// Returns the parent session id, if any, derived from the canonical
     /// [`SessionRelation`](crate::SessionRelation) field.
-    pub fn parent_session_id(&self) -> Option<&str> {
+    pub fn parent_session_id(&self) -> Option<&SessionId> {
         self.relation.parent_session_id()
     }
 }
@@ -296,7 +296,7 @@ pub enum SessionAdmission {
 pub fn validate_session_id(session_id: &SessionId) -> Result<(), StoreError> {
     if !namespace::is_valid_opaque_key(session_id) {
         Err(StoreError::InvalidSessionId {
-            reason: "session ids must not be empty or contain NUL",
+            reason: "session ids must not contain NUL",
         })
     } else {
         Ok(())
@@ -628,9 +628,8 @@ impl RuntimeCommit {
         let completed = &self.turn_commit;
         for (ordinal, node) in self.graph.nodes().iter().enumerate() {
             let expected = match &node.payload {
-                crate::SessionNodePayload::FrameOpen { frame_key, .. } => crate::NodeId::new(
-                    crate::session_graph::frame_node_id(&self.session_id, frame_key.as_str())
-                        .into_inner(),
+                crate::SessionNodePayload::FrameOpen { frame_key, .. } => crate::NodeId::from(
+                    crate::session_graph::frame_node_id(&self.session_id, frame_key.as_str()),
                 ),
                 _ => {
                     derive_history_node_id(&self.session_id, &completed.operation, ordinal as u64)?

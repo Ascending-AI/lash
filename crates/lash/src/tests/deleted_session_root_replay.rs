@@ -80,13 +80,13 @@ const FOLLOW_ON_TASK: &str = "answer from the switched frame";
 
 /// The follow-on the input root's frame switch owes.
 fn follow_on_of(root: &lash_core::TurnId) -> lash_core::TurnId {
-    lash_core::TurnId::from(format!("{root}:agent-frame:1"))
+    lash_core::TurnId::fixture(format!("{root}:agent-frame:1"))
 }
 
 /// The root the session's drive admits the owed follow-on's first recovery
 /// under.
 fn follow_on_recovery_root(root: &lash_core::TurnId) -> lash_core::TurnId {
-    lash_core::TurnId::from(format!("follow-on:{}#0", follow_on_of(root)))
+    lash_core::TurnId::fixture(format!("follow-on:{}#0", follow_on_of(root)))
 }
 
 /// A stateless model: the switched frame's context carries the task and
@@ -420,7 +420,7 @@ async fn a_root_replayed_after_its_session_was_deleted_ends_typed(
     let session_id = lash_core::SessionId::from("deleted-root-replay");
     let session = world
         .core
-        .session(session_id.as_str())
+        .session(session_id.clone())
         .created()
         .await
         .open()
@@ -604,7 +604,7 @@ async fn a_follow_on_recovery_root_drives_its_recorded_decision(
     let session_id = lash_core::SessionId::from("recovered-follow-on");
     let _session = world
         .core
-        .session(session_id.as_str())
+        .session(session_id.clone())
         .created()
         .await
         .open()
@@ -762,7 +762,7 @@ async fn a_changed_host_bound_does_not_change_the_recovery_decision(
     } = world;
     let session_id = lash_core::SessionId::from("changed-recovery-bound");
     drop(
-        core.session(session_id.as_str())
+        core.session(session_id.clone())
             .created()
             .await
             .open()

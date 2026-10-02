@@ -274,10 +274,7 @@ impl CheckpointWriteCollector {
         self.state
             .lock_recover()
             .latest_components_by_session
-            .insert(
-                SessionId::from(session_id.to_string()),
-                manifest.components.clone(),
-            );
+            .insert(session_id.clone(), manifest.components.clone());
     }
 }
 

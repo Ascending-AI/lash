@@ -11,7 +11,7 @@ pub(crate) async fn open_session_with_bounded_retry(
 ) -> Result<lash::LashSession, lash::EmbedError> {
     retry_session_open(
         surface,
-        || state.session_builder(session_id.to_string()).open(),
+        || state.session_builder(session_id.clone()).open(),
         |event, payload| state.trace_for_session(session_id, event, payload),
     )
     .await

@@ -88,14 +88,17 @@ async fn witness(stores: Arc<dyn StoreSet>, label: &str) -> Result<()> {
     let deployment = restate
         .serve(&engine, engine.endpoint_builder(worker)?.build())
         .await?;
-    core.session(&identity)
+    core.session(lash_core::SessionId::fixture(&identity))
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             "fixture-model",
             lash::TurnBudget::Unbounded,
             lash::MaxToolCalls::new(1024),
         )))
         .await?;
-    let session = core.session(&identity).open().await?;
+    let session = core
+        .session(lash_core::SessionId::fixture(&identity))
+        .open()
+        .await?;
     let failed = session
         .send(lash::TurnInput::text("malformed fixture"))
         .id("malformed")
@@ -117,7 +120,10 @@ async fn witness(stores: Arc<dyn StoreSet>, label: &str) -> Result<()> {
     );
     assert!(session.durable().pending_turn_inputs().await?.is_empty());
     session.close().await?;
-    let session = core.session(&identity).open().await?;
+    let session = core
+        .session(lash_core::SessionId::fixture(&identity))
+        .open()
+        .await?;
     let history_text: String = session
         .read_view()
         .messages()

@@ -268,8 +268,8 @@ async fn withheld_cancel_case(
     texts: &[&str],
 ) {
     let session_id = SessionId::from(SESSION_ID);
-    let cancelled_turn_id = TurnId::from(format!("{case}-cancelled"));
-    let next_turn_id = TurnId::from(format!("{case}-next"));
+    let cancelled_turn_id = TurnId::fixture(format!("{case}-cancelled"));
+    let next_turn_id = TurnId::fixture(format!("{case}-next"));
 
     // Inject-now input sent while the turn runs: the terminal checkpoint
     // admits and withholds it for a follow-on turn.
@@ -461,7 +461,7 @@ async fn withheld_cancel_case(
     let expected_delivered = match disposition {
         crate::TurnCancelUndeliveredInputPolicy::Defer => input_ids
             .iter()
-            .map(|input_id| (input_id.clone(), crate::TurnId::from(input_id.as_str())))
+            .map(|input_id| (input_id.clone(), crate::TurnId::fixture(input_id.clone())))
             .collect(),
         crate::TurnCancelUndeliveredInputPolicy::Drop => Vec::new(),
     };
@@ -627,8 +627,8 @@ async fn withheld_wake_case(
     text: &str,
 ) {
     let session_id = SessionId::from(SESSION_ID);
-    let cancelled_turn_id = TurnId::from(format!("{case}-cancelled"));
-    let next_turn_id = TurnId::from(format!("{case}-next"));
+    let cancelled_turn_id = TurnId::fixture(format!("{case}-cancelled"));
+    let next_turn_id = TurnId::fixture(format!("{case}-next"));
 
     // A wake that arrives while the turn runs: accepted after the turn's
     // input, its terminal checkpoint admits and withholds it for a follow-on

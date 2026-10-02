@@ -801,7 +801,7 @@ pub(crate) async fn settle_drives(
         let Some((_, serde_json::Value::String(session))) = row.into_iter().next() else {
             continue;
         };
-        let session = lash_core::SessionId::from(session);
+        let session = lash_core::SessionId::fixture(session);
         let _ = tokio::time::timeout(SETTLE_LIMIT, engine.settle_session_drive(&session)).await;
     }
     Ok(())

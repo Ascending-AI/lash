@@ -115,14 +115,15 @@ impl LlmToolsProvider {
                     output,
                     stream_events: None,
                     generation,
-                    session_id: Some(SessionId::from(match context.owner().runtime_owner() {
+                    session_id: Some(match context.owner().runtime_owner() {
                         lash_core::RuntimeOwner::Session(session_id) => {
-                            format!("{session_id}-llm-query")
+                            session_id.with_suffix("-llm-query")
                         }
-                        owner @ lash_core::RuntimeOwner::Process(_) => {
-                            format!("{owner}-llm-query")
-                        }
-                    })),
+                        lash_core::RuntimeOwner::Process(process_id) => SessionId::prefixed(
+                            "process:",
+                            format_args!("{process_id}-llm-query"),
+                        ),
+                    }),
                     caused_by: None,
                     replay: None,
                 },

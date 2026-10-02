@@ -84,7 +84,7 @@ struct Evidence {
 fn root_meta(session: &str) -> SessionMeta {
     SessionMeta {
         owning_process_id: None,
-        session_id: SessionId::from(session),
+        session_id: SessionId::fixture(session),
         relation: SessionRelation::Root,
         pending_observer_intents: Vec::new(),
     }
@@ -150,19 +150,19 @@ async fn every_writer_is_fenced(stores: &dyn StoreSet, label: &str) -> Result<Ve
 
     let admitted = factory
         .admit_session(&lash_core::testing::store_fixtures::root_session_request(
-            &SessionId::from(session.as_str()),
+            &SessionId::fixture(session.as_str()),
         ))
         .await;
     expect("session admission", store_outcome(admitted))?;
 
     let committed = factory
-        .settle_observer_intents(&SessionId::from(session.as_str()), Vec::new())
+        .settle_observer_intents(&SessionId::fixture(session.as_str()), Vec::new())
         .await;
     expect("session commit", store_outcome(committed))?;
 
     let input = factory
         .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
-            SessionId::from(session.as_str()),
+            SessionId::fixture(session.as_str()),
             lash_core::TurnInputIngress::NextTurn,
             lash_core::TurnInput::text("after finalize"),
         ))
@@ -208,7 +208,7 @@ async fn every_writer_is_fenced(stores: &dyn StoreSet, label: &str) -> Result<Ve
     expect("process continuation write", plugin_outcome(handovers))?;
 
     let deleted = factory
-        .delete_session(&SessionId::from(format!("{label}-delete").as_str()))
+        .delete_session(&SessionId::fixture(format!("{label}-delete")))
         .await;
     expect("session delete", maintenance_outcome(deleted))?;
     Ok(refused)

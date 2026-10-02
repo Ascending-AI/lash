@@ -190,7 +190,7 @@ async fn deep_turn_session(
                 }
                 durable
                     .send(TurnInput::text("deep composition ingress marker"))
-                    .id(source_id)
+                    .id(TurnId::fixture(source_id))
                     .ingress(lash_core::TurnInputIngress::active_turn(
                         &turn_id,
                         lash_core::TurnInputCheckpointBoundary::AfterWork,
@@ -574,22 +574,17 @@ async fn run_once_inner(
             runtime.resume_tool_catalog_composition_counting();
         }
 
-        let deep_turn_id =
-            matches!(scenario, RuntimePerfScenario::DeepTurnComposition).then(|| {
-                format!(
-                    "runtime-perf-deep-turn-{}",
-                    lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
-                )
-            });
+        let deep_turn_id = matches!(scenario, RuntimePerfScenario::DeepTurnComposition)
+            .then(|| TurnId::prefixed("runtime-perf-deep-turn-", uuid::Uuid::new_v4()));
 
-        if let Some(turn_id) = deep_turn_id.as_deref() {
+        if let Some(turn_id) = deep_turn_id.clone() {
             if let Some(session) = deep_session.take() {
                 session.close().await?;
             }
             deep_session = Some(
                 Box::pin(deep_turn_session(
                     &runtime,
-                    &TurnId::from(turn_id),
+                    &turn_id,
                     format!("deep-composition-ingress-{}", turn_index + 1),
                     Arc::clone(&phase_probe),
                 ))
@@ -639,7 +634,8 @@ async fn run_once_inner(
                 let phase_probe = probe_ref;
                 let cancel = CancellationToken::new();
                 let turn = if matches!(scenario, RuntimePerfScenario::ScopedEffectController) {
-                    let turn_id = TurnId::from(format!("runtime-perf-scoped-{}", turn_index + 1));
+                    let turn_id =
+                        TurnId::fixture(format!("runtime-perf-scoped-{}", turn_index + 1));
                     runtime_perf_timed(
                         scenario,
                         turn_index,
@@ -649,7 +645,7 @@ async fn run_once_inner(
                     )
                     .await
                 } else if matches!(scenario, RuntimePerfScenario::TurnCancelRoundTrip) {
-                    let turn_id = TurnId::from(format!(
+                    let turn_id = TurnId::fixture(format!(
                         "runtime-perf-cancel-round-trip-{}",
                         lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
                     ));
@@ -677,7 +673,7 @@ async fn run_once_inner(
                     );
                     Ok(turn)
                 } else if matches!(scenario, RuntimePerfScenario::IngressAdmissionProjection) {
-                    let turn_id = TurnId::from(format!(
+                    let turn_id = TurnId::fixture(format!(
                         "runtime-perf-ingress-projection-{}",
                         lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
                     ));
@@ -705,7 +701,7 @@ async fn run_once_inner(
                     );
                     Ok(turn)
                 } else if let (Some(turn_id), Some(session)) =
-                    (deep_turn_id.as_deref(), deep_session_ref.as_ref())
+                    (deep_turn_id.as_ref(), deep_session_ref.as_ref())
                 {
                     runtime_perf_timed(
                         scenario,
@@ -715,7 +711,7 @@ async fn run_once_inner(
                         Box::pin(runtime.turn_entry().run(
                             session,
                             turn_input,
-                            Some(&TurnId::from(turn_id)),
+                            Some(turn_id),
                             cancel,
                         )),
                     )

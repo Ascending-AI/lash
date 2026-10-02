@@ -29,7 +29,6 @@ pub struct RemoteTurnInputApplication {
 impl RemoteTurnInputApplication {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         require_non_empty("RemoteTurnInputApplication", "input_id", &self.input_id)?;
-        require_non_empty("RemoteTurnInputApplication", "turn_id", &self.turn_id)?;
         require_non_empty(
             "RemoteTurnInputApplication",
             "committed_message_id",
@@ -72,7 +71,6 @@ pub struct RemoteSessionObservation {
 
 impl RemoteSessionObservation {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        require_non_empty("RemoteSessionObservation", "session_id", &self.session_id)?;
         require_non_empty("RemoteSessionObservation", "cursor", &self.cursor)
     }
 }
@@ -110,17 +108,9 @@ impl RemoteSessionObservationEvent {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         require_non_empty(
             "RemoteSessionObservationEvent",
-            "session_id",
-            &self.session_id,
-        )?;
-        require_non_empty(
-            "RemoteSessionObservationEvent",
             "replay_incarnation_id",
             &self.replay_incarnation_id,
         )?;
-        if let Some(turn_id) = self.turn_id.as_deref() {
-            require_non_empty("RemoteSessionObservationEvent", "turn_id", turn_id)?;
-        }
         require_non_empty("RemoteSessionObservationEvent", "cursor", &self.cursor)?;
         if let RemoteSessionObservationEventPayload::TurnActivity { activity } = &self.event {
             activity.validate()?;
@@ -189,7 +179,6 @@ pub struct RemoteLiveReplayGap {
 
 impl RemoteLiveReplayGap {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        require_non_empty("RemoteLiveReplayGap", "session_id", &self.session_id)?;
         require_non_empty(
             "RemoteLiveReplayGap",
             "requested_cursor",
@@ -235,11 +224,6 @@ impl RemoteProcessObservationRequest {
     }
 
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        require_non_empty(
-            "RemoteProcessObservationRequest",
-            "process_id",
-            &self.process_id,
-        )?;
         Ok(())
     }
 }

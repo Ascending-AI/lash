@@ -211,11 +211,14 @@ async fn a_refused_cell_reservation_replays_into_a_host_with_capacity(
             "test",
         ))
         .expect("build the lash core");
-    let session = created_session(&core, run_tag("worker-verdict-cell"))
-        .await
-        .open()
-        .await
-        .expect("open the session");
+    let session = created_session(
+        &core,
+        lash_core::SessionId::fixture(run_tag("worker-verdict-cell")),
+    )
+    .await
+    .open()
+    .await
+    .expect("open the session");
     let output = tokio::time::timeout(
         BOUND,
         session

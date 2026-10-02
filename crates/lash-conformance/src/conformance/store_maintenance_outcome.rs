@@ -270,7 +270,7 @@ async fn commit_generation(
     expected_head_revision: u64,
 ) -> u64 {
     let mut state = crate::RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         head_revision: expected_head_revision,
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,

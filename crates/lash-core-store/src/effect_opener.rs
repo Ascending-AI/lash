@@ -355,7 +355,7 @@ mod tests {
         let session = SessionId::from("s:1");
         let turns = EffectOpener::session_turn_encoding_range(&session);
         let operations = EffectOpener::session_operation_encoding_range(&session);
-        for turn in ["t", "", "t:9", "~"] {
+        for turn in ["t", ":", "t:9", "~"] {
             let encoding =
                 EffectOpener::turn(session.clone(), TurnId::from(turn)).identity_encoding();
             assert!(inside(&turns, &encoding), "{encoding} outside {turns:?}");
@@ -464,16 +464,17 @@ mod tests {
         );
     }
 
-    /// An empty component is encodable too: `0:` marks its boundary exactly.
+    /// A component holding the separator is encodable too: its length marks
+    /// its boundary exactly.
     #[test]
-    fn an_empty_component_encodes_unambiguously() {
+    fn a_component_holding_the_separator_encodes_unambiguously() {
         assert_eq!(
-            EffectOpener::turn("", "t").identity_encoding(),
-            "turn:0::1:t"
+            EffectOpener::turn(":", "t").identity_encoding(),
+            "turn:1:::1:t"
         );
         assert_ne!(
-            EffectOpener::turn("", ":t").identity_encoding(),
-            EffectOpener::turn(":", "t").identity_encoding()
+            EffectOpener::turn("a", ":t").identity_encoding(),
+            EffectOpener::turn("a:", "t").identity_encoding()
         );
     }
 

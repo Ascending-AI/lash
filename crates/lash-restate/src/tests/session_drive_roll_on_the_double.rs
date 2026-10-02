@@ -162,7 +162,7 @@ impl RollDriver {
         match next {
             Some(item) => AdmitVerdict::Admit(admission_body::admitted(
                 request.session.clone(),
-                TurnId::from(item),
+                TurnId::fixture(item),
                 request.request.clone(),
                 lash_core::engine::AdmissionId::new(format!(
                     "{}:{ordinal}",

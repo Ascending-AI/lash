@@ -675,7 +675,7 @@ mod tests {
             schema_version: lash::tracing::TRACE_SCHEMA_VERSION,
             graph_key: "effect:child-session:turn-1:exec-1".to_string(),
             scope: TraceRuntimeScope {
-                session_id: Some(SessionId::from(child_session_id.to_string())),
+                session_id: Some(SessionId::fixture(child_session_id.to_string())),
                 turn_id: Some(TurnId::from("turn-1")),
                 turn_index: Some(0),
                 protocol_iteration: Some(0),
@@ -861,10 +861,13 @@ mod tests {
     fn effect_graph(key: &str, session: &str) -> TraceLashlangGraph {
         test_graph(
             key,
-            &SessionId::from(session),
+            &SessionId::fixture(session),
             TraceRuntimeSubject::Effect {
                 address: lash::runtime::EffectAddress::new(
-                    lash::runtime::ExecutionScope::turn(session, "turn"),
+                    lash::runtime::ExecutionScope::turn(
+                        SessionId::fixture(session.to_string()),
+                        "turn",
+                    ),
                     key,
                 )
                 .expect("effect address"),

@@ -122,7 +122,7 @@ pub(super) async fn assert_model_agreement(
         .list_wake_deliveries(None)
         .await
         .map_err(|error| error.to_string())?;
-    actual_deliveries.sort_by(|left, right| left.delivery_id().cmp(&right.delivery_id()));
+    actual_deliveries.sort_by_key(|delivery| delivery.delivery_id());
     // The model records each wake as its append wrote it, at the version the
     // store's `F` pinned; a read lifts every admitted version to the newest.
     let expected_deliveries = model

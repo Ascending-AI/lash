@@ -96,7 +96,7 @@ pub(crate) async fn ensure_session_not_deleted_tx(
         .map_err(store_sqlx_error)?;
     if deleted {
         Err(StoreError::SessionDeleted {
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: SessionId::parse(session_id.to_string())?,
         })
     } else {
         Ok(())

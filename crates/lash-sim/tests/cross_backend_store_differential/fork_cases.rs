@@ -162,7 +162,7 @@ impl BackendRunner {
                     .fork_session(&ForkSessionRequest {
                         pending_observer_intents: Vec::new(),
                         session_id: self.session_id.clone(),
-                        source_session_id: SessionId::from(format!(
+                        source_session_id: SessionId::fixture(format!(
                             "{}:missing-fork-source",
                             self.session_id
                         )),
@@ -189,17 +189,21 @@ impl BackendRunner {
                     .factory()
                     .fork_session(&ForkSessionRequest {
                         pending_observer_intents: Vec::new(),
-                        session_id: SessionId::from(format!("{}:foreign-lineage", self.session_id)),
+                        session_id: SessionId::fixture(format!(
+                            "{}:foreign-lineage",
+                            self.session_id
+                        )),
                         source_session_id: self.session_id.clone(),
                         head_revision,
                         relation: SessionRelation::Fork {
-                            source_session_id: SessionId::from(format!(
+                            source_session_id: SessionId::fixture(format!(
                                 "{}:foreign-source",
                                 self.session_id
                             )),
-                            source_node_id: Some(
-                                format!("{}:foreign-node", self.session_id).into(),
-                            ),
+                            source_node_id: Some(lash_core::NodeId::fixture(format!(
+                                "{}:foreign-node",
+                                self.session_id
+                            ))),
                         },
                         config: lash_core::SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
@@ -228,7 +232,7 @@ impl BackendRunner {
                     .expect("generated sequence committed a leaf before rewind");
                 let head_revision = self.head_revision().await?;
                 let branch_session_id =
-                    SessionId::from(format!("{}:rewind-branch", self.session_id));
+                    SessionId::fixture(format!("{}:rewind-branch", self.session_id));
                 let branch = self
                     .factory()
                     .fork_session(&ForkSessionRequest {
@@ -238,7 +242,7 @@ impl BackendRunner {
                         head_revision,
                         relation: SessionRelation::Fork {
                             source_session_id: self.session_id.clone(),
-                            source_node_id: Some(node_id.clone().into()),
+                            source_node_id: Some(lash_core::NodeId::fixture(node_id.clone())),
                         },
                         config: lash_core::SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
@@ -269,14 +273,15 @@ impl BackendRunner {
                     .factory()
                     .fork_session(&ForkSessionRequest {
                         pending_observer_intents: Vec::new(),
-                        session_id: SessionId::from(format!("{}:rewind", self.session_id)),
+                        session_id: SessionId::fixture(format!("{}:rewind", self.session_id)),
                         source_session_id: branch_session_id.clone(),
                         head_revision: 0,
                         relation: SessionRelation::Fork {
                             source_session_id: branch_session_id.clone(),
-                            source_node_id: Some(
-                                format!("{}:rewind-source-node", self.session_id).into(),
-                            ),
+                            source_node_id: Some(lash_core::NodeId::fixture(format!(
+                                "{}:rewind-source-node",
+                                self.session_id
+                            ))),
                         },
                         config: lash_core::SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
@@ -288,7 +293,7 @@ impl BackendRunner {
                     .expect("rewind must re-fork after deleting the superseded source");
                 assert_eq!(
                     (rewound.source_session_id, rewound.leaf_node_id),
-                    (branch_session_id, Some(node_id.into())),
+                    (branch_session_id, Some(lash_core::NodeId::fixture(node_id))),
                     "re-fork must name the surviving branch's creation revision"
                 );
                 Ok(None)
@@ -385,7 +390,7 @@ pub(super) async fn selected_observer_intents(
         ),
     ];
     for (index, (factory, registry)) in backends.into_iter().enumerate() {
-        let session_id = SessionId::from(format!("selected-observer-{nonce}-{index}"));
+        let session_id = SessionId::fixture(format!("selected-observer-{nonce}-{index}"));
         let registration = lash_core::ProcessRegistration::new(
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
@@ -415,7 +420,7 @@ pub(super) async fn selected_observer_intents(
             .into(),
             head: SessionCreationHead::Config,
         };
-        let source_id = SessionId::from(format!("selected-history-{nonce}-{index}"));
+        let source_id = SessionId::fixture(format!("selected-history-{nonce}-{index}"));
         let source_request = SessionStoreCreateRequest {
             owning_process_id: None,
             session_id: source_id.clone(),

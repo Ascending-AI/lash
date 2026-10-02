@@ -139,7 +139,8 @@ async fn run_mutation(listing: Listing, hold: bool, overbroad: bool, witness: bo
     ));
     let prefix = format!("wait-isolation-{}", uuid::Uuid::new_v4().simple());
     let mutation = Arc::new(CloseMutation {
-        cancel_session: overbroad.then(|| SessionId::from(format!("{prefix}-losing-wait-session"))),
+        cancel_session: overbroad
+            .then(|| SessionId::fixture(format!("{prefix}-losing-wait-session"))),
         host: overbroad.then(|| Arc::clone(&inner)),
         ..Default::default()
     });

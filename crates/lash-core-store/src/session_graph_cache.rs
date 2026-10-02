@@ -424,10 +424,14 @@ mod tests {
         let mut index = NodeIdIndex::from_resident(HashMap::from([("root".into(), 0)]));
         let initial = index.clone();
         for ordinal in 1..2000 {
-            let draft = NodeId::from(format!("draft-{ordinal}"));
+            let draft = NodeId::fixture(format!("draft-{ordinal}"));
             index.insert(draft.clone(), ordinal);
             let before_rename = index.clone();
-            index.rename(&draft, format!("derived-{ordinal}").into(), ordinal);
+            index.rename(
+                &draft,
+                NodeId::fixture(format!("derived-{ordinal}")),
+                ordinal,
+            );
             assert_eq!(before_rename.get(draft.as_str()), Some(ordinal));
             assert_eq!(before_rename.get(&format!("derived-{ordinal}")), None);
         }
@@ -464,7 +468,7 @@ mod tests {
         let index = NodeIdIndex::from_resident(HashMap::from([("root".into(), 0)]));
         for ordinal in 0..300 {
             let mut speculative = index.clone();
-            speculative.insert(format!("discarded-{ordinal}").into(), 1);
+            speculative.insert(NodeId::fixture(format!("discarded-{ordinal}")), 1);
             assert!(Arc::ptr_eq(&index.0.data, &speculative.0.data));
             assert_eq!(index.get(&format!("discarded-{ordinal}")), None);
         }

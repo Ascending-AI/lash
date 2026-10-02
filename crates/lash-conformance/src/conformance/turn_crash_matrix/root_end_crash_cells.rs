@@ -47,10 +47,7 @@ async fn run_root_end_crash_cell<F, S>(
         .map(|row| row.input.input_id)
         .chain([
             reference_steer_input_id(&identity),
-            crate::InputId::from(PendingTurnInputDraft::keyed_input_id(
-                &identity.session_id,
-                "withheld-follow-on-input",
-            )),
+            PendingTurnInputDraft::keyed_input_id(&identity.session_id, "withheld-follow-on-input"),
         ])
         .collect::<Vec<_>>();
     let before = reader

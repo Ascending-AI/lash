@@ -269,7 +269,10 @@ fn read_parked_segments(
             status: Some(row.get(3)?),
             // Nullable in the schema: a process that has not been bound to a
             // wake session yet still has a parked continuation worth listing.
-            session_id: row.get::<_, Option<String>>(4)?.map(SessionId::from),
+            session_id: row
+                .get::<_, Option<String>>(4)?
+                .map(crate::codec::sql_identity)
+                .transpose()?,
             // Carried because a segment handover's stored program identity can
             // only be judged by recomputing it from the inputs the process
             // record holds, and only the registry holds those.
@@ -303,7 +306,10 @@ fn read_started_processes(
             cursor: row.get(0)?,
             process_id: Some(crate::row_process_id(row, 0)?),
             status: Some(row.get(1)?),
-            session_id: row.get::<_, Option<String>>(2)?.map(SessionId::from),
+            session_id: row
+                .get::<_, Option<String>>(2)?
+                .map(crate::codec::sql_identity)
+                .transpose()?,
             owner_record: Some(record.clone()),
             payload: DurablePayload::Json(record),
         })
@@ -335,7 +341,7 @@ fn read_pending_wakes(
             // is its own keyset cursor: nothing to pad, nothing to compose.
             cursor: row.get(0)?,
             process_id: Some(crate::row_process_id(row, 1)?),
-            session_id: Some(SessionId::from(row.get::<_, String>(2)?)),
+            session_id: Some(crate::codec::sql_identity(row.get::<_, String>(2)?)?),
             // The delivery's own state word, reported verbatim so an operator
             // reads the store's vocabulary rather than a translation of it.
             status: Some(row.get(3)?),
@@ -368,7 +374,7 @@ fn read_session_checkpoints(
             .sql(),
     )?;
     let rows = statement.query_map(params![after, limit_binding(limit)], |row| {
-        let session_id = SessionId::from(row.get::<_, String>(0)?);
+        let session_id: SessionId = crate::codec::sql_identity(row.get::<_, String>(0)?)?;
         let checkpoint_ref: String = row.get(1)?;
         let stored: Option<Vec<u8>> = row.get(2)?;
         let payload = match stored {
@@ -465,7 +471,7 @@ fn read_session_execution_state(
             surface: DurableSurface::SessionExecutionState,
             cursor: session_id.clone(),
             process_id: None,
-            session_id: Some(SessionId::from(session_id)),
+            session_id: Some(crate::codec::sql_identity(session_id)?),
             status: None,
             owner_record: None,
             payload,

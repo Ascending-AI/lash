@@ -55,7 +55,7 @@ pub(super) async fn attachment_namespace(store: Arc<dyn AttachmentStore>) {
 )]
 pub(super) async fn session_namespace(factory: Arc<dyn crate::DeploymentStore>) {
     use super::session_store_factory::session_store_request;
-    for raw in ["", "nul\0session"] {
+    for raw in ["nul\0session"] {
         let request = session_store_request(
             &SessionId::from(raw),
             "hostile-model",

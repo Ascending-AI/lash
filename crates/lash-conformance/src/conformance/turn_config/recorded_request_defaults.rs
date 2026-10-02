@@ -99,7 +99,7 @@ pub async fn a_redrive_calls_the_model_with_the_request_defaults_its_root_record
         Vec::new(),
     )
     .await;
-    let root = TurnId::from(format!(
+    let root = TurnId::fixture(format!(
         "{prefix}-turn-config-recorded-request-defaults-root"
     ));
     let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();

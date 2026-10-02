@@ -131,7 +131,7 @@ async fn scan_started_processes(
                 surface: DurableSurface::StartedProcess,
                 process_id: ProcessId::parse(&process_id).ok(),
                 cursor: process_id,
-                session_id: wake_session_id.map(SessionId::from),
+                session_id: wake_session_id.and_then(|id| SessionId::parse(id).ok()),
                 status: Some(status),
                 owner_record: Some(record_json.clone()),
                 payload: DurablePayload::Json(record_json),
@@ -224,7 +224,7 @@ async fn scan_parked_segments(
                     process_id,
                     // The session the process wakes into, which is the identity
                     // an operator draining a stuck continuation looks for.
-                    session_id: wake_session_id.map(SessionId::from),
+                    session_id: wake_session_id.and_then(|id| SessionId::parse(id).ok()),
                     status: Some(status),
                     // The registry record travels with the item because an
                     // identity-only durable format cannot be checked from the
@@ -268,7 +268,7 @@ async fn scan_pending_wakes(
                 surface: DurableSurface::PendingWake,
                 cursor: delivery_id,
                 process_id: ProcessId::parse(&process_id).ok(),
-                session_id: Some(SessionId::from(target_session_id)),
+                session_id: SessionId::parse(target_session_id).ok(),
                 // The delivery's own state word, verbatim: an operator reading
                 // `enqueuing` learns the claim lapsed mid-flight, which a
                 // translation to "pending" would have hidden.
@@ -411,7 +411,7 @@ async fn scan_session_execution_state(
             surface: DurableSurface::SessionExecutionState,
             cursor: session_id.clone(),
             process_id: None,
-            session_id: Some(SessionId::from(session_id.clone())),
+            session_id: SessionId::parse(session_id.clone()).ok(),
             status: None,
             owner_record: None,
             payload: match components.get(blob_ref.as_str()) {
@@ -501,9 +501,11 @@ async fn fetch_sessions(
     let rows = query.fetch_all(&mut **snapshot).await?;
     Ok(rows
         .into_iter()
-        .map(|(session_id, checkpoint_ref)| SessionCheckpointRow {
-            session_id: SessionId::from(session_id),
-            checkpoint_ref,
+        .filter_map(|(session_id, checkpoint_ref)| {
+            Some(SessionCheckpointRow {
+                session_id: SessionId::parse(session_id).ok()?,
+                checkpoint_ref,
+            })
         })
         .collect())
 }

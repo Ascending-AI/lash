@@ -1642,7 +1642,10 @@ pub(super) async fn a_gated_wait_registry_call_reads_no_row_per_retained_fence()
         ]);
         for index in 0..fences {
             let key = restate_await_event_key(
-                &durable_turn_scope(object_key, format!("turn-{index:03}")),
+                &durable_turn_scope(
+                    object_key,
+                    lash_core::TurnId::fixture(format!("turn-{index:03}")),
+                ),
                 AwaitEventWaitIdentity::TurnCancelGate,
             )
             .expect("derive a retained gate");

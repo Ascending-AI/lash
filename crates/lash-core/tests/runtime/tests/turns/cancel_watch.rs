@@ -130,7 +130,10 @@ where
     let handler = tokio::time::timeout(
         std::time::Duration::from_secs(60),
         double.run_in_handler(
-            AdmittedScope::turn(session_id.as_str(), TurnId::from(turn_id)),
+            AdmittedScope::turn(
+                lash_core::SessionId::fixture(session_id.clone()),
+                TurnId::fixture(turn_id),
+            ),
             attempt,
         ),
     )

@@ -454,7 +454,7 @@ try {
         .into_handle();
     let core = approval_test_core(&backend, provider.clone(), approvals.clone()).await;
     let session_id = format!("async-completion-{slug}");
-    let session = crate::created_session(&core, &session_id)
+    let session = crate::created_session(&core, lash::SessionId::fixture(&session_id))
         .await
         .open()
         .await
@@ -488,7 +488,10 @@ try {
     // The resolution resumes the parked turn in the engine's drive; the
     // session opens once that turn settled.
     core.turn_work_driver()
-        .await_terminal(&lash::TurnAddress::new(&session_id, "async-turn"))
+        .await_terminal(&lash::TurnAddress::new(
+            lash::SessionId::fixture(&session_id),
+            "async-turn",
+        ))
         .await
         .expect("the resumed turn settles");
     let session = crate::tests::open_session_once_released(&core, &session_id).await;

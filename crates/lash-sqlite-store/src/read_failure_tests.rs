@@ -334,10 +334,10 @@ async fn queued_work_read_survives_a_consume_mid_hydration(session_id: &str, rea
         .await
         .expect("open store with a read seam"),
     );
-    let session_id = SessionId::from(session_id);
+    let session_id = SessionId::fixture(session_id);
     let batch = store
         .enqueue_queued_work(lash_core_execution::runtime::QueuedWorkBatchDraft::new(
-            session_id.as_str(),
+            session_id.clone(),
             lash_core_execution::DeliveryPolicy::EarliestSafeBoundary,
             lash_core_execution::runtime::SessionCommand::RefreshToolCatalog {
                 reason: "snapshot test".into(),
@@ -513,14 +513,14 @@ async fn seed_failure_evidence_session(
         .expect("open receipt store");
     store
         .admit_session(
-            &lash_core_execution::testing::store_fixtures::root_session_request(&SessionId::from(
-                session_id,
-            )),
+            &lash_core_execution::testing::store_fixtures::root_session_request(
+                &SessionId::fixture(session_id),
+            ),
         )
         .await
         .expect("admit receipt session");
     let state = lash_core_execution::RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: SessionId::fixture(session_id.to_string()),
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
@@ -574,7 +574,7 @@ async fn seed_failure_evidence_session(
 async fn failure_evidence_refusal(store: &SqliteStore, session_id: &str) -> StoreError {
     store
         .load_failure_evidence_page(
-            &SessionId::from(session_id),
+            &SessionId::fixture(session_id),
             None,
             std::num::NonZeroU32::new(100).expect("nonzero page limit"),
         )

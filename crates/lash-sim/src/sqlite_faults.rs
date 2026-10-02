@@ -516,7 +516,7 @@ async fn run_composition_case(
     }
     std::fs::create_dir_all(&case_root).map_err(|error| error.to_string())?;
     let factory = lane.store(&case_root).await?;
-    let session_id = SessionId::from(format!(
+    let session_id = SessionId::fixture(format!(
         "lash-sim-{}-composition-{:016x}-{label}",
         lane.kind().name(),
         plan.workload_seed
@@ -729,7 +729,7 @@ async fn run_seed(
         .store(&seed_root)
         .await
         .map_err(|error| ScenarioFailure::harness(backend, error))?;
-    let session_id = SessionId::from(format!("lash-sim-{}-fault-{seed:016x}", backend.name()));
+    let session_id = SessionId::fixture(format!("lash-sim-{}-fault-{seed:016x}", backend.name()));
     let mut store = create_store(backend, Arc::clone(&factory), &session_id).await?;
     let mut state = RuntimeSessionState {
         session_id: session_id.clone(),
@@ -966,7 +966,7 @@ fn stamped_commit(
     RuntimeCommit::persisted_state_for_test(state)
         .with_operation(OperationId::turn(
             &state.session_id,
-            format!("{}-fault-{operation_suffix}", backend.name()),
+            lash_core::TurnId::fixture(format!("{}-fault-{operation_suffix}", backend.name())),
             "final",
         ))
         .map(|(commit, _)| commit)
@@ -977,7 +977,7 @@ fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         relation: SessionRelation::Root,
         config: SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -1232,7 +1232,7 @@ mod tests {
             .expect("the lane is configured");
         let inner = lane.store(tmp.path()).await.expect("open the store");
         let script = BackendFaultScript::arm(Arc::clone(&inner), [BackendFaultArm::new(7, fault)]);
-        let session_id = SessionId::from(format!("arm-scope-{}", fault.name()));
+        let session_id = SessionId::fixture(format!("arm-scope-{}", fault.name()));
         let head = || async {
             inner
                 .load_session_head_meta(&session_id)

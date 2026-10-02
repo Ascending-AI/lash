@@ -106,7 +106,7 @@ async fn provider_state_snapshot(state: &AppState, session_id: &SessionId) -> se
     let Json(snapshot) = app_state(
         State(state.clone()),
         Query(SessionQuery {
-            session_id: Some(SessionId::from(session_id.to_string())),
+            session_id: Some(SessionId::fixture(session_id.to_string())),
         }),
     )
     .await
@@ -238,7 +238,7 @@ pub(crate) async fn provider_execution_evidence_scenarios() -> serde_json::Value
             .expect("subscribe through the remote observation facade");
         let mut chat_recovery = observable.subscribe_recoverable_chat(initial.cursor);
 
-        let first_turn_id = TurnId::from(format!("{provider_kind}-evidence-turn-1"));
+        let first_turn_id = TurnId::fixture(format!("{provider_kind}-evidence-turn-1"));
         let (first_observation_line, first_terminal_replacement_line, first_execution) = tokio::join!(
             next_remote_model_call(&mut observation_recovery),
             next_terminal_replacement(&mut chat_recovery, 0),
@@ -308,7 +308,7 @@ pub(crate) async fn provider_execution_evidence_scenarios() -> serde_json::Value
         state.active_turns.remove(&session_id, &first_turn_id);
         let first_snapshot = provider_state_snapshot(&state, &session_id).await;
 
-        let second_turn_id = TurnId::from(format!("{provider_kind}-evidence-turn-2"));
+        let second_turn_id = TurnId::fixture(format!("{provider_kind}-evidence-turn-2"));
         let (second_observation_line, second_terminal_replacement_line, second_execution) = tokio::join!(
             next_remote_model_call(&mut observation_recovery),
             next_terminal_replacement(&mut chat_recovery, 1),

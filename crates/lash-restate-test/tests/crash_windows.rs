@@ -885,7 +885,7 @@ async fn a_presentation_put_before_its_journal_crash_replays_one_presentation(en
     );
 
     let session_id = run_tag("presentation");
-    let session = created_session(&core, session_id.as_str())
+    let session = created_session(&core, lash_core::SessionId::fixture(session_id.clone()))
         .await
         .open()
         .await
@@ -894,7 +894,7 @@ async fn a_presentation_put_before_its_journal_crash_replays_one_presentation(en
         BOUND,
         session
             .send(lash::TurnInput::text("present once"))
-            .id(run_tag("turn").as_str())
+            .id(lash_core::TurnId::fixture(run_tag("turn")))
             .output(),
     )
     .await
@@ -1298,7 +1298,7 @@ async fn group_close_and_retirement_crash_matrix(engine: Engine) {
         let core = presentation_core(&engine, &witness, &executions, &requests);
         let session_id = run_tag("group-close-retirement");
         let turn_id = run_tag("group-close-retirement-turn");
-        let session = created_session(&core, session_id.as_str())
+        let session = created_session(&core, lash_core::SessionId::fixture(session_id.clone()))
             .await
             .open()
             .await
@@ -1322,7 +1322,7 @@ async fn group_close_and_retirement_crash_matrix(engine: Engine) {
             BOUND,
             session
                 .send(lash::TurnInput::text("close the counted group"))
-                .id(turn_id.as_str())
+                .id(lash_core::TurnId::fixture(turn_id.as_str()))
                 .output(),
         )
         .await
@@ -1480,8 +1480,8 @@ async fn group_close_and_retirement_crash_matrix(engine: Engine) {
         );
         let terminal = lash_core::store::RootStore::root_terminal(
             engine.stores().session_store_factory().as_ref(),
-            &lash_core::SessionId::from(session_id),
-            &lash_core::TurnId::from(turn_id),
+            &lash_core::SessionId::fixture(session_id),
+            &lash_core::TurnId::fixture(turn_id),
         )
         .await
         .expect("read root accounting after retirement")

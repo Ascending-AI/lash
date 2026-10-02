@@ -423,7 +423,7 @@ impl SessionQuery {
                 "session_id must be 1-128 ASCII letters, digits, '.', '_' or '-'",
             ));
         }
-        Ok(SessionId::from(session_id))
+        Ok(SessionId::parse(session_id)?)
     }
 
     pub(crate) fn is_explicit(&self) -> bool {
@@ -861,8 +861,8 @@ impl SessionEventRegistry {
                 | StreamItem::ModelCallRecorded { .. }
                 | StreamItem::Done { .. } => None,
             })
-            .filter(|turn_id| committed_input_turn_ids.contains(*turn_id))
-            .map(TurnId::from)
+            .filter_map(|turn_id| TurnId::parse(turn_id).ok())
+            .filter(|turn_id| committed_input_turn_ids.contains(turn_id))
             .collect::<BTreeSet<_>>();
         let committed_status_before = history.committed_user_turn_ids.len();
         history

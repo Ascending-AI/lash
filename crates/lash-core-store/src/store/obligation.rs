@@ -307,19 +307,19 @@ impl ObligationKey {
         let mut columns = columns.into_iter();
         Ok(match kind {
             ObligationKind::Ingress => Self::Ingress {
-                session_id: SessionId::from(next_text(&mut columns, kind, "session_id")?),
+                session_id: next_identity(&mut columns, kind, "session_id")?,
                 item_id: next_text(&mut columns, kind, "item_id")?,
             },
             ObligationKind::ScopeClose => Self::ScopeClose {
-                session_id: SessionId::from(next_text(&mut columns, kind, "session_id")?),
-                root: TurnId::from(next_text(&mut columns, kind, "root")?),
+                session_id: next_identity(&mut columns, kind, "session_id")?,
+                root: next_identity(&mut columns, kind, "root")?,
             },
             ObligationKind::ParentEnd => Self::ParentEnd {
                 parent_kind: next_text(&mut columns, kind, "parent_kind")?,
                 parent_id: next_text(&mut columns, kind, "parent_id")?,
             },
             ObligationKind::SessionDelete => Self::SessionDelete {
-                session_id: SessionId::from(next_text(&mut columns, kind, "session_id")?),
+                session_id: next_identity(&mut columns, kind, "session_id")?,
             },
             ObligationKind::TriggerDelivery => Self::TriggerDelivery {
                 occurrence_id: next_text(&mut columns, kind, "occurrence_id")?,
@@ -375,6 +375,22 @@ fn next_text(
             "{kind} obligation key column `{name}` is {other:?}, not text"
         ))),
     }
+}
+
+/// The next key column as an identity, or why it is not one.
+fn next_identity<T>(
+    columns: &mut impl Iterator<Item = KeyColumn>,
+    kind: ObligationKind,
+    name: &str,
+) -> Result<T, UndecodableObligation>
+where
+    T: std::str::FromStr<Err = crate::BlankIdentity>,
+{
+    next_text(columns, kind, name)?.parse().map_err(|error| {
+        UndecodableObligation::malformed(format!(
+            "{kind} obligation key column `{name}` is no identity: {error}"
+        ))
+    })
 }
 
 /// The next key column as an integer, or why it is not.

@@ -422,7 +422,7 @@ fn surface_drain_scope(session_id: &SessionId) -> lash_core::ExecutionScope {
 
 /// The drain root the sweep admits on a queued-work head.
 fn surface_queued_root(session_id: &SessionId) -> lash_core::TurnId {
-    lash_core::TurnId::from(surface_drain_scope(session_id).id())
+    lash_core::TurnId::fixture(surface_drain_scope(session_id).id())
 }
 
 /// An admission request for `root` headed by `head` under `fence`.
@@ -916,7 +916,7 @@ impl BackendRunner {
                 // The keyed point read answers what the list answers for the
                 // row: `Open`, `Admitted` naming its root, or nothing once
                 // the row is terminal or unknown (FIG-3976).
-                let input = lash_core::InputId::from(if known {
+                let input = lash_core::InputId::fixture(if known {
                     format!("{session_id}:input")
                 } else {
                     UNKNOWN_INPUT_ID.to_string()
@@ -941,7 +941,7 @@ impl BackendRunner {
             SurfaceMethod::AdmitRoot { lease } => {
                 let lease_slot = lease;
                 let lease = self.lease(lease_slot).clone();
-                let head = lash_core::InputId::from(format!("{session_id}:input"));
+                let head = lash_core::InputId::fixture(format!("{session_id}:input"));
                 let request = surface_admit_request(
                     &lease,
                     lash_core::TurnId::from(SURFACE_ROOT_ID),
@@ -987,7 +987,9 @@ impl BackendRunner {
                             TurnInputIngress::NextTurn,
                             TurnInput::text("late input after root claim"),
                         )
-                        .with_input_id(format!("{session_id}:late-input")),
+                        .with_input_id(lash_core::InputId::fixture(
+                            format!("{session_id}:late-input"),
+                        )),
                     )
                     .await?;
                 "enqueued".to_string()
@@ -999,7 +1001,7 @@ impl BackendRunner {
                 let request = surface_admit_request(
                     &lease,
                     lash_core::TurnId::from(SURFACE_ROOT_ID),
-                    lash_core::store::AdmittedHead::Input(lash_core::InputId::from(format!(
+                    lash_core::store::AdmittedHead::Input(lash_core::InputId::fixture(format!(
                         "{session_id}:input"
                     ))),
                 );
@@ -1111,7 +1113,7 @@ impl BackendRunner {
                 let page = store
                     .load_ancestors(
                         &session_id,
-                        lash_core::store::HistoryAnchor::Node(node_id.into()),
+                        lash_core::store::HistoryAnchor::Node(lash_core::NodeId::fixture(node_id)),
                         lash_core::store::HistoryBudget {
                             max_nodes: std::num::NonZeroU32::MIN,
                             max_bytes: std::num::NonZeroU64::MIN.saturating_add(1024 * 1024 - 1),
@@ -1340,7 +1342,7 @@ impl BackendRunner {
             SurfaceMethod::RootTerminal => {
                 // The kind and cause are caller-supplied facts; the instant
                 // is the backend clock's and is not compared.
-                let root = lash_core::TurnId::from(surface_drain_scope(&session_id).id());
+                let root = lash_core::TurnId::fixture(surface_drain_scope(&session_id).id());
                 match store.root_terminal(&session_id, &root).await? {
                     Some(terminal) => {
                         let cause = match &terminal.cause {
@@ -1386,7 +1388,7 @@ impl BackendRunner {
             SurfaceMethod::EndLostRoot => {
                 let root = lash_core::engine::RootRef {
                     session: session_id.clone(),
-                    root: lash_core::TurnId::from(surface_drain_scope(&session_id).id()),
+                    root: lash_core::TurnId::fixture(surface_drain_scope(&session_id).id()),
                 };
                 match self
                     .factory()
@@ -1398,7 +1400,7 @@ impl BackendRunner {
                 }
             }
             SurfaceMethod::EndRefusedRoot => {
-                let root = lash_core::TurnId::from(surface_drain_scope(&session_id).id());
+                let root = lash_core::TurnId::fixture(surface_drain_scope(&session_id).id());
                 let refusal = lash_core::RuntimeError::new(
                     lash_core::RuntimeErrorCode::StoreCommitSuperseded,
                     "the head moved under the root's commit",
@@ -1418,7 +1420,8 @@ impl BackendRunner {
                 }
             }
             SurfaceMethod::EndCommandRoot => {
-                let root = lash_core::TurnId::from(format!("drive-commands:{session_id}-surface"));
+                let root =
+                    lash_core::TurnId::fixture(format!("drive-commands:{session_id}-surface"));
                 let end = match store.end_command_root(&lease_fence, &root, 1).await? {
                     lash_core::store::RootEnd::Ended(terminal) => {
                         format!("ended={:?}/{:?}", terminal.kind(), terminal.cause)
@@ -1436,7 +1439,7 @@ impl BackendRunner {
                 format!("{end} recorded={recorded:?}")
             }
             SurfaceMethod::RootBinding => {
-                let input = lash_core::InputId::from(format!("{session_id}:input"));
+                let input = lash_core::InputId::fixture(format!("{session_id}:input"));
                 match store.root_binding(&session_id, &input).await? {
                     Some(root) => {
                         let forked = self.surface.close_intent.is_some_and(|intent| {
@@ -1452,7 +1455,7 @@ impl BackendRunner {
                 }
             }
             SurfaceMethod::RootOfInput => {
-                let input = lash_core::InputId::from(format!("{session_id}:input"));
+                let input = lash_core::InputId::fixture(format!("{session_id}:input"));
                 match store.root_of_input(&session_id, &input).await? {
                     Some(root) => format!("root={root}"),
                     None => "root=none".to_string(),
@@ -1477,7 +1480,9 @@ impl BackendRunner {
                             TurnInput::text("input under a run spec"),
                         )
                         .with_source_key("surface:run-spec-input")
-                        .with_input_id(format!("{session_id}:run-spec-input"))
+                        .with_input_id(lash_core::InputId::fixture(format!(
+                            "{session_id}:run-spec-input"
+                        )))
                         .with_run_spec(surface_run_spec()),
                     )
                     .await?;
@@ -1510,10 +1515,12 @@ impl BackendRunner {
                         vec![
                             // Every backend mints unkeyed ids its own way, so
                             // the sweep names each row it adds.
-                            draft(added, "input added by a batch")
-                                .with_input_id(format!("{session_id}:{added}")),
-                            draft("surface:run-spec-input", resent_text)
-                                .with_input_id(format!("{session_id}:run-spec-input")),
+                            draft(added, "input added by a batch").with_input_id(
+                                lash_core::InputId::fixture(format!("{session_id}:{added}")),
+                            ),
+                            draft("surface:run-spec-input", resent_text).with_input_id(
+                                lash_core::InputId::fixture(format!("{session_id}:run-spec-input")),
+                            ),
                         ],
                     )?)
                     .await?;
@@ -1534,7 +1541,7 @@ impl BackendRunner {
                         TurnInput::text(text),
                     )
                     .with_source_key(key)
-                    .with_input_id(format!("{session_id}:{key}"))
+                    .with_input_id(lash_core::InputId::fixture(format!("{session_id}:{key}")))
                     .with_run_spec(surface_run_spec())
                 };
                 let admission = store
@@ -1581,7 +1588,7 @@ impl BackendRunner {
                 } else {
                     SURFACE_ROOT_ID
                 });
-                let input = lash_core::InputId::from(format!("{session_id}:input"));
+                let input = lash_core::InputId::fixture(format!("{session_id}:input"));
                 store.bind_root_inputs(&session_id, &root, &[input]).await?;
                 "bound".to_string()
             }
@@ -1861,7 +1868,7 @@ impl BackendRunner {
 )]
 async fn usage_transcript(stores: &dyn lash_core::StoreSet, nonce: &str) -> Vec<String> {
     let accounting = stores.usage_accounting();
-    let owner = lash_core::RuntimeOwner::Session(SessionId::from(format!("{nonce}-accounting")));
+    let owner = lash_core::RuntimeOwner::Session(SessionId::fixture(format!("{nonce}-accounting")));
     let effect = UsageEffectKey::for_effect(
         &EffectAddress::new(
             ExecutionScope::runtime_operation("accounting-sweep"),

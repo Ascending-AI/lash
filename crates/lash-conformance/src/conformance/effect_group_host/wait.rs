@@ -50,10 +50,10 @@ pub async fn losing_wait_isolation_with_registration_witness<F, W>(
     W: FnOnce(&crate::AwaitEventKey) -> Option<Pin<Box<dyn Future<Output = ()> + Send>>>,
 {
     let host = make();
-    let session_id = crate::SessionId::from(format!("{prefix}-losing-wait-session"));
+    let session_id = crate::SessionId::fixture(format!("{prefix}-losing-wait-session"));
     let execution_scope = ExecutionScope::turn(
         session_id.clone(),
-        crate::TurnId::from(format!("{prefix}-losing-wait-turn")),
+        crate::TurnId::fixture(format!("{prefix}-losing-wait-turn")),
     );
     let scoped = host
         .scoped(admit(execution_scope.clone()))
@@ -337,10 +337,10 @@ pub async fn a_wait_cancelled_before_it_parks_is_still_released<F: Fn() -> Host>
     prefix: &str,
 ) {
     let host = make();
-    let session_id = crate::SessionId::from(format!("{prefix}-unparked-wait-session"));
+    let session_id = crate::SessionId::fixture(format!("{prefix}-unparked-wait-session"));
     let execution_scope = ExecutionScope::turn(
         session_id,
-        crate::TurnId::from(format!("{prefix}-unparked-wait-turn")),
+        crate::TurnId::fixture(format!("{prefix}-unparked-wait-turn")),
     );
     let scoped = host
         .scoped(admit(execution_scope.clone()))

@@ -31,7 +31,7 @@ pub(super) async fn closed_roots_leave_flat_wait_index_state_through_a_thousand_
     let mut measurements = Vec::new();
 
     for ordinal in 1..=1000 {
-        let root = TurnId::from(format!("root-{ordinal:04}"));
+        let root = TurnId::fixture(format!("root-{ordinal:04}"));
         let key = restate_await_event_key(
             &ExecutionScope::turn(session_id.clone(), root.clone()),
             AwaitEventWaitIdentity::TurnCancelGate,

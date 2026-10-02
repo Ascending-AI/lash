@@ -1507,10 +1507,10 @@ pub fn derive_history_node_id(
     ordinal: u64,
 ) -> Result<crate::NodeId, StoreError> {
     let preimage = history_node_preimage(session_id, operation, ordinal)?;
-    Ok(crate::NodeId::new(format!(
-        "n_{}",
-        crate::stable_hash::blake3_hex(LASH_HISTORY_NODE_DOMAIN_VERSION, &preimage)
-    )))
+    Ok(crate::NodeId::prefixed(
+        "n_",
+        crate::stable_hash::blake3_hex(LASH_HISTORY_NODE_DOMAIN_VERSION, &preimage),
+    ))
 }
 
 fn history_node_preimage(

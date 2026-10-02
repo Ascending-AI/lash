@@ -433,9 +433,12 @@ pub(crate) fn compaction_request_ids(
     prompt_text: &str,
     execution_scope: &lash_core::ExecutionScope,
 ) -> Result<(SessionId, TurnId), ContextError> {
-    let physical_parent_turn_id = latest_physical_turn_id(state)?
-        .or_else(|| execution_scope.turn_id().cloned())
-        .unwrap_or_else(|| TurnId::from(execution_scope.id()));
+    let physical_parent_turn_id =
+        match latest_physical_turn_id(state)?.or_else(|| execution_scope.turn_id().cloned()) {
+            Some(turn_id) => turn_id,
+            None => TurnId::parse(execution_scope.id())
+                .map_err(|error| ContextError::Session(error.to_string()))?,
+        };
     let journal_scope = execution_scope
         .journal_identity()
         .map_err(|error| ContextError::Session(error.to_string()))?;
@@ -450,10 +453,8 @@ pub(crate) fn compaction_request_ids(
         identity,
     );
     Ok((
-        SessionId::from(format!("{parent_session_id}-compaction:{discriminator}")),
-        TurnId::from(format!(
-            "{physical_parent_turn_id}:standard-compaction:{discriminator}"
-        )),
+        parent_session_id.with_suffix(format_args!("-compaction:{discriminator}")),
+        physical_parent_turn_id.with_suffix(format_args!(":standard-compaction:{discriminator}")),
     ))
 }
 

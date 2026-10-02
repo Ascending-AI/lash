@@ -334,7 +334,7 @@ pub(crate) async fn fork_chat(
         .core()
         .process_registry()
         .list_observed_by(
-            &source_chat_id.clone().into(),
+            &source_chat_id.clone().try_into()?,
             &lash::process::ProcessListFilter {
                 status: lash::process::ProcessStatusFilter::Any,
                 ..Default::default()
@@ -354,7 +354,7 @@ pub(crate) async fn fork_chat(
             move |db| db.prepare_chat_fork(&source_chat_id, &node_id, &target_chat_id)
         })
         .await?;
-    let source_session_id = SessionId::from(source_chat_id);
+    let source_session_id = SessionId::parse(source_chat_id)?;
     let forked = async {
         let target = branch_point_target(&state, &source_session_id, &node_id).await?;
         state
@@ -363,10 +363,10 @@ pub(crate) async fn fork_chat(
                 &source_session_id,
                 target,
                 lash::ForkRequest {
-                    session_id: target_chat_id.clone().into(),
+                    session_id: target_chat_id.clone().try_into()?,
                     relation: lash::persistence::SessionRelation::Fork {
                         source_session_id: source_session_id.clone(),
-                        source_node_id: Some(node_id.clone().into()),
+                        source_node_id: Some(node_id.clone().try_into()?),
                     },
                     observed_processes,
                 },
@@ -454,7 +454,7 @@ pub(crate) async fn send_message(
     let session = state.open_session(&chat_id, turn_profile).await?;
     state.record_board_context(&session).await?;
     let replay_cursor = session.observe().current_observation().cursor;
-    let turn_id = TurnId::from(format!("agent-service-turn:{}", uuid::Uuid::new_v4()));
+    let turn_id = TurnId::prefixed("agent-service-turn:", uuid::Uuid::new_v4());
     let (tx, rx) = mpsc::channel::<StreamItem>(64);
     let mut replay =
         spawn_live_replay_forwarder(session.clone(), replay_cursor, tx.clone(), negotiated);
@@ -474,7 +474,7 @@ pub(crate) async fn send_message(
             &chat_id,
             text,
             task_turn_id,
-            || TurnId::from(format!("agent-service-turn:{}", uuid::Uuid::new_v4())),
+            || TurnId::prefixed("agent-service-turn:", uuid::Uuid::new_v4()),
             |turn_input, turn_id| {
                 let session = session.clone();
                 let run_state = run_state.clone();
@@ -588,7 +588,10 @@ pub(crate) async fn cancel_turn(
         .filter(|request_id| !request_id.trim().is_empty())
         .unwrap_or_else(|| format!("agent-service-cancel:{}", uuid::Uuid::new_v4()));
     let mut cancel = TurnCancelRequest::new(
-        lash::TurnAddress::new(&chat_id, &turn_id),
+        lash::TurnAddress::new(
+            SessionId::parse(chat_id.as_str())?,
+            TurnId::parse(turn_id.as_str())?,
+        ),
         request_id,
         Some("user".to_string()),
     );
@@ -599,7 +602,7 @@ pub(crate) async fn cancel_turn(
         .await
         .map_err(|err| AppError::internal(err.to_string()))?;
     Ok(Json(CancelTurnResponse {
-        session_id: SessionId::from(chat_id),
+        session_id: SessionId::parse(chat_id)?,
         turn_id,
         outcome: receipt.outcome,
     }))
@@ -1280,7 +1283,7 @@ finish("done through route");
                 .selected(),
             lash_remote_protocol::REMOTE_PROTOCOL_VERSION
         );
-        let turn_id = TurnId::from(
+        let turn_id = TurnId::fixture(
             response
                 .headers()
                 .get("x-lash-turn-id")

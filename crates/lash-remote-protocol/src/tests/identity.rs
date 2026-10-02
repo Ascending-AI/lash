@@ -8,9 +8,6 @@ fn remote_owner_scope_validation_matches_each_core_owner_grammar() {
         RemoteTriggerOwnerScope::Session {
             session_id: SessionId::from("owner/session:alpha"),
         },
-        RemoteTriggerOwnerScope::Session {
-            session_id: SessionId::from("  "),
-        },
         RemoteTriggerOwnerScope::Host {
             binding_id: "host binding/alpha:1".to_string(),
         },
@@ -21,10 +18,18 @@ fn remote_owner_scope_validation_matches_each_core_owner_grammar() {
             .expect("existing non-empty core owner grammar must survive");
     }
 
+    for blank in ["", "  "] {
+        assert!(
+            serde_json::from_value::<RemoteTriggerOwnerScope>(serde_json::json!({
+                "type": "session",
+                "session_id": blank,
+            }))
+            .is_err(),
+            "a blank session id decodes to no owner"
+        );
+    }
+
     for owner in [
-        RemoteTriggerOwnerScope::Session {
-            session_id: SessionId::from(""),
-        },
         RemoteTriggerOwnerScope::Host {
             binding_id: String::new(),
         },

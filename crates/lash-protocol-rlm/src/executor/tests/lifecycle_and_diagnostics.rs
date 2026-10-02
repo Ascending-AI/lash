@@ -392,7 +392,7 @@ pub(super) async fn execute_and_collect_inventory(
         crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
     let handler = double
         .open_handler(lash_core::AdmittedScope::turn(
-            lash_core::SessionId::from(format!("fig2365-{language}")),
+            lash_core::SessionId::fixture(format!("fig2365-{language}")),
             lash_core::TurnId::from("turn-1"),
         ))
         .await
@@ -407,7 +407,7 @@ pub(super) async fn execute_and_collect_inventory(
             }),
             lash_core::ToolCatalog::default(),
             lash_core::testing::exec_code_invocation(
-                format!("fig2365-{language}"),
+                lash_core::SessionId::fixture(format!("fig2365-{language}")),
                 "turn-1",
                 1,
                 1,

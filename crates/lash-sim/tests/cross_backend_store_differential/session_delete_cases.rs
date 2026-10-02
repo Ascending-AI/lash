@@ -31,7 +31,7 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
     let root = TurnId::from("delete-root");
     let mut sessions = Vec::new();
     for alias in ["own", "own:x"] {
-        let session_id = SessionId::from(format!("{prefix}-delete-{alias}"));
+        let session_id = SessionId::fixture(format!("{prefix}-delete-{alias}"));
         let store = admit_test_session(
             factory.clone(),
             &SessionStoreCreateRequest {

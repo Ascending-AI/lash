@@ -466,15 +466,15 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
         &provider_calls,
         &hook_calls,
     );
-    let session_id = lash_core::SessionId::from(session);
+    let session_id = lash_core::SessionId::fixture(session);
     drop(
-        core.session(session_id.as_str())
+        core.session(session_id.clone())
             .created()
             .await
             .open()
             .await?,
     );
-    let root = lash_core::TurnId::from(format!("{session}-root"));
+    let root = lash_core::TurnId::fixture(format!("{session}-root"));
     // The step after the LLM call's phases: the turn's completion
     // checkpoint, which both hook sets issue.
     engine.crash_on(

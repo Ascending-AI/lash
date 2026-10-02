@@ -100,7 +100,7 @@ fn finishing_root(
     root: &str,
     admission: &lash_core_execution::store::RootAdmission,
 ) -> lash_core_execution::RuntimeCommit {
-    let root = lash_core_execution::TurnId::from(root);
+    let root = lash_core_execution::TurnId::fixture(root);
     let mut settlement = lash_core_execution::store::IngressSettlement::new(root.clone());
     settlement
         .completed_batches
@@ -627,7 +627,7 @@ lash_conformance::runtime_persistence_reopenable_tests!({
             let effect_host = Arc::clone(&effect_host);
             let database_url = database_url.clone();
             let clock = Arc::clone(&clock);
-            let session_id = SessionId::from(session_id.to_string());
+            let session_id = SessionId::fixture(session_id.to_string());
             sync_await(async move {
                 let open_storage = PostgresStorage::connect(&database_url)
                     .await
@@ -1123,7 +1123,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .admit_session(&lash_core_execution::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: SessionId::fixture(session_id.to_string()),
             relation: lash_core_execution::SessionRelation::Root,
             config: lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
@@ -1137,7 +1137,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     let store = Arc::new(factory.clone()) as Arc<dyn RuntimeStore>;
     let wake = lash_core_execution::ProcessWakeDelivery {
         version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-        target_session_id: SessionId::from(session_id.to_string()),
+        target_session_id: SessionId::fixture(session_id.to_string()),
         process_id: ProcessId::fixture("wake-source-lock-process"),
         sequence: 1,
         event_type: "producer.wake".to_string(),
@@ -1234,7 +1234,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     let completion_store = Arc::clone(&store);
     let completion = tokio::spawn(async move {
         let state = lash_core_execution::RuntimeSessionState {
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: SessionId::fixture(session_id.to_string()),
             ..lash_core_execution::RuntimeSessionState::new(
                 lash_core_execution::SessionPolicy::new(
                     lash_core_execution::TurnBudget::Unbounded,
@@ -1505,7 +1505,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         .admit_session(&lash_core_execution::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(SESSION_ID.to_string()),
+            session_id: SessionId::fixture(SESSION_ID.to_string()),
             relation: lash_core_execution::SessionRelation::default(),
             config: lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
@@ -1550,7 +1550,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         .acquired()
         .expect("clock test lease acquired");
     let state = lash_core_execution::RuntimeSessionState {
-        session_id: SessionId::from(SESSION_ID.to_string()),
+        session_id: SessionId::fixture(SESSION_ID.to_string()),
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),

@@ -357,7 +357,7 @@ async fn probe(args: ProbeArgs) -> Result<ProbeReport> {
         }
     };
     let session_present = if let Some(session) = args.session {
-        let id = lash::SessionId::from(session);
+        let id = lash::SessionId::fixture(session);
         Some(matches!(
             lash_core::SessionCatalogStore::lookup_session(
                 stores.session_store_factory().as_ref(),
@@ -791,7 +791,7 @@ async fn turn(args: TurnArgs) -> Result<TurnReport> {
     let stores = open_stores(&args.store).await?;
     let engine = engine(stores, &args.restate)?;
     let core = core(lash::Backend::new(engine), &ProviderArgs::default())?;
-    let session_id = lash::SessionId::from(args.session.clone());
+    let session_id = lash::SessionId::fixture(args.session.clone());
     // Every turn of a run names the run's session: the first creates it and
     // the rest use it, written out, since only `create` creates (FIG-4112).
     match core

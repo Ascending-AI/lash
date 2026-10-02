@@ -363,7 +363,7 @@ pub(crate) async fn send_turn(
             .await
             .map_err(|error| state.session_admission_error(&session_id, "api.turn", error))?,
     );
-    let turn_id = TurnId::from(format!("workbench-turn-{}", uuid::Uuid::new_v4()));
+    let turn_id = TurnId::prefixed("workbench-turn-", uuid::Uuid::new_v4());
     let chat_attachments = attachment_id
         .iter()
         .cloned()
@@ -1032,7 +1032,7 @@ pub(crate) async fn cancel_queued_work_batch(
         })?;
     if session
         .durable()
-        .cancel_queued_work_batch(&lash::BatchId::from(batch_id.as_str()))
+        .cancel_queued_work_batch(&lash::BatchId::parse(batch_id.as_str())?)
         .await
         .map_err(AppError::internal)?
         .is_none()

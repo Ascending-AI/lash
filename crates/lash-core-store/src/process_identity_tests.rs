@@ -68,7 +68,7 @@ fn process_wake(
 ) -> ProcessWakeDelivery {
     ProcessWakeDelivery {
         version: PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-        target_session_id: SessionId::from(target_session_id),
+        target_session_id: SessionId::fixture(target_session_id),
         process_id,
         sequence,
         event_type: "process.wake".to_string(),

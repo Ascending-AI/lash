@@ -12,7 +12,7 @@ mod tests {
         crate::SessionCatalogStore::admit_session(
             catalog.as_ref(),
             &crate::testing::store_fixtures::session_store_request(
-                &SessionId::from(session_id),
+                &SessionId::fixture(session_id),
                 "model",
                 crate::SessionRelation::Root,
             ),
@@ -27,8 +27,9 @@ mod tests {
         store: &Arc<dyn crate::RuntimeStore>,
         session_id: &str,
     ) -> crate::RuntimeSessionState {
-        let view = crate::store::SessionStore::new(Arc::clone(store), SessionId::from(session_id))
-            .expect("a valid session id");
+        let view =
+            crate::store::SessionStore::new(Arc::clone(store), SessionId::fixture(session_id))
+                .expect("a valid session id");
         crate::store::load_session_window_state(&view, crate::store::WindowSelector::Current)
             .await
             .unwrap()

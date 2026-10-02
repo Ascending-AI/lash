@@ -137,7 +137,7 @@ impl DurableSessionOps {
             },
         };
         let drafts = vec![LiveReplayEventDraft::new(
-            None::<String>,
+            None::<crate::TurnId>,
             SessionObservationEventPayload::QueueChanged { kind, batch_ids },
         )];
         let result = self

@@ -54,7 +54,7 @@ pub(super) async fn law<S: lash_core::StoreSet + ?Sized>(double: &RestateTestBac
         let handler = double
             .open_handler(lash_core::AdmittedScope::turn(
                 &session,
-                format!("turn-{index}"),
+                lash_core::TurnId::fixture(format!("turn-{index}")),
             ))
             .await
             .expect("open the admission handler");

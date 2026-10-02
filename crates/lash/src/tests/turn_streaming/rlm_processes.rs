@@ -53,7 +53,7 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
                     )
                     .with_id("leaf-bearing-stale-append-message"),
                 )],
-                requires_ancestor_node_id: Some("inactive-ancestor".to_string().into()),
+                requires_ancestor_node_id: Some(lash_core::NodeId::from("inactive-ancestor")),
             })
             .await?;
         assert!(matches!(
@@ -224,7 +224,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     let root_id = format!("{session_id}:switch-root");
     let switched = first_session
         .send(TurnInput::text("switch away from the abandoned frame"))
-        .id(root_id.clone())
+        .id(TurnId::fixture(root_id.clone()))
         .await?;
     tokio::time::timeout(std::time::Duration::from_secs(5), follow_on_started_rx)
         .await
@@ -235,7 +235,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     // The switch commit is the durable head while the follow-on call is held.
     let durable = lash_core::SessionHistoryStore::load_session_window(
         sqlite_store_factory.as_ref(),
-        &SessionId::from(session_id.to_string()),
+        &SessionId::fixture(session_id.to_string()),
         lash_core::store::WindowSelector::Current,
     )
     .await?
@@ -285,7 +285,9 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     );
     let redriven = tokio::time::timeout(
         std::time::Duration::from_secs(20),
-        first_session.root(root_id.clone()).outcome(),
+        first_session
+            .root(TurnId::fixture(root_id.clone()))
+            .outcome(),
     )
     .await
     .expect("the redriven root settles")?;
@@ -317,14 +319,20 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         .await?
         .expect("reopened RLM has an execution snapshot");
 
-    let follow_on = reopened_session.root(root_id.clone()).output().await?;
+    let follow_on = reopened_session
+        .root(TurnId::fixture(root_id.clone()))
+        .output()
+        .await?;
     assert_eq!(
         follow_on.final_value(),
         Some(&serde_json::json!(
             "completed after real SQLite cold reopen"
         ))
     );
-    let settled_again = reopened_session.root(root_id).outcome().await?;
+    let settled_again = reopened_session
+        .root(TurnId::fixture(root_id))
+        .outcome()
+        .await?;
     assert_eq!(settled_again.status(), crate::TurnStatus::Answered);
     let follow_on_requests = follow_on_requests.lock_recover();
     assert_eq!(follow_on_requests.len(), 1);
@@ -478,7 +486,7 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
         .await?;
 
     assert_eq!(output.assistant_message(), Some("done after frame switch"));
-    let follow_turn_id = TurnId::from(format!("{root_turn_id}:agent-frame:1"));
+    let follow_turn_id = TurnId::fixture(format!("{root_turn_id}:agent-frame:1"));
     let activities = activities.snapshot().await;
     let started = activities
         .iter()

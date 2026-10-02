@@ -49,7 +49,7 @@ async fn ledger_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
             .map(|(alias, _)| (*alias).to_owned())
     };
     for alias in aliases {
-        let session_id = SessionId::from(format!("{prefix}-obligation-{alias}"));
+        let session_id = SessionId::fixture(format!("{prefix}-obligation-{alias}"));
         factory
             .admit_session(&SessionStoreCreateRequest {
                 owning_process_id: None,
@@ -73,7 +73,7 @@ async fn ledger_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
     let rearmed = ledger
         .arm(
             &ObligationKey::SessionDelete {
-                session_id: SessionId::from(format!("{prefix}-obligation-a")),
+                session_id: SessionId::fixture(format!("{prefix}-obligation-a")),
             },
             T0,
         )
@@ -83,7 +83,7 @@ async fn ledger_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
     let missing = ledger
         .arm(
             &ObligationKey::SessionDelete {
-                session_id: SessionId::from(format!("{prefix}-obligation-missing")),
+                session_id: SessionId::fixture(format!("{prefix}-obligation-missing")),
             },
             T0,
         )

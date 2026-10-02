@@ -73,7 +73,7 @@ pub(crate) async fn sync_cron_jobs_after_trigger_mutation(
     state
         .restate_cron_job_keys
         .lock_recover()
-        .entry(SessionId::from(session_id.to_string()))
+        .entry(session_id.clone())
         .or_default()
         .insert(cron_job_key(session_id, &affected_registration.source_key));
     let surface = IngressCronJobSyncSurface {
@@ -235,7 +235,7 @@ where
     state
         .restate_cron_job_keys
         .lock_recover()
-        .insert(SessionId::from(session_id.to_string()), active);
+        .insert(session_id.clone(), active);
     Ok(())
 }
 /// Idempotency key for one cron tick's trigger occurrence. Must be unique

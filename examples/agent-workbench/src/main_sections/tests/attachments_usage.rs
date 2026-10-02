@@ -196,7 +196,7 @@ async fn run_attachment_usage_gate(
     assert_retrieved_attachment(&state, &uploaded.attachment.id, &png_bytes).await;
 
     let runtime_window_start_ms = lash::runtime::ClockWallTime::timestamp_ms(system_clock.as_ref());
-    let turn_id = TurnId::from(format!("attachment-usage-gate-{}", uuid::Uuid::new_v4()));
+    let turn_id = TurnId::fixture(format!("attachment-usage-gate-{}", uuid::Uuid::new_v4()));
     let request = restate::UserTurnRequest {
         turn_id: turn_id.clone(),
         session_id: session_id.clone(),

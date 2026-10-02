@@ -1030,7 +1030,7 @@ impl TriggerStore for PostgresTriggerStore {
         let mut session_ids = std::collections::BTreeSet::new();
         for owner_scope in owner_scopes {
             if let Some(session_id) = owner_scope.strip_prefix("session:") {
-                session_ids.insert(SessionId::from(session_id));
+                session_ids.insert(SessionId::parse(session_id)?);
             }
         }
         Ok(session_ids.into_iter().collect())
@@ -1375,7 +1375,7 @@ async fn reserve_postgres_deliveries(
     let sql = trigger_sql();
     let owner_scope = occurrence
         .session_id
-        .as_deref()
+        .clone()
         .map(|session_id| lash_core_execution::TriggerOwnerScope::session(session_id).namespace());
     let statement = match &owner_scope {
         Some(_) => {

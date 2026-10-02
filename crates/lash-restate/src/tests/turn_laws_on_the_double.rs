@@ -35,7 +35,7 @@ async fn law_session_store(
     let view = lash_core::runtime::admit_session_view(
         &factory,
         &lash_core::testing::store_fixtures::session_store_request(
-            &SessionId::from(session_id),
+            &SessionId::fixture(session_id),
             "restate-turn-law-model",
             lash_core::SessionRelation::Root,
         ),

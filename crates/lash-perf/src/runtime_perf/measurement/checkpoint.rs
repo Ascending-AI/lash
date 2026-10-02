@@ -118,7 +118,7 @@ pub(super) async fn assign_checkpoint_binding(
     index: usize,
     turn: usize,
 ) -> anyhow::Result<()> {
-    let turn_id = TurnId::from(format!("checkpoint-perf-turn-{turn}"));
+    let turn_id = TurnId::fixture(format!("checkpoint-perf-turn-{turn}"));
     let scope = lash_core::ExecutionScope::turn(session_id.clone(), turn_id.clone());
     let invocation = lash_core::runtime::causal::turn_effect_invocation(
         &scope,
@@ -849,7 +849,7 @@ pub(crate) async fn run_once_embed(
     let (store, session, turn_entry) = run
         .build(async {
             let (core, store_factory, turn_entry) = build_embed_core(scenario).await?;
-            let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
+            let session_id = SessionId::fixture(format!("runtime-perf-{}", scenario.name()));
             let session = core
                 .create_and_open_session(
                     session_id.clone(),
@@ -870,7 +870,7 @@ pub(crate) async fn run_once_embed(
             turn_index,
             async {
                 let cancel = CancellationToken::new();
-                let turn_id = TurnId::from(format!("runtime-perf-embed-{}", turn_index + 1));
+                let turn_id = TurnId::fixture(format!("runtime-perf-embed-{}", turn_index + 1));
                 let turn = runtime_perf_timed(
                     scenario,
                     turn_index,

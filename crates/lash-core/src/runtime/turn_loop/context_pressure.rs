@@ -34,7 +34,7 @@ use super::*;
 /// the turn and the hook.
 struct ContextPressureWrite<'a> {
     session_id: &'a SessionId,
-    turn_id: &'a str,
+    turn_id: &'a TurnId,
     plugin_id: &'a str,
     hook_id: &'a str,
 }
@@ -218,7 +218,7 @@ impl LashRuntime {
         {
             let write = ContextPressureWrite {
                 session_id: &session_id,
-                turn_id: trace_turn_id.as_str(),
+                turn_id: trace_turn_id,
                 plugin_id: &plugin_id,
                 hook_id,
             };
@@ -294,7 +294,7 @@ impl LashRuntime {
             &self.host.core.tracing.trace_context,
             lash_trace::TraceContext::default()
                 .for_session(self.state.session_id.clone())
-                .for_turn(write.turn_id.to_string()),
+                .for_turn(write.turn_id.clone()),
             lash_trace::TraceEvent::Custom {
                 name: "context_pressure.frame_opened".to_string(),
                 payload: serde_json::json!({

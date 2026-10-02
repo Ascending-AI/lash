@@ -457,7 +457,7 @@ pub(crate) async fn retire_cron_session_and_assert_zombie(
         state,
         restate::WorkbenchSessionDeleteWorkflowRequest {
             operation_id: format!("workbench-delete-{}", uuid::Uuid::new_v4()),
-            session_id: SessionId::from(cron_session_id.to_string()),
+            session_id: SessionId::fixture(cron_session_id.to_string()),
             execution_scope,
         },
     )

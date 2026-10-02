@@ -175,7 +175,7 @@ mod tests {
         assert_ne!(
             caller,
             FrameKey::from_call_site(
-                &SessionId::from(""),
+                &SessionId::from("session"),
                 "",
                 &crate::ToolCallId::fixture("frame")
             )

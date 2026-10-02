@@ -460,7 +460,7 @@ async fn await_settled_usage(
     usage: &dyn UsageAccountingStore,
     session: &str,
 ) -> Result<lash_core::OwnerUsage, String> {
-    let owner = lash_core::RuntimeOwner::Session(SessionId::from(session.to_string()));
+    let owner = lash_core::RuntimeOwner::Session(SessionId::fixture(session.to_string()));
     let deadline = std::time::Instant::now() + DELIVERY_WAIT;
     loop {
         let read = usage
@@ -492,7 +492,7 @@ pub async fn delivered_usage(
     session: &str,
 ) -> Result<Vec<UsageBuckets>, String> {
     await_settled_usage(usage, session).await?;
-    let owner = lash_core::RuntimeOwner::Session(SessionId::from(session.to_string()));
+    let owner = lash_core::RuntimeOwner::Session(SessionId::fixture(session.to_string()));
     let mut facts = Vec::new();
     let mut after = None;
     loop {
@@ -534,7 +534,7 @@ pub async fn reopen_session(
     use lash_core::store::{HistoryAnchor, HistoryBudget};
     use std::num::{NonZeroU32, NonZeroU64};
 
-    let session_id = SessionId::from(session_id.to_string());
+    let session_id = SessionId::fixture(session_id.to_string());
     let Some(head) = store
         .load_session_head_meta(&session_id)
         .await

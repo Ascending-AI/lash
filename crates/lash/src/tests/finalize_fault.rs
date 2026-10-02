@@ -48,8 +48,8 @@ impl Fixture {
     /// The attempts the engine made of `turn`'s `LashTurn` run.
     fn turn_attempts(&self, session: &str, turn: &str) -> u32 {
         let key = lash_restate::turn_workflow_key(
-            &lash_core::SessionId::from(session),
-            &lash_core::TurnId::from(turn),
+            &lash_core::SessionId::fixture(session),
+            &lash_core::TurnId::fixture(turn),
         );
         self.double
             .server()

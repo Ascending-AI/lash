@@ -215,7 +215,7 @@ impl ChatObject for Chat {
         ctx: SharedObjectContext<'_>,
         input_id: String,
     ) -> HandlerResult<Json<Answer>> {
-        let input_id = lash::InputId::from(input_id);
+        let input_id = lash::InputId::fixture(input_id);
         let outcome = self
             .session()
             .attach(input_id.clone())
@@ -258,7 +258,7 @@ impl SessionHost for SessionHostService {
             .get()
             .expect("the core is built before the host runs");
         let session = core
-            .session(ctx.key())
+            .session(lash_core::SessionId::fixture(ctx.key()))
             .create_or_use_restate(
                 &ctx,
                 lash::SessionCreation::root(lash::SessionSpec::new(
@@ -715,7 +715,7 @@ where
     F: Fn(HandlerAttempt) -> Fut,
     Fut: std::future::Future<Output = Result<(), String>>,
 {
-    let id = lash::SessionId::from(session_id);
+    let id = lash::SessionId::fixture(session_id);
     loop {
         let (attempt, slot) = deletion(core, session_id).await;
         run(attempt).await.expect("the delete handler runs");
@@ -1009,7 +1009,7 @@ async fn live_restate_host_killed_after_its_session_was_deleted_replays_its_jour
 
     delete_session(&core, &key, |attempt| {
         backend.run_in_handler(
-            lash_core::AdmittedScope::session_delete(lash::SessionId::from(key.as_str())),
+            lash_core::AdmittedScope::session_delete(lash::SessionId::fixture(key.as_str())),
             attempt,
         )
     })
@@ -1126,7 +1126,7 @@ async fn live_restate_root_killed_after_its_session_was_deleted_ends_typed() {
     .expect("start the live backend");
     let barrier = Arc::new(Barrier::default());
     let core = core(backend.lash_backend(), &barrier);
-    let session_id = lash::SessionId::from(key.as_str());
+    let session_id = lash::SessionId::fixture(key.as_str());
     let session = created_session(&core, session_id.clone())
         .await
         .open()
@@ -1257,7 +1257,7 @@ async fn terminal_wait(
     root: &lash_core::TurnId,
 ) -> lash_restate::RestateDurableWaitAddress {
     let address = lash_core::facade_support::TurnAddress::new(
-        lash_core::SessionId::from(session),
+        lash_core::SessionId::fixture(session),
         lash_core::store::PhysicalTurn::derive_turn_id(root, 0),
     );
     let key = lash_core::AwaitEventResolver::await_event_key(
@@ -1305,7 +1305,7 @@ async fn root_of_input(
     input_id: &lash::InputId,
 ) -> lash_core::TurnId {
     let store = backend.session_store_factory();
-    let session_id = lash_core::SessionId::from(session);
+    let session_id = lash_core::SessionId::fixture(session);
     tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             if let Some(root) =
@@ -1372,7 +1372,8 @@ async fn a_committed_root_answers_its_follower_while_the_session_wait_index_is_b
         .expect("the first follower finishes")
         .expect("join");
     assert!(first.answered, "{first:?}");
-    let root = lash_core::TurnId::from(first.root.clone().expect("a settled input names its root"));
+    let root =
+        lash_core::TurnId::fixture(first.root.clone().expect("a settled input names its root"));
 
     let wait = terminal_wait(&world.backend.lash_backend(), SESSION, &root).await;
     let hold = world
@@ -1503,7 +1504,7 @@ async fn a_dropped_terminal_attach_leaves_no_second_server_invocation(
     })
     .await;
     let backend = world.backend.lash_backend();
-    let root = root_of_input(&backend, SESSION, &lash::InputId::from(input_id)).await;
+    let root = root_of_input(&backend, SESSION, &lash::InputId::fixture(input_id)).await;
     let wait = terminal_wait(&backend, SESSION, &root).await;
     let attach = backend
         .effect_host()
@@ -1657,7 +1658,7 @@ async fn live_world_gated(
         None => backend.lash_backend(),
     };
     let core = core(runtime_backend, &barrier);
-    let session = created_session(&core, key.as_str())
+    let session = created_session(&core, lash_core::SessionId::fixture(key.clone()))
         .await
         .open()
         .await
@@ -1729,7 +1730,8 @@ async fn live_restate_a_committed_root_answers_its_follower_while_the_session_wa
         .expect("the first follower finishes")
         .expect("join");
     assert!(first.answered, "{first:?}");
-    let root = lash_core::TurnId::from(first.root.clone().expect("a settled input names its root"));
+    let root =
+        lash_core::TurnId::fixture(first.root.clone().expect("a settled input names its root"));
 
     let wait = terminal_wait(&world.backend.lash_backend(), &world.key, &root).await;
     let hold = world.backend.hold(
@@ -1771,14 +1773,14 @@ async fn live_restate_a_dropped_terminal_attach_leaves_no_second_server_invocati
     })
     .await;
     let backend = world.backend.lash_backend();
-    let root = root_of_input(&backend, &world.key, &lash::InputId::from(input_id)).await;
+    let root = root_of_input(&backend, &world.key, &lash::InputId::fixture(input_id)).await;
     let wait = terminal_wait(&backend, &world.key, &root).await;
     let attach = backend
         .effect_host()
         .turn_attach()
         .expect("a Restate host attaches to turns");
     let address = lash_core::facade_support::TurnAddress::new(
-        lash_core::SessionId::from(world.key.as_str()),
+        lash_core::SessionId::fixture(world.key.as_str()),
         lash_core::store::PhysicalTurn::derive_turn_id(&root, 0),
     );
     let attached = |attach: Arc<dyn lash_core::facade_support::TurnAttach>| {
@@ -1986,14 +1988,14 @@ async fn live_restate_follow_on_root_killed_after_its_session_was_deleted_ends_t
     .expect("start the live backend");
     let follow_on_calls = Arc::new(AtomicUsize::new(0));
     let core = follow_on_core(backend.lash_backend(), &follow_on_calls);
-    let session_id = lash::SessionId::from(key.as_str());
+    let session_id = lash::SessionId::fixture(key.as_str());
     let session = created_session(&core, session_id.clone())
         .await
         .open()
         .await
         .expect("open the session");
     let root = lash_core::TurnId::from("deleted-replay-root");
-    let recovery = lash_core::TurnId::from(format!("follow-on:{root}:agent-frame:1#0"));
+    let recovery = lash_core::TurnId::fixture(format!("follow-on:{root}:agent-frame:1#0"));
     let turn_key = lash_restate::turn_workflow_key(&session_id, &recovery);
     // The recovery root's run dies with its seal journaled and its recovery
     // decision not.

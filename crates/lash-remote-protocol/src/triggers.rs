@@ -84,9 +84,6 @@ impl RemoteTriggerOccurrenceRequest {
             "idempotency_key",
             &self.idempotency_key,
         )?;
-        if let Some(session_id) = &self.session_id {
-            require_non_empty("RemoteTriggerOccurrenceRequest", "session_id", session_id)?;
-        }
         match &self.outcome {
             RemoteTriggerOccurrenceOutcome::Fired => {}
             RemoteTriggerOccurrenceOutcome::Dropped { reason } => {

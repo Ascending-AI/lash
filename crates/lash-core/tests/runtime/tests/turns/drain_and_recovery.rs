@@ -2,11 +2,11 @@ use super::*;
 use lash_core::testing::TestTurnDrive as _;
 
 fn sid(s: &str) -> SessionId {
-    SessionId::from(s)
+    SessionId::fixture(s)
 }
 
 fn tid(s: &str) -> TurnId {
-    TurnId::from(s)
+    TurnId::fixture(s)
 }
 
 async fn open_admitted(
@@ -611,7 +611,7 @@ pub(super) async fn session_manager_persists_child_sessions_in_separate_store() 
     .expect("load session meta")
     .expect("session meta");
     assert_eq!(meta.session_id, "child-store");
-    assert_eq!(meta.parent_session_id(), Some("root"));
+    assert_eq!(meta.parent_session_id().map(|id| id.as_str()), Some("root"));
     let read = durable_window(stores[0].clone(), "child-store").await;
     let graph = read.window;
     let child_frame_key = lash_core::FrameKey::from_caller_material("initial-frame")

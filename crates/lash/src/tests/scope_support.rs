@@ -97,7 +97,7 @@ pub(super) async fn in_delete_handler<T, Stores: lash_core::StoreSet + ?Sized>(
     let session_id = session_id.as_ref();
     let handler = double
         .open_handler(lash_core::AdmittedScope::session_delete(
-            lash_core::SessionId::from(session_id),
+            lash_core::SessionId::fixture(session_id),
         ))
         .await
         .unwrap_or_else(|error| panic!("open the delete handler: {error}"));

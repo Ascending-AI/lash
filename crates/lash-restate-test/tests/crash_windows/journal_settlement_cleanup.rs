@@ -70,11 +70,8 @@ impl SessionDriver for HeldDriver {
         let mut state =
             lash_core::RuntimeSessionState::new(lash_core::testing::mock_session_policy());
         state.session_id = self.session.clone();
-        let operation = lash_core::OperationId::turn(
-            self.session.as_str(),
-            root.as_str(),
-            "settlement-cleanup",
-        );
+        let operation =
+            lash_core::OperationId::turn(self.session.clone(), root.clone(), "settlement-cleanup");
         let mut graph = state.pending_graph_commit();
         graph.derive_node_ids(&self.session, &operation).unwrap();
         let mut commit = lash_core::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
@@ -146,7 +143,7 @@ fn cleanup_relay(backend: &lash_core::Backend) -> ArtifactCleanupRelay {
 async fn law(storage: Storage, live: bool, kind: JournalKind) {
     let (harness, _stores) = Harness::new(storage, live).await;
     let backend = harness.backend();
-    let session = lash_core::SessionId::from(run_tag("settlement-cleanup"));
+    let session = lash_core::SessionId::fixture(run_tag("settlement-cleanup"));
     let root = lash_core::TurnId::from("driveless-root");
     let mut process = None;
     let mut held_driver = None;

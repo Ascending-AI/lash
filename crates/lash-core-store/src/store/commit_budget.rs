@@ -473,7 +473,7 @@ mod tests {
         commit.graph = crate::GraphAppend::Extend {
             nodes: (0..=2)
                 .map(|index| crate::SessionNodeRecord {
-                    node_id: format!("node-{index}").into(),
+                    node_id: crate::NodeId::fixture(format!("node-{index}")),
                     ..node.clone()
                 })
                 .collect(),
@@ -836,7 +836,7 @@ mod tests {
             crate::SessionCommandOutcome::AppendSessionNodes {
                 outcome: crate::session_append::AppendSessionNodesOutcome::Appended {
                     node_ids: Vec::new(),
-                    leaf_node_id: crate::NodeId::new(String::new()),
+                    leaf_node_id: None,
                 },
             },
         ] {

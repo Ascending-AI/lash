@@ -1,7 +1,6 @@
 //! Host-mediated plugin state and its deterministic checkpoint representation.
 pub use lash_core_store::plugin_state::{PluginNamespaceState, PluginState};
 
-use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 use serde::Serialize;
 use serde_json::Value;
@@ -399,6 +398,7 @@ impl PluginStateRegistry {
     }
     pub(super) fn initialize(
         &mut self,
+        owner: &crate::RuntimeOwner,
         snapshot: Option<&PluginState>,
     ) -> Result<(), PluginStateError> {
         let StatePhase::Registering(log) =
@@ -425,12 +425,7 @@ impl PluginStateRegistry {
                 }
             }
             for (id, edits) in &log {
-                PluginStateStore::bind(
-                    &crate::RuntimeOwner::Session(SessionId::from("")),
-                    id,
-                    candidate.clone(),
-                )
-                .apply(edits.clone())?;
+                PluginStateStore::bind(owner, id, candidate.clone()).apply(edits.clone())?;
             }
             let mut hydrated = candidate.lock_recover().data.clone();
             for (id, namespace) in &self.data.plugins {

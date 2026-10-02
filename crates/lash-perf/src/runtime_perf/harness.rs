@@ -334,7 +334,7 @@ impl BenchmarkRuntime {
         self.session = Some(
             self.core
                 .open_session_with_state(
-                    SessionId::from(format!("runtime-perf-{}", scenario.name())),
+                    SessionId::fixture(format!("runtime-perf-{}", scenario.name())),
                     state,
                 )
                 .await?,
@@ -351,7 +351,10 @@ impl BenchmarkRuntime {
         }
         self.session = Some(
             self.core
-                .open_session(SessionId::from(format!("runtime-perf-{}", scenario.name())))
+                .open_session(SessionId::fixture(format!(
+                    "runtime-perf-{}",
+                    scenario.name()
+                )))
                 .await?,
         );
         Ok(())
@@ -435,7 +438,7 @@ impl BenchmarkRuntime {
             .as_ref()
             .expect("benchmark session")
             .send(input)
-            .id(source_id)
+            .id(TurnId::parse(source_id)?)
             .ingress(lash_core::TurnInputIngress::active_turn(
                 turn_id,
                 lash_core::TurnInputCheckpointBoundary::AfterWork,
@@ -1043,7 +1046,7 @@ pub(crate) async fn build_runtime(
         }
     };
     let process_phase_probes = install_process_worker(&restate, &core)?;
-    let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
+    let session_id = SessionId::fixture(format!("runtime-perf-{}", scenario.name()));
     let session = core
         .create_and_open_session(
             session_id.clone(),
@@ -1252,7 +1255,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     }
     let core = durable_benchmark_core(backend, mode_id, provider, plugin_stack)?;
     let process_phase_probes = install_process_worker(&restate, &core)?;
-    let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
+    let session_id = SessionId::fixture(format!("runtime-perf-{}", scenario.name()));
     let session = core
         .create_and_open_session(
             session_id.clone(),

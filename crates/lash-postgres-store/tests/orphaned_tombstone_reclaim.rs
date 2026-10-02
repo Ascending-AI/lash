@@ -103,7 +103,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
             .admit_session(&lash_core_execution::SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
-                session_id: SessionId::from(session_id.to_string()),
+                session_id: session_id.clone(),
                 relation: lash_core_execution::SessionRelation::Root,
                 config: policy.clone().into(),
                 head: lash_core_execution::SessionCreationHead::Config,
@@ -111,7 +111,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
             .await
             .expect("create store");
         let mut state = lash_core_execution::RuntimeSessionState {
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: SessionId::fixture(session_id.to_string()),
             ..lash_core_execution::RuntimeSessionState::new(policy.clone())
         };
         state.ensure_agent_frame_initialized();
@@ -183,7 +183,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
             .session_graph
             .apply_append(&lash_core_execution::store::GraphAppend::Extend {
                 nodes: vec![lash_core_execution::SessionNodeRecord {
-                    node_id: "orphan-fork-child-node".to_string().into(),
+                    node_id: lash_core::NodeId::from("orphan-fork-child-node"),
                     parent_node_id,
                     timestamp: "2026-08-17T00:00:00Z".to_string(),
                     payload: lash_core_execution::SessionNodePayload::Event {

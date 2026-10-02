@@ -328,7 +328,7 @@ async fn run_case(
     let session = crate::tests::sessions::created_session(
         &runtime,
         "gpt-5.4",
-        format!("strict-omission-{label}"),
+        lash_core::SessionId::fixture(format!("strict-omission-{label}")),
     )
     .await
     .open()
@@ -673,16 +673,16 @@ async fn persisted_effect_replay_ignores_strict_toggle(endpoint: Endpoint) {
         .await
         .expect("build replay backend");
     let scope = ExecutionScope::turn(
-        format!("{}-replay-session", endpoint.label()),
-        format!("{}-replay-turn", endpoint.label()),
+        lash_core::SessionId::fixture(format!("{}-replay-session", endpoint.label())),
+        lash_core::TurnId::fixture(format!("{}-replay-turn", endpoint.label())),
     );
     let request = replay_request_with_canonical_call();
     let envelope = RuntimeEffectEnvelope::new(
         RuntimeEffectInvocation::new(
             EffectAddress::new(scope.clone(), "strict-tool-call").expect("valid effect address"),
             RuntimeAttribution::for_turn(
-                format!("{}-replay-session", endpoint.label()),
-                format!("{}-replay-turn", endpoint.label()),
+                lash_core::SessionId::fixture(format!("{}-replay-session", endpoint.label())),
+                lash_core::TurnId::fixture(format!("{}-replay-turn", endpoint.label())),
                 0,
                 0,
             ),

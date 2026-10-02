@@ -28,7 +28,7 @@ struct RawSessionMetaRow {
 impl RawSessionMetaRow {
     fn literal(session_id: &SessionId, relation_kind: &str) -> Self {
         Self {
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: session_id.clone(),
             relation_kind: relation_kind.to_string(),
             parent_session_id: None,
             caused_by_kind: None,
@@ -73,7 +73,7 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
     let child = |session_id: &SessionId, caused_by| SessionMeta {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: SessionId::fixture(session_id.to_string()),
         relation: SessionRelation::Child {
             parent_session_id: SessionId::from("layout-parent-literal"),
             caused_by,
@@ -315,7 +315,9 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 session_id: SessionId::from("layout-fork-history-literal"),
                 relation: SessionRelation::Fork {
                     source_session_id: SessionId::from("layout-source-history-literal"),
-                    source_node_id: Some("layout-source-node-history-literal".to_string().into()),
+                    source_node_id: Some(lash_core::NodeId::from(
+                        "layout-source-node-history-literal",
+                    )),
                 },
             },
             row: RawSessionMetaRow {
@@ -339,7 +341,9 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 session_id: SessionId::from("layout-fork-selected-literal"),
                 relation: SessionRelation::Fork {
                     source_session_id: SessionId::from("layout-source-selected-literal"),
-                    source_node_id: Some("layout-source-node-selected-literal".to_string().into()),
+                    source_node_id: Some(lash_core::NodeId::from(
+                        "layout-source-node-selected-literal",
+                    )),
                 },
             },
             row: RawSessionMetaRow {
@@ -400,12 +404,12 @@ const RAW_SESSION_META_SELECT: &str = "session_id, relation_kind, parent_session
 
 fn sqlite_raw_session_meta_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawSessionMetaRow> {
     Ok(RawSessionMetaRow {
-        session_id: SessionId::from(row.get::<_, String>(0)?),
+        session_id: SessionId::fixture(row.get::<_, String>(0)?),
         relation_kind: row.get(1)?,
-        parent_session_id: row.get::<_, Option<String>>(2)?.map(SessionId::from),
+        parent_session_id: row.get::<_, Option<String>>(2)?.map(SessionId::fixture),
         caused_by_kind: row.get(3)?,
-        caused_by_session_id: row.get::<_, Option<String>>(4)?.map(SessionId::from),
-        caused_by_turn_id: row.get::<_, Option<String>>(5)?.map(TurnId::from),
+        caused_by_session_id: row.get::<_, Option<String>>(4)?.map(SessionId::fixture),
+        caused_by_turn_id: row.get::<_, Option<String>>(5)?.map(TurnId::fixture),
         caused_by_effect_id: row.get(6)?,
         caused_by_call_id: row.get(7)?,
         caused_by_process_id: row.get::<_, Option<String>>(8)?.map(stored_process_id),
@@ -415,19 +419,19 @@ fn sqlite_raw_session_meta_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawS
         caused_by_subscription_incarnation: row.get(12)?,
         caused_by_subscription_revision: row.get(13)?,
         caused_by_node_id: row.get(14)?,
-        source_session_id: row.get::<_, Option<String>>(15)?.map(SessionId::from),
+        source_session_id: row.get::<_, Option<String>>(15)?.map(SessionId::fixture),
         source_node_id: row.get(16)?,
     })
 }
 
 fn postgres_raw_session_meta_row(row: sqlx::postgres::PgRow) -> RawSessionMetaRow {
     RawSessionMetaRow {
-        session_id: SessionId::from(row.get::<String, _>(0)),
+        session_id: SessionId::fixture(row.get::<String, _>(0)),
         relation_kind: row.get(1),
-        parent_session_id: row.get::<Option<String>, _>(2).map(SessionId::from),
+        parent_session_id: row.get::<Option<String>, _>(2).map(SessionId::fixture),
         caused_by_kind: row.get(3),
-        caused_by_session_id: row.get::<Option<String>, _>(4).map(SessionId::from),
-        caused_by_turn_id: row.get::<Option<String>, _>(5).map(TurnId::from),
+        caused_by_session_id: row.get::<Option<String>, _>(4).map(SessionId::fixture),
+        caused_by_turn_id: row.get::<Option<String>, _>(5).map(TurnId::fixture),
         caused_by_effect_id: row.get(6),
         caused_by_call_id: row.get(7),
         caused_by_process_id: row.get::<Option<String>, _>(8).map(stored_process_id),
@@ -437,7 +441,7 @@ fn postgres_raw_session_meta_row(row: sqlx::postgres::PgRow) -> RawSessionMetaRo
         caused_by_subscription_incarnation: row.get(12),
         caused_by_subscription_revision: row.get(13),
         caused_by_node_id: row.get(14),
-        source_session_id: row.get::<Option<String>, _>(15).map(SessionId::from),
+        source_session_id: row.get::<Option<String>, _>(15).map(SessionId::fixture),
         source_node_id: row.get(16),
     }
 }
@@ -475,7 +479,7 @@ fn assert_sqlite_raw_session_meta_layout(path: &Path, cases: &[SessionMetaLayout
             statement
                 .query_map([case.row.session_id.as_str()], |row| {
                     Ok(RawObserverIntentProcessRow {
-                        session_id: SessionId::from(row.get::<_, String>(0)?),
+                        session_id: SessionId::fixture(row.get::<_, String>(0)?),
                         process_index: row.get(1)?,
                         process_id: stored_process_id(row.get::<_, String>(2)?),
                     })
@@ -524,7 +528,7 @@ async fn assert_postgres_raw_session_meta_layout(pool: &PgPool, cases: &[Session
         .into_iter()
         .map(
             |(session_id, process_index, process_id)| RawObserverIntentProcessRow {
-                session_id: SessionId::from(session_id),
+                session_id: SessionId::fixture(session_id),
                 process_index,
                 process_id: stored_process_id(process_id),
             },

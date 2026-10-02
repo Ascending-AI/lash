@@ -205,7 +205,11 @@ async fn record_board_context_for_tool(
         })?;
         (core, db.chat_board(chat_id)?)
     };
-    let session = core.session(chat_id).enqueue_only().open().await?;
+    let session = core
+        .session(lash::SessionId::parse(chat_id)?)
+        .enqueue_only()
+        .open()
+        .await?;
     let config = session.admin().config();
     let revision = config.revision().await?;
     // The move runs inside its root, so submission must not wait for the
@@ -247,7 +251,7 @@ mod tests {
             .lock_recover()
             .create_chat("context law", "mock-model", None)
             .expect("chat");
-        let session_id = lash::SessionId::from(chat.id.clone());
+        let session_id = lash::SessionId::fixture(chat.id.clone());
         let first = BoardState {
             cells: vec![None; 9],
             turn: "O".to_string(),

@@ -18,10 +18,13 @@ pub(crate) fn build_session_request(
 ) -> Result<SessionCreateRequest, String> {
     let current_snapshot = SessionSnapshot {
         policy: current_policy.clone(),
-        ..SessionSnapshot::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-            lash_core::MaxToolCalls::new(1024),
-        ))
+        ..SessionSnapshot::new(
+            SessionId::from("session"),
+            lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            ),
+        )
     };
     let session_spec = SessionSpec::inherit();
     let tool_access = SessionToolAccess::default();

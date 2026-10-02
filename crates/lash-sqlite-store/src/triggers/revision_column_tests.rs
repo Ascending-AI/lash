@@ -5,9 +5,13 @@ fn register_command(owner: &str, key: &str, source_type: &'static str) -> Trigge
     let source_key = lash_core_execution::facade_support::empty_trigger_source_key(source_type)
         .expect("source key");
     TriggerCommand::Register {
-        owner_scope: lash_core_execution::TriggerOwnerScope::session(owner),
+        owner_scope: lash_core_execution::TriggerOwnerScope::session(
+            lash_core::SessionId::fixture(owner.to_string()),
+        ),
         actor: lash_core_execution::ProcessOriginator::session(
-            lash_core_execution::SessionScope::new(owner),
+            lash_core_execution::SessionScope::new(lash_core::SessionId::fixture(
+                owner.to_string(),
+            )),
         ),
         draft: lash_core_execution::TriggerSubscriptionDraft::for_process(
             key,

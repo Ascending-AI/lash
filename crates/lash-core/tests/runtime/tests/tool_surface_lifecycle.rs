@@ -13,7 +13,7 @@ const SEED: u64 = 0x5_c402;
 async fn create_fixture_session(store: &dyn lash_core::RuntimeStore, session_id: &str) {
     lash_core::testing::runtime_helpers::create_runtime_fixture_session(
         store,
-        &SessionId::from(session_id),
+        &SessionId::fixture(session_id),
         &standard_test_policy(),
     )
     .await
@@ -209,7 +209,7 @@ fn build_hidden_session(
 
 fn root_state(session_id: &SessionId) -> RuntimeSessionState {
     RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         policy: standard_test_policy(),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -682,7 +682,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
         &lash_core::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: SessionId::fixture(session_id.to_string()),
             relation: lash_core::SessionRelation::Root,
             config: standard_test_policy().into(),
             head: lash_core::SessionCreationHead::Config,
@@ -743,12 +743,12 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
                         semantics: lash_core::ProcessEventSemanticsSpec::default(),
                     },
                 ])
-                .with_wake_session_id(Some(SessionId::from(session_id.to_string())));
+                .with_wake_session_id(Some(SessionId::fixture(session_id.to_string())));
         }
         let process_id = registry
             .register_process_with_observers(
                 registration,
-                &[SessionId::from(session_id.to_string())],
+                &[SessionId::fixture(session_id.to_string())],
             )
             .await
             .expect("register observed filter process")
@@ -767,7 +767,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     let handler = double
         .open_handler(AdmittedScope::turn(
             SessionId::from(session_id),
-            TurnId::from(uuid::Uuid::new_v4().to_string()),
+            TurnId::fixture(uuid::Uuid::new_v4().to_string()),
         ))
         .await
         .expect("open the scope's handler");
@@ -999,7 +999,7 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
                 payload_schema: lash_core::JsonSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec::default(),
             }]),
-            &[SessionId::from(session_id.to_string())],
+            &[SessionId::fixture(session_id.to_string())],
         )
         .await
         .expect("register process observed by the model session");
@@ -1030,7 +1030,7 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
     let handler = double
         .open_handler(AdmittedScope::turn(
             SessionId::from(session_id),
-            TurnId::from(uuid::Uuid::new_v4().to_string()),
+            TurnId::fixture(uuid::Uuid::new_v4().to_string()),
         ))
         .await
         .expect("open the scope's handler");
@@ -1134,7 +1134,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
         let handler = double
             .open_handler(AdmittedScope::turn(
                 SessionId::from(parent_session_id).clone(),
-                TurnId::from(format!("{process_id}-turn")).clone(),
+                TurnId::fixture(format!("{process_id}-turn")).clone(),
             ))
             .await
             .expect("open the scope's handler");

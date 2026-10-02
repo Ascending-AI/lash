@@ -420,7 +420,7 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
             .admit_session(&lash::persistence::SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
-                session_id: SessionId::from(deleted_target_id.to_string()),
+                session_id: SessionId::fixture(deleted_target_id.to_string()),
                 relation: lash::persistence::SessionRelation::Root,
                 config: session.policy_snapshot().into(),
                 head: lash::persistence::SessionCreationHead::Config,
@@ -461,7 +461,7 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
                         ..lash::process::ProcessEventSemanticsSpec::default()
                     },
                 }])
-                .with_wake_session_id(Some(SessionId::from(deleted_target_id.to_string()))),
+                .with_wake_session_id(Some(SessionId::fixture(deleted_target_id.to_string()))),
             )
             .await
             .expect("register target-gone wake producer")

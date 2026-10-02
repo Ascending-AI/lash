@@ -101,7 +101,7 @@ async fn backend_for(
             &lash_core::SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
-                session_id: SessionId::from(session_id),
+                session_id: SessionId::fixture(session_id),
                 relation: lash_core::SessionRelation::Root,
                 config: lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,

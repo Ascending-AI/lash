@@ -62,7 +62,7 @@ fn opener_context(
 fn opener_scope(session_id: &crate::SessionId) -> crate::ExecutionScope {
     crate::ExecutionScope::turn(
         session_id.clone(),
-        crate::TurnId::from(format!("{session_id}-turn")),
+        crate::TurnId::fixture(format!("{session_id}-turn")),
     )
 }
 
@@ -121,7 +121,7 @@ pub async fn a_cancelled_aggregates_committed_loser_is_incorporated_by_its_opene
     })
     .await;
     let host = world.host;
-    let session_id = crate::SessionId::from(format!("{prefix}-cancelled-aggregate"));
+    let session_id = crate::SessionId::fixture(format!("{prefix}-cancelled-aggregate"));
     let scenario = scenario(fixture, &session_id, serde_json::Value::Null).await;
     let sink = Arc::new(IntentSink::default());
     sink.hold_all();
@@ -209,7 +209,7 @@ pub async fn a_retried_openers_end_finishes_the_closing_group_its_first_end_left
     fixture: &ToolChildLawFixture,
     prefix: &str,
 ) {
-    let session_id = crate::SessionId::from(format!("{prefix}-retried-end"));
+    let session_id = crate::SessionId::fixture(format!("{prefix}-retried-end"));
     let spender = format!("{session_id}-spender");
     let race = || {
         aggregate(

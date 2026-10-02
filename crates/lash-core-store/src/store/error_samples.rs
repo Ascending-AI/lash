@@ -105,7 +105,7 @@ store_error_samples! {
         }
     },
     QueuedWorkRowExceedsContextWindow { .. } => StoreError::QueuedWorkRowExceedsContextWindow {
-        batch_id: BatchId::new("sampled-batch"),
+        batch_id: BatchId::from("sampled-batch"),
         batch_enqueue_seq: 1,
         rendered_tokens: 2,
         max_context_tokens: 1,
@@ -169,6 +169,9 @@ store_error_samples! {
         writable: crate::compat::VersionRange::exactly(1),
     },
     InvalidSessionId { .. } => StoreError::InvalidSessionId { reason: "sampled" },
+    BlankIdentity(_) => StoreError::BlankIdentity(
+        crate::SessionId::parse("").expect_err("an empty string is no session id"),
+    ),
     SessionDeleted { .. } => StoreError::SessionDeleted { session_id: session() },
     UnsupportedStoreOperation { .. } => StoreError::UnsupportedStoreOperation {
         operation: "sampled",
@@ -253,7 +256,6 @@ store_error_samples! {
         expected_node_id: NodeId::from("sampled-derived"),
     },
     NodeIdCollision { .. } => StoreError::NodeIdCollision { node_id: node() },
-    InvalidGraphNodeId { .. } => StoreError::InvalidGraphNodeId { node_id: node() },
     GraphGenerationCollision { .. } => StoreError::GraphGenerationCollision {
         session_id: session(),
         generation: 1,
@@ -286,13 +288,13 @@ store_error_samples! {
     IngressRowNotAdmitted { .. } => StoreError::IngressRowNotAdmitted {
         session_id: session(),
         root: turn(),
-        row: Box::new(super::IngressRowId::Input(InputId::new("ti:sampled"))),
+        row: Box::new(super::IngressRowId::Input(InputId::from("ti:sampled"))),
         admitted_root: None,
     },
     IngressSettlementDuplicate { .. } => StoreError::IngressSettlementDuplicate {
         session_id: session(),
         root: turn(),
-        row: Box::new(super::IngressRowId::Input(InputId::new("ti:sampled"))),
+        row: Box::new(super::IngressRowId::Input(InputId::from("ti:sampled"))),
     },
     IngressSettlementUnfenced { .. } => StoreError::IngressSettlementUnfenced {
         session_id: session(),
@@ -303,7 +305,7 @@ store_error_samples! {
     },
     SessionCommandWithdrawn { .. } => StoreError::SessionCommandWithdrawn {
         session_id: session(),
-        batch_id: BatchId::new("sampled-batch"),
+        batch_id: BatchId::from("sampled-batch"),
     },
     SessionHeadOwned { .. } => StoreError::SessionHeadOwned {
         session_id: session(),
@@ -353,16 +355,16 @@ store_error_samples! {
     PendingTurnInputSourceKeyConflict { .. } => StoreError::PendingTurnInputSourceKeyConflict {
         session_id: session(),
         source_key: "host:sampled".to_string(),
-        existing_input_id: InputId::new("ti:sampled"),
+        existing_input_id: InputId::from("ti:sampled"),
     },
     QueuedWorkSourceKeyConflict { .. } => StoreError::QueuedWorkSourceKeyConflict {
         session_id: session(),
         source_key: "host:sampled".to_string(),
-        existing_batch_id: BatchId::new("sampled-batch"),
+        existing_batch_id: BatchId::from("sampled-batch"),
     },
     PendingTurnInputIdConflict { .. } => StoreError::PendingTurnInputIdConflict {
         session_id: session(),
-        input_id: InputId::new("ti:sampled"),
+        input_id: InputId::from("ti:sampled"),
     },
     PendingTurnInputBatchDuplicate { .. } => StoreError::PendingTurnInputBatchDuplicate {
         session_id: session(),

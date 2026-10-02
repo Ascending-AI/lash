@@ -44,8 +44,8 @@ pub(crate) fn decode_turn_park_row(row: &sqlx::postgres::PgRow) -> Result<TurnPa
     let build_generation: Option<String> = row.try_get(10).map_err(store_sqlx_error)?;
     let child_engine_refs: Option<String> = row.try_get(11).map_err(store_sqlx_error)?;
     TurnPark::decode(
-        SessionId::from(session_id),
-        root.into(),
+        SessionId::parse(session_id)?,
+        root.try_into()?,
         ParkId::from_feed_sequence(stored_u64("park_id", park_id)?),
         &reason_code,
         &reason_json,

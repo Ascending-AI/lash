@@ -31,7 +31,7 @@ fn park_write(
 ) -> crate::store::TurnParkWrite {
     crate::store::TurnParkWrite {
         session_id: session_id.clone(),
-        turn_id: TurnId::from(turn_id),
+        turn_id: TurnId::fixture(turn_id),
         reason,
         at_ms,
         origin: crate::store::TurnParkOrigin::Refusal,
@@ -87,7 +87,7 @@ async fn commit_turn(
     };
     let commit = RuntimeCommit::persisted_state_with_operation_for_testing(
         &state,
-        crate::store::OperationId::turn(session_id.clone(), TurnId::from(turn_id), "final"),
+        crate::store::OperationId::turn(session_id.clone(), TurnId::fixture(turn_id), "final"),
     );
     commit_runtime_state_for_test(store, commit, owner_id).await
 }

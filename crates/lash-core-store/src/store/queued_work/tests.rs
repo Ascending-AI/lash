@@ -39,7 +39,7 @@ fn select_turn_work_indices(
 
 fn candidate(enqueue_seq: u64, merge_key: Option<&str>) -> TurnLaneCandidate {
     TurnLaneCandidate {
-        batch_id: format!("qwb-{enqueue_seq}").into(),
+        batch_id: crate::BatchId::fixture(format!("qwb-{enqueue_seq}")),
         enqueue_seq,
         delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
         kind: QueuedWorkKind::Turn,
@@ -106,9 +106,9 @@ fn rendered_candidate_strategy() -> impl Strategy<Value = TurnLaneCandidate> {
                         caused_by: None,
                     },
                     _ => crate::MessageOrigin::TurnInput {
-                        turn_id: TurnId::from(format!("turn-{index}")),
+                        turn_id: TurnId::fixture(format!("turn-{index}")),
                         input_id: (index % 2 == 0)
-                            .then(|| crate::InputId::new(format!("input-{index}"))),
+                            .then(|| crate::InputId::fixture(format!("input-{index}"))),
                     },
                 },
                 text: "x".repeat(text_len),
@@ -127,7 +127,7 @@ fn rendered_candidate_strategy() -> impl Strategy<Value = TurnLaneCandidate> {
         .prop_map(
             |(enqueue_seq, merge_key, kind, delivery_policy, authority, turn_causes)| {
                 TurnLaneCandidate {
-                    batch_id: format!("qwb-{enqueue_seq}").into(),
+                    batch_id: crate::BatchId::fixture(format!("qwb-{enqueue_seq}")),
                     enqueue_seq,
                     delivery_policy,
                     kind,

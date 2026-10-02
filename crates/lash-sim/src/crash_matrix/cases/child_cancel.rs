@@ -192,7 +192,7 @@ async fn cancel_root(world: &CrashWorld, session: &SessionId, root: &str) -> Res
     for _ in 0..20 {
         let core = world.core()?;
         let session = session.clone();
-        let root = TurnId::from(root);
+        let root = TurnId::fixture(root);
         match world
             .host_op(async move {
                 // The durable session: a cancel needs no runtime of its own

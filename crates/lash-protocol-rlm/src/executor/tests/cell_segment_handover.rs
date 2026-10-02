@@ -113,7 +113,7 @@ impl Fixture {
             .table
             .open_handler(lash_core::AdmittedScope::turn(
                 lash_core::SessionId::from("test-session"),
-                lash_core::TurnId::from(turn),
+                lash_core::TurnId::fixture(turn),
             ))
             .await;
         let ctx = lash_core::testing::TestExecutionContextBuilder::new(
@@ -128,7 +128,7 @@ impl Fixture {
         ))
         .runtime_parent_invocation(lash_core::testing::exec_code_invocation(
             "test-session",
-            turn,
+            lash_core::TurnId::fixture(turn),
             0,
             0,
             "cell",

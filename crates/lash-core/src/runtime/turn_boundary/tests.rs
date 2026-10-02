@@ -139,7 +139,7 @@ fn state_with_graph(graph: SessionGraph) -> RuntimeSessionState {
         nodes.extend(graph.nodes.iter().map(|node| {
             let mut node = node.as_ref().clone();
             if node.parent_node_id.is_none() {
-                node.parent_node_id = Some(frame_node_id.to_string().into());
+                node.parent_node_id = Some(crate::NodeId::fixture(frame_node_id.to_string()));
             }
             std::sync::Arc::new(node)
         }));
@@ -1414,7 +1414,7 @@ fn a_committed_frame_open_clears_execution_state_and_ends_the_last_committed_fra
         committed_frame_transition(&state, None, SeedCarries::none(), &committing, &[]).unwrap(),
         None
     );
-    state.mark_node_ids_persisted([crate::NodeId::new(committed.as_str().to_string())]);
+    state.mark_node_ids_persisted([crate::NodeId::fixture(committed.as_str().to_string())]);
     assert_eq!(
         committed_frame_transition(&state, None, SeedCarries::none(), &committing, &[]).unwrap(),
         None,
@@ -1471,8 +1471,8 @@ fn a_committed_frame_open_clears_execution_state_and_ends_the_last_committed_fra
     // that frame; the store ends the committed frame beside it.
     let uncommitted = crate::FrameNodeId::new(opened_frame_a(&state)).unwrap();
     let appended = [
-        crate::NodeId::new(uncommitted.as_str().to_string()),
-        crate::NodeId::new(opened.frame_node_id().as_str().to_string()),
+        crate::NodeId::fixture(uncommitted.as_str().to_string()),
+        crate::NodeId::fixture(opened.frame_node_id().as_str().to_string()),
     ];
     assert_eq!(
         committed_frame_transition(
@@ -1551,8 +1551,8 @@ fn a_first_commit_that_switches_ends_the_first_frame_it_opens() {
     // The commit appends both frames' opens: the head holds no frame yet, so
     // the first frame, whose edges the turn's cells acquired, ends here.
     let appended = [
-        crate::NodeId::new(first.as_str().to_string()),
-        crate::NodeId::new(successor.as_str().to_string()),
+        crate::NodeId::fixture(first.as_str().to_string()),
+        crate::NodeId::fixture(successor.as_str().to_string()),
     ];
     assert_eq!(
         committed_frame_transition(
@@ -1602,7 +1602,7 @@ fn a_registration_turn_then_a_switch_ends_the_committed_frame_with_its_carries()
     let registering = crate::ExecutionScope::turn(&state.session_id, "registering-turn");
     // The registration turn's commit appends the first frame and switches
     // nothing: it ends no frame.
-    let appended = [crate::NodeId::new(first.as_str().to_string())];
+    let appended = [crate::NodeId::fixture(first.as_str().to_string())];
     assert_eq!(
         committed_frame_transition(&state, None, SeedCarries::none(), &registering, &appended)
             .unwrap(),
@@ -1628,7 +1628,7 @@ fn a_registration_turn_then_a_switch_ends_the_committed_frame_with_its_carries()
             Some(first.clone()),
             SeedCarries::from_names(vec![carried.clone()]),
             &switching,
-            &[crate::NodeId::new(successor.as_str().to_string())],
+            &[crate::NodeId::fixture(successor.as_str().to_string())],
         )
         .unwrap(),
         Some(crate::store::FrameTransition {

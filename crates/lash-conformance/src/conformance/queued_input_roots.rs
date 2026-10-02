@@ -116,7 +116,7 @@ pub async fn two_queued_inputs_sent_across_a_restart_get_their_own_roots_and_a_c
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    let session_id = SessionId::from(format!("{prefix}-queued-input-roots-session"));
+    let session_id = SessionId::fixture(format!("{prefix}-queued-input-roots-session"));
     let first_key = format!("{prefix}-queued-input-roots-first");
     let second_key = format!("{prefix}-queued-input-roots-second");
     let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
@@ -202,7 +202,7 @@ pub async fn two_queued_inputs_sent_across_a_restart_get_their_own_roots_and_a_c
         runner.run_crashed_then_redriven_turn(
             admit(crate::ExecutionScope::turn(
                 &session_id,
-                format!("{prefix}-queued-input-roots-1"),
+                crate::TurnId::fixture(format!("{prefix}-queued-input-roots-1")),
             )),
             die_after_the_second_send(&parts, second_key.clone()),
             drive(&parts, first_tx),
@@ -258,7 +258,7 @@ pub async fn two_queued_inputs_sent_across_a_restart_get_their_own_roots_and_a_c
         applied,
         [(
             first,
-            crate::store::PhysicalTurn::derive_turn_id(&crate::TurnId::from(first_key), 0),
+            crate::store::PhysicalTurn::derive_turn_id(&crate::TurnId::fixture(first_key), 0),
         )],
         "the first input's own root applies it, untouched by the second input's cancel"
     );
@@ -270,7 +270,7 @@ pub async fn two_queued_inputs_sent_across_a_restart_get_their_own_roots_and_a_c
         runner.run_turn(
             admit(crate::ExecutionScope::turn(
                 &session_id,
-                format!("{prefix}-queued-input-roots-2"),
+                crate::TurnId::fixture(format!("{prefix}-queued-input-roots-2")),
             )),
             drive(&parts, next_tx),
         ),

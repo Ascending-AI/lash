@@ -304,13 +304,11 @@ impl ArtifactReferrer {
         let referrer = match kind {
             ArtifactReferrerKind::FrameEnvironment => {
                 let (session_id, frame_node_id): (String, String) = json_parse(kind, id)?;
-                if session_id.is_empty() {
-                    return Err(malformed(kind, "empty session id"));
-                }
                 let frame_node_id = FrameNodeId::new(frame_node_id)
                     .map_err(|error| malformed(kind, error.to_string()))?;
                 Self::FrameEnvironment(FrameEnvironmentId::new(
-                    SessionId::from(session_id),
+                    SessionId::parse(session_id)
+                        .map_err(|error| malformed(kind, error.to_string()))?,
                     frame_node_id,
                 ))
             }
@@ -350,14 +348,16 @@ impl ArtifactReferrer {
                     .map_err(|error| malformed(kind, error.to_string()))?,
             ),
             ArtifactReferrerKind::Session => {
-                let session = SessionId::from(id);
+                let session =
+                    SessionId::parse(id).map_err(|error| malformed(kind, error.to_string()))?;
                 crate::store::validate_session_id(&session)
                     .map_err(|error| malformed(kind, error.to_string()))?;
                 Self::Session(session)
             }
             ArtifactReferrerKind::Upload => {
                 let (session, upload): (String, String) = json_parse(kind, id)?;
-                let session = SessionId::from(session);
+                let session = SessionId::parse(session)
+                    .map_err(|error| malformed(kind, error.to_string()))?;
                 crate::store::validate_session_id(&session)
                     .map_err(|error| malformed(kind, error.to_string()))?;
                 Self::Upload(UploadReferrerId::new(

@@ -96,8 +96,8 @@ pub(crate) use lash_sansio::session_model::{
 pub(crate) use lash_sansio::tool_contract::{ToolDefinition, ToolId, ToolManifest};
 pub(crate) use lash_sansio::{
     AttachmentId, AttachmentMaterializationNotice, AttachmentRef, AttachmentTypeMetadata, BatchId,
-    CausalRef, CheckpointKind, EffectAddress, ExecutionScope, FrameKey, InputId, Message,
-    MessageOrigin, MessageRole, NodeId, Part, PartKind, PluginMessage, ProcessId,
+    BlankIdentity, CausalRef, CheckpointKind, EffectAddress, ExecutionScope, FrameKey, InputId,
+    Message, MessageOrigin, MessageRole, NodeId, Part, PartKind, PluginMessage, ProcessId,
     SessionAppendNode, SessionId, TokenUsage, TurnId, TurnOutputSource, render_turn_causes_prompt,
     shared_parts,
 };
@@ -162,7 +162,7 @@ pub(crate) use turn_input_vocabulary::{
 
 pub(crate) use await_event_identity::{AwaitEventKey, AwaitEventWaitIdentity};
 pub(crate) use chronological::ChronologicalProjection;
-pub(crate) use effect_identity::{RuntimeEffectKind, RuntimeInvocation};
+pub(crate) use effect_identity::RuntimeEffectKind;
 pub(crate) use lash_sansio::ToolIntentIdentity;
 pub(crate) use message_projection::plugin_message_to_message;
 pub(crate) use process_identity::{ProcessWakeDelivery, WakeDeliveryState};

@@ -47,7 +47,7 @@ pub(crate) async fn list_sessions(
             }
         };
         let view = SessionView {
-            session_id: SessionId::from(row.get::<String, _>("session_id")),
+            session_id: SessionId::parse(row.get::<String, _>("session_id"))?,
             created_at_ms: u64_from_sql("SessionView", "created_at_ms", row.get("created_at_ms"))?,
             last_commit_at_ms: row
                 .get::<Option<i64>, _>("last_commit_at_ms")

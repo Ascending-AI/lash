@@ -148,7 +148,7 @@ pub(crate) async fn pinned_runtime(
         .tools(tools)
         .host(host)
         .store(store)
-        .with_session_id(session_id)
+        .with_session_id(lash_core::SessionId::fixture(session_id))
         .build()
         .await
 }

@@ -236,9 +236,11 @@
         {
           "properties": {
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "turn_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -276,6 +278,7 @@
               "type": "string"
             },
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -293,6 +296,7 @@
         {
           "properties": {
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -947,9 +951,11 @@
         {
           "properties": {
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "turn_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -986,6 +992,7 @@
               "type": "string"
             },
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -1080,6 +1087,7 @@
               "type": "string"
             },
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -1106,9 +1114,11 @@
               "type": "string"
             },
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "turn_id": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -1129,6 +1139,7 @@
               "type": "string"
             },
             "session_id": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -1664,6 +1675,7 @@
               ]
             },
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -2315,6 +2327,7 @@
               "type": "string"
             },
             "scope": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -2401,6 +2414,7 @@
           "type": "array"
         },
         "trace_turn_id": {
+          "minLength": 1,
           "type": [
             "string",
             "null"
@@ -2853,6 +2867,7 @@
     },
     "session_capability": {
       "description": "The session capability the process's descendants inherit.",
+      "minLength": 1,
       "type": [
         "string",
         "null"

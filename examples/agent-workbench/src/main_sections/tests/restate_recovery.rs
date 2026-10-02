@@ -1900,8 +1900,8 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> 
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create recovery E2E data dir");
-    let session_id = SessionId::from(format!("workbench-recovery-{backend}-e2e"));
-    let turn_id = TurnId::from(format!("workbench-turn-recovery-{backend}-e2e"));
+    let session_id = SessionId::fixture(format!("workbench-recovery-{backend}-e2e"));
+    let turn_id = TurnId::fixture(format!("workbench-turn-recovery-{backend}-e2e"));
     std::fs::write(data_dir.join("session-id"), session_id.as_str())
         .expect("write recovery E2E session id");
 
@@ -2211,7 +2211,7 @@ async fn live_restate_recovery_child() {
     loop {
         if let Ok(turn_id) = std::fs::read_to_string(&start_turn) {
             let session_id = state.current_session_id();
-            let turn_id = TurnId::from(turn_id.trim().to_string());
+            let turn_id = TurnId::fixture(turn_id.trim().to_string());
             state.track_turn(&session_id, &turn_id);
             followers.push(
                 restate::start_user_turn(

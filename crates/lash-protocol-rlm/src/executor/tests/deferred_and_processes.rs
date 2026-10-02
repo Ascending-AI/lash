@@ -199,8 +199,8 @@ async fn run_cell_through_crashes(
     double
         .run_crashes_then_redriven(
             lash_core::AdmittedScope::turn(
-                lash_core::SessionId::from(session_id),
-                lash_core::TurnId::from(turn_id),
+                lash_core::SessionId::fixture(session_id),
+                lash_core::TurnId::fixture(turn_id),
             ),
             crashing,
             redrive,
@@ -328,7 +328,7 @@ pub(super) struct BindingRecordingDeferredProvider {
 /// The scope [`restricted_empty_deferred_context`] claims for `session_id`.
 fn restricted_empty_deferred_scope(session_id: &str) -> lash_core::AdmittedScope {
     lash_core::AdmittedScope::turn(
-        lash_core::SessionId::from(session_id),
+        lash_core::SessionId::fixture(session_id),
         lash_core::TurnId::from("test-turn"),
     )
 }
@@ -349,7 +349,7 @@ async fn restricted_empty_deferred_context<'h>(
     )));
     let session = lash_core::facade_support::PluginHost::new(factories)
         .build_session(PluginSessionRequest::creation(
-            session_id,
+            lash_core::SessionId::fixture(session_id),
             lash_core::plugin::SessionAuthorityContext {
                 tool_access: lash_core::SessionToolAccess::restricted([])
                     .expect("restricted empty is valid"),
@@ -376,7 +376,7 @@ async fn restricted_empty_deferred_context<'h>(
             session.tools(),
             catalog.as_ref().clone(),
             lash_core::testing::exec_code_invocation(
-                session_id,
+                lash_core::SessionId::fixture(session_id),
                 "test-turn",
                 0,
                 0,

@@ -137,8 +137,8 @@ pub(crate) fn spawn_retention(
                     Ok(db
                         .list_chats()?
                         .into_iter()
-                        .map(|chat| SessionId::from(chat.id))
-                        .collect::<Vec<_>>())
+                        .map(|chat| SessionId::parse(chat.id))
+                        .collect::<Result<Vec<_>, _>>()?)
                 })
                 .await
             {

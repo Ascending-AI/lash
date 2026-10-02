@@ -375,12 +375,12 @@ impl SugarTurn {
         factories: &[Arc<dyn crate::facade_support::PluginFactory>],
         script: Vec<crate::LlmResponse>,
     ) -> Self {
-        let session_id = SessionId::from(format!("{prefix}-batch-sugar-{name}"));
+        let session_id = SessionId::fixture(format!("{prefix}-batch-sugar-{name}"));
         let witness = Arc::new(Witness::default());
         Self {
             host: Arc::clone(host),
             stores: Arc::clone(stores),
-            turn_id: TurnId::from(format!("{session_id}-turn")),
+            turn_id: TurnId::fixture(format!("{session_id}-turn")),
             session_id,
             factories: factories.to_vec(),
             witness,

@@ -60,7 +60,10 @@ async fn deployment(turns: usize, session: &str, root: &str) -> Deployment {
     // close step's immediate delivery fails and its scope close stays owed.
     // The refusal is layered under the engine, so the engine's own close
     // step meets it.
-    let root_scope = lash_core::ScopeId::turn(session, root);
+    let root_scope = lash_core::ScopeId::turn(
+        SessionId::fixture(session),
+        TurnId::fixture(root.to_string()),
+    );
     let double = lash_restate_test::backend_with(
         0x5e55_de1e,
         lash_restate_test::ServerConfig {
@@ -154,9 +157,9 @@ impl Deployment {
     ) -> T {
         let handler = self
             .double
-            .open_handler(lash_core::AdmittedScope::session_delete(SessionId::from(
-                session,
-            )))
+            .open_handler(lash_core::AdmittedScope::session_delete(
+                SessionId::fixture(session),
+            ))
             .await
             .expect("open the delete handler");
         let outcome = {
@@ -183,14 +186,18 @@ impl Deployment {
         reason = "test fixture: a session that fails to run aborts the law"
     )]
     async fn ended_root(&self, session: &str, root: &str) -> ObligationId {
-        let handle = created_session(&self.core, &self.model, session)
-            .await
-            .open()
-            .await
-            .expect("open");
+        let handle = created_session(
+            &self.core,
+            &self.model,
+            SessionId::fixture(session.to_string()),
+        )
+        .await
+        .open()
+        .await
+        .expect("open");
         handle
             .send(lash::TurnInput::text("end a root"))
-            .id(root)
+            .id(TurnId::fixture(root))
             .output()
             .await
             .expect("run the root");
@@ -198,11 +205,11 @@ impl Deployment {
         // The handle answered at the root's final commit; its close step
         // runs after (FIG-3979).
         self.double
-            .settle_session_drive(&SessionId::from(session))
+            .settle_session_drive(&SessionId::fixture(session))
             .await;
         let id = lash_core::store::ObligationKey::ScopeClose {
-            session_id: SessionId::from(session),
-            root: TurnId::from(root),
+            session_id: SessionId::fixture(session),
+            root: TurnId::fixture(root),
         }
         .id();
         assert_eq!(
@@ -265,7 +272,7 @@ impl Deployment {
     #[expect(clippy::expect_used, reason = "test fixture")]
     async fn was_deleted(&self, session: &str) -> bool {
         self.core
-            .session(session)
+            .session(SessionId::fixture(session))
             .durable()
             .await
             .expect("durable handle")
@@ -278,7 +285,7 @@ impl Deployment {
     async fn delete_obligation(&self, session: &str) -> Option<(ObligationId, ObligationState)> {
         self.backend
             .session_delete_ledger()
-            .delete_obligation(&SessionId::from(session))
+            .delete_obligation(&SessionId::fixture(session))
             .await
             .expect("read the delete obligation")
             .map(|obligation| (obligation.id, obligation.state))

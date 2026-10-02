@@ -112,7 +112,7 @@ pub async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Ru
     let _lease = seal_drive_fence_for_test(&store, &SessionId::from(session_id), "cas-owner").await;
     let make_commit = |node_id: &str| {
         let state = RuntimeSessionState {
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: SessionId::fixture(session_id.to_string()),
             ..RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
@@ -199,7 +199,7 @@ pub async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Ru
 pub async fn serves_each_admitted_session_and_refuses_an_unknown_one(store: Arc<dyn RuntimeStore>) {
     let state_for = |session_id: &str| {
         let mut state = RuntimeSessionState {
-            session_id: SessionId::from(session_id),
+            session_id: SessionId::fixture(session_id),
             ..RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),

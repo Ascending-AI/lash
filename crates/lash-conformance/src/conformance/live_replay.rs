@@ -558,7 +558,7 @@ where
     const RACES: usize = 64;
     for race in 0..RACES {
         let store = make();
-        let session_id = SessionId::from(format!("subscribe-race-{race}"));
+        let session_id = SessionId::fixture(format!("subscribe-race-{race}"));
         let revision = SessionRevision::new(5);
         let start = store.current_cursor(&session_id, revision);
         let prior = publish_one(

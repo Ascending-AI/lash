@@ -28,7 +28,7 @@ fn ingress_of(core: &LashCore) -> Result<crate::tools::ToolIntentIngress> {
 
 fn signal_intent(session_id: &SessionId, process: &ProcessId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
-        owner: crate::RuntimeOwner::Session(SessionId::from(session_id.to_string())),
+        owner: crate::RuntimeOwner::Session(session_id.clone()),
         process_id: process.clone(),
         signal_name: SIGNAL.to_string(),
         payload: serde_json::json!({"law": "redelivered-signal"}),

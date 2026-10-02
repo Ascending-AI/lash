@@ -363,7 +363,7 @@ pub async fn concurrent_admissions_bind_every_row_to_at_most_one_root(
     let recorded = admit_root_for_test(
         &store,
         &fence,
-        &TurnId::from(batch_root.as_str()),
+        &TurnId::fixture(batch_root.as_str()),
         lash_core::store::AdmittedHead::Batch(batch.batch_id.clone()),
     )
     .await
@@ -400,7 +400,7 @@ pub async fn concurrent_admissions_bind_every_row_to_at_most_one_root(
         "the input reads back bound to the winning root"
     );
 
-    let turn = TurnId::from(winners[0].as_str());
+    let turn = TurnId::fixture(winners[0].as_str());
     let active = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             &session_id,
@@ -582,7 +582,7 @@ pub async fn queued_work_classes_gate_command_and_turn_admissions(store: Arc<dyn
         let early = admit_root_for_test(
             &store,
             &fence,
-            &TurnId::from(root.as_str()),
+            &TurnId::fixture(root.as_str()),
             lash_core::store::AdmittedHead::Batch(turn.batch_id.clone()),
         )
         .await

@@ -56,7 +56,7 @@ where
         match session_id {
             Some(session_id) => {
                 self.context
-                    .session_is_revoked(&self.namespace, SessionId::from(session_id.to_string()))
+                    .session_is_revoked(&self.namespace, session_id.clone())
                     .await
             }
             None => Ok(false),

@@ -137,8 +137,8 @@ async fn run_pinned_turn(
     let activities = RecordingTurnEvents::default();
     let handler = double
         .open_handler(AdmittedScope::turn(
-            SessionId::from(session_id.as_str()),
-            TurnId::from(turn_id),
+            SessionId::fixture(session_id.as_str()),
+            TurnId::fixture(turn_id),
         ))
         .await
         .expect("open the scope's handler");
@@ -595,8 +595,10 @@ async fn a_blocked_host_sink_holds_neither_the_commit_nor_its_bytes() {
         session_id.as_str(),
         store.clone() as Arc<dyn lash_core::RuntimeStore>,
     );
-    let address =
-        lash_core::facade_support::TurnAddress::new(SessionId::from(session_id.as_str()), TURN_ID);
+    let address = lash_core::facade_support::TurnAddress::new(
+        SessionId::fixture(session_id.as_str()),
+        TURN_ID,
+    );
     let host = GatedHost::default();
     let turn = lash_core::task::spawn({
         let host = host.clone();
@@ -605,7 +607,7 @@ async fn a_blocked_host_sink_holds_neither_the_commit_nor_its_bytes() {
         async move {
             let handler = double
                 .open_handler(AdmittedScope::turn(
-                    SessionId::from(session_id.as_str()),
+                    SessionId::fixture(session_id.as_str()),
                     TurnId::from(TURN_ID),
                 ))
                 .await

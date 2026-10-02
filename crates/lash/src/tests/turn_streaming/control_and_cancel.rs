@@ -656,7 +656,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
 
     let undelivered = session
         .send(TurnInput::text("undelivered active-turn input"))
-        .id(format!("{session_id}:undelivered"))
+        .id(TurnId::fixture(format!("{session_id}:undelivered")))
         .ingress(lash_core::TurnInputIngress::active_turn(
             turn_id,
             lash_core::TurnInputCheckpointBoundary::AfterWork,

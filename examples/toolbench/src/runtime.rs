@@ -266,7 +266,8 @@ async fn run_turn(
     channel: crate::ChannelSelection,
     telemetry: &Arc<crate::telemetry::Telemetry>,
 ) -> Result<(lash::TurnOutput, Vec<String>)> {
-    let session_id = SessionId::from(format!("toolbench-{run}-typescript-{}", task.id));
+    let session_id =
+        SessionId::prefixed("toolbench-", format_args!("{run}-typescript-{}", task.id));
     // Each run names a fresh session, created with its RLM session options.
     let plugin_options = if channel == crate::ChannelSelection::Standard {
         lash::plugins::PluginOptions::default()

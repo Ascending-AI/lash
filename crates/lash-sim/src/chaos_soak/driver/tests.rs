@@ -51,7 +51,7 @@ async fn a_drain_charges_no_tick_to_roots_the_old_build_is_still_driving() {
     assert_eq!(driver.ledger.retired.len(), 1, "{rolled}");
     let backend = driver.world.backend();
     for root in 0..ROOTS {
-        let root = lash_core::TurnId::from(format!("slow-{root}"));
+        let root = lash_core::TurnId::fixture(format!("slow-{root}"));
         assert!(
             backend
                 .session_store_factory()

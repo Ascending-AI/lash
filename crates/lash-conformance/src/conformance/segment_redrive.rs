@@ -244,7 +244,9 @@ impl Scenario {
     }
 
     fn trigger_envelope(&self) -> RuntimeEffectEnvelope {
-        let owner_scope = crate::TriggerOwnerScope::session(format!("{}-owner", self.process_id));
+        let owner_scope = crate::TriggerOwnerScope::session(lash_core::SessionId::fixture(
+            format!("{}-owner", self.process_id),
+        ));
         RuntimeEffectEnvelope::new(
             self.invocation(TRIGGER),
             RuntimeEffectCommand::Trigger {

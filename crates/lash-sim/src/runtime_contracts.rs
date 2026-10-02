@@ -752,7 +752,7 @@ mod tests {
         .expect("test nodes");
         let missing_parent = lash_core::SessionGraph::from_unchecked_nodes_for_testing(
             missing_parent_nodes,
-            Some("child".to_string().into()),
+            Some(lash_core::NodeId::from("child")),
         );
         let facts = runtime_graph_invariant_facts(&missing_parent);
         assert!(!facts.passed());
@@ -779,7 +779,7 @@ mod tests {
         .expect("test nodes");
         let cycle = lash_core::SessionGraph::from_unchecked_nodes_for_testing(
             cycle_nodes,
-            Some("b".to_string().into()),
+            Some(lash_core::NodeId::from("b")),
         );
         let facts = runtime_graph_invariant_facts(&cycle);
         assert!(!facts.passed());
@@ -827,10 +827,13 @@ mod tests {
             lash::TurnReport {
                 cancel_input_outcome: Default::default(),
                 acceptance: None,
-                state: lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
-                    lash_core::TurnBudget::Unbounded,
-                    lash_core::MaxToolCalls::new(1024),
-                )),
+                state: lash_core::SessionSnapshot::new(
+                    lash_core::SessionId::from("session"),
+                    lash_core::SessionPolicy::new(
+                        lash_core::TurnBudget::Unbounded,
+                        lash_core::MaxToolCalls::new(1024),
+                    ),
+                ),
                 outcome,
                 assistant_output: lash_core::facade_support::AssistantOutput {
                     safe_text: "looks final".to_string(),

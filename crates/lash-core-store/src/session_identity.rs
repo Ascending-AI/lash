@@ -35,49 +35,72 @@ impl SessionObserverIntent {
 #[repr(transparent)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
-pub struct FrameNodeId(String);
+pub struct FrameNodeId(crate::NodeId);
 
-/// The wire shape is the validated identity string; `FrameNodeId::new`'s
-/// emptiness refusal cannot be expressed as a schema assertion.
+/// The wire shape is the node identity's: a non-empty string.
 impl schemars::JsonSchema for FrameNodeId {
     fn inline_schema() -> bool {
         true
     }
 
     fn schema_name() -> std::borrow::Cow<'static, str> {
-        <String as schemars::JsonSchema>::schema_name()
+        <crate::NodeId as schemars::JsonSchema>::schema_name()
     }
 
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        <String as schemars::JsonSchema>::json_schema(generator)
+        <crate::NodeId as schemars::JsonSchema>::json_schema(generator)
     }
 }
 /// Rejection produced when constructing a [`FrameNodeId`] from invalid text.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum FrameNodeIdError {
-    /// The empty string is the removed legacy sentinel for an unscoped read.
+    /// The empty string is the removed legacy sentinel for an unscoped read,
+    /// and no node id is blank.
     #[error("frame node id must not be empty; use explicit absence for an unscoped operation")]
     Empty,
 }
 impl FrameNodeId {
     /// Validates and wraps a durable frame-node identity.
     pub fn new(value: impl Into<String>) -> Result<Self, FrameNodeIdError> {
-        let value = value.into();
-        if value.is_empty() {
-            return Err(FrameNodeIdError::Empty);
-        }
-        Ok(Self(value))
+        crate::NodeId::parse(value)
+            .map(Self)
+            .map_err(|_| FrameNodeIdError::Empty)
     }
 
     /// Borrows the durable frame-node identity as text.
     pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    /// The frame-open node this identity names.
+    pub fn node_id(&self) -> &crate::NodeId {
         &self.0
     }
 
     /// Returns the owned durable frame-node identity.
     pub fn into_inner(self) -> String {
-        self.0
+        self.0.into_inner()
+    }
+}
+impl From<crate::NodeId> for FrameNodeId {
+    fn from(node_id: crate::NodeId) -> Self {
+        Self(node_id)
+    }
+}
+impl From<&crate::NodeId> for FrameNodeId {
+    fn from(node_id: &crate::NodeId) -> Self {
+        Self(node_id.clone())
+    }
+}
+impl From<FrameNodeId> for crate::NodeId {
+    fn from(frame_node_id: FrameNodeId) -> Self {
+        frame_node_id.0
+    }
+}
+impl From<&FrameNodeId> for crate::NodeId {
+    fn from(frame_node_id: &FrameNodeId) -> Self {
+        frame_node_id.0.clone()
     }
 }
 impl<'de> Deserialize<'de> for FrameNodeId {
@@ -373,7 +396,7 @@ impl SessionLineage {
     }
 }
 impl SessionRelation {
-    pub fn parent_session_id(&self) -> Option<&str> {
+    pub fn parent_session_id(&self) -> Option<&SessionId> {
         match self {
             Self::Root => None,
             Self::Child {
@@ -622,10 +645,11 @@ pub struct SessionSnapshot {
     pub checkpoint_ref: Option<crate::store::BlobRef>,
 }
 impl SessionSnapshot {
-    /// Construct an empty snapshot with an explicitly chosen session policy.
-    pub fn new(policy: SessionPolicy) -> Self {
+    /// Construct an empty snapshot of `session_id` with an explicitly chosen
+    /// session policy.
+    pub fn new(session_id: SessionId, policy: SessionPolicy) -> Self {
         Self {
-            session_id: SessionId::new(String::new()),
+            session_id,
             policy,
             agent_frames: Vec::new(),
             current_frame_node_id: None,
@@ -743,7 +767,7 @@ pub enum SessionCreationHead {
 }
 
 impl SessionStoreCreateRequest {
-    pub fn parent_session_id(&self) -> Option<&str> {
+    pub fn parent_session_id(&self) -> Option<&SessionId> {
         self.relation.parent_session_id()
     }
 }

@@ -9,7 +9,7 @@ pub(crate) async fn list_session_waits(
     State(state): State<AppState>,
     AxumPath(session_id): AxumPath<String>,
 ) -> Result<Json<Vec<lash::AwaitEventKey>>, AppError> {
-    let session_id = SessionId::from(session_id);
+    let session_id = SessionId::parse(session_id)?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::Observe {
@@ -144,7 +144,7 @@ pub(crate) async fn decide_approval(
         }
     }
     state.trace_for_session(
-        &SessionId::from(requesting_session),
+        &SessionId::parse(requesting_session)?,
         "approval.decided",
         json!({
             "key": key_id,

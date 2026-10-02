@@ -15,7 +15,7 @@ fn held(
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            ProcessProvenance::session(SessionScope::new(session.as_str())),
+            ProcessProvenance::session(SessionScope::new(session.clone())),
             lash_core::Lifetime::Detached,
         ),
         owner.clone(),

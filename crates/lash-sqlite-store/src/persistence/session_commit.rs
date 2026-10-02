@@ -580,7 +580,7 @@ impl SqliteStore {
                             )
                             .optional()
                             .map_err(sqlite_error)?
-                            .map(|(generation, frame_node_id, owner)| {
+                            .map(|(generation, frame_node_id, owner)| -> Result<_, StoreError> {
                                 let generation = u64::try_from(generation).map_err(|_| {
                                     stored_data_corrupt(
                                         "SessionGraph node",
@@ -589,13 +589,13 @@ impl SqliteStore {
                                 })?;
                                 Ok((
                                     lash_core_execution::store::ParentNodeFacts {
-                                        node_id: leaf_node_id.to_string().into(),
+                                        node_id: leaf_node_id.to_string().try_into()?,
                                         generation,
-                                        frame_node_id: frame_node_id.into(),
+                                        frame_node_id: frame_node_id.try_into()?,
                                     },
                                     lash_core_execution::store_backend_support::PathNode {
-                                        node_id: leaf_node_id.to_string().into(),
-                                        owner_session_id: owner.into(),
+                                        node_id: leaf_node_id.to_string().try_into()?,
+                                        owner_session_id: owner.try_into()?,
                                         generation,
                                     },
                                 ))
@@ -630,8 +630,8 @@ impl SqliteStore {
                                 tx,
                                 parent_path_node.clone(),
                                 lash_core_execution::store_backend_support::PathNode {
-                                    node_id: required.to_string().into(),
-                                    owner_session_id: owner.into(),
+                                    node_id: required.to_string().try_into()?,
+                                    owner_session_id: owner.try_into()?,
                                     generation: u64::try_from(generation).map_err(|_| {
                                         stored_data_corrupt(
                                             "SessionGraph node",

@@ -5,7 +5,7 @@ use super::{ProcessId, SessionId};
 /// every redrive of the process reopens the same session and no two processes
 /// ever share one (ADR 0107).
 pub fn process_child_session_id(process_id: &ProcessId) -> SessionId {
-    SessionId::from(format!("session:process:{process_id}"))
+    SessionId::prefixed("session:process:", process_id)
 }
 
 /// The turn a `ProcessInput::SessionTurn` process runs in its child session:
@@ -13,5 +13,5 @@ pub fn process_child_session_id(process_id: &ProcessId) -> SessionId {
 /// run executes it. The process drives that root inline, in its own
 /// execution; it never runs as a root run of its own (FIG-4378).
 pub fn process_session_turn_id(process_id: &ProcessId) -> crate::TurnId {
-    crate::TurnId::from(process_id.as_str())
+    crate::TurnId::from(process_id)
 }

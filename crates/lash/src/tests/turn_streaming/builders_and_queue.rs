@@ -445,7 +445,7 @@ pub(super) async fn a_turn_journals_its_request_by_digest_and_no_sentinel_step()
     for turn in 0..4 {
         session
             .send(TurnInput::text(format!("{turn} {input}")))
-            .id(format!("t{turn}"))
+            .id(lash_core::TurnId::fixture(format!("t{turn}")))
             .output()
             .await?;
         let server = double.server();

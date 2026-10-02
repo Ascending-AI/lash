@@ -859,7 +859,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
                 context
                     .session_waits
                     .lock_recover()
-                    .entry(SessionId::from(session_id.to_string()))
+                    .entry(SessionId::fixture(session_id.to_string()))
                     .or_default()
                     .push(request.key.clone());
             }
@@ -1173,9 +1173,11 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
                             intents: lash_core::ToolIntents::v3(vec![
                                 lash_core::ToolIntent::SignalProcess(
                                     lash_core::SignalProcessIntent {
-                                        owner: lash_core::RuntimeOwner::Session(SessionId::from(
-                                            TOOL_INTENT_CORPUS_SESSION.to_string(),
-                                        )),
+                                        owner: lash_core::RuntimeOwner::Session(
+                                            SessionId::fixture(
+                                                TOOL_INTENT_CORPUS_SESSION.to_string(),
+                                            ),
+                                        ),
                                         process_id: tool_intent_corpus_target(),
                                         signal_name: "resume".to_string(),
                                         payload: serde_json::json!({

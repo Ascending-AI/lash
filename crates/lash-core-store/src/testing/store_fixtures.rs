@@ -73,7 +73,7 @@ pub fn append_conformance_event_node(
 ) {
     let parent_node_id = state.session_graph.leaf_node_id.clone();
     let node = crate::SessionNodeRecord {
-        node_id: crate::NodeId::from(id),
+        node_id: crate::NodeId::fixture(id),
         parent_node_id,
         timestamp: "2026-07-27T00:00:00Z".to_string(),
         payload: crate::SessionNodePayload::Event {
@@ -98,7 +98,7 @@ pub async fn commit_conformance_state(
 ) -> Result<(), crate::StoreError> {
     let operation = crate::OperationId::turn(
         &state.session_id,
-        format!("conformance-commit-{}", state.head_revision),
+        TurnId::fixture(format!("conformance-commit-{}", state.head_revision)),
         "commit",
     );
     let (commit, new_node_ids) =
@@ -148,7 +148,7 @@ pub fn session_store_request_with_policy(
     crate::SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         relation,
         config: policy.into(),
         head: SessionCreationHead::Config,

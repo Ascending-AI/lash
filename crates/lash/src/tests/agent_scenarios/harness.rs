@@ -198,7 +198,7 @@ fn agent_scenario_session_id(name: &str) -> SessionId {
     while slug.ends_with('-') {
         slug.pop();
     }
-    SessionId::from(slug)
+    SessionId::fixture(slug)
 }
 
 pub(super) struct AgentScenarioRun {
@@ -398,7 +398,7 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
         // Stand in for the writer that really uploaded these bytes. The
         // evidence a store keeps is per digest, not per session, so a
         // dedicated seeding session records it exactly as a peer writer would.
-        let seed_session_id = SessionId::from(format!("{}-attachment-seed", case.session_id));
+        let seed_session_id = SessionId::fixture(format!("{}-attachment-seed", case.session_id));
         let seed_store = lash_core::runtime::admit_session_view(
             &runtime.store_factory,
             &lash_core::SessionStoreCreateRequest {
@@ -957,7 +957,7 @@ impl AgentSessionTurnProcessScenario {
         .await;
         assert_remote_process_summaries_round_trip(&final_process_list);
         let run = AgentScenarioRun {
-            session_id: SessionId::from(self.session_id.to_string()),
+            session_id: SessionId::fixture(self.session_id.to_string()),
             turn_output: None,
             streamed_events: Vec::new(),
             graph_snapshots: runtime.graph_store.graphs(),

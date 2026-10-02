@@ -18,7 +18,7 @@ impl PhysicalTurn {
         if physical_ordinal == 0 {
             root.clone()
         } else {
-            TurnId::from(format!("{root}{PHYSICAL_TURN_SEPARATOR}{physical_ordinal}"))
+            root.with_suffix(format_args!("{PHYSICAL_TURN_SEPARATOR}{physical_ordinal}"))
         }
     }
 
@@ -30,7 +30,10 @@ impl PhysicalTurn {
             .rsplit_once(PHYSICAL_TURN_SEPARATOR)
             .and_then(|(root, index)| {
                 let parsed = index.parse::<u64>().ok()?;
-                (parsed > 0 && parsed.to_string() == index).then(|| (TurnId::from(root), parsed))
+                if parsed == 0 || parsed.to_string() != index {
+                    return None;
+                }
+                Some((TurnId::parse(root).ok()?, parsed))
             })
             .unwrap_or_else(|| (turn_id.clone(), 0))
     }

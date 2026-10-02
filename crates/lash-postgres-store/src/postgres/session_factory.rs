@@ -256,8 +256,8 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
                 seq: u64::try_from(seq).unwrap_or_default(),
                 at_ms: u64::try_from(at_ms).unwrap_or_default(),
                 target: lash_core_execution::store::TurnParkTarget {
-                    session_id: SessionId::from(session_id),
-                    turn_id: lash_sansio::TurnId::from(turn_id),
+                    session_id: SessionId::parse(session_id)?,
+                    turn_id: lash_sansio::TurnId::parse(turn_id)?,
                 },
                 park_id: lash_core_execution::store::ParkId::from_feed_sequence(
                     u64::try_from(park_id).unwrap_or_default(),
@@ -299,14 +299,14 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
                     .map_err(crate::store_sqlx_error)?;
                 Ok(lash_core_execution::engine::OpenRoot {
                     target: lash_core_execution::engine::RootRef {
-                        session: SessionId::from(
+                        session: SessionId::parse(
                             row.try_get::<String, _>(0)
                                 .map_err(crate::store_sqlx_error)?,
-                        ),
-                        root: lash_sansio::TurnId::from(
+                        )?,
+                        root: lash_sansio::TurnId::parse(
                             row.try_get::<String, _>(1)
                                 .map_err(crate::store_sqlx_error)?,
-                        ),
+                        )?,
                     },
                     executor: lash_core_execution::store::RootExecutor::from_stored(
                         admission.as_deref(),
@@ -595,6 +595,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         let mut fork_plan = None;
         let mut copy_frame_edges = None;
         if let Some(leaf_node_id) = leaf_node_id.as_deref() {
+            let leaf = lash_core_execution::NodeId::parse(leaf_node_id)?;
             // Retirement never tombstones a retained revision's leaf, so a
             // dead one is damage, not a collected point.
             let node_facts = sqlx::query_as::<_, (String, i64)>(
@@ -619,7 +620,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             let frame = crate::runtime_persistence::nearest_frame_node_id_tx(&mut tx, leaf_node_id)
                 .await?
                 .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
-                    leaf_node_id: leaf_node_id.to_string().into(),
+                    leaf_node_id: leaf.clone(),
                 })?;
             let frame_node_id = lash_core_execution::FrameNodeId::new(frame)
                 .map_err(|error| StoreError::Backend(error.to_string()))?;
@@ -696,7 +697,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             // descendant carrier row.
             let fork_generation = u64_from_sql("SessionGraph node", "generation", fork_generation)?;
             let mut edge_path = Vec::new();
-            let mut current_node_id = lash_core_execution::NodeId::from(leaf_node_id);
+            let mut current_node_id = leaf;
             let mut expected_generation = fork_generation;
             loop {
                 let facts = sqlx::query_as::<_, (String, Option<String>, String, i64)>(
@@ -723,9 +724,12 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                 }
                 let parent_node_id = facts.1.clone();
                 edge_path.push(lash_core_execution::store::ForkNodeFacts {
-                    node_id: facts.0.into(),
-                    parent_node_id: facts.1.map(lash_core_execution::NodeId::from),
-                    owning_session_id: SessionId::from(facts.2),
+                    node_id: facts.0.try_into()?,
+                    parent_node_id: facts
+                        .1
+                        .map(lash_core_execution::NodeId::parse)
+                        .transpose()?,
+                    owning_session_id: SessionId::parse(facts.2)?,
                     generation,
                 });
                 if expected_generation == 0 {
@@ -736,7 +740,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                         record_kind: "SessionGraph",
                         message: "retained fork path ended before generation zero".to_string(),
                     })?
-                    .into();
+                    .try_into()?;
                 expected_generation -= 1;
             }
             edge_path.reverse();
@@ -761,7 +765,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             },
             0,
             checkpoint_ref.clone().map(Into::into),
-            leaf_node_id.clone().map(Into::into),
+            leaf_node_id.clone().map(TryInto::try_into).transpose()?,
             current_frame_node_id,
         )?;
         let head_json = encode_json(&head.payload())?;
@@ -786,7 +790,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         if let Some(fork_plan) = &fork_plan {
             for ancestor in fork_plan.ancestors() {
                 sqlx::query(session_sql().lineage.insert.sql())
-                    .bind(fork_plan.session_id())
+                    .bind(fork_plan.session_id().as_str())
                     .bind(ancestor.ancestor_session_id.as_str())
                     .bind(&*ancestor.fork_node_id)
                     .bind(i64::try_from(ancestor.fork_generation).map_err(|_| {
@@ -833,7 +837,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             session_id: request.session_id.clone(),
             source_session_id,
             head_revision: request.head_revision,
-            leaf_node_id: leaf_node_id.map(Into::into),
+            leaf_node_id: leaf_node_id.map(TryInto::try_into).transpose()?,
             observed_processes: Vec::new(),
         })
     }

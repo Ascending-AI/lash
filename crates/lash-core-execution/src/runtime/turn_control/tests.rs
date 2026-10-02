@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 fn address(label: &str) -> TurnAddress {
     TurnAddress::new(
-        format!("turn-control-{label}-{}", uuid::Uuid::new_v4()),
+        lash_sansio::SessionId::fixture(format!("turn-control-{label}-{}", uuid::Uuid::new_v4())),
         "turn-a",
     )
 }

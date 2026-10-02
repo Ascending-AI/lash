@@ -509,7 +509,7 @@ finish(await handle);
                 payload_schema: lash_core::JsonSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec::default(),
             }]),
-            &[SessionId::from(session_id.to_string())],
+            &[SessionId::fixture(session_id.to_string())],
         )
         .await
         .expect("register the recorded-intent signal target")

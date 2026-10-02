@@ -347,7 +347,7 @@ mod tests {
                 MessageRole::Assistant,
                 "first response",
                 Some(crate::MessageOrigin::TurnOutput {
-                    turn_id: TurnId::from(TURN_ID.to_string()),
+                    turn_id: TurnId::fixture(TURN_ID.to_string()),
                     source: crate::TurnOutputSource::Plugin {
                         plugin_id: "proto".to_string(),
                     },
@@ -383,7 +383,7 @@ mod tests {
         assert_eq!(
             terminal.origin,
             Some(crate::MessageOrigin::TurnOutput {
-                turn_id: TurnId::from(TURN_ID.to_string()),
+                turn_id: TurnId::fixture(TURN_ID.to_string()),
                 source: crate::TurnOutputSource::Runtime,
             })
         );
@@ -399,7 +399,7 @@ mod tests {
                 MessageRole::Assistant,
                 "first response",
                 Some(crate::MessageOrigin::TurnOutput {
-                    turn_id: TurnId::from(TURN_ID.to_string()),
+                    turn_id: TurnId::fixture(TURN_ID.to_string()),
                     source: crate::TurnOutputSource::Runtime,
                 }),
             ),

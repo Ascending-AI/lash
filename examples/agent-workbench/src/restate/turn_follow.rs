@@ -574,7 +574,7 @@ async fn session_is_idle(follows: &RootFollows, session: &lash::LashSession) -> 
 fn root_of_physical_turn(turn_id: &TurnId) -> TurnId {
     match turn_id.as_str().rsplit_once(":agent-frame:") {
         Some((root, ordinal)) if ordinal.parse::<u64>().is_ok_and(|ordinal| ordinal > 0) => {
-            TurnId::from(root)
+            TurnId::parse(root).unwrap_or_else(|_| turn_id.clone())
         }
         _ => turn_id.clone(),
     }

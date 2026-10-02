@@ -469,7 +469,7 @@ pub async fn definition_is_not_reclaimed_while_any_referrer_holds_it(
             crate::DefinitionAcquisition::Held(_)
         ));
         let frame = crate::ArtifactReferrer::FrameEnvironment(crate::FrameEnvironmentId::new(
-            crate::SessionId::from(format!("held-session-{name}-{}", world.tag)),
+            crate::SessionId::fixture(format!("held-session-{name}-{}", world.tag)),
             crate::FrameNodeId::new("frame-1").expect("a frame node id"),
         ));
         assert!(matches!(
@@ -789,7 +789,7 @@ pub async fn start_by_id_replays_exactly_at_after_publication_before_frame_commi
     assert!(world.held(&module_ref, &definition.id).await);
     // The replay reads the recorded id and commits the frame with its edges.
     let frame = crate::ArtifactReferrer::FrameEnvironment(crate::FrameEnvironmentId::new(
-        crate::SessionId::from(format!("before-frame-session-{}", world.tag)),
+        crate::SessionId::fixture(format!("before-frame-session-{}", world.tag)),
         crate::FrameNodeId::new("frame-1").expect("a frame node id"),
     ));
     assert!(matches!(

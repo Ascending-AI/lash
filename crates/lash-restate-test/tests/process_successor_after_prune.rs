@@ -209,7 +209,8 @@ async fn start_process(
     start_key: &str,
     payload: serde_json::Value,
 ) -> lash_core::ProcessId {
-    let admitted = lash_core::AdmittedScope::new(session.turn_scope(lash::TurnId::from(turn_id)));
+    let admitted =
+        lash_core::AdmittedScope::new(session.turn_scope(lash::TurnId::fixture(turn_id)));
     core.host_artifacts()
         .publish_process_env(&lash_core::HostArtifactPin::mint(), &process_env_spec())
         .await

@@ -251,7 +251,7 @@ impl ScriptedDriver {
         Ok(match next {
             Some(item) => AdmitVerdict::Admit(admission_body::admitted(
                 request.session.clone(),
-                TurnId::from(if ceded {
+                TurnId::fixture(if ceded {
                     format!("{item}@{}#{ordinal}", request.request.as_str())
                 } else {
                     item.clone()
@@ -2047,7 +2047,7 @@ async fn live_restate_drive_continuation_crash_redrives_one_successor() {
                 }
             })
         };
-        let session = SessionId::from(tag);
+        let session = SessionId::fixture(tag);
         backend.crash_on(cut.rule(&session));
         let (initial, successor) =
             schedule_continuation_case(&backend.lash_backend(), &driver, &session);
@@ -2092,7 +2092,9 @@ async fn live_restate_drive_continuation_crash_redrives_one_successor() {
             .filter(|invocation| {
                 invocation.target.starts_with(&format!(
                     "{TURN_DRIVER_SERVICE}/{}",
-                    lash_restate::turn_workflow_key(&session, &TurnId::from(""))
+                    lash_restate::turn_workflow_key(&session, &TurnId::from("r"))
+                        .strip_suffix('r')
+                        .expect("a turn key ends with its root")
                 )) && invocation.target.ends_with("/run")
             })
             .collect();

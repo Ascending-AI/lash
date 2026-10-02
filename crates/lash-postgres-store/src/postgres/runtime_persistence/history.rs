@@ -122,8 +122,8 @@ pub(super) async fn head_leaf_path_node(
         .map_err(store_sqlx_error)?
         .map(|(node_id, owner, generation)| {
             Ok(PathNode {
-                node_id: node_id.into(),
-                owner_session_id: owner.into(),
+                node_id: node_id.try_into()?,
+                owner_session_id: owner.try_into()?,
                 generation: u64_from_sql("SessionGraph", "generation", generation)?,
             })
         })
@@ -155,21 +155,21 @@ async fn owner_exit(tx: &mut PgTx<'_>, owner: &SessionId) -> Result<OwnerExit, S
         (Some(_), Some(id), Some(owner), Some(generation), Some(tombstoned)) => {
             OwnerExitParent::Node {
                 node: PathNode {
-                    node_id: id.into(),
-                    owner_session_id: owner.into(),
+                    node_id: id.try_into()?,
+                    owner_session_id: owner.try_into()?,
                     generation: u64_from_sql("SessionGraph", "generation", generation)?,
                 },
                 tombstoned,
             }
         }
         (Some(edge), ..) => OwnerExitParent::Missing {
-            node_id: edge.into(),
+            node_id: edge.try_into()?,
         },
     };
     let node_id: String = row.get("node_id");
     Ok(OwnerExit {
         lowest: Some(OwnerLowestNode {
-            node_id: node_id.into(),
+            node_id: node_id.try_into()?,
             generation: u64_from_sql("SessionGraph", "generation", row.get("generation"))?,
             parent,
         }),
@@ -198,8 +198,8 @@ fn row_path_node(row: &PgRow) -> Result<PathNode, StoreError> {
     let node_id: String = row.get("node_id");
     let owner: String = row.get("session_id");
     Ok(PathNode {
-        node_id: node_id.into(),
-        owner_session_id: owner.into(),
+        node_id: node_id.try_into()?,
+        owner_session_id: owner.try_into()?,
         generation: u64_from_sql("SessionGraph", "generation", row.get("generation"))?,
     })
 }
@@ -237,7 +237,7 @@ async fn lineage_stamp(
             let id: String = row.get(0);
             let generation: i64 = row.get(1);
             Ok((
-                SessionId::from(id),
+                SessionId::parse(id)?,
                 u64_from_sql("ForkLineage", "fork_generation", generation)?,
             ))
         })
@@ -260,7 +260,7 @@ async fn missing_anchor(
             .map_err(store_sqlx_error)?;
     Ok(StoreError::HistoryAnchorUnavailable {
         session_id: session_id.clone(),
-        node_id: node_id.into(),
+        node_id: lash_core_execution::NodeId::parse(node_id)?,
         reason: if tombstoned == Some(true) {
             AnchorUnavailable::Tombstoned
         } else {
@@ -396,7 +396,7 @@ impl SessionHistoryStore for PostgresStore {
                 }
                 if row.get::<String, _>("frame_node_id") != frame_id {
                     return Err(StoreError::InvalidWindowAnchor {
-                        frame_node_id: frame_id.clone().into(),
+                        frame_node_id: frame_id.clone().try_into()?,
                         violation:
                             lash_core_execution::store::WindowAnchorViolation::ForeignFramePointer,
                     });
@@ -438,7 +438,7 @@ impl SessionHistoryStore for PostgresStore {
             let anchor = lash_core_execution::session_graph::WindowAnchor {
                 frame_node_id,
                 generation: u64_from_sql("SessionGraph", "generation", first_generation)?,
-                external_parent: external_parent.map(Into::into),
+                external_parent: external_parent.map(TryInto::try_into).transpose()?,
                 previous_frame_node_id,
             };
             let graph = lash_core_execution::SessionGraph::from_window(nodes, leaf, anchor)?;
@@ -573,7 +573,7 @@ impl SessionHistoryStore for PostgresStore {
             let size = u64_from_sql("SessionGraph", "body_bytes", row.get("body_bytes"))?;
             if size > budget.max_bytes.get() && headers.is_empty() {
                 return Err(StoreError::HistoryNodeTooLarge {
-                    node_id: id.into(),
+                    node_id: id.try_into()?,
                     required_bytes: size,
                     max_bytes: budget.max_bytes.get(),
                 });
@@ -627,7 +627,7 @@ impl SessionHistoryStore for PostgresStore {
                 session_id.clone(),
                 pinned_leaf.clone(),
                 lineage,
-                parent.clone().into(),
+                parent.clone().try_into()?,
                 last.generation - 1,
             ))
         };
@@ -668,7 +668,7 @@ impl SessionHistoryStore for PostgresStore {
                 .fetch_add(1, Ordering::Relaxed);
             nodes.push(HistoryNode {
                 generation: header.generation,
-                owner_session_id: SessionId::from(header.owner),
+                owner_session_id: SessionId::parse(header.owner)?,
                 frame_node_id: lash_core_execution::FrameNodeId::new(header.frame)
                     .map_err(|error| corrupt("SessionGraph", error.to_string()))?,
                 body_bytes: header.size,
@@ -717,13 +717,13 @@ impl SessionHistoryStore for PostgresStore {
                 head_reaches(
                     &mut tx,
                     Some(PathNode {
-                        node_id: leaf_id.into(),
-                        owner_session_id: leaf_owner.into(),
+                        node_id: leaf_id.try_into()?,
+                        owner_session_id: leaf_owner.try_into()?,
                         generation: u64_from_sql("SessionGraph", "generation", leaf_generation)?,
                     }),
                     PathNode {
                         node_id: node_id.clone(),
-                        owner_session_id: owner.into(),
+                        owner_session_id: owner.try_into()?,
                         generation: u64_from_sql("SessionGraph", "generation", generation)?,
                     },
                 )
@@ -801,7 +801,7 @@ impl SessionHistoryStore for PostgresStore {
             last = Some(FailureEvidenceCursor::new(
                 session_id.clone(),
                 committed_at_ms,
-                turn_id.clone().into(),
+                turn_id.clone().try_into()?,
             ));
             settlements.push(lash_core_execution::TurnFailureSettlement {
                 turn_id,

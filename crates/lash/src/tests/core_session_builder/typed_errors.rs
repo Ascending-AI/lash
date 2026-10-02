@@ -278,15 +278,15 @@ async fn state_law(postgres: bool) -> Result<()> {
                 }))
                 .build(crate::testing::runtime_lease_owner())?;
             let created = core
-                .session(id.as_str())
+                .session(lash_core::SessionId::fixture(id.as_str()))
                 .create(crate::SessionCreation::root(mock_session_spec()))
                 .await;
             let error = if rematerialize {
                 created?;
-                let session = core.session(id.as_str()).open().await?;
+                let session = core.session(SessionId::fixture(id.clone())).open().await?;
                 session.park().await?;
                 mode_control.store(mode, Ordering::SeqCst);
-                core.session(id.as_str())
+                core.session(SessionId::fixture(id.clone()))
                     .open()
                     .await
                     .err()
@@ -295,7 +295,7 @@ async fn state_law(postgres: bool) -> Result<()> {
                 match created {
                     Err(error) => error,
                     Ok(_) => core
-                        .session(id.as_str())
+                        .session(SessionId::fixture(id.as_str()))
                         .open()
                         .await
                         .err()
@@ -375,7 +375,7 @@ async fn cleanup_law(postgres: bool) -> Result<()> {
         for step in 0..=4 {
             for transient in [false, true] {
                 let id = format!("typed-cleanup-{recorded}-{step}-{transient}");
-                let id = id.as_str();
+                let id = &lash_core::SessionId::fixture(id);
                 if recorded {
                     core.session(id)
                         .create(crate::SessionCreation::root(mock_session_spec()))

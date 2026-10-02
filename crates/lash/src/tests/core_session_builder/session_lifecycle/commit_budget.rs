@@ -233,7 +233,7 @@ async fn assert_budget_command_error(
     assert!(error.is_terminal(), "{error}");
     assert!(!error.is_retryable(), "{error}");
     let open = factory
-        .list_open_queued_work(&SessionId::from(session_id))
+        .list_open_queued_work(&SessionId::fixture(session_id))
         .await
         .expect("read the session's open work");
     assert!(

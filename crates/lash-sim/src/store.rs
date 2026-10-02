@@ -437,7 +437,7 @@ impl ModelStore {
                     as usize;
                 let runtime_contract = runtime_turn_contract(
                     &RuntimeTurnObservation {
-                        session_id: SessionId::from(event.actor_alias.clone()),
+                        session_id: SessionId::fixture(event.actor_alias.clone()),
                         turn_index,
                         assistant_message: text.clone(),
                         graph_node_count,
@@ -448,7 +448,7 @@ impl ModelStore {
                         agent_frame_invariant: Default::default(),
                         usage_invariant: Default::default(),
                     },
-                    &SessionId::from(event.actor_alias.clone()),
+                    &SessionId::fixture(event.actor_alias.clone()),
                     turn_index,
                     streamed,
                     provider_exchange_count,
@@ -485,7 +485,7 @@ impl ModelStore {
                 let frame_key = lash_core::FrameKey::from_caller_material("initial-frame")
                     .expect("non-empty initial frame material");
                 let frame_node_id = lash_core::facade_support::frame_node_id(
-                    &SessionId::from(event.actor_alias.clone()),
+                    &SessionId::fixture(event.actor_alias.clone()),
                     frame_key.as_str(),
                 );
                 // The model's runtime invariant facts are the same typed fact
@@ -888,7 +888,9 @@ impl ModelStore {
                     durable_key.clone(),
                 )
                 .expect("abstract durable effect carries an admitted effect scope"),
-                lash_core::RuntimeAttribution::for_session(event.actor_alias.clone()),
+                lash_core::RuntimeAttribution::for_session(SessionId::fixture(
+                    event.actor_alias.clone(),
+                )),
                 effect_id.clone(),
             ),
             lash_core::RuntimeEffectCommand::ToolAttempt {
@@ -915,7 +917,7 @@ impl ModelStore {
         let recorded_intents =
             lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::StartProcess(Box::new(
                 lash_core::StartProcessIntent {
-                    owner: lash_core::RuntimeOwner::Session(SessionId::from(
+                    owner: lash_core::RuntimeOwner::Session(SessionId::fixture(
                         event.actor_alias.clone(),
                     )),
                     declaration: lash_core::ProcessStartDeclaration::external(

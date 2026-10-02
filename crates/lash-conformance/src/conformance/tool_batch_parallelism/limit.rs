@@ -309,7 +309,7 @@ pub async fn tool_call_limit_refuses_the_same_call_across_a_crash(
     let schedule = limited(Schedule::GATED);
 
     let session_id =
-        lash_sansio::SessionId::from(format!("{prefix}-{}-limit-crash", producer.label));
+        lash_sansio::SessionId::fixture(format!("{prefix}-{}-limit-crash", producer.label));
     let admitted = admit(crate::ExecutionScope::turn(
         &session_id,
         tool_batch_turn_id(&session_id),
@@ -477,7 +477,7 @@ pub async fn tool_call_limit_counts_what_a_process_holds_across_a_worker_kill(
     let schedule = limited(Schedule::GATED);
     let state = Arc::new(ScenarioState::new(&plan, schedule, dependencies));
     let session_id =
-        lash_sansio::SessionId::from(format!("{prefix}-{}-limit-held", producer.label));
+        lash_sansio::SessionId::fixture(format!("{prefix}-{}-limit-held", producer.label));
 
     let kill = {
         let rendezvous = Arc::clone(&state.rendezvous);

@@ -21,7 +21,7 @@ async fn persisted_record_decode_store(
     storage: &PostgresStorage,
     label: &str,
 ) -> (SessionId, PostgresStore) {
-    let session_id = SessionId::from(format!(
+    let session_id = SessionId::fixture(format!(
         "persisted-record-decode-{label}:{}",
         uuid::Uuid::new_v4()
     ));
@@ -194,14 +194,14 @@ async fn seed_failure_evidence_session(
     let store = storage.store();
     store
         .admit_session(
-            &lash_core_execution::testing::store_fixtures::root_session_request(&SessionId::from(
-                session_id,
-            )),
+            &lash_core_execution::testing::store_fixtures::root_session_request(
+                &SessionId::fixture(session_id),
+            ),
         )
         .await
         .expect("bind receipt-refusal session");
     let state = lash_core_execution::RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: SessionId::fixture(session_id.to_string()),
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
@@ -394,7 +394,7 @@ async fn concurrent_first_commits_return_one_typed_head_revision_conflict() {
         .await
         .expect("connect concurrent first-commit storage");
     let factory = storage.session_store_factory();
-    let session_id = SessionId::from(format!(
+    let session_id = SessionId::fixture(format!(
         "postgres-first-commit-race:{}",
         uuid::Uuid::new_v4()
     ));
@@ -480,7 +480,7 @@ async fn postgres_graph_generation_uniqueness_is_typed() {
         .await
         .expect("connect graph-generation error storage");
     let nonce = uuid::Uuid::new_v4().simple().to_string();
-    let session_id = SessionId::from(format!("postgres-generation-collision:{nonce}"));
+    let session_id = SessionId::fixture(format!("postgres-generation-collision:{nonce}"));
     let first_node = format!("generation-node-a:{nonce}");
     let second_node = format!("generation-node-b:{nonce}");
     sqlx::query(
@@ -503,7 +503,12 @@ async fn postgres_graph_generation_uniqueness_is_typed() {
     .execute(storage.pool())
     .await
     .expect_err("duplicate generation must violate Postgres uniqueness");
-    let error = graph_node_insert_error(raw, &session_id, 3, &second_node);
+    let error = graph_node_insert_error(
+        raw,
+        &session_id,
+        3,
+        &lash_core_execution::NodeId::fixture(second_node.as_str()),
+    );
     assert!(matches!(
         error,
         StoreError::GraphGenerationCollision {
@@ -529,7 +534,7 @@ async fn postgres_delete_permanently_fences_stale_handles_and_session_id_reuse()
         .await
         .expect("connect delete fence storage");
     let factory = storage.store();
-    let session_id = SessionId::from(format!("postgres-delete-fence:{}", uuid::Uuid::new_v4()));
+    let session_id = SessionId::fixture(format!("postgres-delete-fence:{}", uuid::Uuid::new_v4()));
     let request = SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
@@ -592,7 +597,7 @@ lash_conformance::checkpoint_admission_probe_tests!({
     let storage = PostgresStorage::connect(&database_url)
         .await
         .expect("connect checkpoint counter storage");
-    let session_id = SessionId::from(format!(
+    let session_id = SessionId::fixture(format!(
         "postgres-checkpoint-counter:{}",
         std::process::id()
     ));
@@ -639,7 +644,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
     let storage = PostgresStorage::connect(&database_url)
         .await
         .expect("connect attachment fence database");
-    let session_id = SessionId::from(format!(
+    let session_id = SessionId::fixture(format!(
         "postgres-attachment-fence-race:{}",
         std::process::id()
     ));
@@ -903,7 +908,7 @@ async fn admitted_input_fixture(
     lash_core_execution::RuntimeSessionState,
     lash_core_execution::store::RootAdmission,
 ) {
-    let session_id = SessionId::from(format!("{label}:{}", uuid::Uuid::new_v4()));
+    let session_id = SessionId::fixture(format!("{label}:{}", uuid::Uuid::new_v4()));
     let store = storage.store();
     store
         .admit_session(
@@ -1355,7 +1360,7 @@ async fn root_admission_and_head_commit_round_trips_are_pinned() {
         .expect("enable pg_stat_statements for the round-trip pin");
 
     let nonce = uuid::Uuid::new_v4().simple().to_string();
-    let session_id = SessionId::from(format!("statement-pin-session:{nonce}"));
+    let session_id = SessionId::fixture(format!("statement-pin-session:{nonce}"));
     let store = storage.store();
     store
         .admit_session(
@@ -1626,7 +1631,7 @@ async fn postgres_gc_sweep_statement_count_is_dead_set_invariant_when_configured
     // One committed session: one rooted checkpoint manifest plus its
     // component blobs, all retained.
     let nonce = uuid::Uuid::new_v4().simple().to_string();
-    let session_id = SessionId::from(format!("gc-sweep-pin:{nonce}"));
+    let session_id = SessionId::fixture(format!("gc-sweep-pin:{nonce}"));
     let store = storage.store();
     store
         .admit_session(
@@ -1781,7 +1786,7 @@ async fn postgres_batch_session_delete_writes_one_cancel_event_per_park() {
 
     let mut session_ids = Vec::new();
     for label in ["batch-park-a", "batch-park-b"] {
-        let session_id = SessionId::from(format!("{label}:{nonce}"));
+        let session_id = SessionId::fixture(format!("{label}:{nonce}"));
         let request = SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
@@ -1812,7 +1817,7 @@ async fn postgres_batch_session_delete_writes_one_cancel_event_per_park() {
         store
             .record_turn_park(&lash_core_execution::store::TurnParkWrite {
                 session_id: session_id.clone(),
-                turn_id: lash_core_execution::TurnId::from(format!("{label}-turn")),
+                turn_id: lash_core_execution::TurnId::fixture(format!("{label}-turn")),
                 reason: lash_core_execution::store::ParkReason::ReplayDivergence {
                     message: format!("{label} diverged"),
                 },

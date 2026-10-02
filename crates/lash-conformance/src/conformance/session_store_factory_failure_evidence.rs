@@ -86,7 +86,7 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
     let policy = request.config.session_policy();
     host.providers.models = crate::testing::llm_profiles_serving(&policy, provider);
     let state = crate::RuntimeSessionState {
-        session_id: SessionId::from(SESSION_ID.to_string()),
+        session_id: SessionId::fixture(SESSION_ID.to_string()),
         policy: policy.clone(),
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
@@ -109,7 +109,7 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
         .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, turn_id)))
         .expect("scope failure-evidence conformance turn");
     let mut input = crate::TurnInput::text("trigger a paid mid-stream failure");
-    input.trace_turn_id = Some(TurnId::from(turn_id.to_string()));
+    input.trace_turn_id = Some(TurnId::fixture(turn_id.to_string()));
     let turn = runtime
         .drive_turn(
             input,
@@ -128,7 +128,7 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
         )))
         .expect("scope later failure-evidence conformance turn");
     let mut later_input = crate::TurnInput::text("trigger a later paid mid-stream failure");
-    later_input.trace_turn_id = Some(TurnId::from(later_turn_id.to_string()));
+    later_input.trace_turn_id = Some(TurnId::fixture(later_turn_id.to_string()));
     let later_turn = runtime
         .drive_turn(
             later_input,

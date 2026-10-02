@@ -136,7 +136,7 @@ async fn drive(
     let handler = double
         .open_handler(AdmittedScope::turn(
             SessionId::from("root"),
-            TurnId::from(turn_id),
+            TurnId::fixture(turn_id),
         ))
         .await
         .expect("open the scope's handler");

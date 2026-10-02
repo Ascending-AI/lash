@@ -105,7 +105,7 @@ pub(super) async fn expected(world: &CrashWorld, ledger: &Ledger) -> Result<Expe
         .filter(|input| input.admission == Admission::Known && live.contains(&input.session))
         .map(|input| AcceptedInput {
             session: input.session.clone(),
-            root: TurnId::from(input.root.as_str()),
+            root: TurnId::fixture(input.root.as_str()),
         })
         .collect();
     let mut closed_scopes: Vec<ScopeId> = ledger.child_scopes.clone();
@@ -286,7 +286,7 @@ fn roots_closed(ledger: &Ledger, live: &[SessionId]) -> CustomCheck {
                 .obligation_ledger(ObligationKind::ScopeClose);
             let mut violations = Vec::new();
             for (session, root) in roots {
-                let turn = TurnId::from(root.as_str());
+                let turn = TurnId::fixture(root.as_str());
                 match factory.root_terminal(&session, &turn).await {
                     Ok(Some(_)) => {
                         let id = lash_core::store::ObligationKey::ScopeClose {

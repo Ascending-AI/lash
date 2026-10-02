@@ -133,7 +133,7 @@ fn recovery_lease() -> lash::RecoveryLeaseConfig {
 
 /// The session a case runs, unique per seed.
 pub(crate) fn session_name(seam: Seam, seed: u64) -> lash_core::SessionId {
-    lash_core::SessionId::from(format!("crash-{}-{seed:016x}", seam.kind_label()))
+    lash_core::SessionId::fixture(format!("crash-{}-{seed:016x}", seam.kind_label()))
 }
 
 /// Wait for the armed crash point and, when it fired, kill the deployment
@@ -176,7 +176,7 @@ async fn send_text(
                 let session = crate::open_created_session(MODEL, &core, session).await?;
                 session
                     .send(lash::TurnInput::text(text))
-                    .id(root.as_str())
+                    .id(lash_core::TurnId::fixture(root.clone()))
                     .await
                     .map(|_| ())
             })

@@ -376,7 +376,7 @@ pub async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
     )
     .await;
     let mut state = RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: SessionId::fixture(session_id.to_string()),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
@@ -1185,7 +1185,7 @@ pub async fn checkpoint_admission_probe_transaction_counts(
     session_id: &SessionId,
     counts: impl Fn() -> (usize, usize),
 ) {
-    let turn_id = crate::TurnId::from(format!("{session_id}:counter-turn"));
+    let turn_id = crate::TurnId::fixture(format!("{session_id}:counter-turn"));
     let fence = seal_drive_fence_for_test(
         &store,
         session_id,
@@ -1250,7 +1250,7 @@ pub async fn checkpoint_admission_probe_transaction_counts(
         .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
             session_id,
             crate::TurnInputIngress::active_turn(
-                turn_id.to_string(),
+                TurnId::fixture(turn_id.to_string()),
                 crate::TurnInputCheckpointBoundary::AfterWork,
             ),
             crate::TurnInput::text("pending checkpoint input"),
@@ -1426,8 +1426,8 @@ pub(super) fn sample_session_node(
         |_| id.to_string(),
     );
     SessionNodeRecord {
-        node_id: node_id.into(),
-        parent_node_id: parent.map(lash_core::NodeId::from),
+        node_id: lash_core::NodeId::fixture(node_id),
+        parent_node_id: parent.map(lash_core::NodeId::fixture),
         timestamp: "1970-01-01T00:00:00Z".to_string(),
         payload: if parent.is_none() {
             SessionNodePayload::FrameOpen {

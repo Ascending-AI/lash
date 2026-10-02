@@ -27,8 +27,8 @@ pub async fn timer_and_durable_wait_children_are_admitted_beside_a_tool_child(
     fixture: &ToolChildLawFixture,
     prefix: &str,
 ) {
-    let session_id = crate::SessionId::from(format!("{prefix}-siblings"));
-    let turn_id = crate::TurnId::from(format!("{prefix}-siblings-turn"));
+    let session_id = crate::SessionId::fixture(format!("{prefix}-siblings"));
+    let turn_id = crate::TurnId::fixture(format!("{prefix}-siblings-turn"));
     let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id.clone());
     let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
         .expect("a turn scope derives an opener");

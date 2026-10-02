@@ -19,16 +19,16 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
             ..request.clone()
         }
     };
-    let empty = session_store_request(
-        &SessionId::from(""),
+    let malformed = session_store_request(
+        &SessionId::from("nul\0session"),
         "admission-model",
         crate::SessionRelation::Root,
     );
     assert!(matches!(
         factory
-            .admit_session(&empty)
+            .admit_session(&malformed)
             .await
-            .expect_err("empty session id must be rejected"),
+            .expect_err("a session id holding NUL must be rejected"),
         crate::StoreError::InvalidSessionId { .. }
     ));
 

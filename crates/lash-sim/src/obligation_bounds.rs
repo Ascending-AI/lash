@@ -178,7 +178,7 @@ impl World {
             .await
             .expect("sim memory store set");
         let factory = stores.session_store_factory();
-        let session = SessionId::from(format!("obligation-bounds-{name}"));
+        let session = SessionId::fixture(format!("obligation-bounds-{name}"));
         factory
             .admit_session(&lash_core::SessionStoreCreateRequest {
                 session_id: session.clone(),

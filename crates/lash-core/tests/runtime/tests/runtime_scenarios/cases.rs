@@ -545,7 +545,7 @@ impl lash_core::ToolProvider for RuntimeScenarioIntentProvider {
             lash_core::ToolOutcomeDone::ok(serde_json::json!({"provider": "done"})),
             lash_core::ToolIntents::v3(vec![
                 lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-                    owner: lash_core::RuntimeOwner::Session(SessionId::from(session_id.clone())),
+                    owner: lash_core::RuntimeOwner::Session(SessionId::fixture(session_id.clone())),
                     declaration: lash_core::ProcessStartDeclaration::external(
                         lash_core::ProcessOriginator::host_scoped("runtime-scenario"),
                         serde_json::json!({"kind": "start"}),
@@ -553,19 +553,19 @@ impl lash_core::ToolProvider for RuntimeScenarioIntentProvider {
                     ),
                 })),
                 lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
-                    owner: lash_core::RuntimeOwner::Session(SessionId::from(session_id.clone())),
+                    owner: lash_core::RuntimeOwner::Session(SessionId::fixture(session_id.clone())),
                     process_id: self.target.get().expect("the target is registered").clone(),
                     signal_name: "resume".to_string(),
                     payload: serde_json::json!({"kind": "signal"}),
                 }),
                 lash_core::ToolIntent::EmitProcessEvent(lash_core::EmitProcessEventIntent {
-                    owner: lash_core::RuntimeOwner::Session(SessionId::from(session_id.clone())),
+                    owner: lash_core::RuntimeOwner::Session(SessionId::fixture(session_id.clone())),
                     process_id: self.target.get().expect("the target is registered").clone(),
                     event_type: "runtime.intent.note".to_string(),
                     payload: serde_json::json!({"kind": "emit"}),
                 }),
                 lash_core::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
-                    owner: lash_core::RuntimeOwner::Session(SessionId::from(session_id)),
+                    owner: lash_core::RuntimeOwner::Session(SessionId::fixture(session_id)),
                     process_id: self.target.get().expect("the target is registered").clone(),
                 }),
             ]),

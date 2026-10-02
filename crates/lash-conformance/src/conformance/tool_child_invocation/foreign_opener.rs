@@ -32,15 +32,15 @@ pub async fn a_foreign_opener_cannot_drive_another_openers_child(
     fixture: &ToolChildLawFixture,
     prefix: &str,
 ) {
-    let session_a = crate::SessionId::from(format!("{prefix}-mismatch-session-a"));
-    let session_b = crate::SessionId::from(format!("{prefix}-mismatch-session-b"));
+    let session_a = crate::SessionId::fixture(format!("{prefix}-mismatch-session-a"));
+    let session_b = crate::SessionId::fixture(format!("{prefix}-mismatch-session-b"));
     let scope_a = crate::ExecutionScope::turn(
         session_a.clone(),
-        crate::TurnId::from(format!("{prefix}-mismatch-turn-a")),
+        crate::TurnId::fixture(format!("{prefix}-mismatch-turn-a")),
     );
     let scope_b = crate::ExecutionScope::turn(
         session_b.clone(),
-        crate::TurnId::from(format!("{prefix}-mismatch-turn-b")),
+        crate::TurnId::fixture(format!("{prefix}-mismatch-turn-b")),
     );
     let opener_a = crate::EffectOpener::for_scope(&crate::admit(scope_a.clone()))
         .expect("a turn scope derives an opener");

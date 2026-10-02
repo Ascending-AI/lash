@@ -224,7 +224,6 @@ pub enum RuntimeErrorCode {
     EffectScopeNotQuiescent,
     EffectGroupLifecyclePinned,
     AwaitEventScopeNotRetirable,
-    InvalidAwaitEventSessionId,
     InvalidAwaitEventWaitIdentity,
     InvalidTurnCancelRequest,
     LiveReplay,
@@ -675,7 +674,6 @@ impl RuntimeErrorCode {
             Self::EffectScopeNotQuiescent => "effect_scope_not_quiescent",
             Self::EffectGroupLifecyclePinned => "effect_group_lifecycle_pinned",
             Self::AwaitEventScopeNotRetirable => "await_event_scope_not_retirable",
-            Self::InvalidAwaitEventSessionId => "invalid_await_event_session_id",
             Self::InvalidAwaitEventWaitIdentity => "invalid_await_event_wait_identity",
             Self::InvalidTurnCancelRequest => "invalid_turn_cancel_request",
             Self::LiveReplay => "live_replay",
@@ -970,7 +968,6 @@ impl RuntimeErrorCode {
             "effect_scope_not_quiescent" => Self::EffectScopeNotQuiescent,
             "effect_group_lifecycle_pinned" => Self::EffectGroupLifecyclePinned,
             "await_event_scope_not_retirable" => Self::AwaitEventScopeNotRetirable,
-            "invalid_await_event_session_id" => Self::InvalidAwaitEventSessionId,
             "invalid_await_event_wait_identity" => Self::InvalidAwaitEventWaitIdentity,
             "invalid_turn_cancel_request" => Self::InvalidTurnCancelRequest,
             "live_replay" => Self::LiveReplay,
@@ -1417,7 +1414,7 @@ impl RuntimeError {
 
     /// Extracts the deleted session ID for effect-host implementors only from structured
     /// session-deletion causes, returning `None` for all other errors.
-    pub fn deleted_session_id(&self) -> Option<&str> {
+    pub fn deleted_session_id(&self) -> Option<&crate::SessionId> {
         match self.cause.as_ref()? {
             RuntimeErrorCause::SessionDeleted { session_id } => Some(session_id),
             RuntimeErrorCause::VmWorker { .. }
@@ -1843,6 +1840,20 @@ impl From<RuntimeError> for RuntimeEffectControllerError {
 impl From<lash_sansio::EffectIdentityError> for RuntimeEffectControllerError {
     fn from(error: lash_sansio::EffectIdentityError) -> Self {
         RuntimeError::from(error).into()
+    }
+}
+
+/// Blank text offered as an identity is the store's refusal of it, with the
+/// class the store gives that refusal.
+impl From<crate::BlankIdentity> for RuntimeError {
+    fn from(error: crate::BlankIdentity) -> Self {
+        crate::StoreError::from(error).runtime_error()
+    }
+}
+
+impl From<crate::BlankIdentity> for RuntimeEffectControllerError {
+    fn from(error: crate::BlankIdentity) -> Self {
+        crate::StoreError::from(error).into()
     }
 }
 

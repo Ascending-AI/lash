@@ -15,8 +15,8 @@ use lash_sqlite_store::SqliteProcessRegistry;
 
 fn turn_scope(session: &str, turn: &str) -> lash_core_execution::ScopeId {
     lash_core_execution::ScopeId::turn(
-        lash_sansio::SessionId::from(session),
-        lash_core_execution::TurnId::from(turn),
+        lash_sansio::SessionId::fixture(session),
+        lash_core_execution::TurnId::fixture(turn),
     )
 }
 

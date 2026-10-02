@@ -78,7 +78,7 @@ async fn negative_session_head_revision(handles: FenceIntegrityHandles) {
         .await
         .expect("admit negative-head session");
     let state = crate::RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: SessionId::fixture(session_id.to_string()),
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
@@ -90,7 +90,7 @@ async fn negative_session_head_revision(handles: FenceIntegrityHandles) {
         .await
         .expect("materialize negative-head session row");
     let target = FenceIntegrityTarget::SessionHeadRevision {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: SessionId::fixture(session_id.to_string()),
     };
     handles.injector.inject_raw_value(&target, -1).await;
     let before = handles.injector.observe_raw_value(&target).await;

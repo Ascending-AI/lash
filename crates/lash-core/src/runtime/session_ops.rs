@@ -141,12 +141,7 @@ impl LashRuntime {
             .map_err(|error| SessionError::Plugin(crate::PluginError::Runtime(error)))?;
         Ok(crate::AppendSessionNodesOutcome::Appended {
             node_ids,
-            leaf_node_id: self
-                .state
-                .session_graph
-                .leaf_node_id
-                .clone()
-                .unwrap_or_else(|| crate::NodeId::new(String::new())),
+            leaf_node_id: self.state.session_graph.leaf_node_id.clone(),
         })
     }
 

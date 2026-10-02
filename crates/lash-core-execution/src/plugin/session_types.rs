@@ -306,7 +306,7 @@ pub struct SessionCreateRequest {
 impl SessionCreateRequest {
     pub fn root(start: SessionStartPoint, plugin_options: PluginOptions) -> Self {
         Self {
-            session_id: Some(SessionId::from(uuid::Uuid::new_v4().to_string())),
+            session_id: Some(SessionId::from_uuid(uuid::Uuid::new_v4().as_u128())),
             relation: SessionRelation::Root,
             start,
             policy: None,
@@ -327,7 +327,7 @@ impl SessionCreateRequest {
         plugin_options: PluginOptions,
     ) -> Self {
         Self {
-            session_id: Some(SessionId::from(uuid::Uuid::new_v4().to_string())),
+            session_id: Some(SessionId::from_uuid(uuid::Uuid::new_v4().as_u128())),
             relation: SessionRelation::Child {
                 parent_session_id: parent_session_id.into(),
                 caused_by: None,
@@ -352,7 +352,7 @@ impl SessionCreateRequest {
         plugin_options: PluginOptions,
     ) -> Self {
         Self {
-            session_id: Some(SessionId::from(uuid::Uuid::new_v4().to_string())),
+            session_id: Some(SessionId::from_uuid(uuid::Uuid::new_v4().as_u128())),
             relation: SessionRelation::Child {
                 parent_session_id: parent_session_id.into(),
                 caused_by: None,

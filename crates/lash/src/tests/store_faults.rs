@@ -60,7 +60,7 @@ async fn refusal_of(
     id: &str,
 ) -> EmbedError {
     let sent = tokio::time::timeout(ANSWERS_WITHIN, async {
-        core.session(id)
+        core.session(SessionId::fixture(id.to_string()))
             .durable()
             .await?
             .send(TurnInput::text("to a session that cannot open"))
@@ -267,7 +267,10 @@ async fn a_send_whose_drive_meets_a_refusing_catalog_is_answered(
     });
     let core = builder(backend.into()).build(crate::testing::runtime_lease_owner())?;
     crate::tests::create_catalog_session(&core, &id).await?;
-    let durable = core.session(id.as_str()).durable().await?;
+    let durable = core
+        .session(SessionId::fixture(id.clone()))
+        .durable()
+        .await?;
     // The catalog refuses from before the send, so no drive opens the
     // session ahead of the refusal; the facade's own acquisition was made
     // above.

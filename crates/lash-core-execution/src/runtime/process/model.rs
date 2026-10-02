@@ -599,12 +599,6 @@ impl SessionScope {
             None => SessionScopeId::new(format!("session:{}", self.session_id)),
         }
     }
-
-    /// Lets store, effect-host, and protocol implementors test whether this `SessionScope` is empty
-    /// while materializing, executing, or persisting a session turn.
-    pub fn is_empty(&self) -> bool {
-        self.session_id.is_empty()
-    }
 }
 
 /// Serializable process spec used to start or recover a runtime process.

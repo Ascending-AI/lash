@@ -379,7 +379,7 @@ mod tests {
         commit.graph = super::super::GraphAppend::Extend {
             nodes: (0..=RuntimeCommit::MAX_COMMIT_NODE_COUNT)
                 .map(|index| crate::SessionNodeRecord {
-                    node_id: format!("node-{index}").into(),
+                    node_id: crate::NodeId::fixture(format!("node-{index}")),
                     ..node.clone()
                 })
                 .collect(),

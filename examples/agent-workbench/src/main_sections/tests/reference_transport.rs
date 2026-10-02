@@ -209,7 +209,7 @@ impl ReferenceTransport {
                 .as_ref()
                 .map(|ChatMessageProvenance::TurnOutput { turn_id }| turn_id.clone())
                 .or_else(|| {
-                    workbench_turn_id_from_assistant_message_id(&message.id).map(TurnId::from)
+                    workbench_turn_id_from_assistant_message_id(&message.id).map(TurnId::fixture)
                 })
             else {
                 continue;

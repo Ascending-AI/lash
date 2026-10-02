@@ -115,10 +115,10 @@ impl Stage {
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
     async fn new(fixture: &ToolChildLawFixture, name: &str, read: EnvRead) -> Self {
-        let session_id = crate::SessionId::from(name.to_string());
+        let session_id = crate::SessionId::fixture(name.to_string());
         let scope = crate::ExecutionScope::turn(
             session_id.clone(),
-            crate::TurnId::from(format!("{name}-turn")),
+            crate::TurnId::fixture(format!("{name}-turn")),
         );
         let world = (fixture.make_world)(ToolChildWorldSpec {
             lease_ttl_ms: LIVE_LEASE_MS,

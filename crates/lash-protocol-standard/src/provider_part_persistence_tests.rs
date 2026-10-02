@@ -161,7 +161,7 @@ async fn persisted_provider_response(
                 "protocol-standard-test-boot",
             ),
         )
-        .with_session_id(session_id)
+        .with_session_id(lash_core::SessionId::fixture(session_id))
         .with_policy(policy)
         .with_plugin_factories(factories)
         .build(),

@@ -572,7 +572,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                     let run_spec = admit_run_spec_tx(&mut tx, draft, &mut interned).await?;
                     sqlx::query(sql.pending_inputs.insert_new.sql())
                         .bind(enqueue_seq)
-                        .bind(&input_id)
+                        .bind(input_id.as_str())
                         .bind(session_id.as_str())
                         .bind(&draft.source_key)
                         .bind(encode_json(&draft.ingress)?)
@@ -606,9 +606,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                 crate::revisions::pin_tx(
                     &mut tx,
                     session_id,
-                    &lash_core_execution::Target::Input(lash_core_execution::InputId::from(
-                        input_id.as_str(),
-                    )),
+                    &lash_core_execution::Target::Input(input_id.clone()),
                 )
                 .await?;
             }
@@ -799,7 +797,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
             if let Some(row) =
                 load_pending_turn_input_row_by_target_tx(&mut tx, session_id, target, false).await?
             {
-                covered.insert(lash_core_execution::InputId::from(row.input_id));
+                covered.insert(lash_core_execution::InputId::parse(row.input_id)?);
             }
         }
         lock_cancel_rows_in_queue_order(&mut tx, session_id, CancelLockScope::Targets(&covered))

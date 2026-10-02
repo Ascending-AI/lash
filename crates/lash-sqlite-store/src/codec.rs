@@ -40,6 +40,18 @@ fn blob_envelope_admits(version: u32) -> bool {
     )
 }
 
+/// Read a stored identity: a column this store only ever wrote from a typed
+/// id, so blank text is corrupt stored data. The refusal travels typed, as the
+/// store error [`sqlite_error`](crate::sqlite_error) unwraps.
+pub(crate) fn sql_identity<T>(value: String) -> rusqlite::Result<T>
+where
+    T: std::str::FromStr<Err = lash_sansio::BlankIdentity>,
+{
+    value
+        .parse()
+        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(StoreError::from(error))))
+}
+
 /// Read a stored process id: a column this store only ever wrote from a
 /// minted id, so any other spelling is corrupt stored data.
 pub(crate) fn sql_process_id(
@@ -230,7 +242,7 @@ pub(crate) fn try_load_session_head_meta_from_conn(
         && current_frame_node_id.is_none()
     {
         return Err(StoreError::MissingFrameOpenAncestor {
-            leaf_node_id: leaf.clone().into(),
+            leaf_node_id: leaf.clone().try_into()?,
         });
     }
     let current_frame_node_id = current_frame_node_id
@@ -248,7 +260,9 @@ pub(crate) fn try_load_session_head_meta_from_conn(
                 )
             })?,
             checkpoint_ref.map(Into::into),
-            leaf_node_id.map(lash_core_execution::NodeId::from),
+            leaf_node_id
+                .map(lash_core_execution::NodeId::parse)
+                .transpose()?,
             current_frame_node_id,
         )?
         .with_pending_follow_on(pending_follow_on),

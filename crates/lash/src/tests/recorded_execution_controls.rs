@@ -75,7 +75,7 @@ fn core_over(backend: lash_core::Backend, provider: ProviderHandle) -> Result<La
 
 /// Create `id` with `budget` recorded as its turn budget.
 async fn create_with_budget(core: &LashCore, id: &str, budget: crate::TurnBudget) -> Result<()> {
-    core.session(id)
+    core.session(SessionId::fixture(id.to_string()))
         .create(crate::SessionCreation {
             spec: mock_session_spec().turn_budget(budget),
             parent: None,
@@ -109,7 +109,7 @@ fn stopped_at(turns: usize) -> (TurnOutcome, usize) {
 /// Send `text` to `id` through its Durable Session: no host runtime is open,
 /// so the engine opens the session itself to drive the root.
 async fn engine_driven_turn(core: &LashCore, id: &str, text: &str) -> Result<crate::TurnOutput> {
-    core.session(id)
+    core.session(SessionId::fixture(id.to_string()))
         .durable()
         .await?
         .send(TurnInput::text(text))
@@ -203,7 +203,7 @@ async fn budgets_survive_engine_reopen_under_always_replay() -> Result<()> {
 async fn recorded_config(core: &LashCore, id: &str) -> Result<lash_core::PersistedSessionConfig> {
     Ok(lash_core::SessionCommitStore::load_session_head_meta(
         core.store_factory.as_ref(),
-        &SessionId::from(id),
+        &SessionId::fixture(id),
     )
     .await?
     .expect("persisted head")
@@ -213,7 +213,7 @@ async fn recorded_config(core: &LashCore, id: &str) -> Result<lash_core::Persist
 /// The config a fresh open of `id` runs under: what the engine's reopen
 /// loads from the store.
 async fn reopened_config(core: &LashCore, id: &str) -> Result<lash_core::PersistedSessionConfig> {
-    let id = SessionId::from(id);
+    let id = SessionId::fixture(id);
     let store = crate::session::resolve_existing_session(&core.store_factory, &id).await?;
     let state = crate::session::load_state_from_store(&id, &store).await?;
     Ok(lash_core::PersistedSessionConfig::from(&state.policy))
@@ -347,7 +347,10 @@ async fn created_session(id: &str) -> Result<(LashCore, crate::LashSession)> {
     let calls = Arc::new(AtomicUsize::new(0));
     let core = core_over(double_backend().await, looping_provider(&calls))?;
     create_with_budget(&core, id, crate::TurnBudget::Unbounded).await?;
-    let session = core.session(id).open().await?;
+    let session = core
+        .session(SessionId::fixture(id.to_string()))
+        .open()
+        .await?;
     Ok((core, session))
 }
 
@@ -452,7 +455,10 @@ where
         "a fresh open runs under the change"
     );
 
-    let session = core.session(id).open().await?;
+    let session = core
+        .session(SessionId::fixture(id.to_string()))
+        .open()
+        .await?;
     let stale = apply(
         &session,
         "stale",
@@ -714,7 +720,10 @@ async fn a_recorded_budget_bounds_every_root_after_an_engine_restart(
         )
         .await?;
         create_with_budget(&creator, &commanded, crate::TurnBudget::Unbounded).await?;
-        let session = creator.session(commanded.as_str()).open().await?;
+        let session = creator
+            .session(SessionId::fixture(commanded.clone()))
+            .open()
+            .await?;
         let revision = session.admin().config().revision().await?;
         let outcome = apply(
             &session,
@@ -748,7 +757,7 @@ async fn a_recorded_budget_bounds_every_root_after_an_engine_restart(
             "{id}: the engine's reopen after the restart runs the recorded budget"
         );
         eprintln!("{PROGRESS_MARKER}{id}: the engine-driven root stopped at its budget");
-        let opened = unbounded.session(id).open().await?;
+        let opened = unbounded.session(SessionId::fixture(id)).open().await?;
         let output = opened
             .send(TurnInput::text("look it all up again"))
             .output()

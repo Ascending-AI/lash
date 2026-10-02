@@ -509,7 +509,7 @@ async fn run_lane(
     timing: Arc<ProviderTiming>,
     holds: Option<Arc<HoldRegistry>>,
 ) -> Result<Vec<Sample>> {
-    let session_id = SessionId::from(format!("latency-{}-{lane}", spec.name));
+    let session_id = SessionId::fixture(format!("latency-{}-{lane}", spec.name));
     // Each lane names a fresh session.
     let durable = topology
         .core

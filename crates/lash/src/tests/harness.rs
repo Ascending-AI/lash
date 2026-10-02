@@ -171,7 +171,7 @@ pub(crate) fn held_double(core: &crate::LashCore) -> Option<lash_restate_test::R
 pub(crate) async fn settle_session_drive(core: &crate::LashCore, session: &str) {
     held_double(core)
         .expect("the core runs on a held double")
-        .settle_session_drive(&lash_core::SessionId::from(session))
+        .settle_session_drive(&lash_core::SessionId::fixture(session))
         .await;
 }
 

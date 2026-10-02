@@ -10,7 +10,7 @@ use super::*;
 pub enum RemoteEffectOpener {
     Turn {
         session_id: SessionId,
-        turn_id: String,
+        turn_id: TurnId,
     },
     SessionOperation {
         session_id: SessionId,
@@ -65,35 +65,11 @@ impl RemoteScopeId {
         field: &'static str,
     ) -> Result<(), RemoteProtocolError> {
         match self {
-            Self::Opener(RemoteEffectOpener::Turn {
-                session_id,
-                turn_id,
-            }) => {
-                require_non_empty(type_name, field, session_id)?;
-                require_non_empty(type_name, field, turn_id)
-            }
-            Self::Opener(RemoteEffectOpener::SessionOperation {
-                session_id,
-                operation_id,
-            }) => {
-                require_non_empty(type_name, field, session_id)?;
+            Self::Opener(RemoteEffectOpener::SessionOperation { operation_id, .. }) => {
                 require_non_empty(type_name, field, operation_id)
             }
-            Self::Opener(RemoteEffectOpener::Process { process_id }) => {
-                require_non_empty(type_name, field, process_id)
-            }
-            Self::Session(session_id) => require_non_empty(type_name, field, session_id),
-        }
-    }
-}
-
-impl RemoteStartLifetime {
-    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
-        match self {
-            Self::Detached => Ok(()),
-            Self::UntilSession { session_id } => {
-                require_non_empty(type_name, "lifetime.session_id", session_id)
-            }
+            Self::Opener(RemoteEffectOpener::Turn { .. } | RemoteEffectOpener::Process { .. })
+            | Self::Session(_) => Ok(()),
         }
     }
 }

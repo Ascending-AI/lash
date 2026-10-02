@@ -329,7 +329,7 @@ pub(super) async fn a_session_scope_closes_only_through_its_close_row(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     let session = SessionId::from("session-close-session");
-    let originator = SessionScope::new(session.as_str());
+    let originator = SessionScope::new(session.clone());
     let turn = lash_core::ScopeId::turn(session.clone(), crate::TurnId::from("session-close-turn"));
     let session_scope = lash_core::ScopeId::session(session.clone());
     let registration = || {

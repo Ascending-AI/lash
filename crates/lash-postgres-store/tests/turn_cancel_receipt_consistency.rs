@@ -70,7 +70,7 @@ async fn seed_cancelled_inputs(
                 TurnInputIngress::NextTurn,
                 TurnInput::text("first exact payload"),
             )
-            .with_input_id(format!("{session_id}:first")),
+            .with_input_id(lash_core::InputId::fixture(format!("{session_id}:first"))),
         )
         .await
         .expect("seed first affected input");
@@ -81,7 +81,7 @@ async fn seed_cancelled_inputs(
                 TurnInputIngress::NextTurn,
                 TurnInput::text("second exact payload"),
             )
-            .with_input_id(format!("{session_id}:second")),
+            .with_input_id(lash_core::InputId::fixture(format!("{session_id}:second"))),
         )
         .await
         .expect("seed second affected input");

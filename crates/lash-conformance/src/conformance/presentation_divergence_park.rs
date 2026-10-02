@@ -225,11 +225,11 @@ pub async fn a_diverged_tool_presentation_parks_the_turn(
             crate::QueuedWorkBatchingConfig::new(1),
         );
     host.providers.models = crate::testing::standard_test_llm_profiles(model.into_handle());
-    let session_id = SessionId::from(format!("{prefix}-presentation-divergence-session"));
+    let session_id = SessionId::fixture(format!("{prefix}-presentation-divergence-session"));
     let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
     let parts = Parts {
         session_id,
-        turn_id: TurnId::from(format!("{prefix}-presentation-divergence-turn")),
+        turn_id: TurnId::fixture(format!("{prefix}-presentation-divergence-turn")),
         host,
         store,
         pass: Arc::new(AtomicUsize::new(0)),

@@ -548,11 +548,7 @@ pub(crate) async fn recorded_parent_session_id(
         .load_session_meta()
         .await
         .map_err(EmbedError::Store)?
-        .and_then(|meta| {
-            meta.relation
-                .parent_session_id()
-                .map(|parent_session_id| SessionId::from(parent_session_id.to_string()))
-        }))
+        .and_then(|meta| meta.relation.parent_session_id().cloned()))
 }
 
 /// Resolve `session_id`'s existing store through the catalog's non-creating

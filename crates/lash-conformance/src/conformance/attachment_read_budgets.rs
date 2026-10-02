@@ -128,8 +128,8 @@ pub async fn attachment_materialization_turn_witnesses(
     for (case, max_request_bytes, expected_calls) in
         [(0, 8192, 0), (1, 2548, 0), (2, 2548, 1), (3, 2500, 0)]
     {
-        let session_id = SessionId::from(format!("{prefix}-attachment-budget-{case}"));
-        let turn_id = TurnId::from(format!("{prefix}-attachment-budget-turn-{case}"));
+        let session_id = SessionId::fixture(format!("{prefix}-attachment-budget-{case}"));
+        let turn_id = TurnId::fixture(format!("{prefix}-attachment-budget-turn-{case}"));
         let backend = RuntimeAttachmentStore::new(
             stores.attachment_store(),
             stores.attachment_referrers(),

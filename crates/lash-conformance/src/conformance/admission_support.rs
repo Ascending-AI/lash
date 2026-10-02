@@ -24,7 +24,7 @@ pub(crate) async fn admitted_root(
     root: &str,
     head: AdmittedHead,
 ) -> RootAdmission {
-    admit_root_for_test(store, fence, &crate::TurnId::from(root), head)
+    admit_root_for_test(store, fence, &crate::TurnId::fixture(root), head)
         .await
         .expect("admit the root")
         .expect("the root's admission reaches its head")
@@ -114,7 +114,7 @@ pub(crate) async fn admitted_root_with_policy(
     head: AdmittedHead,
     policy: crate::TurnLaneAdmissionPolicy,
 ) -> RootAdmission {
-    let mut request = admit_root_request_for_test(fence, &crate::TurnId::from(root), head);
+    let mut request = admit_root_request_for_test(fence, &crate::TurnId::fixture(root), head);
     request.policy = policy;
     store
         .admit_root(&request)
@@ -125,7 +125,7 @@ pub(crate) async fn admitted_root_with_policy(
 
 /// The settlement completing every row `admission` bound to `root`.
 pub(crate) fn completing_admission(root: &str, admission: &RootAdmission) -> IngressSettlement {
-    let mut settlement = IngressSettlement::new(crate::TurnId::from(root));
+    let mut settlement = IngressSettlement::new(crate::TurnId::fixture(root));
     if let Some(inputs) = &admission.inputs {
         settlement.completed_inputs.push(inputs.completion());
     }
@@ -154,14 +154,14 @@ pub(crate) fn releasing(
     root: &str,
     rows: impl IntoIterator<Item = IngressRowId>,
 ) -> IngressSettlement {
-    let mut settlement = IngressSettlement::new(crate::TurnId::from(root));
+    let mut settlement = IngressSettlement::new(crate::TurnId::fixture(root));
     settlement.released.extend(rows);
     settlement
 }
 
 /// The terminal write of `root`'s first physical turn completing it.
 pub(crate) fn root_completes(root: &str) -> RootTerminalWrite {
-    let root = crate::TurnId::from(root);
+    let root = crate::TurnId::fixture(root);
     RootTerminalWrite {
         commit: TurnCommitId::new(root.clone(), 0),
         turn: lash_core::store::PhysicalTurn::derive_turn_id(&root, 0),

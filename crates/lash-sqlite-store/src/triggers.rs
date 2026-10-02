@@ -798,7 +798,7 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
         &self,
         session_id: &SessionId,
     ) -> Result<usize, lash_core_execution::PluginError> {
-        let session_id = SessionId::from(session_id.to_string());
+        let session_id = session_id.clone();
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
@@ -828,7 +828,7 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                             }
                         };
                         if record.registrant_session_id()
-                            == Some(&SessionId::from(session_id.as_str()))
+                            == Some(&session_id)
                             && !record.is_tombstoned()
                         {
                             subscriptions.push((subscription_id, record));
@@ -1176,7 +1176,10 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                     for row in rows {
                         let owner_scope = row.map_err(process_sqlite_error)?;
                         if let Some(session_id) = owner_scope.strip_prefix("session:") {
-                            session_ids.insert(SessionId::from(session_id));
+                            session_ids.insert(
+                                SessionId::parse(session_id)
+                                    .map_err(lash_core_execution::PluginError::from)?,
+                            );
                         }
                     }
                     Ok(session_ids.into_iter().collect())
@@ -1494,10 +1497,10 @@ fn reserve_sqlite_deliveries(
         occurrence.source_type.clone().into(),
         occurrence.source_key.clone().into(),
     ];
-    let statement = match occurrence.session_id.as_deref() {
+    let statement = match occurrence.session_id.as_ref() {
         Some(session_id) => {
             values.push(
-                lash_core_execution::TriggerOwnerScope::session(session_id)
+                lash_core_execution::TriggerOwnerScope::session(session_id.clone())
                     .namespace()
                     .into(),
             );

@@ -16,7 +16,7 @@ use crate::store::StoreError;
 pub enum TurnInputDraftAdmission {
     /// A stored row is this very submission, filed earlier: the draft answers
     /// it, wherever it sits and whatever became of it.
-    Existing { input_id: String },
+    Existing { input_id: crate::InputId },
     /// Nothing holds the draft's names: it is enqueued.
     New,
 }
@@ -41,26 +41,27 @@ pub fn decide_turn_input_draft_admission(
     if let (Some(source_key), Some((input_id, existing_digest))) =
         (draft.source_key.as_deref(), by_source_key)
     {
+        let input_id = crate::InputId::parse(input_id)?;
         if existing_digest != submission_digest {
             return Err(StoreError::PendingTurnInputSourceKeyConflict {
                 session_id: draft.session_id.clone(),
                 source_key: source_key.to_string(),
-                existing_input_id: input_id.into(),
+                existing_input_id: input_id,
             });
         }
         return Ok(TurnInputDraftAdmission::Existing { input_id });
     }
     if let (Some(input_id), Some((holder, existing_digest))) =
-        (draft.input_id.as_deref(), by_input_id)
+        (draft.input_id.as_ref(), by_input_id)
     {
         if holder != draft.session_id.as_str() || existing_digest != submission_digest {
             return Err(StoreError::PendingTurnInputIdConflict {
                 session_id: draft.session_id.clone(),
-                input_id: input_id.into(),
+                input_id: input_id.clone(),
             });
         }
         return Ok(TurnInputDraftAdmission::Existing {
-            input_id: input_id.to_string(),
+            input_id: input_id.clone(),
         });
     }
     Ok(TurnInputDraftAdmission::New)

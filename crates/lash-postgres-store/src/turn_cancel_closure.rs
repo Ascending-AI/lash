@@ -54,7 +54,7 @@ pub(crate) async fn retire_scope(
             })?;
         if authorization.admitted_scope() == scope {
             return Err(StoreError::TurnCancelClosureLifecyclePinned {
-                session_id: SessionId::from(session_id),
+                session_id: SessionId::parse(session_id)?,
                 pending_count: 1,
             });
         }

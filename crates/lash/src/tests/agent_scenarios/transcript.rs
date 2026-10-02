@@ -328,7 +328,7 @@ mod tests {
     ) -> CheckpointWriteEvent {
         CheckpointWriteEvent {
             schema: CHECKPOINT_WRITE_EVENT_SCHEMA.to_string(),
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: session_id.clone(),
             attribution: None,
             commit_index: revision_before as usize + 1,
             turn_index: revision_before as usize + 1,

@@ -8,51 +8,168 @@
 //! while the serialized and database bytes stay exactly the string they were.
 //!
 //! The shape follows the turn identity that established it: `#[repr(transparent)]`
-//! over `String`, `#[serde(transparent)]`, a JSON schema delegated inline to
-//! `String`, and borrowing conversions (`Deref`, `AsRef`, `Borrow`) so a typed
-//! id still reads as text at store and formatting boundaries without cloning.
+//! over `String`, a transparent encoding, a JSON schema inline as a string, and
+//! borrowing conversions (`Deref`, `AsRef`, `Borrow`) so a typed id still reads
+//! as text at store and formatting boundaries without cloning.
+//!
+//! No identity is empty or whitespace-only: absence is `Option::None`, never a
+//! blank id. Text that arrives from outside the program (a decoded wire or
+//! stored value, a host-supplied string) goes through the fallible `parse`,
+//! which is also what deserialization runs. Text the program itself states is
+//! infallible: a `&'static str` literal converts with `From`, and a derived id
+//! is built from an existing id or a literal prefix, so neither can be blank.
+
+/// Text that is not an identity because it is empty or whitespace-only.
+///
+/// Absence of an identity is `Option::None`; a blank string never stands in
+/// for it.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("a {what} id must not be empty or whitespace-only; absence is `None`, never a blank id")]
+pub struct BlankIdentity {
+    what: &'static str,
+}
+
+impl BlankIdentity {
+    /// The kind of identity that was refused, as its documentation names it.
+    pub fn what(&self) -> &'static str {
+        self.what
+    }
+}
+
+fn is_blank(value: &str) -> bool {
+    value.trim().is_empty()
+}
 
 /// Every identity gets the same surface deliberately: differing accessor sets
 /// were how the borrowed/cloned drift these types replaced arose in the first
-/// place. The generated `serde` and schema impls delegate to `String`, and each
-/// identity pins that byte-for-byte in its own test below.
+/// place. The encoding is the bare string, and each identity pins that
+/// byte-for-byte in its own test below.
 macro_rules! string_identity {
     ($(#[$meta:meta])* $name:ident, $what:literal) => {
         $(#[$meta])*
         #[repr(transparent)]
-        #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
+        #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
         #[serde(transparent)]
         pub struct $name(String);
 
         impl $name {
-            pub fn new(value: impl Into<String>) -> Self {
-                Self(value.into())
+            /// Validates text that arrived from outside the program.
+            ///
+            /// # Errors
+            ///
+            /// [`BlankIdentity`] when the text is empty or whitespace-only.
+            pub fn parse(value: impl Into<String>) -> Result<Self, BlankIdentity> {
+                let value = value.into();
+                if is_blank(&value) {
+                    return Err(BlankIdentity { what: $what });
+                }
+                Ok(Self(value))
+            }
+
+            /// The id spelled `prefix` followed by `rest`.
+            ///
+            /// # Panics
+            ///
+            /// When the literal `prefix` is blank, which is a defect in the
+            /// calling code rather than in any input.
+            pub fn prefixed(prefix: &'static str, rest: impl std::fmt::Display) -> Self {
+                assert!(
+                    !is_blank(prefix),
+                    concat!("the literal prefix of a ", $what, " id must not be blank")
+                );
+                Self(format!("{prefix}{rest}"))
+            }
+
+            /// The id spelled as the hyphenated lowercase text of the UUID
+            /// whose 128 bits are `bits`.
+            pub fn from_uuid(bits: u128) -> Self {
+                Self(format!(
+                    "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
+                    (bits >> 96) as u32,
+                    (bits >> 80) as u16,
+                    (bits >> 64) as u16,
+                    (bits >> 48) as u16,
+                    bits & 0xffff_ffff_ffff
+                ))
+            }
+
+            /// The id spelled as this one followed by `suffix`.
+            #[must_use]
+            pub fn with_suffix(&self, suffix: impl std::fmt::Display) -> Self {
+                Self(format!("{}{suffix}", self.0))
+            }
+
+            /// An id for a test fixture.
+            ///
+            /// # Panics
+            ///
+            /// When `label` is blank.
+            #[doc(hidden)]
+            pub fn fixture(label: impl Into<String>) -> Self {
+                match Self::parse(label) {
+                    Ok(id) => id,
+                    Err(error) => panic!("{error}"),
+                }
             }
         }
 
-        impl From<String> for $name {
-            fn from(value: String) -> Self {
-                Self(value)
-            }
-        }
-
-        impl From<&str> for $name {
-            fn from(value: &str) -> Self {
+        /// A literal id. Text that is not a literal goes through
+        /// [`parse`](Self::parse).
+        ///
+        /// # Panics
+        ///
+        /// When the literal is blank, which is a defect in the calling code
+        /// rather than in any input.
+        impl From<&'static str> for $name {
+            fn from(value: &'static str) -> Self {
+                assert!(
+                    !is_blank(value),
+                    concat!("a literal ", $what, " id must not be blank")
+                );
                 Self(value.to_string())
             }
         }
 
-        impl From<&String> for $name {
-            fn from(value: &String) -> Self {
-                Self(value.clone())
+        impl TryFrom<String> for $name {
+            type Error = BlankIdentity;
+
+            fn try_from(value: String) -> Result<Self, Self::Error> {
+                Self::parse(value)
             }
         }
 
         impl std::str::FromStr for $name {
-            type Err = std::convert::Infallible;
+            type Err = BlankIdentity;
 
             fn from_str(value: &str) -> Result<Self, Self::Err> {
-                Ok(Self::from(value))
+                Self::parse(value)
+            }
+        }
+
+        impl<'de> serde::Deserialize<'de> for $name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                let value = String::deserialize(deserializer)?;
+                Self::parse(value).map_err(serde::de::Error::custom)
+            }
+        }
+
+        impl schemars::JsonSchema for $name {
+            fn inline_schema() -> bool {
+                true
+            }
+
+            fn schema_name() -> std::borrow::Cow<'static, str> {
+                std::borrow::Cow::Borrowed(stringify!($name))
+            }
+
+            /// A string of at least one character. That it is also not
+            /// whitespace-only is `parse`'s refusal; a schema length cannot
+            /// state it.
+            fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+                schemars::json_schema!({ "type": "string", "minLength": 1 })
             }
         }
 
@@ -61,9 +178,9 @@ macro_rules! string_identity {
 }
 
 /// The read-side surface every identity shares: accessors, borrowing
-/// conversions, comparisons and the inline string schema. Construction is the
-/// caller's: [`string_identity!`] adds free construction from any string, and
-/// [`ProcessId`] adds only its validating parse and the registrar's mint.
+/// conversions and comparisons. Construction, decoding and the schema are the
+/// caller's: [`string_identity!`] refuses blank text, and [`ProcessId`] admits
+/// only its registrar's one spelling.
 macro_rules! string_identity_surface {
     ($name:ident) => {
         impl $name {
@@ -170,20 +287,6 @@ macro_rules! string_identity_surface {
         impl PartialEq<$name> for &$name {
             fn eq(&self, other: &$name) -> bool {
                 self.as_str() == other.as_str()
-            }
-        }
-
-        impl schemars::JsonSchema for $name {
-            fn inline_schema() -> bool {
-                true
-            }
-
-            fn schema_name() -> std::borrow::Cow<'static, str> {
-                <String as schemars::JsonSchema>::schema_name()
-            }
-
-            fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-                <String as schemars::JsonSchema>::json_schema(generator)
             }
         }
     };
@@ -356,6 +459,20 @@ impl TryFrom<String> for ProcessId {
 
 string_identity_surface!(ProcessId);
 
+impl schemars::JsonSchema for ProcessId {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        <String as schemars::JsonSchema>::schema_name()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        <String as schemars::JsonSchema>::json_schema(generator)
+    }
+}
+
 string_identity!(NodeId, "session-graph node");
 
 string_identity!(
@@ -376,6 +493,28 @@ string_identity!(
     TurnId,
     "turn"
 );
+
+/// The root of a drive that starts with an input the host gave no id of its
+/// own is named by the input's id.
+impl From<&InputId> for TurnId {
+    fn from(input_id: &InputId) -> Self {
+        Self(input_id.as_str().to_string())
+    }
+}
+
+/// The input that opened a root is addressed by the root's id.
+impl From<&TurnId> for InputId {
+    fn from(root: &TurnId) -> Self {
+        Self(root.as_str().to_string())
+    }
+}
+
+/// The turn a process runs for itself is named by the process id.
+impl From<&ProcessId> for TurnId {
+    fn from(process_id: &ProcessId) -> Self {
+        Self(process_id.as_str().to_string())
+    }
+}
 
 /// Who a runtime runs for: a session, or a process named by its minted id.
 ///
@@ -587,19 +726,97 @@ mod tests {
         );
     }
 
-    /// The schema a typed identity contributes has to be the plain string
-    /// schema, inline: a `$ref` to a generated definition would change every
+    /// A blank string is never an identity: every decoder refuses it, so the
+    /// only spelling of an absent id is `None`.
+    #[test]
+    fn a_blank_string_decodes_to_no_identity() {
+        for blank in ["", " ", "\t\n", "\u{a0}\u{2003}"] {
+            let encoded = serde_json::json!(blank);
+            assert!(serde_json::from_value::<SessionId>(encoded.clone()).is_err());
+            assert!(serde_json::from_value::<TurnId>(encoded.clone()).is_err());
+            assert!(serde_json::from_value::<NodeId>(encoded.clone()).is_err());
+            assert!(serde_json::from_value::<InputId>(encoded.clone()).is_err());
+            assert!(serde_json::from_value::<BatchId>(encoded.clone()).is_err());
+            assert!(
+                serde_json::from_value::<Option<SessionId>>(encoded).is_err(),
+                "a blank id is not a second spelling of `None`"
+            );
+        }
+        assert_eq!(
+            serde_json::from_value::<Option<SessionId>>(serde_json::Value::Null).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn untrusted_text_becomes_an_identity_only_through_the_typed_parse() {
+        for blank in ["", " ", "\t\n"] {
+            assert_eq!(SessionId::parse(blank).unwrap_err().what(), "session");
+            assert_eq!(TurnId::parse(blank).unwrap_err().what(), "turn");
+            assert_eq!(
+                NodeId::parse(blank).unwrap_err().what(),
+                "session-graph node"
+            );
+            assert_eq!(InputId::parse(blank).unwrap_err().what(), "turn input");
+            assert_eq!(
+                BatchId::parse(blank).unwrap_err().what(),
+                "queued-work batch"
+            );
+            assert!(blank.parse::<SessionId>().is_err());
+            assert!(TurnId::try_from(blank.to_string()).is_err());
+        }
+        // Only blankness is refused: the bytes of any other id are kept as given.
+        for kept in ["s-1", " padded ", "session\0x", "λ"] {
+            let id = SessionId::parse(kept).expect("a non-blank id parses");
+            assert_eq!(id.as_str(), kept);
+            assert_eq!(serde_json::to_value(&id).unwrap(), serde_json::json!(kept));
+            assert_eq!(
+                serde_json::from_value::<SessionId>(serde_json::json!(kept)).unwrap(),
+                id
+            );
+        }
+    }
+
+    #[test]
+    fn an_identity_from_uuid_bits_is_the_uuids_hyphenated_text() {
+        assert_eq!(
+            SessionId::from_uuid(0x0192_0000_0000_7000_8000_0000_0000_0001),
+            "01920000-0000-7000-8000-000000000001"
+        );
+        assert_eq!(
+            SessionId::from_uuid(0),
+            "00000000-0000-0000-0000-000000000000"
+        );
+    }
+
+    #[test]
+    fn a_derived_identity_extends_a_literal_or_an_existing_identity() {
+        assert_eq!(TurnId::prefixed("drive-run:", 7), "drive-run:7");
+        assert_eq!(TurnId::prefixed("drive-run:", ""), "drive-run:");
+        assert_eq!(TurnId::from("root").with_suffix(""), "root");
+        assert_eq!(TurnId::from("root").with_suffix("~fork1"), "root~fork1");
+    }
+
+    #[test]
+    #[should_panic(expected = "a literal session id must not be blank")]
+    fn a_blank_literal_identity_is_a_defect() {
+        let _ = SessionId::from(" ");
+    }
+
+    #[test]
+    #[should_panic(expected = "the literal prefix of a turn id must not be blank")]
+    fn a_blank_literal_prefix_is_a_defect() {
+        let _ = TurnId::prefixed("", "");
+    }
+
+    /// The schema a typed identity contributes is an inline string of at least
+    /// one character: a `$ref` to a generated definition would change every
     /// published tool and process schema that carries an identity.
     #[test]
-    fn json_schema_is_the_plain_string_schema() {
+    fn json_schema_is_an_inline_non_empty_string() {
         let mut generator = schemars::SchemaGenerator::default();
-        let string_schema = serde_json::to_value(<String as schemars::JsonSchema>::json_schema(
-            &mut generator,
-        ))
-        .unwrap();
         for identity_schema in [
             <SessionId as schemars::JsonSchema>::json_schema(&mut generator),
-            <ProcessId as schemars::JsonSchema>::json_schema(&mut generator),
             <NodeId as schemars::JsonSchema>::json_schema(&mut generator),
             <InputId as schemars::JsonSchema>::json_schema(&mut generator),
             <BatchId as schemars::JsonSchema>::json_schema(&mut generator),
@@ -607,9 +824,20 @@ mod tests {
         ] {
             assert_eq!(
                 serde_json::to_value(identity_schema).unwrap(),
-                string_schema
+                serde_json::json!({"type": "string", "minLength": 1})
             );
         }
+        let string_schema = serde_json::to_value(<String as schemars::JsonSchema>::json_schema(
+            &mut generator,
+        ))
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(<ProcessId as schemars::JsonSchema>::json_schema(
+                &mut generator
+            ))
+            .unwrap(),
+            string_schema
+        );
         assert!(generator.definitions().is_empty());
     }
 }

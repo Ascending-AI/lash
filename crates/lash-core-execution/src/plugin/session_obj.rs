@@ -705,7 +705,7 @@ impl PluginSession {
         let mut transforms = Vec::new();
         for registered in &self.contributions.assistant_stream_hooks {
             let transform = (registered.hook)(AssistantStreamHookContext {
-                session_id: SessionId::from(session_id.to_string()),
+                session_id: session_id.clone(),
                 plugin_config: self.admitted_plugin_config(),
                 chunk: current.clone(),
             })
@@ -733,7 +733,7 @@ impl PluginSession {
                 .find(|recorded| recorded.plugin_id == registered.plugin_id)
                 .map(|recorded| recorded.state.clone());
             let transform = (registered.hook)(AssistantResponseHookContext {
-                session_id: SessionId::from(session_id.to_string()),
+                session_id: session_id.clone(),
                 plugin_config: self.admitted_plugin_config(),
                 response: current.clone(),
                 stream_state,
@@ -758,7 +758,7 @@ impl PluginSession {
         let mut states = Vec::new();
         for registered in &self.contributions.assistant_stream_finished_hooks {
             let state = (registered.hook)(AssistantStreamFinishedContext {
-                session_id: SessionId::from(session_id.to_string()),
+                session_id: session_id.clone(),
                 plugin_config: self.admitted_plugin_config(),
                 reason,
             })
@@ -1034,7 +1034,7 @@ impl PluginSession {
         session_param: SessionParam,
         session_id: Option<SessionId>,
         default_to_current_session: bool,
-    ) -> Result<Option<String>, PluginOperationInvokeError> {
+    ) -> Result<Option<SessionId>, PluginOperationInvokeError> {
         let effective_session = session_id.or_else(|| {
             if default_to_current_session {
                 self.owner.session_id().cloned()
@@ -1054,7 +1054,7 @@ impl PluginSession {
             }
             _ => {}
         }
-        Ok(effective_session.map(Into::into))
+        Ok(effective_session)
     }
 
     async fn invoke_plugin_operation(
@@ -1078,10 +1078,7 @@ impl PluginSession {
             default_to_current_session,
         )?;
         let outcome = operation
-            .invoke(
-                invocation.into_context(effective_session.map(Into::into)),
-                args,
-            )
+            .invoke(invocation.into_context(effective_session), args)
             .await
             .map_err(|err| PluginOperationInvokeError::Failed(err.to_string()))?;
         Ok((operation.plugin_id().to_string(), outcome))

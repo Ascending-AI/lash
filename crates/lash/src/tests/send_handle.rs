@@ -1004,7 +1004,7 @@ async fn replay_gaps_reach_both_streams_and_sinks() -> Result<()> {
                 &session.session_id(),
                 lash_core::SessionRevision::new(0),
                 vec![lash_core::LiveReplayEventDraft::new(
-                    None::<String>,
+                    None::<lash_core::TurnId>,
                     lash_core::SessionObservationEventPayload::AgentFrameSwitched {
                         frame_id: "lost".into(),
                     },
@@ -1431,26 +1431,37 @@ async fn exact_host_root_settlement(host_id: &str) -> Result<()> {
         .open()
         .await?;
     let input = TurnInput::text("only once");
-    let first = session.send(input.clone()).id(host_id).await?;
+    let first = session
+        .send(input.clone())
+        .id(lash_core::TurnId::fixture(host_id.to_string()))
+        .await?;
     let input_id = first.input_id().clone();
-    assert_eq!(first.outcome().await?.root().cloned(), Some(host_id.into()));
+    assert_eq!(
+        first.outcome().await?.root().cloned(),
+        Some(host_id.parse().unwrap())
+    );
     let durable = tokio::time::timeout(
         std::time::Duration::from_secs(2),
-        session.root(host_id).outcome(),
+        session
+            .root(lash_core::TurnId::fixture(host_id.to_string()))
+            .outcome(),
     )
     .await
     .expect("the exact host root settles")?;
-    assert_eq!(durable.root().cloned(), Some(host_id.into()));
+    assert_eq!(durable.root().cloned(), Some(host_id.parse().unwrap()));
     assert_eq!(durable.status(), crate::TurnStatus::Answered);
-    let retry = session.send(input).id(host_id).await?;
+    let retry = session
+        .send(input)
+        .id(lash_core::TurnId::fixture(host_id.to_string()))
+        .await?;
     assert_eq!(retry.input_id(), &input_id);
     let retried = tokio::time::timeout(std::time::Duration::from_secs(2), retry.outcome())
         .await
         .expect("the settled host id answers its retry")?;
-    assert_eq!(retried.root().cloned(), Some(host_id.into()));
+    assert_eq!(retried.root().cloned(), Some(host_id.parse().unwrap()));
     assert_eq!(fixture.calls.load(Ordering::SeqCst), 1);
     assert!(
-        matches!(session.attach_id(host_id).cancel().await?, crate::CancelReceipt::AlreadySettled { root } if root.as_str() == host_id)
+        matches!(session.attach_id(lash_core::TurnId::fixture(host_id.to_string())).cancel().await?, crate::CancelReceipt::AlreadySettled { root } if root.as_str() == host_id)
     );
     Ok(())
 }
@@ -1494,14 +1505,14 @@ async fn exact_host_root_frame_switch(host_id: &str, cancel: bool) -> Result<()>
         .await
         .open()
         .await?;
-    let root_handle = session.root(host_id);
+    let root_handle = session.root(lash_core::TurnId::fixture(host_id.to_string()));
     let handle = session
         .send(TurnInput::text("switch frames"))
-        .id(host_id)
+        .id(lash_core::TurnId::fixture(host_id))
         .await?;
     let input_id = handle.input_id().clone();
     reaches(&calls, 2, "the root runs its second physical turn").await;
-    let root = lash_core::TurnId::from(host_id);
+    let root = lash_core::TurnId::fixture(host_id);
     let follow_on = lash_core::store::PhysicalTurn::derive_turn_id(&root, 1);
     assert_eq!(
         session
@@ -1525,8 +1536,8 @@ async fn exact_host_root_frame_switch(host_id: &str, cancel: bool) -> Result<()>
         } else {
             "job:agent-frame:2".into()
         },
-        format!("{host_id}:agent-frame:01").into(),
-        format!("{host_id}:agent-frame:+1").into(),
+        lash_core::TurnId::fixture(format!("{host_id}:agent-frame:01")),
+        lash_core::TurnId::fixture(format!("{host_id}:agent-frame:+1")),
     ];
     let activities: Vec<_> = markers
         .iter()
@@ -1546,7 +1557,7 @@ async fn exact_host_root_frame_switch(host_id: &str, cancel: bool) -> Result<()>
                 .zip(&activities)
                 .map(|(turn, activity)| {
                     lash_core::LiveReplayEventDraft::new(
-                        Some(turn.to_string()),
+                        Some(lash_core::TurnId::fixture(turn.to_string())),
                         lash_core::SessionObservationEventPayload::TurnActivity(activity.clone()),
                     )
                 })

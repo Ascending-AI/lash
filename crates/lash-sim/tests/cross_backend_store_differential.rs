@@ -403,10 +403,10 @@ impl NodeSpec {
     fn materialize(self, session_id: &SessionId) -> SessionNodeRecord {
         let frame_key = differential_frame_key(self.node_id);
         SessionNodeRecord {
-            node_id: scoped_node_id(session_id, self.node_id).into(),
+            node_id: lash_core::NodeId::fixture(scoped_node_id(session_id, self.node_id)),
             parent_node_id: self
                 .parent_node_id
-                .map(|node_id| scoped_node_id(session_id, node_id).into()),
+                .map(|node_id| lash_core::NodeId::fixture(scoped_node_id(session_id, node_id))),
             timestamp: "2026-07-26T00:00:00Z".to_string(),
             payload: if is_frame_alias(self.node_id) {
                 SessionNodePayload::FrameOpen {
@@ -703,7 +703,7 @@ fn runtime_commit(
     committed_attachment_ids: Vec<AttachmentId>,
 ) -> RuntimeCommit {
     let state = RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
@@ -1115,7 +1115,7 @@ impl BackendRunner {
     ) -> Result<lash_core::store::AdmittedHead, StoreError> {
         match kind {
             HeadKind::Input => Ok(lash_core::store::AdmittedHead::Input(
-                lash_core::InputId::from(format!("{}:input", self.session_id)),
+                lash_core::InputId::fixture(format!("{}:input", self.session_id)),
             )),
             HeadKind::Batch => self
                 .store()
@@ -1378,12 +1378,12 @@ impl BackendRunner {
                 self.factory()
                     .fork_session(&ForkSessionRequest {
                         pending_observer_intents: Vec::new(),
-                        session_id: SessionId::from(format!("{}:fork", self.session_id)),
+                        session_id: SessionId::fixture(format!("{}:fork", self.session_id)),
                         source_session_id: self.session_id.clone(),
                         head_revision,
                         relation: SessionRelation::Fork {
                             source_session_id: self.session_id.clone(),
-                            source_node_id: Some(node_id.into()),
+                            source_node_id: Some(lash_core::NodeId::fixture(node_id)),
                         },
                         config: lash_core::SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
@@ -1402,18 +1402,21 @@ impl BackendRunner {
                 self.factory().unpin(&self.session_id, &head).await?;
                 Ok(None)
             }
-            StoreOperation::EnqueueNextTurnInput => self
-                .store()
-                .enqueue_pending_turn_input(
-                    PendingTurnInputDraft::new(
-                        &self.session_id,
-                        TurnInputIngress::NextTurn,
-                        TurnInput::text("generation-fenced input"),
+            StoreOperation::EnqueueNextTurnInput => {
+                self.store()
+                    .enqueue_pending_turn_input(
+                        PendingTurnInputDraft::new(
+                            &self.session_id,
+                            TurnInputIngress::NextTurn,
+                            TurnInput::text("generation-fenced input"),
+                        )
+                        .with_input_id(lash_core::InputId::fixture(
+                            format!("{}:input", self.session_id),
+                        )),
                     )
-                    .with_input_id(format!("{}:input", self.session_id)),
-                )
-                .await
-                .map(|_| None),
+                    .await
+                    .map(|_| None)
+            }
             StoreOperation::EnqueueQueuedWork => self
                 .store()
                 .enqueue_queued_work(
@@ -1917,7 +1920,7 @@ async fn assert_storage_failure_mappings_agree(sqlite_root: &Path, postgres: &Po
     let create_request = SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(format!("fig-1242-storage-failure:{}", run_nonce())),
+        session_id: SessionId::fixture(format!("fig-1242-storage-failure:{}", run_nonce())),
         relation: SessionRelation::Root,
         config: lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -2087,10 +2090,10 @@ async fn runners_for_case_with_clock(
     run_nonce: &str,
     clock: Arc<dyn Clock>,
 ) -> Vec<BackendRunner> {
-    let session_id = SessionId::from(format!("fig-778-{run_nonce}-{}", case.as_str()));
+    let session_id = SessionId::fixture(format!("fig-778-{run_nonce}-{}", case.as_str()));
     // The deterministic relation is declared at creation on every backend:
     let relation = SessionRelation::Child {
-        parent_session_id: SessionId::from(format!("fig-778-{run_nonce}-parent")),
+        parent_session_id: SessionId::fixture(format!("fig-778-{run_nonce}-parent")),
         caused_by: None,
     };
     // A process-created session records its owner; every backend reads it back.

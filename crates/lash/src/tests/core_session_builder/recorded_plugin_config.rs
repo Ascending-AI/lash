@@ -230,7 +230,7 @@ fn stating(cap: u64) -> Result<lash_core::PluginOptions> {
 
 /// The session's recorded state, read from its store.
 async fn recorded_state(core: &LashCore, id: &str) -> Result<lash_core::RuntimeSessionState> {
-    let id = SessionId::from(id);
+    let id = SessionId::fixture(id);
     let store = crate::session::resolve_existing_session(&core.store_factory, &id).await?;
     crate::session::load_state_from_store(&id, &store).await
 }
@@ -239,7 +239,7 @@ async fn recorded_state(core: &LashCore, id: &str) -> Result<lash_core::RuntimeS
 async fn recorded_turn_budget(core: &LashCore, id: &str) -> Result<crate::TurnBudget> {
     Ok(lash_core::SessionCommitStore::load_session_head_meta(
         core.store_factory.as_ref(),
-        &SessionId::from(id),
+        &SessionId::fixture(id),
     )
     .await?
     .expect("persisted head")

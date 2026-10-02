@@ -3,7 +3,7 @@ use crate::SessionId;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
 
 impl LashRuntime {
-    pub fn session_id(&self) -> &str {
+    pub fn session_id(&self) -> &SessionId {
         &self.state.session_id
     }
 
@@ -844,7 +844,7 @@ impl LashRuntime {
         else {
             let receipt = crate::SessionCommandReceipt {
                 session_id,
-                batch_id: crate::BatchId::new(format!("inline-command:{}", uuid::Uuid::new_v4())),
+                batch_id: crate::BatchId::prefixed("inline-command:", uuid::Uuid::new_v4()),
                 source_key,
             };
             self.apply_session_command_after_admission(vec![command], None)

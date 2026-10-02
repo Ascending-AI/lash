@@ -24,7 +24,7 @@ async fn published(fixture: &Fixture, session: &str) -> Result<Published> {
 async fn published_by(core: &LashCore, session: &str) -> Result<Published> {
     let head = lash_core::SessionCommitStore::load_session_head_meta(
         core.store_factory.as_ref(),
-        &SessionId::from(session),
+        &SessionId::fixture(session),
     )
     .await?
     .expect("the session has a head");
@@ -56,12 +56,12 @@ async fn fork_by(
     branch: &str,
 ) -> Result<lash_core::ForkSessionReceipt> {
     core.fork_at(
-        &SessionId::from(source),
+        &SessionId::fixture(source),
         target,
         crate::ForkRequest {
-            session_id: branch.into(),
+            session_id: branch.parse().unwrap(),
             relation: lash_core::SessionRelation::Fork {
-                source_session_id: source.into(),
+                source_session_id: source.parse().unwrap(),
                 source_node_id: None,
             },
             observed_processes: Vec::new(),
@@ -104,7 +104,7 @@ async fn assert_no_session(fixture: &Fixture, branch: &str) -> Result<()> {
             fixture
                 .core
                 .store_factory
-                .lookup_session(&SessionId::from(branch))
+                .lookup_session(&SessionId::fixture(branch))
                 .await?,
             lash_core::store::SessionLookup::Absent
         ),
@@ -536,13 +536,18 @@ async fn a_held_turn_pinned_both_ways_forks_after_collection(
         )
         .build(crate::testing::runtime_lease_owner())?;
     let source = format!("{prefix}-source");
-    let session = core.session(source.as_str()).created().await.open().await?;
+    let session = core
+        .session(SessionId::fixture(source.clone()))
+        .created()
+        .await
+        .open()
+        .await?;
     session.send(TurnInput::text("one")).output().await?;
 
     let held_root = format!("{prefix}-held");
     let running = session
         .send(TurnInput::text(HELD))
-        .id(held_root.as_str())
+        .id(lash_core::TurnId::fixture(held_root.as_str()))
         .pin()
         .await?;
     reaches(&calls, 2, "the held turn's model call starts").await;
@@ -550,7 +555,7 @@ async fn a_held_turn_pinned_both_ways_forks_after_collection(
         .current_turn()
         .await?
         .expect("the held turn is the unfinished root");
-    assert_eq!(turn, lash_core::TurnId::from(held_root.as_str()));
+    assert_eq!(turn, lash_core::TurnId::fixture(held_root.as_str()));
     let by_turn = Target::Turn(turn);
     let by_input = Target::Input(running.input_id().clone());
     session.pin(by_turn.clone()).await?;
@@ -569,7 +574,7 @@ async fn a_held_turn_pinned_both_ways_forks_after_collection(
     );
     assert!(matches!(
         core.store_factory
-            .lookup_session(&SessionId::from(early.as_str()))
+            .lookup_session(&SessionId::fixture(early.as_str()))
             .await?,
         lash_core::store::SessionLookup::Absent
     ));

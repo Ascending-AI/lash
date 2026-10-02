@@ -819,7 +819,7 @@ pub async fn probe_live_sessions(
         let probe = Expected {
             inputs: vec![AcceptedInput {
                 session: session.clone(),
-                root: TurnId::from(root.as_str()),
+                root: TurnId::fixture(root.as_str()),
             }],
             ..Expected::default()
         };

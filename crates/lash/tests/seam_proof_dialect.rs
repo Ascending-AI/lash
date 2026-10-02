@@ -264,7 +264,7 @@ fn cell(lines: &str) -> String {
 
 async fn session(core: &LashCore, id: &str) -> lash::LashSession {
     match core
-        .session(id)
+        .session(lash_core::SessionId::fixture(id))
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             "seam-proof-dialect",
             lash::TurnBudget::Unbounded,
@@ -275,7 +275,10 @@ async fn session(core: &LashCore, id: &str) -> lash::LashSession {
         Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}
         Err(error) => panic!("create session `{id}`: {error:?}"),
     }
-    core.session(id).open().await.expect("open the session")
+    core.session(lash_core::SessionId::fixture(id.to_string()))
+        .open()
+        .await
+        .expect("open the session")
 }
 
 fn final_value(output: &TurnOutput) -> Option<serde_json::Value> {

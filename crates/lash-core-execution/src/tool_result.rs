@@ -873,7 +873,7 @@ mod tests {
         };
         let derive = |session: &str, scope: &str, call: &str, index: u32| {
             crate::derive_tool_intent_identity_under(
-                &crate::RuntimeOwner::Session(crate::SessionId::from(session)),
+                &crate::RuntimeOwner::Session(crate::SessionId::fixture(session)),
                 scope,
                 &crate::ToolCallId::fixture(call),
                 index,

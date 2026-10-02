@@ -513,7 +513,7 @@ impl World {
         Self {
             tier: tier.clone(),
             recorded: Arc::default(),
-            session_id: SessionId::from(format!("{}-{law}", tier.prefix)),
+            session_id: SessionId::fixture(format!("{}-{law}", tier.prefix)),
             witness: Arc::new(Witness::default()),
             model_calls: Arc::new(AtomicUsize::new(0)),
             scripts: Arc::default(),
@@ -588,7 +588,7 @@ impl World {
         let input = format!("tool-call identity law: {name}");
         self.script(&input, responses);
         ScriptedTurn {
-            turn_id: TurnId::from(format!("{}-{name}", self.session_id)),
+            turn_id: TurnId::fixture(format!("{}-{name}", self.session_id)),
             input,
         }
     }

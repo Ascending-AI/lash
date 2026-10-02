@@ -193,7 +193,7 @@ pub async fn apply_host_command(
     command: SessionCommand,
     idempotency_key: &str,
 ) -> Result<SessionCommandOutcome, RuntimeError> {
-    let session_id = SessionId::from(runtime.session_id());
+    let session_id = SessionId::fixture(runtime.session_id());
     let (receipt, fence) =
         submit_host_command(store, &session_id, command, idempotency_key).await?;
     let applied_here = drain_host_commands(runtime, &fence, None)

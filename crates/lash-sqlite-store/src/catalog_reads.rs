@@ -111,8 +111,8 @@ impl SqliteStore {
                 seq: u64::try_from(seq).unwrap_or_default(),
                 at_ms: u64::try_from(at_ms).unwrap_or_default(),
                 target: lash_core_execution::store::TurnParkTarget {
-                    session_id: SessionId::from(session_id),
-                    turn_id: lash_sansio::TurnId::from(turn_id),
+                    session_id: SessionId::parse(session_id)?,
+                    turn_id: lash_sansio::TurnId::parse(turn_id)?,
                 },
                 park_id: lash_core_execution::store::ParkId::from_feed_sequence(
                     u64::try_from(park_id).unwrap_or_default(),

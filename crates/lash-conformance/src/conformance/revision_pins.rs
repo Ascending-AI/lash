@@ -38,7 +38,7 @@ struct PinLaw {
 impl PinLaw {
     async fn new(factory: &Arc<dyn ConformanceDeployment>, session: &str) -> Self {
         let request = session_store_request(
-            &SessionId::from(session),
+            &SessionId::fixture(session),
             "revision-pin-model",
             crate::SessionRelation::Root,
         );
@@ -109,7 +109,8 @@ impl PinLaw {
         state.ensure_agent_frame_initialized();
         append_conformance_event_node(&mut state, &format!("{}:{root}", self.id()), root);
         state.set_execution_state_snapshot(Some(root.as_bytes().to_vec().into()));
-        let operation = crate::OperationId::turn(self.id(), root, "final");
+        let operation =
+            crate::OperationId::turn(self.id(), TurnId::fixture(root.to_string()), "final");
         let (commit, _) =
             crate::RuntimeCommit::persisted_state_with_operation(&mut state, operation)
                 .expect("build the turn's commit");
@@ -169,7 +170,7 @@ impl PinLaw {
     }
 
     fn branch(&self, name: &str) -> SessionId {
-        SessionId::from(format!("{}-{name}", self.id()))
+        SessionId::fixture(format!("{}-{name}", self.id()))
     }
 
     /// Fork `target` into the branch `name`, as the facade does: resolve the

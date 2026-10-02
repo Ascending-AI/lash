@@ -367,7 +367,6 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
         scope.id().as_str(),
         format!("session:session-finance/frame:{frame_node_id}")
     );
-    assert!(!scope.is_empty());
     assert_eq!(scope.session_id, "session-finance");
     assert_eq!(scope.agent_frame_id.as_ref(), Some(&frame_node_id));
 
@@ -1035,7 +1034,7 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
     let deleted_session_id = state.current_session_id();
-    let surviving_session_id = SessionId::from(format!("{deleted_session_id}-survivor"));
+    let surviving_session_id = SessionId::fixture(format!("{deleted_session_id}-survivor"));
     let reclaimed = "trigger-delivery-of-deleted-session".to_string();
 
     // Four rows the work rail can render: the deleted session's finished

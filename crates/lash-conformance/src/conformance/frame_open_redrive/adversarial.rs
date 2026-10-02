@@ -113,7 +113,7 @@ impl LawSession {
             self.runner.run_turn(
                 admit(crate::ExecutionScope::turn(
                     &self.session_id,
-                    format!("{}-{drive}", self.prefix),
+                    crate::TurnId::fixture(format!("{}-{drive}", self.prefix)),
                 )),
                 attempt,
             ),
@@ -598,7 +598,7 @@ pub async fn a_fork_made_during_an_open_never_sees_its_seed(
     law.enqueue("first question").await;
     law.run_root("root-1").await;
     let forked_from = law.head().await;
-    let fork_id = SessionId::from(format!("{}-fork", law.session_id));
+    let fork_id = SessionId::fixture(format!("{}-fork", law.session_id));
 
     let store = Arc::clone(&law.store);
     let fork = fork_id.clone();
@@ -982,7 +982,7 @@ pub async fn every_open_restarts_the_live_execution_state(
         law.runner.run_turn(
             admit(crate::ExecutionScope::turn(
                 &law.session_id,
-                format!("{}-open", law.prefix),
+                crate::TurnId::fixture(format!("{}-open", law.prefix)),
             )),
             attempt,
         ),

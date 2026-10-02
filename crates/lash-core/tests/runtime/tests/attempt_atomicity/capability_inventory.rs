@@ -44,7 +44,9 @@ pub(super) async fn exercise_attempt_capabilities(attempt: &lash_core::AttemptCo
     let sessions = attempt.sessions();
     let _ = sessions.model().await;
     let _ = sessions.snapshot_current().await;
-    let _ = sessions.snapshot(SESSION).await;
+    let _ = sessions
+        .snapshot(&lash_core::SessionId::from(SESSION))
+        .await;
     let _ = sessions.tool_catalog().await;
     let _ = sessions.shared_tool_catalog().await;
     let processes = attempt.processes();

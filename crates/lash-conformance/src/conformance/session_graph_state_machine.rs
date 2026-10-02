@@ -529,7 +529,7 @@ impl SessionGraphScenario {
         }
         let physical_id = self.next_session_id(slot);
         let request = session_store_request(
-            &SessionId::from(physical_id.clone()),
+            &SessionId::fixture(physical_id.clone()),
             "session-graph-property-model",
             crate::SessionRelation::Root,
         );
@@ -578,7 +578,7 @@ impl SessionGraphScenario {
             0 => None,
             1 => old_path.first().cloned(),
             2 => old_path.last().cloned(),
-            _ => Some(lash_core::NodeId::new(format!(
+            _ => Some(lash_core::NodeId::fixture(format!(
                 "missing-required-{}",
                 self.model.next_operation
             ))),
@@ -724,7 +724,7 @@ impl SessionGraphScenario {
         selected: &SelectedRevision,
         physical_id: &str,
     ) -> Result<Option<(LiveSession, Vec<lash_core::NodeId>)>, String> {
-        let source_session_id = SessionId::from(
+        let source_session_id = SessionId::fixture(
             self.model
                 .sessions
                 .get(&source_slot)
@@ -741,7 +741,7 @@ impl SessionGraphScenario {
             source_node_id: leaf.clone(),
         };
         let request = session_store_request(
-            &SessionId::from(physical_id.to_string()),
+            &SessionId::fixture(physical_id.to_string()),
             "session-graph-property-model",
             relation.clone(),
         );
@@ -749,7 +749,7 @@ impl SessionGraphScenario {
             .factory
             .fork_session(&crate::ForkSessionRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: SessionId::from(physical_id.to_string()),
+                session_id: SessionId::fixture(physical_id.to_string()),
                 source_session_id,
                 head_revision: selected.revision(),
                 relation,
@@ -886,7 +886,7 @@ impl SessionGraphScenario {
         let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
         commit.turn_commit = crate::RuntimeTurnCommitStamp::new(crate::OperationId::turn(
             &state.session_id,
-            operation,
+            crate::TurnId::fixture(operation),
             "checkpoint",
         ));
         commit_runtime_state_for_property(live.store.store(), commit, "checkpoint")
@@ -958,7 +958,7 @@ impl SessionGraphScenario {
         else {
             return Ok(());
         };
-        let session_id = SessionId::from(session.physical_id.clone());
+        let session_id = SessionId::fixture(session.physical_id.clone());
         // The honest ceilings: the highest node each ancestor owner holds on
         // this session's path (the ForkPlan of ADR 0057).
         let mut honest = BTreeMap::<SessionId, lash_core::NodeId>::new();
@@ -1078,7 +1078,11 @@ impl SessionGraphScenario {
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "malformed subject has no persisted state".to_string())?;
-        let operation = crate::OperationId::turn(&state.session_id, operation_key, "malformed");
+        let operation = crate::OperationId::turn(
+            &state.session_id,
+            crate::TurnId::fixture(operation_key),
+            "malformed",
+        );
         let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
         commit.turn_commit = crate::RuntimeTurnCommitStamp::new(operation.clone());
         commit.graph = malformed_graph_append(&state, &operation, shape % 4)?;
@@ -1139,7 +1143,7 @@ impl SessionGraphScenario {
         commit.expected_head_revision = state.head_revision - 1;
         commit.turn_commit = crate::RuntimeTurnCommitStamp::new(crate::OperationId::turn(
             &state.session_id,
-            operation_key,
+            crate::TurnId::fixture(operation_key),
             "stale-cas",
         ));
         let error = commit_runtime_state_for_property(live.store.store(), commit, "stale-cas")
@@ -1501,7 +1505,7 @@ impl SessionGraphScenario {
             ));
         }
         self.factory
-            .delete_session(&SessionId::from(probe_id))
+            .delete_session(&SessionId::fixture(probe_id))
             .await
             .map_err(|error| error.to_string())?;
         Ok(())
@@ -1641,7 +1645,7 @@ fn malformed_graph_append(
             .expect("non-empty frame material");
             let node_id = crate::frame_node_id(&state.session_id, frame_key.as_str()).into_inner();
             let frame = |parent_node_id: Option<lash_core::NodeId>| crate::SessionNodeRecord {
-                node_id: node_id.clone().into(),
+                node_id: lash_core::NodeId::fixture(node_id.clone()),
                 parent_node_id,
                 timestamp: "1970-01-01T00:00:00Z".to_string(),
                 payload: crate::SessionNodePayload::FrameOpen {
@@ -1651,7 +1655,10 @@ fn malformed_graph_append(
                 },
             };
             crate::GraphAppend::Extend {
-                nodes: vec![frame(old_leaf), frame(Some(node_id.clone().into()))],
+                nodes: vec![
+                    frame(old_leaf),
+                    frame(Some(lash_core::NodeId::fixture(node_id.clone()))),
+                ],
             }
         }
         1 => {
@@ -1674,7 +1681,7 @@ fn malformed_graph_append(
                 crate::frame_node_id(&state.session_id, resident_frame_key.as_str()).into_inner();
             crate::GraphAppend::Extend {
                 nodes: vec![crate::SessionNodeRecord {
-                    node_id: node_id.clone().into(),
+                    node_id: lash_core::NodeId::fixture(node_id.clone()),
                     parent_node_id: old_leaf.clone(),
                     timestamp: "1970-01-01T00:00:00Z".to_string(),
                     payload: crate::SessionNodePayload::FrameOpen {
@@ -1694,8 +1701,8 @@ fn malformed_graph_append(
             let node_id = crate::frame_node_id(&state.session_id, frame_key.as_str()).into_inner();
             crate::GraphAppend::Extend {
                 nodes: vec![crate::SessionNodeRecord {
-                    node_id: node_id.clone().into(),
-                    parent_node_id: Some(node_id.clone().into()),
+                    node_id: lash_core::NodeId::fixture(node_id.clone()),
+                    parent_node_id: Some(lash_core::NodeId::fixture(node_id.clone())),
                     timestamp: "1970-01-01T00:00:00Z".to_string(),
                     payload: crate::SessionNodePayload::FrameOpen {
                         frame_key,
@@ -1736,8 +1743,8 @@ fn assert_bounded_resident_rejection(shape: u8) -> Result<(), String> {
 
 fn malformed_resident_graph(shape: u8) -> crate::SessionGraph {
     let node = |id: &str, parent: Option<&str>| crate::SessionNodeRecord {
-        node_id: id.to_string().into(),
-        parent_node_id: parent.map(lash_core::NodeId::from),
+        node_id: lash_core::NodeId::fixture(id.to_string()),
+        parent_node_id: parent.map(lash_core::NodeId::fixture),
         timestamp: "1970-01-01T00:00:00Z".to_string(),
         payload: crate::SessionNodePayload::Plugin {
             plugin_type: "session-graph-bounded".to_string(),

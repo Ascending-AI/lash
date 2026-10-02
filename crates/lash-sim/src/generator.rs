@@ -114,7 +114,7 @@ pub fn generate_workload(
     let session_count = profile_kind.session_count(&mut rng);
     let sessions = (0..session_count)
         .map(|index| {
-            let raw_session_id = SessionId::from(format!("generated-session-{seed}-{index}"));
+            let raw_session_id = SessionId::fixture(format!("generated-session-{seed}-{index}"));
             let alias = aliases.alias("session", raw_session_id.clone());
             let provider_kind = runtime_provider_kind_for_session(index);
             let provider_script =

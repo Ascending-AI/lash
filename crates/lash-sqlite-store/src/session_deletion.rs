@@ -11,7 +11,7 @@ pub(super) async fn delete_session_from_catalog(
     if !catalog.target().exists() {
         return Ok(lash_core_execution::SessionBlobReclaimReport::default());
     }
-    let session_id = SessionId::from(session_id.to_string());
+    let session_id = session_id.clone();
     let conn = SqliteConnection::open_with_policy(catalog.target(), policy)
         .await
         .map_err(|err| {
@@ -386,7 +386,7 @@ pub(super) async fn delete_wake_allocation_floors_from_process_registry(
     )
     .await
     .map_err(sqlite_error)?;
-    let target_session_id = SessionId::from(target_session_id.to_string());
+    let target_session_id = SessionId::parse(target_session_id.to_string())?;
     conn.write_flow(move |tx| {
         let outcome = tx
             .execute(

@@ -463,13 +463,6 @@ fn drain_area_witnesses() {
             lash::runtime::RuntimeErrorCode::EffectJournalRetirementUnsupported
         )
     });
-    // W0147: lash::runtime::RuntimeErrorCode::InvalidAwaitEventSessionId [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::InvalidAwaitEventSessionId
-        )
-    });
     // W0148: lash::runtime::RuntimeErrorCode::InvalidAwaitEventWaitIdentity [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
@@ -853,7 +846,7 @@ fn drain_area_witnesses() {
         }
     });
     // W0257: lash::durability::EffectJournalRetirement::session [function]
-    let _ = lash::durability::EffectJournalRetirement::session("");
+    let _ = lash::durability::EffectJournalRetirement::session("session");
     // W0258: lash::plugins::ExecRequest [struct]
     type_witness::<lash::plugins::ExecRequest>();
     // W0259: lash::plugins::ExecRequest::code [field]

@@ -209,7 +209,7 @@ pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
     ));
-    state.session_id = SessionId::from("execution-state-replace-then-clear".to_string());
+    state.session_id = SessionId::from("execution-state-replace-then-clear");
     lash_core::testing::stage_execution_state_components(
         &mut state,
         lash_core::plugin::ExecutionStateCapture::replace(
@@ -533,7 +533,7 @@ pub async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
             published_leaf: crate::store::PublishedLeafFacts::Live(crate::store::ParentNodeFacts {
                 node_id: old_leaf.clone(),
                 generation: state.session_graph.active_path_nodes().len() as u64 - 1,
-                frame_node_id: seed_frame_node_id.to_string().into(),
+                frame_node_id: crate::NodeId::fixture(seed_frame_node_id.to_string()),
             }),
         })
         .expect("plan same-leaf commit");
@@ -570,7 +570,7 @@ pub async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
             published_leaf: crate::store::PublishedLeafFacts::Live(crate::store::ParentNodeFacts {
                 node_id: old_leaf.clone(),
                 generation: state.session_graph.active_path_nodes().len() as u64 - 1,
-                frame_node_id: seed_frame_node_id.into_inner().into(),
+                frame_node_id: crate::NodeId::fixture(seed_frame_node_id.into_inner()),
             }),
         })
         .expect("plan leaf-changing commit");

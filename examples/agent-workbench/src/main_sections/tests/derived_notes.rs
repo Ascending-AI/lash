@@ -191,7 +191,10 @@ async fn derived_notes_survive_an_advanced_head_and_are_dropped_by_a_rewind_inne
 async fn run_derived_notes_turn(session: &lash::LashSession, text: &str) {
     session
         .send(lash::TurnInput::text(text))
-        .id(format!("workbench-derived-notes:{}", uuid::Uuid::new_v4()))
+        .id(lash::TurnId::fixture(format!(
+            "workbench-derived-notes:{}",
+            uuid::Uuid::new_v4()
+        )))
         .output()
         .await
         .unwrap_or_else(|error| panic!("run derived-notes turn `{text}`: {error:?}"));

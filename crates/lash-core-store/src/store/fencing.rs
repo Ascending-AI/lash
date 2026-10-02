@@ -224,7 +224,7 @@ pub fn require_single_writer_head_publication(
         "session head publication read its revision outside the backend's single-writer transaction",
     );
     Err(StoreError::UnfencedHeadPublication {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         backend,
     })
 }

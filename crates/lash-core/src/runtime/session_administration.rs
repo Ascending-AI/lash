@@ -142,7 +142,7 @@ impl<'a> SessionDeleteContext<'a> {
     where
         E: SessionDeleteExecution + ?Sized,
     {
-        let session_id = SessionId::from(session_id.as_ref());
+        let session_id = SessionId::parse(session_id.as_ref())?;
         let controller = executor.scoped(AdmittedScope::session_delete(&session_id))?;
         Ok(Self {
             session_id,

@@ -268,7 +268,7 @@ pub async fn every_order_of_a_send_and_a_redrives_settle_admits_nothing_ahead_of
             f.parts.applications().await,
             vec![
                 (f.input.clone(), f.root.clone()),
-                (send, TurnId::from(send_root))
+                (send, TurnId::fixture(send_root))
             ],
             "the held input runs the root once, then the send lands"
         );

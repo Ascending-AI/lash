@@ -163,17 +163,11 @@ impl LashRuntime {
             drive_fence,
             Some(append_stamp),
             None,
-            |state, persisted| {
-                crate::runtime::SessionCommandOutcome::AppendSessionNodes {
-                    outcome: crate::AppendSessionNodesOutcome::Appended {
-                        node_ids: persisted[persisted.len().saturating_sub(requested)..].to_vec(),
-                        leaf_node_id: state
-                            .session_graph
-                            .leaf_node_id
-                            .clone()
-                            .unwrap_or_else(|| crate::NodeId::new(String::new())),
-                    },
-                }
+            |state, persisted| crate::runtime::SessionCommandOutcome::AppendSessionNodes {
+                outcome: crate::AppendSessionNodesOutcome::Appended {
+                    node_ids: persisted[persisted.len().saturating_sub(requested)..].to_vec(),
+                    leaf_node_id: state.session_graph.leaf_node_id.clone(),
+                },
             },
         ))
         .await?;

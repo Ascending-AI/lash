@@ -468,7 +468,10 @@ async fn host_append(
         .cloned()
         .expect("session engine registered");
     let handler = double
-        .open_handler(lash_core::AdmittedScope::turn(&session_id, key.as_str()))
+        .open_handler(lash_core::AdmittedScope::turn(
+            &session_id,
+            TurnId::fixture(key.clone()),
+        ))
         .await
         .expect("open the append's drive handler");
     let drained = runtime
@@ -499,7 +502,7 @@ async fn drive(
     input: TurnInput,
     turn_id: &str,
 ) -> Result<lash_core::facade_support::AssembledTurn, lash_core::RuntimeError> {
-    let handler = open_turn_handler(runtime, &TurnId::from(turn_id)).await;
+    let handler = open_turn_handler(runtime, &TurnId::fixture(turn_id)).await;
     let result = runtime
         .drive_turn(
             input,
@@ -566,7 +569,7 @@ impl Backend {
         script: Arc<Script>,
         extra_plugins: &[Arc<dyn PluginFactory>],
     ) -> SeededSession {
-        let session_id = SessionId::from(format!(
+        let session_id = SessionId::fixture(format!(
             "fig2521-{scenario}-{}-{}",
             self.label,
             uuid::Uuid::new_v4().simple()
@@ -702,7 +705,7 @@ async fn run_owed_follow_on(
     label: &str,
     drive: &str,
 ) -> lash_core::facade_support::AssembledTurn {
-    let turn_id = TurnId::from(drive);
+    let turn_id = TurnId::fixture(drive);
     let handler = open_turn_handler(runtime, &turn_id).await;
     let result = runtime
         .drive_next_root(
@@ -1034,7 +1037,7 @@ async fn storeless_runtime(
     );
     let mut state = under_rlm_options(
         RuntimeSessionState {
-            session_id: SessionId::from(format!(
+            session_id: SessionId::fixture(format!(
                 "fig2521-storeless-{}",
                 uuid::Uuid::new_v4().simple()
             )),
@@ -1222,7 +1225,7 @@ async fn rlm_storeless_stale_ancestor_append_keeps_the_accepted_execution() {
     let outcome = Box::pin(
         runtime.append_storeless_session_nodes(AppendSessionNodesRequest {
             operation_id: "fig2521-stale".to_string(),
-            requires_ancestor_node_id: Some("absent".to_string().into()),
+            requires_ancestor_node_id: Some(lash_core::NodeId::from("absent")),
             nodes: seed_nodes("discarded"),
         }),
     )

@@ -485,7 +485,7 @@ mod tests {
                 ),
                 crate::testing::runtime_lease_owner(),
             )
-            .with_session_id(session_id.as_str())
+            .with_session_id(crate::SessionId::fixture(session_id.as_str()))
             .with_plugin_factories(crate::testing::test_standard_protocol_factories())
             .with_policy(crate::SessionPolicy {
                 model: Some(crate::testing::test_llm_profile_config(

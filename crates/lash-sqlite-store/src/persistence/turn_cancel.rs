@@ -29,7 +29,7 @@ pub(super) fn cancel_pending_turn_input_row_conn(
                 return Ok(
                     lash_core_execution::PendingTurnInputCancelOutcome::AlreadyAdmitted {
                         input,
-                        root: TurnId::from(root),
+                        root: TurnId::parse(root)?,
                     },
                 );
             }

@@ -160,10 +160,10 @@ pub async fn group_incorporation_replays_exactly_the_recorded_ranks(
     fixture: &ToolChildLawFixture,
     prefix: &str,
 ) {
-    let session_id = crate::SessionId::from(format!("{prefix}-incorporation-session"));
+    let session_id = crate::SessionId::fixture(format!("{prefix}-incorporation-session"));
     let scope = crate::ExecutionScope::turn(
         session_id.clone(),
-        crate::TurnId::from(format!("{prefix}-incorporation-turn")),
+        crate::TurnId::fixture(format!("{prefix}-incorporation-turn")),
     );
     let admitted = crate::admit(scope.clone());
     let opener = crate::EffectOpener::for_scope(&admitted).expect("a turn scope derives an opener");

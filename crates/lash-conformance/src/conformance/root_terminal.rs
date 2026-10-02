@@ -189,7 +189,7 @@ pub async fn a_host_id_naming_a_terminal_root_is_answered_not_rerun(
     let root = TurnId::from("root-adopted");
     // An earlier epoch committed the root: its evidence stands.
     let state = parts.initial_state();
-    let operation = crate::OperationId::turn(parts.session_id.as_str(), root.as_str(), "final");
+    let operation = crate::OperationId::turn(parts.session_id.clone(), root.clone(), "final");
     let mut graph = state.pending_graph_commit();
     graph
         .derive_node_ids(&state.session_id, &operation)
@@ -573,7 +573,7 @@ async fn until_root(
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::ProcessProvenance::session(crate::SessionScope::new(session_id.as_str())),
+                crate::ProcessProvenance::session(crate::SessionScope::new(session_id.clone())),
                 lash_core::Lifetime::Detached,
             ),
             lash_core::ScopeId::turn(session_id.clone(), root.clone()),
@@ -1120,7 +1120,7 @@ pub async fn a_root_end_closes_its_turn_scope_in_the_process_registry(
             crate::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            crate::ProcessProvenance::session(crate::SessionScope::new(parts.session_id.as_str())),
+            crate::ProcessProvenance::session(crate::SessionScope::new(parts.session_id.clone())),
             lash_core::Lifetime::Detached,
         )
     };

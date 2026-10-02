@@ -215,7 +215,7 @@ mod tests {
         fn node(&self, id: &str) -> PathNode {
             let (owner, generation, _) = self.0[id];
             PathNode {
-                node_id: NodeId::from(id),
+                node_id: NodeId::fixture(id),
                 owner_session_id: SessionId::from(owner),
                 generation,
             }

@@ -92,8 +92,8 @@ async fn committed_final_recovers(
         OpenerAtLoss::CancelClosed => "cancel-recovery",
         OpenerAtLoss::BeforeSeat => "seat-recovery",
     };
-    let session_id = crate::SessionId::from(format!("{prefix}-{label}"));
-    let turn_id = crate::TurnId::from(format!("{prefix}-{label}-turn"));
+    let session_id = crate::SessionId::fixture(format!("{prefix}-{label}"));
+    let turn_id = crate::TurnId::fixture(format!("{prefix}-{label}-turn"));
     let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id.clone());
     let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
         .expect("a turn scope derives an opener");

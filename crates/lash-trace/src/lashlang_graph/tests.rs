@@ -12,7 +12,7 @@ use crate::{
 fn identity() -> LanguageIdentity {
     LanguageIdentity {
         scope: TraceRuntimeScope {
-            session_id: Some(SessionId::from("session-1".to_string())),
+            session_id: Some(SessionId::from("session-1")),
             turn_id: Some(TurnId::from("turn-1")),
             turn_index: Some(0),
             protocol_iteration: Some(0),

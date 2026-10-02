@@ -197,7 +197,7 @@ async fn rlm_creation_defaults_from_lineage_and_opens_preserve_recorded_formats(
                 RlmFinalAnswerFormat::RawFinalValue,
             ),
         ] {
-            let id = SessionId::from(format!("{case}-engine-{engine}"));
+            let id = SessionId::fixture(format!("{case}-engine-{engine}"));
             let plugin_options = match stated {
                 Some(ref format) => lash_core::PluginOptions::typed(
                     lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,

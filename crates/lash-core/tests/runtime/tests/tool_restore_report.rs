@@ -77,7 +77,7 @@ fn plugin_host_with_tools(
 
 fn state_for(session_id: &SessionId) -> RuntimeSessionState {
     RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         policy: standard_test_policy(),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,

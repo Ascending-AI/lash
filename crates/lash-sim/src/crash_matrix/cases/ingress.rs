@@ -41,7 +41,7 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
         let root = format!("in-{index}");
         expected.inputs.push(AcceptedInput {
             session: session.clone(),
-            root: TurnId::from(root.as_str()),
+            root: TurnId::fixture(root.as_str()),
         });
         if index != target {
             send(&world, &session, &root).await?;

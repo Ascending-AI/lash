@@ -263,7 +263,7 @@ fn services(
 /// One turn of `session` that must finish with `revision`.
 async fn turn(core: &lash::LashCore, session: &str, phase: &str, revision: u64) {
     let output = core
-        .session(session.to_string())
+        .session(lash_core::SessionId::fixture(session.to_string()))
         .open()
         .await
         .unwrap()
@@ -348,11 +348,18 @@ async fn advance(
             assert_eq!(report.session_id, session);
             assert_eq!(report.deletion, DeletionOutcome::Deleted, "{report:?}");
             assert!(report.reopen_refusal.is_some(), "{report:?}");
-            assert!(core.session(session.clone()).open().await.is_err());
+            assert!(
+                core.session(lash_core::SessionId::fixture(session.clone()))
+                    .open()
+                    .await
+                    .is_err()
+            );
             assert!(
                 core.backend()
                     .trigger_store()
-                    .list_subscriptions(lash_core::TriggerSubscriptionFilter::for_session(session))
+                    .list_subscriptions(lash_core::TriggerSubscriptionFilter::for_session(
+                        lash_core::SessionId::fixture(session)
+                    ))
                     .await
                     .unwrap()
                     .is_empty(),
@@ -520,7 +527,7 @@ async fn witness(
             .unwrap(),
     );
     let session = session_of(&run);
-    core.session(session.clone())
+    core.session(lash_core::SessionId::fixture(session.clone()))
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             mock_llm_profile_metadata().wire_model,
             lash::TurnBudget::Unbounded,
@@ -796,7 +803,7 @@ async fn live_witness(case: Advance) {
             .unwrap(),
     );
     let session = session_of(&run);
-    core.session(session.clone())
+    core.session(lash_core::SessionId::fixture(session.clone()))
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             mock_llm_profile_metadata().wire_model,
             lash::TurnBudget::Unbounded,

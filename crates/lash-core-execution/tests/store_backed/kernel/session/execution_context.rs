@@ -25,7 +25,7 @@ mod tests {
             .expect("the test scope validates")
             .expect("the backend host lends a static controller");
         crate::testing::TestExecutionContextBuilder::for_backend(backend)
-            .session_id(session_id)
+            .session_id(lash_sansio::SessionId::fixture(session_id))
             .borrowed_effect_controller(controller)
             .build()
             .into_runtime()

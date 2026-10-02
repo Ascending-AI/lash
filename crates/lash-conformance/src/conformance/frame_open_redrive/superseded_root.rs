@@ -151,7 +151,7 @@ impl LawSession {
     fn drive_scope(&self, drive: &str) -> crate::AdmittedScope {
         admit(crate::ExecutionScope::turn(
             &self.session_id,
-            format!("{}-{drive}", self.prefix),
+            crate::TurnId::fixture(format!("{}-{drive}", self.prefix)),
         ))
     }
 

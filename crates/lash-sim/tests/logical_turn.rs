@@ -1040,7 +1040,7 @@ async fn terminal_checkpoint_withheld_admission_is_traced_once() {
             "withheld-trace-test-boot",
         ))
         .unwrap();
-    let session = created_session(&core, session_id.as_str())
+    let session = created_session(&core, session_id.clone())
         .await
         .open()
         .await

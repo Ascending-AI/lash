@@ -67,7 +67,7 @@ impl World {
         let nonce = harness.run_nonce();
         let backend = layer(harness.law_backend());
         let registry = backend.process_registry();
-        let session_id = SessionId::from(format!("parent-end-{law}-{nonce}"));
+        let session_id = SessionId::fixture(format!("parent-end-{law}-{nonce}"));
         let store = lash_core::runtime::admit_session_view(
             &backend.session_store_factory(),
             &lash_core::SessionStoreCreateRequest {
@@ -97,7 +97,7 @@ impl World {
     }
 
     fn root(&self, name: &str) -> TurnId {
-        TurnId::from(format!("{name}-{}", self.nonce))
+        TurnId::fixture(format!("{name}-{}", self.nonce))
     }
 
     /// Register a child of `parent` that lives `Until` it, returning the id
@@ -120,7 +120,7 @@ impl World {
                 payload: serde_json::json!({ "law": "parent-end" }),
             },
             lash_core::ProcessProvenance::session(lash_core::SessionScope::new(
-                self.session_id.as_str(),
+                self.session_id.clone(),
             )),
             lash_core::Lifetime::Detached,
         )

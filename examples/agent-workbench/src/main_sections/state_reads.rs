@@ -73,7 +73,7 @@ impl AppState {
             state.session_id = session_id.clone();
             state
         });
-        self.session_builder(session_id.to_string())
+        self.session_builder(session_id.clone())
             .observe_with_state(state)
             .await
     }
@@ -94,7 +94,7 @@ pub(crate) fn state_store_request(
     lash::persistence::SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         relation: lash::persistence::SessionRelation::Root,
         config: (&policy).into(),
         head: lash::persistence::SessionCreationHead::Config,
@@ -147,7 +147,7 @@ pub(crate) async fn read_state_projection(
     let persisted = loaded.unwrap_or_else(|| {
         let mut persisted =
             lash::persistence::RuntimeSessionState::new(request.config.session_policy());
-        persisted.session_id = SessionId::from(session_id.to_string());
+        persisted.session_id = session_id.clone();
         persisted
     });
     let revision = persisted

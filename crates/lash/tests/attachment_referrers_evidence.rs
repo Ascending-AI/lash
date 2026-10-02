@@ -469,7 +469,7 @@ fn law_core_over(
 }
 
 async fn created_session(core: &LashCore, session_id: &str) -> lash::LashSession {
-    core.session(session_id)
+    core.session(lash_core::SessionId::fixture(session_id.to_string()))
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             law_model().wire_model,
             lash::TurnBudget::Unbounded,
@@ -477,7 +477,7 @@ async fn created_session(core: &LashCore, session_id: &str) -> lash::LashSession
         )))
         .await
         .expect("create the law's session");
-    core.session(session_id)
+    core.session(lash_core::SessionId::fixture(session_id.to_string()))
         .open()
         .await
         .expect("open the law's session")
@@ -724,7 +724,7 @@ async fn delivered_attachment_survives_prune(
         .expect("the receiving turn");
     assert!(output.is_success(), "receiving turn: {output:?}");
     let committed = wait_referrers(&fixture, &id, "the session's edge", |found| {
-        found.contains(&ArtifactReferrer::Session(lash_core::SessionId::from(
+        found.contains(&ArtifactReferrer::Session(lash_core::SessionId::fixture(
             session_id.as_str(),
         )))
     })
@@ -925,7 +925,7 @@ finish(value);",
         .expect("the receiving turn");
     assert!(output.is_success(), "receiving turn: {output:?}");
     let committed = wait_referrers(&fixture, &id, "the session's edge", |found| {
-        found.contains(&ArtifactReferrer::Session(lash_core::SessionId::from(
+        found.contains(&ArtifactReferrer::Session(lash_core::SessionId::fixture(
             session_id.as_str(),
         )))
     })
@@ -1045,7 +1045,7 @@ finish(\"child done\");",
     witness.release_one();
     process_terminal(&core, &child).await;
     prune_processes(&core).await;
-    let child_session = lash_core::SessionId::from(format!("session:process:{child}"));
+    let child_session = lash_core::SessionId::fixture(format!("session:process:{child}"));
     let committed = wait_referrers(&fixture, &id, "the child session's edge alone", |found| {
         found == [ArtifactReferrer::Session(child_session.clone())]
     })
@@ -1173,7 +1173,7 @@ fn upload_store(
     lash_core::facade_support::RuntimeAttachmentStore::new_with_clock(
         backend.attachment_store(),
         backend.attachment_referrers(),
-        lash_core::RuntimeOwner::Session(lash_core::SessionId::from(session_id)),
+        lash_core::RuntimeOwner::Session(lash_core::SessionId::fixture(session_id)),
         fixture.double.test_clock() as Arc<dyn lash_core::Clock>,
     )
     .with_upload_expiry_ms(expiry_ms)

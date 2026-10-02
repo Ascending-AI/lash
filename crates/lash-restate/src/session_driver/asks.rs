@@ -347,7 +347,7 @@ mod tests {
             Duration::from_secs(2),
             drive_ended(
                 &engine,
-                &SessionId::new("restarting-drive"),
+                &SessionId::from("restarting-drive"),
                 &DriveRequestId::new("drive-1"),
             ),
         )

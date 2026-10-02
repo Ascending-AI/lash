@@ -170,7 +170,7 @@ mod restate_tests {
         .await
         .expect("the chat route answers")
         .expect("send message through the chat route");
-        let turn_id = TurnId::from(
+        let turn_id = TurnId::fixture(
             response
                 .headers()
                 .get("x-lash-turn-id")
@@ -313,7 +313,10 @@ mod restate_tests {
             lash_restate::RestateAuthorityId::new("agent-service-effect-group-test").unwrap(),
         );
         let wait_scope = ExecutionScope::turn(
-            format!("agent-service-await-session-{}", uuid::Uuid::new_v4()),
+            lash::SessionId::fixture(format!(
+                "agent-service-await-session-{}",
+                uuid::Uuid::new_v4()
+            )),
             "cancelled-await-event",
         );
         let wait_key = wait_host

@@ -17,7 +17,7 @@ use lash::persistence::LeaseOwnerIdentity;
 use lash::provider::ProviderHandle;
 use lash::standard::{StandardPrompt, StandardTurnOptions};
 use lash::tracing::{JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceLevel, TraceSink};
-use lash::{LashCore, LlmProfileMetadata, SessionSpec};
+use lash::{LashCore, LlmProfileMetadata, SessionId, SessionSpec};
 use lash_plugin_mcp::{
     McpPluginFactory, McpServerConfig, McpStdioTransport, McpStreamableHttpTransport, McpTransport,
 };
@@ -403,13 +403,13 @@ pub fn provider_from_env() -> Result<(ProviderHandle, LlmProfileMetadata)> {
 /// anything shorter-lived — a mention or a process lifetime — would throw the
 /// room's memory away every time somebody asked a question. Threads branch from
 /// this session; they do not replace it.
-pub fn session_id(channel_id: &str) -> String {
-    format!("channel:{channel_id}")
+pub fn session_id(channel_id: &str) -> SessionId {
+    SessionId::prefixed("channel:", channel_id)
 }
 
 /// Stable id for the forked session behind one Slack thread.
-pub fn thread_session_id(channel_id: &str, thread_ts: &str) -> String {
-    format!("thread:{channel_id}:{thread_ts}")
+pub fn thread_session_id(channel_id: &str, thread_ts: &str) -> SessionId {
+    SessionId::prefixed("thread:", format_args!("{channel_id}:{thread_ts}"))
 }
 
 /// Trace/store root under a data directory, used by the dev script and tests.

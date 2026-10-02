@@ -105,9 +105,9 @@ async fn child(backend: lash_core::Backend, session: &str) -> lash_core::Process
             lash_core::ProcessInput::External {
                 metadata: Value::Null,
             },
-            lash_core::ProcessProvenance::session(lash_core::SessionScope::new(SessionId::from(
-                session,
-            ))),
+            lash_core::ProcessProvenance::session(lash_core::SessionScope::new(
+                SessionId::fixture(session),
+            )),
             lash_core::Lifetime::Detached,
         ))
         .await

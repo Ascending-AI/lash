@@ -359,7 +359,7 @@ async fn process_root_law(storage: Storage, live: bool) {
 
     let target = RootRef {
         session: lash_core::facade_support::process_child_session_id(&process_id),
-        root: lash_core::TurnId::from(process_id.as_str()),
+        root: lash_core::TurnId::fixture(process_id.as_str()),
     };
     let sessions = harness.backend().session_store_factory();
     assert!(
@@ -447,7 +447,7 @@ async fn ahead_root_law(storage: Storage, live: bool) {
     let (harness, _stores) = Harness::new(storage, live).await;
     let call = Arc::new(HeldModelCall::new());
     let core = core(&harness, Arc::clone(&call));
-    let session = lash_core::SessionId::from(run_tag("process-root-ahead"));
+    let session = lash_core::SessionId::fixture(run_tag("process-root-ahead"));
     let sessions = harness.backend().session_store_factory();
 
     // The host creates the explicit session; no turn runs in it yet, so no
@@ -465,7 +465,7 @@ async fn ahead_root_law(storage: Storage, live: bool) {
     // asked for it, so the process's drive admits it ahead of its own.
     let target = RootRef {
         session: session.clone(),
-        root: lash_core::TurnId::from(run_tag("ahead-turn")),
+        root: lash_core::TurnId::fixture(run_tag("ahead-turn")),
     };
     let ahead = sessions
         .enqueue_pending_turn_input(

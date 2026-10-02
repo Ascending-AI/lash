@@ -29,7 +29,7 @@ async fn test_core() -> lash::Result<(lash::LashCore, ProcessId, ProcessId)> {
                     lash::process::ProcessProvenance::host(),
                     lash_core::Lifetime::Detached,
                 ),
-                &[SessionId::from(SESSION.to_string())],
+                &[SessionId::fixture(SESSION.to_string())],
             )
             .await?
             .id;
@@ -66,7 +66,7 @@ async fn test_core() -> lash::Result<(lash::LashCore, ProcessId, ProcessId)> {
 
 fn cancel_intent_for(session_id: &SessionId, process: &ProcessId) -> lash::tools::ToolIntent {
     lash::tools::ToolIntent::CancelProcess(lash::tools::CancelProcessIntent {
-        owner: lash::RuntimeOwner::Session(SessionId::from(session_id.to_string())),
+        owner: lash::RuntimeOwner::Session(session_id.clone()),
         process_id: process.clone(),
     })
 }

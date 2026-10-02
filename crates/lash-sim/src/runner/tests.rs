@@ -123,7 +123,7 @@ async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
         let session = crate::open_created_session(
             model,
             &core,
-            format!("prefix-stability-{}", model.replace('/', "-")),
+            SessionId::fixture(format!("prefix-stability-{}", model.replace('/', "-"))),
         )
         .await
         .expect("RLM prefix-stability session");

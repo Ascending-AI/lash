@@ -430,7 +430,7 @@ mod served_only_outside_a_run {
             .unwrap_or_else(|| panic!("the in-process harness runs on the server double"));
         let registry = harness.law_stores().process_registry();
         let nonce = harness.run_nonce();
-        let session_id = SessionId::from(format!("served-only-{nonce}"));
+        let session_id = SessionId::fixture(format!("served-only-{nonce}"));
         let turn_id = TurnId::from("served-only-turn");
         let start_key = lash_core::StartKey::for_host(format!("served-only-probe-{nonce}"));
         let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel::<Answers>();
@@ -480,7 +480,7 @@ mod served_only_outside_a_run {
             .unwrap_or_else(|| panic!("the in-process harness runs on the server double"));
         let registry = harness.law_stores().process_registry();
         let nonce = harness.run_nonce();
-        let session_id = SessionId::from(format!("served-recorded-{nonce}"));
+        let session_id = SessionId::fixture(format!("served-recorded-{nonce}"));
         let turn_id = TurnId::from("served-recorded-turn");
         let start_key = lash_core::StartKey::for_host(format!("served-recorded-probe-{nonce}"));
         let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel::<Answers>();

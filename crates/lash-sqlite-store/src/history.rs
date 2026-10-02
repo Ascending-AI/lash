@@ -81,7 +81,7 @@ fn missing_anchor(
     let tombstoned = visible_header(conn, session, node)?.is_some_and(|row| row.tombstoned);
     Ok(StoreError::HistoryAnchorUnavailable {
         session_id: session.clone(),
-        node_id: node.into(),
+        node_id: lash_core_execution::NodeId::parse(node)?,
         reason: if tombstoned {
             AnchorUnavailable::Tombstoned
         } else {
@@ -117,8 +117,8 @@ pub(crate) fn head_leaf_path_node(
     .map_err(sqlite_error)?
     .map(|(node_id, owner, generation)| {
         Ok(PathNode {
-            node_id: node_id.into(),
-            owner_session_id: owner.into(),
+            node_id: node_id.try_into()?,
+            owner_session_id: owner.try_into()?,
             generation: path_generation(generation)?,
         })
     })
@@ -170,20 +170,20 @@ fn owner_exit(conn: &Connection, owner: &SessionId) -> Result<OwnerExit, StoreEr
         (Some(_), Some(id), Some(owner), Some(generation), Some(tombstoned)) => {
             OwnerExitParent::Node {
                 node: PathNode {
-                    node_id: id.into(),
-                    owner_session_id: owner.into(),
+                    node_id: id.try_into()?,
+                    owner_session_id: owner.try_into()?,
                     generation: path_generation(generation)?,
                 },
                 tombstoned: tombstoned != 0,
             }
         }
         (Some(edge), ..) => OwnerExitParent::Missing {
-            node_id: edge.into(),
+            node_id: edge.try_into()?,
         },
     };
     Ok(OwnerExit {
         lowest: Some(OwnerLowestNode {
-            node_id: node_id.into(),
+            node_id: node_id.try_into()?,
             generation: path_generation(generation)?,
             parent,
         }),
@@ -210,8 +210,8 @@ pub(crate) fn head_reaches(
 
 fn header_path_node(row: &Header) -> Result<PathNode, StoreError> {
     Ok(PathNode {
-        node_id: row.id.clone().into(),
-        owner_session_id: row.owner.clone().into(),
+        node_id: row.id.clone().try_into()?,
+        owner_session_id: row.owner.clone().try_into()?,
         generation: path_generation(row.generation)?,
     })
 }
@@ -223,7 +223,7 @@ fn lineage(conn: &Connection, session: &SessionId) -> Result<LineageStamp, Store
     let rows = statement
         .query_map(params![session.as_str()], |row| {
             Ok((
-                SessionId::from(row.get::<_, String>(0)?),
+                crate::codec::sql_identity(row.get::<_, String>(0)?)?,
                 row.get::<_, i64>(1)?,
             ))
         })
@@ -341,7 +341,7 @@ fn window(
             }
             if pointer != frame.id {
                 return Err(StoreError::InvalidWindowAnchor {
-                    frame_node_id: frame.id.clone().into(),
+                    frame_node_id: frame.id.clone().try_into()?,
                     violation:
                         lash_core_execution::store::WindowAnchorViolation::ForeignFramePointer,
                 });
@@ -376,7 +376,7 @@ fn window(
             frame_node_id: lash_core_execution::FrameNodeId::new(frame.id.clone())
                 .map_err(|error| corrupt("SessionGraph", error.to_string()))?,
             generation: nonnegative("SessionGraph", "generation", frame.generation)?,
-            external_parent: frame.parent.map(Into::into),
+            external_parent: frame.parent.map(TryInto::try_into).transpose()?,
             previous_frame_node_id: previous,
         };
         let graph = lash_core_execution::SessionGraph::from_window(nodes, leaf, anchor)?;
@@ -474,13 +474,13 @@ impl SessionHistoryStore for SqliteStore {
                     head_reaches(
                         conn,
                         Some(PathNode {
-                            node_id: leaf_id.into(),
-                            owner_session_id: leaf_owner.into(),
+                            node_id: leaf_id.try_into()?,
+                            owner_session_id: leaf_owner.try_into()?,
                             generation: path_generation(leaf_generation)?,
                         }),
                         PathNode {
                             node_id: node.clone(),
-                            owner_session_id: owner.into(),
+                            owner_session_id: owner.try_into()?,
                             generation: path_generation(generation)?,
                         },
                     )
@@ -621,7 +621,7 @@ fn ancestors(
         let size = nonnegative("SessionGraph", "body_bytes", row.bytes)?;
         if headers.is_empty() && size > budget.max_bytes.get() {
             return Err(StoreError::HistoryNodeTooLarge {
-                node_id: row.id.into(),
+                node_id: row.id.try_into()?,
                 required_bytes: size,
                 max_bytes: budget.max_bytes.get(),
             });
@@ -668,7 +668,7 @@ fn ancestors(
                 .as_ref()
                 .ok_or_else(|| corrupt("SessionGraph", "non-root row lacks parent"))?
                 .clone()
-                .into(),
+                .try_into()?,
             nonnegative("SessionGraph", "generation", last.generation)? - 1,
         ))
     };
@@ -696,7 +696,7 @@ fn ancestors(
         decoded.fetch_add(1, Ordering::Relaxed);
         nodes.push(HistoryNode {
             generation: nonnegative("SessionGraph", "generation", header.generation)?,
-            owner_session_id: SessionId::from(header.owner),
+            owner_session_id: SessionId::parse(header.owner)?,
             frame_node_id: lash_core_execution::FrameNodeId::new(header.frame)
                 .map_err(|error| corrupt("SessionGraph", error.to_string()))?,
             body_bytes: nonnegative("SessionGraph", "body_bytes", header.bytes)?,
@@ -780,7 +780,7 @@ fn failure_page(
         last = Some(FailureEvidenceCursor::new(
             session.clone(),
             nonnegative("RuntimeCommitReceipt", "committed_at_ms", committed_at_ms)?,
-            turn_id.clone().into(),
+            turn_id.clone().try_into()?,
         ));
         settlements.push(lash_core_execution::TurnFailureSettlement {
             turn_id,

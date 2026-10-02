@@ -115,6 +115,7 @@ pub(super) async fn fork_at_in_catalog(
             let mut current_frame_node_id = None;
             let mut fork_plan = None;
             if let Some(leaf_node_id) = leaf_node_id.as_deref() {
+                let leaf = lash_core_execution::NodeId::parse(leaf_node_id)?;
                 // Retirement never tombstones a retained revision's leaf, so
                 // a dead one is damage, not a collected point.
                 let node_facts = tx
@@ -137,7 +138,7 @@ pub(super) async fn fork_at_in_catalog(
                 })?;
                 let frame = persistence::nearest_frame_node_id_conn(tx, leaf_node_id)?
                     .ok_or_else(|| lash_core_execution::StoreError::MissingFrameOpenAncestor {
-                        leaf_node_id: leaf_node_id.to_string().into(),
+                        leaf_node_id: leaf.clone(),
                     })?;
                 let frame_node_id = lash_core_execution::FrameNodeId::new(frame)
                     .map_err(|error| stored_data_corrupt("fork frame", error))?;
@@ -180,7 +181,7 @@ pub(super) async fn fork_at_in_catalog(
                     )
                 })?;
                 let mut edge_path = Vec::new();
-                let mut current_node_id = lash_core_execution::NodeId::from(leaf_node_id);
+                let mut current_node_id = leaf;
                 let mut expected_generation = fork_generation;
                 loop {
                     let facts = tx
@@ -222,9 +223,9 @@ pub(super) async fn fork_at_in_catalog(
                     }
                     let parent_node_id = facts.1.clone();
                     edge_path.push(lash_core_execution::store::ForkNodeFacts {
-                        node_id: facts.0.into(),
-                        parent_node_id: facts.1.map(lash_core_execution::NodeId::from),
-                        owning_session_id: SessionId::from(facts.2),
+                        node_id: facts.0.try_into()?,
+                        parent_node_id: facts.1.map(lash_core_execution::NodeId::parse).transpose()?,
+                        owning_session_id: SessionId::parse(facts.2)?,
                         generation,
                     });
                     if expected_generation == 0 {
@@ -235,7 +236,7 @@ pub(super) async fn fork_at_in_catalog(
                             "SessionGraph",
                             "retained fork path ended before generation zero",
                         )
-                    })?.into();
+                    })?.try_into()?;
                     expected_generation -= 1;
                 }
                 edge_path.reverse();
@@ -281,7 +282,7 @@ pub(super) async fn fork_at_in_catalog(
                 },
                 0,
                 checkpoint_ref.clone().map(Into::into),
-                leaf_node_id.clone().map(Into::into),
+                leaf_node_id.clone().map(TryInto::try_into).transpose()?,
                 current_frame_node_id,
             )?;
             let head_json = encode_json(&meta.payload())?;
@@ -312,7 +313,7 @@ pub(super) async fn fork_at_in_catalog(
                     .map_err(sqlite_error)?;
                 for ancestor in fork_plan.ancestors() {
                     stmt.execute(params![
-                        fork_plan.session_id(),
+                        fork_plan.session_id().as_str(),
                         ancestor.ancestor_session_id.as_str(),
                         ancestor.fork_node_id.as_str(),
                         i64::try_from(ancestor.fork_generation).map_err(|_| {
@@ -341,7 +342,7 @@ pub(super) async fn fork_at_in_catalog(
                 session_id: request.session_id,
                 source_session_id,
                 head_revision: request.head_revision,
-                leaf_node_id: leaf_node_id.map(Into::into),
+                leaf_node_id: leaf_node_id.map(TryInto::try_into).transpose()?,
                 observed_processes: Vec::new(),
             })
         })();

@@ -26,8 +26,8 @@ pub(crate) const EFFECT_SCOPE_ID: &str = "lash-sim-runtime-boundaries";
 /// boundary's session, as a session's own turn runs its effects.
 fn boundary_effect_scope(event: &BoundaryEvent) -> ExecutionScope {
     ExecutionScope::turn(
-        event.actor_alias.clone(),
-        format!("{EFFECT_SCOPE_ID}:{}", event.boundary_id),
+        SessionId::fixture(event.actor_alias.clone()),
+        lash_core::TurnId::fixture(format!("{EFFECT_SCOPE_ID}:{}", event.boundary_id)),
     )
 }
 
@@ -35,8 +35,8 @@ fn boundary_effect_scope(event: &BoundaryEvent) -> ExecutionScope {
 /// one per durable key, so its crash and redrive replay one invocation.
 pub(crate) fn durable_effect_scope(session: &str, durable_key: &str) -> ExecutionScope {
     ExecutionScope::turn(
-        session.to_string(),
-        format!("{EFFECT_SCOPE_ID}:{durable_key}"),
+        SessionId::fixture(session.to_string()),
+        lash_core::TurnId::fixture(format!("{EFFECT_SCOPE_ID}:{durable_key}")),
     )
 }
 
@@ -205,7 +205,7 @@ impl RuntimeBoundaryHarness {
             lash_core::RuntimeEffectInvocation::new(
                 EffectAddress::new(scope.clone(), durable_key.clone())
                     .expect("durable effect carries an admitted effect scope"),
-                RuntimeAttribution::for_session(event.actor_alias.clone()),
+                RuntimeAttribution::for_session(SessionId::fixture(event.actor_alias.clone())),
                 effect_id.clone(),
             ),
             RuntimeEffectCommand::ToolAttempt {
@@ -232,7 +232,7 @@ impl RuntimeBoundaryHarness {
         let recorded_intents =
             lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::StartProcess(Box::new(
                 lash_core::StartProcessIntent {
-                    owner: lash_core::RuntimeOwner::Session(SessionId::from(
+                    owner: lash_core::RuntimeOwner::Session(SessionId::fixture(
                         event.actor_alias.clone(),
                     )),
                     declaration: lash_core::ProcessStartDeclaration::external(
@@ -372,7 +372,7 @@ impl RuntimeBoundaryHarness {
                     format!("tool/{}/{}", event.actor_alias, event.boundary_id),
                 )
                 .expect("tool boundary carries an admitted effect scope"),
-                RuntimeAttribution::for_session(event.actor_alias.clone()),
+                RuntimeAttribution::for_session(SessionId::fixture(event.actor_alias.clone())),
                 format!("tool-attempt:{}", event.boundary_id),
             ),
             RuntimeEffectCommand::ToolAttempt {
@@ -459,7 +459,7 @@ impl RuntimeBoundaryHarness {
                     format!("exec/{}/{}", event.actor_alias, event.boundary_id),
                 )
                 .expect("exec boundary carries an admitted effect scope"),
-                RuntimeAttribution::for_session(event.actor_alias.clone()),
+                RuntimeAttribution::for_session(SessionId::fixture(event.actor_alias.clone())),
                 format!("exec-code:{}", event.boundary_id),
             ),
             RuntimeEffectCommand::ExecCode { code },

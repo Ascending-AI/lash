@@ -80,8 +80,6 @@ fn remote_undelivered_is_defer(value: &RemoteTurnCancelUndeliveredInputPolicy) -
 
 impl RemoteTurnCancelRequest {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        require_non_empty("RemoteTurnCancelRequest", "session_id", &self.session_id)?;
-        require_non_empty("RemoteTurnCancelRequest", "turn_id", &self.turn_id)?;
         require_non_empty("RemoteTurnCancelRequest", "request_id", &self.request_id)
     }
 }
@@ -139,8 +137,6 @@ impl RemoteTurnCancelReceipt {
     }
 
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        require_non_empty("RemoteTurnCancelReceipt", "session_id", &self.session_id)?;
-        require_non_empty("RemoteTurnCancelReceipt", "turn_id", &self.turn_id)?;
         self.outcome.validate()
     }
 }

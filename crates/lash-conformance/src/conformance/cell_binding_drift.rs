@@ -322,7 +322,7 @@ pub async fn redriven_cell_links_against_its_journaled_binding_set(
         model_calls: Arc::new(AtomicUsize::new(0)),
         executions: Arc::new(AtomicUsize::new(0)),
     };
-    let turn_id = TurnId::from(format!("{prefix}-binding-drift-turn"));
+    let turn_id = TurnId::fixture(format!("{prefix}-binding-drift-turn"));
     for (case, recorded, drift, word) in [
         ("done-rem", true, Probe::Removed, "missing"),
         ("done-chg", true, Probe::Retried, "changed"),
@@ -330,8 +330,8 @@ pub async fn redriven_cell_links_against_its_journaled_binding_set(
         ("live-rem", false, Probe::Removed, "missing"),
         ("live-chg", false, Probe::Retried, "changed"),
     ] {
-        let session_id = SessionId::from(format!("{prefix}-{case}-real"));
-        let probe_session = SessionId::from(format!("{prefix}-{case}-prob"));
+        let session_id = SessionId::fixture(format!("{prefix}-{case}-real"));
+        let probe_session = SessionId::fixture(format!("{prefix}-{case}-prob"));
         let attempt_key =
             first_attempt_key(&world, &runner, &probe_session, &session_id, &turn_id).await;
         let store = crate::conformance::law_session_store(world.stores.as_ref(), &session_id).await;
@@ -449,8 +449,8 @@ pub async fn redriven_cell_links_against_its_journaled_binding_set(
 
     // A reworded descriptor is not drift: a call whose result was never
     // recorded runs the tool live, once, and the turn completes unparked.
-    let session_id = SessionId::from(format!("{prefix}-live-dsc-real"));
-    let probe_session = SessionId::from(format!("{prefix}-live-dsc-prob"));
+    let session_id = SessionId::fixture(format!("{prefix}-live-dsc-real"));
+    let probe_session = SessionId::fixture(format!("{prefix}-live-dsc-prob"));
     let attempt_key =
         first_attempt_key(&world, &runner, &probe_session, &session_id, &turn_id).await;
     let store = crate::conformance::law_session_store(world.stores.as_ref(), &session_id).await;

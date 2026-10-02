@@ -486,7 +486,7 @@ impl Session {
     ) -> Result<Self, SessionError> {
         let tool_registry = services.plugins.tool_registry();
         let session = Self {
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: session_id.clone(),
             services,
             context_overlay_revision: 0,
             context_tools: Vec::new(),
@@ -531,7 +531,7 @@ impl Session {
         true
     }
 
-    pub fn session_id(&self) -> &str {
+    pub fn session_id(&self) -> &SessionId {
         &self.session_id
     }
 
@@ -860,7 +860,7 @@ impl Session {
             observation_call_key: None,
             execution_env_spec: execution_env_spec.clone(),
             owner: crate::ExecutionOwner::SessionFrame {
-                session_id: SessionId::from(session_id.to_string()),
+                session_id: session_id.clone(),
                 agent_frame_id,
             },
             observer,

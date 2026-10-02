@@ -23,8 +23,8 @@ fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
 #[test]
 fn construction_enforces_structural_graph_integrity() {
     let node = |id: &str, parent: Option<&str>| SessionNodeRecord {
-        node_id: id.to_string().into(),
-        parent_node_id: parent.map(crate::NodeId::from),
+        node_id: NodeId::fixture(id.to_string()),
+        parent_node_id: parent.map(crate::NodeId::fixture),
         timestamp: "2026-08-08T00:00:00Z".to_string(),
         payload: SessionNodePayload::Plugin {
             plugin_type: "construction-integrity-test".to_string(),
@@ -32,20 +32,17 @@ fn construction_enforces_structural_graph_integrity() {
         },
     };
 
-    assert!(matches!(
-        SessionGraph::from_nodes(vec![node("", None)], Some(String::new().into())),
-        Err(crate::StoreError::InvalidGraphNodeId { node_id }) if node_id.is_empty()
-    ));
-    let invalid_encoded = serde_json::to_string(&SessionGraph::from_unchecked_nodes_for_testing(
-        vec![node("", None)],
-        Some(String::new().into()),
+    let mut blank_encoded = serde_json::to_value(SessionGraph::from_unchecked_nodes_for_testing(
+        vec![node("only", None)],
+        Some(NodeId::from("only")),
     ))
     .unwrap();
+    blank_encoded["nodes"][0]["node_id"] = serde_json::Value::String(String::new());
     assert!(
-        serde_json::from_str::<SessionGraph>(&invalid_encoded)
-            .expect_err("serialized graphs must reject empty node identities")
+        serde_json::from_value::<SessionGraph>(blank_encoded)
+            .expect_err("a serialized graph with a blank node id decodes to no graph")
             .to_string()
-            .contains("node id must not be empty")
+            .contains("id must not be empty or whitespace-only")
     );
     assert!(matches!(
         SessionGraph::from_nodes(
@@ -108,22 +105,14 @@ fn rejected_graph_appends_leave_nodes_leaf_and_cached_reads_unchanged() {
     let before_graph = serde_json::to_value(&graph).expect("serialize graph preimage");
     let before_read = graph.read_model();
     let node = |node_id: &str, parent_node_id: &str| SessionNodeRecord {
-        node_id: node_id.to_string().into(),
-        parent_node_id: Some(parent_node_id.to_string().into()),
+        node_id: NodeId::fixture(node_id.to_string()),
+        parent_node_id: Some(NodeId::fixture(parent_node_id.to_string())),
         timestamp: "2026-09-12T00:00:00Z".to_string(),
         payload: SessionNodePayload::Plugin {
             plugin_type: "atomic-append-test".to_string(),
             body: SharedJsonValue::new(serde_json::json!({"node": node_id})),
         },
     };
-
-    let empty_node_id = GraphAppend::Extend {
-        nodes: vec![node("", &resident_leaf)],
-    };
-    assert!(matches!(
-        graph.apply_append(&empty_node_id),
-        Err(crate::StoreError::InvalidGraphNodeId { node_id }) if node_id.is_empty()
-    ));
 
     let duplicate = GraphAppend::Extend {
         nodes: vec![node(&resident_leaf, &resident_leaf)],
@@ -305,8 +294,8 @@ fn resident_integrity_rejects_missing_leaves() {
 #[test]
 fn cache_build_rejects_cycles_in_inactive_components() {
     let plugin_node = |node_id: &str, parent_node_id: Option<&str>| SessionNodeRecord {
-        node_id: node_id.to_string().into(),
-        parent_node_id: parent_node_id.map(crate::NodeId::from),
+        node_id: NodeId::fixture(node_id.to_string()),
+        parent_node_id: parent_node_id.map(crate::NodeId::fixture),
         timestamp: "2026-07-31T00:00:00Z".to_string(),
         payload: SessionNodePayload::Plugin {
             plugin_type: "inactive-cycle-test".to_string(),
@@ -645,9 +634,9 @@ fn stored_frame_open_rejects_a_raw_frame_key() {
     let frame_key = crate::FrameKey::from_caller_material("strict-durable-frame")
         .expect("non-empty frame material");
     let node = SessionNodeRecord {
-        node_id: frame_node_id(&SessionId::from("session"), frame_key.as_str())
-            .into_inner()
-            .into(),
+        node_id: NodeId::fixture(
+            frame_node_id(&SessionId::from("session"), frame_key.as_str()).into_inner(),
+        ),
         parent_node_id: None,
         timestamp: "2026-09-01T00:00:00Z".to_string(),
         payload: SessionNodePayload::FrameOpen {
@@ -1143,7 +1132,7 @@ fn apply_append_after_snapshot_shares_resident_records() {
     graph
         .apply_append(&GraphAppend::Extend {
             nodes: vec![SessionNodeRecord {
-                node_id: "appended".to_string().into(),
+                node_id: NodeId::from("appended"),
                 parent_node_id: Some(resident_leaf.clone()),
                 timestamp: "2026-09-12T00:00:00Z".to_string(),
                 payload: SessionNodePayload::Plugin {
@@ -1169,8 +1158,8 @@ fn remap_node_ids_rewrites_only_mapped_records() {
     // Warm the by_id cache so the remap resolves positions through it.
     assert!(graph.find_node(first.as_str()).is_some());
 
-    let first_derived = crate::NodeId::from("derived-first".to_string());
-    let second_derived = crate::NodeId::from("derived-second".to_string());
+    let first_derived = crate::NodeId::from("derived-first");
+    let second_derived = crate::NodeId::from("derived-second");
     graph.remap_node_ids(
         &crate::SessionId::from("remap-test"),
         &[
@@ -1201,7 +1190,7 @@ fn remap_node_ids_keeps_unmapped_records_shared() {
     let snapshot = graph.clone();
     assert!(graph.find_node(first.as_str()).is_some());
 
-    let second_derived = crate::NodeId::from("derived-second".to_string());
+    let second_derived = crate::NodeId::from("derived-second");
     graph.remap_node_ids(
         &crate::SessionId::from("remap-test"),
         &[(second.clone(), second_derived.clone())],
@@ -1225,7 +1214,7 @@ fn remap_node_ids_rewrites_mapped_parents_on_unmapped_records() {
 
     // Remap only the middle node: the unmapped child must follow its remapped
     // parent, so its record is unshared even though its own id is untouched.
-    let second_derived = crate::NodeId::from("derived-second".to_string());
+    let second_derived = crate::NodeId::from("derived-second");
     graph.remap_node_ids(
         &crate::SessionId::from("remap-test"),
         &[(second.clone(), second_derived.clone())],
@@ -1252,8 +1241,8 @@ fn remap_node_ids_rewrites_parents_on_child_before_parent_layouts() {
     // cache index path and the cold fallback.
     for warm_cache in [true, false] {
         let record = |id: &str, parent: Option<&str>| SessionNodeRecord {
-            node_id: id.to_string().into(),
-            parent_node_id: parent.map(crate::NodeId::from),
+            node_id: NodeId::fixture(id.to_string()),
+            parent_node_id: parent.map(crate::NodeId::fixture),
             timestamp: "2026-08-08T00:00:00Z".to_string(),
             payload: SessionNodePayload::Plugin {
                 plugin_type: "remap-child-before-parent".to_string(),
@@ -1270,7 +1259,7 @@ fn remap_node_ids_rewrites_parents_on_child_before_parent_layouts() {
             assert!(graph.find_node("root").is_some());
         }
 
-        let derived_root = crate::NodeId::from("derived-root".to_string());
+        let derived_root = crate::NodeId::from("derived-root");
         graph.remap_node_ids(
             &crate::SessionId::from("remap-test"),
             &[("root".into(), derived_root.clone())],
@@ -1320,8 +1309,8 @@ fn apply_realized_node_timestamps_rewrites_only_realized_records() {
 #[test]
 fn shared_records_serialize_with_the_unchanged_durable_shape() {
     let node = |node_id: &str, parent_node_id: Option<&str>| SessionNodeRecord {
-        node_id: node_id.to_string().into(),
-        parent_node_id: parent_node_id.map(Into::into),
+        node_id: NodeId::fixture(node_id.to_string()),
+        parent_node_id: parent_node_id.map(|id| id.parse().unwrap()),
         timestamp: "2026-09-12T00:00:00Z".to_string(),
         payload: SessionNodePayload::Plugin {
             plugin_type: "shape-test".to_string(),
@@ -1330,7 +1319,7 @@ fn shared_records_serialize_with_the_unchanged_durable_shape() {
     };
     let graph = SessionGraph::from_nodes(
         vec![node("root", None), node("child", Some("root"))],
-        Some("child".to_string().into()),
+        Some(NodeId::from("child")),
     )
     .expect("fixture graph is valid");
 
@@ -1413,10 +1402,10 @@ mod window_anchor {
         let frame_key =
             crate::FrameKey::from_caller_material(key).expect("non-empty frame material");
         SessionNodeRecord {
-            node_id: frame_node_id(&SessionId::from("window"), frame_key.as_str())
-                .into_inner()
-                .into(),
-            parent_node_id: parent.map(crate::NodeId::from),
+            node_id: NodeId::fixture(
+                frame_node_id(&SessionId::from("window"), frame_key.as_str()).into_inner(),
+            ),
+            parent_node_id: parent.map(crate::NodeId::fixture),
             timestamp: "2026-09-29T00:00:00Z".to_string(),
             payload: SessionNodePayload::FrameOpen {
                 frame_key,
@@ -1431,8 +1420,8 @@ mod window_anchor {
 
     fn plugin(id: &str, parent: &str) -> SessionNodeRecord {
         SessionNodeRecord {
-            node_id: id.into(),
-            parent_node_id: Some(parent.into()),
+            node_id: id.parse().unwrap(),
+            parent_node_id: Some(parent.parse().unwrap()),
             timestamp: "2026-09-29T00:00:00Z".to_string(),
             payload: SessionNodePayload::Plugin {
                 plugin_type: "window-anchor-test".to_string(),
@@ -1611,7 +1600,7 @@ fn held_readers_of_every_commit_share_the_frame_and_keep_what_they_saw() {
             MessageRole::User,
             &format!("turn {turn}"),
         ));
-        let derived = NodeId::from(format!("derived-{turn}"));
+        let derived = NodeId::fixture(format!("derived-{turn}"));
         let warm = graph.read_model();
         graph.remap_node_ids(&session, &[(draft, derived.clone())]);
         graph.apply_realized_node_timestamps(&[RealizedNodeTimestamp {

@@ -94,8 +94,8 @@ pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
     fixture: &ToolChildLawFixture,
     prefix: &str,
 ) {
-    let session_id = crate::SessionId::from(format!("{prefix}-lane"));
-    let turn_id = crate::TurnId::from(format!("{prefix}-lane-turn"));
+    let session_id = crate::SessionId::fixture(format!("{prefix}-lane"));
+    let turn_id = crate::TurnId::fixture(format!("{prefix}-lane-turn"));
     let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id.clone());
     let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
         .expect("a turn scope derives an opener");

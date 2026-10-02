@@ -49,7 +49,7 @@ async fn retained_committed_views_keep_their_commit_and_share_the_frame() {
         let handler = double
             .open_handler(AdmittedScope::turn(
                 SessionId::from("root"),
-                TurnId::from(format!("retention-turn-{turn}")),
+                TurnId::fixture(format!("retention-turn-{turn}")),
             ))
             .await
             .expect("open the scope's handler");

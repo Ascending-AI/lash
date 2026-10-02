@@ -1293,9 +1293,10 @@ impl RuntimeSessionState {
     pub fn open_unpersisted_initial_frame_under_current_assignment(&mut self) {
         let frame_key = crate::FrameKey::from_caller_material("initial-frame")
             .expect("the initial frame material is non-empty");
-        let frame_node_id = crate::NodeId::new(
-            crate::session_graph::frame_node_id(&self.session_id, frame_key.as_str()).into_inner(),
-        );
+        let frame_node_id = crate::NodeId::from(crate::session_graph::frame_node_id(
+            &self.session_id,
+            frame_key.as_str(),
+        ));
         if self.persisted_node_ids.contains(&frame_node_id) {
             return;
         }

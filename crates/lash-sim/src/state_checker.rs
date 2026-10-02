@@ -67,7 +67,7 @@ fn check_checkpoint_state(
             continue;
         };
         let session_id = write.attributed_session().to_string();
-        let attributed_session = SessionId::from(session_id.clone());
+        let attributed_session = SessionId::fixture(session_id.clone());
         let checked = sessions.entry(session_id.clone()).or_default();
         fold_graph_append(checked, &state.submitted_graph_append, &attributed_session)?;
         checked.checked_commits += 1;
@@ -91,7 +91,7 @@ fn check_checkpoint_state(
                 write.commit_index
             )
         })?;
-        compare_read_model(checked, accepted_read, &SessionId::from(session_id))?;
+        compare_read_model(checked, accepted_read, &SessionId::fixture(session_id))?;
     }
 
     // Every session the workload declared must reach the checker, checked by
@@ -124,7 +124,7 @@ fn check_checkpoint_state(
                 checked.checked_commits
             ));
         };
-        compare_runtime_facts(checked, runtime, &SessionId::from(session_id))?;
+        compare_runtime_facts(checked, runtime, &SessionId::fixture(session_id))?;
         runtime_facts_checked += 1;
     }
 

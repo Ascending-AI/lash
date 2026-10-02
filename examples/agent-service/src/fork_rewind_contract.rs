@@ -70,7 +70,7 @@ async fn host_can_rewind_from_a_surviving_branch_after_deleting_the_source() {
         &SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(SOURCE_SESSION.to_string()),
+            session_id: SessionId::fixture(SOURCE_SESSION.to_string()),
             relation: SessionRelation::Root,
             config: source_policy.clone().into(),
             head: SessionCreationHead::Config,
@@ -82,7 +82,7 @@ async fn host_can_rewind_from_a_surviving_branch_after_deleting_the_source() {
         &SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(FOREIGN_TARGET.to_string()),
+            session_id: SessionId::fixture(FOREIGN_TARGET.to_string()),
             relation: SessionRelation::Root,
             config: source_policy.clone().into(),
             head: SessionCreationHead::Config,
@@ -90,7 +90,7 @@ async fn host_can_rewind_from_a_surviving_branch_after_deleting_the_source() {
     )
     .await;
     let mut source_state = RuntimeSessionState::new(source_policy);
-    source_state.session_id = SessionId::from(SOURCE_SESSION.to_string());
+    source_state.session_id = SessionId::fixture(SOURCE_SESSION.to_string());
     source_state.ensure_agent_frame_initialized();
     source
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&source_state))

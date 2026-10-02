@@ -143,7 +143,7 @@ async fn committed_frame(
 ) -> (usize, lash_core::store::SessionWindowRead) {
     let window = lash_core::SessionHistoryStore::load_session_window(
         backend.session_store_factory().as_ref(),
-        &SessionId::from(session_id),
+        &SessionId::fixture(session_id),
         lash_core::store::WindowSelector::Current,
     )
     .await

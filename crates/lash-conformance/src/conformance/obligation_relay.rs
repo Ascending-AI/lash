@@ -227,7 +227,7 @@ async fn armed_session(
     name: &str,
     now_ms: u64,
 ) -> (ObligationKey, ObligationId) {
-    let session_id = SessionId::from(format!("{}-{name}", fixture.prefix));
+    let session_id = SessionId::fixture(format!("{}-{name}", fixture.prefix));
     fixture
         .stores
         .session_store_factory()
@@ -364,7 +364,7 @@ pub async fn arming_takes_only_an_idle_row(fixture: ObligationLawFixture) {
         "a row that already owes an obligation is not armed again"
     );
     let missing = ObligationKey::SessionDelete {
-        session_id: SessionId::from(format!("{}-never-created", fixture.prefix)),
+        session_id: SessionId::fixture(format!("{}-never-created", fixture.prefix)),
     };
     assert_eq!(
         ledger.arm(&missing, T0).await.expect("arm a missing row"),
@@ -1028,7 +1028,7 @@ pub async fn immediate_delivery_takes_only_a_due_obligation(fixture: ObligationL
 pub async fn withdrawing_an_open_input_delivers_its_ingress_obligation(
     fixture: ObligationLawFixture,
 ) {
-    let session_id = SessionId::from(format!("{}-ingress-withdrawal", fixture.prefix));
+    let session_id = SessionId::fixture(format!("{}-ingress-withdrawal", fixture.prefix));
     let store = crate::conformance::law_session_store(fixture.stores.as_ref(), &session_id).await;
     let ingress = fixture.stores.obligation_ledger(ObligationKind::Ingress);
     let now = fixture.stores.clock().timestamp_ms();

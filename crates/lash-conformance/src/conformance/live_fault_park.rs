@@ -144,7 +144,7 @@ impl World {
                 crate::QueuedWorkBatchingConfig::new(1),
             );
         host.providers.models = crate::testing::standard_test_llm_profiles(model.into_handle());
-        let session_id = SessionId::from(format!("{name}-session"));
+        let session_id = SessionId::fixture(format!("{name}-session"));
         let admission_faults = Arc::new(AtomicUsize::new(0));
         let admissions = Arc::new(AtomicUsize::new(0));
         let store: Arc<dyn crate::RuntimeStore> = Arc::new(FaultingAdmission {
@@ -154,7 +154,7 @@ impl World {
         });
         Self {
             session_id,
-            turn_id: TurnId::from(format!("{name}-turn")),
+            turn_id: TurnId::fixture(format!("{name}-turn")),
             host,
             store,
             contributor_armed: Arc::new(AtomicBool::new(false)),

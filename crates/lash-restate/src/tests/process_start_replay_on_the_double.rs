@@ -259,8 +259,9 @@ pub(super) async fn a_replayed_host_start_binds_its_recorded_process(seed: u64) 
     let under = |originator: &str| {
         let mut registration =
             external_registration().with_start_key(Some(lash_core::StartKey::for_host(&host_key)));
-        registration.provenance =
-            lash_core::ProcessProvenance::session(lash_core::SessionScope::new(originator));
+        registration.provenance = lash_core::ProcessProvenance::session(
+            lash_core::SessionScope::new(lash_core::SessionId::fixture(originator.to_string())),
+        );
         registration
     };
     let taken_by_b: Arc<Mutex<Option<ProcessId>>> = Arc::default();

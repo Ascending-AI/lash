@@ -79,7 +79,7 @@ impl SqliteStore {
         session_id: &SessionId,
         batch_id: &str,
     ) -> Result<Option<QueuedWorkBatch>, StoreError> {
-        let session_id = SessionId::from(session_id.to_string());
+        let session_id = SessionId::parse(session_id.to_string())?;
         let batch_id = batch_id.to_string();
         let now = self.clock.timestamp_ms();
         self.conn
@@ -141,7 +141,7 @@ impl SqliteStore {
         session_id: &SessionId,
         batch_id: &str,
     ) -> Result<Option<lash_core_execution::store::RuntimeCommitReceipt>, StoreError> {
-        let session_id = SessionId::from(session_id.to_string());
+        let session_id = SessionId::parse(session_id.to_string())?;
         let batch_id = batch_id.to_string();
         let fleet = self.fleet_format();
         self.conn
@@ -179,7 +179,7 @@ impl SqliteStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-        let session_id = SessionId::from(session_id.to_string());
+        let session_id = SessionId::parse(session_id.to_string())?;
         #[cfg(feature = "testing")]
         let hydration_pause = self.conn.pauses();
         // One snapshot for the batch rows and their item rows: see
@@ -218,7 +218,7 @@ impl SqliteStore {
         &self,
         session_id: &SessionId,
     ) -> Result<lash_core_execution::store::PendingSessionWorkOrdering, StoreError> {
-        let session_id = SessionId::from(session_id.to_string());
+        let session_id = SessionId::parse(session_id.to_string())?;
         self.conn
             .call(move |conn| {
                 let outcome: Result<
@@ -242,7 +242,7 @@ impl SqliteStore {
                         .map_err(sqlite_error)?;
                     let ordering_key = |kind: &'static str, at: Option<i64>, seq: Option<i64>| {
                         at.zip(seq)
-                            .map(|(at, seq)| {
+                            .map(|(at, seq)| -> Result<_, StoreError> {
                                 Ok(lash_core_execution::store::PendingWorkOrderingKey {
                                     enqueued_at_ms: u64_from_sql(kind, "enqueued_at_ms", at)
                                         .map_err(sqlite_error)?,
@@ -267,7 +267,7 @@ impl SqliteStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-        let session_id = SessionId::from(session_id.to_string());
+        let session_id = SessionId::parse(session_id.to_string())?;
         #[cfg(feature = "testing")]
         let hydration_pause = self.conn.pauses();
         // One snapshot for the batch rows and their item rows: see

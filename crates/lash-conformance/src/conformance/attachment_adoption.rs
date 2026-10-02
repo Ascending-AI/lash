@@ -90,7 +90,7 @@ impl AttachmentStore for FaultingAttachmentStore {
 )]
 pub(super) async fn create(f: &Arc<dyn DeploymentStore>, id: &str) -> Arc<dyn RuntimeStore> {
     f.admit_session(&session_store_request(
-        &SessionId::from(id),
+        &SessionId::fixture(id),
         "probe",
         SessionRelation::Root,
     ))

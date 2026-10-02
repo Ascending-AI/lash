@@ -56,7 +56,7 @@ impl AdmittedRoot {
         head: Head,
         stamp: &crate::engine::BuildGeneration,
     ) -> Self {
-        let session_id = SessionId::from(format!("{}-{name}", fixture.prefix));
+        let session_id = SessionId::fixture(format!("{}-{name}", fixture.prefix));
         let store = fixture
             .stores
             .session_store_factory()
@@ -109,7 +109,7 @@ impl AdmittedRoot {
         let admission = store
             .admit_root(&crate::store::AdmitRootRequest {
                 fence: lease.clone(),
-                root: TurnId::from(name),
+                root: TurnId::fixture(name),
                 head,
                 max_inputs: 64,
                 policy: lash_core::testing::queued_work_admission_policy(64),
@@ -130,7 +130,7 @@ impl AdmittedRoot {
             .expect("the root reaches its head");
         Self {
             session_id,
-            root: TurnId::from(name),
+            root: TurnId::fixture(name),
             store: Arc::clone(store.store()),
             lease,
             admission,
@@ -162,7 +162,7 @@ impl AdmittedRoot {
         };
         // A follow-on is written only by a turn's terminal commit.
         let operation =
-            crate::OperationId::turn(self.session_id.as_str(), self.root.as_str(), "final");
+            crate::OperationId::turn(self.session_id.clone(), self.root.clone(), "final");
         let mut graph = state.pending_graph_commit();
         graph
             .derive_node_ids(&state.session_id, &operation)

@@ -35,7 +35,7 @@ pub(super) fn process_record(process_id: &ProcessId) -> lash_core::ProcessRecord
         lash_core::Lifetime::Detached,
     )
     .with_event_types([process_event_type()])
-    .with_wake_session_id(Some(SessionId::from("session-a".to_string())));
+    .with_wake_session_id(Some(SessionId::from("session-a")));
     let mut record = lash_core::ProcessRecord::from_registration(registration, process_id.clone());
     record.external_ref = Some(lash_core::ProcessExternalRef {
         backend: "worker".to_string(),

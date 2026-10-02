@@ -31,11 +31,17 @@ fn turn_effect_invocation(
     replay_key: impl Into<String>,
 ) -> lash_core::RuntimeEffectInvocation {
     lash_core::RuntimeEffectInvocation::new(
-        lash_core::EffectAddress::new(ExecutionScope::turn(session_id, turn_id), replay_key)
-            .expect("valid test turn effect address"),
+        lash_core::EffectAddress::new(
+            ExecutionScope::turn(
+                lash_core::SessionId::fixture(session_id),
+                TurnId::fixture(turn_id.to_string()),
+            ),
+            replay_key,
+        )
+        .expect("valid test turn effect address"),
         lash_core::RuntimeAttribution::for_turn(
-            session_id,
-            turn_id,
+            lash_core::SessionId::fixture(session_id),
+            lash_core::TurnId::fixture(turn_id),
             turn_index,
             protocol_iteration,
         ),
@@ -1473,13 +1479,15 @@ pub(super) fn fig1464_poison_list_envelope(session: &str, effect: &str) -> Runti
     RuntimeEffectEnvelope::new(
         operation_effect_invocation(
             session,
-            lash_core::RuntimeAttribution::for_session(session),
+            lash_core::RuntimeAttribution::for_session(SessionId::fixture(session.to_string())),
             effect,
             effect,
         ),
         RuntimeEffectCommand::Trigger {
             command: Box::new(lash_core::TriggerCommand::List {
-                owner_scope: lash_core::TriggerOwnerScope::session(session),
+                owner_scope: lash_core::TriggerOwnerScope::session(SessionId::fixture(
+                    session.to_string(),
+                )),
                 filter: lash_core::TriggerSubscriptionFilter::default(),
             }),
         },
@@ -2236,7 +2244,7 @@ pub(super) fn llm_spec() -> lash_core::LlmRequestSpec {
         attachment_acceptance: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         scope: lash_core::LlmRequestScope::new(
-            "session".to_string(),
+            SessionId::fixture("session".to_string()),
             "session:frame:test".to_string(),
             "session:request:test".to_string(),
         ),

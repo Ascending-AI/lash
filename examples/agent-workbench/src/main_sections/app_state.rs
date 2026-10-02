@@ -161,7 +161,7 @@ impl AppState {
             session_id,
             format!("turn:{turn_id}:done"),
             StreamItem::Done {
-                turn_id: Some(TurnId::from(turn_id.to_string())),
+                turn_id: Some(turn_id.clone()),
                 outcome: TurnDoneOutcome::Completed,
             },
         );
@@ -202,7 +202,7 @@ impl AppState {
             session_id,
             format!("turn:{turn_id}:done"),
             StreamItem::Done {
-                turn_id: Some(TurnId::from(turn_id.to_string())),
+                turn_id: Some(turn_id.clone()),
                 outcome: TurnDoneOutcome::Failed,
             },
         );
@@ -268,8 +268,11 @@ impl AppState {
             // Model a turn appearing after the first attempt's journaled
             // snapshot, then fail retention once. A correct redrive reuses the
             // snapshot instead of turning this post-tombstone retry terminal.
-            self.active_turns
-                .insert(&session_id, &turn_id, WorkbenchTurnKind::User);
+            self.active_turns.insert(
+                &session_id,
+                TurnId::fixture(&turn_id),
+                WorkbenchTurnKind::User,
+            );
             return Err(AppError::retryable_internal(
                 "injected post-tombstone process-retention failure",
             ));
@@ -605,7 +608,7 @@ impl AppState {
             text,
             Vec::new(),
             Some(ChatMessageProvenance::TurnOutput {
-                turn_id: TurnId::from(turn_id.to_string()),
+                turn_id: turn_id.clone(),
             }),
         )
     }
@@ -735,7 +738,7 @@ impl WorkbenchSessions {
 
     pub(crate) fn persistent(path: PathBuf) -> AnyhowResult<Self> {
         let current = match std::fs::read_to_string(&path) {
-            Ok(session_id) if !session_id.trim().is_empty() => SessionId::from(session_id),
+            Ok(session_id) if !session_id.trim().is_empty() => SessionId::parse(session_id)?,
             Ok(_) => new_session_id(),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => new_session_id(),
             Err(err) => {
@@ -967,10 +970,10 @@ impl WorkbenchSessions {
 }
 
 pub(crate) fn new_session_id() -> SessionId {
-    SessionId::from(format!(
-        "{SESSION_ID_PREFIX}-{}",
-        uuid::Uuid::new_v4().simple()
-    ))
+    SessionId::prefixed(
+        SESSION_ID_PREFIX,
+        format_args!("-{}", uuid::Uuid::new_v4().simple()),
+    )
 }
 
 /// The model a request selects: its own id and variant, or the host's current
@@ -1396,8 +1399,8 @@ impl AppError {
 
     pub(crate) fn session_open(error: lash::EmbedError) -> Self {
         if let Some((session_id, context)) = deleted_session_details(&error) {
-            log_deleted_session_refusal(&SessionId::from(session_id), context);
-            return Self::conflict(deleted_session_message(&SessionId::from(session_id)));
+            log_deleted_session_refusal(session_id, context);
+            return Self::conflict(deleted_session_message(session_id));
         }
         if session_open_is_contended(&error) {
             return temporarily_unavailable_session_open();
@@ -1447,10 +1450,10 @@ impl AppError {
             (true, true) => AppErrorVerdict::Ambiguous,
         };
         if let Some((session_id, context)) = deleted_session_details(&error) {
-            log_deleted_session_refusal(&SessionId::from(session_id), context);
+            log_deleted_session_refusal(session_id, context);
             return Self {
                 status: StatusCode::CONFLICT,
-                message: deleted_session_message(&SessionId::from(session_id)),
+                message: deleted_session_message(session_id),
                 verdict,
                 retirement: Some(SessionRetirementRefusal {
                     session_id: SessionId::from(session_id),
@@ -1508,7 +1511,9 @@ pub(crate) fn parked_turn_message(error: &lash::EmbedError) -> Option<String> {
     Some(format!("{}: {}", code.as_str(), crate::PARKED_TURN_MESSAGE))
 }
 
-pub(crate) fn deleted_session_details(error: &lash::EmbedError) -> Option<(&str, Option<&str>)> {
+pub(crate) fn deleted_session_details(
+    error: &lash::EmbedError,
+) -> Option<(&SessionId, Option<&str>)> {
     let (source, context) = match error {
         lash::EmbedError::Store(source) => (source, None),
         lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {
@@ -1522,7 +1527,7 @@ pub(crate) fn deleted_session_details(error: &lash::EmbedError) -> Option<(&str,
         lash::EmbedError::Plugin(lash::plugins::PluginError::RuntimeEffectController(error)) => {
             return match error.cause.as_ref() {
                 Some(lash::runtime::RuntimeErrorCause::SessionDeleted { session_id }) => {
-                    Some((session_id.as_str(), Some(error.code.as_str())))
+                    Some((session_id, Some(error.code.as_str())))
                 }
                 // Future terminal causes do not establish that this session was deleted.
                 _ => None,
@@ -1531,9 +1536,7 @@ pub(crate) fn deleted_session_details(error: &lash::EmbedError) -> Option<(&str,
         _ => return None,
     };
     match source {
-        lash::persistence::StoreError::SessionDeleted { session_id } => {
-            Some((session_id.as_str(), context))
-        }
+        lash::persistence::StoreError::SessionDeleted { session_id } => Some((session_id, context)),
         _ => None,
     }
 }
@@ -1551,6 +1554,12 @@ pub(crate) fn log_deleted_session_refusal(session_id: &SessionId, context: Optio
         "agent-workbench session admission refusal: session_id={session_id:?} \
          tombstone_outcome=\"retired\" outcome=\"refused\" store_context={context:?}"
     );
+}
+
+impl From<lash::BlankIdentity> for AppError {
+    fn from(error: lash::BlankIdentity) -> Self {
+        Self::bad_request(error.to_string())
+    }
 }
 
 impl std::fmt::Display for AppError {
@@ -1672,11 +1681,11 @@ mod app_error_tests {
 
     #[tokio::test]
     async fn wrapped_session_deletion_is_a_comprehensible_conflict_response() {
-        let session_id = "retired-during-runtime-binding";
+        let session_id = SessionId::from("retired-during-runtime-binding");
         let error = AppError::session_open(lash::EmbedError::Session(lash::SessionError::Store {
             context: format!("failed to bind session `{session_id}` to its store"),
             source: lash::persistence::StoreError::SessionDeleted {
-                session_id: SessionId::from(session_id),
+                session_id: session_id.clone(),
             },
         }));
         let response = error.into_response();
@@ -1688,7 +1697,7 @@ mod app_error_tests {
         assert_eq!(
             serde_json::from_slice::<Value>(&body).expect("decode conflict response"),
             json!({
-                "error": deleted_session_message(&SessionId::from(session_id)),
+                "error": deleted_session_message(&session_id),
             })
         );
     }

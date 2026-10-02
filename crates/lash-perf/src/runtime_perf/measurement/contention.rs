@@ -436,7 +436,7 @@ pub(crate) async fn run_once_writer_contention(
     for worker in 0..workers {
         peer_sessions.push(
             runtime
-                .create_and_open_child_session(SessionId::from(format!(
+                .create_and_open_child_session(SessionId::fixture(format!(
                     "runtime-perf-{}-peer-{worker}",
                     scenario.name()
                 )))
@@ -914,7 +914,7 @@ async fn run_durable_contention_worker(
                 .root_admission_attempts
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             attempt += 1;
-            let root = lash_core::TurnId::from(format!("contention-root-{worker}-{attempt}"));
+            let root = lash_core::TurnId::fixture(format!("contention-root-{worker}-{attempt}"));
             let head = store
                 .list_open_queued_work(&session_id)
                 .await?

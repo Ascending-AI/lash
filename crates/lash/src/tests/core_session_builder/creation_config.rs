@@ -62,7 +62,7 @@ fn creation_spec() -> crate::SessionSpec {
 
 /// Create `id` with [`creation_spec`], and nothing else.
 async fn create_with_creation_spec(core: &LashCore, id: &str) -> Result<crate::DurableSession> {
-    core.session(id)
+    core.session(SessionId::fixture(id.to_string()))
         .create(crate::SessionCreation {
             spec: creation_spec(),
             parent: None,
@@ -113,7 +113,8 @@ async fn counting_core(
 
 fn session_view(backend: &lash_core::Backend, id: &str) -> lash_core::store::SessionStore {
     let runtime_store: Arc<dyn lash_core::RuntimeStore> = backend.session_store_factory();
-    lash_core::store::SessionStore::new(runtime_store, SessionId::from(id)).expect("session view")
+    lash_core::store::SessionStore::new(runtime_store, SessionId::fixture(id))
+        .expect("session view")
 }
 
 async fn recorded_config(

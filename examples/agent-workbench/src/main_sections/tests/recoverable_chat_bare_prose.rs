@@ -13,7 +13,7 @@ async fn settled_assistant_rows(
     let Json(snapshot) = app_state(
         State(state.clone()),
         Query(SessionQuery {
-            session_id: Some(SessionId::from(session_id.to_string())),
+            session_id: Some(SessionId::fixture(session_id.to_string())),
         }),
     )
     .await

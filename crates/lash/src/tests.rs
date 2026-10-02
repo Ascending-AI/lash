@@ -60,7 +60,7 @@ use tokio::sync::{Mutex as TokioMutex, oneshot};
 /// creating verb — the same move an in-repo host that relied on
 /// enqueue-materialisation now makes.
 pub(crate) async fn create_catalog_session(core: &LashCore, session_id: &str) -> Result<()> {
-    core.session(session_id)
+    core.session(SessionId::fixture(session_id.to_string()))
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     Ok(())

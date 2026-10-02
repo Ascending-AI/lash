@@ -17,9 +17,8 @@ impl GraphAppend {
             }
             let old = node.node_id.clone();
             let derived = match &node.payload {
-                crate::SessionNodePayload::FrameOpen { frame_key, .. } => NodeId::new(
-                    crate::session_graph::frame_node_id(session_id, frame_key.as_str())
-                        .into_inner(),
+                crate::SessionNodePayload::FrameOpen { frame_key, .. } => NodeId::from(
+                    crate::session_graph::frame_node_id(session_id, frame_key.as_str()),
                 ),
                 _ => derive_history_node_id(session_id, operation, ordinal as u64)?,
             };

@@ -585,7 +585,7 @@ async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Resu
     .await?
     .expect("the created session has a store")
     .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft {
-        input_id: Some("metadata-only-input".to_string()),
+        input_id: Some(lash_core::InputId::from("metadata-only-input")),
         ..lash_core::PendingTurnInputDraft::new(
             SessionId::from("metadata-only"),
             lash_core::TurnInputIngress::NextTurn,
@@ -632,7 +632,7 @@ async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Resu
     .await?
     .expect("the committed session has a store")
     .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft {
-        input_id: Some("checkpointed-input".to_string()),
+        input_id: Some(lash_core::InputId::from("checkpointed-input")),
         ..lash_core::PendingTurnInputDraft::new(
             SessionId::from("checkpointed"),
             lash_core::TurnInputIngress::NextTurn,
@@ -1192,7 +1192,7 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
         .await?
         .expect("the persisted session has a store")
         .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft {
-            input_id: Some("fig-3353-pending".to_string()),
+            input_id: Some(lash_core::InputId::from("fig-3353-pending")),
             ..lash_core::PendingTurnInputDraft::new(
                 session_id.clone(),
                 lash_core::TurnInputIngress::NextTurn,
@@ -1461,7 +1461,7 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
     .await?
     .expect("the created session has a store")
     .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft {
-        input_id: Some("created-then-queued-input".to_string()),
+        input_id: Some(lash_core::InputId::from("created-then-queued-input")),
         ..lash_core::PendingTurnInputDraft::new(
             SessionId::from("created-then-queued"),
             lash_core::TurnInputIngress::NextTurn,
@@ -1540,7 +1540,7 @@ async fn a_retried_create_is_refused_and_preserves_the_recorded_relation() -> Re
     .await?
     .expect("the created session has a store")
     .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft {
-        input_id: Some("retried-create-input".to_string()),
+        input_id: Some(lash_core::InputId::from("retried-create-input")),
         ..lash_core::PendingTurnInputDraft::new(
             SessionId::from("create-retried"),
             lash_core::TurnInputIngress::NextTurn,

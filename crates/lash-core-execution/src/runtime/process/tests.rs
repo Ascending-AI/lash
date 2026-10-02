@@ -108,7 +108,8 @@ fn process_wake_turn_cause_preserves_process_origin() {
 
     let cause = process_wake_turn_cause(&wake);
 
-    assert_eq!(cause.id, "wake:abc");
+    let expected_wake_id = wake.wake_id();
+    assert_eq!(cause.id, expected_wake_id.as_str());
     assert_eq!(cause.event_type, "process.ready");
     assert_eq!(
         cause.text,
@@ -125,7 +126,7 @@ fn process_wake_turn_cause_preserves_process_origin() {
         } if process_id == crate::process_id_for_test("process-1")
             && event_type == "process.ready"
             && sequence == 7
-            && wake_id.as_deref() == Some("wake:abc")
+            && wake_id.as_deref() == Some(expected_wake_id.as_str())
             && caused_by == Some(process_caused_by)
     ));
 }

@@ -435,7 +435,7 @@ fn root_session_request(session_id: &str) -> lash_core_execution::SessionStoreCr
     lash_core_execution::SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(session_id),
+        session_id: SessionId::fixture(session_id),
         relation: lash_core_execution::SessionRelation::Root,
         config: lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
@@ -994,9 +994,11 @@ async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
         .expect("source key");
     let store = backend.trigger_store();
     let register = |owner: &str, key: &str| lash_core_execution::TriggerCommand::Register {
-        owner_scope: lash_core_execution::TriggerOwnerScope::session(owner),
+        owner_scope: lash_core_execution::TriggerOwnerScope::session(SessionId::fixture(
+            owner.to_string(),
+        )),
         actor: lash_core_execution::ProcessOriginator::session(
-            lash_core_execution::SessionScope::new(owner),
+            lash_core_execution::SessionScope::new(SessionId::fixture(owner.to_string())),
         ),
         draft: lash_core_execution::TriggerSubscriptionDraft::for_process(
             key,

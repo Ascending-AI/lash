@@ -1214,7 +1214,7 @@ fn source_keyed_active_draft(
 ) -> crate::PendingTurnInputDraft {
     pending_active_turn_input_draft(
         &SessionId::from("root"),
-        &TurnId::from(turn_id),
+        &TurnId::fixture(turn_id),
         min_boundary,
         text,
     )

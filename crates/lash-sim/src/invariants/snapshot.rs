@@ -472,7 +472,7 @@ impl StoreSnapshot {
         for session in sessions.iter().map(|row| required(row, "session_id")) {
             let messages = crate::crash_matrix::invariants::transcript_from(
                 factory.as_ref(),
-                &lash_core::SessionId::from(session.as_str()),
+                &lash_core::SessionId::fixture(session.as_str()),
             )
             .await?;
             let mut transcript = TranscriptSession {

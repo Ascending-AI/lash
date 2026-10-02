@@ -34,7 +34,7 @@ pub(crate) fn pending_turn_input_row(row: PgRow) -> Result<PendingTurnInputRow, 
     Ok(PendingTurnInputRow {
         enqueue_seq: u64_from_sql("PendingTurnInput", "enqueue_seq", row.get("enqueue_seq"))?,
         input_id: row.get("input_id"),
-        session_id: SessionId::from(row.get::<String, _>("session_id")),
+        session_id: SessionId::parse(row.get::<String, _>("session_id"))?,
         source_key: row.get("source_key"),
         state,
         input_json: row.get("input_json"),
@@ -52,7 +52,7 @@ pub(crate) fn pending_turn_input_from_row(
     row: PendingTurnInputRow,
 ) -> Result<lash_core_execution::PendingTurnInput, StoreError> {
     Ok(lash_core_execution::PendingTurnInput {
-        input_id: row.input_id.into(),
+        input_id: row.input_id.try_into()?,
         session_id: row.session_id,
         enqueue_seq: row.enqueue_seq,
         source_key: row.source_key,
@@ -74,7 +74,7 @@ pub(crate) fn pending_turn_input_read_from_row(
     Ok(match admitted_root {
         Some(root) => lash_core_execution::PendingTurnInputRead::admitted(
             input,
-            lash_core_execution::TurnId::from(root),
+            lash_core_execution::TurnId::parse(root)?,
         ),
         None => lash_core_execution::PendingTurnInputRead::open(input),
     })
@@ -203,7 +203,7 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
                 return Ok(
                     lash_core_execution::PendingTurnInputCancelOutcome::AlreadyAdmitted {
                         input,
-                        root: lash_core_execution::TurnId::from(root),
+                        root: lash_core_execution::TurnId::parse(root)?,
                     },
                 );
             }

@@ -278,7 +278,7 @@ fn remote_observation_and_turn_input_exclude_reconnect_state() {
         &SessionId::from("session"),
         lash_core::SessionRevision::new(4),
         vec![lash_core::LiveReplayEventDraft::new(
-            None::<String>,
+            None::<TurnId>,
             lash_core::SessionObservationEventPayload::QueueChanged {
                 kind: lash_core::SessionQueueEventKind::Enqueued,
                 batch_ids: vec!["batch-1".to_string()],
@@ -299,10 +299,13 @@ fn remote_observation_and_turn_input_exclude_reconnect_state() {
             cache_write_input_tokens: 0,
             reasoning_output_tokens: 1,
         },
-        ..lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-            lash_core::MaxToolCalls::new(1024),
-        ))
+        ..lash_core::SessionSnapshot::new(
+            SessionId::from("session"),
+            lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+                lash_core::MaxToolCalls::new(1024),
+            ),
+        )
     };
     let observation = lash_core::facade_support::SessionObservation {
         read_view: lash_core::SessionReadView::from_snapshot(&snapshot),

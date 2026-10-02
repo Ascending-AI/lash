@@ -412,7 +412,7 @@ impl Driver {
     }
 
     fn session_id(&self, seed: u64, session: SessionRef) -> SessionId {
-        SessionId::from(format!("soak-{seed:016x}-s{session}"))
+        SessionId::fixture(format!("soak-{seed:016x}-s{session}"))
     }
 
     fn slot(&self, session: SessionRef) -> Result<&SessionSlot, String> {
@@ -759,7 +759,7 @@ impl Driver {
                             .send(lash::TurnInput::text(
                                 crate::crash_matrix::invariants::input_text(root),
                             ))
-                            .id(root.as_str())
+                            .id(lash_core::TurnId::fixture(root.clone()))
                             .await
                             .map(|_| ())
                     } else {
@@ -768,7 +768,7 @@ impl Driver {
                                 lash::BatchInput::new(lash::TurnInput::text(
                                     crate::crash_matrix::invariants::input_text(root),
                                 ))
-                                .id(root.as_str())
+                                .id(lash_core::TurnId::fixture(root.clone()))
                             }))
                             .await
                             .map(|_| ())
@@ -815,7 +815,7 @@ impl Driver {
 
     /// One real deferred tool round trip gives the existing tool checkers facts.
     pub(super) async fn witness(&mut self) -> Result<(), String> {
-        let id = SessionId::from(format!("soak-{:016x}-witness", self.world.seed()));
+        let id = SessionId::fixture(format!("soak-{:016x}-witness", self.world.seed()));
         self.world
             .core()?
             .session(id.clone())
@@ -1001,7 +1001,7 @@ impl Driver {
             .root_of_input(session, &input_id(session, &root))
             .await
             .map_err(|error| format!("resolve root to cancel `{root}`: {error}"))?
-            .unwrap_or_else(|| lash_core::TurnId::from(root.as_str()));
+            .unwrap_or_else(|| lash_core::TurnId::fixture(root.as_str()));
         let mut last = String::new();
         for _ in 0..20 {
             let core = self.world.core()?;
@@ -1405,7 +1405,7 @@ pub(super) async fn register_child(
         lash_core::ProcessInput::External {
             metadata: serde_json::json!({ "chaos_soak": "child" }),
         },
-        lash_core::ProcessProvenance::session(lash_core::SessionScope::new(session.as_str())),
+        lash_core::ProcessProvenance::session(lash_core::SessionScope::new(session.clone())),
         lash_core::Lifetime::Detached,
     );
     registration.ancestry = lash_core::Ancestry::from_scopes([parent.clone()]);
@@ -1437,9 +1437,7 @@ fn refusal_code(error: &lash::EmbedError) -> Result<HostRefusalCode, String> {
 }
 
 fn input_id(session: &SessionId, key: &str) -> lash_core::InputId {
-    lash_core::InputId::from(lash_core::PendingTurnInputDraft::keyed_input_id(
-        session, key,
-    ))
+    lash_core::PendingTurnInputDraft::keyed_input_id(session, key)
 }
 
 fn wall_ms() -> i64 {

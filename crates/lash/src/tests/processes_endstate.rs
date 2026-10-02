@@ -1268,8 +1268,8 @@ async fn process_children_inherit_session_chain_provenance() -> Result<()> {
                     lash_core::ProcessOriginator::session(lash_core::SessionScope::new(session_id));
                 request
             }
-            .with_wake_session_id(Some(SessionId::from(session_id.to_string())))
-            .with_observers([session_id.to_string()]),
+            .with_wake_session_id(Some(SessionId::fixture(session_id.to_string())))
+            .with_observers([lash_core::SessionId::fixture(session_id.to_string())]),
             runtime_operation_scope(&core, "chain-parent-start").await,
         )
         .await?
@@ -1349,7 +1349,7 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
         .start(
             process
                 .start_request(process_id)
-                .with_observers([session_id.to_string()]),
+                .with_observers([lash_core::SessionId::fixture(session_id.to_string())]),
             runtime_operation_scope(&core, "outliving-process-start").await,
         )
         .await?

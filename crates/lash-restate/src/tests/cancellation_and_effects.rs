@@ -1143,7 +1143,7 @@ pub(super) fn replay_test_state(
     policy: &lash_core::SessionPolicy,
 ) -> lash_core::RuntimeSessionState {
     lash_core::RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         policy: policy.clone(),
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -1154,7 +1154,7 @@ pub(super) fn replay_test_state(
 
 pub(super) fn replay_test_input(turn_id: &TurnId) -> lash_core::TurnInput {
     let mut input = lash_core::TurnInput::text("finish once");
-    input.trace_turn_id = Some(TurnId::from(turn_id.to_string()));
+    input.trace_turn_id = Some(turn_id.clone());
     input
 }
 

@@ -21,13 +21,13 @@ use lash_sansio::SessionId;
 use std::future::Future;
 use std::sync::Arc;
 
-use lash_core_execution::runtime::{ProcessWakeDelivery, QueuedWorkBatchDraft, RuntimeSubject};
+use lash_core_execution::runtime::{ProcessWakeDelivery, QueuedWorkBatchDraft};
 use lash_core_execution::store::RootStore as _;
 use lash_core_execution::testing::store_fixtures::RuntimeStoreTestDriveExt;
 use lash_core_execution::{
     AttachmentReferrers, AttachmentRootSet, LeaseOwnerIdentity, PluginState, QueuedWorkStore,
-    RuntimeCommit, RuntimeInvocation, RuntimeSessionState, SessionCatalogStore, SessionCommitStore,
-    StoreError, StoreSchemaVerdict, ToolState,
+    RuntimeCommit, RuntimeSessionState, SessionCatalogStore, SessionCommitStore, StoreError,
+    StoreSchemaVerdict, ToolState,
 };
 use lash_sqlite_store::{SqliteDatabase, SqliteStore, verify_schema_at};
 
@@ -89,7 +89,7 @@ async fn admit(
         .admit_root(
             &lash_core_execution::testing::store_fixtures::admit_root_request_for_test(
                 fence,
-                &lash_core_execution::TurnId::from(root),
+                &lash_core_execution::TurnId::fixture(root),
                 lash_core_execution::store::AdmittedHead::Batch(head.clone()),
             ),
         )
@@ -102,7 +102,7 @@ fn commit_at(
     writer_id: &str,
 ) -> RuntimeCommit {
     let state = RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
@@ -295,7 +295,7 @@ fn exclusive_draft(session_id: &SessionId, text: &str) -> QueuedWorkBatchDraft {
     let sequence = 1;
     let wake = ProcessWakeDelivery {
         version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-        target_session_id: SessionId::from(session_id.to_string()),
+        target_session_id: session_id.clone(),
         process_id: process_id.clone(),
         sequence,
         event_type: "process.wake".to_string(),

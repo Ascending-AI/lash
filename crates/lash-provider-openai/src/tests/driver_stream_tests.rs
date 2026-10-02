@@ -115,7 +115,7 @@ async fn openai_chat_runtime_respects_expose_thinking() {
         let session = crate::tests::sessions::created_session(
             &core,
             "provider/model",
-            format!("openai-reasoning-visible-{expose_thinking}"),
+            lash_core::SessionId::fixture(format!("openai-reasoning-visible-{expose_thinking}")),
         )
         .await
         .open()

@@ -18,7 +18,7 @@ async fn reserve_delivery(
     let source = format!("{name}-source");
     register_trigger(
         &handles.triggers,
-        &SessionId::from(format!("{name}-session")),
+        &SessionId::fixture(format!("{name}-session")),
         &format!("{name}-key"),
         &source,
         &format!("{name}-register"),

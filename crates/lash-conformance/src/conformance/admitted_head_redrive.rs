@@ -248,7 +248,7 @@ pub async fn a_turn_redriven_after_its_commit_replays_at_its_admitted_head(
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    let session_id = SessionId::from(format!("{prefix}-admitted-head-session"));
+    let session_id = SessionId::fixture(format!("{prefix}-admitted-head-session"));
     let calls = Arc::new(AtomicUsize::new(0));
     let model = crate::testing::TestProvider::builder()
         .kind("stub")
@@ -290,7 +290,7 @@ pub async fn a_turn_redriven_after_its_commit_replays_at_its_admitted_head(
     // The first turn is admitted before the session's first commit; the
     // second on the first turn's committed head.
     for (ordinal, text) in [(1_usize, "first question"), (2, "second question")] {
-        let turn_id = TurnId::from(format!("{prefix}-admitted-head-turn-{ordinal}"));
+        let turn_id = TurnId::fixture(format!("{prefix}-admitted-head-turn-{ordinal}"));
         runner
             .run_crashed_then_redriven_turn(
                 admit(crate::ExecutionScope::turn(&session_id, &turn_id)),

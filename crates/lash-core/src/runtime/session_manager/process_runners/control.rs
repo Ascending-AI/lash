@@ -1021,10 +1021,7 @@ impl ProcessCapability {
             .iter()
             .filter(|process_id| {
                 filter
-                    .narrow(
-                        &SessionId::from(session_id.to_string()),
-                        std::slice::from_ref(process_id),
-                    )
+                    .narrow(&session_id.clone(), std::slice::from_ref(process_id))
                     .iter()
                     .any(|returned| returned == *process_id)
             })

@@ -120,8 +120,8 @@ pub use handle::{
     HANDLE_FIELD, HANDLE_KIND, HandleId, HandleTarget, is_handle_shape, parse_handle,
 };
 pub use identity::{
-    BatchId, InputId, InvalidProcessId, NodeId, PROCESS_ID_PREFIX, ProcessId, RuntimeOwner,
-    SessionId, TurnId, session_owner_namespace,
+    BatchId, BlankIdentity, InputId, InvalidProcessId, NodeId, PROCESS_ID_PREFIX, ProcessId,
+    RuntimeOwner, SessionId, TurnId, session_owner_namespace,
 };
 pub use llm::capability::{
     LlmProfileCapability, LlmProfileEffortValidationCategory, LlmProfileEffortValidationError,

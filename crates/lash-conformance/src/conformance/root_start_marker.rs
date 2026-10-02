@@ -124,7 +124,7 @@ pub async fn fresh_execution_of_started_root_is_substrate_lost(
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    let session_id = SessionId::from(format!("{prefix}-root-start-marker"));
+    let session_id = SessionId::fixture(format!("{prefix}-root-start-marker"));
     let calls = Arc::new(AtomicUsize::new(0));
     let model = crate::testing::TestProvider::builder()
         .kind("stub")

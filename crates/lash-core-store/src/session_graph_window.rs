@@ -22,14 +22,14 @@ pub struct WindowAnchor {
 
 impl WindowAnchor {
     /// The base's own node id.
-    pub fn base_node_id(&self) -> &str {
-        self.frame_node_id.as_str()
+    pub fn base_node_id(&self) -> &NodeId {
+        self.frame_node_id.node_id()
     }
 
     /// Whether `node` is the base and names exactly the anchor's external
     /// parent: the one dangling parent edge an anchored graph admits.
     pub(crate) fn admits_external_parent(&self, node: &SessionNodeRecord) -> bool {
-        node.node_id.as_str() == self.base_node_id()
+        node.node_id == *self.base_node_id()
             && node.parent_node_id.is_some()
             && node.parent_node_id == self.external_parent
     }
@@ -62,7 +62,7 @@ impl SessionGraph {
     ) -> Result<Self, crate::StoreError> {
         use crate::store::WindowAnchorViolation as Violation;
         let violation = |violation: Violation| crate::StoreError::InvalidWindowAnchor {
-            frame_node_id: NodeId::from(anchor.base_node_id()),
+            frame_node_id: anchor.base_node_id().clone(),
             violation,
         };
         let Some(base) = nodes.first() else {
@@ -71,7 +71,7 @@ impl SessionGraph {
         if base.frame_open().is_none() {
             return Err(violation(Violation::BaseNotFrameOpen));
         }
-        if base.node_id.as_str() != anchor.base_node_id() {
+        if base.node_id != *anchor.base_node_id() {
             return Err(violation(Violation::BaseIsNotLeafFrame));
         }
         let above_root = anchor.generation > 0;

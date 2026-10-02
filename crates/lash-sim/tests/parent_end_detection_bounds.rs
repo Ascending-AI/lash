@@ -160,7 +160,9 @@ impl World {
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                ProcessProvenance::session(SessionScope::new(session)),
+                ProcessProvenance::session(SessionScope::new(lash_core::SessionId::fixture(
+                    session.to_string(),
+                ))),
                 Lifetime::Detached,
             ))
             .await
@@ -190,7 +192,9 @@ impl World {
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            ProcessProvenance::session(SessionScope::new(session)),
+            ProcessProvenance::session(SessionScope::new(lash_core::SessionId::fixture(
+                session.to_string(),
+            ))),
             Lifetime::Detached,
         );
         registration.ancestry = Ancestry::from_scopes([scope.clone()]);

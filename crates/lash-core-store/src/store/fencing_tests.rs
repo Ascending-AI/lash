@@ -11,7 +11,7 @@ use crate::SessionId;
 const SESSION: &str = "session-fencing";
 
 fn session_id() -> SessionId {
-    SessionId::from(SESSION.to_string())
+    SessionId::fixture(SESSION.to_string())
 }
 
 // ---------------------------------------------------------------------------

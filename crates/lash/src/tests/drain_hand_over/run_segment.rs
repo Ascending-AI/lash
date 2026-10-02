@@ -178,9 +178,9 @@ impl RunRoll {
             .expect("the engine's generation is bound")
             .clone();
         let core = run_core(engine.old_backend(), engine.old_work(), &model, &executed);
-        let session = lash_core::SessionId::from(session);
+        let session = lash_core::SessionId::fixture(session);
         let handle = core
-            .session(session.as_str())
+            .session(session.clone())
             .created()
             .await
             .open()
@@ -749,7 +749,7 @@ async fn budget_session(
     turn_budget: crate::TurnBudget,
 ) -> Result<crate::LashSession> {
     let metadata = mock_llm_profile_spec();
-    core.session(session.as_str())
+    core.session(session.clone())
         .created_with(crate::SessionSpec::new(
             metadata.wire_model.clone(),
             turn_budget,

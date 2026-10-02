@@ -281,7 +281,7 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
     assert!(deleted.record_snapshot.is_tombstoned());
 
     let blocked = store
-        .reconcile_trigger_retention(&[], &[SessionId::from(SESSION.to_string())])
+        .reconcile_trigger_retention(&[], &[SessionId::fixture(SESSION.to_string())])
         .await
         .expect("reconcile while dead owner's delivery remains");
     assert_eq!(
@@ -338,7 +338,7 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
                 subscription_id: reservation.subscription.subscription_id.clone(),
                 process_id,
             }],
-            &[SessionId::from(SESSION.to_string())],
+            &[SessionId::fixture(SESSION.to_string())],
         )
         .await
         .expect("reconcile dead owner's final delivery");
@@ -406,10 +406,7 @@ async fn host_tombstone_remains_a_permanent_revive_fence(store: Arc<dyn crate::T
         .expect("ingest host-law zero-match occurrence");
 
     let report = store
-        .reconcile_trigger_retention(
-            &[],
-            &[SessionId::from("unrelated-deleted-session".to_string())],
-        )
+        .reconcile_trigger_retention(&[], &[SessionId::from("unrelated-deleted-session")])
         .await
         .expect("reconcile around host tombstone");
     assert_eq!(report.reclaimed_occurrence_count, 1);
@@ -1948,7 +1945,7 @@ async fn non_fired_occurrences_are_durable_and_never_reserve(store: Arc<dyn crat
     );
 
     let retention = store
-        .reconcile_trigger_retention(&[], &[SessionId::from("tick-outcome-session".to_string())])
+        .reconcile_trigger_retention(&[], &[SessionId::from("tick-outcome-session")])
         .await
         .expect("reconcile after the tick-outcome session is gone");
     assert_eq!(
@@ -1986,7 +1983,7 @@ async fn non_fired_occurrences_are_durable_and_never_reserve(store: Arc<dyn crat
 async fn host_audit_cutoff_reclaims_only_non_fired_occurrences(
     store: Arc<dyn crate::TriggerStore>,
 ) {
-    let session = SessionId::from("audit-cutoff-session".to_string());
+    let session = SessionId::from("audit-cutoff-session");
     mutate(
         &store,
         "audit-cutoff-register",
@@ -2300,7 +2297,7 @@ async fn hostile_trigger_namespaces(store: Arc<dyn crate::TriggerStore>) {
             "malformed operation id must be rejected before receipt lookup"
         );
     }
-    for raw in ["", "nul\0owner"] {
+    for raw in ["nul\0owner"] {
         let command = register_command(
             &SessionId::from(raw),
             sample_draft(&SessionId::from("canary"), "key", "source", "process"),

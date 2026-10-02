@@ -463,7 +463,10 @@ async fn drive_prompt_root(
     root: &str,
 ) {
     let handler = double
-        .open_handler(lash_core::AdmittedScope::turn(session_id, root))
+        .open_handler(lash_core::AdmittedScope::turn(
+            session_id,
+            lash_core::TurnId::fixture(root.to_string()),
+        ))
         .await
         .expect("root handler");
     runtime
@@ -487,7 +490,10 @@ async fn apply_prompt_command(
     receipt: lash_core::facade_support::SessionCommandReceipt,
 ) {
     let handler = double
-        .open_handler(lash_core::AdmittedScope::turn(session_id, command))
+        .open_handler(lash_core::AdmittedScope::turn(
+            session_id,
+            lash_core::TurnId::fixture(command.to_string()),
+        ))
         .await
         .expect("command handler");
     runtime

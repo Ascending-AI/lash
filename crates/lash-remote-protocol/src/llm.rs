@@ -808,7 +808,6 @@ impl RemoteLlmRequestScope {
     }
 
     fn validate(&self) -> Result<(), RemoteProtocolError> {
-        require_non_empty("RemoteLlmRequestScope", "session_id", &self.session_id)?;
         require_non_empty(
             "RemoteLlmRequestScope",
             "agent_frame_id",

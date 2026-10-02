@@ -209,7 +209,7 @@ async fn assert_foreign_registry_refuses(
 async fn exercise_host_arm(arm: &HostArm, second: &IssuanceSpy, foreign: &IssuanceSpy) {
     let spy = &arm.resolver;
     let scope = ExecutionScope::turn(
-        format!("completion-routing-{}", arm.name),
+        crate::SessionId::fixture(format!("completion-routing-{}", arm.name)),
         "completion-routing-turn",
     );
 

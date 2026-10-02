@@ -690,7 +690,7 @@ mod process_visibility_tests {
             &env,
             policy.clone(),
             crate::RuntimeSessionState {
-                session_id: SessionId::from(SESSION_ID.to_string()),
+                session_id: SessionId::fixture(SESSION_ID.to_string()),
                 policy,
                 ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
@@ -719,7 +719,7 @@ mod process_visibility_tests {
                         payload_schema: crate::JsonSchema::any(),
                         semantics: crate::ProcessEventSemanticsSpec::default(),
                     }]),
-                    &[SessionId::from(SESSION_ID.to_string())],
+                    &[SessionId::fixture(SESSION_ID.to_string())],
                 )
                 .await
                 .expect("register observed process for visibility table")
@@ -755,7 +755,7 @@ mod process_visibility_tests {
         double
             .open_handler(crate::AdmittedScope::turn(
                 SessionId::from(SESSION_ID),
-                TurnId::from(uuid::Uuid::new_v4().to_string()),
+                TurnId::fixture(uuid::Uuid::new_v4().to_string()),
             ))
             .await
             .expect("open the turn's handler")

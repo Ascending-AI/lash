@@ -146,7 +146,7 @@ pub(super) async fn wake_allocation_floor_for_testing(
     target_session_id: &SessionId,
     process_id: &ProcessId,
 ) -> Result<Option<u64>, lash_core_execution::PluginError> {
-    let target_session_id = SessionId::from(target_session_id.to_string());
+    let target_session_id = SessionId::fixture(target_session_id.to_string());
     let process_id = process_id.clone();
     registry
         .conn
@@ -207,7 +207,7 @@ impl SqliteProcessRegistry {
         by: ProcessObserverBy,
         add: bool,
     ) -> Result<(), lash_core_execution::PluginError> {
-        let session_id = SessionId::from(session_id.to_string());
+        let session_id = SessionId::parse(session_id.to_string())?;
         let process_id = process_id.clone();
         let now = self.clock.timestamp_ms();
         let config = self.wake_delivery_config;
@@ -520,9 +520,12 @@ impl SqliteProcessRegistry {
         conn.query_row(
             process_sql().process.select_wake_session_id.sql(),
             params![process_id.as_str()],
-            |row| row.get::<_, Option<String>>(0),
+            |row| {
+                row.get::<_, Option<String>>(0)?
+                    .map(crate::codec::sql_identity)
+                    .transpose()
+            },
         )
-        .map(|session_id| session_id.map(SessionId::from))
         .map_err(process_sqlite_error)
     }
 

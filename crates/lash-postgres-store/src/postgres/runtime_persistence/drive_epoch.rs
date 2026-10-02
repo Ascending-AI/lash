@@ -291,7 +291,7 @@ impl DriveEpochStore for PostgresStore {
                 let session_id: String = row.try_get(0).map_err(store_sqlx_error)?;
                 let json: String = row.try_get(1).map_err(store_sqlx_error)?;
                 let at_ms: i64 = row.try_get(2).map_err(store_sqlx_error)?;
-                SessionFault::from_stored(SessionId::from(session_id), &json, at_ms)
+                SessionFault::from_stored(SessionId::parse(session_id)?, &json, at_ms)
             })
             .collect()
     }

@@ -242,7 +242,7 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
     let mut committed_inputs = Vec::new();
     let mut committed_turn_ids = BTreeSet::new();
     for index in 0..6 {
-        let turn_id = TurnId::from(format!("committed-before-switch-{index}"));
+        let turn_id = TurnId::fixture(format!("committed-before-switch-{index}"));
         let prompt = format!("committed prompt before switch {index}");
         committed_turn_ids.insert(turn_id.clone());
         state.push_message_with_id_for_session(
@@ -256,7 +256,7 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
                 .with_id(format!("runtime-{turn_id}"))
                 .with_origin(lash::messages::MessageOrigin::TurnInput {
                     turn_id,
-                    input_id: Some(format!("input-{index}").into()),
+                    input_id: Some(lash::InputId::fixture(format!("input-{index}"))),
                 }),
         );
     }
@@ -418,7 +418,7 @@ async fn a_frame_switch_keeps_sends_the_workbench_never_saw_commit() {
     let mut committed_inputs = Vec::new();
     let mut submitted_prompts = Vec::new();
     for index in 0..4 {
-        let turn_id = TurnId::from(format!("unobserved-before-switch-{index}"));
+        let turn_id = TurnId::fixture(format!("unobserved-before-switch-{index}"));
         let prompt = format!("submitted prompt before switch {index}");
         state.push_message_with_id_for_session(
             &session_id,
@@ -432,7 +432,7 @@ async fn a_frame_switch_keeps_sends_the_workbench_never_saw_commit() {
                 .with_id(format!("runtime-{turn_id}"))
                 .with_origin(lash::messages::MessageOrigin::TurnInput {
                     turn_id,
-                    input_id: Some(format!("input-{index}").into()),
+                    input_id: Some(lash::InputId::fixture(format!("input-{index}"))),
                 }),
         );
     }

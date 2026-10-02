@@ -38,7 +38,7 @@ pub(super) async fn register_until_child(
         lash_core::ProcessInput::External {
             metadata: serde_json::json!({ "crash_matrix": "child" }),
         },
-        lash_core::ProcessProvenance::session(lash_core::SessionScope::new(session.as_str())),
+        lash_core::ProcessProvenance::session(lash_core::SessionScope::new(session.clone())),
         lash_core::Lifetime::Detached,
     );
     registration.ancestry = lash_core::Ancestry::from_scopes([parent.clone()]);
@@ -100,7 +100,7 @@ async fn claim_scope_close_before_restart(
     world.kill().await;
     let id = lash_core::store::ObligationKey::ScopeClose {
         session_id: session.clone(),
-        root: TurnId::from(root),
+        root: TurnId::fixture(root),
     }
     .id();
     let ledger = world
@@ -286,10 +286,10 @@ fn host_root_terminal(
 ) -> lash_core::store::RootTerminal {
     lash_core::store::RootTerminal {
         session_id: session.clone(),
-        root: TurnId::from(root),
+        root: TurnId::fixture(root),
         cause: lash_core::store::RootTerminalCause::Committed {
-            commit: lash_core::store::TurnCommitId::new(TurnId::from(root), 0),
-            turn: TurnId::from(root),
+            commit: lash_core::store::TurnCommitId::new(TurnId::fixture(root), 0),
+            turn: TurnId::fixture(root),
             outcome: lash_core::store::RootCommittedOutcome::Finished(
                 lash_core::facade_support::TurnFinish::AssistantMessage {
                     text: String::new(),
@@ -383,7 +383,7 @@ pub(super) async fn stage_parent_end(point: CrashPoint, seed: u64) -> Result<Sta
             // victim plan behind them whose child accepts it.
             for index in 0..POISONED_PLANS {
                 let root = format!("poisoned-{index}");
-                let parent = ScopeId::turn(session.clone(), TurnId::from(root.as_str()));
+                let parent = ScopeId::turn(session.clone(), TurnId::fixture(root.as_str()));
                 let child = register_until_child(&world, &session, &parent).await?;
                 world.faults().always_matching(
                     HostSite::DeliverCancelBefore,

@@ -153,7 +153,7 @@ fn conflicting_reopen_state(session_id: &SessionId) -> RuntimeSessionState {
     let frame_node_id = lash_core::facade_support::frame_node_id(session_id, frame_key.as_str());
     let mut nodes = state.session_graph.nodes.clone();
     nodes.push(std::sync::Arc::new(lash_core::SessionNodeRecord {
-        node_id: frame_node_id.to_string().into(),
+        node_id: lash_core::NodeId::fixture(frame_node_id.to_string()),
         parent_node_id: state.session_graph.leaf_node_id.clone(),
         timestamp: "2026-07-27T00:00:00Z".to_string(),
         payload: lash_core::SessionNodePayload::FrameOpen {
@@ -162,9 +162,11 @@ fn conflicting_reopen_state(session_id: &SessionId) -> RuntimeSessionState {
             assignment: lash_core::AgentFrameAssignment::unconfigured(current_policy),
         },
     }));
-    state.session_graph =
-        lash_core::SessionGraph::from_shared_nodes(nodes, Some(frame_node_id.to_string().into()))
-            .expect("session lifecycle fixture graph is valid");
+    state.session_graph = lash_core::SessionGraph::from_shared_nodes(
+        nodes,
+        Some(lash_core::NodeId::fixture(frame_node_id.to_string())),
+    )
+    .expect("session lifecycle fixture graph is valid");
     state.current_frame_node_id = Some(frame_node_id);
     state.agent_frames = state.session_graph.agent_frame_records(session_id);
     state.policy = lash_core::SessionPolicy {

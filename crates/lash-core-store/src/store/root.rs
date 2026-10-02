@@ -1000,10 +1000,10 @@ mod tests {
 
     fn committed(root: &str, ordinal: u32, stop: Option<TurnStop>) -> RootTerminal {
         RootTerminalWrite {
-            root: TurnId::from(root),
-            commit: TurnCommitId::new(TurnId::from(root), ordinal),
+            root: TurnId::fixture(root),
+            commit: TurnCommitId::new(TurnId::fixture(root), ordinal),
             turn: crate::store::PhysicalTurn::derive_turn_id(
-                &TurnId::from(root),
+                &TurnId::fixture(root),
                 u64::from(ordinal),
             ),
             outcome: match stop {

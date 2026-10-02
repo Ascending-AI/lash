@@ -23,8 +23,8 @@ fn session_name(index: usize) -> String {
 
 fn turn_scope(index: usize) -> lash_core_execution::ScopeId {
     lash_core_execution::ScopeId::turn(
-        lash_sansio::SessionId::from(session_name(index)),
-        lash_core_execution::TurnId::from(format!("sqlite-parent-end-race-turn-{index:02}")),
+        lash_sansio::SessionId::fixture(session_name(index)),
+        lash_core_execution::TurnId::fixture(format!("sqlite-parent-end-race-turn-{index:02}")),
     )
 }
 
@@ -39,7 +39,7 @@ fn cancel_child(
             metadata: serde_json::Value::Null,
         },
         lash_core_execution::ProcessProvenance::session(lash_core_execution::SessionScope::new(
-            session_name(index),
+            lash_sansio::SessionId::fixture(session_name(index)),
         )),
         lash_core_execution::Lifetime::Detached,
     );

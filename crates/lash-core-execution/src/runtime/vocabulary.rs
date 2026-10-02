@@ -677,7 +677,7 @@ pub async fn park_turn_refused_by_generation(
         store,
         &crate::store::TurnParkWrite::refusal(
             session_id.clone(),
-            TurnId::from(scope.id()),
+            TurnId::parse(scope.id())?,
             crate::store::ParkReason::session_state_generation_refused(refusal),
             at_ms,
         ),

@@ -102,7 +102,7 @@ pub(crate) async fn admit_turn_input(
     ingress: lash::persistence::TurnInputIngress,
     surface: &str,
 ) -> Result<TurnInputReceipt, AppError> {
-    let source_id = format!("workbench-turn-input-{}", uuid::Uuid::new_v4());
+    let source_id = lash::TurnId::prefixed("workbench-turn-input-", uuid::Uuid::new_v4());
     // The Durable Session never creates (ADR 0119), and the workbench admits
     // input for a session whose first turn may not have run yet. It creates the
     // session explicitly first — create-or-use, since the id may exist — which

@@ -228,7 +228,7 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
         return;
     };
     let session_id = unique_id("clock-contract-session");
-    let session = SessionId::from(session_id.clone());
+    let session = SessionId::fixture(session_id.clone());
     let server_before = db_now_ms(&storage).await;
     let clock = Arc::new(TestClock::new(server_before.saturating_add(CLOCK_SKEW_MS)));
     let factory = storage
@@ -264,7 +264,7 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
 
     let withdrawable = store
         .enqueue_queued_work(QueuedWorkBatchDraft::new(
-            &session_id,
+            SessionId::fixture(&session_id),
             DeliveryPolicy::EarliestSafeBoundary,
             SessionCommand::RefreshToolCatalog {
                 reason: "clock-contract withdrawn command".to_string(),
@@ -283,7 +283,7 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
     );
     let command = store
         .enqueue_queued_work(QueuedWorkBatchDraft::new(
-            &session_id,
+            SessionId::fixture(&session_id),
             DeliveryPolicy::EarliestSafeBoundary,
             SessionCommand::RefreshToolCatalog {
                 reason: "clock-contract command".to_string(),
@@ -413,15 +413,15 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
     // (ADR 0101 §5.1): the active input steers the admitted root.
     let active_input = store
         .enqueue_pending_turn_input(PendingTurnInputDraft::new(
-            &session_id,
-            TurnInputIngress::active_turn(root.as_str(), TurnInputCheckpointBoundary::AfterWork),
+            SessionId::fixture(&session_id),
+            TurnInputIngress::active_turn(root.clone(), TurnInputCheckpointBoundary::AfterWork),
             TurnInput::text("clock-contract active input"),
         ))
         .await
         .expect("enqueue active input under skewed client clock");
     let next_input = store
         .enqueue_pending_turn_input(PendingTurnInputDraft::new(
-            &session_id,
+            SessionId::fixture(&session_id),
             TurnInputIngress::NextTurn,
             TurnInput::text("clock-contract pending input"),
         ))
@@ -558,7 +558,7 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
 
     let final_next_input = store
         .enqueue_pending_turn_input(PendingTurnInputDraft::new(
-            &session_id,
+            SessionId::fixture(&session_id),
             TurnInputIngress::NextTurn,
             TurnInput::text("clock-contract final pending input"),
         ))
@@ -594,7 +594,7 @@ async fn final_turn_commit_stamps_follow_the_injected_store_clock() {
         .admit_session(&SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(session_id.clone()),
+            session_id: SessionId::fixture(session_id.clone()),
             relation: SessionRelation::Root,
             config: lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
@@ -607,7 +607,7 @@ async fn final_turn_commit_stamps_follow_the_injected_store_clock() {
         .expect("create final-commit session store");
     let store = factory;
     let state = RuntimeSessionState {
-        session_id: SessionId::from(session_id.clone()),
+        session_id: SessionId::fixture(session_id.clone()),
         ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),

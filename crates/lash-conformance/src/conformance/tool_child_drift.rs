@@ -330,7 +330,7 @@ pub async fn a_group_tool_child_judges_its_own_drifted_tool(
         rlm,
         executions: Arc::new(AtomicUsize::new(0)),
     };
-    let turn_id = TurnId::from(format!("{prefix}-child-drift-turn"));
+    let turn_id = TurnId::fixture(format!("{prefix}-child-drift-turn"));
     for (case, shape, cut, drift, word) in [
         ("nd-rem", Shape::Native, Cut::Settled, Probe::Removed, ""),
         ("nd-chg", Shape::Native, Cut::Settled, Probe::Retried, ""),
@@ -365,8 +365,8 @@ pub async fn a_group_tool_child_judges_its_own_drifted_tool(
             "missing",
         ),
     ] {
-        let session_id = SessionId::from(format!("{prefix}-{case}-real"));
-        let probe_session = SessionId::from(format!("{prefix}-{case}-prob"));
+        let session_id = SessionId::fixture(format!("{prefix}-{case}-real"));
+        let probe_session = SessionId::fixture(format!("{prefix}-{case}-prob"));
         let journal_cut = cut_key(
             &world,
             &runner,
@@ -564,8 +564,8 @@ pub async fn a_group_tool_child_judges_its_own_drifted_tool(
 
     // A reworded tool is not drift: a call needed live runs once and the turn
     // finishes unparked.
-    let session_id = SessionId::from(format!("{prefix}-nl-dsc-real"));
-    let probe_session = SessionId::from(format!("{prefix}-nl-dsc-prob"));
+    let session_id = SessionId::fixture(format!("{prefix}-nl-dsc-real"));
+    let probe_session = SessionId::fixture(format!("{prefix}-nl-dsc-prob"));
     let journal_cut = cut_key(
         &world,
         &runner,

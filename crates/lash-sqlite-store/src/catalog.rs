@@ -408,8 +408,8 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
                     child_engine_refs,
                 )| {
                     lash_core_execution::store::TurnPark::decode(
-                        SessionId::from(session_id),
-                        lash_sansio::TurnId::from(turn_id),
+                        SessionId::parse(session_id)?,
+                        lash_sansio::TurnId::parse(turn_id)?,
                         lash_core_execution::store::ParkId::from_feed_sequence(
                             u64::try_from(park_id).unwrap_or_default(),
                         ),
@@ -458,8 +458,8 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
                 let rows = stmt.query_map(params![session, root, limit.get() as i64], |row| {
                     Ok((
                         lash_core_execution::engine::RootRef {
-                            session: SessionId::from(row.get::<_, String>(0)?),
-                            root: lash_sansio::TurnId::from(row.get::<_, String>(1)?),
+                            session: crate::codec::sql_identity(row.get::<_, String>(0)?)?,
+                            root: crate::codec::sql_identity(row.get::<_, String>(1)?)?,
                         },
                         row.get::<_, Option<String>>(2)?,
                         row.get::<_, Option<String>>(3)?,
@@ -607,7 +607,7 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
                             })?;
                         if authorization.admitted_scope() == &inspected_scope {
                             return Err(StoreError::TurnCancelClosureLifecyclePinned {
-                                session_id: SessionId::from(session_id),
+                                session_id: SessionId::parse(session_id)?,
                                 pending_count: 1,
                             });
                         }

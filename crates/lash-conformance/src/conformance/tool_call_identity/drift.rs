@@ -70,7 +70,7 @@ pub async fn retained_call_identity_refuses_name_arguments_and_authority_drift_b
     reason = "conformance setup and bounded attempt reports"
 )]
 async fn retained_request_replay(tier: &ToolCallIdentityTier, change: &str) {
-    let session_id = lash_sansio::SessionId::from(format!("{}-request-{change}", tier.prefix));
+    let session_id = lash_sansio::SessionId::fixture(format!("{}-request-{change}", tier.prefix));
     let admitted = crate::AdmittedScope::turn(session_id.clone(), "test-turn");
     let definition = super::probe_definition(super::PROBE);
     let original = crate::PreparedToolCall {

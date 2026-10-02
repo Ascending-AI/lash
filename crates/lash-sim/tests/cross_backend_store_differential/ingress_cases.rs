@@ -34,7 +34,7 @@ fn page() -> NonZeroUsize {
 async fn ingress_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
     let mut out = Transcript::new();
     let ledger = stores.obligation_ledger(ObligationKind::Ingress);
-    let session_id = SessionId::from(format!("{prefix}-ingress"));
+    let session_id = SessionId::fixture(format!("{prefix}-ingress"));
     let store = admit_test_session(
         stores.session_store_factory(),
         &SessionStoreCreateRequest {

@@ -35,8 +35,8 @@ pub async fn a_late_completion_after_a_cancel_decision_is_refused(
     fixture: &ToolChildLawFixture,
     prefix: &str,
 ) {
-    let session_id = crate::SessionId::from(format!("{prefix}-late-completion"));
-    let turn_id = crate::TurnId::from(format!("{prefix}-late-completion-turn"));
+    let session_id = crate::SessionId::fixture(format!("{prefix}-late-completion"));
+    let turn_id = crate::TurnId::fixture(format!("{prefix}-late-completion-turn"));
     let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id);
     let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
         .expect("a turn scope derives an opener");

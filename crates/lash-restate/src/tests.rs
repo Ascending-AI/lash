@@ -240,7 +240,7 @@ pub(super) async fn memory_session_store(session_id: &str) -> lash_core::store::
     lash_core::runtime::admit_session_view(
         &memory_session_store_factory().await,
         &lash_core::testing::store_fixtures::session_store_request(
-            &SessionId::from(session_id),
+            &SessionId::fixture(session_id),
             "restate-test-model",
             lash_core::SessionRelation::Root,
         ),
@@ -509,11 +509,17 @@ fn test_turn_effect_invocation(
     replay_key: impl Into<String>,
 ) -> lash_core::RuntimeEffectInvocation {
     lash_core::RuntimeEffectInvocation::new(
-        lash_core::EffectAddress::new(ExecutionScope::turn(session_id, turn_id), replay_key)
-            .expect("valid Restate test effect address"),
+        lash_core::EffectAddress::new(
+            ExecutionScope::turn(
+                lash_core::SessionId::fixture(session_id),
+                TurnId::fixture(turn_id.to_string()),
+            ),
+            replay_key,
+        )
+        .expect("valid Restate test effect address"),
         lash_core::RuntimeAttribution::for_turn(
-            session_id,
-            turn_id,
+            lash_core::SessionId::fixture(session_id),
+            lash_core::TurnId::fixture(turn_id),
             turn_index,
             protocol_iteration,
         ),

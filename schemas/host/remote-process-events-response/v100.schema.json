@@ -199,9 +199,11 @@
         {
           "properties": {
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "turn_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -239,6 +241,7 @@
               "type": "string"
             },
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -256,6 +259,7 @@
         {
           "properties": {
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -907,9 +911,11 @@
         {
           "properties": {
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "turn_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -946,6 +952,7 @@
               "type": "string"
             },
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -1040,6 +1047,7 @@
               "type": "string"
             },
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -1496,12 +1504,14 @@
           ]
         },
         "session_id": {
+          "minLength": 1,
           "type": [
             "string",
             "null"
           ]
         },
         "turn_id": {
+          "minLength": 1,
           "type": [
             "string",
             "null"
@@ -1710,6 +1720,7 @@
               "type": "string"
             },
             "session_id": {
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -1794,6 +1805,7 @@
           "additionalProperties": false,
           "properties": {
             "session": {
+              "minLength": 1,
               "type": "string"
             }
           },

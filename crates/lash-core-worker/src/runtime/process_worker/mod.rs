@@ -455,7 +455,7 @@ impl DurableProcessWorker {
             return Ok(());
         };
         let turn_request = crate::TurnCancelRequest::new(
-            crate::TurnAddress::new(session_id, crate::TurnId::from(record.id.as_str())),
+            crate::TurnAddress::new(session_id, crate::TurnId::parse(record.id.as_str())?),
             format!("process-cancel:{}", record.id),
             Some(request.requester.clone()),
         );

@@ -176,7 +176,7 @@ fn session_administrative_read_rejects_non_session_scope_aliases() {
         ExecutionScope::process(lash_core::ProcessId::fixture("alias-process")),
         ExecutionScope::runtime_operation("alias-operation"),
     ] {
-        let alias = SessionId::from(durable_wait_index_key_for_scope(&scope));
+        let alias = SessionId::fixture(durable_wait_index_key_for_scope(&scope));
         let key = restate_await_event_key(
             &scope,
             AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("alias-wait")),

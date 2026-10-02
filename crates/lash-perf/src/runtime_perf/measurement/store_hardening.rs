@@ -102,9 +102,10 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
             .await?;
             let postgres_factory = postgres.store();
 
-            let memory_session_id = SessionId::from(format!("perf-hardening-memory-{run_id}"));
-            let sqlite_session_id = SessionId::from(format!("perf-hardening-sqlite-{run_id}"));
-            let postgres_session_id = SessionId::from(format!("perf-hardening-postgres-{run_id}"));
+            let memory_session_id = SessionId::fixture(format!("perf-hardening-memory-{run_id}"));
+            let sqlite_session_id = SessionId::fixture(format!("perf-hardening-sqlite-{run_id}"));
+            let postgres_session_id =
+                SessionId::fixture(format!("perf-hardening-postgres-{run_id}"));
             memory_factory
                 .admit_session(&runtime_perf_session_create_request(&memory_session_id))
                 .await?;
@@ -365,7 +366,7 @@ async fn measure_store_hardening_backend_turn(
         ))
         .await?
         .batch_id;
-    let root = lash_core::TurnId::from(format!("hardening-root-{turn_index}"));
+    let root = lash_core::TurnId::fixture(format!("hardening-root-{turn_index}"));
     let (admission, phase) = measure_runtime_perf_async_phase(names.admit_queued_work, async {
         let mut request = lash_core::testing::store_fixtures::admit_root_request_for_test(
             &lease,
@@ -518,7 +519,7 @@ async fn measure_store_hardening_history_reads(
             let Some(fork_point) = head_page.pinned_leaf.clone() else {
                 anyhow::bail!("the hardening session has a head leaf to fork at");
             };
-            let fork_session_id = SessionId::from(format!("{session_id}-history-fork"));
+            let fork_session_id = SessionId::fixture(format!("{session_id}-history-fork"));
             let Some(head) = store.load_session_head_meta(session_id).await? else {
                 anyhow::bail!("the hardening session has a head to fork");
             };
@@ -650,7 +651,7 @@ async fn load_store_hardening_state(
     .await?
     .map(|loaded| loaded.state)
     .unwrap_or_else(|| RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
@@ -664,7 +665,7 @@ pub(super) fn runtime_perf_session_create_request(
     lash_core::SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         relation: lash_core::SessionRelation::Root,
         config: lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,

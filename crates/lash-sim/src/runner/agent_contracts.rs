@@ -650,7 +650,7 @@ async fn facade_final_value_execution_inner(
     let result = engine
         .run_turn(
             &session,
-            format!("{session_id}-turn"),
+            lash_core::TurnId::fixture(format!("{session_id}-turn")),
             events.clone(),
             Arc::new(move |session: &lash::LashSession| {
                 session.send(lash::TurnInput::text(prompt)).require_finish()
@@ -765,7 +765,7 @@ async fn facade_agent_process_execution_with_options(
     let result = engine
         .run_turn(
             &session,
-            format!("{session_id}-turn"),
+            lash_core::TurnId::fixture(format!("{session_id}-turn")),
             events.clone(),
             contract_turn(prompt),
         )

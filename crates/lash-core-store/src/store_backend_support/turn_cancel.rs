@@ -59,7 +59,7 @@ pub fn turn_cancel_record_from_rows(
             (AFFECTED_INPUT_KIND, None) => {
                 outcome.affected_inputs.push(
                     crate::turn_control_vocabulary::TurnCancelAffectedInput {
-                        input_id: item_id.into(),
+                        input_id: crate::InputId::parse(item_id)?,
                         payload: decode(&payload_json, "turn input")?,
                         disposition: applied_disposition,
                     },
@@ -68,7 +68,7 @@ pub fn turn_cancel_record_from_rows(
             (AFFECTED_WAKE_KIND, Some(batch_id)) => {
                 outcome.affected_wakes.push(
                     crate::turn_control_vocabulary::TurnCancelAffectedWake {
-                        batch_id: batch_id.into(),
+                        batch_id: crate::BatchId::parse(batch_id)?,
                         wake: decode(&payload_json, "process wake")?,
                         disposition: applied_disposition,
                     },

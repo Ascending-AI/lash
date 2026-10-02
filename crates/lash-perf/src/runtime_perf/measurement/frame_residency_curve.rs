@@ -138,7 +138,7 @@ async fn point(
     prior_rows: usize,
     commit_samples: usize,
 ) -> anyhow::Result<FramePoint> {
-    let session_id = SessionId::from(format!("frame-residency-{prior_rows}"));
+    let session_id = SessionId::fixture(format!("frame-residency-{prior_rows}"));
     let catalog = open_catalog(scenario, sqlite_root, postgres_url).await?;
     catalog
         .admit_session(&runtime_perf_session_create_request(&session_id))

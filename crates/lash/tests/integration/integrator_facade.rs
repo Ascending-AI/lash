@@ -142,7 +142,8 @@ fn snapshot_agent_frame_is_constructible_from_the_facade() {
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(1024),
     );
-    let mut snapshot = lash::runtime::SessionSnapshot::new(policy.clone());
+    let mut snapshot =
+        lash::runtime::SessionSnapshot::new(lash::SessionId::from("session"), policy.clone());
     snapshot.agent_frames.push(AgentFrameRecord {
         frame_node_id,
         session_id: SessionId::from("host-session"),
@@ -190,7 +191,7 @@ fn facade_tool_binding_is_dialect_agnostic() {
 #[test]
 fn remaining_host_ui_types_are_constructible_from_the_facade() {
     let node = SessionNodeRecord {
-        node_id: "plugin-node".to_string().into(),
+        node_id: lash_core::NodeId::from("plugin-node"),
         parent_node_id: None,
         timestamp: "2026-08-25T00:00:00Z".to_string(),
         payload: SessionNodePayload::Plugin {

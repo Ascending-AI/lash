@@ -102,8 +102,8 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
     fixture: &ToolChildLawFixture,
     prefix: &str,
 ) {
-    let session_id = crate::SessionId::from(format!("{prefix}-protected"));
-    let turn_id = crate::TurnId::from(format!("{prefix}-protected-turn"));
+    let session_id = crate::SessionId::fixture(format!("{prefix}-protected"));
+    let turn_id = crate::TurnId::fixture(format!("{prefix}-protected-turn"));
     let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id.clone());
     let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
         .expect("a turn scope derives an opener");
@@ -207,8 +207,8 @@ pub async fn drains_are_admitted_in_recorded_commit_order(
     fixture: &ToolChildLawFixture,
     prefix: &str,
 ) {
-    let session_id = crate::SessionId::from(format!("{prefix}-commit-order"));
-    let turn_id = crate::TurnId::from(format!("{prefix}-commit-order-turn"));
+    let session_id = crate::SessionId::fixture(format!("{prefix}-commit-order"));
+    let turn_id = crate::TurnId::fixture(format!("{prefix}-commit-order-turn"));
     let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id.clone());
     let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
         .expect("a turn scope derives an opener");
@@ -362,8 +362,8 @@ pub async fn a_drain_held_at_the_barrier_parks_under_a_frozen_dispatch_clock(
     fixture: &ToolChildLawFixture,
     prefix: &str,
 ) {
-    let session_id = crate::SessionId::from(format!("{prefix}-frozen-barrier"));
-    let turn_id = crate::TurnId::from(format!("{prefix}-frozen-barrier-turn"));
+    let session_id = crate::SessionId::fixture(format!("{prefix}-frozen-barrier"));
+    let turn_id = crate::TurnId::fixture(format!("{prefix}-frozen-barrier-turn"));
     let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id.clone());
     let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
         .expect("a turn scope derives an opener");

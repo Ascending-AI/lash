@@ -291,10 +291,13 @@ async fn standard_compaction_turn_transform_strips_old_image_attachments() {
         text_message("u2", MessageRole::User, "latest"),
     ];
 
-    let state = SessionSnapshot::new(lash_core::SessionPolicy::new(
-        lash_core::TurnBudget::Unbounded,
-        lash_core::MaxToolCalls::new(1024),
-    ));
+    let state = SessionSnapshot::new(
+        SessionId::from("session"),
+        lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+            lash_core::MaxToolCalls::new(1024),
+        ),
+    );
     let traces = Arc::new(RecordingTraces::default());
     let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
     let ctx = build_turn_ctx(state, Some(prompt_usage(130_000)), Some(200_000), &traces);
@@ -512,7 +515,10 @@ async fn standard_compaction_turn_transform_traces_attachment_pruning_without_co
     let state = SessionSnapshot {
         session_id: SessionId::from("root"),
         policy: lash_core::testing::mock_session_policy(),
-        ..SessionSnapshot::new(lash_core::testing::mock_session_policy())
+        ..SessionSnapshot::new(
+            SessionId::from("root"),
+            lash_core::testing::mock_session_policy(),
+        )
     };
     let ctx = build_turn_ctx(state, Some(prompt_usage(130_000)), Some(200_000), &traces);
     let prepared = PreparedContext {
@@ -559,7 +565,10 @@ async fn standard_compaction_turn_transform_traces_nothing_when_no_attachments_p
     let state = SessionSnapshot {
         session_id: SessionId::from("root"),
         policy: lash_core::testing::mock_session_policy(),
-        ..SessionSnapshot::new(lash_core::testing::mock_session_policy())
+        ..SessionSnapshot::new(
+            SessionId::from("root"),
+            lash_core::testing::mock_session_policy(),
+        )
     };
     let ctx = build_turn_ctx(state, Some(prompt_usage(130_000)), Some(200_000), &traces);
     let prepared = PreparedContext {
@@ -596,7 +605,10 @@ async fn standard_compactor_returns_summary_seed_for_new_frame() {
         session_id: SessionId::from("root"),
         policy: lash_core::testing::mock_session_policy(),
         session_graph: SessionGraph::from_active_read_state(&messages),
-        ..SessionSnapshot::new(lash_core::testing::mock_session_policy())
+        ..SessionSnapshot::new(
+            SessionId::from("root"),
+            lash_core::testing::mock_session_policy(),
+        )
     };
     let compaction_scope =
         lash_core::ExecutionScope::runtime_operation("standard-compaction-compact-test");
@@ -739,7 +751,10 @@ async fn standard_compactor_returns_summary_seed_for_new_frame() {
 
 #[test]
 fn compaction_request_identity_is_stable_across_reconstructed_nested_maps() {
-    let mut state = SessionSnapshot::new(lash_core::testing::mock_session_policy());
+    let mut state = SessionSnapshot::new(
+        SessionId::from("session"),
+        lash_core::testing::mock_session_policy(),
+    );
     state.session_id = SessionId::from("retry-map-parent");
     // A recorded namespace with nested maps: a reconstructed snapshot must
     // hash to the same identity whatever order its maps were rebuilt in.
@@ -779,7 +794,10 @@ async fn standard_compactor_records_zero_node_completion_for_none() {
     let state = SessionSnapshot {
         session_id: SessionId::from("root"),
         policy: lash_core::testing::mock_session_policy(),
-        ..SessionSnapshot::new(lash_core::testing::mock_session_policy())
+        ..SessionSnapshot::new(
+            SessionId::from("root"),
+            lash_core::testing::mock_session_policy(),
+        )
     };
     let captured = Arc::new(RecordingLlmCompletions::default());
     let ctx = build_compaction_ctx(
@@ -813,7 +831,10 @@ async fn standard_compactor_records_zero_node_completion_before_error() {
         session_id: SessionId::from("root"),
         policy: lash_core::testing::mock_session_policy(),
         session_graph: SessionGraph::from_active_read_state(&messages),
-        ..SessionSnapshot::new(lash_core::testing::mock_session_policy())
+        ..SessionSnapshot::new(
+            SessionId::from("root"),
+            lash_core::testing::mock_session_policy(),
+        )
     };
     let captured = Arc::new(RecordingLlmCompletions {
         error: Some(PluginError::Session(
@@ -1298,7 +1319,10 @@ fn snapshot_with_messages(messages: &[Message]) -> SessionSnapshot {
         session_id: SessionId::from("root"),
         policy: lash_core::testing::mock_session_policy(),
         session_graph: SessionGraph::from_active_read_state(messages),
-        ..SessionSnapshot::new(lash_core::testing::mock_session_policy())
+        ..SessionSnapshot::new(
+            SessionId::from("root"),
+            lash_core::testing::mock_session_policy(),
+        )
     }
 }
 
@@ -1471,7 +1495,10 @@ fn compactable_state(messages: Vec<Message>) -> SessionSnapshot {
         session_id: SessionId::from("root"),
         policy: lash_core::testing::mock_session_policy(),
         session_graph: SessionGraph::from_active_read_state(&messages),
-        ..SessionSnapshot::new(lash_core::testing::mock_session_policy())
+        ..SessionSnapshot::new(
+            SessionId::from("root"),
+            lash_core::testing::mock_session_policy(),
+        )
     }
 }
 

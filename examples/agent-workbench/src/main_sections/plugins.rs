@@ -373,7 +373,7 @@ impl WorkbenchDerivedNotes {
                     "summary": note.summary,
                 }),
             )],
-            requires_ancestor_node_id: Some(note.base_node_id.clone().into()),
+            requires_ancestor_node_id: lash::NodeId::parse(note.base_node_id.clone()).ok(),
         };
         let settled = match ctx
             .session_graph
@@ -388,9 +388,12 @@ impl WorkbenchDerivedNotes {
                 node_id: node_ids
                     .into_iter()
                     .next()
-                    .unwrap_or_else(|| leaf_node_id.clone())
-                    .to_string(),
-                leaf_node_id: leaf_node_id.to_string(),
+                    .or_else(|| leaf_node_id.clone())
+                    .map(lash::NodeId::into_inner)
+                    .unwrap_or_default(),
+                leaf_node_id: leaf_node_id
+                    .map(lash::NodeId::into_inner)
+                    .unwrap_or_default(),
             },
             Ok(lash::plugins::AppendSessionNodesOutcome::StaleBranch { required_node_id }) => {
                 WorkbenchSettledNote::AbandonedBranch {

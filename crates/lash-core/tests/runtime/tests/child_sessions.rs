@@ -916,7 +916,7 @@ async fn durable_owner_usage(
     runtime: &LashRuntime,
     session_id: &str,
 ) -> lash_core::facade_support::SessionUsageReport {
-    let owner = lash_core::RuntimeOwner::Session(SessionId::from(session_id));
+    let owner = lash_core::RuntimeOwner::Session(SessionId::fixture(session_id));
     let accounting = runtime.host.core.usage_accounting();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {

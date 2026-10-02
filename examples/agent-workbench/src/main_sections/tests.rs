@@ -740,7 +740,7 @@ finish("snapshot cursor");
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
     let session_id = SessionId::from("workbench-snapshot-cursor");
-    let session = crate::created_session(&state.core, session_id.to_string())
+    let session = crate::created_session(&state.core, SessionId::fixture(session_id.to_string()))
         .await
         .open()
         .await
@@ -1068,7 +1068,10 @@ finish({ test: boxes[0], test2: boxes[1] });
         Duration::from_secs(5),
         session
             .send(lash::TurnInput::text("list both inboxes"))
-            .id(format!("workbench-test-turn:{}", uuid::Uuid::new_v4()))
+            .id(TurnId::fixture(format!(
+                "workbench-test-turn:{}",
+                uuid::Uuid::new_v4()
+            )))
             .output(),
     )
     .await
@@ -1621,7 +1624,7 @@ struct WorkbenchTurn {
 async fn run_workbench_turn_via_restate(state: &AppState, text: &str) -> WorkbenchTurn {
     state.push_message("user", text);
     let session_id = state.current_session_id();
-    let turn_id = TurnId::from(format!("workbench-turn-{}", uuid::Uuid::new_v4()));
+    let turn_id = TurnId::fixture(format!("workbench-turn-{}", uuid::Uuid::new_v4()));
     // The route claims the session before it sends; so does this.
     state.track_turn_prompt(&session_id, &turn_id, text.to_string(), None);
     let follower = tokio::time::timeout(
@@ -2205,7 +2208,10 @@ fn trigger_registration_response() -> lash::provider::LlmResponse {
 async fn register_test_trigger(session: &lash::LashSession) {
     let output = session
         .send(lash::TurnInput::text("register trigger"))
-        .id(format!("workbench-test-register:{}", uuid::Uuid::new_v4()))
+        .id(TurnId::fixture(format!(
+            "workbench-test-register:{}",
+            uuid::Uuid::new_v4()
+        )))
         .output()
         .await
         .expect("register trigger route");

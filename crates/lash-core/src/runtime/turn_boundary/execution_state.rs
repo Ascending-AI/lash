@@ -2,7 +2,6 @@
 //! applied, and settled, and what a frame open carries out of the frame it
 //! leaves.
 
-use crate::SessionId;
 use crate::{PluginSession, Session, SessionError, StoreError};
 
 use super::RuntimeSessionState;
@@ -80,13 +79,10 @@ pub(in crate::runtime) async fn derive_seed_carries(
     let Some(code_executor) = session.plugins().code_executor() else {
         return Ok(SeedCarries::none());
     };
-    let session_id = session.session_id().to_string();
+    let session_id = session.session_id().clone();
     let carries = code_executor
         .frame_switch_carries(
-            crate::plugin::ProtocolSessionContext::new(
-                &SessionId::from(session_id),
-                session.fleet_format(),
-            ),
+            crate::plugin::ProtocolSessionContext::new(&session_id, session.fleet_format()),
             successor,
             seed,
         )
@@ -195,10 +191,10 @@ pub(super) async fn capture_execution_state_update(
     if !code_executor.execution_state_dirty() {
         return Ok(ExecutionStateUpdate::Clean);
     }
-    let session_id = session.session_id().to_string();
+    let session_id = session.session_id().clone();
     let snapshot = code_executor
         .snapshot_execution_state(crate::plugin::ProtocolSessionContext::new(
-            &SessionId::from(session_id),
+            &session_id,
             session.fleet_format(),
         ))
         .await?;
@@ -232,10 +228,10 @@ pub(super) async fn probe_execution_state_capture(
     if !code_executor.execution_state_dirty() {
         return Ok(());
     }
-    let session_id = session.session_id().to_string();
+    let session_id = session.session_id().clone();
     code_executor
         .probe_execution_state_capture(crate::plugin::ProtocolSessionContext::new(
-            &SessionId::from(session_id),
+            &session_id,
             session.fleet_format(),
         ))
         .await
@@ -262,7 +258,5 @@ pub(super) async fn settle_execution_state_capture(
 
 /// Whether the store already holds `frame`'s open.
 fn is_committed(state: &RuntimeSessionState, frame: &crate::FrameNodeId) -> bool {
-    state
-        .persisted_node_ids
-        .contains(&crate::NodeId::new(frame.as_str().to_string()))
+    state.persisted_node_ids.contains(frame.node_id())
 }

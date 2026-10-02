@@ -675,7 +675,7 @@ async fn syncing_session_a_leaves_session_bs_armed_cron_untouched() {
     let session_b = "fig1067-session-b";
     let key_b = crate::restate::cron_job_key(&SessionId::from(session_b), "cron-source:b");
     state.restate_cron_job_keys.lock_recover().insert(
-        SessionId::from(session_b.to_string()),
+        SessionId::fixture(session_b.to_string()),
         std::collections::BTreeSet::from([key_b.clone()]),
     );
     let surface = ScriptedCronObjectSurface::default();
@@ -1040,7 +1040,7 @@ async fn retire_cron_test_session(
 fn cron_tick_test_state(session_id: &SessionId) -> crate::restate::WorkbenchCronState {
     crate::restate::WorkbenchCronState {
         request: WorkbenchCronRequest {
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: session_id.clone(),
             source_key: "cron-source:fig1018-decision".to_string(),
             expr: "*/10 * * * * *".to_string(),
             tz: Some("UTC".to_string()),
@@ -1430,7 +1430,7 @@ async fn cron_tick_allows_a_live_non_current_session_to_emit_a_delivery() {
     emit_cron_occurrence_with_effect_controller(
         state,
         WorkbenchCronRequest {
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: SessionId::fixture(session_id.to_string()),
             source_key: source_key.to_string(),
             expr: "*/10 * * * * *".to_string(),
             tz: Some("UTC".to_string()),

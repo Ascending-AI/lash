@@ -323,7 +323,10 @@ async fn drive(
     id: &str,
 ) {
     let handler = double
-        .open_handler(lash_core::AdmittedScope::turn(session_id, TurnId::from(id)))
+        .open_handler(lash_core::AdmittedScope::turn(
+            session_id,
+            TurnId::fixture(id),
+        ))
         .await
         .expect("open turn handler");
     let result = runtime

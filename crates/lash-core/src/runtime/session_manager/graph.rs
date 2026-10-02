@@ -66,10 +66,7 @@ impl CurrentOwnerCapability {
             .len()
             .saturating_sub(requested_node_count)..]
             .to_vec();
-        let locally_derived_leaf_node_id = graph
-            .leaf_node_id()
-            .cloned()
-            .unwrap_or_else(|| crate::NodeId::new(String::new()));
+        let locally_derived_leaf_node_id = graph.leaf_node_id().cloned();
         state
             .capture_plugin_states(&self.plugins)
             .map_err(crate::PluginError::Runtime)?;
@@ -139,7 +136,7 @@ impl CurrentOwnerCapability {
         background.sync_needed.store(true, Ordering::Release);
         Ok(crate::AppendSessionNodesOutcome::Appended {
             node_ids,
-            leaf_node_id: committed_leaf_node_id.unwrap_or(locally_derived_leaf_node_id),
+            leaf_node_id: committed_leaf_node_id.or(locally_derived_leaf_node_id),
         })
     }
 }

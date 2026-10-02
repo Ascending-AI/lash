@@ -117,7 +117,7 @@ fn published(location: &SqliteLocation) -> (i64, i64, i64, Vec<(String, String)>
 
 fn state(session_id: &str) -> RuntimeSessionState {
     RuntimeSessionState {
-        session_id: session_id.into(),
+        session_id: lash_core_execution::SessionId::fixture(session_id),
         ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),

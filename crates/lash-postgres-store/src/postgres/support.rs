@@ -81,7 +81,7 @@ pub(crate) fn graph_node_insert_error(
     err: sqlx::Error,
     session_id: &SessionId,
     generation: u64,
-    node_id: &str,
+    node_id: &lash_core_execution::NodeId,
 ) -> StoreError {
     if let sqlx::Error::Database(database) = &err
         && database.code().as_deref() == Some("23505")
@@ -89,13 +89,13 @@ pub(crate) fn graph_node_insert_error(
         match database.constraint() {
             Some("lash_graph_nodes_session_id_generation_key") => {
                 return StoreError::GraphGenerationCollision {
-                    session_id: SessionId::from(session_id.to_string()),
+                    session_id: session_id.clone(),
                     generation,
                 };
             }
             Some("lash_graph_nodes_pkey") => {
                 return StoreError::NodeIdCollision {
-                    node_id: node_id.to_string().into(),
+                    node_id: node_id.clone(),
                 };
             }
             _ => {}
@@ -115,7 +115,7 @@ pub(crate) fn graph_node_insert_error(
 pub(crate) fn pending_turn_input_insert_error(
     err: sqlx::Error,
     session_id: &SessionId,
-    input_id: &str,
+    input_id: &lash_core_execution::InputId,
 ) -> StoreError {
     if let sqlx::Error::Database(database) = &err
         && database.code().as_deref() == Some("23505")
@@ -127,7 +127,7 @@ pub(crate) fn pending_turn_input_insert_error(
     {
         return StoreError::PendingTurnInputIdConflict {
             session_id: session_id.clone(),
-            input_id: input_id.into(),
+            input_id: input_id.clone(),
         };
     }
     store_sqlx_error(err)
@@ -570,7 +570,7 @@ fn decode_session_head_meta_row(
         && current_frame_node_id.is_none()
     {
         return Err(StoreError::MissingFrameOpenAncestor {
-            leaf_node_id: leaf.into(),
+            leaf_node_id: leaf.try_into()?,
         });
     }
     let current_frame_node_id = current_frame_node_id
@@ -605,7 +605,9 @@ fn decode_session_head_meta_row(
             payload,
             u64_from_sql("SessionHeadMeta", "head_revision", head_revision)?,
             checkpoint_ref.map(Into::into),
-            leaf_node_id.map(lash_core_execution::NodeId::from),
+            leaf_node_id
+                .map(lash_core_execution::NodeId::parse)
+                .transpose()?,
             current_frame_node_id,
         )?
         .with_pending_follow_on(pending_follow_on),

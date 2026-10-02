@@ -702,7 +702,7 @@ mod checkpoint_admission_determinism_tests {
         crate::AdmittedQueuedWork {
             session_id: SessionId::from("p7"),
             batches: vec![crate::QueuedWorkBatch {
-                batch_id: batch_id.to_string().into(),
+                batch_id: lash_core::BatchId::fixture(batch_id.to_string()),
                 session_id: SessionId::from("p7"),
                 enqueue_seq: 1,
                 source_key: None,

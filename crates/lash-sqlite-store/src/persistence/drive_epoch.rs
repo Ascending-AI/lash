@@ -262,7 +262,7 @@ impl DriveEpochStore for SqliteStore {
             .map_err(sqlite_error)?;
         rows.into_iter()
             .map(|(session_id, json, at_ms)| {
-                SessionFault::from_stored(SessionId::from(session_id), &json, at_ms)
+                SessionFault::from_stored(SessionId::parse(session_id)?, &json, at_ms)
             })
             .collect()
     }

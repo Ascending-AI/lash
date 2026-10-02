@@ -1088,7 +1088,7 @@ impl LawSession {
         protocol: Arc<dyn FrameLawProtocol>,
         provider: crate::ProviderHandle,
     ) -> Self {
-        let session_id = SessionId::from(format!("{prefix}-{law}"));
+        let session_id = SessionId::fixture(format!("{prefix}-{law}"));
         let mut host =
             crate::LawBackend::over_stores(Arc::clone(&stores), Arc::clone(&effect_host))
                 .host_config(
@@ -1282,7 +1282,7 @@ impl LawSession {
             self.runner.run_turn(
                 admit(crate::ExecutionScope::turn(
                     &self.session_id,
-                    format!("{}-{drive}", self.prefix),
+                    crate::TurnId::fixture(format!("{}-{drive}", self.prefix)),
                 )),
                 drive_attempt(&self.parts, None, Some(tx)),
             ),
@@ -1328,7 +1328,7 @@ impl LawSession {
             self.runner.run_crashed_then_redriven_turn(
                 admit(crate::ExecutionScope::turn(
                     &self.session_id,
-                    format!("{}-{drive}", self.prefix),
+                    crate::TurnId::fixture(format!("{}-{drive}", self.prefix)),
                 )),
                 drive_attempt(&self.parts, Some(crash), None),
                 drive_attempt(&self.parts, None, Some(tx)),

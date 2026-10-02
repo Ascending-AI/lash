@@ -129,8 +129,9 @@ const MEASURED_STAMP_OWNER_BYTES: usize = 256;
 /// dropped: an owner of [`MEASURED_STAMP_OWNER_BYTES`], a run id, and no fact.
 fn maximal_usage_stamp() -> lash_core::EffectUsage {
     lash_core::EffectUsage {
-        owner: lash_core::RuntimeOwner::Session(lash_core::SessionId::from(
-            "s".repeat(MEASURED_STAMP_OWNER_BYTES),
+        owner: lash_core::RuntimeOwner::Session(lash_core::SessionId::prefixed(
+            "s",
+            "s".repeat(MEASURED_STAMP_OWNER_BYTES - 1),
         )),
         run: lash_core::UsageRunId::mint(),
         facts: Vec::new(),

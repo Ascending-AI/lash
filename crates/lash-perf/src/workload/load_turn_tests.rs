@@ -271,7 +271,7 @@ async fn replay_session_through(actor: u64, ordinal: u64) {
         )
         .expect("the core's process worker"),
     );
-    let session_id = lash::SessionId::from(format!("fig-4255-{actor}-{first}"));
+    let session_id = lash::SessionId::fixture(format!("fig-4255-{actor}-{first}"));
     core.session(session_id.clone())
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             "e2e-mock",

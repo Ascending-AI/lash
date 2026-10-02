@@ -578,8 +578,8 @@ mod tests {
 
     fn active_path_walk_is_bounded_scenario() {
         let plugin_node = |node_id: &str, parent_node_id: &str| SessionNodeRecord {
-            node_id: node_id.to_string().into(),
-            parent_node_id: Some(parent_node_id.to_string().into()),
+            node_id: crate::NodeId::fixture(node_id),
+            parent_node_id: Some(crate::NodeId::fixture(parent_node_id)),
             timestamp: "2026-07-31T00:00:00Z".to_string(),
             payload: crate::SessionNodePayload::Plugin {
                 plugin_type: "turn-graph-cycle-test".to_string(),

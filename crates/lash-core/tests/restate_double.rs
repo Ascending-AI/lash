@@ -50,7 +50,10 @@ async fn a_kernel_turn_finishes_inside_a_handler_on_the_double() {
     .await;
     let session_id = runtime.session_id().to_string();
     let runtime = Arc::new(tokio::sync::Mutex::new(runtime));
-    let admitted = AdmittedScope::turn(session_id.as_str(), "double-turn");
+    let admitted = AdmittedScope::turn(
+        lash_core::SessionId::fixture(session_id.clone()),
+        "double-turn",
+    );
     let outcome: Arc<std::sync::Mutex<Option<Result<TurnOutcome, String>>>> = Arc::default();
     let attempt: lash_restate_test::HandlerAttempt = {
         let runtime = Arc::clone(&runtime);
@@ -127,7 +130,7 @@ async fn a_turn_finishes_in_an_open_handler(double: &lash_restate_test::RestateT
     let session_id = runtime.session_id().to_string();
     let handler = double
         .open_handler(AdmittedScope::turn(
-            session_id.as_str(),
+            lash_core::SessionId::fixture(session_id.as_str()),
             "open-handler-turn",
         ))
         .await

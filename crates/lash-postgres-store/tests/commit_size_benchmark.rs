@@ -99,12 +99,12 @@ fn realistic_commit(
                 format!("{session_id}:node:{index}")
             };
             SessionNodeRecord {
-                node_id: node_id.clone().into(),
+                node_id: lash_core::NodeId::fixture(node_id.clone()),
                 parent_node_id: (index > 0).then(|| {
                     if index == 1 {
-                        frame_node_id.to_string().into()
+                        lash_core::NodeId::fixture(frame_node_id.to_string())
                     } else {
-                        format!("{session_id}:node:{}", index - 1).into()
+                        lash_core::NodeId::fixture(format!("{session_id}:node:{}", index - 1))
                     }
                 }),
                 timestamp: "2026-08-20T12:00:00Z".to_string(),
@@ -149,7 +149,7 @@ fn realistic_commit(
         })
         .collect::<Vec<_>>();
     let state = RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: SessionId::fixture(session_id.to_string()),
         policy: SessionPolicy {
             model: Some(lash_core_execution::LlmProfileConfig::new(
                 lash_core_execution::RecordedLlmProfile::mint(
@@ -194,7 +194,7 @@ fn realistic_commit(
     }
     commit.committed_attachment_ids = attachment_ids;
     commit.adopted_intent_rows = row_shape.adoption as u64;
-    let turn_id = TurnId::from(format!("commit-size-benchmark-{sample}"));
+    let turn_id = TurnId::fixture(format!("commit-size-benchmark-{sample}"));
     let (mut commit, _) = commit
         .with_operation(lash_core_execution::store::OperationId::new(
             lash_core_execution::ExecutionScope::turn(session_id, turn_id),
@@ -381,7 +381,7 @@ async fn measured_commit_size_curve() {
             let mut elapsed = Vec::with_capacity(SAMPLES);
             let mut measured = None;
             for sample in 0..(WARMUP_SAMPLES + SAMPLES) {
-                let session_id = SessionId::from(format!(
+                let session_id = SessionId::fixture(format!(
                     "bench-{}-{}-{}-{backend}-{sample}",
                     case.axis,
                     case.target,

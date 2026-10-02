@@ -654,7 +654,7 @@ impl ToolCallFixture<'static> {
         let session_graph: Arc<dyn crate::plugin::SessionGraphService> = host;
         Self {
             context: crate::tool_provider::ToolContext::builder(
-                SessionId::from("test-session".to_string()),
+                SessionId::from("test-session"),
                 sessions,
                 session_lifecycle,
                 session_graph,
@@ -1240,7 +1240,7 @@ pub async fn code_execution_context_stopped_on<'run>(
     let control = Arc::new(
         crate::runtime::turn_control::ActiveTurnControl::new(
             host.await_event_resolver(),
-            crate::TurnAddress::new(session_id.to_string(), turn_id.to_string()),
+            crate::TurnAddress::new(session_id.clone(), turn_id.clone()),
         )
         .await
         .expect("the test host keys a turn's cancellation gate"),
@@ -1410,7 +1410,12 @@ pub async fn coordinate_tool_provider_with_services(
             format!("tool-batch:{}", call.call_id),
         )
         .expect("valid test effect address"),
-        crate::RuntimeAttribution::for_turn(session_id, scoped_effect_controller.scope_id(), 1, 0),
+        crate::RuntimeAttribution::for_turn(
+            session_id.clone(),
+            crate::TurnId::fixture(scoped_effect_controller.scope_id()),
+            1,
+            0,
+        ),
         format!("tool-batch:{}", call.call_id),
     );
     let dispatch = build_atomic_tool_dispatch(
@@ -1463,7 +1468,7 @@ pub async fn coordinate_tool_provider_with_services(
         .plugins
         .present_tool_result(
             crate::plugin::ToolResultProjectionContext {
-                owner: crate::RuntimeOwner::Session(SessionId::from(session_id.to_string())),
+                owner: crate::RuntimeOwner::Session(session_id.clone()),
                 call_id: call.call_id.clone(),
                 tool_id: call.tool_id.clone(),
                 tool_name: outcome.record.tool.clone(),
@@ -2144,15 +2149,15 @@ pub fn tool_registry_with_live_provider(
 pub fn mock_assembled_turn(session_id: &SessionId, summary: &str) -> AssembledTurn {
     AssembledTurn {
         state: SessionSnapshot {
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: session_id.clone(),
             policy: SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
             ),
-            ..SessionSnapshot::new(SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-            ))
+            ..SessionSnapshot::new(
+                session_id.clone(),
+                SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024)),
+            )
         },
         outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
             text: summary.to_string(),
@@ -2328,12 +2333,8 @@ impl crate::plugin::SessionLifecycleService for MockSessionManager {
             session_id: request
                 .session_id
                 .clone()
-                .unwrap_or_else(|| SessionId::from("child".to_string())),
-            parent_session_id: request
-                .relation
-                .parent_session_id()
-                .map(ToOwned::to_owned)
-                .map(Into::into),
+                .unwrap_or_else(|| SessionId::from("child")),
+            parent_session_id: request.relation.parent_session_id().cloned(),
             policy: request.policy.unwrap_or_else(mock_session_policy),
             observed_processes: Vec::new(),
         })

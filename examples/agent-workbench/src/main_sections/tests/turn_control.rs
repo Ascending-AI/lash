@@ -786,7 +786,7 @@ finish(await handle);
     // The engine drives a session's roots on the most recent open of it, so
     // the turn is sent from the session the probe is installed on, under a
     // claim as the send route would take.
-    let turn_id = TurnId::from(format!("workbench-turn-{}", uuid::Uuid::new_v4()));
+    let turn_id = TurnId::fixture(format!("workbench-turn-{}", uuid::Uuid::new_v4()));
     state.track_turn(&session_id, &turn_id);
     let turn = session
         .send(lash::TurnInput::text(turn_text))
@@ -1290,14 +1290,16 @@ async fn register_turn_child(
         lash::process::ProcessInput::External {
             metadata: json!({ "awaited": true }),
         },
-        lash::process::ProcessProvenance::session(lash::process::SessionScope::new(session_id)),
+        lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
+            SessionId::fixture(session_id.to_string()),
+        )),
         lash::process::Lifetime::Detached,
     );
     // Started by the turn, `Detached` from it: the turn's close leaves it
     // alone, so only the turn control's own cancel reaches it.
     registration.ancestry = lash::process::Ancestry::from_scopes([lash::process::ScopeId::turn(
-        lash::SessionId::from(session_id),
-        TurnId::from(turn_id),
+        lash::SessionId::fixture(session_id),
+        TurnId::fixture(turn_id),
     )]);
     registry
         .register_process(registration)
@@ -1498,7 +1500,7 @@ async fn a_pending_cancel_probes_the_roots_lash_turn_inner() {
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let session_id = SessionId::from(format!("probe-session-{}", uuid::Uuid::new_v4()));
+    let session_id = SessionId::fixture(format!("probe-session-{}", uuid::Uuid::new_v4()));
     let turn_id = TurnId::from("plainly-named-turn");
     let key = lash_restate::turn_workflow_key(&session_id, &turn_id);
     let (admin_url, probed) = spawn_restate_admin_recording_probes(key.clone()).await;

@@ -119,7 +119,7 @@ mod tests {
             data: crate::TurnInputCompletionData {
                 input_ids: input_ids
                     .iter()
-                    .map(|id| crate::InputId::from(*id))
+                    .map(|id| crate::InputId::fixture(*id))
                     .collect(),
                 applications: Vec::new(),
             },

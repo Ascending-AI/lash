@@ -437,8 +437,8 @@ async fn cut_then_redrive(
     prefix: &str,
     cut: Cut,
 ) -> (SessionId, TurnId, Arc<dyn crate::RuntimeStore>, Answer) {
-    let turn_id = TurnId::from(format!("{prefix}-spawn-turn"));
-    let session_id = SessionId::from(format!("{prefix}-{}-real", cut.label()));
+    let turn_id = TurnId::fixture(format!("{prefix}-spawn-turn"));
+    let session_id = SessionId::fixture(format!("{prefix}-{}-real", cut.label()));
     let store = crate::conformance::law_session_store(world.stores.as_ref(), &session_id).await;
     let admitted = admit(crate::ExecutionScope::turn(&session_id, &turn_id));
     let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel();
@@ -460,7 +460,7 @@ async fn cut_then_redrive(
     );
     match cut {
         Cut::BeforeMarker => {
-            let probe_session = SessionId::from(format!("{prefix}-{}-prob", cut.label()));
+            let probe_session = SessionId::fixture(format!("{prefix}-{}-prob", cut.label()));
             let marker =
                 start_marker_key(world, runner, &probe_session, &session_id, &turn_id).await;
             runner

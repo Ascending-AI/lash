@@ -587,7 +587,7 @@ pub(crate) async fn cancel_cron_jobs_for_session(
             session_id,
             "cron.restate.cancel",
             lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted {
-                session_id: SessionId::from(session_id.to_string()),
+                session_id: SessionId::parse(session_id.to_string())?,
             }),
         ));
     }
@@ -1161,7 +1161,7 @@ pub(crate) async fn record_turn_output_for_profile(
                             _ => None,
                         }
                     })
-                    .unwrap_or_else(|| TurnId::from(identity.durable_turn_id.to_string()))
+                    .unwrap_or_else(|| identity.durable_turn_id.clone())
             } else {
                 identity.turn_id.clone()
             };
@@ -1202,7 +1202,7 @@ fn cron_request_from_registration(
         .decode_as(&crate::workbench_lashlang_resources())
         .map_err(|err| err.to_string())?;
     let request = WorkbenchCronRequest {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         source_key: registration.source_key.clone(),
         expr: payload.expr,
         tz: payload.tz,
@@ -1239,7 +1239,7 @@ async fn journaled_session_admission(
     surface: &'static str,
 ) -> Result<(), AppError> {
     let admission_state = state.clone();
-    let admission_session_id = SessionId::from(session_id.to_string());
+    let admission_session_id = session_id.clone();
     let Json(admission) = controller
         .context()
         .run(move || async move {

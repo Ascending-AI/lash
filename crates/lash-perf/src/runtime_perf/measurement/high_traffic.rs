@@ -36,7 +36,7 @@ async fn take_population_sessions(
     let mut sessions = Vec::with_capacity(population);
     sessions.push(runtime.take_session());
     for index in 1..population {
-        let session_id = lash::SessionId::from(format!(
+        let session_id = lash::SessionId::fixture(format!(
             "runtime-perf-{}-population-{index}-{}",
             scenario.name(),
             uuid::Uuid::new_v4()
@@ -474,7 +474,9 @@ async fn run_high_traffic_operation(
             .send(TurnInput::text(format!(
                 "load-kind:{kind} operation:{ordinal}"
             )))
-            .id(format!("runtime-perf-load-{ordinal}"))
+            .id(lash_core::TurnId::fixture(format!(
+                "runtime-perf-load-{ordinal}"
+            )))
             .await?;
         durable_queue_depth = session.durable().pending_turn_inputs().await?.len() as u64;
         let report = handle.output().await?.result;
@@ -512,9 +514,9 @@ async fn run_high_traffic_operation(
         let emitted = Arc::new(Mutex::new(None));
         restate
             .run_in_handler(
-                lash_core::AdmittedScope::new(
-                    session.turn_scope(format!("runtime-perf-load-trigger-emission-{ordinal}")),
-                ),
+                lash_core::AdmittedScope::new(session.turn_scope(lash_core::TurnId::fixture(
+                    format!("runtime-perf-load-trigger-emission-{ordinal}"),
+                ))),
                 Arc::new({
                     let core = core.clone();
                     let emitted = Arc::clone(&emitted);
@@ -595,7 +597,9 @@ async fn run_high_traffic_direct_turn(
             "load-kind:{kind} operation:{ordinal} session:{}",
             session.session_id()
         )))
-        .id(format!("runtime-perf-load-turn-{ordinal}"))
+        .id(lash_core::TurnId::fixture(format!(
+            "runtime-perf-load-turn-{ordinal}"
+        )))
         .output()
         .await?
         .result;

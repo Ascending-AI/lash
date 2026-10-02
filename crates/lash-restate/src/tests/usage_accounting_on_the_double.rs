@@ -111,7 +111,7 @@ pub(super) async fn read_parked_usage_from_second_core(
         tier,
     )
     .await;
-    let session = lash_core::SessionId::from(format!("{}-fourth-envelope-drift", tier.prefix));
+    let session = lash_core::SessionId::fixture(format!("{}-fourth-envelope-drift", tier.prefix));
     let owner = lash_core::RuntimeOwner::Session(session.clone());
     let head = tier
         .stores

@@ -176,7 +176,7 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::Deployme
         .await
         .expect("create read-session writer");
     let mut state = crate::RuntimeSessionState {
-        session_id: SessionId::from(SESSION_ID.to_string()),
+        session_id: SessionId::fixture(SESSION_ID.to_string()),
         token_usage: crate::TokenUsage {
             input_tokens: 11,
             output_tokens: 7,
@@ -656,7 +656,7 @@ pub async fn session_store_factory_delete_fences_stale_handles(
     );
     assert_eq!(
         runtime_error.deleted_session_id(),
-        Some(request.session_id.as_str()),
+        Some(&request.session_id),
         "the typed runtime outcome must retain the deleted session identity"
     );
     assert!(
@@ -1128,7 +1128,7 @@ async fn session_store_factory_round_trips_every_relation_shape(
     ];
 
     for (label, relation) in relations {
-        let session_id = SessionId::from(format!("session-meta-roundtrip-{label}"));
+        let session_id = SessionId::fixture(format!("session-meta-roundtrip-{label}"));
         // The relation is created with the store: `settle_observer_intents` may not
         // move a recorded lineage (FIG-3045), so the round trip declares it at
         // admission and then rewrites only the rest of the record.
@@ -1216,7 +1216,7 @@ async fn session_store_factory_create_is_idempotent(factory: Arc<dyn crate::Depl
         .expect("load recreated meta")
         .expect("recreated meta");
     assert_eq!(
-        meta.parent_session_id(),
+        meta.parent_session_id().map(SessionId::as_str),
         Some("custom-parent"),
         "admit_session must preserve the original relation"
     );
@@ -1280,7 +1280,7 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
     );
     let child = crate::SessionNodeRecord {
         node_id: "cross-session-child".into(),
-        parent_node_id: Some(foreign_parent.to_string().into()),
+        parent_node_id: Some(crate::NodeId::fixture(foreign_parent.to_string())),
         timestamp: "2026-07-27T00:00:00Z".to_string(),
         payload: crate::SessionNodePayload::Event {
             event: crate::SessionHistoryRecord::Protocol(
@@ -1680,7 +1680,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         .expect("initial frame node");
     let frame_node_id = frame.node_id.clone();
     let child_node = |node_id: &str| crate::SessionNodeRecord {
-        node_id: node_id.to_string().into(),
+        node_id: crate::NodeId::fixture(node_id.to_string()),
         parent_node_id: Some(frame_node_id.clone()),
         timestamp: "2026-07-27T00:00:00Z".to_string(),
         payload: crate::SessionNodePayload::Event {

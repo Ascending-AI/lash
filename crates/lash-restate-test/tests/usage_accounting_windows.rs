@@ -266,7 +266,7 @@ async fn cut_before_send(kill: bool) {
     let mut crashed = CrashCount::new();
     assert!(backend.on_crash(crashed.listener()));
     let calls = Arc::new(AtomicUsize::new(0));
-    let id = SessionId::from(tag("cut"));
+    let id = SessionId::fixture(tag("cut"));
     let owner = RuntimeOwner::Session(id.clone());
     let core = core(&backend, Arc::clone(&calls), true, owner.clone());
     core.session(&id)
@@ -461,7 +461,7 @@ async fn live_restate_usage_crash_p6_killed_between_entry_and_send() {
 async fn live_restate_usage_crash_p4_sent_not_projected() {
     let (backend, attempts, failures) = backend("p4", true).await;
     let calls = Arc::new(AtomicUsize::new(0));
-    let id = SessionId::from(tag("projection"));
+    let id = SessionId::fixture(tag("projection"));
     let core = core(
         &backend,
         Arc::clone(&calls),

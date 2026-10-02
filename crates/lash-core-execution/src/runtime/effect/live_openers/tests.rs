@@ -103,7 +103,8 @@ fn openers_are_keyed_by_value_not_by_rendered_text() {
     // A turn whose session id is spelled exactly like a process opener's
     // rendering.
     let real_process = process_opener("indexer");
-    let turn_like_a_process = EffectOpener::turn(real_process.render(), "turn-1");
+    let turn_like_a_process =
+        EffectOpener::turn(SessionId::fixture(real_process.render()), "turn-1");
 
     let (_guard, _ended) = registry.register(turn_like_a_process.clone(), live_context());
 

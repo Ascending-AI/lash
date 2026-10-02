@@ -447,7 +447,10 @@ pub(super) async fn open_turn_handler(
     session_id: &str,
 ) -> lash_restate_test::OpenHandler {
     double
-        .open_handler(lash_core::AdmittedScope::turn(session_id, "turn-1"))
+        .open_handler(lash_core::AdmittedScope::turn(
+            lash_core::SessionId::fixture(session_id.to_string()),
+            "turn-1",
+        ))
         .await
         .expect("open the turn's handler")
 }

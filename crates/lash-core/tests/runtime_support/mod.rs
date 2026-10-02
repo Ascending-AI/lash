@@ -172,7 +172,7 @@ async fn drive_submitted_command(
     let handler = double
         .open_handler(lash_core::AdmittedScope::turn(
             lash_core::SessionId::from(runtime.session_id()),
-            request,
+            lash_core::TurnId::fixture(request),
         ))
         .await
         .expect("open the host command's drive handler");

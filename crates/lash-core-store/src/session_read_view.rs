@@ -142,7 +142,7 @@ impl SessionReadView {
         }
     }
 
-    pub fn session_id(&self) -> &str {
+    pub fn session_id(&self) -> &crate::SessionId {
         &self.0.meta.session_id
     }
 

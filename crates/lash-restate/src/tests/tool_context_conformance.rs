@@ -113,8 +113,8 @@ impl ProductionToolCell {
     /// any call past the script: a re-issued call on replay panics.
     async fn scripted(tool_name: &str, script: Vec<String>) -> Self {
         let context_name = "restate-durable";
-        let session_id = SessionId::from(format!("tool-context-{context_name}-{tool_name}"));
-        let turn_id = TurnId::from(format!("{session_id}-turn"));
+        let session_id = SessionId::fixture(format!("tool-context-{context_name}-{tool_name}"));
+        let turn_id = TurnId::fixture(format!("{session_id}-turn"));
         let dir = tempfile::tempdir().expect("tool-context tempdir");
         let first_party: Arc<dyn ToolProvider> = Arc::new(lash_llm_tools::llm_query_provider());
         let tool_executions = Arc::new(AtomicUsize::new(0));

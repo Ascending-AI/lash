@@ -27,7 +27,7 @@ async fn runs_a_turn(
     id: &str,
 ) -> Result<()> {
     let turn = tokio::time::timeout(std::time::Duration::from_secs(60), async {
-        core.session(id)
+        core.session(SessionId::fixture(id.to_string()))
             .open()
             .await?
             .send(TurnInput::text("a turn of the created session"))
@@ -49,7 +49,7 @@ async fn runs_a_turn(
         ),
         Err(error) => panic!("session `{id}` runs a turn: {error:?}"),
     }
-    double.settle_session_drive(&SessionId::from(id)).await;
+    double.settle_session_drive(&SessionId::fixture(id)).await;
     Ok(())
 }
 

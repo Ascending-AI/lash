@@ -490,7 +490,10 @@ impl LawParts {
     }
 
     fn scope(&self, name: &str) -> crate::AdmittedScope {
-        admit(crate::ExecutionScope::turn(&self.session_id, name))
+        admit(crate::ExecutionScope::turn(
+            &self.session_id,
+            TurnId::fixture(name.to_string()),
+        ))
     }
 }
 
@@ -559,7 +562,7 @@ async fn a_row_is_answered_only_by_its_root(
     row: CheckpointRow,
     words: &str,
 ) {
-    let session_id = SessionId::from(format!("{prefix}-root-answers-its-rows"));
+    let session_id = SessionId::fixture(format!("{prefix}-root-answers-its-rows"));
     let raw = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
     let law_row = Arc::new(LawRow::default());
     let witness = Arc::new(RowWitness {
@@ -574,9 +577,9 @@ async fn a_row_is_answered_only_by_its_root(
         stores,
         effect_host,
     };
-    let root = TurnId::from(format!("{prefix}-root"));
+    let root = TurnId::fixture(format!("{prefix}-root"));
     let follow_on = crate::store::PhysicalTurn::derive_turn_id(&root, 1);
-    let peer = TurnId::from(format!("{prefix}-peer"));
+    let peer = TurnId::fixture(format!("{prefix}-peer"));
     raw.enqueue_pending_turn_input(
         crate::PendingTurnInputDraft::new(
             session_id.clone(),

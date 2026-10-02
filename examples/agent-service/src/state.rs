@@ -78,7 +78,11 @@ impl AppStateData {
     }
 
     pub(crate) async fn record_board_context_for_chat(&self, chat_id: &str) -> AppResult<()> {
-        let session = self.core.session(chat_id).open().await?;
+        let session = self
+            .core
+            .session(lash::SessionId::parse(chat_id)?)
+            .open()
+            .await?;
         self.record_board_context(&session).await
     }
 
@@ -123,7 +127,7 @@ impl AppStateData {
             .await?;
         match self
             .core
-            .session(chat_id)
+            .session(lash::SessionId::parse(chat_id)?)
             .create(lash::SessionCreation::root(
                 // The service's default spec, running the chat's model: a
                 // core keeps none, so the host states it at each creation.
@@ -151,7 +155,11 @@ impl AppStateData {
             Ok(_) | Err(lash::EmbedError::SessionAlreadyExists { .. }) => {}
             Err(error) => return Err(error.into()),
         }
-        let session = self.core.session(chat_id).open().await?;
+        let session = self
+            .core
+            .session(lash::SessionId::parse(chat_id)?)
+            .open()
+            .await?;
         let recorded = session
             .policy_snapshot()
             .model
@@ -304,6 +312,12 @@ impl AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         (self.status, Json(json!({ "error": self.message }))).into_response()
+    }
+}
+
+impl From<lash::BlankIdentity> for AppError {
+    fn from(err: lash::BlankIdentity) -> Self {
+        Self::bad_request(err.to_string())
     }
 }
 
@@ -692,7 +706,7 @@ mod session_language_tests {
         // session's checkpoint.
         let seeding_core = test_core_with_tools(&double, Arc::new(SeedTools)).await;
         seeding_core
-            .session(chat_id.clone())
+            .session(lash::SessionId::fixture(chat_id.clone()))
             .create(lash::SessionCreation::root(lash::SessionSpec::new(
                 mock_llm_profile().key,
                 lash::TurnBudget::Unbounded,
@@ -701,7 +715,7 @@ mod session_language_tests {
             .await
             .expect("seed create");
         let seeded = seeding_core
-            .session(chat_id.clone())
+            .session(lash::SessionId::fixture(chat_id.clone()))
             .open()
             .await
             .expect("seed open");
@@ -807,7 +821,7 @@ mod session_language_tests {
 
         let seeding_core = test_core_with_tools(&double, Arc::new(SeedTools)).await;
         seeding_core
-            .session(chat_id.clone())
+            .session(lash::SessionId::fixture(chat_id.clone()))
             .create(lash::SessionCreation::root(lash::SessionSpec::new(
                 mock_llm_profile().key,
                 lash::TurnBudget::Unbounded,
@@ -816,7 +830,7 @@ mod session_language_tests {
             .await
             .expect("seed create");
         let seeded = seeding_core
-            .session(chat_id.clone())
+            .session(lash::SessionId::fixture(chat_id.clone()))
             .open()
             .await
             .expect("seed open");

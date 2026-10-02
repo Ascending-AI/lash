@@ -197,7 +197,7 @@ async fn ordering_group_discard_case(
     reason: crate::WakeDiscardReason,
     blocks: bool,
 ) {
-    let target_session_id = SessionId::from(format!("wake-ordering-group-target-{case}"));
+    let target_session_id = SessionId::fixture(format!("wake-ordering-group-target-{case}"));
     let process_id = registry
         .register_process(
             process_registry::registration(&format!("wake-ordering-group-{case}"))
@@ -295,7 +295,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     let request = crate::SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(target_session_id.to_string()),
+        session_id: SessionId::fixture(target_session_id.to_string()),
         relation: crate::SessionRelation::Root,
         config: crate::SessionPolicy {
             model: Some(crate::testing::test_llm_profile_config(
@@ -323,7 +323,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         .register_process(
             process_registry::registration(process_id)
                 .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
+                .with_wake_session_id(Some(SessionId::fixture(target_session_id.to_string()))),
         )
         .await
         .expect("register wake producer");
@@ -399,7 +399,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         .admit_view(&crate::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(authority_target_session_id.to_string()),
+            session_id: SessionId::fixture(authority_target_session_id.to_string()),
             relation: crate::SessionRelation::Root,
             config: request.config.session_policy().into(),
             head: crate::SessionCreationHead::Config,
@@ -424,7 +424,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
                         ),
                     ))
                     .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                    .with_wake_session_id(Some(SessionId::from(
+                    .with_wake_session_id(Some(SessionId::fixture(
                         authority_target_session_id.to_string(),
                     ))),
             )
@@ -615,7 +615,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         .register_process(
             process_registry::registration(coalesced_process_id)
                 .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
+                .with_wake_session_id(Some(SessionId::fixture(target_session_id.to_string()))),
         )
         .await
         .expect("register coalesced wake producer");
@@ -696,7 +696,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         .register_process(
             process_registry::registration(retarget_process_id)
                 .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
+                .with_wake_session_id(Some(SessionId::fixture(target_session_id.to_string()))),
         )
         .await
         .expect("register retarget-race producer");
@@ -769,7 +769,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         .register_process(
             process_registry::registration(crash_process_id)
                 .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
+                .with_wake_session_id(Some(SessionId::fixture(target_session_id.to_string()))),
         )
         .await
         .expect("register stale-claim producer");
@@ -860,7 +860,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         .register_process(
             process_registry::registration(settled_crash_process_id)
                 .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
+                .with_wake_session_id(Some(SessionId::fixture(target_session_id.to_string()))),
         )
         .await
         .expect("register live-row retry producer");
@@ -919,7 +919,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         .register_process(
             process_registry::registration(deferred_process_id)
                 .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
+                .with_wake_session_id(Some(SessionId::fixture(target_session_id.to_string()))),
         )
         .await
         .expect("register deferred-first-attempt producer");
@@ -989,7 +989,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         .register_process(
             process_registry::registration(blocked_process_id)
                 .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
+                .with_wake_session_id(Some(SessionId::fixture(target_session_id.to_string()))),
         )
         .await
         .expect("register blocked-group producer");
@@ -1123,7 +1123,7 @@ async fn missing_target_is_deferred_and_rearmed(
         .register_process(
             process_registry::registration(process_id)
                 .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
+                .with_wake_session_id(Some(SessionId::fixture(target_session_id.to_string()))),
         )
         .await
         .expect("register missing-target wake sender");
@@ -1173,7 +1173,7 @@ async fn missing_target_is_deferred_and_rearmed(
         .admit_view(&crate::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(target_session_id.to_string()),
+            session_id: SessionId::fixture(target_session_id.to_string()),
             relation: crate::SessionRelation::Root,
             config: crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
@@ -1228,7 +1228,7 @@ async fn sender_floor_lifetime(
         .admit_view(&crate::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(target_session_id.to_string()),
+            session_id: SessionId::fixture(target_session_id.to_string()),
             relation: crate::SessionRelation::Root,
             config: crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
@@ -1244,7 +1244,7 @@ async fn sender_floor_lifetime(
         .register_process(
             process_registry::registration(process_id)
                 .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
+                .with_wake_session_id(Some(SessionId::fixture(target_session_id.to_string()))),
         )
         .await
         .expect("register sender-floor lifetime process");
@@ -1430,7 +1430,7 @@ async fn prune_reregister_sender_floor_delivers_through_driver(
     let registration = || {
         process_registry::registration(process_id)
             .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-            .with_wake_session_id(Some(SessionId::from(target_session_id.to_string())))
+            .with_wake_session_id(Some(target_session_id.clone()))
     };
     let wake_floor_prune_reregister_record = registry
         .register_process(registration())
@@ -1640,7 +1640,7 @@ async fn mixed_era_floor_and_ordering(
                     process_registry::plain_event_type("producer.progress"),
                     process_registry::wake_event_type("producer.wake"),
                 ])
-                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
+                .with_wake_session_id(Some(target_session_id.clone())),
         )
         .await
         .expect("register mixed-era process");
@@ -1651,7 +1651,7 @@ async fn mixed_era_floor_and_ordering(
             version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
                 PROCESS_WAKE_DELIVERY_FORMAT_VERSION
             )),
-            target_session_id: SessionId::from(target_session_id.to_string()),
+            target_session_id: target_session_id.clone(),
             process_id: process_id.clone(),
             sequence,
             event_type: "producer.wake".to_string(),
@@ -1672,7 +1672,7 @@ async fn mixed_era_floor_and_ordering(
         version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
             PROCESS_WAKE_DELIVERY_FORMAT_VERSION
         )),
-        target_session_id: SessionId::from(target_session_id.to_string()),
+        target_session_id: SessionId::fixture(target_session_id.to_string()),
         process_id: process_id.clone(),
         sequence: 3,
         event_type: "producer.wake".to_string(),
@@ -1716,7 +1716,7 @@ async fn mixed_era_floor_and_ordering(
                 version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
                     PROCESS_WAKE_DELIVERY_FORMAT_VERSION
                 )),
-                target_session_id: SessionId::from(target_session_id.to_string()),
+                target_session_id: SessionId::fixture(target_session_id.to_string()),
                 process_id: process_id.clone(),
                 sequence: 2,
                 event_type: "producer.wake".to_string(),
@@ -1798,7 +1798,7 @@ async fn rewound_fresh_delivery_is_discarded_without_blocking(
                     process_registry::plain_event_type("producer.progress"),
                     process_registry::wake_event_type("producer.wake"),
                 ])
-                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
+                .with_wake_session_id(Some(target_session_id.clone())),
         )
         .await
         .expect("register restored sender process");
@@ -1807,7 +1807,7 @@ async fn rewound_fresh_delivery_is_discarded_without_blocking(
         version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
             PROCESS_WAKE_DELIVERY_FORMAT_VERSION
         )),
-        target_session_id: SessionId::from(target_session_id.to_string()),
+        target_session_id: target_session_id.clone(),
         process_id: process_id.clone(),
         sequence: 10,
         event_type: "producer.wake".to_string(),
@@ -1930,7 +1930,7 @@ async fn target_gone_is_a_typed_discard(
     let target_request = crate::SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(target_session_id.to_string()),
+        session_id: SessionId::fixture(target_session_id.to_string()),
         relation: crate::SessionRelation::Root,
         config: crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
@@ -1953,7 +1953,7 @@ async fn target_gone_is_a_typed_discard(
         .register_process(
             process_registry::registration(process_id)
                 .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
+                .with_wake_session_id(Some(SessionId::fixture(target_session_id.to_string()))),
         )
         .await
         .expect("register target-gone wake sender");
@@ -2025,7 +2025,7 @@ async fn expired_is_a_typed_discard(
         .register_process(
             process_registry::registration(process_id)
                 .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(SessionId::from(target_session_id.to_string()))),
+                .with_wake_session_id(Some(SessionId::fixture(target_session_id.to_string()))),
         )
         .await
         .expect("register expiring wake sender");

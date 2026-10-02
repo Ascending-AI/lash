@@ -170,7 +170,7 @@ impl Law {
 
     /// A live session holding one accepted input per root in `roots`.
     async fn session(&self, label: &str, roots: &[&str]) -> SessionId {
-        let session = SessionId::from(format!(
+        let session = SessionId::fixture(format!(
             "paused-children-{label}-{}",
             self.harness.run_nonce()
         ));
@@ -198,7 +198,7 @@ impl Law {
                 .expect("accept the root's input")
                 .input_id;
             store
-                .bind_root_inputs(&TurnId::from(*root), std::slice::from_ref(&input))
+                .bind_root_inputs(&TurnId::fixture(*root), std::slice::from_ref(&input))
                 .await
                 .expect("bind the input to its root");
         }
@@ -216,7 +216,7 @@ impl Law {
         winner: bool,
     ) -> Group {
         let key = witness_key(label);
-        let scope = ExecutionScope::turn(session.clone(), TurnId::from(root));
+        let scope = ExecutionScope::turn(session.clone(), TurnId::fixture(root));
         let child = |position: usize, command| {
             RuntimeEffectEnvelope::new(
                 RuntimeEffectInvocation::new(
@@ -257,7 +257,10 @@ impl Law {
                             .iter()
                             .map(|child| child.invocation.effect_replay_key().to_owned())
                             .collect(),
-                        opener: lash_core::AdmittedScope::turn(session.clone(), root),
+                        opener: lash_core::AdmittedScope::turn(
+                            session.clone(),
+                            TurnId::fixture(root.to_string()),
+                        ),
                     },
                     membership: witness_membership(&children),
                     dispatch_route: witness_dispatch_route(),

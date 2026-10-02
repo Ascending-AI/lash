@@ -114,8 +114,8 @@ struct ReferenceIdentity {
 
 impl ReferenceIdentity {
     fn for_scenario(scenario: &str) -> Self {
-        let session_id = SessionId::from(format!("trace-derived-real-turn:{scenario}"));
-        let turn_id = TurnId::from(format!("{session_id}:turn"));
+        let session_id = SessionId::fixture(format!("trace-derived-real-turn:{scenario}"));
+        let turn_id = TurnId::fixture(format!("{session_id}:turn"));
         Self {
             session_id,
             turn_id,
@@ -992,16 +992,13 @@ fn reference_steer(identity: &ReferenceIdentity) -> PendingTurnInputDraft {
         ),
         crate::TurnInput::text("active checkpoint input"),
     )
-    .with_input_id(reference_steer_input_id(identity).as_str())
+    .with_input_id(reference_steer_input_id(identity))
     .with_source_key(REFERENCE_STEER_KEY)
 }
 
 /// The input id [`reference_steer`] writes.
 fn reference_steer_input_id(identity: &ReferenceIdentity) -> crate::InputId {
-    crate::InputId::from(PendingTurnInputDraft::keyed_input_id(
-        &identity.session_id,
-        REFERENCE_STEER_KEY,
-    ))
+    PendingTurnInputDraft::keyed_input_id(&identity.session_id, REFERENCE_STEER_KEY)
 }
 
 async fn seed_reference_ingress(store: &Arc<dyn RuntimeStore>, identity: &ReferenceIdentity) {
@@ -1087,7 +1084,7 @@ fn crash_at_armed_point(control: &SeamControl) -> crate::ConformanceCrash {
 
 /// The admitted scope a runner runs the reference turn under.
 fn reference_admitted_scope(identity: &ReferenceIdentity) -> crate::AdmittedScope {
-    crate::AdmittedScope::turn(&identity.session_id, identity.turn_id.as_str())
+    crate::AdmittedScope::turn(&identity.session_id, identity.turn_id.clone())
 }
 
 /// The level-one crash points of `trace`, in trace order.

@@ -258,7 +258,7 @@ pub async fn run_specs_split_roots_in_admission_order(
         vec!["selector-a1", "selector-b", "selector-a3"],
         "three roots in admission order: {outcome:?}"
     );
-    let root = |key: &str| TurnId::from(key);
+    let root = |key: &str| TurnId::fixture(key);
     assert_eq!(
         parts.applications().await,
         vec![
@@ -1141,7 +1141,7 @@ pub async fn a_recovered_follow_on_inherits_its_roots_recorded_run(
     };
     let scope = admit(crate::ExecutionScope::turn(
         &parts.session_id,
-        format!("{prefix}-run-spec-follow-on-drive"),
+        TurnId::fixture(format!("{prefix}-run-spec-follow-on-drive")),
     ));
     tokio::time::timeout(
         std::time::Duration::from_secs(90),
@@ -1309,7 +1309,7 @@ pub async fn a_redriven_switch_owes_its_follow_on_under_the_bound_its_root_resol
     };
     let scope = admit(crate::ExecutionScope::turn(
         &parts.session_id,
-        format!("{prefix}-run-spec-follow-on-bound-drive"),
+        TurnId::fixture(format!("{prefix}-run-spec-follow-on-bound-drive")),
     ));
     tokio::time::timeout(
         std::time::Duration::from_secs(90),

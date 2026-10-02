@@ -1222,7 +1222,7 @@ async fn provider_auxiliary_panics_are_typed_in_quiet_and_loud_modes() {
     );
     let mut runtime = Box::pin(
         LashRuntime::builder(host, test_runtime_owner())
-            .with_session_id(session_id.to_string())
+            .with_session_id(SessionId::fixture(session_id.to_string()))
             .with_policy(policy())
             .with_plugin_factories(vec![protocol_factory()])
             .build(),
@@ -1519,7 +1519,7 @@ async fn provider_desugared_construction_panics_are_typed_in_quiet_and_loud_mode
     );
     let mut runtime = Box::pin(
         LashRuntime::builder(host, test_runtime_owner())
-            .with_session_id(session_id.to_string())
+            .with_session_id(SessionId::fixture(session_id.to_string()))
             .with_policy(policy())
             .with_plugin_factories(vec![protocol_factory()])
             .build(),

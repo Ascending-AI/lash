@@ -15,11 +15,7 @@ pub use lash_core::facade_support::{AssistantOutput, TurnIssue, TurnIssueSeverit
 pub use lash_core::{TurnFailureCode, TurnFailureKind};
 
 pub(crate) fn fresh_turn_id() -> TurnId {
-    TurnId::from(
-        lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string())
-            .0
-            .to_string(),
-    )
+    TurnId::from_uuid(uuid::Uuid::new_v4().as_u128())
 }
 
 /// Run one admitted root on `runtime`'s session (FIG-3600), recording every

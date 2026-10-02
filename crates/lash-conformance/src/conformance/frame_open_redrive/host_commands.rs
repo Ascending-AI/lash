@@ -503,7 +503,7 @@ async fn drive_crashed_at(
         law.runner.run_crashed_then_redriven_turn(
             admit(crate::ExecutionScope::turn(
                 &law.session_id,
-                format!("{}-{drive}", law.prefix),
+                crate::TurnId::fixture(format!("{}-{drive}", law.prefix)),
             )),
             command_attempt(law, Some(crash), None),
             command_attempt(law, None, Some(tx)),

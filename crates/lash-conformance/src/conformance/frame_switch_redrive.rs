@@ -181,7 +181,7 @@ pub async fn a_frame_switched_driver_turn_redriven_after_its_commit_replays_at_i
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    let session_id = SessionId::from(format!("{prefix}-frame-switch-session"));
+    let session_id = SessionId::fixture(format!("{prefix}-frame-switch-session"));
     let calls = Arc::new(AtomicUsize::new(0));
     let executed = Arc::new(AtomicUsize::new(0));
     let model = crate::testing::TestProvider::builder()
@@ -247,7 +247,7 @@ pub async fn a_frame_switched_driver_turn_redriven_after_its_commit_replays_at_i
     let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
     let scope = admit(crate::ExecutionScope::turn(
         &session_id,
-        format!("{prefix}-frame-switch-drive"),
+        crate::TurnId::fixture(format!("{prefix}-frame-switch-drive")),
     ));
     // A redrive that diverged from its journal never ends: the tier retries
     // it until it rests. Bound the wait so the divergence fails the law.

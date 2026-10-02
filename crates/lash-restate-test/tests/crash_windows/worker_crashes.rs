@@ -127,11 +127,14 @@ async fn setup_crash_case(engine: Engine, before_request: usize) {
             "test",
         ))
         .expect("build the lash core");
-    let session = created_session(&core, run_tag("worker-setup-crash"))
-        .await
-        .open()
-        .await
-        .expect("open the session");
+    let session = created_session(
+        &core,
+        lash_core::SessionId::fixture(run_tag("worker-setup-crash")),
+    )
+    .await
+    .open()
+    .await
+    .expect("open the session");
     let output = tokio::time::timeout(
         BOUND,
         session.send(lash::TurnInput::text("count once")).output(),

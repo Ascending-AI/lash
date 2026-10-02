@@ -898,6 +898,13 @@ impl From<crate::AttachmentStoreError> for PluginError {
     }
 }
 
+/// Blank text offered as an identity is the store's refusal of it.
+impl From<lash_sansio::BlankIdentity> for PluginError {
+    fn from(error: lash_sansio::BlankIdentity) -> Self {
+        crate::StoreError::from(error).into()
+    }
+}
+
 impl From<crate::StoreError> for PluginError {
     /// A store error at a plugin-facing port, with its class
     /// ([`StoreError::runtime_code`](crate::StoreError::runtime_code)) kept:

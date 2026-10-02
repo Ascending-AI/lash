@@ -42,7 +42,8 @@ async fn queue_append(parts: &DriveParts, text: &str, ancestor: Option<&str>) ->
                         nodes: vec![crate::SessionAppendNode::message(
                             crate::PluginMessage::text(crate::MessageRole::User, text),
                         )],
-                        requires_ancestor_node_id: ancestor.map(|id| id.to_string().into()),
+                        requires_ancestor_node_id: ancestor
+                            .map(|id| crate::NodeId::fixture(id.to_string())),
                     }),
                 },
             )

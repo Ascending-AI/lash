@@ -191,7 +191,7 @@ impl World {
     pub(crate) fn new(tier: &UsageAccountingTier, law: &str, script: Script) -> Self {
         Self {
             tier: tier.clone(),
-            session_id: SessionId::from(format!("{}-{law}", tier.prefix)),
+            session_id: SessionId::fixture(format!("{}-{law}", tier.prefix)),
             script,
             witness: Arc::new(Witness::default()),
             kill: crate::ConformanceCrash::new(),
@@ -208,7 +208,7 @@ impl World {
     }
 
     fn turn_id(&self) -> TurnId {
-        TurnId::from(format!("{}-turn", self.session_id))
+        TurnId::fixture(format!("{}-turn", self.session_id))
     }
 
     fn admitted(&self) -> crate::AdmittedScope {
@@ -989,7 +989,7 @@ async fn assert_fork_carries_no_usage(tier: &UsageAccountingTier, world: &World,
         .await
         .unwrap_or_else(|error| panic!("{law}: read the parent's head: {error}"))
         .unwrap_or_else(|| panic!("{law}: the parent has a head"));
-    let child = SessionId::from(format!("{}-fork", world.session_id));
+    let child = SessionId::fixture(format!("{}-fork", world.session_id));
     factory
         .fork_session(&crate::ForkSessionRequest {
             session_id: child.clone(),

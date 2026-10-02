@@ -79,12 +79,12 @@ impl ForkPlan {
         }
 
         Ok(Self {
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: session_id.clone(),
             ancestors: ancestors.into_values().collect(),
         })
     }
 
-    pub fn session_id(&self) -> &str {
+    pub fn session_id(&self) -> &SessionId {
         &self.session_id
     }
 
@@ -106,9 +106,9 @@ mod tests {
 
     fn node(owner: &str, generation: u64, parent: Option<&str>) -> ForkNodeFacts {
         ForkNodeFacts {
-            node_id: format!("{owner}-{generation}").into(),
-            parent_node_id: parent.map(crate::NodeId::from),
-            owning_session_id: SessionId::from(owner.to_string()),
+            node_id: NodeId::fixture(format!("{owner}-{generation}")),
+            parent_node_id: parent.map(crate::NodeId::fixture),
+            owning_session_id: SessionId::fixture(owner.to_string()),
             generation,
         }
     }

@@ -54,8 +54,8 @@ impl Target {
             message,
         };
         match kind {
-            "input" => Ok(Self::Input(crate::InputId::from(id))),
-            "turn" => Ok(Self::Turn(crate::TurnId::from(id))),
+            "input" => Ok(Self::Input(crate::InputId::parse(id)?)),
+            "turn" => Ok(Self::Turn(crate::TurnId::parse(id)?)),
             "revision" => id
                 .parse()
                 .map(Self::Revision)

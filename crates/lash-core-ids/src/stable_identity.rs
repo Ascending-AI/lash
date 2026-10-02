@@ -197,8 +197,14 @@ pub fn provider_route(
 }
 
 pub fn rendered_hash(prefix: &str, family_version: u8, preimage: &[u8]) -> String {
+    format!("{prefix}{}", rendered_hash_tail(family_version, preimage))
+}
+
+/// What follows the prefix in a [`rendered_hash`], for an identity type that
+/// builds itself from its literal prefix.
+pub fn rendered_hash_tail(family_version: u8, preimage: &[u8]) -> String {
     format!(
-        "{prefix}:v{family_version}:blake3:{}",
+        ":v{family_version}:blake3:{}",
         crate::stable_hash::blake3_hex(LASH_STABLE_IDENTITY_DOMAIN_VERSION, preimage)
     )
 }

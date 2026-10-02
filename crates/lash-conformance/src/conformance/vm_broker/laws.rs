@@ -17,8 +17,8 @@ use super::{CELL, HostStop, Phase, Scenario, echo, within_budget};
 use crate::{AdmittedScope, ConformanceTurnRunner, ExecutionScope};
 
 fn admitted(prefix: &str, law: &str, case: &str) -> AdmittedScope {
-    let session_id = SessionId::from(format!("{prefix}-{law}-{case}"));
-    let turn_id = TurnId::from(format!("{prefix}-{law}-{case}-turn"));
+    let session_id = SessionId::fixture(format!("{prefix}-{law}-{case}"));
+    let turn_id = TurnId::fixture(format!("{prefix}-{law}-{case}-turn"));
     crate::admit(ExecutionScope::turn(&session_id, &turn_id))
 }
 

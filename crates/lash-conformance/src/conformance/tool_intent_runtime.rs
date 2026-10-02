@@ -76,8 +76,8 @@ pub async fn public_signal_intent_wakes_parked_process(
     turn_runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
     let registry = stores.process_registry();
-    let session_id = SessionId::from(format!("{prefix}-session"));
-    let turn_id = TurnId::from(format!("{prefix}-turn"));
+    let session_id = SessionId::fixture(format!("{prefix}-session"));
+    let turn_id = TurnId::fixture(format!("{prefix}-turn"));
     let registered = registry
         .register_process_with_observers(
             crate::ProcessRegistration::new(

@@ -95,7 +95,7 @@ pub(super) fn repair_event(
 ) -> SessionHistoryRecord {
     event(
         Transport::Repair {
-            turn_id: TurnId::from(turn_id.to_string()),
+            turn_id: turn_id.clone(),
             protocol_iteration,
             parts,
             text,

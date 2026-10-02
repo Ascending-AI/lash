@@ -77,13 +77,8 @@ impl AttemptSessionReads {
     }
 
     /// Integrator class 3 snapshot of a named session through controller-free reads.
-    pub async fn snapshot(
-        &self,
-        session_id: impl AsRef<str>,
-    ) -> Result<SessionSnapshot, PluginError> {
-        self.sessions
-            .snapshot_session(&SessionId::from(session_id.as_ref()))
-            .await
+    pub async fn snapshot(&self, session_id: &SessionId) -> Result<SessionSnapshot, PluginError> {
+        self.sessions.snapshot_session(session_id).await
     }
 
     /// Integrator class 3 read of the owner's serialized tool catalog.

@@ -148,7 +148,7 @@ impl TestTurnDrive for LashRuntime {
         let turn_id = input
             .trace_turn_id
             .clone()
-            .unwrap_or_else(|| TurnId::from(opts.execution_scope_id()));
+            .unwrap_or_else(|| TurnId::fixture(opts.execution_scope_id()));
         let accepted = self
             .enqueue_turn_input(
                 input,

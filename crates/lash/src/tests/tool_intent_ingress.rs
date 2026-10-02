@@ -53,7 +53,7 @@ async fn ingress_core_over(
                     semantics: lash_core::ProcessEventSemanticsSpec::default(),
                 },
             ]),
-            &[SessionId::from(SESSION.to_string())],
+            &[SessionId::fixture(SESSION.to_string())],
         )
         .await?
         .id;
@@ -253,7 +253,7 @@ async fn ingress_core_with_trigger_store(
 
 fn trigger_intent(session_id: &SessionId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::EmitTrigger(lash_core::EmitTriggerIntent {
-        owner: crate::RuntimeOwner::Session(SessionId::from(session_id.to_string())),
+        owner: crate::RuntimeOwner::Session(session_id.clone()),
         request: lash_core::TriggerOccurrenceRequest::new(
             "intent.ingress.trigger",
             "intent-ingress-source",
@@ -1156,7 +1156,7 @@ impl lash_core::RuntimeEffectController for AdmissionCrashController {
 
 fn emit_intent(session_id: &SessionId, process: &ProcessId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::EmitProcessEvent(lash_core::EmitProcessEventIntent {
-        owner: crate::RuntimeOwner::Session(SessionId::from(session_id.to_string())),
+        owner: crate::RuntimeOwner::Session(session_id.clone()),
         process_id: process.clone(),
         event_type: EVENT.to_string(),
         payload: serde_json::json!({"law": "duplicate-submit"}),
@@ -1165,7 +1165,7 @@ fn emit_intent(session_id: &SessionId, process: &ProcessId) -> lash_core::ToolIn
 
 fn start_intent(session_id: &SessionId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-        owner: crate::RuntimeOwner::Session(SessionId::from(session_id.to_string())),
+        owner: crate::RuntimeOwner::Session(session_id.clone()),
         declaration: lash_core::ProcessStartDeclaration::external(
             lash_core::ProcessOriginator::host(),
             serde_json::Value::Null,
@@ -1176,7 +1176,7 @@ fn start_intent(session_id: &SessionId) -> lash_core::ToolIntent {
 
 fn start_intent_with_env(session_id: &SessionId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-        owner: crate::RuntimeOwner::Session(SessionId::from(session_id.to_string())),
+        owner: crate::RuntimeOwner::Session(session_id.clone()),
         declaration: lash_core::ProcessStartDeclaration::new(
             lash_core::ProcessInput::Engine {
                 kind: "testing-fixture".to_string(),
@@ -1208,7 +1208,7 @@ fn cancel_intent(session_id: &SessionId, process: &ProcessId) -> lash_core::Tool
 
 fn cancel_intent_for_target(session_id: &SessionId, target: &ProcessId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
-        owner: crate::RuntimeOwner::Session(SessionId::from(session_id.to_string())),
+        owner: crate::RuntimeOwner::Session(session_id.clone()),
         process_id: target.clone(),
     })
 }
@@ -1452,13 +1452,13 @@ async fn foreign_session_and_turn_keys_are_typed_refusals() -> Result<()> {
     let (core, registry, process) = ingress_core(sqlite_memory_store_backend().await).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let foreign_session = crate::tools::ToolIntentIngressKey::derive(
-        "foreign-session",
+        &lash_core::SessionId::from("foreign-session"),
         SCOPE,
         &lash_core::ToolCallId::fixture("host-call"),
         0,
     );
     let foreign_turn = crate::tools::ToolIntentIngressKey::derive(
-        SESSION,
+        &lash_core::SessionId::from(SESSION),
         "foreign-turn",
         &lash_core::ToolCallId::fixture("host-call"),
         0,
@@ -1503,7 +1503,7 @@ async fn malformed_key_is_a_typed_refusal_before_realization() -> Result<()> {
     let (core, registry, process) = ingress_core(sqlite_memory_store_backend().await).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let mut malformed = serde_json::to_value(crate::tools::ToolIntentIngressKey::derive(
-        SESSION,
+        &lash_core::SessionId::from(SESSION),
         SCOPE,
         &lash_core::ToolCallId::fixture("host-call"),
         0,
@@ -1534,7 +1534,7 @@ async fn malformed_key_is_a_typed_refusal_before_realization() -> Result<()> {
 #[test]
 fn ingress_transport_fields_are_required_and_have_no_implicit_serde_defaults() {
     let key = crate::tools::ToolIntentIngressKey::derive(
-        SESSION,
+        &lash_core::SessionId::from(SESSION),
         SCOPE,
         &lash_core::ToolCallId::fixture("compat-call"),
         7,
@@ -2089,7 +2089,7 @@ async fn ingress_engine_core(
 
 fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::ToolIntent {
     lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-        owner: crate::RuntimeOwner::Session(SessionId::from(SESSION.to_string())),
+        owner: crate::RuntimeOwner::Session(SessionId::fixture(SESSION.to_string())),
         declaration: lash_core::ProcessStartDeclaration::new(
             lash_core::ProcessInput::Engine {
                 kind: kind.to_string(),

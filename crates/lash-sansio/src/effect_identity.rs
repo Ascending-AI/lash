@@ -121,7 +121,7 @@ impl ExecutionScope {
         let scope = match wire.kind.as_str() {
             "turn" => Self::Turn {
                 session_id: wire.session_id?,
-                turn_id: TurnId::from(wire.execution_id?),
+                turn_id: TurnId::parse(wire.execution_id?).ok()?,
             },
             SESSION_OPERATION_JOURNAL_KIND => Self::SessionOperation {
                 session_id: wire.session_id?,
@@ -164,17 +164,9 @@ impl ExecutionScope {
 
     pub fn validate(&self) -> Result<(), EffectIdentityError> {
         let missing = match self {
-            Self::Turn {
-                session_id,
-                turn_id,
-            } => session_id.trim().is_empty() || turn_id.trim().is_empty(),
-            Self::Process { process_id } => process_id.trim().is_empty(),
-            Self::SessionOperation {
-                session_id,
-                operation_id,
-            } => session_id.trim().is_empty() || operation_id.trim().is_empty(),
-            Self::SessionDelete { session_id } => session_id.trim().is_empty(),
-            Self::RuntimeOperation { operation_id } => operation_id.trim().is_empty(),
+            Self::Turn { .. } | Self::Process { .. } | Self::SessionDelete { .. } => false,
+            Self::SessionOperation { operation_id, .. }
+            | Self::RuntimeOperation { operation_id } => operation_id.trim().is_empty(),
         };
         if missing {
             return Err(EffectIdentityError::MissingExecutionScopeId);

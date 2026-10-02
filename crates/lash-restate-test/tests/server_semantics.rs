@@ -1157,7 +1157,7 @@ async fn a_new_build_serves_new_invocations_while_pinned_ones_finish_on_theirs()
     let job_key = |ordinal: u64| {
         lash_restate::turn_workflow_key(
             &lash_core::SessionId::from("upgrade-e2e"),
-            &lash_core::TurnId::from(format!("job-{ordinal}")),
+            &lash_core::TurnId::fixture(format!("job-{ordinal}")),
         )
     };
     // Wait for its first attempt to be served by build N.

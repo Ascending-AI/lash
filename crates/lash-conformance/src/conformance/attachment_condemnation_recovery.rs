@@ -219,7 +219,7 @@ pub async fn cold_reopen_adopts_old_generation_before_new_deletes<Reopen, Reopen
         "adoption requires a fenced durable authority"
     );
     let namespace = uuid::Uuid::new_v4();
-    let session_id = SessionId::from(format!("condemnation-crash-{namespace}"));
+    let session_id = SessionId::fixture(format!("condemnation-crash-{namespace}"));
     factory
         .admit_view(&session_store_request(
             &session_id,
@@ -461,7 +461,7 @@ pub async fn persistently_failing_delete_stalls_typed(
     clock: Arc<testing::TestClock>,
 ) {
     let namespace = uuid::Uuid::new_v4();
-    let session_id = SessionId::from(format!("failing-delete-{namespace}"));
+    let session_id = SessionId::fixture(format!("failing-delete-{namespace}"));
     let store = create(&f, session_id.as_str()).await;
     let backend = Arc::new(FaultingAttachmentStore::over(make_bytes()));
     let reference = backend

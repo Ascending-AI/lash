@@ -183,7 +183,7 @@ impl TurnStopwatch {
 }
 
 fn turn_phase_id(parent_turn_id: &TurnId, phase: &str) -> TurnId {
-    TurnId::from(format!("{parent_turn_id}:{phase}"))
+    parent_turn_id.with_suffix(format_args!(":{phase}"))
 }
 
 async fn turn_control_binding<'a>(

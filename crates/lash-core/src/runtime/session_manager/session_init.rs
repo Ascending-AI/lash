@@ -118,8 +118,7 @@ fn identified_create_request(
     let session_id = request
         .session_id
         .take()
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| SessionId::from(uuid::Uuid::new_v4().to_string()));
+        .unwrap_or_else(|| SessionId::from_uuid(uuid::Uuid::new_v4().as_u128()));
     request.session_id = Some(session_id.clone());
     // `SessionStartPoint` keeps predecessor variants only so durable and
     // remote payloads still decode; `Empty` is the only start point
@@ -146,7 +145,7 @@ fn plan_session_init(
     // start point initialisation admits. Durable forks and resumed sessions
     // get their state from the store, not from the create request.
     let start_state = RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         ..RuntimeSessionState::new(current.policy.clone())
     };
     let ChildFacts {
@@ -351,7 +350,7 @@ pub(in crate::runtime::session_manager) fn admit_session_turn_child(
     let session_id = create_request
         .session_id
         .clone()
-        .unwrap_or_else(|| SessionId::from(format!("the child of {start_name}")));
+        .unwrap_or_else(|| SessionId::prefixed("the child of ", start_name));
     resolve_child_facts(&starter, create_request, &session_id).map(|_| ())
 }
 
@@ -730,10 +729,7 @@ async fn initialize_session(
     request: SessionCreateRequest,
     owning_process_id: &crate::ProcessId,
 ) -> Result<InitializedSession, crate::PluginError> {
-    if let Some(session_id) = request
-        .session_id
-        .as_ref()
-        .filter(|session_id| !session_id.is_empty())
+    if let Some(session_id) = request.session_id.as_ref()
         && let Some(store) = durable_session_store(current, session_id).await?
         && let Some(state) = recorded_session_state(session_id, &request.relation, &store).await?
     {
@@ -883,15 +879,11 @@ async fn reopen_committed_session(
     let plugins = match state.plugin_state() {
         Some(snapshot) => plugin_host.build_session(PluginSessionRequest {
             parent_session_id: parent_session_id.clone(),
-            ..PluginSessionRequest::rematerialization(
-                state.session_id.as_str(),
-                snapshot,
-                authority,
-            )
+            ..PluginSessionRequest::rematerialization(state.session_id.clone(), snapshot, authority)
         }),
         None => plugin_host.build_session(PluginSessionRequest {
             parent_session_id: parent_session_id.clone(),
-            ..PluginSessionRequest::creation(state.session_id.as_str(), authority)
+            ..PluginSessionRequest::creation(state.session_id.clone(), authority)
         }),
     }?;
     let policy = state.effective_policy().clone();
@@ -1402,8 +1394,8 @@ impl SessionTurnInitError {
 }
 
 /// The process-backed turn-input validation: the child's turn keeps the
-/// process scope it was admitted under, a non-empty durable turn id, and a
-/// `trace_turn_id` stamped to that id.
+/// process scope it was admitted under and a `trace_turn_id` stamped to its
+/// durable turn id.
 fn validated_process_turn_input<'run>(
     turn_id: &TurnId,
     mut input: crate::TurnInput,
@@ -1417,11 +1409,6 @@ fn validated_process_turn_input<'run>(
         return Err(crate::PluginError::Session(format!(
             "process-backed session turn `{turn_id}` requires execution scope {required_scope:?}"
         )));
-    }
-    if turn_id.trim().is_empty() {
-        return Err(crate::PluginError::Session(
-            "session turns require a non-empty stable turn id".to_string(),
-        ));
     }
     if let Some(input_turn_id) = input.trace_turn_id.as_deref()
         && input_turn_id != turn_id
@@ -1802,7 +1789,7 @@ mod tests {
         .expect("process scope");
 
         let (input, _) = validated_process_turn_input(
-            &crate::TurnId::from(process_id.as_str()),
+            &crate::TurnId::fixture(process_id.as_str()),
             crate::TurnInput::text("run child"),
             &process_id,
             crate::ProcessLineage::of_process(&process_id, &crate::Ancestry::root(), None, None),

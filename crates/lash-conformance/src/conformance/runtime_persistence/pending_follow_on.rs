@@ -24,7 +24,7 @@ fn terminal_commit(
 ) -> RuntimeCommit {
     commit_as(
         state,
-        crate::OperationId::turn(SESSION, turn_id, "final"),
+        crate::OperationId::turn(SESSION, TurnId::fixture(turn_id.to_string()), "final"),
         pending_follow_on,
     )
 }

@@ -578,11 +578,7 @@ where
         session_id: &SessionId,
     ) -> Result<(), RuntimeError> {
         self.context
-            .update_session_waits(
-                &self.namespace,
-                SessionId::from(session_id.to_string()),
-                true,
-            )
+            .update_session_waits(&self.namespace, session_id.clone(), true)
             .await
             .map_err(|err| {
                 crate::wire::lash_terminal(&err, RuntimeErrorCode::EngineEffectController)
@@ -595,11 +591,7 @@ where
         session_id: &SessionId,
     ) -> Result<(), RuntimeError> {
         self.context
-            .update_session_waits(
-                &self.namespace,
-                SessionId::from(session_id.to_string()),
-                false,
-            )
+            .update_session_waits(&self.namespace, session_id.clone(), false)
             .await
             .map_err(|err| {
                 crate::wire::lash_terminal(&err, RuntimeErrorCode::EngineEffectController)

@@ -2032,7 +2032,7 @@ async fn a_follow_on_that_cannot_commit_leaves_no_withheld_row_bound(
     failure: WithheldFollowOnFailure,
 ) {
     let double = kernel_double(seed, lash_restate_test::ServerConfig::default()).await;
-    let root = TurnId::from(format!("{session_id}-turn"));
+    let root = TurnId::fixture(format!("{session_id}-turn"));
     let store_cell: Arc<Mutex<Option<Arc<RecordingStore>>>> = Arc::new(Mutex::new(None));
     let captured_store_cell = Arc::clone(&store_cell);
     type WakeSource = (
@@ -2219,7 +2219,7 @@ async fn a_follow_on_that_cannot_commit_leaves_no_withheld_row_bound(
     let handler = double
         .open_handler(AdmittedScope::turn(
             session.clone(),
-            format!("{session_id}-redrive"),
+            TurnId::fixture(format!("{session_id}-redrive")),
         ))
         .await
         .expect("open the drain's handler");

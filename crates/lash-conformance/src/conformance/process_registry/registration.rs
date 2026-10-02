@@ -87,12 +87,12 @@ pub async fn a_start_key_reports_created_then_existing_and_is_trusted(
 fn host_keyed(bytes: &str, session: &str, wake: Option<&str>) -> ProcessRegistration {
     let mut registration = registration("host-key")
         .with_start_key(Some(crate::StartKey::for_host(bytes)))
-        .with_wake_session_id(wake.map(SessionId::from));
+        .with_wake_session_id(wake.map(SessionId::fixture));
     registration.input = std::sync::Arc::new(ProcessInput::External {
         metadata: serde_json::json!({"report": "nightly", "secret": "input-metadata-of-a"}),
     });
     registration.provenance = ProcessProvenance::new(crate::ProcessOriginator::session(
-        crate::SessionScope::new(session),
+        crate::SessionScope::new(SessionId::fixture(session.to_string())),
     ));
     registration
 }

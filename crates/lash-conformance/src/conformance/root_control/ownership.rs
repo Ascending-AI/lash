@@ -168,7 +168,7 @@ impl OwnershipTools {
                         metadata: serde_json::Value::Null,
                     },
                     crate::ProcessProvenance::session(crate::SessionScope::new(
-                        self.session_id.as_str(),
+                        self.session_id.clone(),
                     )),
                     lash_core::Lifetime::Detached,
                 ),
@@ -329,7 +329,7 @@ fn drive_attempt(
 fn driver(parts: &DriveParts, name: &str) -> crate::AdmittedScope {
     crate::admit(crate::ExecutionScope::turn(
         &parts.session_id,
-        TurnId::from(name),
+        TurnId::fixture(name),
     ))
 }
 
@@ -730,7 +730,7 @@ pub async fn every_driver_turn_is_owned_by_its_root(
                     metadata: serde_json::Value::Null,
                 },
                 crate::ProcessProvenance::session(crate::SessionScope::new(
-                    parked.parts.session_id.as_str(),
+                    parked.parts.session_id.clone(),
                 )),
                 lash_core::Lifetime::Detached,
             ),

@@ -128,7 +128,10 @@ impl SendBatchBuilder {
             .map(|row| SendHandle {
                 target: target.clone(),
                 receipt: TurnInputAcceptanceReceipt::from(row),
-                id: row.source_key.as_deref().map(TurnId::from),
+                id: row
+                    .source_key
+                    .as_deref()
+                    .and_then(|source_key| TurnId::parse(source_key).ok()),
                 cursor: cursor.clone(),
                 shared: Arc::new(HandleShared::pending()),
             })

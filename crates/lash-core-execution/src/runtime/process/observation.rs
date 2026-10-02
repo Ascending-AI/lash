@@ -420,7 +420,7 @@ impl ObservedProcess {
             external_ref: record.external_ref,
             wait,
             park,
-            child_session_id: child_session_id(&input).map(Into::into),
+            child_session_id: child_session_id(&input),
             input,
         }
     }
@@ -506,11 +506,9 @@ fn terminal_error(outcome: Option<&ProcessAwaitOutput>) -> Option<String> {
     }
 }
 
-fn child_session_id(input: &ProcessInput) -> Option<String> {
+fn child_session_id(input: &ProcessInput) -> Option<SessionId> {
     match input {
-        ProcessInput::SessionTurn { create_request, .. } => {
-            create_request.session_id.clone().map(Into::into)
-        }
+        ProcessInput::SessionTurn { create_request, .. } => create_request.session_id.clone(),
         ProcessInput::Engine { .. } | ProcessInput::External { .. } => None,
     }
 }

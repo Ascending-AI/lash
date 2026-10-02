@@ -11,7 +11,6 @@ pub struct RemoteProcessCancelRequest {
 
 impl RemoteProcessCancelRequest {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        require_non_empty("RemoteProcessCancelRequest", "process_id", &self.process_id)?;
         require_non_empty("RemoteProcessCancelRequest", "requester", &self.requester)?;
         Ok(())
     }
@@ -28,7 +27,6 @@ pub struct RemoteProcessCancelReceipt {
 
 impl RemoteProcessCancelReceipt {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        require_non_empty("RemoteProcessCancelReceipt", "process_id", &self.process_id)?;
         if let Some(record) = &self.record {
             record.validate("RemoteProcessCancelReceipt")?;
             if record.status() != self.status {
@@ -63,7 +61,6 @@ pub struct RemoteProcessSignalRequest {
 
 impl RemoteProcessSignalRequest {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        require_non_empty("RemoteProcessSignalRequest", "process_id", &self.process_id)?;
         require_non_empty(
             "RemoteProcessSignalRequest",
             "signal_name",
@@ -104,7 +101,6 @@ pub struct RemoteProcessAwaitOutcome {
 
 impl RemoteProcessAwaitOutcome {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        require_non_empty("RemoteProcessAwaitOutcome", "process_id", &self.process_id)?;
         self.output.validate("RemoteProcessAwaitOutcome")
     }
 }
@@ -180,11 +176,6 @@ impl RemoteProcessEventsResponse {
     }
 
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        require_non_empty(
-            "RemoteProcessEventsResponse",
-            "process_id",
-            &self.process_id,
-        )?;
         if !self.cursor.reference().names(&self.process_id) {
             return Err(RemoteProtocolError::InvalidEnvelope {
                 type_name: "RemoteProcessEventsResponse",
@@ -245,7 +236,6 @@ impl RemoteProcessStartRequest {
         if let Some(start_key) = &self.start_key {
             require_non_empty("RemoteProcessStartRequest", "start_key", start_key)?;
         }
-        self.lifetime.validate("RemoteProcessStartRequest")?;
         self.input.validate("RemoteProcessStartRequest")?;
         if let Some(env_ref) = &self.env_ref {
             env_ref.validate("RemoteProcessStartRequest")?;
@@ -254,16 +244,6 @@ impl RemoteProcessStartRequest {
             identity.validate("RemoteProcessStartRequest")?;
         }
         self.originator.validate("RemoteProcessStartRequest")?;
-        if let Some(wake_session_id) = &self.wake_session_id {
-            require_non_empty(
-                "RemoteProcessStartRequest",
-                "wake_session_id",
-                wake_session_id,
-            )?;
-        }
-        for observer in &self.observers {
-            require_non_empty("RemoteProcessStartRequest", "observers", observer)?;
-        }
         for event_type in &self.event_types {
             event_type.validate("RemoteProcessStartRequest")?;
         }

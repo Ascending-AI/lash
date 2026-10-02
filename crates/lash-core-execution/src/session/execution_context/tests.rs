@@ -328,7 +328,7 @@ fn scoped_context(
     )
     .expect("the test scope validates");
     crate::testing::TestExecutionContextBuilder::over_controller(controller)
-        .session_id(session_id)
+        .session_id(lash_sansio::SessionId::fixture(session_id))
         .plugin_factories(vec![])
         .build()
         .into_runtime()

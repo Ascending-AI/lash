@@ -33,9 +33,9 @@ impl LashRuntime {
             materialize_initial_admissions,
             drive_fence,
         } = context;
-        input
-            .trace_turn_id
-            .get_or_insert_with(|| TurnId::from(scoped_effect_controller.scope_id()));
+        if input.trace_turn_id.is_none() {
+            input.trace_turn_id = Some(TurnId::parse(scoped_effect_controller.scope_id())?);
+        }
         // The scope identifies the authority that admitted this run. Physical
         // turn ids remain separate routing and trace attribution, including for
         // queued drains, runtime operations, processes, and follow-on frames.
@@ -157,10 +157,10 @@ impl LashRuntime {
         // The turn id names the root the accepted input starts: it is the
         // row's host id, so the drive runs the turn under this id (ADR 0069
         // §6, FIG-3600 ruling Q4).
-        let trace_turn_id = input
-            .trace_turn_id
-            .clone()
-            .unwrap_or_else(|| TurnId::from(opts.execution_scope_id()));
+        let trace_turn_id = match input.trace_turn_id.clone() {
+            Some(trace_turn_id) => trace_turn_id,
+            None => TurnId::parse(opts.execution_scope_id())?,
+        };
         input.trace_turn_id = Some(trace_turn_id.clone());
         // Acceptance is journaled, not written directly: it happens before the
         // turn runs, which puts it inside a durable engine's replay window, and

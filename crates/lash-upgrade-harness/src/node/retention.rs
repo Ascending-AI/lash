@@ -395,7 +395,7 @@ pub async fn run(args: RetentionArgs) -> Result<()> {
             .map_err(|failure| anyhow!("the attachment GC: {failure:?}"))?;
             let mut sessions_reclaimed = Vec::with_capacity(session.len());
             for id in session {
-                let session_id = lash::SessionId::from(id.clone());
+                let session_id = lash::SessionId::fixture(id.clone());
                 if !matches!(
                     factory.lookup_session(&session_id).await?,
                     lash::persistence::SessionLookup::Live(_)
@@ -422,7 +422,7 @@ pub async fn run(args: RetentionArgs) -> Result<()> {
         }
         RetentionStep::Pin { session } => {
             let factory = stores.session_store_factory();
-            let session_id = lash::SessionId::from(session);
+            let session_id = lash::SessionId::fixture(session);
             let head = retained(factory.as_ref(), build, &session_id)
                 .await?
                 .revisions
@@ -436,7 +436,9 @@ pub async fn run(args: RetentionArgs) -> Result<()> {
         }
         RetentionStep::Revisions { session } => {
             let factory = stores.session_store_factory();
-            super::print(&retained(factory.as_ref(), build, &lash::SessionId::from(session)).await?)
+            super::print(
+                &retained(factory.as_ref(), build, &lash::SessionId::fixture(session)).await?,
+            )
         }
         RetentionStep::Fork {
             session,
@@ -444,8 +446,8 @@ pub async fn run(args: RetentionArgs) -> Result<()> {
             branch,
         } => {
             let factory = stores.session_store_factory();
-            let source = lash::SessionId::from(session);
-            let branch = lash::SessionId::from(branch);
+            let source = lash::SessionId::fixture(session);
+            let branch = lash::SessionId::fixture(branch);
             let resolved = factory
                 .resolve_target(&source, &lash_core::Target::Revision(revision))
                 .await

@@ -483,11 +483,13 @@ fn tool_invocation_batch_preimage(calls: &[ToolInvocation]) -> Vec<u8> {
     identity.finish()
 }
 
-pub(crate) fn deterministic_tool_invocation_batch_id(calls: &[ToolInvocation]) -> String {
-    crate::stable_identity::rendered_hash(
+pub(crate) fn deterministic_tool_invocation_batch_id(calls: &[ToolInvocation]) -> crate::BatchId {
+    crate::BatchId::prefixed(
         "tool-batch",
-        TOOL_BATCH_FAMILY_VERSION,
-        &tool_invocation_batch_preimage(calls),
+        crate::stable_identity::rendered_hash_tail(
+            TOOL_BATCH_FAMILY_VERSION,
+            &tool_invocation_batch_preimage(calls),
+        ),
     )
 }
 

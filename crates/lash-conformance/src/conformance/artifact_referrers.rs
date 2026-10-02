@@ -107,7 +107,7 @@ where
     let key = artifact.module_ref().as_str().to_owned();
     let bytes = artifact.to_store_bytes().expect("module bytes");
     let frame = ArtifactReferrer::FrameEnvironment(FrameEnvironmentId::new(
-        lash_core::SessionId::from(format!("artifact-race-{}", HostArtifactPin::mint())),
+        lash_core::SessionId::fixture(format!("artifact-race-{}", HostArtifactPin::mint())),
         lash_core::FrameNodeId::new("frame-1").expect("frame node id"),
     ));
     let frame_claim = ReferrerClaim::unguarded(frame.clone()).expect("frame claim");

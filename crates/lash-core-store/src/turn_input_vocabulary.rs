@@ -38,13 +38,13 @@ use std::sync::Arc;
 /// unique across sessions. Format: `ti:<blake3-hex>`, the shape every other
 /// pending turn-input id has.
 #[must_use]
-pub fn provisioned_turn_input_id(acceptance: &crate::EffectAddress) -> String {
-    format!(
-        "ti:{}",
+pub fn provisioned_turn_input_id(acceptance: &crate::EffectAddress) -> crate::InputId {
+    crate::InputId::prefixed(
+        "ti:",
         crate::stable_hash::blake3_hex(
             LASH_ACCEPTED_TURN_INPUT_DOMAIN_VERSION,
             acceptance.graph_key().as_bytes(),
-        )
+        ),
     )
 }
 
@@ -61,13 +61,13 @@ pub fn derive_pending_turn_input_id(
     source_key: Option<&str>,
     now_epoch_ms: u64,
     nonce: u64,
-) -> String {
-    format!(
-        "ti:{}",
+) -> crate::InputId {
+    crate::InputId::prefixed(
+        "ti:",
         crate::stable_hash::blake3_hex(
             LASH_TURN_INPUT_DOMAIN_VERSION,
             format!("{session_id}:{source_key:?}:{now_epoch_ms}:{nonce}").as_bytes(),
-        )
+        ),
     )
 }
 #[derive(
@@ -358,7 +358,7 @@ impl TurnInputState {
 pub struct PendingTurnInputDraft {
     pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input_id: Option<String>,
+    pub input_id: Option<crate::InputId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_key: Option<String>,
     pub ingress: TurnInputIngress,
@@ -416,20 +416,20 @@ impl PendingTurnInputDraft {
     /// A host that knows the key it sent under can re-attach to the input
     /// after a restart without any read (FIG-3837).
     #[must_use]
-    pub fn keyed_input_id(session_id: &SessionId, source_key: &str) -> String {
-        format!(
-            "ti:{}",
+    pub fn keyed_input_id(session_id: &SessionId, source_key: &str) -> crate::InputId {
+        crate::InputId::prefixed(
+            "ti:",
             crate::stable_hash::blake3_hex(
                 LASH_KEYED_TURN_INPUT_DOMAIN_VERSION,
                 // Length-prefixed, so no session and key pair spells another.
                 format!("{}:{session_id}:{source_key}", session_id.as_str().len()).as_bytes(),
-            )
+            ),
         )
     }
 
     /// Sets the input id carried by a `PendingTurnInputDraft` for store and durable-substrate
     /// implementors while admitting and settling durable turn inputs.
-    pub fn with_input_id(mut self, input_id: impl Into<String>) -> Self {
+    pub fn with_input_id(mut self, input_id: impl Into<crate::InputId>) -> Self {
         self.input_id = Some(input_id.into());
         self
     }

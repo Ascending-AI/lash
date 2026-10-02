@@ -576,7 +576,7 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<lash_core_execution::PendingTurnInputRead>, StoreError> {
-        let session_id = SessionId::from(session_id.to_string());
+        let session_id = SessionId::parse(session_id.to_string())?;
         // Open and admitted rows, and the rows a checkpoint accepted into a
         // running root, read in one snapshot and listed in `enqueue_seq`
         // order (FIG-4044).
@@ -659,7 +659,7 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<lash_core_execution::TurnInputApplication>, StoreError> {
-        let session_id = SessionId::from(session_id.to_string());
+        let session_id = SessionId::parse(session_id.to_string())?;
         let fleet = self.fleet_format();
         self.conn
             .call(move |conn| {
@@ -720,7 +720,7 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
         session_id: &SessionId,
         targets: &[lash_core_execution::PendingTurnInputCancelTarget],
     ) -> Result<Vec<lash_core_execution::PendingTurnInputCancelReceipt>, StoreError> {
-        let session_id = SessionId::from(session_id.to_string());
+        let session_id = SessionId::parse(session_id.to_string())?;
         let targets = targets.to_vec();
         let now = self.clock.timestamp_ms();
         self.conn
@@ -783,7 +783,7 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
         session_id: &SessionId,
         anchor: &lash_core_execution::PendingTurnInputCancelTarget,
     ) -> Result<lash_core_execution::PendingTurnInputSuffixCancelOutcome, StoreError> {
-        let session_id = SessionId::from(session_id.to_string());
+        let session_id = SessionId::parse(session_id.to_string())?;
         let anchor = anchor.clone();
         let now = self.clock.timestamp_ms();
         self.conn
@@ -1054,9 +1054,7 @@ fn enqueue_pending_turn_inputs_conn(
             crate::revisions::pin_conn(
                 tx,
                 session_id,
-                &lash_core_execution::Target::Input(lash_core_execution::InputId::from(
-                    input_id.as_str(),
-                )),
+                &lash_core_execution::Target::Input(input_id.clone()),
             )?;
         }
         admitted.push(

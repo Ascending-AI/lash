@@ -1158,12 +1158,12 @@ impl RuntimeExecutionContext<'_> {
     /// completion if the cancel decided it — not an error.
     pub async fn execute_prepared_tool_group(
         &self,
-        batch_id: &str,
+        batch_id: crate::BatchId,
         group_invocation: crate::RuntimeEffectInvocation,
         prepared_entries: Vec<(usize, crate::PreparedToolCall)>,
     ) -> Result<Vec<(usize, CompletedProtocolToolCall)>, crate::RuntimeEffectControllerError> {
         let batch = crate::PreparedToolBatch::new(
-            batch_id,
+            batch_id.clone(),
             prepared_entries
                 .iter()
                 .map(|(_, prepared)| prepared.clone())
@@ -1194,12 +1194,12 @@ impl RuntimeExecutionContext<'_> {
             })));
         }
         let consumer = ToolAggregateConsumer::AllSettled;
-        let group_key = self.tool_child_group_key(batch_id);
+        let group_key = self.tool_child_group_key(&batch_id);
         let handle = match self
             .open_tool_child_group(
                 group_invocation,
                 group_key.clone(),
-                batch_id,
+                &batch_id,
                 &leaves,
                 consumer.wake(),
                 crate::GroupReopen::RetainedShape,

@@ -1,5 +1,4 @@
 use lash::ProcessId;
-use lash::SessionId;
 mod batch_journal;
 mod button_event;
 use button_event::{button_pressed_event_type, button_pressed_payload_schema};
@@ -1525,14 +1524,14 @@ pub fn expected_attachment_bytes(workflow_id: &str) -> Vec<u8> {
 
 /// The key a call's default workflow id derives from: its session, or the
 /// process that runs it.
-fn call_owner_key(context: &lash::tools::AttemptContext<'_>) -> SessionId {
+fn call_owner_key(context: &lash::tools::AttemptContext<'_>) -> String {
     match context.owner().session_id() {
-        Some(session_id) => session_id.clone(),
-        None => SessionId::from(context.owner().runtime_owner().to_string()),
+        Some(session_id) => session_id.to_string(),
+        None => context.owner().runtime_owner().to_string(),
     }
 }
 
-fn workflow_id_from_args(session_id: &SessionId, args: &serde_json::Value) -> String {
+fn workflow_id_from_args(session_id: &str, args: &serde_json::Value) -> String {
     args.get("workflow_id")
         .and_then(serde_json::Value::as_str)
         .unwrap_or(session_id)

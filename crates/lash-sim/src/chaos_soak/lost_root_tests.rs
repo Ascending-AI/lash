@@ -51,7 +51,7 @@ async fn root_terminal(
         .world
         .backend()
         .session_store_factory()
-        .root_terminal(session, &lash_core::TurnId::from(root))
+        .root_terminal(session, &lash_core::TurnId::fixture(root))
         .await
         .expect("read the root's terminal")
 }
@@ -191,9 +191,7 @@ async fn missing_unstarted_root_runs_once_from_its_ingress() {
         root: root.to_owned(),
         admission: driver::Admission::Known,
     });
-    let input = lash_core::InputId::from(lash_core::PendingTurnInputDraft::keyed_input_id(
-        &session, root,
-    ));
+    let input = lash_core::PendingTurnInputDraft::keyed_input_id(&session, root);
     driver
         .world
         .backend()

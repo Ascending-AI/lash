@@ -456,12 +456,12 @@ fn held_by_another_executor(
 /// The root a queued-work head is admitted under: named by its admission, so
 /// no two admissions share a root and a redrive of one names the same root.
 fn queued_root(admission: &AdmissionId) -> TurnId {
-    TurnId::from(format!("drive-run:{}", admission.as_str()))
+    TurnId::prefixed("drive-run:", admission.as_str())
 }
 
 /// The root an admission of the command lane applies it under.
 fn commands_root(admission: &AdmissionId) -> TurnId {
-    TurnId::from(format!("drive-commands:{}", admission.as_str()))
+    TurnId::prefixed("drive-commands:", admission.as_str())
 }
 
 /// The first execution of one `SealDriveAdmission` step: the drive-epoch

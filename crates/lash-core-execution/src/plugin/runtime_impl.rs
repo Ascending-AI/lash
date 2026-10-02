@@ -383,7 +383,10 @@ impl PluginHost {
         }
         // Registration and readiness both contribute to a cold materialization.
         // Freeze their replay log before later writes become an uncommitted tail.
-        session.state.lock_recover().initialize(snapshot)?;
+        session
+            .state
+            .lock_recover()
+            .initialize(&session.owner, snapshot)?;
         Ok(session)
     }
 

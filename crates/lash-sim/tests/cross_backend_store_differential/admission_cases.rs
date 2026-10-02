@@ -169,7 +169,7 @@ pub(super) fn backend_neutral_commit_hash(commit: &RuntimeCommit) -> Option<(Str
         let next = aliases.len();
         *batch = aliases
             .entry(batch.clone())
-            .or_insert_with(|| lash_core::BatchId::from(format!("differential-batch#{next}")))
+            .or_insert_with(|| lash_core::BatchId::fixture(format!("differential-batch#{next}")))
             .clone();
     };
     for completion in &mut ingress.completed_batches {

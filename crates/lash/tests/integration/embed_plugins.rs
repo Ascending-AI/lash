@@ -306,7 +306,7 @@ async fn created_with_label(core: &LashCore, session_id: &str, label: Option<&st
         .expect("encode the plugin's creation options"),
         None => lash::plugins::PluginOptions::default(),
     };
-    core.session(session_id)
+    core.session(lash_core::SessionId::fixture(session_id.to_string()))
         .create(lash::SessionCreation::root(
             lash::SessionSpec::new(
                 "mock-model",

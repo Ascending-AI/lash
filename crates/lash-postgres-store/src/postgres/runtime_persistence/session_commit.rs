@@ -735,13 +735,13 @@ impl PostgresStore {
                 let generation = u64_from_sql("SessionGraph node", "generation", generation)?;
                 Ok::<_, StoreError>((
                     lash_core_execution::store::ParentNodeFacts {
-                        node_id: leaf_node_id.to_string().into(),
+                        node_id: leaf_node_id.to_string().try_into()?,
                         generation,
-                        frame_node_id: frame_node_id.into(),
+                        frame_node_id: frame_node_id.try_into()?,
                     },
                     lash_core_execution::store_backend_support::PathNode {
-                        node_id: leaf_node_id.to_string().into(),
-                        owner_session_id: owner.into(),
+                        node_id: leaf_node_id.to_string().try_into()?,
+                        owner_session_id: owner.try_into()?,
                         generation,
                     },
                 ))
@@ -776,8 +776,8 @@ impl PostgresStore {
                         &mut tx,
                         parent_path_node.clone(),
                         lash_core_execution::store_backend_support::PathNode {
-                            node_id: required.to_string().into(),
-                            owner_session_id: owner.into(),
+                            node_id: required.to_string().try_into()?,
+                            owner_session_id: owner.try_into()?,
                             generation: u64_from_sql(
                                 "SessionGraph node",
                                 "generation",
@@ -826,8 +826,8 @@ impl PostgresStore {
                 .await
                 .map_err(store_sqlx_error)?
                 .into_iter()
-                .map(lash_core_execution::NodeId::from)
-                .collect::<std::collections::HashSet<_>>();
+                .map(lash_core_execution::NodeId::parse)
+                .collect::<Result<std::collections::HashSet<_>, _>>()?;
         let published_leaf = match old_leaf_node_id {
             None => lash_core_execution::store::PublishedLeafFacts::Absent,
             Some(node_id) => match parent_node_facts {

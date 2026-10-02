@@ -16,7 +16,7 @@ use pretty_assertions::assert_eq;
 const PAGE: std::num::NonZeroUsize = std::num::NonZeroUsize::new(16).expect("page bound");
 
 fn turn_scope(session: &SessionId, turn: &str) -> lash_core::ScopeId {
-    lash_core::ScopeId::turn(session.clone(), crate::TurnId::from(turn))
+    lash_core::ScopeId::turn(session.clone(), crate::TurnId::fixture(turn))
 }
 
 /// How a child started under a scope lives relative to it.
@@ -59,7 +59,7 @@ pub(super) async fn a_turn_scope_ends_through_its_recorded_ledger_row(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     let session = SessionId::from("turn-parent-end-session");
-    let originator = SessionScope::new(session.as_str());
+    let originator = SessionScope::new(session.clone());
     let turn = turn_scope(&session, "turn-parent-end-turn");
     let other_turn = turn_scope(&session, "turn-parent-end-other-turn");
 
@@ -315,7 +315,7 @@ pub(super) async fn a_session_close_reaps_the_turn_scopes_that_never_became_root
     registry: Arc<dyn ProcessRegistry>,
 ) {
     let session = SessionId::from("never-root-session");
-    let originator = SessionScope::new(session.as_str());
+    let originator = SessionScope::new(session.clone());
     let session_scope = lash_core::ScopeId::session(session.clone());
     let root = turn_scope(&session, "never-root-admitted");
     let joined = turn_scope(&session, "never-root-joined");
@@ -337,7 +337,7 @@ pub(super) async fn a_session_close_reaps_the_turn_scopes_that_never_became_root
         .expect("register a child under a drain that recorded no end");
     let foreign_child = register_child(
         &registry,
-        &SessionScope::new(other_session.as_str()),
+        &SessionScope::new(other_session.clone()),
         &foreign,
         Lives::Until,
     )
@@ -410,7 +410,7 @@ pub(super) async fn a_session_close_reaps_the_turn_scopes_that_never_became_root
     }
     register_child(
         &registry,
-        &SessionScope::new(other_session.as_str()),
+        &SessionScope::new(other_session.clone()),
         &foreign,
         Lives::Until,
     )
@@ -484,7 +484,7 @@ pub(super) async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_writt
     registry: Arc<dyn ProcessRegistry>,
 ) {
     let session = SessionId::from("unrecorded-turn-session");
-    let originator = SessionScope::new(session.as_str());
+    let originator = SessionScope::new(session.clone());
     let first = turn_scope(&session, "unrecorded-turn-a");
     let second = turn_scope(&session, "unrecorded-turn-b");
     let abandon_only = turn_scope(&session, "unrecorded-turn-c");

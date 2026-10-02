@@ -324,7 +324,10 @@ pub(crate) fn parse_turn_workflow_key(key: &str) -> Option<(SessionId, lash_core
     if session.is_empty() || root.is_empty() {
         return None;
     }
-    Some((SessionId::from(session), lash_core::TurnId::from(root)))
+    Some((
+        SessionId::parse(session).ok()?,
+        lash_core::TurnId::parse(root).ok()?,
+    ))
 }
 
 // ---------------------------------------------------------------------------

@@ -84,7 +84,7 @@ fn a_direct_completion_retries_an_unbound_llm_profile_instead_of_recording_it() 
                     attachment_acceptance: Default::default(),
                     generation: lash_core::GenerationOptions::default(),
                     scope: lash_core::LlmRequestScope::new(
-                        "direct-session".to_string(),
+                        lash_core::SessionId::fixture("direct-session".to_string()),
                         "direct-session:frame:test".to_string(),
                         "direct-session:request:test".to_string(),
                     ),

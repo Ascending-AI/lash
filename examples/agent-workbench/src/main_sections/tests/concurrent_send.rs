@@ -772,7 +772,7 @@ async fn deleting_a_non_current_session_preserves_selected_session_buffers() {
         .expect("materialize the session before deleting it");
     let selected_session_id = "workbench-selected-during-delete";
     state.sessions.record(
-        SessionId::from(selected_session_id.to_string()),
+        SessionId::fixture(selected_session_id.to_string()),
         "selected".to_string(),
     );
     state

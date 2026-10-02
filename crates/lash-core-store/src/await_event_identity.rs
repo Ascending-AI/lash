@@ -55,10 +55,10 @@ impl AwaitEventWaitIdentity {
         let invalid = match self {
             Self::ToolCompletion { .. } => false,
             Self::ProcessSignal {
-                process_id,
                 signal_name,
                 ordinal,
-            } => process_id.trim().is_empty() || signal_name.trim().is_empty() || *ordinal == 0,
+                ..
+            } => signal_name.trim().is_empty() || *ordinal == 0,
             Self::TurnCancelGate
             | Self::TurnTerminal
             | Self::TurnCancelEscalation

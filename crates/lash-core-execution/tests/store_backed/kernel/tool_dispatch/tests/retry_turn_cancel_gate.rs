@@ -107,7 +107,7 @@ async fn retry_sleep_shape(
         .cloned()
         .expect("the exact dispatch context runs in a session frame");
     context.owner = crate::ExecutionOwner::SessionFrame {
-        session_id: crate::SessionId::from(ambient_session_id),
+        session_id: crate::SessionId::fixture(ambient_session_id),
         agent_frame_id,
     };
     context.effect_controller = crate::ScopedEffectController::shared(

@@ -788,8 +788,11 @@ mod tests {
         use proptest::prelude::*;
         let token = proptest::sample::select(vec!["a", "b", "ab", "a-b", "", "b-a"])
             .prop_map(str::to_string);
+        // A session id is never blank, so its alphabet has no empty token.
+        let session =
+            proptest::sample::select(vec!["a", "b", "ab", "a-b", "b-a"]).prop_map(str::to_string);
         (
-            token.clone(),
+            session,
             token.clone(),
             token.clone(),
             0u32..4,
@@ -800,7 +803,7 @@ mod tests {
     fn derive_from(inputs: &(String, String, String, u32, Option<String>)) -> ToolIntentIdentity {
         let (session_id, execution_scope_id, tool_call_id, intent_index, minting) = inputs;
         derive_tool_intent_identity_inner(
-            &RuntimeOwner::Session(SessionId::from(session_id.clone())),
+            &RuntimeOwner::Session(SessionId::fixture(session_id.clone())),
             execution_scope_id,
             &crate::ToolCallId::fixture(tool_call_id),
             *intent_index,

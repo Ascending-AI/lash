@@ -50,8 +50,8 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
     fixture: &ToolChildLawFixture,
     prefix: &str,
 ) {
-    let session_id = crate::SessionId::from(format!("{prefix}-recovery"));
-    let turn_id = crate::TurnId::from(format!("{prefix}-recovery-turn"));
+    let session_id = crate::SessionId::fixture(format!("{prefix}-recovery"));
+    let turn_id = crate::TurnId::fixture(format!("{prefix}-recovery-turn"));
     let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id.clone());
     let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
         .expect("a turn scope derives an opener");

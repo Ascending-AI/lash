@@ -260,7 +260,7 @@ async fn admit_oracle_root(
         .min_by_key(|batch| batch.enqueue_seq)?;
     let mut request = lash_core::testing::store_fixtures::admit_root_request_for_test(
         fence,
-        &lash_core::TurnId::from(root),
+        &lash_core::TurnId::fixture(root),
         lash_core::store::AdmittedHead::Batch(head.batch_id),
     );
     request.policy = lash_core::testing::queued_work_admission_policy(max_rows);
@@ -295,7 +295,7 @@ async fn end_oracle_root(
     root: &str,
     admission: &lash_core::store::RootAdmission,
 ) {
-    let root = lash_core::TurnId::from(root);
+    let root = lash_core::TurnId::fixture(root);
     let mut settlement = lash_core::store::IngressSettlement::new(root.clone());
     if let Some(queued) = &admission.queued {
         settlement.completed_batches.push(queued.completion());

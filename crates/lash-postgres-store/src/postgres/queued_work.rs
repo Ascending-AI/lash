@@ -52,7 +52,7 @@ pub(crate) fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError>
     Ok(QueuedBatchRow {
         enqueue_seq: u64_from_sql("QueuedWorkBatch", "enqueue_seq", row.get("enqueue_seq"))?,
         batch_id: row.get("batch_id"),
-        session_id: SessionId::from(row.get::<String, _>("session_id")),
+        session_id: SessionId::parse(row.get::<String, _>("session_id"))?,
         source_key: row.get("source_key"),
         delivery_policy,
         payload,
@@ -99,7 +99,7 @@ pub(crate) fn queued_work_batch_from_row(
     row: QueuedBatchRow,
 ) -> Result<QueuedWorkBatch, StoreError> {
     let batch = QueuedWorkBatch {
-        batch_id: row.batch_id.into(),
+        batch_id: row.batch_id.try_into()?,
         session_id: row.session_id,
         enqueue_seq: row.enqueue_seq,
         source_key: row.source_key,

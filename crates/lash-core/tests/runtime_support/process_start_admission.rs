@@ -159,7 +159,7 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
     let handler = double
         .open_handler(AdmittedScope::turn(
             SessionId::from(session_id).clone(),
-            TurnId::from(uuid::Uuid::new_v4().to_string()),
+            TurnId::fixture(uuid::Uuid::new_v4().to_string()),
         ))
         .await
         .expect("open the scope's handler");
@@ -177,7 +177,7 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
     let handler = double
         .open_handler(AdmittedScope::turn(
             SessionId::from(session_id).clone(),
-            TurnId::from(uuid::Uuid::new_v4().to_string()),
+            TurnId::fixture(uuid::Uuid::new_v4().to_string()),
         ))
         .await
         .expect("open the scope's handler");
@@ -210,7 +210,7 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
     let handler = double
         .open_handler(AdmittedScope::turn(
             SessionId::from(session_id).clone(),
-            TurnId::from(uuid::Uuid::new_v4().to_string()),
+            TurnId::fixture(uuid::Uuid::new_v4().to_string()),
         ))
         .await
         .expect("open the scope's handler");
@@ -226,7 +226,7 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
     let handler = double
         .open_handler(AdmittedScope::turn(
             SessionId::from(session_id).clone(),
-            TurnId::from(uuid::Uuid::new_v4().to_string()),
+            TurnId::fixture(uuid::Uuid::new_v4().to_string()),
         ))
         .await
         .expect("open the scope's handler");
@@ -277,7 +277,7 @@ async fn recorded_intent_start_refuses_an_unregistered_engine_kind_like_a_direct
     let handler = double
         .open_handler(AdmittedScope::turn(
             SessionId::from(session_id),
-            TurnId::from(uuid::Uuid::new_v4().to_string()),
+            TurnId::fixture(uuid::Uuid::new_v4().to_string()),
         ))
         .await
         .expect("open the scope's handler");
@@ -293,7 +293,7 @@ async fn recorded_intent_start_refuses_an_unregistered_engine_kind_like_a_direct
     let handler = double
         .open_handler(AdmittedScope::turn(
             SessionId::from(session_id),
-            TurnId::from(uuid::Uuid::new_v4().to_string()),
+            TurnId::fixture(uuid::Uuid::new_v4().to_string()),
         ))
         .await
         .expect("open the scope's handler");
@@ -344,7 +344,7 @@ async fn engine_start_without_an_env_spec_keeps_its_per_route_semantics() {
     let handler = double
         .open_handler(AdmittedScope::turn(
             SessionId::from(session_id).clone(),
-            TurnId::from(uuid::Uuid::new_v4().to_string()),
+            TurnId::fixture(uuid::Uuid::new_v4().to_string()),
         ))
         .await
         .expect("open the scope's handler");
@@ -374,7 +374,7 @@ async fn engine_start_without_an_env_spec_keeps_its_per_route_semantics() {
     let handler = double
         .open_handler(AdmittedScope::turn(
             SessionId::from(session_id).clone(),
-            TurnId::from(uuid::Uuid::new_v4().to_string()),
+            TurnId::fixture(uuid::Uuid::new_v4().to_string()),
         ))
         .await
         .expect("open the scope's handler");

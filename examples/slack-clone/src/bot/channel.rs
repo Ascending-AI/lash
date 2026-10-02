@@ -44,7 +44,7 @@ use crate::log_err;
 use crate::secrets::constant_time_eq;
 use crate::wire::events::{self, Event, EventCallback};
 
-type SessionLockRegistry = Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>;
+type SessionLockRegistry = Arc<Mutex<HashMap<lash::SessionId, Arc<tokio::sync::Mutex<()>>>>>;
 
 /// How long [`ChannelBot::retry_deferred`] waits between attempts.
 ///
@@ -694,9 +694,9 @@ impl ChannelBot {
             .context("fold the route's ambient context into the mention")?;
         let handle = session
             .send(TurnInput::text(send_text))
-            .id(format!(
-                "mention:{}:{}",
-                record.channel_id, record.message_ts
+            .id(lash::TurnId::prefixed(
+                "mention:",
+                format!("{}:{}", record.channel_id, record.message_ts),
             ))
             .await
             .context("send the mention to its session")?;
@@ -1196,7 +1196,7 @@ fn provider_failure(report: &lash::TurnReport) -> Option<ProviderFailure> {
 /// The registry entry disappears after the last holder or waiter finishes, so
 /// a long-lived bot does not retain one allocation for every thread ever seen.
 struct SessionLockLease {
-    key: String,
+    key: lash::SessionId,
     lock: Arc<tokio::sync::Mutex<()>>,
     registry: SessionLockRegistry,
 }
@@ -1256,7 +1256,7 @@ fn reply_from_transcript(
         match (&turn_id, admitted_by) {
             // Our input's committed copy: remember which turn consumed it.
             (None, Some((turn, Some(admitted)))) if admitted == input_id => {
-                turn_id = Some(TurnId::from(turn.to_string()));
+                turn_id = TurnId::parse(turn).ok();
             }
             // Nothing found yet; keep scanning.
             (None, _) => {}

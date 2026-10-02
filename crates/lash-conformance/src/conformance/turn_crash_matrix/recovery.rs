@@ -210,7 +210,7 @@ async fn drive_drain_turn(
     // with the history nodes that turn already committed.
     let identity = ReferenceIdentity {
         session_id: identity.session_id.clone(),
-        turn_id: crate::TurnId::from(format!("{}:drain:{ordinal}", identity.turn_id)),
+        turn_id: crate::TurnId::fixture(format!("{}:drain:{ordinal}", identity.turn_id)),
     };
     let (drain, drained) = ReferenceTurn::new(
         law.stores,

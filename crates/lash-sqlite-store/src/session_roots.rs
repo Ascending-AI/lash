@@ -294,7 +294,7 @@ fn release_root_rows_conn(
                 session_id,
                 root,
                 lash_core_execution::TurnCancelAffectedInput {
-                    input_id: input_id.into(),
+                    input_id: input_id.try_into()?,
                     payload: crate::persistence::turn_cancel::decode_stored_json(
                         &input_json,
                         "turn input",
@@ -588,7 +588,7 @@ pub(crate) fn unfinished_root_conn(
     row.map(|(root, json)| {
         let admission = decode_root_admission(&json)?;
         Ok(UnfinishedRoot {
-            root: TurnId::from(root),
+            root: TurnId::parse(root)?,
             head: admission.head,
             executor: admission.executor,
         })
@@ -735,11 +735,10 @@ pub(crate) fn root_binding_conn(
     conn.query_row(
         session_roots_sql().inputs.select_root.sql(),
         params![session_id.as_str(), input.as_str()],
-        |row| row.get::<_, String>(0),
+        |row| crate::codec::sql_identity(row.get::<_, String>(0)?),
     )
     .optional()
     .map_err(sqlite_error)
-    .map(|root| root.map(TurnId::from))
 }
 
 /// Bind `input` to `root` in the caller's transaction, set-if-absent: the
@@ -825,7 +824,7 @@ impl StoredIntentRow {
     pub(crate) fn decode(self) -> Result<ControlIntent, StoreError> {
         ControlIntent::from_stored(
             stored_u64("ControlIntent", self.id)?,
-            SessionId::from(self.session_id),
+            SessionId::parse(self.session_id)?,
             u32::try_from(self.format)
                 .map_err(|_| stored_data_corrupt("ControlIntent", "format out of range"))?,
             &self.kind_json,
@@ -1070,11 +1069,13 @@ pub(crate) fn begin_session_close_conn(
             .prepare_cached(sql.roots.select_open_roots.sql())
             .map_err(sqlite_error)?;
         let open = statement
-            .query_map(params![session_id.as_str()], |row| row.get::<_, String>(0))
+            .query_map(params![session_id.as_str()], |row| {
+                crate::codec::sql_identity::<TurnId>(row.get::<_, String>(0)?)
+            })
             .map_err(sqlite_error)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(sqlite_error)?;
-        roots.extend(open.into_iter().map(TurnId::from));
+        roots.extend(open);
     }
     // The parked root is released with the park, whose feed event outlives
     // the session (FIG-3659).
@@ -1100,7 +1101,7 @@ pub(crate) fn begin_session_close_conn(
             },
             crate::clamp_epoch_ms(at_ms),
         )?;
-        roots.insert(TurnId::from(parked_root));
+        roots.insert(TurnId::parse(parked_root)?);
     }
     let verbs = open_verbs_by_session_conn(tx, session_id)?;
     for verb in &verbs {
@@ -1302,7 +1303,10 @@ impl RootStore for crate::SqliteStore {
             })
             .await
             .map_err(sqlite_error)?;
-        Ok(scopes.into_iter().map(TurnId::from).collect())
+        Ok(scopes
+            .into_iter()
+            .map(TurnId::parse)
+            .collect::<Result<_, _>>()?)
     }
 
     async fn bind_root_inputs(

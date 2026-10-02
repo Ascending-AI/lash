@@ -530,7 +530,7 @@ fn sqlite_frame_opens(
     store_factory: &lash_sqlite_store::SqliteStoreSet,
     session_id: &str,
 ) -> Vec<String> {
-    sqlite_nodes(store_factory, &SessionId::from(session_id))
+    sqlite_nodes(store_factory, &SessionId::fixture(session_id))
         .into_iter()
         .filter(|node| {
             matches!(
@@ -602,7 +602,9 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
     for attempt in 1..=lash_plugin_standard_compaction::OVERFLOW_RECOVERY_MAX_ATTEMPTS {
         let turn = session
             .send(TurnInput::text(format!("try again {attempt}")))
-            .id(format!("standard-compaction-exhausted-{attempt}"))
+            .id(lash_core::TurnId::fixture(format!(
+                "standard-compaction-exhausted-{attempt}"
+            )))
             .output()
             .await?;
         assert!(turn.result.is_success(), "{:?}", turn.result);
@@ -1365,7 +1367,9 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
     for ordinal in 0..=THRESHOLD_TURNS {
         session
             .send(TurnInput::text(format!("request {ordinal}")))
-            .id(format!("plugin-injection-{ordinal}"))
+            .id(lash_core::TurnId::fixture(format!(
+                "plugin-injection-{ordinal}"
+            )))
             .output()
             .await?;
     }
@@ -1816,7 +1820,7 @@ async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -
                     panic!("an unconditional append on a fresh session is never a stale branch");
                 };
                 assert_eq!(node_ids.len(), 1);
-                assert_eq!(leaf_node_id, node_ids[0]);
+                assert_eq!(leaf_node_id.as_ref(), Some(&node_ids[0]));
                 // In-turn readers see the appended node before the turn commits.
                 let snapshot = ctx.sessions.snapshot_session(&ctx.session_id).await?;
                 visible_in_turn.store(

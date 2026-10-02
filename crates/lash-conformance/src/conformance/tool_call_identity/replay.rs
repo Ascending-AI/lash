@@ -111,7 +111,7 @@ pub async fn frames_keep_identity_and_distinguish_fresh_calls(tier: ToolCallIden
         .run_crashed_then_redriven_turn(
             crate::admit(crate::ExecutionScope::turn(
                 &world.session_id,
-                format!("{}-drive", world.session_id),
+                crate::TurnId::fixture(format!("{}-drive", world.session_id)),
             )),
             root_attempt(&world, None),
             root_attempt(&world, Some(report)),
@@ -193,7 +193,7 @@ pub async fn compaction_keeps_identity_and_distinguishes_fresh_calls(tier: ToolC
         .run_turn(
             crate::admit(crate::ExecutionScope::turn(
                 &world.session_id,
-                format!("{}-compaction", world.session_id),
+                crate::TurnId::fixture(format!("{}-compaction", world.session_id)),
             )),
             compact,
         )

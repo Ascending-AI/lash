@@ -1023,7 +1023,7 @@ impl ParkedJobs {
         let key = match admitted.scope().session_id() {
             Some(session) => turn_workflow_key(
                 session,
-                &lash_core::TurnId::from(format!("job-{prefix}{ordinal}")),
+                &lash_core::TurnId::fixture(format!("job-{prefix}{ordinal}")),
             ),
             None => format!("job-{prefix}{ordinal}"),
         };

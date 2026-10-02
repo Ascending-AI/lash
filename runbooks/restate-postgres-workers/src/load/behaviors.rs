@@ -160,7 +160,7 @@ pub(super) async fn listed_trigger_revision(
 ) -> HandlerResult<u64> {
     journal_read(controller, "load.trigger-revision", async {
         let listed = core
-            .session(session_id.to_string())
+            .session(lash::SessionId::parse(session_id)?)
             .open()
             .await?
             .admin()
@@ -190,7 +190,10 @@ impl LoadWorker {
                 behavior::MARKER,
                 self.load.sha256()
             )))
-            .id(format!("load-{run}-behavior-{phase}"))
+            .id(lash::TurnId::prefixed(
+                "load-",
+                format!("{run}-behavior-{phase}"),
+            ))
             .accept_restate(ctx)
             .await?;
         let outcome = input_outcome(handle.outcome_restate(ctx, RestateWait::new()).await?);
@@ -208,7 +211,7 @@ impl LoadWorker {
         controller: &Controller<'_>,
         run: &str,
     ) -> HandlerResult<BehaviorReport> {
-        let session_id = format!("load-{run}-behaviors");
+        let session_id = lash::SessionId::prefixed("load-", format_args!("{run}-behaviors"));
         let session =
             journaled_session(controller.context(), &self.core, session_id.clone()).await?;
         let expected = behavior::prefill(&self.load, run).map_err(terminal_chain)?;

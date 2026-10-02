@@ -183,7 +183,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
     // memory store set; their captured state is what the curve measures.
     let artifacts = restate_backend().await?;
     for point in points {
-        let session_id = SessionId::from(format!(
+        let session_id = SessionId::fixture(format!(
             "runtime-perf-{}-{run_id}-{}-{}",
             scenario.name(),
             point.axis.name(),

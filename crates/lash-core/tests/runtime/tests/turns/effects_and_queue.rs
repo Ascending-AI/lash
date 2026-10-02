@@ -921,7 +921,7 @@ pub(super) async fn idle_ordering_read_is_independent_of_pending_command_depth()
         let handler = double
             .open_handler(AdmittedScope::turn(
                 SessionId::from("root").clone(),
-                TurnId::from(format!("depth-invariance-{backlog_depth}")).clone(),
+                TurnId::fixture(format!("depth-invariance-{backlog_depth}")).clone(),
             ))
             .await
             .expect("open the scope's handler");

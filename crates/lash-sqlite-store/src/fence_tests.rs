@@ -56,7 +56,7 @@ fn root_intent_exists(location: &SqliteLocation) -> bool {
 fn session_meta(id: &str) -> SessionMeta {
     SessionMeta {
         owning_process_id: None,
-        session_id: SessionId::from(id),
+        session_id: SessionId::fixture(id),
         relation: SessionRelation::Root,
         pending_observer_intents: Vec::new(),
     }

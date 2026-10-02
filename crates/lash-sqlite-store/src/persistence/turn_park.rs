@@ -86,7 +86,7 @@ pub(crate) fn turn_park_conn(
             };
             TurnPark::decode(
                 session_id.clone(),
-                root.into(),
+                root.try_into()?,
                 lash_core_execution::store::ParkId::from_feed_sequence(stored("park_id", park_id)?),
                 &reason_code,
                 &reason_json,

@@ -12,7 +12,7 @@ pub(super) async fn run_once_queued_work_admission_stress(
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     let scenario = RuntimePerfScenario::QueuedWorkAdmissionStress;
-    let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
+    let session_id = SessionId::fixture(format!("runtime-perf-{}", scenario.name()));
     let other_session_id = "runtime-perf-queued-work-other";
     let mut run = RunRecorder::start(scenario, chat_turns);
 
@@ -109,7 +109,8 @@ pub(super) async fn run_once_queued_work_admission_stress(
                 phase_profile.insert(phase.0, phase.1);
                 completed_batches += 1;
 
-                let join_root = lash_core::TurnId::from(format!("queued-work-join-{turn_index}"));
+                let join_root =
+                    lash_core::TurnId::fixture(format!("queued-work-join-{turn_index}"));
                 let (join, phase) =
                     measure_runtime_perf_async_phase("queued_work.admit_join_turn_work", async {
                         admit_perf_root(
@@ -185,7 +186,7 @@ pub(super) async fn run_once_queued_work_admission_stress(
                 completed_batches += join_batch_ids.len();
 
                 let exclusive_root =
-                    lash_core::TurnId::from(format!("queued-work-exclusive-{turn_index}"));
+                    lash_core::TurnId::fixture(format!("queued-work-exclusive-{turn_index}"));
                 let (exclusive, phase) = measure_runtime_perf_async_phase(
                     "queued_work.admit_exclusive_turn_work",
                     async {
@@ -374,7 +375,7 @@ pub(super) fn queued_work_stress_wake(
         version: fleet_format.writer_version(lash_core::surface_format!(
             lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION
         )),
-        target_session_id: SessionId::from(session_id.to_string()),
+        target_session_id: session_id.clone(),
         process_id: process_id.clone(),
         sequence,
         event_type: "process.wake".to_string(),
@@ -393,7 +394,7 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     let scenario = RuntimePerfScenario::TurnInputIngressInterrupt;
-    let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
+    let session_id = SessionId::fixture(format!("runtime-perf-{}", scenario.name()));
     let other_session_id = "runtime-perf-turn-input-other";
     let mut run = RunRecorder::start(scenario, chat_turns);
 
@@ -443,7 +444,8 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
             turn_index,
             async {
                 let mut phase_profile = BTreeMap::new();
-                let turn_id = lash_core::TurnId::from(format!("turn-input-ingress-{turn_index}"));
+                let turn_id =
+                    lash_core::TurnId::fixture(format!("turn-input-ingress-{turn_index}"));
 
                 let (fence, phase) = measure_runtime_perf_async_phase(
                     "turn_input_ingress.seal_drive_epoch",
@@ -646,7 +648,7 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                     .map(|read| read.input.input_id)
                     .ok_or_else(|| anyhow::anyhow!("expected an open next-turn input"))?;
                 let next_root =
-                    lash_core::TurnId::from(format!("turn-input-ingress-next-{turn_index}"));
+                    lash_core::TurnId::fixture(format!("turn-input-ingress-next-{turn_index}"));
                 let (next, phase) = measure_runtime_perf_async_phase(
                     "turn_input_ingress.admit_next_turn_inputs",
                     async {
@@ -895,7 +897,7 @@ async fn runtime_perf_commit_state(
     session_id: &SessionId,
 ) -> anyhow::Result<RuntimeSessionState> {
     let state = RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),

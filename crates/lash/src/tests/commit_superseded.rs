@@ -132,7 +132,7 @@ impl Fixture {
     fn turn_runs(&self, turn: &str) -> Vec<lash_restate_test::InvocationView> {
         let key = lash_restate::turn_workflow_key(
             &lash_core::SessionId::from(SESSION),
-            &lash_core::TurnId::from(turn),
+            &lash_core::TurnId::fixture(turn),
         );
         self.double
             .server()

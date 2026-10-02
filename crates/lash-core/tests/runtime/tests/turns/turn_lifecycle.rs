@@ -511,7 +511,7 @@ pub(super) async fn final_commit_refusals_reach_the_runtime_host_mapper() {
         let handler = double
             .open_handler(AdmittedScope::turn(
                 SessionId::from("root"),
-                TurnId::from(format!("host-commit-refusal-{case_index}")),
+                TurnId::fixture(format!("host-commit-refusal-{case_index}")),
             ))
             .await
             .expect("open the turn's handler");
@@ -528,7 +528,10 @@ pub(super) async fn final_commit_refusals_reach_the_runtime_host_mapper() {
         handler.close().await.expect("close the turn's handler");
 
         assert_eq!(error.code, expected_code);
-        assert_eq!(error.deleted_session_id(), expected_deleted_session_id);
+        assert_eq!(
+            error.deleted_session_id().map(|id| id.as_str()),
+            expected_deleted_session_id
+        );
     }
 }
 
@@ -1939,9 +1942,9 @@ impl SteerWhileRunning {
         input: TurnInput,
     ) {
         let mut draft = lash_core::PendingTurnInputDraft::new(
-            session_id.to_string(),
+            session_id.clone(),
             lash_core::TurnInputIngress::active_turn(
-                turn_id.to_string(),
+                turn_id.clone(),
                 lash_core::TurnInputCheckpointBoundary::AfterWork,
             ),
             input,
@@ -2038,9 +2041,9 @@ pub(super) async fn enqueue_turn_input_for_checkpoint(
     input: TurnInput,
 ) -> lash_core::PendingTurnInput {
     let mut draft = lash_core::PendingTurnInputDraft::new(
-        session_id.to_string(),
+        session_id.clone(),
         lash_core::TurnInputIngress::active_turn(
-            turn_id.to_string(),
+            turn_id.clone(),
             lash_core::TurnInputCheckpointBoundary::AfterWork,
         ),
         input,
@@ -2059,7 +2062,7 @@ pub(super) async fn enqueue_idle_turn_input(
     lash_core::store::TurnInputStore::enqueue_pending_turn_input(
         store,
         lash_core::PendingTurnInputDraft::new(
-            session_id.to_string(),
+            session_id.clone(),
             lash_core::TurnInputIngress::NextTurn,
             TurnInput::text(text),
         ),
@@ -2076,7 +2079,7 @@ pub(super) async fn enqueue_session_command(
     lash_core::store::QueuedWorkStore::enqueue_queued_work(
         store,
         lash_core::testing::runtime_internals::QueuedWorkBatchDraft::new(
-            session_id.to_string(),
+            session_id.clone(),
             lash_core::DeliveryPolicy::EarliestSafeBoundary,
             lash_core::facade_support::SessionCommand::RefreshToolCatalog {
                 reason: reason.to_string(),
@@ -2106,7 +2109,7 @@ pub(super) async fn enqueue_config_transaction(
     lash_core::store::QueuedWorkStore::enqueue_queued_work(
         store,
         lash_core::testing::runtime_internals::QueuedWorkBatchDraft::new(
-            runtime.session_id().to_string(),
+            SessionId::fixture(runtime.session_id().to_string()),
             lash_core::DeliveryPolicy::AfterCurrentTurnCommit,
             lash_core::facade_support::SessionCommand::ApplyConfigTransaction {
                 transaction: Box::new(record),

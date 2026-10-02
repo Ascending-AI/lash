@@ -32,7 +32,7 @@ pub(super) fn occupied_node_ids_conn(
             .query_map(params![encoded], |row| row.get::<_, String>(0))
             .map_err(sqlite_error)?;
         for node_id in rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)? {
-            occupied.insert(lash_core_execution::NodeId::from(node_id));
+            occupied.insert(lash_core_execution::NodeId::parse(node_id)?);
         }
     }
     Ok(occupied)

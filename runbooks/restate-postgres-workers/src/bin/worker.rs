@@ -250,7 +250,7 @@ impl AppState {
             for root in roots.into_iter().filter(|root| !claimed.contains(root)) {
                 let turn = settled_output(
                     session
-                        .root(root.as_str())
+                        .root(lash::TurnId::parse(root.as_str()).map_err(terminal_error)?)
                         .outcome_restate(ctx, RestateWait::new())
                         .await?,
                 )?;
@@ -311,7 +311,7 @@ impl AppState {
         let turn = settled_output(
             session
                 .send(input)
-                .id(request.workflow_id.clone())
+                .id(lash::TurnId::parse(request.workflow_id.clone()).map_err(terminal_error)?)
                 .accept_restate(ctx)
                 .await?
                 .outcome_restate(ctx, RestateWait::new().sink(&sink))
@@ -395,7 +395,10 @@ impl AppState {
                 "Run queued frame switch. workflow_id={} frame_switch_queued_start=true",
                 request.workflow_id
             )))
-            .id(format!("{}:first", request.workflow_id))
+            .id(
+                lash::TurnId::parse(format!("{}:first", request.workflow_id))
+                    .map_err(terminal_error)?,
+            )
             .accept_restate(ctx)
             .await?;
         let first_input = first.input_id().clone();
@@ -405,21 +408,22 @@ impl AppState {
         // The second input lands while the first root runs its frame switch.
         // A replayed invocation sends it again under the same id, which the
         // store answers with the first acceptance.
-        let enqueue_second = tokio::spawn(async move {
-            wait_for_provider_scenario(
-                &enqueue_pool,
-                &enqueue_workflow_id,
-                "frame_switch_queued_start",
-            )
-            .await?;
-            enqueue_session
+        let enqueue_second =
+            tokio::spawn(async move {
+                wait_for_provider_scenario(
+                    &enqueue_pool,
+                    &enqueue_workflow_id,
+                    "frame_switch_queued_start",
+                )
+                .await?;
+                enqueue_session
                 .send(TurnInput::text(format!(
                     "Run pending item. workflow_id={enqueue_workflow_id} frame_switch_pending=true"
                 )))
-                .id(format!("{enqueue_workflow_id}:second"))
+                .id(lash::TurnId::parse(format!("{enqueue_workflow_id}:second"))?)
                 .await
                 .map_err(anyhow::Error::from)
-        });
+            });
         let first_turn = settled_output(first.outcome_restate(ctx, RestateWait::new()).await?)?;
         let first_value = first_turn.result.final_value().cloned().ok_or_else(|| {
             terminal_error("queued frame-switch follow-on produced no final value")
@@ -498,7 +502,7 @@ impl AppState {
                     "Run crash-recovered frame switch. workflow_id={} frame_switch_crash_start=true",
                     request.workflow_id
                 )))
-                .id(format!("{}:original", request.workflow_id))
+                .id(lash::TurnId::parse(format!("{}:original", request.workflow_id)).map_err(terminal_error)?)
                 .accept_restate(ctx)
                 .await?
                 .outcome_restate(ctx, RestateWait::new())
@@ -604,7 +608,10 @@ impl AppState {
                 "Run cancellable frame switch. workflow_id={} frame_switch_cancel_start=true",
                 request.workflow_id
             )))
-            .id(format!("{}:cancel-original", request.workflow_id))
+            .id(
+                lash::TurnId::parse(format!("{}:cancel-original", request.workflow_id))
+                    .map_err(terminal_error)?,
+            )
             .accept_restate(ctx)
             .await?;
         wait_for_cancel_gate(self.storage.pool(), &request.workflow_id)
@@ -642,7 +649,10 @@ impl AppState {
                     "Run after cancellation. workflow_id={} frame_switch_post_cancel=true",
                     request.workflow_id
                 )))
-                .id(format!("{}:post-cancel", request.workflow_id))
+                .id(
+                    lash::TurnId::parse(format!("{}:post-cancel", request.workflow_id))
+                        .map_err(terminal_error)?,
+                )
                 .accept_restate(ctx)
                 .await?
                 .outcome_restate(ctx, RestateWait::new())
@@ -864,7 +874,10 @@ async fn topology_attachment(
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, String)> {
     let read = async {
         let core = state.build_core()?;
-        let session = core.session(session_id.clone()).open().await?;
+        let session = core
+            .session(lash::SessionId::parse(session_id.clone())?)
+            .open()
+            .await?;
         let id = lash::attachments::AttachmentId::parse(&attachment_id)?;
         let stored = lash::persistence::AttachmentStore::get(
             &s3_store_from_env()?,

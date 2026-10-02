@@ -57,9 +57,12 @@ pub(super) fn write(id: &AttachmentId, referrer: ArtifactReferrer) -> Attachment
 
 pub(super) fn execution(session: &SessionId, name: &str) -> ArtifactReferrer {
     ArtifactReferrer::Execution(
-        ExecutionScope::turn(session.clone(), name)
-            .journal_identity()
-            .unwrap(),
+        ExecutionScope::turn(
+            session.clone(),
+            lash_core::TurnId::fixture(name.to_string()),
+        )
+        .journal_identity()
+        .unwrap(),
     )
 }
 
@@ -222,7 +225,7 @@ pub async fn upload_staging_identities_are_distinct_guarded_and_fenced_independe
 
 fn state(session: &str) -> RuntimeSessionState {
     let mut state = RuntimeSessionState {
-        session_id: session.into(),
+        session_id: session.parse().unwrap(),
         ..RuntimeSessionState::new(SessionPolicy::new(
             TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
@@ -274,7 +277,7 @@ pub async fn retained_output_is_held_by_its_execution_until_a_commit_names_it(
         .unwrap()
     };
     let journal = |turn: &str| {
-        ExecutionScope::turn(SessionId::from(SESSION), turn)
+        ExecutionScope::turn(SessionId::from(SESSION), crate::TurnId::fixture(turn))
             .journal_identity()
             .unwrap()
     };

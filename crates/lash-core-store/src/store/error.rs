@@ -484,6 +484,11 @@ pub enum StoreError {
     },
     #[error("invalid session id: {reason}")]
     InvalidSessionId { reason: &'static str },
+    /// Text offered as an identity is empty or whitespace-only: a
+    /// host-supplied id, or one read back from a stored row. No retry repairs
+    /// either.
+    #[error(transparent)]
+    BlankIdentity(#[from] crate::BlankIdentity),
     #[error(
         "session `{session_id}` was used and deleted; session ids cannot be reused in this store"
     )]
@@ -677,8 +682,6 @@ pub enum StoreError {
     },
     #[error("runtime commit node id `{node_id}` already exists in durable session history")]
     NodeIdCollision { node_id: NodeId },
-    #[error("runtime commit node id must not be empty")]
-    InvalidGraphNodeId { node_id: NodeId },
     #[error("runtime commit generation {generation} already exists for session `{session_id}`")]
     GraphGenerationCollision {
         session_id: SessionId,
@@ -1152,6 +1155,7 @@ impl StoreError {
             | Self::WriterFenced { .. }
             | Self::SessionStateVersionNewerThanRuntime { .. }
             | Self::InvalidSessionId { .. }
+            | Self::BlankIdentity(_)
             | Self::SessionDeleted { .. }
             | Self::UnsupportedStoreOperation { .. }
             | Self::RootHeldByAnotherExecutor { .. }
@@ -1181,7 +1185,6 @@ impl StoreError {
             | Self::AppendAncestorNotActive { .. }
             | Self::NodeIdDerivationMismatch { .. }
             | Self::NodeIdCollision { .. }
-            | Self::InvalidGraphNodeId { .. }
             | Self::GraphGenerationCollision { .. }
             | Self::InvalidGraphLeaf { .. }
             | Self::ForkTargetPending { .. }
@@ -1320,6 +1323,7 @@ impl StoreError {
             | Self::HistoryCursorLineageChanged { .. }
             | Self::SessionBindingNotMaterialized { .. }
             | Self::InvalidSessionId { .. }
+            | Self::BlankIdentity(_)
             | Self::UnsupportedStoreOperation { .. }
             | Self::TurnCancelClosureConflict { .. }
             | Self::TurnCancelClosureAuthorizationMismatch { .. }
@@ -1336,7 +1340,6 @@ impl StoreError {
             | Self::AppendAncestorNotActive { .. }
             | Self::NodeIdDerivationMismatch { .. }
             | Self::NodeIdCollision { .. }
-            | Self::InvalidGraphNodeId { .. }
             | Self::GraphGenerationCollision { .. }
             | Self::InvalidGraphLeaf { .. }
             | Self::ForkTargetPending { .. }
@@ -1474,6 +1477,7 @@ impl StoreError {
                 "SessionStateVersionNewerThanRuntime"
             }
             Self::InvalidSessionId { .. } => "InvalidSessionId",
+            Self::BlankIdentity(_) => "BlankIdentity",
             Self::SessionDeleted { .. } => "SessionDeleted",
             Self::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation",
 
@@ -1509,7 +1513,6 @@ impl StoreError {
             Self::AppendAncestorNotActive { .. } => "AppendAncestorNotActive",
             Self::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch",
             Self::NodeIdCollision { .. } => "NodeIdCollision",
-            Self::InvalidGraphNodeId { .. } => "InvalidGraphNodeId",
             Self::GraphGenerationCollision { .. } => "GraphGenerationCollision",
             Self::InvalidGraphLeaf { .. } => "InvalidGraphLeaf",
             Self::ForkTargetPending { .. } => "ForkTargetPending",

@@ -141,7 +141,7 @@ mod tests {
             writer_formats: crate::build_newest_writer_formats(),
         });
         let prepared = build_turn(SansIoTurnInput {
-            session_id: SessionId::from("session".to_string()),
+            session_id: SessionId::from("session"),
             model_tool_calls: crate::ModelToolCalls::fixture(),
             agent_frame_id: "frame-test".to_string(),
             turn_id: TurnId::from("turn"),

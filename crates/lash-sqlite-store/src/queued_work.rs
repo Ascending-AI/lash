@@ -72,7 +72,7 @@ impl QueuedBatchRow {
             ));
         }
         let batch = QueuedWorkBatch {
-            batch_id: self.batch_id.into(),
+            batch_id: self.batch_id.try_into()?,
             session_id: self.session_id,
             enqueue_seq: self.enqueue_seq,
             source_key: self.source_key,
@@ -103,7 +103,7 @@ pub(crate) fn queued_batch_row_from_sql(
     Ok(QueuedBatchRow {
         enqueue_seq: u64_from_sql("QueuedWorkBatch", "enqueue_seq", row.get("enqueue_seq")?)?,
         batch_id: row.get("batch_id")?,
-        session_id: SessionId::from(row.get::<_, String>("session_id")?),
+        session_id: crate::codec::sql_identity(row.get::<_, String>("session_id")?)?,
         source_key: row.get("source_key")?,
         delivery_policy: row.get("delivery_policy")?,
         work_kind: row.get("work_kind")?,

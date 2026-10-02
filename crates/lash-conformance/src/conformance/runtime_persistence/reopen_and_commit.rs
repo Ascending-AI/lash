@@ -800,7 +800,7 @@ pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimeSt
     let node_id = crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str());
     let graph = crate::GraphAppend::Extend {
         nodes: vec![crate::SessionNodeRecord {
-            node_id: node_id.to_string().into(),
+            node_id: lash_core::NodeId::fixture(node_id.to_string()),
             parent_node_id: None,
             timestamp: "2026-07-26T10:00:00Z".to_string(),
             payload: crate::SessionNodePayload::FrameOpen {
@@ -819,8 +819,8 @@ pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimeSt
     assert_eq!(
         node_id_mapping,
         vec![(
-            lash_core::NodeId::new(node_id.as_str()),
-            lash_core::NodeId::new(node_id.as_str()),
+            lash_core::NodeId::fixture(node_id.as_str()),
+            lash_core::NodeId::fixture(node_id.as_str()),
         )],
         "operation stamping must return the append-id mapping"
     );
@@ -923,7 +923,7 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
         crate::FrameKey::from_caller_material("collision-frame").expect("non-empty frame material");
     let colliding_id = crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str());
     let original = crate::SessionNodeRecord {
-        node_id: colliding_id.to_string().into(),
+        node_id: lash_core::NodeId::fixture(colliding_id.to_string()),
         parent_node_id: None,
         timestamp: "2026-07-26T10:00:00Z".to_string(),
         payload: crate::SessionNodePayload::FrameOpen {
@@ -937,7 +937,7 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
     };
     state.session_graph = crate::SessionGraph::from_nodes(
         vec![original.clone()],
-        Some(colliding_id.to_string().into()),
+        Some(lash_core::NodeId::fixture(colliding_id.to_string())),
     )
     .expect("collision fixture seed graph is valid");
     let initial = RuntimeCommit::persisted_state_for_test(&state);

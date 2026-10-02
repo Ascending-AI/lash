@@ -1167,8 +1167,8 @@ impl LlmRequest {
         }
     }
 
-    pub fn session_id(&self) -> &str {
-        self.scope.session_id.as_str()
+    pub fn session_id(&self) -> &SessionId {
+        &self.scope.session_id
     }
 
     pub fn agent_frame_id(&self) -> &str {

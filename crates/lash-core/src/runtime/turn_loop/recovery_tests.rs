@@ -10,7 +10,10 @@ fn closure_authorization(
     admitted_scope: ExecutionScope,
     fencing_token: u64,
 ) -> TurnCancelClosureAuthorization {
-    let address = TurnAddress::new("recovery-session", turn_id);
+    let address = TurnAddress::new(
+        "recovery-session",
+        lash_core::TurnId::fixture(turn_id.to_string()),
+    );
     let turn_scope = address.execution_scope();
     let key = |wait, name: &str| AwaitEventKey {
         scope: turn_scope.clone(),

@@ -129,7 +129,7 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
             }))
             .build(crate::testing::runtime_lease_owner())?;
         let session = core
-            .session(format!("discovery-{mode}"))
+            .session(lash_core::SessionId::fixture(format!("discovery-{mode}")))
             .created()
             .await
             .open()

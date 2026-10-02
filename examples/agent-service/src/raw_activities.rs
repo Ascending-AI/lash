@@ -69,7 +69,7 @@ pub(crate) async fn stream_raw_activities(
 
     let turn_profile = llm_profile_choice_for_chat_selection(&llm_profile_selection);
     let session = state.open_session(&chat_id, turn_profile).await?;
-    let turn_id = TurnId::from(format!("agent-service-raw-turn:{}", uuid::Uuid::new_v4()));
+    let turn_id = TurnId::prefixed("agent-service-raw-turn:", uuid::Uuid::new_v4());
     // Accepted before the response starts, so a refused acceptance is the
     // response's status: a retryable refusal answers 503.
     let turn = session

@@ -136,7 +136,7 @@ pub(super) async fn run_live_turn_facts(
         .serve_test_llm_profile(provider_handle, model.clone())
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let session_id = SessionId::from(format!(
+    let session_id = SessionId::fixture(format!(
         "sim-live-failure-{provider_kind}-{offered_prose_deltas}"
     ));
     let session = crate::open_created_session(model.wire_model.clone(), &core, session_id.clone())

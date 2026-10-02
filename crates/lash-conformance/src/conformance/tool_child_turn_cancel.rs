@@ -278,8 +278,8 @@ pub async fn an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteratio
     _process_work: Arc<dyn crate::ProcessWorkSubstrate>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    let session_id = SessionId::from(format!("{prefix}-retry-sleep-session"));
-    let turn_id = TurnId::from(format!("{prefix}-retry-sleep-turn"));
+    let session_id = SessionId::fixture(format!("{prefix}-retry-sleep-session"));
+    let turn_id = TurnId::fixture(format!("{prefix}-retry-sleep-turn"));
     let tool = RetryOnceTool {
         attempts: Arc::new(AtomicUsize::new(0)),
     };
@@ -478,9 +478,9 @@ pub async fn a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gat
     _process_work: Arc<dyn crate::ProcessWorkSubstrate>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    let session_id = SessionId::from(format!("{prefix}-follow-on-session"));
-    let root_turn_id = TurnId::from(format!("{prefix}-follow-on-root"));
-    let follow_turn_id = TurnId::from(format!("{root_turn_id}:agent-frame:1"));
+    let session_id = SessionId::fixture(format!("{prefix}-follow-on-session"));
+    let root_turn_id = TurnId::fixture(format!("{prefix}-follow-on-root"));
+    let follow_turn_id = TurnId::fixture(format!("{root_turn_id}:agent-frame:1"));
     let executions = Arc::new(AtomicUsize::new(0));
     let (completion_key_tx, completion_key_rx) = tokio::sync::oneshot::channel();
     let tools = Arc::new(FollowOnPendingTools {
@@ -645,8 +645,8 @@ pub async fn cancel_dispositions_survive_group_child_teardown_and_redrive(
         crate::TurnCancelUndeliveredInputPolicy::Drop,
     ] {
         let prefix = format!("{prefix}-{disposition:?}");
-        let session_id = SessionId::from(format!("{prefix}-ignores-cancel-session"));
-        let turn_id = TurnId::from(format!("{prefix}-ignores-cancel-turn"));
+        let session_id = SessionId::fixture(format!("{prefix}-ignores-cancel-session"));
+        let turn_id = TurnId::fixture(format!("{prefix}-ignores-cancel-turn"));
         let started = Arc::new(AtomicUsize::new(0));
         let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let tool = IgnoresCancellationTool {

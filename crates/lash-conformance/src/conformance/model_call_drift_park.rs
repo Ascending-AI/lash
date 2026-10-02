@@ -213,8 +213,8 @@ pub async fn model_call_drift_parks_then_completes_once_restored(
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     protocol: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
 ) {
-    let session_id = SessionId::from(format!("{prefix}-model-drift-session"));
-    let turn_id = TurnId::from(format!("{prefix}-model-drift-turn"));
+    let session_id = SessionId::fixture(format!("{prefix}-model-drift-session"));
+    let turn_id = TurnId::fixture(format!("{prefix}-model-drift-turn"));
     let calls = Arc::new(AtomicUsize::new(0));
     let model = crate::testing::TestProvider::builder()
         .kind("stub")
@@ -247,7 +247,7 @@ pub async fn model_call_drift_parks_then_completes_once_restored(
     // The journaled prompt is served: the redrive's registry removed the
     // tool the prompt rendered, and the recorded model call still replays
     // with no provider request, finishing the turn.
-    let served_session = SessionId::from(format!("{prefix}-model-served-session"));
+    let served_session = SessionId::fixture(format!("{prefix}-model-served-session"));
     let served_store =
         crate::conformance::law_session_store(stores.as_ref(), &served_session).await;
     let served = DriftParts {
@@ -407,8 +407,8 @@ pub async fn runtime_drive_cold_replay_ignores_live_input_and_hook_drift(
     protocol: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
 ) {
     use crate::testing::runtime_helpers::{RuntimeTestPlugin, RuntimeTestPluginFactory};
-    let session_id = SessionId::from(format!("{prefix}-cold-drive"));
-    let turn_id = TurnId::from(format!("{prefix}-cold-root"));
+    let session_id = SessionId::fixture(format!("{prefix}-cold-drive"));
+    let turn_id = TurnId::fixture(format!("{prefix}-cold-root"));
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let hook_calls = Arc::new(AtomicUsize::new(0));
     let provider = crate::testing::TestProvider::builder()

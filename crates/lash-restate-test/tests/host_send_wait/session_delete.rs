@@ -375,7 +375,7 @@ async fn finish_cleanup(world: &World, scope_close: &ObligationId) {
 }
 
 pub(super) async fn finish_session_cleanup(world: &World, session_id: &str) {
-    let session = lash::SessionId::from(session_id);
+    let session = lash::SessionId::fixture(session_id);
     let backend = world.backend.lash_backend();
     tokio::time::timeout(Duration::from_secs(60), async {
         loop {
@@ -393,7 +393,7 @@ pub(super) async fn finish_session_cleanup(world: &World, session_id: &str) {
                     .is_some()
                     || world
                         .core
-                        .session(session_id)
+                        .session(lash_core::SessionId::fixture(session_id))
                         .durable()
                         .await
                         .expect("handle")
@@ -463,7 +463,7 @@ async fn live_delete_after_answer(pinned: bool) {
         async move {
             delete_session(&core, &key, |attempt| {
                 backend.run_in_handler(
-                    lash_core::AdmittedScope::session_delete(key.as_str()),
+                    lash_core::AdmittedScope::session_delete(lash::SessionId::fixture(key.clone())),
                     attempt,
                 )
             })
@@ -506,7 +506,7 @@ async fn live_delete_after_answer(pinned: bool) {
     assert!(
         world
             ._core
-            .session(world.key.as_str())
+            .session(lash_core::SessionId::fixture(world.key.as_str()))
             .durable()
             .await
             .expect("handle")

@@ -33,7 +33,7 @@ fn standard_session_with_access(
         )),
     ])
     .build_session(PluginSessionRequest::creation(
-        session_id,
+        lash_core::SessionId::fixture(session_id),
         lash_core::plugin::SessionAuthorityContext {
             tool_access,
             ..Default::default()

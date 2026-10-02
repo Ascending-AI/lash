@@ -37,7 +37,7 @@ async fn admitted_under(
     head: AdmittedHead,
     policy: crate::TurnLaneAdmissionPolicy,
 ) -> lash_core::store::RootAdmission {
-    let mut request = admit_root_request_for_test(fence, &TurnId::from(root), head);
+    let mut request = admit_root_request_for_test(fence, &TurnId::fixture(root), head);
     request.policy = policy;
     store
         .admit_root(&request)
@@ -408,7 +408,7 @@ pub(super) fn policy_test_wake(
         version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
             PROCESS_WAKE_DELIVERY_FORMAT_VERSION
         )),
-        target_session_id: SessionId::from(session_id.to_string()),
+        target_session_id: session_id.clone(),
         process_id: process_id.clone(),
         sequence,
         event_type: "process.wake".to_string(),

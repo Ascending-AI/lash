@@ -276,8 +276,8 @@ async fn the_zero_move_policy_is_one_shared_bounded_loop() {
         &state,
         &chat.id,
         "I played X in the top left.".to_string(),
-        TurnId::from("shared-turn-1".to_string()),
-        || TurnId::from("shared-turn-2".to_string()),
+        TurnId::from("shared-turn-1"),
+        || TurnId::from("shared-turn-2"),
         |turn_input, _turn_id| {
             let inputs = Arc::clone(&inputs);
             async move {

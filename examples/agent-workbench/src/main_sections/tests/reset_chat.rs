@@ -282,7 +282,7 @@ async fn register_terminal_processes(
                     metadata: Value::Null,
                 },
                 lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
-                    session_id.to_string(),
+                    session_id.clone(),
                 )),
                 lash::process::Lifetime::Detached,
             ))

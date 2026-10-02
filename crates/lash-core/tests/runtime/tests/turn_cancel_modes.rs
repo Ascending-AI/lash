@@ -728,7 +728,7 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
             lash_core::TurnCancelUndeliveredInputPolicy::Drop,
         ] {
             let transport = mock_provider(Vec::new());
-            let session_id = SessionId::from(
+            let session_id = SessionId::fixture(
                 format!("cancel-matrix-{mode:?}-{disposition:?}").to_ascii_lowercase(),
             );
             let (mut runtime, store) =
@@ -752,7 +752,7 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
             steer.bind(&store);
             steer.queue(
                 &session_id,
-                &TurnId::from(turn_id.as_str()),
+                &TurnId::fixture(turn_id.as_str()),
                 None,
                 lash_core::TurnInput::text("unsent steer"),
             );
@@ -760,7 +760,10 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
             let receipt = driver
                 .request_cancel(
                     TurnCancelRequest::new(
-                        lash_core::facade_support::TurnAddress::new(&session_id, &turn_id),
+                        lash_core::facade_support::TurnAddress::new(
+                            &session_id,
+                            TurnId::fixture(&turn_id),
+                        ),
                         format!("{turn_id}:request"),
                         Some("test-user".to_string()),
                     )
@@ -772,7 +775,7 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
             assert!(matches!(receipt.outcome, TurnCancelOutcome::Requested(_)));
             let handler = double
                 .open_handler(lash_core::AdmittedScope::new(
-                    persisted.turn_scope(&turn_id),
+                    persisted.turn_scope(TurnId::fixture(&turn_id)),
                 ))
                 .await
                 .expect("open the scope's handler");
@@ -849,7 +852,9 @@ async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
             .tools(Arc::new(tool.clone()))
             .host(EmbeddedRuntimeHost::new(config))
             .store(runtime_store)
-            .with_session_id(format!("cancel-no-drain-{mode:?}").to_ascii_lowercase())
+            .with_session_id(SessionId::fixture(
+                format!("cancel-no-drain-{mode:?}").to_ascii_lowercase(),
+            ))
             .build()
             .await;
         let persisted = runtime.export_persistence_state();
@@ -861,7 +866,7 @@ async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
         );
         let turn_id = format!("no-drain-{mode:?}").to_ascii_lowercase();
         let turn = lash_core::task::spawn({
-            let turn_scope = persisted.turn_scope(&turn_id);
+            let turn_scope = persisted.turn_scope(TurnId::fixture(&turn_id));
             let double = double.clone();
             async move {
                 let handler = double
@@ -886,7 +891,10 @@ async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
         let receipt = driver
             .request_cancel(
                 TurnCancelRequest::new(
-                    lash_core::facade_support::TurnAddress::new(&session_id, &turn_id),
+                    lash_core::facade_support::TurnAddress::new(
+                        &session_id,
+                        TurnId::fixture(&turn_id),
+                    ),
                     format!("{turn_id}:request"),
                     Some("test-user".to_string()),
                 )

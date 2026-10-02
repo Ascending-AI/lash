@@ -112,10 +112,10 @@ impl SessionCursor {
         expected_session_id: &SessionId,
     ) -> Result<ParsedSessionCursor<'_>, SessionCursorError> {
         let parsed = self.parse()?;
-        if parsed.session_id != expected_session_id {
+        if parsed.session_id != *expected_session_id {
             return Err(SessionCursorError::WrongSession {
-                expected_session_id: SessionId::from(expected_session_id.to_string()),
-                actual_session_id: SessionId::from(parsed.session_id.to_string()),
+                expected_session_id: expected_session_id.clone(),
+                actual_session_id: parsed.session_id,
             });
         }
         Ok(parsed)
@@ -155,7 +155,7 @@ impl SessionCursor {
             })?;
         let session_id = parts
             .next()
-            .filter(|value| !value.is_empty())
+            .and_then(|value| SessionId::parse(value).ok())
             .ok_or_else(|| SessionCursorError::Malformed {
                 message: "missing session id".to_string(),
             })?;
@@ -180,10 +180,10 @@ impl fmt::Display for SessionCursor {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct ParsedSessionCursor<'a> {
     pub replay_incarnation_id: &'a str,
-    pub session_id: &'a str,
+    pub session_id: SessionId,
     pub revision: SessionRevision,
     pub live_position: u64,
 }
@@ -244,12 +244,10 @@ impl SessionObservationEvent {
         reason = "the store writes cursors in the parsable form"
     )]
     pub fn session_id(&self) -> SessionId {
-        SessionId::from(
-            self.cursor
-                .parse()
-                .expect("store-created observation event cursor must parse")
-                .session_id,
-        )
+        self.cursor
+            .parse()
+            .expect("store-created observation event cursor must parse")
+            .session_id
     }
 
     /// Returns the replay-store incarnation named by this event's durable cursor.
@@ -1219,7 +1217,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         cursor: &SessionCursor,
     ) -> Result<LiveReplayOutcome, LiveReplayStoreError> {
         let parsed = cursor.parse()?;
-        let session_id = SessionId::from(parsed.session_id);
+        let session_id = parsed.session_id.clone();
         let now = self.clock.now();
         let mut sessions = self.sessions.lock_recover();
         if Self::incarnation_gap_for_cursor(sessions.buffers.get(&session_id), &parsed).is_none() {
@@ -1253,7 +1251,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         cursor: &SessionCursor,
     ) -> Result<LiveReplaySubscribeOutcome, LiveReplayStoreError> {
         let parsed = cursor.parse()?;
-        let session_id = SessionId::from(parsed.session_id);
+        let session_id = parsed.session_id.clone();
         let now = self.clock.now();
         let mut sessions = self.sessions.lock_recover();
         if Self::incarnation_gap_for_cursor(sessions.buffers.get(&session_id), &parsed).is_none() {

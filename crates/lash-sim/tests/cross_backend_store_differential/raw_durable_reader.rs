@@ -64,7 +64,7 @@ fn scope_close_obligations(
                 if let Some(id) = &obligation_id {
                     let derived = lash_core::store::ObligationKey::ScopeClose {
                         session_id: session_id.clone(),
-                        root: lash_core::TurnId::from(root.as_str()),
+                        root: lash_core::TurnId::fixture(root.as_str()),
                     }
                     .id();
                     assert_eq!(

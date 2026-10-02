@@ -720,7 +720,7 @@ mod tests {
     use super::*;
 
     fn session(id: &str) -> crate::RuntimeOwner {
-        crate::RuntimeOwner::Session(crate::SessionId::from(id))
+        crate::RuntimeOwner::Session(crate::SessionId::fixture(id))
     }
 
     fn signal(owner: &crate::RuntimeOwner, payload: serde_json::Value) -> crate::ToolIntent {

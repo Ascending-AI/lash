@@ -138,7 +138,7 @@ pub async fn another_process_is_not_the_recorded_opener(
     fixture: &ToolChildLawFixture,
     prefix: &str,
 ) {
-    let session_id = crate::SessionId::from(format!("{prefix}-incarnation-session"));
+    let session_id = crate::SessionId::fixture(format!("{prefix}-incarnation-session"));
     let process_id = crate::ProcessId::fixture(&format!("{prefix}-incarnation-process"));
     let scope_p = crate::ExecutionScope::process(process_id.clone());
     let recorded_ref = process_id.clone();

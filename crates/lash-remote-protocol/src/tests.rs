@@ -541,7 +541,7 @@ fn remote_turn_result_json_round_trips() {
 
 #[test]
 fn turn_started_has_pinned_wire_shape_and_non_empty_identity() {
-    let mut activity = RemoteTurnActivity {
+    let activity = RemoteTurnActivity {
         sequence: 0,
         id: "turn-start-event".to_string(),
         correlation_id: "turn-start-correlation".to_string(),
@@ -566,11 +566,12 @@ fn turn_started_has_pinned_wire_shape_and_non_empty_identity() {
         })
     );
     activity.validate().expect("non-empty turn identity");
-    let RemoteTurnEvent::TurnStarted { turn_id } = &mut activity.event else {
-        unreachable!("constructed turn start activity")
-    };
-    *turn_id = TurnId::from("");
-    assert!(activity.validate().is_err());
+    let mut blank = serde_json::to_value(&activity).expect("serialize turn start");
+    blank["turn_id"] = serde_json::Value::String(String::new());
+    assert!(
+        serde_json::from_value::<RemoteTurnActivity>(blank).is_err(),
+        "a blank turn id decodes to no turn start"
+    );
 }
 
 #[test]
@@ -1271,7 +1272,7 @@ fn remote_process_dtos_json_round_trip() {
             label: Some("Import".to_string()),
         }),
         wake_session_id: Some(SessionId::from("session")),
-        observers: vec![SessionId::from("session".to_string())],
+        observers: vec![SessionId::from("session")],
         event_types: vec![remote_process_event_type()],
         lifetime: crate::RemoteStartLifetime::UntilSession {
             session_id: SessionId::from("session"),
@@ -1291,12 +1292,12 @@ fn remote_process_dtos_json_round_trip() {
         serde_json::from_value::<RemoteProcessStartRequest>(missing_lifetime).is_err(),
         "a start request names its lifetime; there is no default"
     );
-    let mut empty_session = start.clone();
-    empty_session.lifetime = crate::RemoteStartLifetime::UntilSession {
-        session_id: SessionId::from(""),
-    };
+    let mut empty_session = serde_json::to_value(&start).expect("serialize start");
+    assert_eq!(empty_session["lifetime"]["lifetime"], "until_session");
+    empty_session["lifetime"]["session_id"] = serde_json::Value::String(String::new());
     assert!(
-        matches!(empty_session.validate(), Err(RemoteProtocolError::MissingRequiredField { field, .. }) if field == "lifetime.session_id")
+        serde_json::from_value::<RemoteProcessStartRequest>(empty_session).is_err(),
+        "a blank session id decodes to no lifetime"
     );
 
     let decoded: RemoteProcessStartRequest =

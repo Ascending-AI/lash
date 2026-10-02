@@ -38,7 +38,7 @@ async fn indexed_wait_keeps_its_key_through_settlement_and_retirement(
     let ingress = harness.ingress();
     let identity = uuid::Uuid::new_v4().to_string();
     for transition in ["settle", "resolve", "cancel_all"] {
-        let session = SessionId::from(format!("{identity}-{transition}"));
+        let session = SessionId::fixture(format!("{identity}-{transition}"));
         let scopes = [
             ExecutionScope::turn(session.clone(), "root"),
             ExecutionScope::process(ProcessId::fixture(&format!("{session}-process"))),

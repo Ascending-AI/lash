@@ -204,7 +204,7 @@ where
         RestateTurnCancelGate::Registered(gate) => gate,
         RestateTurnCancelGate::Revoked => {
             return Ok(RestateTurnCancelRaceOutcome::SessionRevoked {
-                session_id: SessionId::from(session_id.to_string()),
+                session_id: session_id.clone(),
             });
         }
     };
@@ -224,7 +224,7 @@ where
         }
         RestateTurnCancelWake::SessionRevoked => {
             return Ok(RestateTurnCancelRaceOutcome::SessionRevoked {
-                session_id: SessionId::from(session_id.to_string()),
+                session_id: session_id.clone(),
             });
         }
         RestateTurnCancelWake::TurnCancelDeferred => {}
@@ -258,7 +258,7 @@ where
         RestateTurnCancelGate::Registered(gate) => gate,
         RestateTurnCancelGate::Revoked => {
             return Ok(RestateTurnCancelRaceOutcome::SessionRevoked {
-                session_id: SessionId::from(session_id.to_string()),
+                session_id: session_id.clone(),
             });
         }
     };
@@ -290,7 +290,7 @@ where
                 }
                 RestateTurnCancelWake::SessionRevoked => {
                     RestateTurnCancelRaceOutcome::SessionRevoked {
-                        session_id: SessionId::from(session_id.to_string()),
+                        session_id: session_id.clone(),
                     }
                 }
             })
@@ -492,7 +492,7 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
         Box::pin(async move {
             if let Some(session_id) = key.scope.session_id()
                 && self
-                    .session_is_revoked(namespace, SessionId::from(session_id.to_string()))
+                    .session_is_revoked(namespace, session_id.clone())
                     .await?
             {
                 return Ok(RestateTurnGatePeek::Revoked);

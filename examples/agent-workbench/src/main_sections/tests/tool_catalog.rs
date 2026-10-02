@@ -74,7 +74,10 @@ pub(crate) async fn assert_plugin_provider_execution(
 ) {
     let output = session
         .send(lash::TurnInput::text("send through the plugin provider"))
-        .id(format!("workbench-test-turn:{}", uuid::Uuid::new_v4()))
+        .id(lash::TurnId::fixture(format!(
+            "workbench-test-turn:{}",
+            uuid::Uuid::new_v4()
+        )))
         .output()
         .await
         .expect("turn should resolve and execute inbox.test.send");
@@ -140,7 +143,10 @@ pub(crate) async fn assert_live_tool_provider_execution_and_removal(session: &la
     let live = add_live_provider(session).await;
     let output = session
         .send(lash::TurnInput::text("send through the live provider"))
-        .id(format!("workbench-test-turn:{}", uuid::Uuid::new_v4()))
+        .id(lash::TurnId::fixture(format!(
+            "workbench-test-turn:{}",
+            uuid::Uuid::new_v4()
+        )))
         .output()
         .await
         .expect("turn should resolve and execute inbox.live.send");

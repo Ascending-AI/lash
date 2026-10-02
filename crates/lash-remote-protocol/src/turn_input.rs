@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::llm::RemoteAttachmentSource;
-use crate::registry_errors::{RemoteProtocolError, require_non_empty};
+use crate::registry_errors::RemoteProtocolError;
 use crate::tools::RemoteToolGrant;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -206,8 +206,6 @@ impl RemoteTurnRequest {
     }
 
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        require_non_empty("RemoteTurnRequest", "session_id", &self.session_id)?;
-        require_non_empty("RemoteTurnRequest", "turn_id", &self.turn_id)?;
         self.input.validate()?;
         RemoteToolGrant::validate_all(&self.tool_grants)?;
         Ok(())

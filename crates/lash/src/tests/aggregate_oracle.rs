@@ -433,7 +433,9 @@ impl ToolProvider for OracleTools {
             lash_core::ToolOutcomeDone::ok(value),
             lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::EmitProcessEvent(
                 lash_core::EmitProcessEventIntent {
-                    owner: crate::RuntimeOwner::Session(SessionId::from(self.session_id.clone())),
+                    owner: crate::RuntimeOwner::Session(SessionId::fixture(
+                        self.session_id.clone(),
+                    )),
                     process_id: self.theatre.intent_process(),
                     event_type: if args.refused_intent {
                         UNREGISTERED_EVENT.to_string()
@@ -555,7 +557,7 @@ async fn register_intent_target(
                 payload_schema: lash_core::JsonSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec::default(),
             }]),
-            &[SessionId::from(session_id.to_string())],
+            &[SessionId::fixture(session_id.to_string())],
         )
         .await
         .expect("register the intent target process")
@@ -622,7 +624,12 @@ async fn drive_cells(
         Arc::clone(&requests),
     )?;
     serve_processes(&core);
-    let session = core.session(session_id).created().await.open().await?;
+    let session = core
+        .session(SessionId::fixture(session_id.to_string()))
+        .created()
+        .await
+        .open()
+        .await?;
     let streamed = Arc::clone(&theatre);
     let turn = tokio::spawn(async move {
         session

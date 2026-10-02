@@ -1,4 +1,5 @@
 use super::*;
+use crate::SessionId;
 use crate::plugin::PluginSessionRequest;
 
 #[derive(Clone)]
@@ -768,7 +769,11 @@ fn readiness_runs_after_hydration_and_its_writes_survive() {
 #[test]
 fn live_hydration_adopts_the_recorded_head_over_an_uncommitted_tail() {
     let state = store();
-    state.state.lock_recover().initialize(None).unwrap();
+    state
+        .state
+        .lock_recover()
+        .initialize(state.owner(), None)
+        .unwrap();
     state.set("value", serde_json::json!(1)).unwrap();
     let recorded = state.state.lock_recover().data.clone();
     state.set("value", serde_json::json!(2)).unwrap();
@@ -811,7 +816,11 @@ fn live_hydration_adopts_the_recorded_head_over_an_uncommitted_tail() {
 fn live_hydration_from_the_unchanged_source_head_drops_the_uncommitted_tail() {
     let recorded = {
         let state = store();
-        state.state.lock_recover().initialize(None).unwrap();
+        state
+            .state
+            .lock_recover()
+            .initialize(state.owner(), None)
+            .unwrap();
         state.set("value", serde_json::json!(1)).unwrap();
         state.state.lock_recover().data.clone()
     };
@@ -824,7 +833,10 @@ fn live_hydration_from_the_unchanged_source_head_drops_the_uncommitted_tail() {
         registry.clone(),
     );
     state.set("registered", serde_json::json!(true)).unwrap();
-    registry.lock_recover().initialize(Some(&recorded)).unwrap();
+    registry
+        .lock_recover()
+        .initialize(state.owner(), Some(&recorded))
+        .unwrap();
     registry.lock_recover().hydrate_live(&recorded);
     assert_eq!(
         (state.generation(), state.get("registered")),
@@ -893,7 +905,10 @@ fn register_remove_rebuilt_generation_five() {
         registry.clone(),
     );
     state.remove("seed").unwrap();
-    registry.lock_recover().initialize(Some(&snapshot)).unwrap();
+    registry
+        .lock_recover()
+        .initialize(state.owner(), Some(&snapshot))
+        .unwrap();
     assert_eq!(
         state.get("seed"),
         None,
@@ -912,7 +927,10 @@ fn hydration_fixture(
         registry.clone(),
     );
     state.set("registered", Value::Bool(true)).unwrap();
-    registry.lock_recover().initialize(Some(snapshot)).unwrap();
+    registry
+        .lock_recover()
+        .initialize(state.owner(), Some(snapshot))
+        .unwrap();
     (state, registry)
 }
 

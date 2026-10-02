@@ -286,18 +286,12 @@ pub(super) enum LogicalTurnStart {
 }
 
 impl LogicalTurnStart {
-    fn continuation_state(&self) -> (crate::TurnContext, TurnId) {
+    fn continuation_state(&self) -> (crate::TurnContext, Option<TurnId>) {
         match self {
-            Self::Input(input) => (
-                input.turn_context.clone(),
-                input
-                    .trace_turn_id
-                    .clone()
-                    .unwrap_or_else(|| TurnId::from("")),
-            ),
+            Self::Input(input) => (input.turn_context.clone(), input.trace_turn_id.clone()),
             Self::ExhaustedFollowOn(owed) => (
                 crate::TurnContext::default(),
-                owed.follow_on_turn_id.clone(),
+                Some(owed.follow_on_turn_id.clone()),
             ),
         }
     }
@@ -402,7 +396,7 @@ impl LashRuntime {
             return;
         };
         let operation = crate::OperationId::new(
-            crate::ExecutionScope::turn(self.state.session_id.as_str(), committed_turn.clone()),
+            crate::ExecutionScope::turn(self.state.session_id.clone(), committed_turn.clone()),
             "root-end",
         );
         let fleet_format = self.fleet_format();
@@ -513,9 +507,9 @@ impl LashRuntime {
         // A turn scope is its logical root's: the turn that starts under it
         // is the root's first physical turn, or, for a recovered follow-on,
         // a later physical turn of that root.
-        if !supplied_trace_turn_id.is_empty()
+        if let Some(supplied_trace_turn_id) = supplied_trace_turn_id.as_ref()
             && let Some(scope_root) = scoped_effect_controller.execution_scope().turn_id()
-            && crate::store::PhysicalTurn::physical_ordinal_of(scope_root, &supplied_trace_turn_id)
+            && crate::store::PhysicalTurn::physical_ordinal_of(scope_root, supplied_trace_turn_id)
                 .is_none()
         {
             return Err(RuntimeError::new(
@@ -530,10 +524,9 @@ impl LashRuntime {
         // counts on from it: a follow-on takes the id its committed switch
         // wrote on the head, and a terminal-checkpoint follow-on takes the next
         // physical index (ADR 0101 §3).
-        let mut turn_trace_turn_id = if supplied_trace_turn_id.is_empty() {
-            TurnId::from(scoped_effect_controller.scope_id())
-        } else {
-            supplied_trace_turn_id
+        let mut turn_trace_turn_id = match supplied_trace_turn_id {
+            Some(supplied_trace_turn_id) => supplied_trace_turn_id,
+            None => TurnId::parse(scoped_effect_controller.scope_id())?,
         };
         let logical_root = self
             .drive_root

@@ -87,7 +87,10 @@ async fn superseded_child_root_law(storage: Storage) {
     );
     assert_eq!(
         sessions
-            .root_terminal(&session_id, &lash_core::TurnId::from(process_id.as_str()))
+            .root_terminal(
+                &session_id,
+                &lash_core::TurnId::fixture(process_id.as_str())
+            )
             .await
             .expect("read the child's root terminal"),
         None,

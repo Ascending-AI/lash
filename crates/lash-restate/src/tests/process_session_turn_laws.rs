@@ -982,7 +982,7 @@ pub(super) async fn a_partially_created_child_completes_from_its_recorded_creati
     redeployment: Redeployment,
 ) -> Result<(), String> {
     let registry = process_registry();
-    let child = SessionId::from(format!("partial-create-{redeployment:?}"));
+    let child = SessionId::fixture(format!("partial-create-{redeployment:?}"));
     let registration = keyed_registration_for(&child).await;
     let process_id = registry
         .register_process(registration.clone())
@@ -1199,7 +1199,7 @@ struct UnservedCommittedChild {
 
 async fn unserved_committed_child(child: &str) -> UnservedCommittedChild {
     let registry = process_registry();
-    let registration = keyed_registration_for(&SessionId::from(child)).await;
+    let registration = keyed_registration_for(&SessionId::fixture(child)).await;
     let process_id = registry
         .register_process(registration.clone())
         .await
@@ -1545,7 +1545,7 @@ async fn a_start_in_a_process_owned_session_records_its_owner_above_the_session(
     let child = SessionId::from("process-owned-worker-child");
     let mut registration = registration_for(&child).await;
     registration.provenance =
-        lash_core::ProcessProvenance::session(lash_core::SessionScope::new(parent_id.as_str()));
+        lash_core::ProcessProvenance::session(lash_core::SessionScope::new(parent_id.clone()));
     registration.ancestry = lash_core::Ancestry::from_scopes([
         parent_turn.clone(),
         lash_core::ScopeId::session(parent_id.clone()),
@@ -1603,7 +1603,7 @@ async fn a_start_in_a_process_owned_session_records_its_owner_above_the_session(
         lash_core::ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        lash_core::ProcessOriginator::session(lash_core::SessionScope::new(child.as_str())),
+        lash_core::ProcessOriginator::session(lash_core::SessionScope::new(child.clone())),
         lash_core::Lifetime::Detached,
     )
     .keyed_in(&scoped)

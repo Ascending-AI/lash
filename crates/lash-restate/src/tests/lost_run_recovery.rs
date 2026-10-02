@@ -224,7 +224,7 @@ async fn seed(stores: &dyn StoreSet, start: usize, count: usize) {
             .record_first_started_with_authority(&record.id, started, &authority)
             .await
             .expect("start");
-        let session = SessionId::from(format!("recovery-{index:06}"));
+        let session = SessionId::fixture(format!("recovery-{index:06}"));
         sessions
             .admit_session(&lash_core::SessionStoreCreateRequest {
                 session_id: session.clone(),

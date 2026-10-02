@@ -98,7 +98,7 @@ async fn acceptance_runtime_with_batching(
     host.providers.models = crate::testing::standard_test_llm_profiles(provider);
     let policy = crate::testing::mock_session_policy();
     let state = crate::RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: SessionId::fixture(session_id.to_string()),
         policy: policy.clone(),
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
@@ -107,7 +107,7 @@ async fn acceptance_runtime_with_batching(
     };
     Box::pin(
         crate::LashRuntime::builder(host, lease_owner)
-            .with_session_id(session_id)
+            .with_session_id(SessionId::fixture(session_id))
             .with_policy(policy)
             .with_initial_state(state)
             .with_plugin_factories(
@@ -116,7 +116,10 @@ async fn acceptance_runtime_with_batching(
                     .chain(plugin_factories)
                     .collect(),
             )
-            .with_store(crate::conformance::helpers::session_view(store, session_id))
+            .with_store(crate::conformance::helpers::session_view(
+                store,
+                SessionId::fixture(session_id.to_string()),
+            ))
             .build(),
     )
     .await
@@ -125,7 +128,7 @@ async fn acceptance_runtime_with_batching(
 
 pub(super) fn direct_input(turn_id: &TurnId, text: &str) -> crate::TurnInput {
     let mut input = crate::TurnInput::text(text);
-    input.trace_turn_id = Some(TurnId::from(turn_id.to_string()));
+    input.trace_turn_id = Some(turn_id.clone());
     input
 }
 
@@ -150,7 +153,7 @@ pub async fn direct_turn_accepts_before_driving(
     backend: crate::Backend,
     store: Arc<dyn crate::RuntimeStore>,
 ) {
-    let turn_id = TurnId::from(format!("{prefix}-accept-before-drive"));
+    let turn_id = TurnId::fixture(format!("{prefix}-accept-before-drive"));
     let probe = Arc::new(std::sync::Mutex::new(None));
     let provider = {
         let store = Arc::clone(&store);
@@ -303,7 +306,7 @@ pub async fn direct_turn_acceptance_mints_no_idempotency_key(
     .await;
     let mut acceptances = Vec::new();
     for round in 0..2 {
-        let turn_id = TurnId::from(format!("{prefix}-resubmit-{round}"));
+        let turn_id = TurnId::fixture(format!("{prefix}-resubmit-{round}"));
         let scope = effect_host
             .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &turn_id)))
             .expect("scope a resubmitted direct turn");
@@ -795,7 +798,10 @@ async fn assert_nothing_left_to_answer(
     let drain_id = format!("{prefix}-after-redrive-drain");
     let scope = journal
         .effect_host
-        .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &drain_id)))
+        .scoped(admit(crate::ExecutionScope::turn(
+            SESSION_ID,
+            TurnId::fixture(&drain_id),
+        )))
         .expect("scope the post-redrive drain");
     let drain = drainer
         .drive_one_admitted_queued_root(crate::TurnOptions::new(
@@ -824,7 +830,7 @@ pub async fn vacuum_then_redrive_replays_receipt_single_row(
     backend: crate::Backend,
     store: Arc<dyn crate::RuntimeStore>,
 ) {
-    let turn_id = TurnId::from(format!("{prefix}-vacuum-redrive-single"));
+    let turn_id = TurnId::fixture(format!("{prefix}-vacuum-redrive-single"));
     let journal = Journal::new(&backend);
     let (provider, requests) = recording_provider("deployed staging");
     let first = journal
@@ -881,7 +887,7 @@ pub async fn vacuum_then_redrive_replays_receipt_absorbed_rows(
     backend: crate::Backend,
     store: Arc<dyn crate::RuntimeStore>,
 ) {
-    let turn_id = TurnId::from(format!("{prefix}-vacuum-redrive-absorbed"));
+    let turn_id = TurnId::fixture(format!("{prefix}-vacuum-redrive-absorbed"));
     enqueue_next_turn(&store, "queued first").await;
     enqueue_next_turn(&store, "queued second").await;
     let journal = Journal::new(&backend).composing();
@@ -937,7 +943,7 @@ pub async fn cancelled_vacuumed_acceptance_is_not_resurrected(
     backend: crate::Backend,
     store: Arc<dyn crate::RuntimeStore>,
 ) {
-    let turn_id = TurnId::from(format!("{prefix}-cancelled-vacuumed"));
+    let turn_id = TurnId::fixture(format!("{prefix}-cancelled-vacuumed"));
     let journal = Journal::new(&backend);
     journal
         .controller
@@ -1004,7 +1010,7 @@ pub async fn uncommitted_redrive_drives_journaled_set_not_live_admission(
     backend: crate::Backend,
     store: Arc<dyn crate::RuntimeStore>,
 ) {
-    let turn_id = TurnId::from(format!("{prefix}-uncommitted-redrive"));
+    let turn_id = TurnId::fixture(format!("{prefix}-uncommitted-redrive"));
     let journal = Journal::new(&backend);
     let (provider, requests) = recording_provider("answered the journaled set");
     journal
@@ -1071,7 +1077,7 @@ pub async fn drive_effect_refusal_is_journaled(
     backend: crate::Backend,
     store: Arc<dyn crate::RuntimeStore>,
 ) {
-    let turn_id = TurnId::from(format!("{prefix}-refused-drive"));
+    let turn_id = TurnId::fixture(format!("{prefix}-refused-drive"));
     let journal = Journal::new(&backend);
     let (provider, requests) = recording_provider("never reached");
 
@@ -1141,7 +1147,7 @@ pub async fn an_accepted_direct_input_is_held_for_its_acceptors_drive(
     store: Arc<dyn crate::RuntimeStore>,
 ) {
     use lash_core::store::{ObligationKey, ObligationKind, ObligationState};
-    let turn_id = TurnId::from(format!("{prefix}-held-for-its-acceptor"));
+    let turn_id = TurnId::fixture(format!("{prefix}-held-for-its-acceptor"));
     let journal = Journal::new(&backend);
     let (provider, requests) = recording_provider("answered by the acceptor's drive");
     // The acceptor dies between its acceptance and its root's admission.
@@ -1265,7 +1271,7 @@ pub async fn direct_turn_behind_earlier_admissions_runs_after_them(
     backend: crate::Backend,
     store: Arc<dyn crate::RuntimeStore>,
 ) {
-    let turn_id = TurnId::from(format!("{prefix}-queued-direct-turn"));
+    let turn_id = TurnId::fixture(format!("{prefix}-queued-direct-turn"));
     let first = enqueue_next_turn(&store, "earliest admission").await;
     let second = enqueue_next_turn(&store, "second admission").await;
     let journal = Journal::new(&backend)
@@ -1336,7 +1342,7 @@ pub async fn accept_turn_input_redrive_after_store_commit_admits_one_row(
     backend: crate::Backend,
     store: Arc<dyn crate::RuntimeStore>,
 ) {
-    let turn_id = TurnId::from(format!("{prefix}-acceptance-lost-outcome"));
+    let turn_id = TurnId::fixture(format!("{prefix}-acceptance-lost-outcome"));
     let journal = Journal::new(&backend);
     journal
         .controller

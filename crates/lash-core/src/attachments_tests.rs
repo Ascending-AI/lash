@@ -19,11 +19,11 @@ use crate::{ArtifactReferrer, AttachmentWrite, ReferrerClaim, RuntimeOwner};
 use lash_sansio::{AttachmentTypeMetadata, MediaType};
 
 fn session_owner(session_id: &str) -> RuntimeOwner {
-    RuntimeOwner::Session(SessionId::from(session_id))
+    RuntimeOwner::Session(SessionId::fixture(session_id))
 }
 
 fn session_claim(session_id: &str) -> ReferrerClaim {
-    ReferrerClaim::unguarded(ArtifactReferrer::Session(SessionId::from(session_id)))
+    ReferrerClaim::unguarded(ArtifactReferrer::Session(SessionId::fixture(session_id)))
         .expect("a session claim is unguarded")
 }
 
@@ -1297,7 +1297,7 @@ async fn fenced_fixture(session_id: &SessionId) -> FencedFixture {
     let request = crate::SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         relation: crate::SessionRelation::Root,
         config: crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,

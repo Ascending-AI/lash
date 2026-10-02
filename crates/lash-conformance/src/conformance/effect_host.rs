@@ -1120,13 +1120,10 @@ async fn effect_host_preserves_scope_metadata(host: Arc<dyn EffectHost>) {
 }
 
 async fn effect_host_rejects_missing_scope_ids(host: Arc<dyn EffectHost>) {
-    // A process scope carries a minted id, which is never empty, so only the
-    // string-keyed scopes can name a missing id.
+    // A session, turn or process id is never blank, so only the scopes keyed
+    // by an operation string can name a missing id.
     let invalid_scopes = [
-        ExecutionScope::turn("", "turn"),
-        ExecutionScope::turn("session", ""),
         ExecutionScope::session_operation("session", ""),
-        ExecutionScope::session_delete(""),
         ExecutionScope::runtime_operation(""),
     ];
 
@@ -1386,8 +1383,10 @@ async fn effect_host_await_event_reinstate_lifts_process_scope_fence(host: Arc<d
         .await
         .expect("reinstating an unfenced scope is idempotent");
 
-    let session_scope =
-        durable_turn_scope(format!("await-event-reinstate-session-{suffix}"), "turn-1");
+    let session_scope = durable_turn_scope(
+        SessionId::fixture(format!("await-event-reinstate-session-{suffix}")),
+        "turn-1",
+    );
     let refused = host
         .reinstate_effect_scope(&session_scope)
         .await
@@ -1684,7 +1683,7 @@ async fn effect_host_await_event_retires_non_session_scopes(host: Arc<dyn Effect
     );
 
     let session_scope = durable_turn_scope(
-        format!("await-event-scope-lever-session-{suffix}"),
+        SessionId::fixture(format!("await-event-scope-lever-session-{suffix}")),
         "turn-scope-lever",
     );
     let err = host

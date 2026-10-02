@@ -125,7 +125,7 @@ pub async fn open_thread_session(
     let thread_id = thread_session_id(&record.channel_id, thread_ts);
 
     let child_exists = core
-        .session(thread_id.clone())
+        .session(lash::SessionId::fixture(thread_id.clone()))
         .durable()
         .await
         .context("durable handle for the thread child session")?
@@ -182,7 +182,7 @@ pub async fn open_thread_session(
             tokio::time::sleep(nap).await;
             backoff = backoff.saturating_mul(2).min(ROOT_ADMISSION_MAX_BACKOFF);
         };
-        let parent_id = lash::SessionId::from(session_id(&record.channel_id));
+        let parent_id = lash::SessionId::fixture(session_id(&record.channel_id));
         let observed_processes = core
             .process_registry()
             .list_observed_by(
@@ -204,7 +204,7 @@ pub async fn open_thread_session(
                 &parent_id,
                 Target::Revision(fork_revision),
                 lash::ForkRequest {
-                    session_id: thread_id.clone().into(),
+                    session_id: lash::SessionId::fixture(thread_id.clone()),
                     relation: lash::persistence::SessionRelation::Fork {
                         source_session_id: parent_id.clone(),
                         source_node_id: None,
@@ -235,7 +235,11 @@ pub async fn open_thread_session(
         }
     };
 
-    let session = match core.session(&thread_id).open().await {
+    let session = match core
+        .session(lash::SessionId::fixture(&thread_id))
+        .open()
+        .await
+    {
         Ok(session) => session,
         Err(error) if session_admission_contended(&error) => {
             return Ok(ThreadSessionOpen::AdmissionContended);
@@ -410,7 +414,7 @@ async fn retain_boundary(
     else {
         return Ok(false);
     };
-    let target = Target::Input(input_id.into());
+    let target = Target::Input(lash::InputId::parse(input_id)?);
     durable
         .pin(target.clone())
         .await

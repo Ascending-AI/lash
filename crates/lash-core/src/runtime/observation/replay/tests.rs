@@ -89,7 +89,7 @@ fn session_observation_event_constructor_rejects_malformed_cursor() {
 #[test]
 fn session_observation_event_accessors_return_cursor_facts() {
     let event = SessionObservationEvent::new(
-        Some(TurnId::from("turn-1".to_string())),
+        Some(TurnId::from("turn-1")),
         SessionCursor::from_store_token("lashsc2:incarnation-1:7:42:session-1")
             .expect("valid store cursor"),
         activity("valid"),
@@ -136,7 +136,7 @@ fn reserved_cursors_are_valid_until_publication_and_abandonment_forces_gap() {
             &SessionId::from("reserved"),
             revision,
             vec![LiveReplayEventDraft::new(
-                None::<String>,
+                None::<TurnId>,
                 activity("reserved"),
             )],
         )
@@ -183,7 +183,7 @@ fn prepared_batches_become_visible_in_reserved_cursor_order() {
         .prepare_publication(
             &SessionId::from("ordered"),
             revision,
-            vec![LiveReplayEventDraft::new(None::<String>, activity("first"))],
+            vec![LiveReplayEventDraft::new(None::<TurnId>, activity("first"))],
         )
         .expect("reserve first publication");
     let second = store
@@ -191,7 +191,7 @@ fn prepared_batches_become_visible_in_reserved_cursor_order() {
             &SessionId::from("ordered"),
             revision,
             vec![LiveReplayEventDraft::new(
-                None::<String>,
+                None::<TurnId>,
                 activity("second"),
             )],
         )
@@ -246,8 +246,8 @@ fn a_redelivered_turn_activity_collapses_into_the_stored_copy() {
             &session,
             revision,
             vec![
-                LiveReplayEventDraft::new(None::<String>, activity_with_id("key#3", "prose")),
-                LiveReplayEventDraft::new(None::<String>, activity_with_id("key#4", "tail")),
+                LiveReplayEventDraft::new(None::<TurnId>, activity_with_id("key#3", "prose")),
+                LiveReplayEventDraft::new(None::<TurnId>, activity_with_id("key#4", "tail")),
             ],
         )
         .expect("prepare replayed batch");
@@ -293,8 +293,8 @@ fn a_fully_redelivered_publication_reserves_nothing() {
             &session,
             revision,
             vec![
-                LiveReplayEventDraft::new(None::<String>, activity_with_id("key#0", "prose")),
-                LiveReplayEventDraft::new(None::<String>, activity_with_id("key#0", "prose")),
+                LiveReplayEventDraft::new(None::<TurnId>, activity_with_id("key#0", "prose")),
+                LiveReplayEventDraft::new(None::<TurnId>, activity_with_id("key#0", "prose")),
             ],
         )
         .expect("prepare fully redelivered batch");
@@ -332,7 +332,7 @@ fn an_in_flight_reservation_dedupes_the_same_activity() {
             &session,
             revision,
             vec![LiveReplayEventDraft::new(
-                None::<String>,
+                None::<TurnId>,
                 activity_with_id("key#0", "a"),
             )],
         )
@@ -342,7 +342,7 @@ fn an_in_flight_reservation_dedupes_the_same_activity() {
             &session,
             revision,
             vec![LiveReplayEventDraft::new(
-                None::<String>,
+                None::<TurnId>,
                 activity_with_id("key#0", "a"),
             )],
         )
@@ -375,7 +375,7 @@ fn an_abandoned_reservation_releases_the_activity_identity() {
             &session,
             revision,
             vec![LiveReplayEventDraft::new(
-                None::<String>,
+                None::<TurnId>,
                 activity_with_id("key#0", "a"),
             )],
         )
@@ -724,7 +724,7 @@ async fn invalidation_fences_pending_publications_and_recovers_after_the_gap() {
             &session_id,
             revision,
             vec![LiveReplayEventDraft::new(
-                None::<String>,
+                None::<TurnId>,
                 activity("pending"),
             )],
         )
@@ -754,7 +754,7 @@ async fn invalidation_fences_pending_publications_and_recovers_after_the_gap() {
             &session_id,
             revision,
             vec![LiveReplayEventDraft::new(
-                None::<String>,
+                None::<TurnId>,
                 activity("after-resync"),
             )],
         )
@@ -807,7 +807,7 @@ fn expiry_tick_releases_one_hundred_thousand_idle_sessions() {
     );
     let mut retained = Vec::new();
     for index in 0..100_000 {
-        let session = SessionId::from(format!("idle-{index}"));
+        let session = SessionId::fixture(format!("idle-{index}"));
         let event = store
             .publish_test_event(&session, SessionRevision(1), None, activity("idle"))
             .expect("publish idle session");
@@ -840,7 +840,7 @@ fn expiry_tick_releases_one_hundred_thousand_idle_sessions() {
 fn invalidation_releases_session_entries() {
     let store = InMemoryLiveReplayStore::default();
     for index in 0..100 {
-        let session = SessionId::from(format!("invalidated-{index}"));
+        let session = SessionId::fixture(format!("invalidated-{index}"));
         store
             .publish_test_event(&session, SessionRevision(1), None, activity("idle"))
             .expect("publish");
@@ -860,7 +860,7 @@ fn deployment_session_capacity_evicts_with_a_gap() {
     for index in 0..4097 {
         store
             .publish_test_event(
-                &SessionId::from(format!("pressure-{index}")),
+                &SessionId::fixture(format!("pressure-{index}")),
                 SessionRevision(1),
                 None,
                 activity("pressure"),
@@ -939,7 +939,7 @@ fn capacity_eviction_retires_pending_reservations() {
             &victim,
             SessionRevision(1),
             vec![LiveReplayEventDraft::new(
-                None::<String>,
+                None::<TurnId>,
                 activity("pending"),
             )],
         )
@@ -1009,7 +1009,7 @@ fn an_oversized_publication_fences_continuity_without_reserving_positions() {
                 &session,
                 SessionRevision(1),
                 vec![LiveReplayEventDraft::new(
-                    None::<String>,
+                    None::<TurnId>,
                     activity(&"x".repeat(20_000))
                 )]
             )
@@ -1051,7 +1051,7 @@ fn pending_and_ready_publications_share_deployment_byte_capacity() {
             &victim,
             SessionRevision(1),
             vec![LiveReplayEventDraft::new(
-                None::<String>,
+                None::<TurnId>,
                 activity(&"a".repeat(5000)),
             )],
         )
@@ -1062,7 +1062,7 @@ fn pending_and_ready_publications_share_deployment_byte_capacity() {
             &victim,
             SessionRevision(1),
             vec![LiveReplayEventDraft::new(
-                None::<String>,
+                None::<TurnId>,
                 activity(&"b".repeat(5000)),
             )],
         )

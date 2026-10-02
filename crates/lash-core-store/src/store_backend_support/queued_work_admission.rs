@@ -82,11 +82,11 @@ pub fn decide_queued_work_draft_admission(
                 return Err(StoreError::QueuedWorkSourceKeyConflict {
                     session_id: draft.session_id.clone(),
                     source_key: source_key.to_string(),
-                    existing_batch_id: batch_id.into(),
+                    existing_batch_id: crate::BatchId::parse(batch_id)?,
                 });
             }
             Ok(QueuedWorkDraftAdmission::Existing {
-                batch_id: batch_id.into(),
+                batch_id: crate::BatchId::parse(batch_id)?,
             })
         }
         _ => Ok(QueuedWorkDraftAdmission::New),

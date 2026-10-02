@@ -70,8 +70,8 @@ async fn run_pinned_controller_turn(
     let activities = RecordingTurnEvents::default();
     let handler = double
         .open_handler(AdmittedScope::turn(
-            session_id.as_str(),
-            TurnId::from(turn_id),
+            lash_core::SessionId::fixture(session_id.as_str()),
+            TurnId::fixture(turn_id),
         ))
         .await
         .expect("open the turn's handler");

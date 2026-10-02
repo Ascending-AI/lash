@@ -465,7 +465,7 @@ mod tests {
         let second = ScopeId::turn(SessionId::from("s"), crate::TurnId::from("a/c"));
         assert_ne!(first.storage_id(), second.storage_id());
         let turn = ScopeId::turn(SessionId::from("s"), crate::TurnId::from("t"));
-        let session = ScopeId::session(turn.storage_id());
+        let session = ScopeId::session(SessionId::fixture(turn.storage_id()));
         assert_ne!(turn.storage_id(), session.storage_id());
     }
 

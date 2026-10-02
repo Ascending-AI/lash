@@ -118,7 +118,7 @@ async fn a_suppressed_append_is_journaled_in_full_and_wakes_nobody() {
 
 fn wake_registration(id: &str, target_session_id: &SessionId) -> ProcessRegistration {
     registration(id)
-        .with_wake_session_id(Some(SessionId::from(target_session_id.to_string())))
+        .with_wake_session_id(Some(target_session_id.clone()))
         .with_extra_event_types([ProcessEventType {
             name: "producer.wake".to_string(),
             payload_schema: crate::JsonSchema::any(),

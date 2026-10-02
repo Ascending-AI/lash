@@ -185,7 +185,7 @@ pub(super) async fn run_once_resident_graph_append_curve(
                     )?;
                     phase_profile.insert(phase.0, phase.1);
 
-                    let derived_node_id = lash_core::NodeId::from(format!(
+                    let derived_node_id = lash_core::NodeId::fixture(format!(
                         "perf-derived/{resident_nodes}/{turn_index}"
                     ));
                     let (_, phase) = measure_runtime_perf_phase(
@@ -396,10 +396,13 @@ mod commit_scaling_tests {
         graph.apply_append(&GraphAppend::Extend { nodes })?;
         graph.remap_node_ids(
             &state.session_id,
-            &[(draft, format!("committed-{turn}").into())],
+            &[(
+                draft,
+                lash_core::NodeId::fixture(format!("committed-{turn}")),
+            )],
         );
         graph.apply_realized_node_timestamps(&[RealizedNodeTimestamp {
-            node_id: format!("committed-{turn}").into(),
+            node_id: lash_core::NodeId::fixture(format!("committed-{turn}")),
             timestamp: "2026-09-30T00:00:01Z".into(),
         }]);
         let mut snapshot = state.to_snapshot();

@@ -597,8 +597,8 @@ async fn live_restate_stateless_service_rebuild_recovers_each_service_kind() {
     let models = Arc::new(AtomicUsize::new(0));
     let core = deployment_core(&engine, &executions, &models);
     engine.install_process_worker(worker(&core));
-    let session_id = lash_core::SessionId::from(run_tag("rebuild-session"));
-    let session = crate::created_session(&core, session_id.as_str())
+    let session_id = lash_core::SessionId::fixture(run_tag("rebuild-session"));
+    let session = crate::created_session(&core, session_id.clone())
         .await
         .open()
         .await
@@ -751,7 +751,7 @@ async fn live_restate_stateless_service_rebuild_recovers_each_service_kind() {
         .expect("fresh turn handler reads its recorded state");
     assert_eq!(reply.body, Some(first_drive.ran[0].clone()));
     let session = core
-        .session(session_id.as_str())
+        .session(lash_core::SessionId::fixture(session_id.as_str()))
         .open()
         .await
         .expect("reopen session on fresh core");

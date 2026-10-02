@@ -43,14 +43,13 @@ impl<'de> serde::Deserialize<'de> for ToolIntentIngressKey {
 
 impl ToolIntentIngressKey {
     pub fn derive(
-        session_id: impl AsRef<str>,
+        session_id: &SessionId,
         execution_scope_id: impl AsRef<str>,
         tool_call_id: &lash_core::ToolCallId,
         intent_index: u32,
     ) -> Self {
-        let session_id = SessionId::from(session_id.as_ref());
         let identity = lash_core::derive_tool_intent_identity(
-            &lash_core::RuntimeOwner::Session(session_id),
+            &lash_core::RuntimeOwner::Session(session_id.clone()),
             execution_scope_id.as_ref(),
             tool_call_id,
             intent_index,
@@ -221,13 +220,6 @@ impl crate::LashCore {
     ) -> crate::Result<ToolIntentIngress> {
         scope.validate().map_err(lash_core::RuntimeError::from)?;
         let session_id = session_id.into();
-        if session_id.trim().is_empty() {
-            return Err(lash_core::RuntimeError::new(
-                lash_core::RuntimeErrorCode::MissingExecutionScopeId,
-                "tool-intent ingress requires a non-empty session id",
-            )
-            .into());
-        }
         if let Some(scoped_session) = scope.session_id()
             && scoped_session != session_id
         {

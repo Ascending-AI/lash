@@ -289,7 +289,7 @@ fn test_boundary(
 fn test_write(session_id: &SessionId, turn_index: usize) -> CheckpointWriteEvent {
     CheckpointWriteEvent {
         schema: crate::store::CHECKPOINT_WRITE_EVENT_SCHEMA.to_string(),
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         attribution: None,
         commit_index: turn_index,
         turn_index,

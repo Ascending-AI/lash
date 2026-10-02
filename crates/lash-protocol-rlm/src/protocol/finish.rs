@@ -34,7 +34,7 @@ pub(super) fn internal_assistant_prose_message_for_turn(
         content,
         reasoning,
         Some(lash_core::MessageOrigin::TurnOutput {
-            turn_id: TurnId::from(turn_id.to_string()),
+            turn_id: turn_id.clone(),
             source: lash_core::TurnOutputSource::Plugin {
                 plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             },

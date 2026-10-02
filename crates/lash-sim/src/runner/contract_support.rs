@@ -82,7 +82,7 @@ async fn contract_execution_boundaries(
             fixed_contract_execution_boundary(events, next_at, execution.row, execution.payload)?;
         for mut write in execution.checkpoint_writes {
             write.attribution = Some(crate::store::CheckpointAttribution {
-                session_id: SessionId::from(boundary.actor_alias.clone()),
+                session_id: SessionId::fixture(boundary.actor_alias.clone()),
                 cause_boundary_id: boundary.boundary_id.clone(),
             });
             // Contract proofs execute in isolated facade worlds whose opaque

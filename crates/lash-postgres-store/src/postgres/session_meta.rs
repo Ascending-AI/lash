@@ -10,19 +10,22 @@ const SESSION_META_CODEC: SessionMetaCodec = SessionMetaCodec::new("PostgreSQL B
 
 pub(crate) fn stored_relation_from_row(row: &PgRow) -> Result<StoredRelation, StoreError> {
     Ok(StoredRelation {
-        session_id: SessionId::from(row.get::<String, _>("session_id")),
+        session_id: SessionId::parse(row.get::<String, _>("session_id"))?,
         relation_kind: row.get("relation_kind"),
         parent_session_id: row
             .get::<Option<String>, _>("parent_session_id")
-            .map(SessionId::from),
+            .map(SessionId::parse)
+            .transpose()?,
         cause: CausalColumns {
             kind: row.get("caused_by_kind"),
             session_id: row
                 .get::<Option<String>, _>("caused_by_session_id")
-                .map(SessionId::from),
+                .map(SessionId::parse)
+                .transpose()?,
             turn_id: row
                 .get::<Option<String>, _>("caused_by_turn_id")
-                .map(lash_core_execution::TurnId::from),
+                .map(lash_core_execution::TurnId::parse)
+                .transpose()?,
             effect_id: row.get("caused_by_effect_id"),
             call_id: row.get("caused_by_call_id"),
             process_id: row
@@ -43,7 +46,8 @@ pub(crate) fn stored_relation_from_row(row: &PgRow) -> Result<StoredRelation, St
         },
         source_session_id: row
             .get::<Option<String>, _>("source_session_id")
-            .map(SessionId::from),
+            .map(SessionId::parse)
+            .transpose()?,
         source_node_id: row.get("source_node_id"),
         pending_observer_intents: Vec::new(),
     })
@@ -89,9 +93,11 @@ pub(crate) async fn load_recorded_lineage_tx(
         .decode_lineage(
             &row.get::<String, _>("relation_kind"),
             row.get::<Option<String>, _>("parent_session_id")
-                .map(SessionId::from),
+                .map(SessionId::parse)
+                .transpose()?,
             row.get::<Option<String>, _>("source_session_id")
-                .map(SessionId::from),
+                .map(SessionId::parse)
+                .transpose()?,
             row.get::<Option<String>, _>("source_node_id"),
         )
         .map(Some)

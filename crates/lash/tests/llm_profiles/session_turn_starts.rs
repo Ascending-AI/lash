@@ -44,7 +44,10 @@ pub(super) fn session_turn_start_of(
     lash_core::ProcessStartRequest::new(
         lash_core::ProcessInput::SessionTurn {
             definition_key: "keys-session-turn-start".into(),
-            create_request: Box::new(create_request.with_session_id(format!("{key}-child"))),
+            create_request: Box::new(
+                create_request
+                    .with_session_id(lash_core::SessionId::fixture(format!("{key}-child"))),
+            ),
             turn_input: Box::new(TurnInput::text(text)),
             result: lash_core::SessionTurnOutcome::Turn,
         },

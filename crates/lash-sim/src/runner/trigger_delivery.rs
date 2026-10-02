@@ -51,14 +51,18 @@ impl SimTriggerHarness {
                 },
                 lash_core::ProcessIdentity::labelled("sim-trigger", Some("sim trigger")),
             )
-            .with_wake_target(lash_core::SessionScope::new(session.clone()));
+            .with_wake_target(lash_core::SessionScope::new(
+                lash_core::SessionId::fixture(session.clone()),
+            ));
             self.store
                 .execute_command(
                     &format!("sim-trigger-register:{}", event.boundary_id),
                     lash_core::TriggerCommand::Register {
-                        owner_scope: lash_core::TriggerOwnerScope::session(session.clone()),
+                        owner_scope: lash_core::TriggerOwnerScope::session(
+                            lash_core::SessionId::fixture(session.clone()),
+                        ),
                         actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
-                            session.clone(),
+                            lash_core::SessionId::fixture(session.clone()),
                         )),
                         draft,
                     },

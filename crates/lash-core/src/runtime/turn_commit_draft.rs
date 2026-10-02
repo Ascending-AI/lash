@@ -147,7 +147,7 @@ impl TurnGraphAppendDraft {
                 return Ok(existing.outcome.clone());
             }
             return Err(crate::PluginError::AppendOperationIdentityConflict {
-                session_id: SessionId::from(session_id.to_string()),
+                session_id: SessionId::parse(session_id.to_string())?,
                 operation_key: draft_namespace,
             });
         }
@@ -167,10 +167,7 @@ impl TurnGraphAppendDraft {
         inner.active_node_ids.extend(node_ids.iter().cloned());
         let outcome = crate::AppendSessionNodesOutcome::Appended {
             node_ids,
-            leaf_node_id: inner
-                .leaf_node_id
-                .clone()
-                .unwrap_or_else(|| crate::NodeId::new(String::new())),
+            leaf_node_id: inner.leaf_node_id.clone(),
         };
         inner.recorded.push(RecordedTurnGraphAppend {
             draft_namespace,
@@ -529,7 +526,7 @@ mod tests {
     fn seeded_state(session_id: &SessionId) -> RuntimeSessionState {
         let clock = crate::SystemClock;
         let mut state = RuntimeSessionState {
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: session_id.clone(),
             ..RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
@@ -605,7 +602,7 @@ mod tests {
         assert_eq!(first_ids.len(), 2);
         assert!(matches!(
             &first,
-            AppendSessionNodesOutcome::Appended { leaf_node_id, .. } if *leaf_node_id == first_ids[1]
+            AppendSessionNodesOutcome::Appended { leaf_node_id, .. } if leaf_node_id.as_ref() == Some(&first_ids[1])
         ));
 
         // Same identity replays the first answer; a reused id with another

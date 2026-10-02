@@ -255,11 +255,6 @@ async fn scoped_borrowed_effect_controller_uses_required_stable_turn_id() {
     let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let recorder = RecordingEffectController::default();
-    assert!(
-        layered_effect_host(&backend, Arc::new(recorder.clone()))
-            .scoped(AdmittedScope::turn("effect-test-session", ""))
-            .is_err()
-    );
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
@@ -1242,7 +1237,7 @@ async fn in_turn_direct_completion_uses_effect_controller_without_out_of_band_co
             lash_core::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
         )
         .expect("valid test runtime scope"),
-        Some(TurnId::from("turn-direct".to_string())),
+        Some(TurnId::from("turn-direct")),
     );
     let completion = direct
         .direct_completion(
@@ -1310,7 +1305,7 @@ async fn direct_clients_from_one_turn_share_sequential_replay_ordinals() {
             lash_core::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
         )
         .expect("valid test runtime scope"),
-        Some(TurnId::from("turn-direct".to_string())),
+        Some(TurnId::from("turn-direct")),
     );
     let second = manager.direct_completion_client(
         ScopedEffectController::shared(
@@ -1318,7 +1313,7 @@ async fn direct_clients_from_one_turn_share_sequential_replay_ordinals() {
             lash_core::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
         )
         .expect("valid test runtime scope"),
-        Some(TurnId::from("turn-direct".to_string())),
+        Some(TurnId::from("turn-direct")),
     );
 
     first
@@ -1375,7 +1370,7 @@ async fn direct_concurrency_requires_keys_and_releases_unkeyed_guard() {
             lash_core::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
         )
         .expect("valid test runtime scope"),
-        Some(TurnId::from("turn-direct".to_string())),
+        Some(TurnId::from("turn-direct")),
     );
 
     let first_client = client.clone();

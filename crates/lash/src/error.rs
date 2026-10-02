@@ -182,6 +182,13 @@ pub enum EmbedError {
     },
 }
 
+/// Blank text a host offers as an identity is the store's refusal of it.
+impl From<lash_sansio::BlankIdentity> for EmbedError {
+    fn from(error: lash_sansio::BlankIdentity) -> Self {
+        Self::Store(error.into())
+    }
+}
+
 impl From<SessionError> for EmbedError {
     fn from(error: SessionError) -> Self {
         match error {

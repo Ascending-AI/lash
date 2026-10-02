@@ -301,7 +301,7 @@ fn sqlite_async_error(error: tokio_rusqlite::Error) -> StoreError {
 fn sqlite_pending_turn_input_insert_error(
     err: rusqlite::Error,
     session_id: &SessionId,
-    input_id: &str,
+    input_id: &lash_core_execution::InputId,
 ) -> StoreError {
     if let rusqlite::Error::SqliteFailure(code, message) = &err
         && code.code == rusqlite::ErrorCode::ConstraintViolation
@@ -312,7 +312,7 @@ fn sqlite_pending_turn_input_insert_error(
         {
             return StoreError::PendingTurnInputIdConflict {
                 session_id: session_id.clone(),
-                input_id: input_id.into(),
+                input_id: input_id.clone(),
             };
         }
     }
@@ -323,7 +323,7 @@ fn sqlite_graph_node_insert_error(
     err: rusqlite::Error,
     session_id: &SessionId,
     generation: u64,
-    node_id: &str,
+    node_id: &lash_core_execution::NodeId,
 ) -> StoreError {
     if let rusqlite::Error::SqliteFailure(code, message) = &err
         && code.code == rusqlite::ErrorCode::ConstraintViolation
@@ -331,13 +331,13 @@ fn sqlite_graph_node_insert_error(
         let message = message.as_deref().unwrap_or_default();
         if message.contains("graph_nodes.session_id, graph_nodes.generation") {
             return StoreError::GraphGenerationCollision {
-                session_id: SessionId::from(session_id.to_string()),
+                session_id: session_id.clone(),
                 generation,
             };
         }
         if message.contains("graph_nodes.node_id") {
             return StoreError::NodeIdCollision {
-                node_id: node_id.to_string().into(),
+                node_id: node_id.clone(),
             };
         }
     }

@@ -177,13 +177,13 @@ pub async fn plugin_state_boundary_trace(
     let host = fixture.host();
     let plugins = host
         .build_session(PluginSessionRequest::creation(
-            parent_id,
+            SessionId::fixture(parent_id),
             Default::default(),
         ))
         .expect("build");
     let handle = fixture.state(parent_id);
     let mut state = RuntimeSessionState {
-        session_id: parent_id.into(),
+        session_id: parent_id.parse().unwrap(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
@@ -216,7 +216,7 @@ pub async fn plugin_state_boundary_trace(
     ));
     assert_eq!(handle.get("counter"), Some(serde_json::json!(1)));
     let crash_state =
-        crate::conformance::helpers::load_window_state(&store, &SessionId::from(parent_id))
+        crate::conformance::helpers::load_window_state(&store, &SessionId::fixture(parent_id))
             .await
             .unwrap()
             .unwrap();
@@ -224,7 +224,7 @@ pub async fn plugin_state_boundary_trace(
     let rebuilt_host = rebuilt_fixture.host();
     let rebuilt = rebuilt_host
         .build_session(PluginSessionRequest::rematerialization(
-            parent_id,
+            SessionId::fixture(parent_id),
             crash_state.plugin_state().unwrap(),
             SessionAuthorityContext::default(),
         ))
@@ -260,13 +260,13 @@ pub async fn plugin_state_boundary_trace(
         "generation unchanged: checkpoint must use its resident reference"
     );
     let durable =
-        crate::conformance::helpers::load_window_state(&store, &SessionId::from(parent_id))
+        crate::conformance::helpers::load_window_state(&store, &SessionId::fixture(parent_id))
             .await
             .unwrap()
             .unwrap();
     let rebuilt = rebuilt_host
         .build_session(PluginSessionRequest::rematerialization(
-            parent_id,
+            SessionId::fixture(parent_id),
             durable.plugin_state().unwrap(),
             SessionAuthorityContext::default(),
         ))
@@ -284,7 +284,7 @@ pub async fn plugin_state_boundary_trace(
     assert_eq!(rebuilt.export_state(), plugins.export_state());
     handle.set("counter", serde_json::json!(2)).unwrap();
     let child = plugins
-        .fork_for_session(child_id, Default::default())
+        .fork_for_session(SessionId::fixture(child_id), Default::default())
         .unwrap();
     let child_handle = fixture.state(child_id);
     assert_eq!(child_handle.generation(), handle.generation());
@@ -300,7 +300,7 @@ pub async fn plugin_state_boundary_trace(
     assert_eq!(child_handle.get("counter"), Some(serde_json::json!(2)));
     assert_eq!(handle.get("child-only"), None);
     let mut child_state = RuntimeSessionState {
-        session_id: child_id.into(),
+        session_id: child_id.parse().unwrap(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
@@ -311,7 +311,7 @@ pub async fn plugin_state_boundary_trace(
         .expect("the live plugin state is captured");
     commit(&child_store, &mut child_state).await;
     let child_durable =
-        crate::conformance::helpers::load_window_state(&child_store, &SessionId::from(child_id))
+        crate::conformance::helpers::load_window_state(&child_store, &SessionId::fixture(child_id))
             .await
             .unwrap()
             .unwrap();
@@ -352,7 +352,10 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) {
     };
     let plugins = fixture
         .host()
-        .build_session(PluginSessionRequest::creation(id, Default::default()))
+        .build_session(PluginSessionRequest::creation(
+            SessionId::fixture(id),
+            Default::default(),
+        ))
         .unwrap();
     let hook_session = plugins.clone();
     let runtime_host = crate::EmbeddedRuntimeHost::new(crate::StoreLawBackend::new().host_config(
@@ -416,7 +419,7 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) {
     let plugins = rebuilt
         .host()
         .build_session(PluginSessionRequest::rematerialization(
-            id,
+            SessionId::fixture(id),
             durable,
             SessionAuthorityContext {
                 plugin_config: state.admitted_plugin_config(),
@@ -474,7 +477,10 @@ async fn registration_state_law(
     let fixture = MockPlugin::default();
     let plugins = fixture
         .host()
-        .build_session(PluginSessionRequest::creation(id, Default::default()))
+        .build_session(PluginSessionRequest::creation(
+            SessionId::fixture(id.to_string()),
+            Default::default(),
+        ))
         .unwrap();
     let handle = fixture.state(id);
     handle.set("counter", serde_json::json!(true)).unwrap();
@@ -488,7 +494,7 @@ async fn registration_state_law(
         .unwrap();
     assert_eq!(handle.generation(), 5);
     let mut state = RuntimeSessionState {
-        session_id: id.into(),
+        session_id: id.parse().unwrap(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
@@ -497,10 +503,11 @@ async fn registration_state_law(
     state.refresh_plugin_states(&plugins).unwrap();
     commit(&store, &mut state).await;
     drop(plugins);
-    let mut durable = crate::conformance::helpers::load_window_state(&store, &SessionId::from(id))
-        .await
-        .unwrap()
-        .unwrap();
+    let mut durable =
+        crate::conformance::helpers::load_window_state(&store, &SessionId::fixture(id))
+            .await
+            .unwrap()
+            .unwrap();
     let rebuilt = MockPlugin {
         registration,
         ..Default::default()
@@ -508,7 +515,7 @@ async fn registration_state_law(
     let plugins = rebuilt
         .host()
         .build_session(PluginSessionRequest::rematerialization(
-            id,
+            SessionId::fixture(id),
             durable.plugin_state().unwrap(),
             SessionAuthorityContext::default(),
         ))
@@ -516,10 +523,11 @@ async fn registration_state_law(
     assert_eq!(rebuilt.state(id).generation(), 6);
     durable.refresh_plugin_states(&plugins).unwrap();
     commit(&store, &mut durable).await;
-    let final_state = crate::conformance::helpers::load_window_state(&store, &SessionId::from(id))
-        .await
-        .unwrap()
-        .unwrap();
+    let final_state =
+        crate::conformance::helpers::load_window_state(&store, &SessionId::fixture(id))
+            .await
+            .unwrap()
+            .unwrap();
     assert_eq!(final_state.plugin_state(), Some(&plugins.export_state()));
     let namespace = &final_state.plugin_state().unwrap().plugins["mock-state"];
     assert_eq!(namespace.generation, 6);
@@ -627,7 +635,7 @@ async fn assert_plugin_write_refused(
 ) {
     let head = |store: Arc<dyn RuntimeStore>| async move {
         store
-            .load_session_head_meta(&SessionId::from(session_id))
+            .load_session_head_meta(&SessionId::fixture(session_id))
             .await
             .unwrap()
             .map(|head| (head.head_revision, head.checkpoint_ref))
@@ -662,7 +670,7 @@ async fn plugin_format_boundary(store: Arc<dyn RuntimeStore>, session_id: &str, 
     factories.push(Arc::new(FormatPlugin(calls.clone())));
     let host = crate::PluginHost::new(factories);
     let mut state = RuntimeSessionState {
-        session_id: session_id.into(),
+        session_id: crate::SessionId::fixture(session_id),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
@@ -715,7 +723,7 @@ async fn plugin_format_boundary(store: Arc<dyn RuntimeStore>, session_id: &str, 
     }
     commit(&store, &mut state).await;
     let mut durable =
-        crate::conformance::helpers::load_window_state(&store, &SessionId::from(session_id))
+        crate::conformance::helpers::load_window_state(&store, &SessionId::fixture(session_id))
             .await
             .unwrap()
             .unwrap();
@@ -724,7 +732,7 @@ async fn plugin_format_boundary(store: Arc<dyn RuntimeStore>, session_id: &str, 
     let original_head = durable.head_revision;
     calls.store(0, std::sync::atomic::Ordering::SeqCst);
     let request = PluginSessionRequest::rematerialization(
-        session_id,
+        SessionId::fixture(session_id),
         &original,
         SessionAuthorityContext {
             plugin_config: durable.admitted_plugin_config(),
@@ -736,7 +744,7 @@ async fn plugin_format_boundary(store: Arc<dyn RuntimeStore>, session_id: &str, 
         assert!(matches!(result, Err(PluginError::Format(_))));
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
         let after =
-            crate::conformance::helpers::load_window_state(&store, &SessionId::from(session_id))
+            crate::conformance::helpers::load_window_state(&store, &SessionId::fixture(session_id))
                 .await
                 .unwrap()
                 .unwrap();
@@ -756,7 +764,7 @@ async fn plugin_format_boundary(store: Arc<dyn RuntimeStore>, session_id: &str, 
     );
     // Materialization publishes nothing.
     let before_commit =
-        crate::conformance::helpers::load_window_state(&store, &SessionId::from(session_id))
+        crate::conformance::helpers::load_window_state(&store, &SessionId::fixture(session_id))
             .await
             .unwrap()
             .unwrap();
@@ -786,7 +794,7 @@ async fn plugin_format_boundary(store: Arc<dyn RuntimeStore>, session_id: &str, 
         durable.refresh_plugin_states(&decoded).unwrap();
         commit(&store, &mut durable).await;
         let after =
-            crate::conformance::helpers::load_window_state(&store, &SessionId::from(session_id))
+            crate::conformance::helpers::load_window_state(&store, &SessionId::fixture(session_id))
                 .await
                 .unwrap()
                 .unwrap();
@@ -810,7 +818,7 @@ async fn plugin_format_boundary(store: Arc<dyn RuntimeStore>, session_id: &str, 
     durable.refresh_plugin_states(&decoded).unwrap();
     commit(&store, &mut durable).await;
     let after =
-        crate::conformance::helpers::load_window_state(&store, &SessionId::from(session_id))
+        crate::conformance::helpers::load_window_state(&store, &SessionId::fixture(session_id))
             .await
             .unwrap()
             .unwrap();

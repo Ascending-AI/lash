@@ -12,15 +12,22 @@ pub(crate) fn stored_relation_from_row(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<StoredRelation> {
     Ok(StoredRelation {
-        session_id: SessionId::from(row.get::<_, String>(0)?),
+        session_id: crate::codec::sql_identity(row.get::<_, String>(0)?)?,
         relation_kind: row.get(1)?,
-        parent_session_id: row.get::<_, Option<String>>(2)?.map(SessionId::from),
+        parent_session_id: row
+            .get::<_, Option<String>>(2)?
+            .map(crate::codec::sql_identity)
+            .transpose()?,
         cause: CausalColumns {
             kind: row.get(3)?,
-            session_id: row.get::<_, Option<String>>(4)?.map(SessionId::from),
+            session_id: row
+                .get::<_, Option<String>>(4)?
+                .map(crate::codec::sql_identity)
+                .transpose()?,
             turn_id: row
                 .get::<_, Option<String>>(5)?
-                .map(lash_core_execution::TurnId::from),
+                .map(crate::codec::sql_identity)
+                .transpose()?,
             effect_id: row.get(6)?,
             call_id: row.get(7)?,
             process_id: row
@@ -34,7 +41,10 @@ pub(crate) fn stored_relation_from_row(
             subscription_revision: row.get(13)?,
             node_id: row.get(14)?,
         },
-        source_session_id: row.get::<_, Option<String>>(15)?.map(SessionId::from),
+        source_session_id: row
+            .get::<_, Option<String>>(15)?
+            .map(crate::codec::sql_identity)
+            .transpose()?,
         source_node_id: row.get(16)?,
         pending_observer_intents: Vec::new(),
     })
@@ -158,8 +168,8 @@ pub(crate) fn load_recorded_lineage(
         |(relation_kind, parent_session_id, source_session_id, source_node_id)| {
             SESSION_META_CODEC.decode_lineage(
                 &relation_kind,
-                parent_session_id.map(SessionId::from),
-                source_session_id.map(SessionId::from),
+                parent_session_id.map(SessionId::parse).transpose()?,
+                source_session_id.map(SessionId::parse).transpose()?,
                 source_node_id,
             )
         },

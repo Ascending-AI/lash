@@ -146,7 +146,7 @@ impl lash::triggers::TriggerStore for RetiringSubscriptionListTriggerStore {
         let session_id = self.session_to_retire.lock_recover().take();
         if let Some(session_id) = session_id {
             self.store_factory
-                .delete_session(&SessionId::from(session_id))
+                .delete_session(&SessionId::fixture(session_id))
                 .await
                 .map_err(|error| lash::plugins::PluginError::Session(error.to_string()))?;
         }
@@ -673,7 +673,7 @@ fn every_terminalize_branch_makes_runtime_shaped_session_deletion_terminal() {
         ];
 
         for (case, result) in cases {
-            let turn_id = TurnId::from(format!("{case}-turn"));
+            let turn_id = TurnId::fixture(format!("{case}-turn"));
             state.track_turn(&session_id, &turn_id);
             let error = crate::restate::terminalize_turn_execution(
                 &state,
@@ -1333,7 +1333,7 @@ async fn one_send_renders_one_user_row_while_running_and_after_the_ui_row_is_rec
                 .with_id("m_ingress_workbench-input-1")
                 .with_origin(lash::messages::MessageOrigin::TurnInput {
                     turn_id: TurnId::from(turn_id),
-                    input_id: Some("workbench-input-1".to_string().into()),
+                    input_id: Some(lash::InputId::from("workbench-input-1")),
                 }),
         ])
         .await
@@ -1573,7 +1573,7 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
                 .with_id("runtime-first-user")
                 .with_origin(lash::messages::MessageOrigin::TurnInput {
                     turn_id: TurnId::from(first_turn_id),
-                    input_id: Some("first-input".to_string().into()),
+                    input_id: Some(lash::InputId::from("first-input")),
                 }),
             lash::plugins::PluginMessage::text(
                 lash::messages::MessageRole::Assistant,
@@ -1801,7 +1801,7 @@ async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill(
             .with_id("m_ingress_workbench-input-fig994")
             .with_origin(lash::messages::MessageOrigin::TurnInput {
                 turn_id: TurnId::from(turn_id),
-                input_id: Some("workbench-input-fig994".to_string().into()),
+                input_id: Some(lash::InputId::from("workbench-input-fig994")),
             });
     committed.parts.push(injected_attachment_part(
         lash::direct::AttachmentSource::stored(attachment),
@@ -1893,7 +1893,7 @@ async fn replayed_prompt_keeps_its_attachment_when_the_product_row_was_lost() {
     .with_id("m_ingress_workbench-input-fig994-replay")
     .with_origin(lash::messages::MessageOrigin::TurnInput {
         turn_id: TurnId::from(turn_id),
-        input_id: Some("workbench-input-fig994-replay".to_string().into()),
+        input_id: Some(lash::InputId::from("workbench-input-fig994-replay")),
     });
     committed.parts.push(injected_attachment_part(
         lash::direct::AttachmentSource::stored(attachment),

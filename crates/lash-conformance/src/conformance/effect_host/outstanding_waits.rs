@@ -13,14 +13,20 @@ pub(crate) async fn effect_host_lists_registered_unresolved_waits(
     resolver: Arc<dyn EffectHost>,
 ) {
     let suffix = uuid::Uuid::new_v4();
-    let session_a = SessionId::from(format!("await-event-list-a-{suffix}"));
-    let session_b = SessionId::from(format!("await-event-list-b-{suffix}"));
-    let scope_a = durable_turn_scope(&session_a, format!("turn-a-{suffix}"));
-    let scope_b = durable_turn_scope(&session_b, format!("turn-b-{suffix}"));
+    let session_a = SessionId::fixture(format!("await-event-list-a-{suffix}"));
+    let session_b = SessionId::fixture(format!("await-event-list-b-{suffix}"));
+    let scope_a = durable_turn_scope(
+        &session_a,
+        lash_core::TurnId::fixture(format!("turn-a-{suffix}")),
+    );
+    let scope_b = durable_turn_scope(
+        &session_b,
+        lash_core::TurnId::fixture(format!("turn-b-{suffix}")),
+    );
 
     assert!(
         observer
-            .list_outstanding_await_event_keys(&SessionId::from(format!(
+            .list_outstanding_await_event_keys(&SessionId::fixture(format!(
                 "await-event-list-unknown-{suffix}"
             )))
             .await

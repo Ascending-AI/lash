@@ -320,7 +320,7 @@ fn core(double: &Double, entries: &[Entry<'_>], worker: &str) -> LashCore {
 }
 
 async fn created_on(core: &LashCore, id: &str, key: &str) -> lash::LashSession {
-    core.session(id)
+    core.session(lash_core::SessionId::fixture(id.to_string()))
         .create(lash::SessionCreation {
             spec: lash::SessionSpec::new(
                 key,
@@ -331,7 +331,10 @@ async fn created_on(core: &LashCore, id: &str, key: &str) -> lash::LashSession {
         })
         .await
         .expect("create the session");
-    core.session(id).open().await.expect("open the session")
+    core.session(lash_core::SessionId::fixture(id.to_string()))
+        .open()
+        .await
+        .expect("open the session")
 }
 
 async fn answer_of(handle: lash::SendHandle) -> String {
@@ -581,7 +584,11 @@ async fn park_of(
 async fn answer_after_redrive(session: &lash::LashSession, root: &str) -> String {
     let output = tokio::time::timeout(std::time::Duration::from_secs(60), async {
         loop {
-            match session.attach_id(root).output().await {
+            match session
+                .attach_id(lash::TurnId::fixture(root.to_string()))
+                .output()
+                .await
+            {
                 Ok(output) => return output,
                 Err(lash::EmbedError::Send(_)) => {
                     tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -1766,7 +1773,7 @@ async fn ledger(
     Vec<lash_core::UsageFactRecord>,
     Vec<lash_core::UsageRunRecord>,
 ) {
-    let owner = lash_core::RuntimeOwner::Session(lash_core::SessionId::from(session_id));
+    let owner = lash_core::RuntimeOwner::Session(lash_core::SessionId::fixture(session_id));
     let limit = std::num::NonZeroU32::new(64).expect("non-zero");
     let facts = core
         .usage_fact_page(&owner, None, limit)
@@ -2255,7 +2262,9 @@ async fn a_host_process_start_refuses_unsupported_inherited_reasoning_before_rec
             "the refused call registered no process"
         );
         assert!(matches!(
-            host.session(format!("{key}-child")).open().await,
+            host.session(lash_core::SessionId::fixture(format!("{key}-child")))
+                .open()
+                .await,
             Err(lash::EmbedError::UnknownSession { .. })
         ));
     }

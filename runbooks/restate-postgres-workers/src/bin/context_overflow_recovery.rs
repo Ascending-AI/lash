@@ -124,7 +124,7 @@ async fn durable_history(
 /// committed overflow and opens a frame before the next turn runs.
 async fn standard_plugin_recovery(run_id: &str) -> Result<Value> {
     let harness = Harness::new(Script::ClassifiedOverflow, Protocol::Standard).await?;
-    let session_id = SessionId::from(format!("context-overflow-standard-{run_id}"));
+    let session_id = SessionId::prefixed("context-overflow-standard-", run_id);
     let session = harness.open(&session_id).await?;
     let overflow = session
         .send(lash::TurnInput::text("summarize the attached report"))
@@ -208,7 +208,7 @@ async fn overflow_and_recovery(
     session_tag: &str,
 ) -> Result<Value> {
     let harness = Harness::new(script, Protocol::Rlm).await?;
-    let session_id = SessionId::from(format!("context-overflow-{session_tag}-{run_id}"));
+    let session_id = SessionId::prefixed("context-overflow-", format!("{session_tag}-{run_id}"));
     let session = harness.open(&session_id).await?;
 
     let overflow = session
@@ -256,7 +256,7 @@ async fn overflow_and_recovery(
 /// the overflow outcome.
 async fn provider_error_control(run_id: &str) -> Result<Value> {
     let harness = Harness::new(Script::ProviderError, Protocol::Rlm).await?;
-    let session_id = SessionId::from(format!("context-overflow-control-{run_id}"));
+    let session_id = SessionId::prefixed("context-overflow-control-", run_id);
     let session = harness.open(&session_id).await?;
 
     let failed = session

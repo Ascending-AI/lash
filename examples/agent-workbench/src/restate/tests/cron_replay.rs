@@ -518,7 +518,7 @@ fn replay_cron_state(
 ) -> crate::restate::WorkbenchCronState {
     crate::restate::WorkbenchCronState {
         request: WorkbenchCronRequest {
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: session_id.clone(),
             source_key: source_key.to_string(),
             expr: "*/10 * * * * *".to_string(),
             tz: Some("UTC".to_string()),

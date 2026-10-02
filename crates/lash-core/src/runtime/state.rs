@@ -64,7 +64,7 @@ pub(crate) async fn refuse_historical_frame_switch(
         return Ok(());
     }
     let historical = store
-        .contains_active_ancestor(&crate::NodeId::from(frame_node_id.as_str()))
+        .contains_active_ancestor(frame_node_id.node_id())
         .await
         .map_err(super::runtime_error_from_store_commit)?;
     if historical {

@@ -120,7 +120,7 @@ async fn drain_transcript(stores: &dyn StoreSet, nonce: &str) -> Transcript {
         ("qb", &a, true, true),
         ("qc", &b, true, false),
     ] {
-        let session_id = SessionId::from(format!("{nonce}-drain-{name}"));
+        let session_id = SessionId::fixture(format!("{nonce}-drain-{name}"));
         let store = admit_test_session(
             stores.session_store_factory(),
             &SessionStoreCreateRequest {
@@ -176,7 +176,7 @@ async fn drain_transcript(stores: &dyn StoreSet, nonce: &str) -> Transcript {
             .expect("seal the root's drive epoch")
             .acquired()
             .expect("drive seal");
-        let root = lash_core::TurnId::from(format!("{nonce}-{name}"));
+        let root = lash_core::TurnId::fixture(format!("{nonce}-{name}"));
         let mut request =
             lash_core::testing::store_fixtures::admit_root_request_for_test(&lease, &root, head);
         request.admitted_generation = stamp.clone();

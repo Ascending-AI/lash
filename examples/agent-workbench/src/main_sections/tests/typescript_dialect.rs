@@ -25,7 +25,11 @@ pub(crate) async fn run_turn_through_the_workbench_open_path(
     // same bounded retry every route applies.
     let session = retry_session_open(
         "test.workbench_open_path",
-        || state.session_builder(session_id.to_string()).open(),
+        || {
+            state
+                .session_builder(SessionId::fixture(session_id.to_string()))
+                .open()
+        },
         |event, payload| state.trace_for_session(session_id, event, payload),
     )
     .await
@@ -36,7 +40,7 @@ pub(crate) async fn run_turn_through_the_workbench_open_path(
     };
     session
         .send(lash::TurnInput::text(text))
-        .id(turn_id.to_string())
+        .id(turn_id.clone())
         .require_finish()
         .expect("require finish")
         .output_into(&ui_events)
@@ -794,7 +798,7 @@ async fn a_cell_reads_what_an_earlier_cell_bound_in_both_dialects() {
         run_turn_through_the_workbench_open_path(
             &state,
             &session_id,
-            &TurnId::from(format!("session-globals-{index}")),
+            &TurnId::fixture(format!("session-globals-{index}")),
             prompt,
         )
         .await;

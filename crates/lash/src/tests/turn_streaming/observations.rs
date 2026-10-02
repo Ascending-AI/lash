@@ -1498,7 +1498,7 @@ pub(super) async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
             .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
             .live_replay_store(replay_store.clone())
             .build(crate::testing::runtime_lease_owner())?;
-        let session_id = SessionId::from(format!("two-histories-{boundary:?}"));
+        let session_id = SessionId::fixture(format!("two-histories-{boundary:?}"));
         let session = core.session(session_id).created().await.open().await?;
         let before = session.observe().recoverable_chat_snapshot();
         let turn_session = session.clone();

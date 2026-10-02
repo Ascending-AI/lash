@@ -357,7 +357,7 @@ impl World {
         )
         .expect("a durable process worker");
         engine.install_process_worker(worker);
-        let session_id = lash::SessionId::from(format!("raa-{tag}"));
+        let session_id = lash::SessionId::fixture(format!("raa-{tag}"));
         core.session(session_id.clone())
             .create(lash::SessionCreation::root(lash::SessionSpec::new(
                 "mock-model",

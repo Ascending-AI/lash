@@ -633,7 +633,7 @@ pub(crate) fn session_vacuum_report(
     report: lash::persistence::VacuumReport,
 ) -> SessionVacuumReport {
     SessionVacuumReport {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         sweep: lash::persistence::MaintenanceReport::sweep(&report).into(),
         removed_node_count: report.removed_node_count,
         removed_pending_turn_input_tombstone_count: report

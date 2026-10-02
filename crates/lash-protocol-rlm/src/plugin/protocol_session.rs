@@ -471,7 +471,7 @@ mod tests {
                 input_tokens: 120_292,
                 ..Default::default()
             }),
-            ..lash_core::SessionSnapshot::new(policy)
+            ..lash_core::SessionSnapshot::new(lash_core::SessionId::from("session"), policy)
         };
         let directives = session
             .soft_warn_directives(lash_core::plugin::CheckpointHookContext {
@@ -539,7 +539,7 @@ mod tests {
                 input_tokens: 8,
                 ..Default::default()
             }),
-            ..lash_core::SessionSnapshot::new(policy)
+            ..lash_core::SessionSnapshot::new(lash_core::SessionId::from("session"), policy)
         };
         let directives = session
             .soft_warn_directives(lash_core::plugin::CheckpointHookContext {
@@ -585,7 +585,7 @@ mod tests {
                 input_tokens: 40_999,
                 ..Default::default()
             }),
-            ..lash_core::SessionSnapshot::new(policy)
+            ..lash_core::SessionSnapshot::new(lash_core::SessionId::from("session"), policy)
         };
 
         let directives = session
@@ -642,7 +642,7 @@ mod tests {
                 input_tokens: used,
                 ..Default::default()
             }),
-            ..lash_core::SessionSnapshot::new(policy)
+            ..lash_core::SessionSnapshot::new(lash_core::SessionId::from("session"), policy)
         };
         lash_core::plugin::CheckpointHookContext {
             session_id: SessionId::from("root"),

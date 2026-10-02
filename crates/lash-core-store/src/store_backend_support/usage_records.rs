@@ -304,7 +304,7 @@ pub fn usage_run_resolution_columns(
 /// The `(owner_kind, owner_id)` pair decodes back to the owner.
 pub fn usage_owner(owner_kind: &str, owner_id: String) -> Result<RuntimeOwner, StoreError> {
     match owner_kind {
-        "session" => Ok(RuntimeOwner::Session(SessionId::from(owner_id))),
+        "session" => Ok(RuntimeOwner::Session(SessionId::parse(owner_id)?)),
         "process" => Ok(RuntimeOwner::Process(
             ProcessId::parse(&owner_id).map_err(|error| usage_corrupt(error.to_string()))?,
         )),

@@ -98,7 +98,11 @@ pub(crate) async fn open_session_once_released(
 ) -> lash::LashSession {
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            match crate::created_session(core, session_id).await.open().await {
+            match crate::created_session(core, SessionId::fixture(session_id.to_string()))
+                .await
+                .open()
+                .await
+            {
                 Ok(session) => return session,
                 Err(error) if crate::session_open_is_contended(&error) => {
                     tokio::time::sleep(Duration::from_millis(20)).await;

@@ -49,7 +49,7 @@ async fn drive_text_turn(
     let handler = double
         .open_handler(AdmittedScope::turn(
             SessionId::from(SESSION),
-            TurnId::from(turn_id),
+            TurnId::fixture(turn_id),
         ))
         .await
         .expect("open the turn's handler");

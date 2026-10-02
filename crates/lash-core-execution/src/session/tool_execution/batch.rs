@@ -154,11 +154,11 @@ impl RuntimeExecutionContext<'_> {
     /// (ADR 0099 §3) and each leaf's admission pinned.
     pub(super) fn tool_child_leaves(
         &self,
-        batch_id: &str,
+        batch_id: &crate::BatchId,
         entries: Vec<PreparedToolLeafEntry>,
     ) -> Vec<PreparedToolChildLeaf> {
         let batch = crate::PreparedToolBatch::new_with_grants(
-            batch_id.to_string(),
+            batch_id.clone(),
             entries
                 .iter()
                 .map(|entry| {

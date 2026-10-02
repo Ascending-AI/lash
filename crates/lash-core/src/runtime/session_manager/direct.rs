@@ -435,7 +435,7 @@ mod tests {
             &env,
             policy.clone(),
             crate::RuntimeSessionState {
-                session_id: crate::SessionId::from(SESSION_ID.to_string()),
+                session_id: crate::SessionId::fixture(SESSION_ID.to_string()),
                 policy: policy.clone(),
                 ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
@@ -509,7 +509,7 @@ mod tests {
 
         let rebound = services
             .bound_tool_child_services(
-                &crate::RuntimeOwner::Session(crate::SessionId::from(SESSION_ID.to_string())),
+                &crate::RuntimeOwner::Session(crate::SessionId::fixture(SESSION_ID.to_string())),
                 &child_env,
             )
             .expect("the transport's own session binds");

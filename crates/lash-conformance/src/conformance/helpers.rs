@@ -246,7 +246,7 @@ pub(crate) async fn load_one_node(
     let page = store
         .load_ancestors(
             session_id,
-            crate::store::HistoryAnchor::Node(crate::NodeId::from(node_id)),
+            crate::store::HistoryAnchor::Node(crate::NodeId::fixture(node_id)),
             crate::store::HistoryBudget {
                 max_nodes: std::num::NonZeroU32::MIN,
                 max_bytes: std::num::NonZeroU64::MAX,

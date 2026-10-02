@@ -340,7 +340,7 @@ impl GeneratedBackendFaultHarness {
                     FixedScriptRunnerError::Assertion(format!("backend fault: {error}"))
                 })?;
         let seed = event.at ^ ((attempt as u64) << 32) ^ 0x4649_4731_3135_3300;
-        let session_id = SessionId::from(format!(
+        let session_id = SessionId::fixture(format!(
             "sim-fault-{}",
             event
                 .boundary_id
@@ -365,7 +365,7 @@ impl GeneratedBackendFaultHarness {
         let (commit, _) = RuntimeCommit::persisted_state_for_test(&state)
             .with_operation(OperationId::turn(
                 &session_id,
-                format!("generated-backend-fault-{attempt}"),
+                lash_core::TurnId::fixture(format!("generated-backend-fault-{attempt}")),
                 "final",
             ))
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
@@ -452,7 +452,7 @@ impl GeneratedBackendFaultHarness {
             .admit_session(&SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
-                session_id: SessionId::from(session_id.to_string()),
+                session_id: session_id.clone(),
                 relation: SessionRelation::Root,
                 config: SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,

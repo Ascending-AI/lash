@@ -96,7 +96,7 @@ pub(crate) fn ensure_session_not_deleted_conn(
         .is_some();
     if deleted {
         Err(StoreError::SessionDeleted {
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: session_id.clone(),
         })
     } else {
         Ok(())

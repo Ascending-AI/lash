@@ -778,8 +778,8 @@ impl Shape {
 )]
 impl World {
     async fn new(tier: &DeclaredStartTier, name: &str, shape: Shape) -> Self {
-        let session_id = SessionId::from(format!("{}-{name}", tier.prefix));
-        let turn_id = TurnId::from(format!("{}-{name}-turn", tier.prefix));
+        let session_id = SessionId::fixture(format!("{}-{name}", tier.prefix));
+        let turn_id = TurnId::fixture(format!("{}-{name}-turn", tier.prefix));
         let mut script = Script::new(shape.children, shape.producer);
         script.barrier = shape.barrier;
         let script = Arc::new(script);

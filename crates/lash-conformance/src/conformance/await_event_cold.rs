@@ -27,7 +27,7 @@ where
 {
     let factory = make_catalog();
     for session_id in session_ids {
-        let session_id = SessionId::from(*session_id);
+        let session_id = SessionId::fixture(*session_id);
         let request = super::session_store_request(
             &session_id,
             "conformance-turn-control",
@@ -85,8 +85,8 @@ async fn cold_replayed_parked_owner<F>(make: &F, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
 {
-    let session_id = SessionId::from(format!("{prefix}-parked-session"));
-    let turn_id = TurnId::from(format!("{prefix}-parked-turn"));
+    let session_id = SessionId::fixture(format!("{prefix}-parked-session"));
+    let turn_id = TurnId::fixture(format!("{prefix}-parked-turn"));
     let scope = durable_turn_scope(&session_id, &turn_id);
     let key = make()
         .await_event_key(
@@ -198,8 +198,8 @@ where
     ];
     for (index, wait) in identities.into_iter().enumerate() {
         let scope = durable_turn_scope(
-            format!("{prefix}-identity-session-{index}"),
-            format!("{prefix}-identity-turn-{index}"),
+            SessionId::fixture(format!("{prefix}-identity-session-{index}")),
+            TurnId::fixture(format!("{prefix}-identity-turn-{index}")),
         );
         let host_a = make();
         let key = host_a
@@ -248,8 +248,8 @@ where
     C: Fn() -> Arc<dyn crate::DeploymentStore>,
 {
     let address = durable_turn_address(
-        format!("{prefix}-race-session"),
-        format!("{prefix}-race-turn"),
+        SessionId::fixture(format!("{prefix}-race-session")),
+        TurnId::fixture(format!("{prefix}-race-turn")),
     );
     let owner_host = make();
     let active = ActiveTurnControl::new(owner_host.as_ref(), address.clone())
@@ -283,8 +283,8 @@ where
     F: Fn() -> Arc<dyn EffectHost>,
 {
     let scope = durable_turn_scope(
-        format!("{prefix}-stable-session"),
-        format!("{prefix}-stable-turn"),
+        SessionId::fixture(format!("{prefix}-stable-session")),
+        TurnId::fixture(format!("{prefix}-stable-turn")),
     );
     let wait = AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture(&format!(
         "{prefix}-stable-call"
@@ -309,8 +309,8 @@ where
     F: Fn() -> Arc<dyn EffectHost>,
 {
     let scope = durable_turn_scope(
-        format!("{prefix}-auth-session"),
-        format!("{prefix}-auth-turn"),
+        SessionId::fixture(format!("{prefix}-auth-session")),
+        TurnId::fixture(format!("{prefix}-auth-turn")),
     );
     let key = make()
         .await_event_key(
@@ -330,8 +330,8 @@ where
     variants.push(key_id);
     let mut scope = key.clone();
     scope.scope = durable_turn_scope(
-        format!("{prefix}-auth-session"),
-        format!("{prefix}-auth-other-turn"),
+        SessionId::fixture(format!("{prefix}-auth-session")),
+        TurnId::fixture(format!("{prefix}-auth-other-turn")),
     );
     variants.push(scope);
     let mut wait = key.clone();
@@ -341,8 +341,8 @@ where
     variants.push(wait);
     let mut session = key.clone();
     session.scope = durable_turn_scope(
-        format!("{prefix}-auth-session-tampered"),
-        format!("{prefix}-auth-turn"),
+        SessionId::fixture(format!("{prefix}-auth-session-tampered")),
+        TurnId::fixture(format!("{prefix}-auth-turn")),
     );
     variants.push(session);
 
@@ -383,8 +383,11 @@ async fn cold_revocation_survives_reopen<F>(make: &F, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
 {
-    let session_id = SessionId::from(format!("{prefix}-revoked-session"));
-    let scope = durable_turn_scope(&session_id, format!("{prefix}-revoked-turn"));
+    let session_id = SessionId::fixture(format!("{prefix}-revoked-session"));
+    let scope = durable_turn_scope(
+        &session_id,
+        TurnId::fixture(format!("{prefix}-revoked-turn")),
+    );
     let key = make()
         .await_event_key(
             &scope,
@@ -500,8 +503,8 @@ async fn cold_cancel_sweep_excludes_turn_control<F>(make: &F, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
 {
-    let session_id = SessionId::from(format!("{prefix}-sweep-session"));
-    let scope = durable_turn_scope(&session_id, format!("{prefix}-sweep-turn"));
+    let session_id = SessionId::fixture(format!("{prefix}-sweep-session"));
+    let scope = durable_turn_scope(&session_id, TurnId::fixture(format!("{prefix}-sweep-turn")));
     let ordinary = make()
         .await_event_key(
             &scope,
@@ -575,8 +578,8 @@ where
     C: Fn() -> Arc<dyn crate::DeploymentStore>,
 {
     let after = durable_turn_address(
-        format!("{prefix}-attach-after-session"),
-        format!("{prefix}-attach-after-turn"),
+        SessionId::fixture(format!("{prefix}-attach-after-session")),
+        TurnId::fixture(format!("{prefix}-attach-after-turn")),
     );
     let after_terminal = crate::TurnTerminal::Committed {
         outcome: crate::TurnOutcome::Finished(crate::TurnFinish::AssistantMessage {
@@ -609,8 +612,8 @@ where
     );
 
     let before = durable_turn_address(
-        format!("{prefix}-attach-before-session"),
-        format!("{prefix}-attach-before-turn"),
+        SessionId::fixture(format!("{prefix}-attach-before-session")),
+        TurnId::fixture(format!("{prefix}-attach-before-turn")),
     );
     let before_terminal = crate::TurnTerminal::Committed {
         outcome: crate::TurnOutcome::Finished(crate::TurnFinish::AssistantMessage {

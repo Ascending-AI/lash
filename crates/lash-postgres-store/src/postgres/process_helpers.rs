@@ -135,8 +135,10 @@ pub(crate) async fn wake_session_id_tx(
         .bind(process_id.as_str())
         .fetch_one(&mut **tx)
         .await
-        .map(|session_id| session_id.map(SessionId::from))
-        .map_err(plugin_sqlx_error)
+        .map_err(plugin_sqlx_error)?
+        .map(SessionId::parse)
+        .transpose()
+        .map_err(PluginError::from)
 }
 
 pub(crate) async fn save_process_tx(

@@ -29,7 +29,7 @@ fn replacing_a_non_current_session_does_not_rotate_the_selected_session() {
     ids.ensure(&retired);
     let selected = "workbench-selected-during-delete";
     ids.record(
-        SessionId::from(selected.to_string()),
+        SessionId::fixture(selected.to_string()),
         "selected".to_string(),
     );
     ids.select(&SessionId::from(selected))
@@ -347,7 +347,7 @@ finish(await handle);
     // The engine drives a session's roots on the most recent open of it, so
     // the turn is sent from the session the probe is installed on, under a
     // claim as the send route would take.
-    let turn_id = TurnId::from(format!("workbench-turn-{}", uuid::Uuid::new_v4()));
+    let turn_id = TurnId::fixture(format!("workbench-turn-{}", uuid::Uuid::new_v4()));
     state.track_turn(&old_session_id, &turn_id);
     let turn = session
         .send(lash::TurnInput::text(turn_text))

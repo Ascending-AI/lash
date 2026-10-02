@@ -171,7 +171,7 @@ struct SurfaceRunner {
 }
 
 fn surface_parked_turn_id(key: u8) -> lash_core::TurnId {
-    lash_core::TurnId::from(format!("surface-parked-turn-{key}"))
+    lash_core::TurnId::fixture(format!("surface-parked-turn-{key}"))
 }
 
 /// One deterministic park record per key, cycling every reason shape the
@@ -193,7 +193,7 @@ fn surface_turn_park(key: u8) -> lash_core::store::TurnParkWrite {
         },
     };
     lash_core::store::TurnParkWrite {
-        session_id: SessionId::from(SURFACE_RUNTIME_SESSION.to_string()),
+        session_id: SessionId::fixture(SURFACE_RUNTIME_SESSION.to_string()),
         turn_id: surface_parked_turn_id(key),
         reason,
         at_ms: 1_000 + u64::from(key),
@@ -410,7 +410,7 @@ impl SurfaceRunner {
             SurfaceOperation::TurnParkLoad => {
                 let loaded = self
                     .runtime
-                    .load_turn_park(&SessionId::from(SURFACE_RUNTIME_SESSION.to_string()))
+                    .load_turn_park(&SessionId::fixture(SURFACE_RUNTIME_SESSION.to_string()))
                     .await
                     .map_err(|error| error.to_string())?;
                 self.turn_park_loads
@@ -418,7 +418,7 @@ impl SurfaceRunner {
                 Ok(())
             }
             SurfaceOperation::TurnParkSettle { key } => {
-                let session = SessionId::from(SURFACE_RUNTIME_SESSION.to_string());
+                let session = SessionId::fixture(SURFACE_RUNTIME_SESSION.to_string());
                 let view = lash_core::SessionStore::new(Arc::clone(&self.runtime), session.clone())
                     .map_err(|error| error.to_string())?;
                 let state = lash_core::store::load_session_window_state(

@@ -7,7 +7,7 @@ use lash_sansio::SessionId;
 #[expect(clippy::expect_used, reason = "conformance fixture assertions")]
 pub async fn queue_head_read_failure_publishes_recoverable_gap(backend: crate::Backend) {
     for committed in [false, true] {
-        let session_id = SessionId::from(format!("queue-head-gap-{committed}"));
+        let session_id = SessionId::fixture(format!("queue-head-gap-{committed}"));
         let factory = backend.session_store_factory();
         let view = factory
             .admit_view(&crate::SessionStoreCreateRequest {
@@ -224,7 +224,7 @@ impl crate::LiveReplayStore for FailingQueuePublication {
 #[expect(clippy::expect_used, reason = "conformance fixture assertions")]
 pub async fn queue_publication_failure_preserves_committed_mutation(backend: crate::Backend) {
     for fail_prepare in [true, false] {
-        let id = SessionId::from(format!("publication-failure-{fail_prepare}"));
+        let id = SessionId::fixture(format!("publication-failure-{fail_prepare}"));
         let store = backend
             .session_store_factory()
             .admit_view(&crate::testing::store_fixtures::session_store_request(
@@ -317,7 +317,7 @@ pub async fn absent_or_deleted_durable_operations_emit_no_driver_wake<F, Fut>(
         .into_backend();
     let factory = backend.session_store_factory();
     for deleted in [false, true] {
-        let id = SessionId::from(format!("no-wake-{deleted}"));
+        let id = SessionId::fixture(format!("no-wake-{deleted}"));
         if deleted {
             factory
                 .admit_session(&crate::testing::store_fixtures::session_store_request(

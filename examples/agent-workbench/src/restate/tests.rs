@@ -540,7 +540,10 @@ fn nested_deleted_session_details_preserve_controller_store_context() {
 
     assert_eq!(
         crate::deleted_session_details(&error),
-        Some(("retired-nested-context", Some("session_deleted"),))
+        Some((
+            &SessionId::from("retired-nested-context"),
+            Some("session_deleted"),
+        ))
     );
 }
 
@@ -554,7 +557,7 @@ async fn cron_occurrence_call_site_terminalizes_typed_refusals_and_retries_unkno
             lash::plugins::PluginError::RuntimeEffectController(
                 lash::runtime::RuntimeEffectControllerError::from(
                     lash::persistence::StoreError::SessionDeleted {
-                        session_id: SessionId::from(session_id.to_string()),
+                        session_id: SessionId::fixture(session_id.to_string()),
                     },
                 ),
             ),
@@ -585,7 +588,7 @@ async fn cron_occurrence_call_site_terminalizes_typed_refusals_and_retries_unkno
         let error = match emit_cron_occurrence_with_effect_controller(
             state,
             WorkbenchCronRequest {
-                session_id: SessionId::from(session_id.to_string()),
+                session_id: SessionId::fixture(session_id.to_string()),
                 source_key: "test-source".to_string(),
                 expr: "*/10 * * * * *".to_string(),
                 tz: Some("UTC".to_string()),

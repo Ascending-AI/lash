@@ -612,7 +612,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         lash_core::Lifetime::Detached,
     )
     .with_host_start_key("observed-process")
-    .with_observers(["process-observation-events".to_string()]);
+    .with_observers([lash_core::SessionId::from("process-observation-events")]);
     let started = session
         .admin()
         .processes()
@@ -1037,7 +1037,7 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
                 serde_json::Value::Null,
                 lash_core::Lifetime::Detached,
             )
-            .with_observers(["host-cancel".to_string()]),
+            .with_observers([lash_core::SessionId::from("host-cancel")]),
             runtime_operation_scope(&core, "host-cancel-start").await,
         )
         .await?
@@ -1106,7 +1106,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
                     payload_schema: lash_core::JsonSchema::any(),
                     semantics: lash_core::ProcessEventSemanticsSpec::default(),
                 }])
-                .with_observers(["host-filter-bypass".to_string()]),
+                .with_observers([lash_core::SessionId::from("host-filter-bypass")]),
                 runtime_operation_scope(&core, format!("{label}-start")).await,
             )
             .await?
@@ -1212,7 +1212,7 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
                     serde_json::Value::Null,
                     lash_core::Lifetime::Detached,
                 )
-                .with_observers(["host-cancel-all".to_string()]),
+                .with_observers([lash_core::SessionId::from("host-cancel-all")]),
                 runtime_operation_scope(&core, format!("{label}-start")).await,
             )
             .await?
@@ -1431,8 +1431,8 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
     ];
 
     for (case, backend) in cases {
-        let parent_session_id = SessionId::from(format!("managed-observer-parent-{case}"));
-        let child_session_id = SessionId::from(format!("managed-observer-child-{case}"));
+        let parent_session_id = SessionId::fixture(format!("managed-observer-parent-{case}"));
+        let child_session_id = SessionId::fixture(format!("managed-observer-child-{case}"));
         let backend = DecoratedBackend::over(backend).process_work(|registry| {
             lash_core::ProcessWorkWiring::new(
                 lash_core::facade_support::watch_process_registry(registry),

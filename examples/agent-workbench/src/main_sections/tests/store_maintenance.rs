@@ -156,7 +156,7 @@ async fn store_maintenance_fixture(provider: ProviderHandle) -> StoreMaintenance
 
 fn vacuum_only_request(session_id: &SessionId) -> RunStoreMaintenanceRequest {
     RunStoreMaintenanceRequest {
-        vacuum_session_ids: vec![SessionId::from(session_id.to_string())],
+        vacuum_session_ids: vec![session_id.clone()],
         reclaim_attachments: None,
     }
 }
@@ -229,7 +229,7 @@ async fn store_maintenance_vacuum_reclaims_only_settled_rows_inner() {
         .expect("open the vacuum test session");
     let cancelled = session
         .durable()
-        .cancel_pending_turn_input(&lash::InputId::from(settled.input_id.as_str()))
+        .cancel_pending_turn_input(&lash::InputId::fixture(settled.input_id.as_str()))
         .await
         .expect("cancel the second input");
     assert!(
@@ -374,7 +374,7 @@ async fn store_maintenance_reclaims_only_unreferenced_attachments_inner() {
     .expect("upload the attachment a turn will reference");
     let referenced_id = uploaded.attachment.id.clone();
 
-    let turn_id = TurnId::from(format!("store-maintenance-{}", uuid::Uuid::new_v4()));
+    let turn_id = TurnId::fixture(format!("store-maintenance-{}", uuid::Uuid::new_v4()));
     let request = restate::UserTurnRequest {
         turn_id: turn_id.clone(),
         session_id: session_id.clone(),

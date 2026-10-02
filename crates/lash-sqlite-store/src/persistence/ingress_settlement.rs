@@ -214,7 +214,7 @@ pub(super) fn settle_commit_ingress_conn(
         affected_inputs.push((
             row.enqueue_seq,
             lash_core_execution::TurnCancelAffectedInput {
-                input_id: row.input_id.into(),
+                input_id: row.input_id.try_into()?,
                 payload,
                 disposition,
             },

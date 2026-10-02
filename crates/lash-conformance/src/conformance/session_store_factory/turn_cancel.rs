@@ -953,7 +953,7 @@ pub(super) async fn turn_cancel_scope_retirement_serializes_with_authorization(
         crate::TurnCancelClosureAuthorization,
     ) {
         let request = session_store_request(
-            &SessionId::from(format!("turn-cancel-scope-retirement:{suffix}")),
+            &SessionId::fixture(format!("turn-cancel-scope-retirement:{suffix}")),
             "turn-cancel-scope-retirement-model",
             crate::SessionRelation::Root,
         );
@@ -981,7 +981,7 @@ pub(super) async fn turn_cancel_scope_retirement_serializes_with_authorization(
             .expect("select physical cancellation owner");
         let address = crate::TurnAddress::new(
             &request.session_id,
-            TurnId::from(format!("turn-cancel-scope-retirement:{suffix}:turn")),
+            TurnId::fixture(format!("turn-cancel-scope-retirement:{suffix}:turn")),
         );
         let authorization = closure_authorization(
             &address,
@@ -1141,11 +1141,11 @@ pub(super) async fn turn_cancel_undelivered_crash_matrix(factory: Arc<dyn crate:
     ) {
         let suffix = format!("{:?}-{:?}-{:?}", mode, disposition, path).to_ascii_lowercase();
         let request = session_store_request(
-            &SessionId::from(format!("turn-cancel-{suffix}")),
+            &SessionId::fixture(format!("turn-cancel-{suffix}")),
             "turn-cancel-drop-model",
             crate::SessionRelation::Root,
         );
-        let turn_id = TurnId::from(format!("turn-cancel-{suffix}:turn"));
+        let turn_id = TurnId::fixture(format!("turn-cancel-{suffix}:turn"));
         let store = factory
             .admit_view(&request)
             .await

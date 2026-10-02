@@ -51,11 +51,15 @@ async fn core(
 }
 
 async fn tool_names(core: &LashCore, session_id: &str) -> Vec<String> {
-    let session = crate::created_session(core, "mock-model", session_id)
-        .await
-        .open()
-        .await
-        .expect("session");
+    let session = crate::created_session(
+        core,
+        "mock-model",
+        lash_core::SessionId::fixture(session_id.to_string()),
+    )
+    .await
+    .open()
+    .await
+    .expect("session");
     let mut names: Vec<String> = session
         .admin()
         .tools()

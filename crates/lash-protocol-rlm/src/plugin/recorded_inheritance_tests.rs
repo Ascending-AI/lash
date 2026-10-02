@@ -180,7 +180,10 @@ async fn register_on(
         })
     });
     host.in_handler(
-        lash_core::AdmittedScope::turn("recorded-process-behaviour", starter),
+        lash_core::AdmittedScope::turn(
+            "recorded-process-behaviour",
+            TurnId::fixture(starter.to_string()),
+        ),
         attempt,
     )
     .await;
@@ -217,7 +220,11 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(
         .compile_lashlang_module(
             &creating.plugin_host,
             false,
-            crate::LashlangModuleCompileRequest::new(name, looping_process(), env_spec.clone()),
+            crate::LashlangModuleCompileRequest::new(
+                SessionId::fixture(name.to_string()),
+                looping_process(),
+                env_spec.clone(),
+            ),
         )
         .await
         .expect("the process module compiles");
@@ -349,8 +356,8 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(
 /// its cell runs a loop the creating host's bound would stop.
 async fn a_child_session_runs_under_its_parents_recorded_behaviour(double: Double, name: &str) {
     let backend = double.lash_backend();
-    let parent_id = SessionId::from(format!("{name}-parent"));
-    let child_id = SessionId::from(format!("{name}-child"));
+    let parent_id = SessionId::fixture(format!("{name}-parent"));
+    let child_id = SessionId::fixture(format!("{name}-child"));
     let mut parent: lash_core::PersistedSessionConfig = policy().into();
     parent.plugin_config = PluginHost::new(vec![super::recorded_behaviour_tests::factory(
         creating_config(),
@@ -446,7 +453,7 @@ async fn a_child_session_runs_under_its_parents_recorded_behaviour(double: Doubl
     };
     double
         .run_in_handler(
-            lash_core::AdmittedScope::turn(&child_id, TurnId::from(format!("{name}-root"))),
+            lash_core::AdmittedScope::turn(&child_id, TurnId::fixture(format!("{name}-root"))),
             attempt,
         )
         .await

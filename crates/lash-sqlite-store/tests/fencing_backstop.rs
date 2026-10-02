@@ -221,7 +221,7 @@ async fn admit(
         .admit_root(
             &lash_core_execution::testing::store_fixtures::admit_root_request_for_test(
                 fence,
-                &TurnId::from(root),
+                &TurnId::fixture(root),
                 AdmittedHead::Batch(head.clone()),
             ),
         )

@@ -78,7 +78,7 @@ impl LawRig {
         stores: Arc<dyn crate::StoreSet>,
         runner: &dyn ConformanceTurnRunner,
     ) -> Self {
-        let session_id = SessionId::from(format!("{prefix}-{law}"));
+        let session_id = SessionId::fixture(format!("{prefix}-{law}"));
         let source_key = format!("{prefix}-{law}-source");
         let idempotency_key = format!("{prefix}-{law}-occurrence");
         let triggers = stores.trigger_store();

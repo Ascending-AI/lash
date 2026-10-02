@@ -208,7 +208,7 @@ pub async fn run(args: PluginStateArgs) -> Result<PluginStateReport> {
     let stores = super::open_sqlite(&args.store_dir).await?;
     let store: Arc<dyn RuntimeStore> = stores.session_store_factory();
     let host = PluginHost::new(vec![Arc::new(ProbePlugin)]);
-    let session = SessionId::from(args.session.as_str());
+    let session = SessionId::parse(args.session.as_str())?;
     let mut report = PluginStateReport {
         build: BuildLabel::current(),
         fleet: store.fleet_format().version(),

@@ -115,7 +115,7 @@ async fn probe_session(
         .serve_test_llm_profile(provider_handle, model.clone())
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    core.session(session_id.to_string())
+    core.session(lash_core::SessionId::fixture(session_id.to_string()))
         .create(lash::SessionCreation::root(
             lash::SessionSpec::new(
                 model.wire_model,
@@ -127,7 +127,7 @@ async fn probe_session(
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let session = core
-        .session(session_id.to_string())
+        .session(lash_core::SessionId::fixture(session_id.to_string()))
         .open()
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
@@ -137,7 +137,7 @@ async fn probe_session(
     let _outcome = engine
         .run_turn(
             &session,
-            format!("{session_id}-turn"),
+            lash_core::TurnId::fixture(format!("{session_id}-turn")),
             Arc::new(super::runtime_proofs::RuntimeProofRecordingEvents::default()),
             Arc::new(|session: &lash::LashSession| {
                 Ok(session.send(lash::TurnInput::text("Run the attempt usage probe.")))

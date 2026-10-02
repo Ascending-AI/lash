@@ -93,7 +93,6 @@ first_party_codes! {
         Self::EffectScopeNotQuiescent,
         Self::EffectGroupLifecyclePinned,
         Self::AwaitEventScopeNotRetirable,
-        Self::InvalidAwaitEventSessionId,
         Self::InvalidAwaitEventWaitIdentity,
         Self::InvalidTurnCancelRequest,
         Self::LiveReplay,
@@ -505,7 +504,7 @@ fn turn_input_source_key_conflict_is_a_typed_identity_conflict() {
     let conflict = || crate::store::StoreError::PendingTurnInputSourceKeyConflict {
         session_id: SessionId::from("session"),
         source_key: "host:retry".to_string(),
-        existing_input_id: crate::InputId::new("ti:existing"),
+        existing_input_id: crate::InputId::from("ti:existing"),
     };
     for error in [
         crate::runtime_error::runtime_error_from_turn_input_admission(conflict()),

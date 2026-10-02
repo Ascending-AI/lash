@@ -297,7 +297,7 @@ pub(super) async fn drive_turn_control_scenarios(
     // claimed. What must hold is stricter than
     // the old identity check: the turn completes exactly once, against exactly one
     // acceptance, with no duplicate or conflicting settlement anywhere.
-    assert_recovered_turn_converged(storage.pool(), &TurnId::from(recovery.workflow_id)).await?;
+    assert_recovered_turn_converged(storage.pool(), &TurnId::parse(recovery.workflow_id)?).await?;
 
     println!(
         "turn-control gates passed: cross-process; cancel-before-start; seal-vs-cancel; owner-crash-recovery; terminal-attach-evidence; exact-address-late-noop; repeated-request-policy"
@@ -791,7 +791,10 @@ pub(super) fn turn_control_request(workflow_id: &str, fail_once: bool) -> TurnRe
 
 pub(super) async fn turn_address(request: &TurnRequest) -> Result<TurnAddress> {
     let session_id = turn_session_id(&request.workflow_id);
-    Ok(TurnAddress::new(session_id, request.workflow_id.clone()))
+    Ok(TurnAddress::new(
+        session_id,
+        lash::TurnId::parse(request.workflow_id.clone())?,
+    ))
 }
 
 pub(super) fn cancel_request(address: TurnAddress, request_id: &str) -> TurnCancelRequest {

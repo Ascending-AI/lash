@@ -743,7 +743,7 @@ pub(super) fn empty_request() -> LlmRequest {
         generation: Default::default(),
         attachment_acceptance: Default::default(),
         scope: LlmRequestScope::new(
-            "runtime-perf-empty".to_string(),
+            lash_core::SessionId::fixture("runtime-perf-empty".to_string()),
             "runtime-perf-empty:frame".to_string(),
             "runtime-perf-empty:request".to_string(),
         ),

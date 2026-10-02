@@ -83,14 +83,14 @@ async fn admit(
     head: AdmittedHead,
 ) -> Result<RootAdmission, TestCaseError> {
     store
-        .admit_root(&admission_request(fence, &TurnId::from(root), head, 64))
+        .admit_root(&admission_request(fence, &TurnId::fixture(root), head, 64))
         .await
         .map_err(fail)?
         .ok_or_else(|| fail("the admission missed its head"))
 }
 
 fn completing(root: &str, admission: &RootAdmission) -> IngressSettlement {
-    let mut settlement = IngressSettlement::new(TurnId::from(root));
+    let mut settlement = IngressSettlement::new(TurnId::fixture(root));
     if let Some(queued) = &admission.queued {
         settlement.completed_batches.push(queued.completion());
     }

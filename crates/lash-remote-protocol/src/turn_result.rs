@@ -60,8 +60,6 @@ impl RemoteTurnReport {
     }
 
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        require_non_empty("RemoteTurnReport", "session_id", &self.session_id)?;
-        require_non_empty("RemoteTurnReport", "turn_id", &self.turn_id)?;
         if let RemoteTurnOutcome::Stopped {
             stop: RemoteTurnStop::Cancelled { evidence },
         } = &self.outcome
@@ -157,13 +155,12 @@ impl RemoteCausalRef {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         use crate::registry_errors::require_non_empty;
         match self {
-            Self::Turn {
-                session_id,
-                turn_id,
-            } => {
-                require_non_empty(type_name, "caused_by.session_id", session_id)?;
-                require_non_empty(type_name, "caused_by.turn_id", turn_id)
-            }
+            // A session, turn or process id is well formed by construction,
+            // and so is a `ToolCallId`.
+            Self::Turn { .. }
+            | Self::ToolCall { .. }
+            | Self::Process { .. }
+            | Self::ProcessEvent { .. } => Ok(()),
             Self::Effect { address } => {
                 address
                     .validate()
@@ -171,13 +168,6 @@ impl RemoteCausalRef {
                         type_name,
                         message: format!("caused_by.address: {error}"),
                     })
-            }
-            // A `ToolCallId` is well formed by construction.
-            Self::ToolCall { session_id, .. } => {
-                require_non_empty(type_name, "caused_by.session_id", session_id)
-            }
-            Self::Process { process_id } | Self::ProcessEvent { process_id, .. } => {
-                require_non_empty(type_name, "caused_by.process_id", process_id)
             }
             Self::TriggerOccurrence {
                 occurrence_id,
@@ -198,11 +188,7 @@ impl RemoteCausalRef {
                 }
                 Ok(())
             }
-            Self::SessionNode {
-                session_id,
-                node_id,
-            } => {
-                require_non_empty(type_name, "caused_by.session_id", session_id)?;
+            Self::SessionNode { node_id, .. } => {
                 require_non_empty(type_name, "caused_by.node_id", node_id)
             }
         }
@@ -390,7 +376,6 @@ impl RemoteSendOutcome {
     /// relationship between a send's state and its data.
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         const TYPE: &str = "RemoteSendOutcome";
-        require_non_empty(TYPE, "session_id", self.session_id())?;
         require_non_empty(TYPE, "input_id", self.input_id())?;
         for gap in self.gaps() {
             gap.validate()?;

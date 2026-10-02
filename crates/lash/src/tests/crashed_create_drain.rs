@@ -130,7 +130,7 @@ async fn headless_row(
     seams: &dyn lash_core::store::StoreTestSupport,
     session: &str,
 ) -> Result<lash_core::store::SessionStore> {
-    let session_id = SessionId::from(session);
+    let session_id = SessionId::fixture(session);
     crate::tests::create_catalog_session(core, session).await?;
     seams
         .delete_session_head_for_testing(&session_id)
@@ -163,7 +163,7 @@ async fn head_of(
 /// and records what the creation resolved.
 async fn crashed_create(core: &LashCore, session: &str) -> Result<CrashedCreate> {
     let creator = core
-        .session(format!("{session}-creator"))
+        .session(SessionId::fixture(format!("{session}-creator")))
         .created()
         .await
         .open()
@@ -180,7 +180,7 @@ async fn crashed_create(core: &LashCore, session: &str) -> Result<CrashedCreate>
             lash_core::SessionStartPoint::Empty,
             lash_core::PluginOptions::default(),
         )
-        .with_session_id(id)
+        .with_session_id(lash_core::SessionId::fixture(id))
     };
     let twin = format!("{session}-twin");
     lifecycle
@@ -210,7 +210,7 @@ async fn crashed_create(core: &LashCore, session: &str) -> Result<CrashedCreate>
     drop(creator);
 
     let view = |id: &str| {
-        let id = SessionId::from(id);
+        let id = SessionId::fixture(id);
         async move {
             lash_core::runtime::live_session_view(&core.store_factory, &id)
                 .await
@@ -243,7 +243,7 @@ async fn queue_an_append(
     store
         .enqueue_queued_work(
             lash_core_store::queued_work_vocabulary::QueuedWorkBatchDraft::new(
-                SessionId::from(session),
+                SessionId::fixture(session),
                 lash_core::DeliveryPolicy::AfterCurrentTurnCommit,
                 lash_core_store::queued_work_vocabulary::SessionCommand::AppendSessionNodes {
                     request: Box::new(lash_core::AppendSessionNodesRequest {
@@ -251,7 +251,8 @@ async fn queue_an_append(
                         nodes: vec![lash_core::SessionAppendNode::message(
                             lash_core::PluginMessage::text(lash_core::MessageRole::User, NOTE),
                         )],
-                        requires_ancestor_node_id: ancestor.map(|id| id.to_string().into()),
+                        requires_ancestor_node_id: ancestor
+                            .map(|id| lash_core::NodeId::fixture(id.to_string())),
                     }),
                 },
             )
@@ -267,7 +268,7 @@ async fn queue_an_append(
 async fn schedule_a_drive(core: &LashCore, session: &str) {
     let engine_port = core.substrate_slot.ports().await.queued;
     engine_port.schedule_drive(
-        &SessionId::from(session),
+        &SessionId::fixture(session),
         lash_core::engine::DriveRequestId::new("after-crashed-create"),
     );
 }
@@ -446,7 +447,7 @@ async fn a_session_drained_after_a_crashed_create_reopens_on_a_new_deployment(
     let restarted = redeploy(double).await;
     let core = core_over(&restarted, 512)?;
     let turn = tokio::time::timeout(std::time::Duration::from_secs(60), async {
-        core.session(id.as_str())
+        core.session(SessionId::fixture(id.clone()))
             .durable()
             .await?
             .send(TurnInput::text("answer after the drain"))

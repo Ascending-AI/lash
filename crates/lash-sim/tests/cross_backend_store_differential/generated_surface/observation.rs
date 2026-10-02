@@ -201,7 +201,7 @@ pub(super) fn read_sqlite_surface(
             .unwrap();
         stmt.query_map([], |row| {
             Ok((
-                SessionId::from(row.get::<_, String>(0)?),
+                SessionId::fixture(row.get::<_, String>(0)?),
                 stored_process_id(row.get::<_, String>(1)?),
             ))
         })
@@ -263,7 +263,7 @@ pub(super) fn read_sqlite_surface(
             .unwrap();
         stmt.query_map([], |row| {
             Ok((
-                SessionId::from(row.get::<_, String>(0)?),
+                SessionId::fixture(row.get::<_, String>(0)?),
                 stored_process_id(row.get::<_, String>(1)?),
                 row.get::<_, i64>(2)? as u64,
             ))
@@ -416,7 +416,10 @@ pub(super) async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
     .unwrap()
     .into_iter()
     .map(|(session_id, process_id): (String, String)| {
-        (SessionId::from(session_id), stored_process_id(process_id))
+        (
+            SessionId::fixture(session_id),
+            stored_process_id(process_id),
+        )
     })
     .collect();
     type PgWakeRow = (
@@ -483,7 +486,7 @@ pub(super) async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
         .into_iter()
         .map(|(session, process, sequence)| {
             (
-                SessionId::from(session),
+                SessionId::fixture(session),
                 stored_process_id(process),
                 sequence as u64,
             )

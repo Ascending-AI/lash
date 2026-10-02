@@ -188,8 +188,11 @@ fn pending_turn_inputs_reject_a_duplicate_source_key_insert() {
     let error = connection
         .execute(insert, rusqlite::params![2, "second", "key"])
         .expect_err("a duplicate (session_id, source_key) insert must abort");
-    let mapped =
-        crate::sqlite_pending_turn_input_insert_error(error, &SessionId::from("session"), "second");
+    let mapped = crate::sqlite_pending_turn_input_insert_error(
+        error,
+        &SessionId::from("session"),
+        &lash_core_execution::InputId::from("second"),
+    );
     assert!(
         matches!(
             &mapped,
@@ -201,8 +204,11 @@ fn pending_turn_inputs_reject_a_duplicate_source_key_insert() {
     let error = connection
         .execute(insert, rusqlite::params![3, "first", "other-key"])
         .expect_err("a duplicate input_id insert must abort");
-    let mapped =
-        crate::sqlite_pending_turn_input_insert_error(error, &SessionId::from("session"), "first");
+    let mapped = crate::sqlite_pending_turn_input_insert_error(
+        error,
+        &SessionId::from("session"),
+        &lash_core_execution::InputId::from("first"),
+    );
     assert!(
         matches!(&mapped, StoreError::PendingTurnInputIdConflict { .. }),
         "the duplicate input_id insert maps to the typed identity conflict: {mapped:?}"
@@ -324,13 +330,13 @@ async fn session_listing_statement_count_is_session_count_invariant() {
     let mut expected_relations = BTreeMap::new();
 
     for index in 0..8 {
-        let session_id = SessionId::from(format!("listing-statement-count-{index}"));
+        let session_id = SessionId::fixture(format!("listing-statement-count-{index}"));
         let relation = if index == 0 {
             lash_core_execution::SessionRelation::Root
         } else {
             lash_core_execution::SessionRelation::Fork {
                 source_session_id: SessionId::from("listing-statement-count-0"),
-                source_node_id: Some(format!("source-node-{index}").into()),
+                source_node_id: Some(lash_core::NodeId::fixture(format!("source-node-{index}"))),
             }
         };
         store
@@ -433,7 +439,7 @@ async fn durable_state(
     session_id: &SessionId,
 ) -> lash_core_execution::RuntimeSessionState {
     let state = lash_core_execution::RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
@@ -477,7 +483,7 @@ async fn checkpoint_component_statement_count_is_depth_invariant() {
             .expect("open depth-invariance store");
         let mut state = durable_state(
             &store,
-            &SessionId::from(format!("sqlite-checkpoint-depth-{depth}")),
+            &SessionId::fixture(format!("sqlite-checkpoint-depth-{depth}")),
         )
         .await;
         let mut seed = RuntimeCommit::persisted_state_for_test(&state);
@@ -1120,7 +1126,7 @@ async fn concurrent_admission_creates_both_sessions_in_one_catalog() {
     let dir = tempfile::tempdir().expect("admission tempdir");
     let store = SqliteStore::open(dir.path()).await.expect("open catalog");
     let request = |session_id: &str| SessionStoreCreateRequest {
-        session_id: SessionId::from(session_id),
+        session_id: SessionId::fixture(session_id),
         relation: lash_core_execution::SessionRelation::Root,
         config: lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,

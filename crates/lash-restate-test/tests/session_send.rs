@@ -493,7 +493,7 @@ async fn withdraw_while_queued_vs_cancel_while_running() {
         .restate()
         .turn_work_driver()
         .request_cancel(lash::TurnCancelRequest::new(
-            lash::TurnAddress::new(session_id.as_str(), root.as_str()),
+            lash::TurnAddress::new(session_id.clone(), lash_core::TurnId::fixture(root.clone())),
             "withdraw-cancel-stop",
             Some("user".to_owned()),
         ))

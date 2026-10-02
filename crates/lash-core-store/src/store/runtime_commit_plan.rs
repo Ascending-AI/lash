@@ -271,7 +271,7 @@ impl RuntimeCommitPlanner {
             && !facts.requested_ancestor_is_active
         {
             return Err(StoreError::AppendAncestorNotActive {
-                required_node_id: crate::NodeId::from(required_node_id),
+                required_node_id: crate::NodeId::parse(required_node_id)?,
             });
         }
         validate_head_revision(

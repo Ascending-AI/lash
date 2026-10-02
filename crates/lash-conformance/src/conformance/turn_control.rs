@@ -17,7 +17,7 @@ use pretty_assertions::assert_eq;
 
 fn address(label: &str) -> TurnAddress {
     durable_turn_address(
-        format!("turn-control-{label}-{}", uuid::Uuid::new_v4()),
+        SessionId::fixture(format!("turn-control-{label}-{}", uuid::Uuid::new_v4())),
         "turn-a",
     )
 }

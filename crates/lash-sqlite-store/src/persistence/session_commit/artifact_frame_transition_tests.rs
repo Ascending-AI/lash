@@ -10,7 +10,7 @@ fn first_commit_may_end_its_own_appended_frame_open() {
     let successor = FrameNodeId::new("successor-frame").expect("frame id");
     let graph = lash_core_execution::store::GraphAppend::Extend {
         nodes: vec![lash_core_execution::SessionNodeRecord {
-            node_id: first.as_str().to_owned().into(),
+            node_id: lash_core::NodeId::fixture(first.as_str().to_owned()),
             parent_node_id: None,
             timestamp: "2026-09-29T00:00:00Z".into(),
             payload: lash_core_execution::SessionNodePayload::FrameOpen {
@@ -178,7 +178,7 @@ async fn committed_first_frame(
     session: &str,
     clock: &lash_core::testing::TestClock,
 ) -> lash_core_execution::RuntimeSessionState {
-    let session_id = SessionId::from(session);
+    let session_id = SessionId::fixture(session);
     lash_core_execution::SessionCatalogStore::admit_session(
         store,
         &lash_core_execution::testing::store_fixtures::root_session_request(&session_id),

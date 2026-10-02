@@ -1123,7 +1123,7 @@ async fn run_scenario(
     } else {
         "serial-safe"
     };
-    let session_id = lash_sansio::SessionId::from(format!(
+    let session_id = lash_sansio::SessionId::fixture(format!(
         "{prefix}-{}-{}-{label}",
         producer.label, plan.scenario
     ));
@@ -1355,7 +1355,7 @@ impl ScenarioObservations {
 /// of the session so a handler-bound tier can scope its own controller to the
 /// same turn before handing it to [`run_scenario_on_session`].
 pub fn tool_batch_turn_id(session_id: &lash_sansio::SessionId) -> lash_sansio::TurnId {
-    lash_sansio::TurnId::from(format!("{session_id}-turn"))
+    lash_sansio::TurnId::fixture(format!("{session_id}-turn"))
 }
 
 /// The first leaf name in `text`: a leaf's answer however its consumer

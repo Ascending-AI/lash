@@ -396,7 +396,7 @@ impl lash_core_execution::ProcessObserverRegistry for SqliteProcessRegistry {
                         .prepare(process_sql().observer.list_sessions_for_process.sql())
                         .map_err(process_sqlite_error)?;
                     stmt.query_map(params![process_id.as_str()], |row| {
-                        row.get::<_, String>(0).map(SessionId::from)
+                        crate::codec::sql_identity::<SessionId>(row.get::<_, String>(0)?)
                     })
                     .map_err(process_sqlite_error)?
                     .collect::<Result<Vec<_>, _>>()

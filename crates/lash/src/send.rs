@@ -895,7 +895,7 @@ impl RootHandle {
     pub async fn output(self) -> Result<TurnOutput> {
         let root = self.root.clone();
         let outcome = self.outcome().await?;
-        settled_output(InputId::from(root.as_str()), outcome)
+        settled_output(InputId::from(&root), outcome)
     }
 }
 
@@ -922,10 +922,8 @@ pub(crate) fn attach(target: SendTarget, input_id: InputId) -> SendHandle {
 /// id is derived from its session and key, so no read finds it. An id that
 /// was never accepted answers like a withdrawn input.
 pub(crate) fn attach_id(target: SendTarget, id: TurnId) -> SendHandle {
-    let input_id = InputId::from(lash_core::PendingTurnInputDraft::keyed_input_id(
-        &target.session_id(),
-        id.as_str(),
-    ));
+    let input_id =
+        lash_core::PendingTurnInputDraft::keyed_input_id(&target.session_id(), id.as_str());
     let mut handle = attach(target, input_id);
     handle.receipt.source_key = Some(id.to_string());
     handle.id = Some(id);

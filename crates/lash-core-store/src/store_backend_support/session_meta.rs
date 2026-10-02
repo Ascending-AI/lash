@@ -374,7 +374,10 @@ impl SessionMetaCodec {
                 SessionRelation::Fork {
                     source_session_id: self
                         .required(stored.source_session_id, "source_session_id")?,
-                    source_node_id: stored.source_node_id.map(crate::NodeId::new),
+                    source_node_id: stored
+                        .source_node_id
+                        .map(crate::NodeId::parse)
+                        .transpose()?,
                 }
             }
             other => return Err(self.corrupt(format!("unknown relation_kind `{other}`"))),

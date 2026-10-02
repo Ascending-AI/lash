@@ -41,7 +41,7 @@ pub async fn fork_observer_transient_failure_retains_intent_until_publication(
             pending_observer_intents: vec![crate::SessionObserverIntent::host_requested(
                 process_id.clone(),
             )],
-            session_id: SessionId::from(SESSION_ID.to_string()),
+            session_id: SessionId::fixture(SESSION_ID.to_string()),
             relation: crate::SessionRelation::Fork {
                 source_session_id: SessionId::from("fork-observer-transient-source"),
                 source_node_id: Some("fork-observer-transient-node".into()),

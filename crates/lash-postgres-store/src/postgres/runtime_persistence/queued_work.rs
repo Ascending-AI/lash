@@ -188,7 +188,7 @@ impl PostgresStore {
         tx.commit().await.map_err(store_sqlx_error)?;
         let ordering_key = |kind: &'static str, at: Option<i64>, seq: Option<i64>| {
             at.zip(seq)
-                .map(|(at, seq)| {
+                .map(|(at, seq)| -> Result<_, StoreError> {
                     Ok(lash_core_execution::store::PendingWorkOrderingKey {
                         enqueued_at_ms: u64_from_sql(kind, "enqueued_at_ms", at)?,
                         enqueue_seq: u64_from_sql(kind, "enqueue_seq", seq)?,

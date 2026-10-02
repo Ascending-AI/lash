@@ -498,7 +498,7 @@ mod tests {
     #[test]
     fn domain_is_separate_from_every_other_lash_blake3_identity() {
         let id = ToolCallId::derive("", turn("call-1"), &[]);
-        let frame = FrameKey::from_call_site(&SessionId::from(""), "", &id);
+        let frame = FrameKey::from_call_site(&SessionId::from("session"), "", &id);
         assert_ne!(id.digest_hex(), &frame.as_str()["frame-key/v2/".len()..]);
 
         let mut same_bytes_other_domain = Blake3DomainHasher::new("lash-intent/v2");

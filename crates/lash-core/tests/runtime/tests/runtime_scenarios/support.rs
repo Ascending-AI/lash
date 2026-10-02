@@ -616,7 +616,7 @@ impl RuntimeQueueIngress {
                 lash_core::testing::runtime_internals::process_wake_batch_draft(
                     ProcessWakeDelivery {
                         version: lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-                        target_session_id: SessionId::from(session_id.to_string()),
+                        target_session_id: SessionId::fixture(session_id.to_string()),
                         process_id: lash_core::ProcessId::fixture(&format!("process:{text}")),
                         sequence: 1,
                         event_type: "process.wake".to_string(),

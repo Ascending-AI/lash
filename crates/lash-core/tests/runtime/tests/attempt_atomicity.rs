@@ -305,7 +305,7 @@ async fn fixtures() -> Fixtures {
         let process_id = registry
             .register_process_with_observers(
                 registration.with_extra_event_types(event_types.clone()),
-                &[SessionId::from(SESSION.to_string())],
+                &[SessionId::fixture(SESSION.to_string())],
             )
             .await
             .expect("register matrix process")
@@ -423,7 +423,7 @@ fn tool_context_with_provider<'run>(
         .expect("attempt-atomicity session manager")
         .direct_completion_client(
             effect_controller.clone(),
-            Some(TurnId::from(TURN.to_string())),
+            Some(TurnId::fixture(TURN.to_string())),
         );
     let direct_completions = if bind_direct_client_to_attempt {
         // The attempt's usage run, begun as the tool-attempt runner begins it:
@@ -468,7 +468,7 @@ fn tool_context_with_provider<'run>(
             ),
         ),
         owner: lash_core::ExecutionOwner::SessionFrame {
-            session_id: SessionId::from(SESSION.to_string()),
+            session_id: SessionId::fixture(SESSION.to_string()),
             agent_frame_id: lash_core::FrameNodeId::new("test-frame").unwrap(),
         },
         observer: lash_core::engine::NullObservationSink::arc(),
@@ -906,7 +906,7 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
 
         let intents = lash_core::ToolIntents::v3(vec![
             lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-                owner: lash_core::RuntimeOwner::Session(SessionId::from(SESSION.to_string())),
+                owner: lash_core::RuntimeOwner::Session(SessionId::fixture(SESSION.to_string())),
                 declaration: lash_core::ProcessStartDeclaration::external(
                     lash_core::ProcessOriginator::host_scoped("intent-test"),
                     serde_json::json!({"step": "start"}),
@@ -914,19 +914,19 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
                 ),
             })),
             lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
-                owner: lash_core::RuntimeOwner::Session(SessionId::from(SESSION.to_string())),
+                owner: lash_core::RuntimeOwner::Session(SessionId::fixture(SESSION.to_string())),
                 process_id: fixtures.live.clone(),
                 signal_name: "resume".to_string(),
                 payload: serde_json::json!({"step": "signal"}),
             }),
             lash_core::ToolIntent::EmitProcessEvent(lash_core::EmitProcessEventIntent {
-                owner: lash_core::RuntimeOwner::Session(SessionId::from(SESSION.to_string())),
+                owner: lash_core::RuntimeOwner::Session(SessionId::fixture(SESSION.to_string())),
                 process_id: fixtures.live.clone(),
                 event_type: "attempt.atomicity.note".to_string(),
                 payload: serde_json::json!({"step": "event"}),
             }),
             lash_core::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
-                owner: lash_core::RuntimeOwner::Session(SessionId::from(SESSION.to_string())),
+                owner: lash_core::RuntimeOwner::Session(SessionId::fixture(SESSION.to_string())),
                 process_id: fixtures.live.clone(),
             }),
         ]);
@@ -996,7 +996,7 @@ async fn over_budget_intent_batch_refuses_every_intent_and_executes_zero_command
             (0..=lash_core::TOOL_INTENT_MAX_COUNT)
                 .map(|index| {
                     lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
-                        owner: lash_core::RuntimeOwner::Session(SessionId::from(
+                        owner: lash_core::RuntimeOwner::Session(SessionId::fixture(
                             SESSION.to_string(),
                         )),
                         process_id: fixtures.live.clone(),
@@ -1174,7 +1174,7 @@ async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identi
         let dispatch = tool.dispatch.as_ref().clone();
         let intents = lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::SignalProcess(
             lash_core::SignalProcessIntent {
-                owner: lash_core::RuntimeOwner::Session(SessionId::from(SESSION.to_string())),
+                owner: lash_core::RuntimeOwner::Session(SessionId::fixture(SESSION.to_string())),
                 process_id: fixtures.live.clone(),
                 signal_name: "resume".to_string(),
                 payload: serde_json::json!({"recorded": "payload"}),
@@ -1673,7 +1673,7 @@ async fn attempt_scoped_client_keeps_direct_llm_completions_out_of_the_journal()
             .runtime
             .runtime_session_services()
             .expect("attempt-atomicity session manager")
-            .direct_completion_client(scoped, Some(TurnId::from(TURN.to_string())))
+            .direct_completion_client(scoped, Some(TurnId::fixture(TURN.to_string())))
             .with_tool_attempt_parent_invocation(attempt_invocation().into_runtime_invocation())
             // The attempt's usage run, as the tool-attempt runner begins it.
             .with_usage_run(

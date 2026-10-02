@@ -249,7 +249,7 @@ async fn drive_redrive_turn(
 }
 
 fn redrive_turn_id(session_id: &lash_sansio::SessionId) -> lash_sansio::TurnId {
-    lash_sansio::TurnId::from(format!("{session_id}-turn"))
+    lash_sansio::TurnId::fixture(format!("{session_id}-turn"))
 }
 
 /// A crash of the turn while its batch is open, with one member settled and
@@ -271,7 +271,7 @@ pub async fn a_settled_batch_member_runs_once_across_a_turn_crash(
     producer: crate::ToolBatchProducer,
 ) {
     let session_id =
-        lash_sansio::SessionId::from(format!("{prefix}-{}-batch-crash-redrive", producer.label));
+        lash_sansio::SessionId::fixture(format!("{prefix}-{}-batch-crash-redrive", producer.label));
     let admitted = admit(crate::ExecutionScope::turn(
         &session_id,
         redrive_turn_id(&session_id),

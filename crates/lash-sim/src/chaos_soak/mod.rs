@@ -856,10 +856,8 @@ mod tests {
             vec!["held-withdrawn".to_owned()],
             driver::Admission::Known,
         );
-        let withdrawn = lash_core::InputId::from(lash_core::PendingTurnInputDraft::keyed_input_id(
-            &session,
-            "held-withdrawn",
-        ));
+        let withdrawn =
+            lash_core::PendingTurnInputDraft::keyed_input_id(&session, "held-withdrawn");
         let receipt = durable
             .cancel(lash::CancelTarget::Input(withdrawn.clone()))
             .await
@@ -997,10 +995,7 @@ mod tests {
             lash_core::SessionLookup::Live(_)
         ));
         let store = factory;
-        let second = lash_core::InputId::from(lash_core::PendingTurnInputDraft::keyed_input_id(
-            &session,
-            "held-second",
-        ));
+        let second = lash_core::PendingTurnInputDraft::keyed_input_id(&session, "held-second");
         let root = store
             .root_of_input(&session, &second)
             .await

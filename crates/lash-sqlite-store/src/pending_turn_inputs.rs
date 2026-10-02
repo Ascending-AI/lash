@@ -44,7 +44,7 @@ pub(crate) fn pending_turn_input_row_from_sql(
     Ok(PendingTurnInputRow {
         enqueue_seq: u64_from_sql("PendingTurnInput", "enqueue_seq", row.get(0)?)?,
         input_id: row.get(1)?,
-        session_id: SessionId::from(row.get::<_, String>(2)?),
+        session_id: crate::codec::sql_identity(row.get::<_, String>(2)?)?,
         source_key: row.get(3)?,
         ingress_json: row.get(4)?,
         state: row.get(5)?,
@@ -64,7 +64,7 @@ pub(crate) fn pending_turn_input_from_row(
 ) -> Result<lash_core_execution::PendingTurnInput, StoreError> {
     let ingress = decode_turn_input_ingress(row.ingress_json)?;
     Ok(lash_core_execution::PendingTurnInput {
-        input_id: row.input_id.into(),
+        input_id: row.input_id.try_into()?,
         session_id: row.session_id,
         enqueue_seq: row.enqueue_seq,
         source_key: row.source_key,
@@ -85,7 +85,7 @@ pub(crate) fn pending_turn_input_read_from_row(
     Ok(match admitted_root {
         Some(root) => lash_core_execution::PendingTurnInputRead::admitted(
             input,
-            lash_core_execution::TurnId::from(root),
+            lash_core_execution::TurnId::parse(root)?,
         ),
         None => lash_core_execution::PendingTurnInputRead::open(input),
     })

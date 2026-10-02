@@ -82,7 +82,7 @@ fn registration() -> ProcessRegistration {
             ..ProcessEventSemanticsSpec::default()
         },
     }])
-    .with_wake_session_id(Some(SessionId::from(SESSION_ID.to_string())))
+    .with_wake_session_id(Some(SessionId::from(SESSION_ID)))
 }
 
 async fn process_events(
@@ -158,7 +158,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
             .admit_session(&SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
-                session_id: SessionId::from(session_id.to_string()),
+                session_id: SessionId::parse(session_id.to_string())?,
                 relation: SessionRelation::Root,
                 config: lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
@@ -194,7 +194,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
                     ..ProcessEventSemanticsSpec::default()
                 },
             }])
-            .with_wake_session_id(Some(SessionId::from(OLD_SESSION_ID.to_string()))),
+            .with_wake_session_id(Some(SessionId::parse(OLD_SESSION_ID.to_string())?)),
         )
         .await
         .context("register retarget process")?
@@ -301,7 +301,7 @@ async fn prepare(storage: &PostgresStorage) -> Result<()> {
         .admit_session(&SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(SESSION_ID.to_string()),
+            session_id: SessionId::parse(SESSION_ID.to_string())?,
             relation: SessionRelation::Root,
             config: lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,

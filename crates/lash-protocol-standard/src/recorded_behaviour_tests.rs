@@ -183,7 +183,7 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour(
     session: &str,
 ) {
     let backend = double.lash_backend();
-    let session_id = SessionId::from(session);
+    let session_id = SessionId::fixture(session);
     let mut config: lash_core::PersistedSessionConfig = policy().into();
     config.plugin_config = host(creating_config())
         .resolve_creation_plugin_config(
@@ -208,7 +208,7 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour(
     .await
     .expect("create the session");
     let model = Arc::new(Model::default());
-    let root = TurnId::from(format!("{session}-root"));
+    let root = TurnId::fixture(format!("{session}-root"));
     let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
     let crashing: lash_restate_test::HandlerAttempt = {
         let backend = backend.clone();

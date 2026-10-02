@@ -36,7 +36,11 @@ fn turn_commit(
     root_terminal: Option<RootTerminalWrite>,
     drive_fence: Option<DriveFence>,
 ) -> RuntimeCommit {
-    let operation = crate::OperationId::turn(state.session_id.as_str(), turn, "final");
+    let operation = crate::OperationId::turn(
+        state.session_id.clone(),
+        TurnId::fixture(turn.to_string()),
+        "final",
+    );
     let mut graph = state.pending_graph_commit();
     graph
         .derive_node_ids(&state.session_id, &operation)
@@ -52,7 +56,7 @@ fn turn_commit(
 /// What the commit of physical turn `ordinal` of `root` writes when it ends
 /// the root with `stop`.
 fn ends(root: &str, ordinal: u32, stop: Option<crate::TurnStop>) -> RootTerminalWrite {
-    let root = TurnId::from(root);
+    let root = TurnId::fixture(root);
     let turn = lash_core::store::PhysicalTurn::derive_turn_id(&root, u64::from(ordinal));
     RootTerminalWrite {
         commit: TurnCommitId::new(root.clone(), ordinal),
@@ -79,7 +83,7 @@ async fn terminal_of(
     root: &str,
 ) -> Option<lash_core::store::RootTerminal> {
     store
-        .root_terminal(session_id, &TurnId::from(root))
+        .root_terminal(session_id, &TurnId::fixture(root))
         .await
         .expect("read the root's terminal evidence")
 }

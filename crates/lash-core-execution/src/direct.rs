@@ -419,7 +419,7 @@ pub fn build_llm_request(
         None => {
             let request_id = uuid::Uuid::new_v4().to_string();
             LlmRequestScope::new(
-                format!("direct:{request_id}"),
+                SessionId::prefixed("direct:", &request_id),
                 format!("direct:{request_id}:frame"),
                 request_id,
             )

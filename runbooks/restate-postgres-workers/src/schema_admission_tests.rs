@@ -282,7 +282,7 @@ async fn dialect_store_law(backend: lash_core::Backend, label: &str) -> LashCore
     );
     let session_id = format!("{label}-{}", endpoint.label());
     runtime
-        .session(&session_id)
+        .session(lash_core::SessionId::fixture(&session_id))
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             "gpt-5.4",
             lash::TurnBudget::Unbounded,
@@ -291,7 +291,7 @@ async fn dialect_store_law(backend: lash_core::Backend, label: &str) -> LashCore
         .await
         .expect("create matrix session");
     let session = runtime
-        .session(session_id)
+        .session(lash_core::SessionId::fixture(session_id))
         .open()
         .await
         .expect("open matrix session");

@@ -601,7 +601,7 @@ impl TurnBoundary {
         let clock = Arc::clone(&self.clock);
         let graph_appends = self.graph_appends.clone();
         let protocol_terminal_output = self.protocol_terminal_output.clone();
-        let turn_id = crate::TurnId::from(self.operation_scope.id());
+        let turn_id = crate::TurnId::parse(self.operation_scope.id())?;
         let terminal_message_id = format!("m_turn_{turn_id}_assistant");
         let state = self.final_state_mut();
         state.adopt_snapshot(returned_state);

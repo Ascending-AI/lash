@@ -311,7 +311,7 @@ pub use lash_sansio::llm::types::{
     AttemptRecord, ChargeSafetyDenialReason, LlmCallId, StreamBlockKind,
 };
 pub use lash_sansio::{
-    ErrorEnvelope, ExecCodeFailure, FrameKeyError, InvalidProcessId, LlmCallError,
+    BlankIdentity, ErrorEnvelope, ExecCodeFailure, FrameKeyError, InvalidProcessId, LlmCallError,
     ToolCallPosition, ToolCallRoot,
 };
 

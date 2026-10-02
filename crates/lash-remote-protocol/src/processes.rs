@@ -53,7 +53,6 @@ impl RemoteSessionScope {
     }
 
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
-        require_non_empty(type_name, "session_id", &self.session_id)?;
         if let Some(agent_frame_id) = &self.agent_frame_id {
             require_non_empty(type_name, "agent_frame_id", agent_frame_id)?;
         }
@@ -152,11 +151,7 @@ impl RemoteProcessOriginator {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         match self {
             Self::Host { .. } => Ok(()),
-            Self::Session {
-                session_id,
-                agent_frame_id,
-            } => {
-                require_non_empty(type_name, "session_id", session_id)?;
+            Self::Session { agent_frame_id, .. } => {
                 if let Some(agent_frame_id) = agent_frame_id {
                     require_non_empty(type_name, "agent_frame_id", agent_frame_id)?;
                 }
@@ -600,7 +595,6 @@ pub struct RemoteProcessHandleView {
 impl RemoteProcessHandleView {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         require_non_empty(type_name, "id", &self.id)?;
-        require_non_empty(type_name, "process_id", &self.process_id)?;
         require_non_empty(type_name, "kind", &self.kind)?;
         Ok(())
     }
@@ -725,7 +719,6 @@ impl From<RemoteTerminalProcessStatus> for RemoteProcessStatus {
 
 impl RemoteProcessRecord {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
-        require_non_empty(type_name, "process_id", &self.process_id)?;
         self.lifetime.validate(type_name)?;
         for scope in &self.ancestry {
             scope.validate(type_name, "ancestry")?;
@@ -787,7 +780,6 @@ pub struct RemoteProcessWorkSnapshot {
 
 impl RemoteProcessWorkSnapshot {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        require_non_empty("RemoteProcessWorkSnapshot", "session_id", &self.session_id)?;
         for item in &self.items {
             item.validate("RemoteProcessWorkSnapshot")?;
         }
@@ -892,7 +884,6 @@ pub struct RemoteObservedProcess {
 
 impl RemoteObservedProcess {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
-        require_non_empty(type_name, "process_id", &self.process_id)?;
         self.identity.validate(type_name)?;
         self.lifetime.validate(type_name)?;
         for scope in &self.ancestry {
@@ -914,9 +905,6 @@ impl RemoteObservedProcess {
         }
         if let Some(park) = &self.park {
             park.validate(type_name)?;
-        }
-        if let Some(child_session_id) = &self.child_session_id {
-            require_non_empty(type_name, "child_session_id", child_session_id)?;
         }
         Ok(())
     }
@@ -954,7 +942,6 @@ pub struct RemoteProcessEvent {
 
 impl RemoteProcessEvent {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
-        require_non_empty(type_name, "process_id", &self.process_id)?;
         require_non_empty(type_name, "event_type", &self.event_type)?;
         if let Some(invocation) = &self.invocation {
             invocation.validate(type_name)?;
@@ -1243,12 +1230,6 @@ pub struct RemoteRuntimeAttribution {
 
 impl RemoteRuntimeAttribution {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
-        if let Some(session_id) = &self.session_id {
-            require_non_empty(type_name, "runtime_attribution.session_id", session_id)?;
-        }
-        if let Some(turn_id) = &self.turn_id {
-            require_non_empty(type_name, "runtime_attribution.turn_id", turn_id)?;
-        }
         if self.turn_id.is_some() && self.session_id.is_none() {
             return Err(RemoteProtocolError::InvalidEnvelope {
                 type_name,
@@ -1326,25 +1307,14 @@ impl RemoteRuntimeSubject {
                     })?;
                 require_non_empty(type_name, "runtime_subject.effect_id", effect_id)
             }
-            Self::Process { process_id } => {
-                require_non_empty(type_name, "runtime_subject.process_id", process_id)
-            }
-            Self::ProcessEvent {
-                process_id,
-                event_type,
-                ..
-            } => {
-                require_non_empty(type_name, "runtime_subject.process_id", process_id)?;
+            Self::Process { .. } => Ok(()),
+            Self::ProcessEvent { event_type, .. } => {
                 require_non_empty(type_name, "runtime_subject.event_type", event_type)
             }
             Self::TriggerOccurrence { occurrence_id, .. } => {
                 require_non_empty(type_name, "runtime_subject.occurrence_id", occurrence_id)
             }
-            Self::SessionNode {
-                session_id,
-                node_id,
-            } => {
-                require_non_empty(type_name, "runtime_subject.session_id", session_id)?;
+            Self::SessionNode { node_id, .. } => {
                 require_non_empty(type_name, "runtime_subject.node_id", node_id)
             }
         }
@@ -1480,7 +1450,6 @@ pub struct RemoteProcessStartReceipt {
 
 impl RemoteProcessStartReceipt {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        require_non_empty("RemoteProcessStartReceipt", "process_id", &self.process_id)?;
         if let Some(digest) = &self.start_key_digest {
             require_non_empty("RemoteProcessStartReceipt", "start_key_digest", digest)?;
         }

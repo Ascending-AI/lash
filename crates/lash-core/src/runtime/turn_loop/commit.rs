@@ -897,7 +897,7 @@ impl LashRuntime {
             lash_trace::TraceContext::default()
                 .for_session(state.session_id.clone())
                 .for_turn_index(state.turn_index)
-                .for_turn(trace_turn_id.to_string()),
+                .for_turn(trace_turn_id.clone()),
             lash_trace::TraceEvent::TurnCompleted {
                 outcome: trace_outcome,
             },

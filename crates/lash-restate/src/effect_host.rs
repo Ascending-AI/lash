@@ -429,12 +429,6 @@ impl EffectHost for RestateEffectHost {
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<AwaitEventKey>, RuntimeError> {
-        if session_id.trim().is_empty() {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::InvalidAwaitEventSessionId,
-                "await-event session id must be non-empty",
-            ));
-        }
         let keys: Vec<AwaitEventKey> = self
             .controller
             .await_event_ingress

@@ -282,7 +282,7 @@ impl ToolBatchProbe for ToolBatchProbeImpl {
         ctx: restate_sdk::context::WorkflowContext<'_>,
         Json(request): Json<ProbeRequest>,
     ) -> HandlerResult<Json<ProbeResponse>> {
-        let session_id = lash_sansio::SessionId::from(request.session_id.clone());
+        let session_id = lash_sansio::SessionId::fixture(request.session_id.clone());
         let controller = lash_restate::RestateRuntimeEffectController::new(
             ctx,
             self.authority.clone(),

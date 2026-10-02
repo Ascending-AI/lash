@@ -223,8 +223,8 @@ pub async fn two_presentation_steps_compose_deterministically_on_first_run_and_r
     fixture: &ToolChildLawFixture,
     prefix: &str,
 ) {
-    let session_id = crate::SessionId::from(format!("{prefix}-compose"));
-    let turn_id = crate::TurnId::from(format!("{prefix}-compose-turn"));
+    let session_id = crate::SessionId::fixture(format!("{prefix}-compose"));
+    let turn_id = crate::TurnId::fixture(format!("{prefix}-compose-turn"));
     let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id.clone());
     let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
         .expect("a turn scope derives an opener");
@@ -314,8 +314,8 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
     fixture: &ToolChildLawFixture,
     prefix: &str,
 ) {
-    let session_id = crate::SessionId::from(format!("{prefix}-env"));
-    let turn_id = crate::TurnId::from(format!("{prefix}-env-turn"));
+    let session_id = crate::SessionId::fixture(format!("{prefix}-env"));
+    let turn_id = crate::TurnId::fixture(format!("{prefix}-env-turn"));
     let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id.clone());
     let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
         .expect("a turn scope derives an opener");
@@ -416,8 +416,8 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn the_oracle_and_a_bounded_step_coexist(fixture: &ToolChildLawFixture, prefix: &str) {
-    let session_id = crate::SessionId::from(format!("{prefix}-coexist"));
-    let turn_id = crate::TurnId::from(format!("{prefix}-coexist-turn"));
+    let session_id = crate::SessionId::fixture(format!("{prefix}-coexist"));
+    let turn_id = crate::TurnId::fixture(format!("{prefix}-coexist-turn"));
     let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id.clone());
     let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
         .expect("a turn scope derives an opener");
@@ -537,8 +537,8 @@ pub async fn a_retained_full_output_is_a_durable_artifact_not_a_path(
     fixture: &ToolChildLawFixture,
     prefix: &str,
 ) {
-    let session_id = crate::SessionId::from(format!("{prefix}-retain"));
-    let turn_id = crate::TurnId::from(format!("{prefix}-retain-turn"));
+    let session_id = crate::SessionId::fixture(format!("{prefix}-retain"));
+    let turn_id = crate::TurnId::fixture(format!("{prefix}-retain-turn"));
     let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id.clone());
     let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
         .expect("a turn scope derives an opener");

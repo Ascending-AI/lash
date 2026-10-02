@@ -14,7 +14,7 @@ use std::sync::Arc;
     reason = "conformance fixture stops on failed setup"
 )]
 async fn law(store: Arc<dyn ConformanceDeployment>, expected: TurnCommitOutcome) {
-    let session_id = SessionId::from(format!("outcome-{}", expected.as_str()));
+    let session_id = SessionId::fixture(format!("outcome-{}", expected.as_str()));
     let request = crate::testing::store_fixtures::session_store_request(
         &session_id,
         "outcome-model",
@@ -26,7 +26,7 @@ async fn law(store: Arc<dyn ConformanceDeployment>, expected: TurnCommitOutcome)
         ..RuntimeSessionState::new(request.config.session_policy())
     };
     let turn_id = TurnId::from("outcome-turn");
-    let operation = OperationId::turn(&session_id, turn_id.as_str(), "final");
+    let operation = OperationId::turn(&session_id, turn_id.clone(), "final");
     let (mut commit, _) = RuntimeCommit::persisted_state_with_operation_and_budget(
         &mut state,
         operation,

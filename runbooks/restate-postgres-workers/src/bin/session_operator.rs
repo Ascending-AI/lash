@@ -159,14 +159,18 @@ impl Harness {
 
     async fn open(&self, tag: &str) -> Result<lash::LashSession> {
         self.core
-            .session(format!("operator:{tag}"))
+            .session(SessionId::prefixed("operator:", tag))
             .create(lash::SessionCreation::root(lash::SessionSpec::new(
                 "session-operator-mock",
                 lash::TurnBudget::Unbounded,
                 lash::MaxToolCalls::new(1024),
             )))
             .await?;
-        Ok(self.core.session(format!("operator:{tag}")).open().await?)
+        Ok(self
+            .core
+            .session(SessionId::prefixed("operator:", tag))
+            .open()
+            .await?)
     }
 
     async fn calls(&self, tag: &str) -> Result<i64> {
@@ -378,7 +382,7 @@ impl Harness {
         let session = self.open(tag).await?;
         let handle = session
             .send(TurnInput::text(format!("operator:{tag}")))
-            .id(tag)
+            .id(TurnId::parse(tag)?)
             .await?;
         let outcome = tokio::time::timeout(WAIT, handle.outcome())
             .await
@@ -390,11 +394,11 @@ impl Harness {
             outcome.output().is_none(),
             "park cannot fabricate an answer"
         );
-        let root = TurnId::from(tag);
+        let root = TurnId::parse(tag)?;
         let child = self
-            .child(&SessionId::from(format!("operator:{tag}")), &root)
+            .child(&SessionId::prefixed("operator:", tag), &root)
             .await?;
-        self.assert_open(&SessionId::from(format!("operator:{tag}")), &root, &child)
+        self.assert_open(&SessionId::prefixed("operator:", tag), &root, &child)
             .await?;
         ensure!(
             self.calls(tag).await? == 2,

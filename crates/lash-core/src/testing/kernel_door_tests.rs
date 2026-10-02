@@ -42,7 +42,10 @@ async fn a_unit_test_turn_runs_in_an_open_handler_on_the_double() {
     .await;
     let session_id = runtime.session_id().to_string();
     let handler = double
-        .open_handler(AdmittedScope::turn(session_id.as_str(), "unit-door-turn"))
+        .open_handler(AdmittedScope::turn(
+            crate::SessionId::fixture(session_id.clone()),
+            "unit-door-turn",
+        ))
         .await
         .expect("open the turn's handler");
     let turn = runtime

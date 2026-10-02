@@ -48,7 +48,7 @@ async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
         ))
         .expect("core");
     let id = format!("replay-bounds-{tag}");
-    core.session(&id)
+    core.session(lash::SessionId::fixture(&id))
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             "live-replay-bounds",
             lash::TurnBudget::Unbounded,
@@ -56,7 +56,11 @@ async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
         )))
         .await
         .expect("create");
-    let session = core.session(&id).open().await.expect("open");
+    let session = core
+        .session(lash::SessionId::fixture(&id))
+        .open()
+        .await
+        .expect("open");
     let old = session.observe().current_observation().cursor;
     let output = session
         .send(TurnInput::text("publish before eviction"))
@@ -70,7 +74,7 @@ async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
     );
 
     replay.current_cursor(
-        &lash::SessionId::from(format!("pressure-{tag}")),
+        &lash::SessionId::fixture(format!("pressure-{tag}")),
         lash::observe::SessionRevision::new(0),
     );
     let SessionResume::Gap { observation, gap } = session

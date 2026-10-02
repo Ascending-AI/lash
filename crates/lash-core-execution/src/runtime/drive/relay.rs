@@ -637,7 +637,7 @@ mod tests {
 
     fn session_delete(session: &str) -> Result<ObligationKey, UndecodableObligation> {
         Ok(ObligationKey::SessionDelete {
-            session_id: SessionId::from(session),
+            session_id: SessionId::fixture(session),
         })
     }
 

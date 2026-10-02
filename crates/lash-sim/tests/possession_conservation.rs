@@ -148,7 +148,7 @@ impl PossessionWorld {
     /// World creation is itself a step: an empty world must already satisfy
     /// the law before any opener acts.
     async fn add_opener(&mut self, name: &'static str, session: &str) {
-        let session = SessionId::from(session);
+        let session = SessionId::fixture(session);
         self.openers.insert(
             name,
             Opener {
@@ -496,7 +496,7 @@ impl PossessionWorld {
         // Started by the opener's turn and living until it.
         let turn = ScopeId::Opener(EffectOpener::turn(
             session.clone(),
-            TurnId::from(format!("turn-{opener_name}")),
+            TurnId::fixture(format!("turn-{opener_name}")),
         ));
         let mut registration = ProcessRegistration::new(
             ProcessInput::Engine {

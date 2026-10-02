@@ -54,8 +54,8 @@ impl LineageConformanceInjector for SqliteLineageConformanceInjector {
             .expect("prepare SQLite lineage observation");
         stmt.query_map(rusqlite::params![session_id.as_str()], |row| {
             Ok(lash_core_execution::store::ForkLineageAncestor {
-                ancestor_session_id: SessionId::from(row.get::<_, String>(0)?),
-                fork_node_id: lash_core_execution::NodeId::from(row.get::<_, String>(1)?),
+                ancestor_session_id: SessionId::fixture(row.get::<_, String>(0)?),
+                fork_node_id: lash_core_execution::NodeId::fixture(row.get::<_, String>(1)?),
                 fork_generation: u64::try_from(row.get::<_, i64>(2)?)
                     .expect("non-negative fork generation"),
             })
@@ -75,7 +75,7 @@ impl LineageConformanceInjector for SqliteLineageConformanceInjector {
                 |row| {
                     Ok(row
                         .get::<_, Option<String>>(0)?
-                        .map(lash_core_execution::NodeId::from))
+                        .map(lash_core_execution::NodeId::fixture))
                 },
             )
             .expect("read SQLite lineage head");
@@ -106,13 +106,13 @@ impl LineageConformanceInjector for SqliteLineageConformanceInjector {
             .expect("prepare SQLite graph facts");
         stmt.query_map([], |row| {
             Ok(GraphFactObservation {
-                node_id: lash_core_execution::NodeId::from(row.get::<_, String>(0)?),
+                node_id: lash_core_execution::NodeId::fixture(row.get::<_, String>(0)?),
                 parent_node_id: row
                     .get::<_, Option<String>>(1)?
-                    .map(lash_core_execution::NodeId::from),
-                owning_session_id: SessionId::from(row.get::<_, String>(2)?),
+                    .map(lash_core_execution::NodeId::fixture),
+                owning_session_id: SessionId::fixture(row.get::<_, String>(2)?),
                 generation: u64::try_from(row.get::<_, i64>(3)?).expect("non-negative generation"),
-                frame_node_id: lash_core_execution::NodeId::from(row.get::<_, String>(4)?),
+                frame_node_id: lash_core_execution::NodeId::fixture(row.get::<_, String>(4)?),
                 is_frame: row.get(5)?,
             })
         })

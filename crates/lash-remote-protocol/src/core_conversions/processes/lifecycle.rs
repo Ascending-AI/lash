@@ -8,7 +8,7 @@ impl From<lash_core::EffectOpener> for RemoteEffectOpener {
                 turn_id,
             } => Self::Turn {
                 session_id,
-                turn_id: turn_id.to_string(),
+                turn_id,
             },
             lash_core::EffectOpener::SessionOperation {
                 session_id,

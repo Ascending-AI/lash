@@ -540,7 +540,10 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
     let registration = waiting_process_registration(process_env_ref.clone());
     let waiting = handles
         .processes
-        .register_process_with_observers(registration, &[SessionId::from(SESSION_ID.to_string())])
+        .register_process_with_observers(
+            registration,
+            &[SessionId::fixture(SESSION_ID.to_string())],
+        )
         .await
         .expect("register waiting fixture process");
     assert_eq!(
@@ -614,7 +617,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
                     ..ProcessEventSemanticsSpec::default()
                 },
             }])
-            .with_wake_session_id(Some(SessionId::from(SESSION_ID.to_string()))),
+            .with_wake_session_id(Some(SessionId::fixture(SESSION_ID.to_string()))),
         )
         .await
         .expect("register fixture wake process")
@@ -1139,7 +1142,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         .processes
         .register_process_with_observers(
             waiting_process_registration(expected.process_env_ref.clone()),
-            &[SessionId::from(SESSION_ID.to_string())],
+            &[SessionId::fixture(SESSION_ID.to_string())],
         )
         .await
         .expect("durable fixture identity drift: a start under a retained key failed");
@@ -1400,7 +1403,7 @@ fn fixture_session_request(session_id: &SessionId) -> SessionStoreCreateRequest 
     SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         relation: SessionRelation::Root,
         config: SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -1438,7 +1441,7 @@ fn fixture_record_config_operation() -> OperationId {
 
 fn fixture_state() -> RuntimeSessionState {
     RuntimeSessionState {
-        session_id: SessionId::from(SESSION_ID.to_string()),
+        session_id: SessionId::fixture(SESSION_ID.to_string()),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),

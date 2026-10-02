@@ -237,20 +237,6 @@ impl RuntimeAttribution {
     }
 
     pub fn validate(&self) -> Result<(), RuntimeEffectControllerError> {
-        if self
-            .session_id
-            .as_ref()
-            .is_some_and(|session_id| session_id.trim().is_empty())
-            || self
-                .turn_id
-                .as_ref()
-                .is_some_and(|turn_id| turn_id.trim().is_empty())
-        {
-            return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectInvocationSubject,
-                "runtime attribution identifiers must be non-empty when present",
-            ));
-        }
         if self.turn_id.is_some() && self.session_id.is_none() {
             return Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectInvocationSubject,

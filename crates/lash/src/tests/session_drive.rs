@@ -205,8 +205,14 @@ impl HeldDriveFixture {
                 mock_llm_profile_spec(),
             )
             .build(crate::testing::runtime_lease_owner())?;
-        let session_id = lash_core::SessionId::from(session);
-        drop(core.session(session).created().await.open().await?);
+        let session_id = lash_core::SessionId::fixture(session);
+        drop(
+            core.session(lash_core::SessionId::fixture(session.to_string()))
+                .created()
+                .await
+                .open()
+                .await?,
+        );
         let store = catalog
             .get()
             .and_then(|catalog| catalog.store_for(&session_id))

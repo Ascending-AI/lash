@@ -1019,7 +1019,7 @@ fn prepare_wake_delivery(
         return Ok(None);
     };
     process_wake_delivery(ProcessWakeDeliveryRequest {
-        target_session_id: SessionId::from(target_session_id.to_string()),
+        target_session_id: target_session_id.clone(),
         process_id: process_id.clone(),
         sequence,
         event_type,

@@ -33,7 +33,7 @@ pub struct ObservationPluginServices {
 
 #[derive(Clone)]
 pub struct RuntimeObservation {
-    pub session_id: Arc<str>,
+    pub session_id: SessionId,
     pub revision: SessionRevision,
     pub cursor: SessionCursor,
     pub read_view: crate::SessionReadView,
@@ -124,7 +124,7 @@ impl RuntimeObservation {
             (None, _) => None,
         };
         Self {
-            session_id: Arc::from(runtime.session_id()),
+            session_id: runtime.session_id().clone(),
             revision,
             cursor,
             read_view,
@@ -144,7 +144,7 @@ impl RuntimeObservation {
         }
     }
 
-    pub fn session_id(&self) -> &str {
+    pub fn session_id(&self) -> &SessionId {
         &self.session_id
     }
 
@@ -164,7 +164,7 @@ impl RuntimeObservation {
     }
 
     pub fn process_scope(&self) -> crate::SessionScope {
-        crate::SessionScope::new(self.session_id.as_ref())
+        crate::SessionScope::new(self.session_id.clone())
     }
 
     pub fn process_scope_id(&self) -> crate::SessionScopeId {
@@ -172,14 +172,14 @@ impl RuntimeObservation {
     }
 
     pub fn turn_scope(&self, turn_id: impl Into<TurnId>) -> crate::ExecutionScope {
-        crate::ExecutionScope::turn(self.session_id.as_ref(), turn_id)
+        crate::ExecutionScope::turn(self.session_id.clone(), turn_id)
     }
 
     pub fn session_operation_scope(
         &self,
         operation_id: impl Into<String>,
     ) -> crate::ExecutionScope {
-        crate::ExecutionScope::session_operation(self.session_id.as_ref(), operation_id)
+        crate::ExecutionScope::session_operation(self.session_id.clone(), operation_id)
     }
 
     pub async fn query_plugin(
@@ -231,7 +231,7 @@ impl RuntimeObservation {
         let mut entries = list_scope_process_handles(executor, &root_scope, mode).await;
         if let Some(agent_frame_id) = self.current_frame_node_id.as_ref() {
             let frame_scope = crate::SessionScope::for_agent_frame(
-                self.session_id.as_ref(),
+                self.session_id.clone(),
                 agent_frame_id.clone(),
             );
             if frame_scope.id() != root_scope.id() {
@@ -339,8 +339,7 @@ impl RuntimeHandle {
         let process_env_store = Arc::clone(&runtime.host.core.durability.process_env_store);
         let process_engines = runtime.host.core.process_engines.clone();
         let revision = SessionRevision::from_runtime(&runtime);
-        let cursor =
-            live_replay_store.current_cursor(&SessionId::from(runtime.session_id()), revision);
+        let cursor = live_replay_store.current_cursor(runtime.session_id(), revision);
         let (read_view, authority_fingerprint) = export_observation_state(&runtime);
         let observation = RuntimeObservation::from_runtime(
             &runtime,
@@ -402,7 +401,7 @@ impl RuntimeHandle {
         let (read_view, authority_fingerprint) = export_observation_state(runtime);
         let cursor = self
             .live_replay_store
-            .current_cursor(&SessionId::from(runtime.session_id()), revision);
+            .current_cursor(runtime.session_id(), revision);
         let next = RuntimeObservation::from_runtime(
             runtime,
             cursor,
@@ -449,7 +448,7 @@ impl RuntimeHandle {
             && let Some(frame_id) = next.current_frame_node_id.clone()
         {
             drafts.push(LiveReplayEventDraft::new(
-                None::<String>,
+                None::<TurnId>,
                 SessionObservationEventPayload::AgentFrameSwitched {
                     frame_id: frame_id.into_inner(),
                 },
@@ -458,7 +457,7 @@ impl RuntimeHandle {
         drafts.push(LiveReplayEventDraft::new(turn_id, payload));
 
         let prepared = match self.live_replay_store.prepare_publication(
-            &SessionId::from(runtime.session_id()),
+            runtime.session_id(),
             revision,
             drafts,
         ) {
@@ -471,7 +470,7 @@ impl RuntimeHandle {
                 );
                 next.cursor = self
                     .live_replay_store
-                    .current_cursor(&SessionId::from(runtime.session_id()), revision);
+                    .current_cursor(runtime.session_id(), revision);
                 self.observation.store(Arc::new(next));
                 return;
             }
@@ -510,7 +509,7 @@ impl RuntimeHandle {
     pub fn record_turn_activity(&self, turn_id: Option<&TurnId>, activity: crate::TurnActivity) {
         let observation = self.observe();
         self.publish_live_events(
-            &SessionId::from(observation.session_id()),
+            observation.session_id(),
             observation.session_revision(),
             vec![LiveReplayEventDraft::new(
                 turn_id,
@@ -523,10 +522,10 @@ impl RuntimeHandle {
     pub fn record_queue_changed(&self, kind: SessionQueueEventKind, batch_ids: Vec<String>) {
         let observation = self.observe();
         self.publish_live_events(
-            &SessionId::from(observation.session_id()),
+            observation.session_id(),
             observation.session_revision(),
             vec![LiveReplayEventDraft::new(
-                None::<String>,
+                None::<TurnId>,
                 SessionObservationEventPayload::QueueChanged { kind, batch_ids },
             )],
             "failed to publish queue observation event; reconnect may require gap recovery",
@@ -542,7 +541,7 @@ impl RuntimeHandle {
         cursor: &SessionCursor,
     ) -> Result<SessionResume, LiveReplayStoreError> {
         let observation = self.observe();
-        let requested = cursor.parse_for_session(&SessionId::from(observation.session_id()))?;
+        let requested = cursor.parse_for_session(observation.session_id())?;
         match self.live_replay_store.replay_after_cursor(cursor)? {
             LiveReplayOutcome::Replayed(events)
                 if Self::has_replacement_evidence(
@@ -573,7 +572,7 @@ impl RuntimeHandle {
         cursor: &SessionCursor,
     ) -> Result<SessionObservationSubscription, LiveReplayStoreError> {
         let observation = self.observe();
-        let requested = cursor.parse_for_session(&SessionId::from(observation.session_id()))?;
+        let requested = cursor.parse_for_session(observation.session_id())?;
         match self.live_replay_store.subscribe_after_cursor(cursor)? {
             LiveReplaySubscribeOutcome::Subscribed(subscription)
                 if requested.revision == observation.session_revision()
@@ -624,11 +623,11 @@ impl RuntimeHandle {
         let observation_cursor = observation.cursor();
         let current_cursor = self
             .live_replay_store
-            .current_cursor(&SessionId::from(observation.session_id()), latest_revision);
+            .current_cursor(observation.session_id(), latest_revision);
         let latest_cursor = match (
-            requested_cursor.parse_for_session(&SessionId::from(observation.session_id())),
-            observation_cursor.parse_for_session(&SessionId::from(observation.session_id())),
-            current_cursor.parse_for_session(&SessionId::from(observation.session_id())),
+            requested_cursor.parse_for_session(observation.session_id()),
+            observation_cursor.parse_for_session(observation.session_id()),
+            current_cursor.parse_for_session(observation.session_id()),
         ) {
             (Ok(requested), Ok(observation), Ok(current)) => [
                 (observation.live_position, observation_cursor.clone()),
@@ -646,7 +645,7 @@ impl RuntimeHandle {
                 cursor: latest_cursor.clone(),
             },
             LiveReplayGap {
-                session_id: SessionId::from(observation.session_id().to_string()),
+                session_id: observation.session_id().clone(),
                 requested_cursor: requested_cursor.clone(),
                 latest_cursor,
                 latest_revision,
@@ -670,7 +669,7 @@ impl RuntimeHandle {
             .clone()
             .ok_or_else(super::session_api::queued_turn_input_store_required)?;
         let ops = super::DurableSessionOps::new(
-            SessionId::from(observation.session_id().to_string()),
+            observation.session_id().clone(),
             observation.ingress.clone(),
             Arc::clone(&self.live_replay_store),
         );

@@ -535,7 +535,7 @@ fn unregistered_slot_id(slot: u8) -> ProcessId {
 }
 
 fn session_id(index: u8) -> SessionId {
-    SessionId::from(format!("prop-session-{}", index % SESSION_COUNT))
+    SessionId::fixture(format!("prop-session-{}", index % SESSION_COUNT))
 }
 
 /// A generated process: externally owned (an `External` input lash never
@@ -2277,7 +2277,7 @@ async fn consume_wake(
     else {
         return Ok(false);
     };
-    let root = crate::TurnId::from(format!(
+    let root = crate::TurnId::fixture(format!(
         "store-contract-consume:{}",
         lease.admission().as_str()
     ));

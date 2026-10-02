@@ -629,7 +629,7 @@ pub(crate) async fn unfinished_root_conn(
     row.map(|(root, json)| {
         let admission = decode_root_admission(&json)?;
         Ok(UnfinishedRoot {
-            root: TurnId::from(root),
+            root: TurnId::parse(root)?,
             head: admission.head,
             executor: admission.executor,
         })
@@ -735,8 +735,10 @@ pub(crate) async fn root_binding_conn(
         .bind(input.as_str())
         .fetch_optional(&mut *conn)
         .await
-        .map_err(store_sqlx_error)
-        .map(|root| root.map(TurnId::from))
+        .map_err(store_sqlx_error)?
+        .map(TurnId::parse)
+        .transpose()
+        .map_err(StoreError::from)
 }
 
 /// Bind `input` to `root` in the caller's transaction, set-if-absent: the
@@ -810,7 +812,7 @@ pub(crate) fn decode_intent(row: &sqlx::postgres::PgRow) -> Result<ControlIntent
     };
     ControlIntent::from_stored(
         u64_from_sql("ControlIntent", "intent_id", id)?,
-        SessionId::from(session_id),
+        SessionId::parse(session_id)?,
         u32::try_from(format).map_err(|_| corrupt("format"))?,
         &kind_json,
         &state_json,
@@ -1040,7 +1042,9 @@ pub(crate) async fn begin_session_close_tx(
         .fetch_all(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-    roots.extend(open.into_iter().map(TurnId::from));
+    for root in open {
+        roots.insert(TurnId::parse(root)?);
+    }
     // The parked root is released with the park, whose feed event outlives
     // the session (FIG-3659).
     let released = sqlx::query(
@@ -1067,7 +1071,7 @@ pub(crate) async fn begin_session_close_tx(
             at_ms,
         )
         .await?;
-        roots.insert(TurnId::from(parked_root));
+        roots.insert(TurnId::parse(parked_root)?);
     }
     let verbs = open_verbs_by_session_conn(tx, session_id).await?;
     for verb in &verbs {
@@ -1244,7 +1248,10 @@ impl RootStore for PostgresStore {
                 .fetch_all(&self.pool)
                 .await
                 .map_err(store_sqlx_error)?;
-        Ok(scopes.into_iter().map(TurnId::from).collect())
+        Ok(scopes
+            .into_iter()
+            .map(TurnId::parse)
+            .collect::<Result<_, _>>()?)
     }
 
     async fn bind_root_inputs(

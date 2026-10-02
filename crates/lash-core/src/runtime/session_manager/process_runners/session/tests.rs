@@ -223,7 +223,7 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
     let mut recorded = serde_json::to_value(&create_request).expect("serialize recorded request");
     recorded["start"] = serde_json::json!({
         "kind": "snapshot",
-        "snapshot": serde_json::to_value(crate::SessionSnapshot::new(
+        "snapshot": serde_json::to_value(crate::SessionSnapshot::new(SessionId::from("session"),
             runtime.state.policy().clone(),
         ))
         .expect("serialize predecessor snapshot"),

@@ -625,8 +625,8 @@ fn process_start_requests_round_trip_core_values() {
         serde_json::json!({ "label": "External" }),
         lash_core::Lifetime::Detached,
     )
-    .with_wake_session_id(Some(SessionId::from("session-a".to_string())))
-    .with_observers(["session-a".to_string()])
+    .with_wake_session_id(Some(SessionId::from("session-a")))
+    .with_observers([SessionId::from("session-a")])
     .with_event_types([process_event_type()]);
     assert_process_start_roundtrip(external.clone());
     // A host start's session-lookup grant crosses as `until_session`.
@@ -995,8 +995,8 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
         status: lash_core::ProcessStatusFilter::any_of([lash_core::ProcessStatus::Waiting]),
         originator: Some(lash_core::ProcessOriginatorFilter::session("test")),
         until: Some(lash_core::ScopeId::turn(
-            lash_sansio::SessionId::from("test".to_string()),
-            lash_core::TurnId::from("turn-1".to_string()),
+            lash_sansio::SessionId::from("test"),
+            lash_core::TurnId::from("turn-1"),
         )),
         cancel_pending_before_ms: Some(99),
         identity_kind: Some("engine".to_string()),
@@ -1132,7 +1132,7 @@ fn remote_turn_result_maps_core_semantics() {
     let turn = lash_core::facade_support::AssembledTurn {
         turn_input_acceptance: None,
         turn_cancel_input_outcome: Default::default(),
-        state: lash_core::SessionSnapshot::new(unbounded_policy()),
+        state: lash_core::SessionSnapshot::new("session".into(), unbounded_policy()),
         outcome: lash_core::facade_support::TurnOutcome::Finished(
             lash_core::facade_support::TurnFinish::AssistantMessage {
                 text: "done".to_string(),
@@ -1310,7 +1310,7 @@ fn assert_terminal_call_record_converts_and_validates(
     let turn = lash_core::facade_support::AssembledTurn {
         turn_input_acceptance: None,
         turn_cancel_input_outcome: Default::default(),
-        state: lash_core::SessionSnapshot::new(unbounded_policy()),
+        state: lash_core::SessionSnapshot::new("session".into(), unbounded_policy()),
         outcome: if cancelled {
             lash_core::facade_support::TurnOutcome::Stopped(
                 lash_core::facade_support::TurnStop::Cancelled {
@@ -1959,6 +1959,7 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
     }
 
     let read_view = lash_core::SessionReadView::from_snapshot(&lash_core::SessionSnapshot::new(
+        lash_core::SessionId::from("session"),
         unbounded_policy(),
     ));
     let remote = RemoteSessionObservationEvent::from_core(
@@ -1976,7 +1977,7 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
     ));
 
     let resident_read_view = lash_core::SessionReadView::from_snapshot(
-        &lash_core::SessionSnapshot::new(unbounded_policy()),
+        &lash_core::SessionSnapshot::new("session".into(), unbounded_policy()),
     );
     let remote = RemoteSessionObservationEvent::from_core(
         9,
@@ -2165,7 +2166,7 @@ fn trigger_subscription_record() -> lash_core::TriggerSubscriptionRecord {
 /// the key and session B's bytes derived another key.
 #[test]
 fn a_remote_start_key_is_global_and_never_rehashed() {
-    let remote_start = |session: &str, start_key: &str| {
+    let remote_start = |session: &'static str, start_key: &str| {
         let mut remote =
             RemoteProcessStartRequest::try_from(lash_core::ProcessStartRequest::external(
                 lash_core::ProcessOriginator::session(lash_core::SessionScope::new(session)),

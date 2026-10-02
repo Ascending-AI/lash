@@ -258,7 +258,7 @@ fn retained_revision(
             .filter(|(_, revision)| *revision == Some(row.head_revision))
             .map(|(target, _)| target.clone())
             .collect(),
-        leaf_node_id: row.leaf_node_id.map(Into::into),
+        leaf_node_id: row.leaf_node_id.map(TryInto::try_into).transpose()?,
         checkpoint_ref: row.checkpoint_ref.map(BlobRef),
     })
 }

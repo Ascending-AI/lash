@@ -7,7 +7,7 @@ pub(super) fn settled_closure_for_test(
     turn: &str,
     cancellation: Option<crate::TurnCancellationEvidence>,
 ) -> crate::TurnCancelClosureSettlement {
-    let address = crate::TurnAddress::new(SessionId::from(session), TurnId::from(turn));
+    let address = crate::TurnAddress::new(SessionId::fixture(session), TurnId::fixture(turn));
     let key = |wait, suffix: &str| crate::AwaitEventKey {
         scope: address.execution_scope(),
         wait,
@@ -15,7 +15,7 @@ pub(super) fn settled_closure_for_test(
         signature: format!("test:{suffix}"),
     };
     let fence = crate::store_backend_support::sealed_drive_fence(
-        SessionId::from(session),
+        SessionId::fixture(session),
         1,
         AdmissionId::new("admission"),
     );
@@ -225,7 +225,7 @@ fn first_persisted_state_commit_derives_and_installs_node_ids() {
         session_id: SessionId::from("first-commit"),
         session_graph: crate::SessionGraph::from_nodes(
             vec![crate::SessionNodeRecord {
-                node_id: placeholder.clone().into(),
+                node_id: crate::NodeId::fixture(placeholder.clone()),
                 parent_node_id: None,
                 timestamp: "2026-07-27T00:00:00Z".to_string(),
                 payload: crate::SessionNodePayload::Plugin {
@@ -233,7 +233,7 @@ fn first_persisted_state_commit_derives_and_installs_node_ids() {
                     body: crate::session_graph::SharedJsonValue::new(serde_json::json!({})),
                 },
             }],
-            Some(placeholder.into()),
+            Some(crate::NodeId::fixture(placeholder)),
         )
         .expect("first-commit fixture graph is valid"),
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
@@ -792,7 +792,7 @@ fn frame_node_identity_is_stable_across_operation_realization() {
         crate::session_graph::frame_node_id(&SessionId::from("session"), frame_key.as_str());
     let mut graph = GraphAppend::Extend {
         nodes: vec![crate::SessionNodeRecord {
-            node_id: frame_node_id.to_string().into(),
+            node_id: crate::NodeId::fixture(frame_node_id.to_string()),
             parent_node_id: None,
             timestamp: "2026-07-26T10:00:00Z".to_string(),
             payload: crate::SessionNodePayload::FrameOpen {
@@ -848,8 +848,8 @@ fn append_leaf_is_derived_from_the_terminal_appended_node() {
     assert!(GraphAppend::PreserveHead.nodes().is_empty());
 
     let node = |node_id: &str, parent_node_id: Option<&str>| crate::SessionNodeRecord {
-        node_id: node_id.into(),
-        parent_node_id: parent_node_id.map(Into::into),
+        node_id: node_id.parse().unwrap(),
+        parent_node_id: parent_node_id.map(|id| id.parse().unwrap()),
         timestamp: "2026-07-27T00:00:00Z".to_string(),
         payload: crate::SessionNodePayload::Plugin {
             plugin_type: node_id.to_string(),

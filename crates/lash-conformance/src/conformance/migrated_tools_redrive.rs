@@ -202,8 +202,8 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
     plugins: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
 ) {
     let registry = stores.process_registry();
-    let session_id = SessionId::from(format!("{prefix}-session"));
-    let turn_id = TurnId::from(format!("{prefix}-turn"));
+    let session_id = SessionId::fixture(format!("{prefix}-session"));
+    let turn_id = TurnId::fixture(format!("{prefix}-turn"));
     let target = registry
         .register_process_with_observers(
             crate::ProcessRegistration::new(

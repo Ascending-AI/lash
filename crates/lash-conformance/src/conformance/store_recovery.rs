@@ -163,7 +163,7 @@ where
 
 fn committed_state(session_id: &SessionId, marker: &str) -> crate::RuntimeSessionState {
     let mut state = crate::RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
@@ -242,7 +242,7 @@ pub async fn checkpoint_survives_before_admission_settlement<F>(
 ) where
     F: Fn(&str) -> Arc<dyn RuntimeStore>,
 {
-    let session_id = SessionId::from(format!("{prefix}:checkpoint-before-settlement"));
+    let session_id = SessionId::fixture(format!("{prefix}:checkpoint-before-settlement"));
     let source = "checkpoint-before-settlement";
     let writer = make(&session_id);
     let (_expired_lease, admission) =
@@ -296,7 +296,7 @@ pub async fn a_commit_settles_admitted_rows_once<F>(make: &F, prefix: &str)
 where
     F: Fn(&str) -> Arc<dyn RuntimeStore>,
 {
-    let session_id = SessionId::from(format!("{prefix}:atomic-settlement"));
+    let session_id = SessionId::fixture(format!("{prefix}:atomic-settlement"));
     let source = "atomic-settlement";
     let writer = make(&session_id);
     let (lease, admission) =
@@ -349,7 +349,7 @@ pub async fn recorded_commit_replay_is_idempotent<F>(make: &F, prefix: &str)
 where
     F: Fn(&str) -> Arc<dyn RuntimeStore>,
 {
-    let session_id = SessionId::from(format!("{prefix}:commit-replay"));
+    let session_id = SessionId::fixture(format!("{prefix}:commit-replay"));
     let source = "commit-replay";
     let writer = make(&session_id);
     let (lease, admission) =

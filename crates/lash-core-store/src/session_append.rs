@@ -83,7 +83,8 @@ pub struct AppendSessionNodesRequest {
 pub enum AppendSessionNodesOutcome {
     /// The nodes are durable. `node_ids` are their store-assigned ids in
     /// request order. On a fresh append, `leaf_node_id` is the selected leaf
-    /// after that commit. On receipt replay both fields are the stored
+    /// after that commit, and `None` only while the graph holds no node. On
+    /// receipt replay both fields are the stored
     /// first-attempt result; later commits may have moved the current session
     /// leaf elsewhere.
     ///
@@ -92,7 +93,7 @@ pub enum AppendSessionNodesOutcome {
     /// [`AppendSessionNodesRequest::requires_ancestor_node_id`]; see that field.
     Appended {
         node_ids: Vec<crate::NodeId>,
-        leaf_node_id: crate::NodeId,
+        leaf_node_id: Option<crate::NodeId>,
     },
     /// Nothing was written: the branch the caller read from has been abandoned.
     /// [`AppendSessionNodesRequest::requires_ancestor_node_id`] named a node

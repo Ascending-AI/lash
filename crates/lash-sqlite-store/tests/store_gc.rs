@@ -53,7 +53,7 @@ async fn factory_state(
         .expect("load factory session metadata")
         .expect("factory session metadata");
     RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: SessionId::fixture(session_id.to_string()),
         head_revision,
         ..RuntimeSessionState::new(SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
@@ -219,7 +219,10 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
         .expect("load meta")
         .expect("meta");
     assert_eq!(meta.session_id, "chat/alpha");
-    assert_eq!(meta.parent_session_id(), Some("preserved-parent"));
+    assert_eq!(
+        meta.parent_session_id().map(|id| id.as_str()),
+        Some("preserved-parent")
+    );
 
     let reopened = admit_store(
         &factory,
@@ -245,7 +248,10 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
         .await
         .expect("load reopened meta")
         .expect("reopened meta");
-    assert_eq!(reopened_meta.parent_session_id(), Some("preserved-parent"));
+    assert_eq!(
+        reopened_meta.parent_session_id().map(|id| id.as_str()),
+        Some("preserved-parent")
+    );
 }
 
 #[tokio::test]
@@ -255,7 +261,7 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
     let request = |session_id: &SessionId| SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: SessionId::fixture(session_id.to_string()),
         relation: lash_core_execution::SessionRelation::Root,
         config: SessionPolicy {
             model: recorded_llm_profile("model"),
@@ -350,7 +356,7 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
     let store_for = |session_id: &SessionId| SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: SessionId::fixture(session_id.to_string()),
         relation: lash_core_execution::SessionRelation::Root,
         config: SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
@@ -375,7 +381,7 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
             frame_key.as_str(),
         );
         let node = lash_core_execution::SessionNodeRecord {
-            node_id: frame_node_id.to_string().into(),
+            node_id: lash_core_execution::NodeId::fixture(frame_node_id.to_string()),
             parent_node_id: None,
             timestamp: "2026-07-26T00:00:00Z".to_string(),
             payload: lash_core_execution::SessionNodePayload::FrameOpen {
@@ -418,13 +424,19 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
     assert_ne!(first_node_id, second_node_id);
     assert!(
         first
-            .contains_active_ancestor(&first_state.session_id, &first_node_id.to_string().into())
+            .contains_active_ancestor(
+                &first_state.session_id,
+                &lash_core_execution::NodeId::fixture(first_node_id.to_string())
+            )
             .await
             .unwrap()
     );
     assert!(
         second
-            .contains_active_ancestor(&second_state.session_id, &second_node_id.to_string().into())
+            .contains_active_ancestor(
+                &second_state.session_id,
+                &lash_core_execution::NodeId::fixture(second_node_id.to_string())
+            )
             .await
             .unwrap()
     );
@@ -437,7 +449,7 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
     let request = |session_id: &SessionId| SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: SessionId::fixture(session_id.to_string()),
         relation: lash_core_execution::SessionRelation::Root,
         config: SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
@@ -461,7 +473,7 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
         frame_key.as_str(),
     );
     let node = lash_core_execution::SessionNodeRecord {
-        node_id: frame_node_id.to_string().into(),
+        node_id: lash_core_execution::NodeId::fixture(frame_node_id.to_string()),
         parent_node_id: None,
         timestamp: "2026-07-26T00:00:00Z".to_string(),
         payload: lash_core_execution::SessionNodePayload::FrameOpen {
@@ -514,7 +526,7 @@ async fn sqlite_vacuum_is_scoped_to_the_bound_session() {
     let request = |session_id: &SessionId| SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: SessionId::fixture(session_id.to_string()),
         relation: lash_core_execution::SessionRelation::Root,
         config: SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
@@ -609,7 +621,7 @@ async fn commit_single_root_node(
         &SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: session_id.clone(),
             relation: lash_core_execution::SessionRelation::Root,
             config: SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
@@ -732,7 +744,7 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
             .session_graph
             .apply_append(&lash_core_execution::store::GraphAppend::Extend {
                 nodes: vec![lash_core_execution::SessionNodeRecord {
-                    node_id: "orphan-fork-child-node".to_string().into(),
+                    node_id: lash_core_execution::NodeId::from("orphan-fork-child-node"),
                     parent_node_id,
                     timestamp: "2026-08-17T00:00:00Z".to_string(),
                     payload: lash_core_execution::SessionNodePayload::Event {

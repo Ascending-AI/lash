@@ -551,8 +551,13 @@ async fn a_drive_on_a_draining_build_hands_over_after_its_current_root(
         .expect("the lever names one generation");
     let old_core = core_over(engine.old_backend(), engine.old_work(), &model);
 
-    let handle = old_core.session(session).created().await.open().await?;
-    let session_id = lash_core::SessionId::from(session);
+    let handle = old_core
+        .session(lash_core::SessionId::fixture(session.to_string()))
+        .created()
+        .await
+        .open()
+        .await?;
+    let session_id = lash_core::SessionId::fixture(session);
     let store = lash_core::runtime::live_session_view(&old_core.store_factory, &session_id)
         .await?
         .expect("an opened session has a store");
@@ -831,8 +836,12 @@ impl MidRoll {
             .expect("the engine's generation is bound")
             .clone();
         let core = core_with_protocol(engine.old_backend(), engine.old_work(), &model, protocol);
-        core.session(session).created().await.open().await?;
-        let session = lash_core::SessionId::from(session);
+        core.session(lash_core::SessionId::fixture(session.to_string()))
+            .created()
+            .await
+            .open()
+            .await?;
+        let session = lash_core::SessionId::fixture(session);
         let store = lash_core::runtime::live_session_view(&core.store_factory, &session)
             .await?
             .expect("an opened session has a store");
@@ -1022,11 +1031,7 @@ async fn a_root_started_on_a_newer_build_counts_in_the_build_that_runs_it(
         .clone();
     let core = core_over(engine.old_backend(), engine.old_work(), &model);
     let session = lash_core::SessionId::from("drain-hand-over-runner-stamp");
-    core.session(session.as_str())
-        .created()
-        .await
-        .open()
-        .await?;
+    core.session(session.clone()).created().await.open().await?;
     let store = lash_core::runtime::live_session_view(&core.store_factory, &session)
         .await?
         .expect("an opened session has a store");

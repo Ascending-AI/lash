@@ -95,7 +95,7 @@ fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         relation: SessionRelation::Root,
         config: crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
@@ -120,7 +120,7 @@ async fn seed(
         .await
         .expect("admit lineage conformance session");
     let mut state = RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: SessionId::fixture(session_id.to_string()),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
@@ -152,12 +152,12 @@ async fn fork(
     session_id: &SessionId,
     node_id: &str,
 ) -> SessionStore {
-    let source = SessionId::from(source);
+    let source = SessionId::fixture(source);
     let head_revision = super::helpers::revision_at(factory.as_ref(), &source, node_id).await;
     factory
         .fork_session(&ForkSessionRequest {
             pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: session_id.clone(),
             source_session_id: source,
             head_revision,
             relation: SessionRelation::Root,
@@ -317,7 +317,7 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
     let mut prior_leaf = source_nodes[1].clone();
     let mut prior_session = "lineage-a".to_string();
     for depth in 0..12 {
-        let session_id = SessionId::from(format!("lineage-chain-{depth}"));
+        let session_id = SessionId::fixture(format!("lineage-chain-{depth}"));
         let chained = fork(&factory, &prior_session, &session_id, &prior_leaf).await;
         prior_session = session_id.to_string();
         prior_leaf = append(&chained, 1)

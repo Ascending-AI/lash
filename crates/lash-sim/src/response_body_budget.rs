@@ -96,9 +96,13 @@ async fn witness(
                     .build(crate::sim_process_owner())
                     .unwrap();
                 let session_id = format!("{lane}-{streamed}-{status}-{excess}");
-                let session = crate::open_created_session("budget-model", &core, session_id)
-                    .await
-                    .unwrap();
+                let session = crate::open_created_session(
+                    "budget-model",
+                    &core,
+                    lash_core::SessionId::fixture(session_id),
+                )
+                .await
+                .unwrap();
                 let output = session
                     .send(lash::TurnInput::text("hello"))
                     .output()

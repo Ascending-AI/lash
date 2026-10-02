@@ -16,7 +16,7 @@ async fn create_stating_termination(
     session_id: &str,
     termination: crate::rlm::RlmTermination,
 ) -> crate::Result<crate::DurableSession> {
-    core.session(session_id)
+    core.session(lash_core::SessionId::fixture(session_id.to_string()))
         .create(crate::SessionCreation {
             spec: mock_session_spec().plugin_options(
                 lash_core::PluginOptions::typed(

@@ -191,8 +191,8 @@ pub async fn no_row_stays_bound_after_a_roots_terminal_commit(store: Arc<dyn Run
         admit_at_checkpoint_for_test(
             &store,
             &fence,
-            &TurnId::from(root.as_str()),
-            &TurnId::from(root.as_str()),
+            &TurnId::fixture(root.as_str()),
+            &TurnId::fixture(root.as_str()),
             crate::CheckpointKind::AfterWork,
             &format!("{root}:checkpoint"),
             64,
@@ -211,7 +211,7 @@ pub async fn no_row_stays_bound_after_a_roots_terminal_commit(store: Arc<dyn Run
             settlement.completed_batches.clear();
             settlement
         } else {
-            IngressSettlement::new(TurnId::from(root.as_str()))
+            IngressSettlement::new(TurnId::fixture(root.as_str()))
         };
         let mut commit = final_commit(head_commit(&store, &session).await, &fence, settlement);
         if let (Some(terminal), Some(stop)) = (commit.root_terminal.as_mut(), &stop) {
@@ -281,7 +281,7 @@ pub async fn open_input_addressed_to_an_ended_root_is_next_turn_input(
         ("drop", crate::TurnCancelUndeliveredInputPolicy::Drop),
     ] {
         let root = format!("{case}-composing-root");
-        let member_turn = TurnId::from(format!("{case}-member-turn"));
+        let member_turn = TurnId::fixture(format!("{case}-member-turn"));
         let enqueue = |draft: crate::PendingTurnInputDraft| {
             let store = Arc::clone(&store);
             async move {
@@ -331,7 +331,7 @@ pub async fn open_input_addressed_to_an_ended_root_is_next_turn_input(
         .await;
         let own = enqueue(pending_active_turn_input_draft(
             &session,
-            &TurnId::from(root.as_str()),
+            &TurnId::fixture(root.as_str()),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "addressed to the root's own turn",
         ))
@@ -339,7 +339,7 @@ pub async fn open_input_addressed_to_an_ended_root_is_next_turn_input(
         let addressed_rows = [&addressed, &follow_on, &own];
         let swept = addressed_rows.map(|input| input.input_id.clone()).to_vec();
 
-        let address = crate::TurnAddress::new(session.clone(), TurnId::from(root.as_str()));
+        let address = crate::TurnAddress::new(session.clone(), TurnId::fixture(root.as_str()));
         if disposition == crate::TurnCancelUndeliveredInputPolicy::Drop {
             store
                 .record_turn_cancel_request(

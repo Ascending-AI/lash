@@ -109,7 +109,7 @@ async fn fleet(database: &IsolatedDatabase) -> (PostgresStorage, PostgresStorage
 fn meta(session: &str) -> SessionMeta {
     SessionMeta {
         owning_process_id: None,
-        session_id: SessionId::from(session),
+        session_id: SessionId::fixture(session),
         relation: SessionRelation::Root,
         pending_observer_intents: Vec::new(),
     }

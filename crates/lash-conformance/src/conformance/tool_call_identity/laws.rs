@@ -850,7 +850,7 @@ async fn append_in_a_handler(
     let drained = Arc::new(std::sync::Mutex::new(Ok(Vec::new())));
     let scope = crate::AdmittedScope::turn(
         world.session_id.clone(),
-        format!("host-append:{}", receipt.batch_id),
+        crate::TurnId::fixture(format!("host-append:{}", receipt.batch_id)),
     );
     let (drain_runtime, drain_fence, report) = (runtime.clone(), fence.clone(), drained.clone());
     tier.runner
@@ -1373,7 +1373,7 @@ pub async fn fork_inherits_history_without_execution_queues_waits_or_journals_on
         .expect("source window")
         .expect("source");
     let leaf = before.window.leaf_node_id.clone().expect("source leaf");
-    let branch = SessionId::from(format!("{}-branch", world.session_id));
+    let branch = SessionId::fixture(format!("{}-branch", world.session_id));
     let executed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     for session in [&world.session_id, &branch] {
         if session == branch {

@@ -316,7 +316,7 @@ impl CommittedRootUnderALlmProfileChange {
             turn_config_llm_profiles(recording_model(&calls, &models)),
         )
         .await;
-        let root = TurnId::from(format!("{prefix}-turn-config-{name}-root"));
+        let root = TurnId::fixture(format!("{prefix}-turn-config-{name}-root"));
         let crash = crate::ConformanceCrash::new();
         let crashing: crate::ConformanceTurnAttempt = {
             let parts = parts.clone();
@@ -458,7 +458,7 @@ impl CommittedRootUnderALlmProfileChange {
         name: &str,
         runner: &Arc<dyn crate::ConformanceTurnRunner>,
     ) {
-        let next = TurnId::from(format!("{prefix}-turn-config-{name}-next"));
+        let next = TurnId::fixture(format!("{prefix}-turn-config-{name}-next"));
         let next_turn = run_text_turn(
             runner,
             &self.parts,
@@ -580,7 +580,7 @@ pub async fn an_older_admission_redriven_after_a_profile_change_is_fenced_out(
         ("root A's final commit run again", law.root.clone()),
         (
             "a turn root A never committed",
-            TurnId::from(format!("{}-rerun", law.root)),
+            TurnId::fixture(format!("{}-rerun", law.root)),
         ),
     ] {
         let mut commit = super::root_control::root_final_commit(&rerun, &law.root, &turn, 0);
@@ -667,7 +667,7 @@ async fn law_session_recording(
     policy: crate::SessionPolicy,
     tools: Vec<Arc<dyn crate::plugin::PluginFactory>>,
 ) -> ConfigParts {
-    let session_id = SessionId::from(format!("{prefix}-turn-config-{name}-session"));
+    let session_id = SessionId::fixture(format!("{prefix}-turn-config-{name}-session"));
     let mut host = crate::LawBackend::over_stores(Arc::clone(stores), Arc::clone(effect_host))
         .host_config(
             crate::CommitBudget::bounded(1024 * 1024, 512),
@@ -798,7 +798,7 @@ pub async fn an_input_sent_after_a_config_command_runs_on_the_new_profile(
         turn_config_llm_profiles(recording_model(&calls, &models)),
     )
     .await;
-    let first = TurnId::from(format!("{prefix}-turn-config-after-command-first"));
+    let first = TurnId::fixture(format!("{prefix}-turn-config-after-command-first"));
     let turn = run_text_turn(&runner, &parts, &first, "first", BeforeSend::Nothing)
         .await
         .unwrap_or_else(|error| panic!("the first root runs: {error:?}"));
@@ -807,7 +807,7 @@ pub async fn an_input_sent_after_a_config_command_runs_on_the_new_profile(
         "the first root finishes: {:?}",
         turn.outcome
     );
-    let second = TurnId::from(format!("{prefix}-turn-config-after-command-second"));
+    let second = TurnId::fixture(format!("{prefix}-turn-config-after-command-second"));
     let turn = run_text_turn(
         &runner,
         &parts,
@@ -867,7 +867,7 @@ pub async fn a_config_transaction_waits_while_a_root_owns_the_head(
         turn_config_llm_profiles(gated_recording_model(&calls, &models, &entered, &release)),
     )
     .await;
-    let root = TurnId::from(format!("{prefix}-turn-config-pending-while-root"));
+    let root = TurnId::fixture(format!("{prefix}-turn-config-pending-while-root"));
     let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
     let submitting = async {
         entered.notified().await;
@@ -939,7 +939,7 @@ pub async fn a_config_transaction_waits_while_a_root_owns_the_head(
         "the lane applies the transaction once the root released the head"
     );
 
-    let next = TurnId::from(format!("{prefix}-turn-config-pending-while-root-next"));
+    let next = TurnId::fixture(format!("{prefix}-turn-config-pending-while-root-next"));
     let turn = run_text_turn(&runner, &parts, &next, "second", BeforeSend::Nothing)
         .await
         .unwrap_or_else(|error| panic!("the next root runs: {error:?}"));
@@ -1062,7 +1062,7 @@ pub async fn one_config_resolution_per_root(
         ))],
     )
     .await;
-    let root = TurnId::from(format!("{prefix}-turn-config-one-resolution-root"));
+    let root = TurnId::fixture(format!("{prefix}-turn-config-one-resolution-root"));
     let run = run_text_turn(
         &runner,
         &parts,
@@ -1130,7 +1130,7 @@ pub async fn an_unbindable_llm_profile_retries_and_never_fails_the_turn(
     // The same session on a worker whose models lack the recorded key.
     let mut unserved = served.clone();
     unserved.host.providers.models = Arc::new(crate::LlmProfileRegistry::new());
-    let root = TurnId::from(format!("{prefix}-turn-config-unbindable-root"));
+    let root = TurnId::fixture(format!("{prefix}-turn-config-unbindable-root"));
     let attempts = Arc::new(AtomicUsize::new(0));
     let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
     // The first attempt runs on the worker without the key; every later one,
@@ -1931,7 +1931,7 @@ pub async fn a_redrive_runs_under_the_execution_controls_its_root_recorded(
         policy_with_budget(crate::TurnBudget::bounded(RECORDED_TURNS)),
     )
     .await;
-    let root = TurnId::from(format!("{prefix}-turn-config-recorded-controls-root"));
+    let root = TurnId::fixture(format!("{prefix}-turn-config-recorded-controls-root"));
     let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
     let crashing: crate::ConformanceTurnAttempt = {
         let parts = parts.clone();
@@ -2012,7 +2012,7 @@ pub async fn a_missing_recorded_termination_is_a_typed_terminal_refusal(
         turn_config_llm_profiles(recording_model(&calls, &models)),
     )
     .await;
-    let root = TurnId::from(format!("{prefix}-missing-recorded-termination-root"));
+    let root = TurnId::fixture(format!("{prefix}-missing-recorded-termination-root"));
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     runner
         .run_turn(
@@ -2157,7 +2157,7 @@ pub async fn a_redrive_assembles_the_terminal_its_root_recorded_termination_deci
         )
         .await;
         parts.protocol = crate::testing::test_protocol_factories_ending_without_done();
-        let root = TurnId::from(format!("{prefix}-turn-config-{name}-root"));
+        let root = TurnId::fixture(format!("{prefix}-turn-config-{name}-root"));
         let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
         runner
             .run_crashed_then_redriven_turn(

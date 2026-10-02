@@ -34,11 +34,8 @@ pub async fn committed_turn_receipt_answers_the_parent_end_recovery_read(
         ))
     };
     let mut commit = RuntimeCommit::persisted_state_for_test(&state);
-    commit.turn_commit = RuntimeTurnCommitStamp::new(crate::OperationId::turn(
-        "root",
-        committed.as_str(),
-        "final",
-    ));
+    commit.turn_commit =
+        RuntimeTurnCommitStamp::new(crate::OperationId::turn("root", committed.clone(), "final"));
     store
         .commit_runtime_state(commit)
         .await

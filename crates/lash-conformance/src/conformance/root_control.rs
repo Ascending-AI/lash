@@ -252,7 +252,7 @@ impl AdmittedRoot {
         stores: &Arc<dyn crate::StoreSet>,
     ) -> Self {
         let parts = DriveParts::new(prefix, name, host, stores, 8).await;
-        let root = TurnId::from(format!("{name}-root"));
+        let root = TurnId::fixture(format!("{name}-root"));
         let input = parts.enqueue("first", Some(root.as_str())).await;
         let lease = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
             &parts.store,
@@ -536,7 +536,7 @@ pub(super) fn root_final_commit(
     turn: &TurnId,
     ordinal: u32,
 ) -> crate::RuntimeCommit {
-    let operation = crate::OperationId::turn(state.session_id.as_str(), turn.as_str(), "final");
+    let operation = crate::OperationId::turn(state.session_id.clone(), turn.clone(), "final");
     let mut graph = state.pending_graph_commit();
     graph
         .derive_node_ids(&state.session_id, &operation)
@@ -1008,7 +1008,7 @@ pub async fn fork_releases_the_old_owner_before_the_new_root_drives_in_original_
     };
     assert_eq!(
         *new_root,
-        TurnId::from(format!("{}~fork{}", f.root, intent.id))
+        TurnId::fixture(format!("{}~fork{}", f.root, intent.id))
     );
     for input in [&f.input, &second] {
         assert_eq!(

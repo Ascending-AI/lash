@@ -320,7 +320,7 @@ impl RuntimeExecutionContext<'_> {
 /// aggregate's content must match on a redrive is checked at the group head
 /// against the journal's retained children
 /// ([`GroupReopen::RetainedContent`](crate::GroupReopen::RetainedContent)).
-fn aggregate_content_digest(calls: &[ToolInvocation], timers: &[(usize, u64)]) -> String {
+fn aggregate_content_digest(calls: &[ToolInvocation], timers: &[(usize, u64)]) -> crate::BatchId {
     let mut identity = crate::stable_identity::IdentityEncoder::new(
         "lash.aggregate-content",
         AGGREGATE_CONTENT_FAMILY_VERSION,
@@ -330,10 +330,9 @@ fn aggregate_content_digest(calls: &[ToolInvocation], timers: &[(usize, u64)]) -
         identity.u64(*position as u64);
         identity.u64(*duration_ms);
     });
-    crate::stable_identity::rendered_hash(
+    crate::BatchId::prefixed(
         "tool-batch",
-        TOOL_BATCH_FAMILY_VERSION,
-        &identity.finish(),
+        crate::stable_identity::rendered_hash_tail(TOOL_BATCH_FAMILY_VERSION, &identity.finish()),
     )
 }
 

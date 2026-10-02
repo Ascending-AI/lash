@@ -133,7 +133,7 @@ async fn commit_with_attachment_refs(
     let create = new_session || model.attachment_sessions.is_empty();
     let (session_index, session_id, head_revision, store) = if create {
         model.attachment_session_sequence += 1;
-        let session_id = SessionId::from(format!(
+        let session_id = SessionId::fixture(format!(
             "runtime-persistence-attachment-{seed}-{}",
             model.attachment_session_sequence
         ));
@@ -165,7 +165,7 @@ async fn commit_with_attachment_refs(
         ),
         crate::RuntimeOwner::Session(session_id.clone()),
     ));
-    let turn_id = TurnId::from(format!(
+    let turn_id = TurnId::fixture(format!(
         "attachment-turn:{seed}:{session_id}:{head_revision}"
     ));
     let _owner_binding = if turn_owned {
@@ -266,7 +266,7 @@ async fn put_attachment_intent(
     value: u8,
 ) -> Result<(), String> {
     model.attachment_session_sequence += 1;
-    let session_id = SessionId::from(format!(
+    let session_id = SessionId::fixture(format!(
         "runtime-persistence-intent-{seed}-{}",
         model.attachment_session_sequence
     ));
@@ -294,7 +294,7 @@ async fn put_attachment_intent(
         Some(
             facade
                 .bind_execution_scoped(
-                    crate::ExecutionScope::turn(session_id, owner_id)
+                    crate::ExecutionScope::turn(session_id, TurnId::fixture(owner_id))
                         .journal_identity()
                         .map_err(|error| error.to_string())?,
                 )

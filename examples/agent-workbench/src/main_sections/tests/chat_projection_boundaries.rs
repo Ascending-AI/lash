@@ -20,7 +20,7 @@ fn probe_turn_input(turn_id: &TurnId, message_id: &str) -> lash::messages::Messa
             None,
         )]),
         origin: Some(lash::messages::MessageOrigin::TurnInput {
-            turn_id: TurnId::from(turn_id.to_string()),
+            turn_id: turn_id.clone(),
             input_id: None,
         }),
     }
@@ -82,7 +82,7 @@ fn probe_runtime_assistant(message_id: &str, prose: &str) -> lash::messages::Mes
 fn probe_replies(messages: Vec<lash::messages::Message>, running_turn_ids: &[&str]) -> Vec<String> {
     let running = running_turn_ids
         .iter()
-        .map(|turn_id| TurnId::from(*turn_id))
+        .map(|turn_id| TurnId::fixture(*turn_id))
         .collect::<BTreeSet<_>>();
     durable_rlm_reply_message_ids(&messages, &running)
         .into_iter()

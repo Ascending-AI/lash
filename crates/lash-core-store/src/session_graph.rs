@@ -125,10 +125,10 @@ pub mod facade_ops {
 
 pub fn draft_node_id(namespace: &str, ordinal: u64) -> NodeId {
     let preimage = format!("{}:{namespace}:{ordinal}", namespace.len());
-    NodeId::new(format!(
-        "{DRAFT_NODE_PREFIX_VERSION}{}",
-        crate::stable_hash::blake3_hex(LASH_DRAFT_NODE_DOMAIN_VERSION, preimage.as_bytes())
-    ))
+    NodeId::prefixed(
+        DRAFT_NODE_PREFIX_VERSION,
+        crate::stable_hash::blake3_hex(LASH_DRAFT_NODE_DOMAIN_VERSION, preimage.as_bytes()),
+    )
 }
 
 /// Derive a durable frame identity before the surrounding operation commits.
@@ -137,21 +137,16 @@ pub fn draft_node_id(namespace: &str, ordinal: u64) -> NodeId {
 /// FrameOpen ID must be final before runtime effects begin. The host-provided
 /// session id fixes the identity before store admission; binding must leave it
 /// unchanged.
-#[expect(
-    clippy::expect_used,
-    reason = "`FrameNodeId::new` rejects only the empty string, and the derived id always carries its `frame-node/v3/` prefix"
-)]
 pub fn frame_node_id(session_id: &SessionId, frame_key: &str) -> crate::FrameNodeId {
     let preimage = format!(
         "{}:{session_id}:{}:{frame_key}",
         session_id.len(),
         frame_key.len()
     );
-    crate::FrameNodeId::new(format!(
-        "{FRAME_NODE_PREFIX_VERSION}{}",
-        crate::stable_hash::blake3_hex(LASH_FRAME_NODE_DOMAIN_VERSION, preimage.as_bytes())
+    crate::FrameNodeId::from(NodeId::prefixed(
+        FRAME_NODE_PREFIX_VERSION,
+        crate::stable_hash::blake3_hex(LASH_FRAME_NODE_DOMAIN_VERSION, preimage.as_bytes()),
     ))
-    .expect("derived frame node ids are non-empty")
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -914,8 +909,11 @@ impl SessionNodeRecord {
         }
         let body = serde_json::from_value::<StoredSessionNodeBody>(value)?;
         Ok(Self {
-            node_id: NodeId::from(node_id),
-            parent_node_id: parent_node_id.map(NodeId::from),
+            node_id: NodeId::parse(node_id).map_err(serde::de::Error::custom)?,
+            parent_node_id: parent_node_id
+                .map(NodeId::parse)
+                .transpose()
+                .map_err(serde::de::Error::custom)?,
             timestamp: body.timestamp,
             payload: body.payload,
         })
@@ -1080,10 +1078,10 @@ impl SessionGraph {
     fn validate_structural_integrity(&self) -> Result<(), crate::StoreError> {
         let by_id = graph_node_indices(self)?;
         if let Some(anchor) = self.anchor()
-            && !by_id.contains_key(anchor.base_node_id())
+            && !by_id.contains_key(anchor.base_node_id().as_str())
         {
             return Err(crate::StoreError::InvalidWindowAnchor {
-                frame_node_id: NodeId::from(anchor.base_node_id()),
+                frame_node_id: anchor.base_node_id().clone(),
                 violation: crate::store::WindowAnchorViolation::BaseIsNotLeafFrame,
             });
         }
@@ -1407,7 +1405,7 @@ impl SessionGraph {
             return false;
         }
         self.append_prebuilt_nodes(vec![SessionNodeRecord {
-            node_id: NodeId::new(frame_node_id.into_inner()),
+            node_id: NodeId::from(frame_node_id),
             parent_node_id: self.leaf_node_id.clone(),
             timestamp,
             payload: SessionNodePayload::FrameOpen {
@@ -1419,10 +1417,6 @@ impl SessionGraph {
         true
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "`FrameNodeId::new` rejects only the empty string, and a node id read back out of the graph is never empty"
-    )]
     pub(crate) fn try_agent_frame_records(
         &self,
         session_id: &SessionId,
@@ -1437,11 +1431,10 @@ impl SessionGraph {
             let Some((reason, assignment)) = node.frame_open() else {
                 continue;
             };
-            let frame_node_id = crate::FrameNodeId::new(node.node_id.clone())
-                .expect("validated graph node identities are non-empty");
+            let frame_node_id = crate::FrameNodeId::from(&node.node_id);
             frames.push(crate::AgentFrameRecord::new_at(
                 frame_node_id.clone(),
-                session_id.to_string(),
+                session_id.clone(),
                 previous_frame_node_id.clone(),
                 reason.clone(),
                 assignment.clone(),
@@ -1503,9 +1496,6 @@ impl SessionGraph {
         &mut self,
         append: &crate::store::GraphAppend,
     ) -> Result<(), crate::StoreError> {
-        for node in append.nodes() {
-            crate::session_graph_integrity::validate_node_id(&node.node_id)?;
-        }
         // Construction or the cold-cache build validates resident ids once.
         // A warm graph only needs to validate the incoming batch.
         let resident_index = &self.try_cache()?.by_id;

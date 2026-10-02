@@ -420,10 +420,9 @@ pub fn head_input_root(
 /// source key) when it has one, else its input id (FIG-3600, ruling Q4).
 #[must_use]
 pub fn input_root(input: &crate::PendingTurnInput) -> crate::TurnId {
-    crate::TurnId::from(
-        input
-            .source_key
-            .as_deref()
-            .unwrap_or_else(|| input.input_id.as_str()),
-    )
+    input
+        .source_key
+        .as_deref()
+        .and_then(|source_key| crate::TurnId::parse(source_key).ok())
+        .unwrap_or_else(|| crate::TurnId::from(&input.input_id))
 }

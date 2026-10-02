@@ -286,7 +286,11 @@ fn steering_commit(
     pending_follow_on: Option<crate::store::PendingFollowOn>,
 ) -> RuntimeCommit {
     let mut graph = state.pending_graph_commit();
-    let operation = crate::OperationId::turn(state.session_id.as_str(), turn_id, "final");
+    let operation = crate::OperationId::turn(
+        state.session_id.clone(),
+        TurnId::fixture(turn_id.to_string()),
+        "final",
+    );
     graph
         .derive_node_ids(&state.session_id, &operation)
         .expect("derive commit node ids");
@@ -318,7 +322,7 @@ async fn commit_switch_owing(
     let owed = crate::store::PendingFollowOn {
         continuation: None,
         follow_on_turn_id: crate::store::PhysicalTurn::derive_turn_id(
-            &TurnId::from(switching_turn),
+            &TurnId::fixture(switching_turn),
             1,
         ),
         frame_id: state

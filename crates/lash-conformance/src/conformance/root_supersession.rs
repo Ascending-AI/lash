@@ -322,7 +322,7 @@ pub async fn inconsistent_divergence_still_parks(
         8,
     )
     .await;
-    let root = TurnId::from(format!("inconsistent-{head:?}-root").to_lowercase());
+    let root = TurnId::fixture(format!("inconsistent-{head:?}-root").to_lowercase());
     let input = parts.enqueue("ask", Some(root.as_str())).await;
     // An earlier execution recorded the root's admission on `base`.
     let fence = lash_core::testing::store_fixtures::seal_drive_fence_for_test(

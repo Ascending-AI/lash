@@ -20,7 +20,7 @@ pub(crate) fn replayed_active_user_rows(
     let turn_ids = product_messages
         .iter()
         .filter_map(|message| workbench_turn_id_from_user_message_id(&message.id))
-        .map(TurnId::from)
+        .filter_map(|turn_id| TurnId::parse(turn_id).ok())
         .collect::<BTreeSet<_>>();
     // The turn and its prompt arrive from one read of one lock, so this row
     // can no longer be built from a turn that a concurrent removal has since
@@ -62,7 +62,8 @@ pub(crate) fn ui_owned_user_rows_by_turn<'a>(
         .into_iter()
         .filter_map(|message| {
             workbench_turn_id_from_user_message_id(&message.id)
-                .map(|turn_id| (TurnId::from(turn_id), message.clone()))
+                .and_then(|turn_id| TurnId::parse(turn_id).ok())
+                .map(|turn_id| (turn_id, message.clone()))
         })
         .collect()
 }
@@ -653,7 +654,7 @@ fn committed_turn_output_message_ids(committed: &[ChatMessage]) -> BTreeMap<Turn
 fn chat_message_turn_id(message: &ChatMessage) -> Option<TurnId> {
     workbench_turn_id_from_user_message_id(&message.id)
         .or_else(|| workbench_turn_id_from_assistant_message_id(&message.id))
-        .map(TurnId::from)
+        .and_then(|turn_id| TurnId::parse(turn_id).ok())
         .or_else(|| {
             message
                 .provenance

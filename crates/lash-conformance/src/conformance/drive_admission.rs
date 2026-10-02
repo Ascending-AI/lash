@@ -49,7 +49,7 @@ impl DriveParts {
         stores: &Arc<dyn crate::StoreSet>,
         admission_bound: usize,
     ) -> Self {
-        let session_id = SessionId::from(format!("{prefix}-{law}"));
+        let session_id = SessionId::fixture(format!("{prefix}-{law}"));
         let calls = Arc::new(AtomicUsize::new(0));
         let model = crate::testing::TestProvider::builder()
             .kind("stub")
@@ -271,7 +271,7 @@ impl DriveParts {
     ) -> crate::store::AdmitRootRequest {
         crate::store::AdmitRootRequest {
             fence: authority.clone(),
-            root: TurnId::from(root),
+            root: TurnId::fixture(root),
             head,
             max_inputs: 1,
             policy: crate::testing::queued_work_admission_policy(1),

@@ -554,7 +554,9 @@ impl RestateSessionControl {
             .parse(&invocation.target_service_name)
             .map(|route| route.service());
         if service == Some(crate::LashService::SessionDriver) {
-            self.reconcile_drive(parks, invocation, key.as_str().into(), report)
+            let session = lash_core::SessionId::parse(key.as_str())
+                .map_err(|error| EngineRefusal::from(lash_core::StoreError::from(error)))?;
+            self.reconcile_drive(parks, invocation, session, report)
                 .await?;
         } else if service == Some(crate::LashService::ProcessWorkflow) {
             let pass = crate::process::park_reconcile::reconcile_process_invocations(

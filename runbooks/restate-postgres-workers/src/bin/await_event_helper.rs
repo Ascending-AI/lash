@@ -15,8 +15,11 @@ async fn main() -> Result<()> {
     let nonce = args.next().context("missing vector nonce")?;
     anyhow::ensure!(args.next().is_none(), "unexpected helper arguments");
 
-    let session_id = SessionId::from(format!("cold-process-{nonce}-session"));
-    let scope = ExecutionScope::turn(&session_id, format!("cold-process-{nonce}-turn"));
+    let session_id = SessionId::prefixed("cold-process-", format!("{nonce}-session"));
+    let scope = ExecutionScope::turn(
+        &session_id,
+        lash_core::TurnId::prefixed("cold-process-", format!("{nonce}-turn")),
+    );
     let wait = match identity.as_str() {
         "tool_completion" => AwaitEventWaitIdentity::tool_completion(
             lash_core::ToolCallId::fixture(&format!("cold-process-{nonce}-call")),

@@ -134,7 +134,7 @@ pub(super) async fn session(
     prefix: &str,
     law: &str,
 ) -> (SessionId, Arc<dyn crate::RuntimeStore>) {
-    let id = SessionId::from(format!("{prefix}-{law}"));
+    let id = SessionId::fixture(format!("{prefix}-{law}"));
     let store = super::law_session_store(stores.as_ref(), &id).await;
     (id, store)
 }
@@ -550,7 +550,7 @@ pub async fn a_root_commit_racing_a_close_is_refused_stale_fence(
     state.session_id = id.clone();
     state.ensure_agent_frame_initialized();
     let root = TurnId::from("racing-root");
-    let operation = crate::OperationId::turn(id.as_str(), root.as_str(), "final");
+    let operation = crate::OperationId::turn(id.clone(), root.clone(), "final");
     let mut graph = state.pending_graph_commit();
     graph
         .derive_node_ids(&id, &operation)

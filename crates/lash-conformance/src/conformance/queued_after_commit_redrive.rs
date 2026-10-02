@@ -115,7 +115,7 @@ pub async fn a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    let session_id = SessionId::from(format!("{prefix}-queued-redrive-session"));
+    let session_id = SessionId::fixture(format!("{prefix}-queued-redrive-session"));
     let calls = Arc::new(AtomicUsize::new(0));
     let model = crate::testing::TestProvider::builder()
         .kind("stub")
@@ -174,7 +174,7 @@ pub async fn a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_
         runner.run_crashed_then_redriven_turn(
             admit(crate::ExecutionScope::turn(
                 &session_id,
-                format!("{prefix}-queued-redrive-1"),
+                crate::TurnId::fixture(format!("{prefix}-queued-redrive-1")),
             )),
             attempt(&parts, true, None),
             attempt(&parts, false, Some(first_tx)),
@@ -212,7 +212,7 @@ pub async fn a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_
         runner.run_turn(
             admit(crate::ExecutionScope::turn(
                 &session_id,
-                format!("{prefix}-queued-redrive-2"),
+                crate::TurnId::fixture(format!("{prefix}-queued-redrive-2")),
             )),
             attempt(&parts, false, Some(second_tx)),
         ),

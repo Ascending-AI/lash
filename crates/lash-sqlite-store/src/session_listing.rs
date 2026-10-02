@@ -1,7 +1,6 @@
 //! Session-catalog view listing over the durable-core catalog.
 
 use lash_core_execution::{SessionEntry, SessionListFilter, SessionRelationKind, SessionView};
-use lash_sansio::SessionId;
 use rusqlite::Connection;
 
 use crate::{sqlite_conversion_error, stored_data_corrupt, u64_from_sql};
@@ -47,7 +46,7 @@ pub(crate) fn list_session_views(
             }
         };
         Ok(SessionView {
-            session_id: SessionId::from(row.get::<_, String>(0)?),
+            session_id: crate::codec::sql_identity(row.get::<_, String>(0)?)?,
             created_at_ms: u64_from_sql("SessionView", "created_at_ms", row.get(17)?)?,
             last_commit_at_ms: row
                 .get::<_, Option<i64>>(18)?

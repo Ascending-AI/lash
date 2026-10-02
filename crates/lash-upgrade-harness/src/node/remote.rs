@@ -432,8 +432,8 @@ pub(super) fn client(args: RemoteClientArgs) -> Result<ClientReport> {
     };
 
     let request = RemoteTurnRequest {
-        session_id: lash::SessionId::from(args.session.clone()),
-        turn_id: lash::TurnId::from(format!("{}-turn", args.session)),
+        session_id: lash::SessionId::fixture(args.session.clone()),
+        turn_id: lash::TurnId::fixture(format!("{}-turn", args.session)),
         input: turn_input(&args.message),
         protocol_turn_options: None,
         tool_grants: Vec::new(),
@@ -506,12 +506,10 @@ pub(super) fn client(args: RemoteClientArgs) -> Result<ClientReport> {
     // error at its version.
     let mut error = None;
     if let Ok(negotiated) = &negotiated {
-        let invalid = RemoteTurnRequest {
-            session_id: lash::SessionId::from(String::new()),
-            ..request.clone()
-        };
-        let invalid: serde_json::Value =
-            serde_json::from_slice(&Envelope::at(negotiated, &invalid).encode_json()?)?;
+        // A blank session id is no session id: only the wire can carry one.
+        let mut invalid: serde_json::Value =
+            serde_json::from_slice(&Envelope::at(negotiated, &request).encode_json()?)?;
+        invalid["session_id"] = serde_json::Value::String(String::new());
         write_frame(&mut to_host, &Frame::Request(invalid))?;
         let Frame::Error(message) = next()? else {
             bail!("the host did not answer the invalid request with an error");

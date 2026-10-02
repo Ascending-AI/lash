@@ -137,8 +137,8 @@ pub(super) async fn held_step_law<Stores: lash_core::StoreSet + ?Sized + 'static
     runner: TurnRunner<Stores>,
     prefix: &str,
 ) {
-    let session = SessionId::from(format!("{prefix}-session"));
-    let turn_id = TurnId::from(format!("{prefix}-turn"));
+    let session = SessionId::fixture(format!("{prefix}-session"));
+    let turn_id = TurnId::fixture(format!("{prefix}-turn"));
     let view = lash_core::runtime::admit_session_view(
         &backend.session_store_factory(),
         &lash_core::testing::store_fixtures::session_store_request(

@@ -272,7 +272,7 @@ pub async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
                             Some(label),
                         )),
                     ),
-                    &[SessionId::from("recent-filter-observer".to_string())],
+                    &[SessionId::from("recent-filter-observer")],
                 )
                 .await
                 .expect("register recent-retired fixture")
@@ -298,7 +298,7 @@ pub async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
                     Some("recent-filter-fresh"),
                 )),
             ),
-            &[SessionId::from("recent-filter-observer".to_string())],
+            &[SessionId::from("recent-filter-observer")],
         )
         .await
         .expect("register fresh terminal process")
@@ -508,11 +508,11 @@ pub async fn list_processes_filters_by_until_scope_and_pending_cancel(
 
     let session = SessionId::from("scope-filter-session");
     let frame_a = SessionScope::for_agent_frame(
-        session.as_str(),
+        session.clone(),
         crate::session_graph::frame_node_id(&session, "scope-frame-a"),
     );
     let frame_b = SessionScope::for_agent_frame(
-        session.as_str(),
+        session.clone(),
         crate::session_graph::frame_node_id(&session, "scope-frame-b"),
     );
     let turn_scope =

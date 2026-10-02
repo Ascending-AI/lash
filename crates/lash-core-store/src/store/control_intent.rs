@@ -544,7 +544,7 @@ pub fn decide_root_intent(
 /// before binding the released members, so the name is unique and stable.
 #[must_use]
 pub fn forked_root(root: &TurnId, intent: ControlIntentId) -> TurnId {
-    TurnId::from(format!("{root}~fork{intent}"))
+    root.with_suffix(format_args!("~fork{intent}"))
 }
 
 /// The deployment's control-intent ledger (FIG-3600 S7, ADR 0104 O4, astra

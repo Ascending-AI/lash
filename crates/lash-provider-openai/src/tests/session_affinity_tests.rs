@@ -11,7 +11,7 @@ async fn host_enabled_session_affinity_works_through_a_custom_proxy_url() {
         })
         .with_transport(transport.clone());
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    let session_id = SessionId::from(format!("{}étrailing", "s".repeat(255)));
+    let session_id = SessionId::fixture(format!("{}étrailing", "s".repeat(255)));
     req.scope.session_id = session_id.clone();
     let expected = req.scope.provider_session_affinity_key();
 

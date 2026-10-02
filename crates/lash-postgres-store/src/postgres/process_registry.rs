@@ -689,8 +689,10 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
             .bind(process_id.as_str())
             .fetch_all(&self.pool)
             .await
-            .map(|ids: Vec<String>| ids.into_iter().map(SessionId::from).collect())
-            .map_err(plugin_sqlx_error)
+            .map_err(plugin_sqlx_error)?
+            .into_iter()
+            .map(|id: String| SessionId::parse(id).map_err(PluginError::from))
+            .collect()
     }
 
     async fn retarget_subscription(

@@ -25,7 +25,7 @@ pub struct UsageLedgerStoreFixture {
     pub snapshot: UsageLedgerSnapshot,
 }
 fn owner(label: &str) -> RuntimeOwner {
-    RuntimeOwner::Session(SessionId::from(label))
+    RuntimeOwner::Session(SessionId::fixture(label))
 }
 fn effect(label: &str) -> UsageEffectKey {
     UsageEffectKey::for_effect(

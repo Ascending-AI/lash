@@ -621,7 +621,7 @@ fn admission_request(
 
 fn next_root(model: &mut ReferenceModel) -> TurnId {
     model.root_sequence += 1;
-    TurnId::from(format!("property-root-{}", model.root_sequence))
+    TurnId::fixture(format!("property-root-{}", model.root_sequence))
 }
 
 /// Admit from the head of `family` under the live fence. With a root

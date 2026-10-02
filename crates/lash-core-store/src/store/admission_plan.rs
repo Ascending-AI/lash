@@ -211,9 +211,7 @@ pub fn require_admitted_to_root(
             session_id: session_id.clone(),
             root: root.clone(),
             row: Box::new(row.clone()),
-            admitted_root: observed
-                .flatten()
-                .map(|root| TurnId::from(root.to_string())),
+            admitted_root: observed.flatten().map(TurnId::parse).transpose()?,
         }),
     }
 }
@@ -465,7 +463,7 @@ mod tests {
     use super::*;
 
     fn row(id: &str) -> IngressRowId {
-        IngressRowId::Input(InputId::from(id))
+        IngressRowId::Input(InputId::fixture(id))
     }
 
     #[test]

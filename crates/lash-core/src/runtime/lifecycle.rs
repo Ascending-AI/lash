@@ -551,14 +551,14 @@ impl LashRuntime {
             Some(snapshot) => plugin_host.build_session(PluginSessionRequest {
                 parent_session_id: parent_session_id.clone(),
                 ..PluginSessionRequest::rematerialization(
-                    state.session_id.as_str(),
+                    state.session_id.clone(),
                     snapshot,
                     authority,
                 )
             }),
             None => plugin_host.build_session(PluginSessionRequest {
                 parent_session_id,
-                ..PluginSessionRequest::creation(state.session_id.as_str(), authority)
+                ..PluginSessionRequest::creation(state.session_id.clone(), authority)
             }),
         }
         .map_err(SessionError::Plugin)?;
@@ -764,7 +764,7 @@ mod tests {
     ) -> Result<crate::runtime::LashRuntime, SessionError> {
         let plugins = crate::testing::test_plugin_host(Vec::new())
             .build_session(crate::plugin::PluginSessionRequest::creation(
-                state.session_id.as_str(),
+                state.session_id.clone(),
                 Default::default(),
             ))
             .expect("plugin session");
@@ -883,7 +883,7 @@ mod tests {
         let request = crate::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: SessionId::fixture(session_id.to_string()),
             relation: crate::SessionRelation::Root,
             config: policy.clone().into(),
             head: crate::SessionCreationHead::Config,
@@ -905,7 +905,7 @@ mod tests {
             runtime_host,
             runtime_services,
             crate::RuntimeSessionState {
-                session_id: SessionId::from(session_id.to_string()),
+                session_id: SessionId::fixture(session_id.to_string()),
                 policy,
                 ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
@@ -926,7 +926,7 @@ mod tests {
             Err(refused) => *refused.error,
         };
         let canonical = crate::StoreError::SessionDeleted {
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: SessionId::fixture(session_id.to_string()),
         }
         .to_string();
 
@@ -961,7 +961,7 @@ mod tests {
             &crate::SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
-                session_id: SessionId::from(session_id.to_string()),
+                session_id: SessionId::fixture(session_id.to_string()),
                 relation: crate::SessionRelation::Root,
                 config: policy.clone().into(),
                 head: crate::SessionCreationHead::Config,
@@ -988,7 +988,7 @@ mod tests {
             runtime_host,
             runtime_services,
             crate::RuntimeSessionState {
-                session_id: SessionId::from(session_id.to_string()),
+                session_id: SessionId::fixture(session_id.to_string()),
                 policy,
                 ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,

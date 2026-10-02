@@ -182,8 +182,8 @@ pub async fn a_child_no_deployment_can_run_settles_typed_and_an_uncarried_one_re
 
     // Not carried: the child retries, and settles once it is carried.
     {
-        let session_id = crate::SessionId::from(format!("{prefix}-uncarried"));
-        let turn_id = crate::TurnId::from(format!("{prefix}-uncarried-turn"));
+        let session_id = crate::SessionId::fixture(format!("{prefix}-uncarried"));
+        let turn_id = crate::TurnId::fixture(format!("{prefix}-uncarried-turn"));
         let scope = crate::ExecutionScope::turn(session_id, turn_id);
         let group_key = format!("{prefix}-uncarried-group");
         let settled = Arc::new(std::sync::Mutex::new(None));
@@ -227,8 +227,8 @@ pub async fn a_child_no_deployment_can_run_settles_typed_and_an_uncarried_one_re
 
     // Never: the child settles with the typed refusal instead of retrying.
     {
-        let session_id = crate::SessionId::from(format!("{prefix}-unroutable"));
-        let turn_id = crate::TurnId::from(format!("{prefix}-unroutable-turn"));
+        let session_id = crate::SessionId::fixture(format!("{prefix}-unroutable"));
+        let turn_id = crate::TurnId::fixture(format!("{prefix}-unroutable-turn"));
         let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id);
         let admitted = crate::admit(scope.clone());
         let group_key = format!("{prefix}-unroutable-group");
@@ -357,8 +357,8 @@ pub async fn a_child_whose_opener_is_live_on_another_worker_retries_until_routed
     fixture: &ToolChildLawFixture,
     prefix: &str,
 ) {
-    let session_id = crate::SessionId::from(format!("{prefix}-placed"));
-    let turn_id = crate::TurnId::from(format!("{prefix}-placed-turn"));
+    let session_id = crate::SessionId::fixture(format!("{prefix}-placed"));
+    let turn_id = crate::TurnId::fixture(format!("{prefix}-placed-turn"));
     let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id);
     let admitted = crate::admit(scope.clone());
     let opener = crate::EffectOpener::for_scope(&admitted).expect("a turn scope derives an opener");
@@ -478,10 +478,10 @@ pub async fn a_lent_child_is_cancelled_by_its_openers_durable_end(
     fixture: &ToolChildLawFixture,
     prefix: &str,
 ) {
-    let session_id = crate::SessionId::from(format!("{prefix}-lent-end"));
+    let session_id = crate::SessionId::fixture(format!("{prefix}-lent-end"));
     let scope = crate::ExecutionScope::turn(
         session_id.clone(),
-        crate::TurnId::from(format!("{prefix}-lent-end-turn")),
+        crate::TurnId::fixture(format!("{prefix}-lent-end-turn")),
     );
     let admitted = crate::admit(scope.clone());
     let opener = crate::EffectOpener::for_scope(&admitted).expect("a turn scope derives an opener");

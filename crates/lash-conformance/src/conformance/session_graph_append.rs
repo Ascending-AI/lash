@@ -234,7 +234,7 @@ async fn abandoned_branch_scenario(
     prefix: &str,
 ) -> AbandonedBranchScenario {
     let source_request = session_store_request(
-        &SessionId::from(format!("{prefix}-source")),
+        &SessionId::fixture(format!("{prefix}-source")),
         "append-fence-model",
         crate::SessionRelation::Root,
     );
@@ -270,7 +270,7 @@ async fn abandoned_branch_scenario(
 
     let branch_request = crate::ForkSessionRequest {
         pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(format!("{prefix}-branch")),
+        session_id: SessionId::fixture(format!("{prefix}-branch")),
         source_session_id: source_request.session_id.clone(),
         head_revision: fork_revision,
         relation: crate::SessionRelation::Root,
@@ -345,7 +345,7 @@ async fn assert_appended_onto_current_leaf(
         .cloned()
         .expect("the appended node's durable id");
     assert_eq!(node_ids.len(), 1);
-    assert_eq!(leaf_node_id, appended);
+    assert_eq!(leaf_node_id, Some(appended.clone()));
 
     let read = read_conformance_session(store).await;
     let node = read
@@ -585,11 +585,11 @@ pub async fn old_format_append_receipt_returns_public_leaf<F, Fut>(
     else {
         panic!("old-format append fixture must return Appended")
     };
-    assert!(!first_leaf.is_empty());
+    assert!(first_leaf.is_some());
     assert_eq!(replay_node_ids, first_node_ids);
     assert_eq!(replay_leaf, first_leaf);
     assert!(
-        !replay_leaf.is_empty(),
+        replay_leaf.is_some(),
         "legacy fallback must be a real node id"
     );
 }
@@ -668,7 +668,7 @@ fn derived_append_request(
             "append-fence-conformance",
             serde_json::json!({ "derived_from": required_node_id }),
         )],
-        requires_ancestor_node_id: Some(required_node_id.to_string().into()),
+        requires_ancestor_node_id: Some(crate::NodeId::fixture(required_node_id.to_string())),
     }
 }
 

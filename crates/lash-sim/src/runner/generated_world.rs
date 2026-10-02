@@ -384,9 +384,13 @@ impl GeneratedRuntimeWorld {
         let provider_schedule = ScriptedTransportSchedule::new();
         let (core, transport, provider_kind, model) =
             runtime_core_for_scripts(scripts, backend, Some(provider_schedule.clone()))?;
-        let session = crate::open_created_session(model, &core, event.actor_alias.clone())
-            .await
-            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+        let session = crate::open_created_session(
+            model,
+            &core,
+            SessionId::fixture(event.actor_alias.clone()),
+        )
+        .await
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         if session.session_id() != event.actor_alias {
             return Err(FixedScriptRunnerError::Assertion(format!(
                 "ingress opened session `{}`, expected `{}`",
@@ -458,7 +462,7 @@ impl GeneratedRuntimeWorld {
         let mut send = runtime_session
             .session
             .send(lash::TurnInput::text(text.to_string()))
-            .id(source_key);
+            .id(lash_core::TurnId::fixture(source_key));
         let observed_active_turn_id = event
             .payload
             .get("active_turn_id")
@@ -486,7 +490,7 @@ impl GeneratedRuntimeWorld {
         };
         if ingress_mode == QueuedIngressMode::ActiveTurn {
             send = send.ingress(lash_core::TurnInputIngress::active_turn(
-                active_turn_id,
+                lash_core::TurnId::fixture(active_turn_id),
                 lash_core::TurnInputCheckpointBoundary::AfterWork,
             ));
         }
@@ -949,7 +953,7 @@ impl GeneratedRuntimeWorld {
         let graph_node_count = read_view.session_graph().nodes.len();
         let transcript_message_count = read_view.messages().len();
         let graph_non_empty = graph_node_count > 0;
-        let observer_ok = read_view.session_id() == event.actor_alias
+        let observer_ok = *read_view.session_id() == event.actor_alias
             && read_view.turn_index() == expected_turn_index
             && graph_non_empty;
         if !observer_ok {
@@ -1008,7 +1012,7 @@ impl GeneratedRuntimeWorld {
         let outcome = runtime_session
             .session
             .durable()
-            .cancel_pending_turn_input(&lash_core::InputId::from(input_id.as_str()))
+            .cancel_pending_turn_input(&lash_core::InputId::fixture(input_id.as_str()))
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         // The model's queue-then-withdraw pair is over: the engine may drive
@@ -1105,10 +1109,13 @@ impl GeneratedRuntimeWorld {
             )) as Arc<dyn lash_core::ToolProvider>)
             .build(crate::sim_process_owner())
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-        let session =
-            crate::open_created_session(model.wire_model.clone(), &core, session_alias.clone())
-                .await
-                .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+        let session = crate::open_created_session(
+            model.wire_model.clone(),
+            &core,
+            SessionId::fixture(session_alias.clone()),
+        )
+        .await
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         let turn_session = session.clone();
         let turn_events: Arc<dyn lash::TurnActivitySink> = events.clone();
         let prompt = format!("await {suspend_kind_label} completion");
@@ -1134,7 +1141,7 @@ impl GeneratedRuntimeWorld {
             turn_engine
                 .run_turn(
                     &turn_session,
-                    turn_id,
+                    lash_core::TurnId::fixture(turn_id),
                     turn_events,
                     Arc::new(move |session: &lash::LashSession| {
                         Ok(session.send(lash::TurnInput::text(prompt.clone())))
@@ -1473,7 +1480,7 @@ async fn run_provider_turn_task(
     let output = engine
         .run_turn_releasing(
             &session,
-            event.boundary_id.clone(),
+            lash_core::TurnId::fixture(event.boundary_id.clone()),
             Arc::new(crate::backend::DiscardedTurnActivity),
             Arc::new(move |session: &lash::LashSession| {
                 Ok(session.send(lash::TurnInput::text(prompt.clone())))
@@ -1525,7 +1532,7 @@ async fn run_provider_turn_task(
         .unwrap_or(expected_turn_index as u64) as usize;
     let runtime_contract = runtime_turn_contract(
         &observation,
-        &SessionId::from(event.actor_alias.clone()),
+        &SessionId::fixture(event.actor_alias.clone()),
         expected_turn_index,
         expected_text,
         expected_exchange_count,

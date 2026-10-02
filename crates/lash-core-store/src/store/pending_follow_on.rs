@@ -139,10 +139,10 @@ impl PendingFollowOn {
     /// own. Its evidence and its park name [`Self::root_turn_id`], the
     /// logical root the follow-on continues.
     pub fn recovery_root(&self) -> TurnId {
-        TurnId::from(format!(
-            "follow-on:{}#{}",
-            self.follow_on_turn_id, self.attempts
-        ))
+        TurnId::prefixed(
+            "follow-on:",
+            format_args!("{}#{}", self.follow_on_turn_id, self.attempts),
+        )
     }
 
     /// Whether `root` is the admitted root of one of this follow-on's
@@ -412,7 +412,7 @@ mod tests {
     fn fact(turn: &str, frame: &str) -> PendingFollowOn {
         PendingFollowOn {
             continuation: None,
-            follow_on_turn_id: TurnId::from(turn),
+            follow_on_turn_id: TurnId::fixture(turn),
             frame_id: FrameNodeId::new(frame).expect("frame"),
             task: "task".into(),
             resolved_run: Box::new(resolved(DEFAULT_MAX_FOLLOW_ON_RECOVERIES)),
@@ -421,7 +421,7 @@ mod tests {
         }
     }
 
-    fn terminal(turn: &str) -> super::super::OperationId {
+    fn terminal(turn: &'static str) -> super::super::OperationId {
         super::super::OperationId::turn("s", turn, TURN_TERMINAL_OPERATION_KEY)
     }
 

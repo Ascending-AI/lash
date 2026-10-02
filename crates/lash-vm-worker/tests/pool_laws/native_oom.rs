@@ -389,7 +389,7 @@ async fn law(phase: Phase) {
     let backend = lash_restate_test::backend(4482, lash_restate_test::ServerConfig::default())
         .await
         .expect("journal test host");
-    let session = SessionId::from(format!("native-oom-{}", phase.name()));
+    let session = SessionId::fixture(format!("native-oom-{}", phase.name()));
     let turn = TurnId::from("turn");
     tokio::time::timeout(
         Duration::from_secs(30),

@@ -185,7 +185,7 @@ impl SessionDriver for Driver {
                     lash_core::RuntimeSessionState::new(lash_core::testing::mock_session_policy());
                 state.session_id = self.session.clone();
                 let operation =
-                    lash_core::OperationId::turn(self.session.as_str(), root.as_str(), "witness");
+                    lash_core::OperationId::turn(self.session.clone(), root.clone(), "witness");
                 let mut graph = state.pending_graph_commit();
                 graph
                     .derive_node_ids(&self.session, &operation)
@@ -315,7 +315,7 @@ impl Fixture {
     }
     async fn build(server: HarnessServer, admission: bool, command_only: bool) -> Self {
         let harness = LiveConformanceHarness::start_on(server).await;
-        let session = SessionId::from(format!("control-witness-{}", harness.run_nonce()));
+        let session = SessionId::fixture(format!("control-witness-{}", harness.run_nonce()));
         let root = TurnId::from("root");
         let factory = harness.law_stores().session_store_factory();
         let store = lash_core::runtime::admit_session_view(
@@ -1389,7 +1389,7 @@ async fn mismatched_handle(server: HarnessServer) {
     // names a root of another session.
     let handle = EnginePark::new(paused[0].id.clone());
     let other = RootRef {
-        session: SessionId::from(format!("{}-other", f.driver.session)),
+        session: SessionId::fixture(format!("{}-other", f.driver.session)),
         root: f.driver.root.clone(),
     };
     let control = f.work.control();
@@ -1720,7 +1720,7 @@ async fn recovery_tick_keeps_cadence_with_slow_control_rpc(server: HarnessServer
     let harness = LiveConformanceHarness::start_on(server).await;
     let stores = harness.law_stores();
     let factory = stores.session_store_factory();
-    let session = SessionId::from(format!("cadence-{}", harness.run_nonce()));
+    let session = SessionId::fixture(format!("cadence-{}", harness.run_nonce()));
     let root = TurnId::from("open-root");
     factory
         .admit_session(&lash_core::SessionStoreCreateRequest {
@@ -2018,7 +2018,7 @@ impl lash_http_transport::HttpTransport for AdminOutage {
 /// pass whose admin read fails first ends nothing.
 async fn missing_started_root(server: HarnessServer, admin_outage: bool) {
     let harness = LiveConformanceHarness::start_on(server).await;
-    let session = SessionId::from(format!("lost-root-{}", harness.run_nonce()));
+    let session = SessionId::fixture(format!("lost-root-{}", harness.run_nonce()));
     let root = TurnId::from("lost-root");
     let factory = harness.law_stores().session_store_factory();
     let store = lash_core::runtime::admit_session_view(
@@ -2303,7 +2303,7 @@ async fn process_root(server: HarnessServer, which: ProcessRoot) {
     let stores = harness.law_stores();
     let registry = stores.process_registry();
     let factory = stores.session_store_factory();
-    let session = SessionId::from(format!("process-child-root-{}", harness.run_nonce()));
+    let session = SessionId::fixture(format!("process-child-root-{}", harness.run_nonce()));
     let process_id = registry
         .register_process(
             lash_core::ProcessRegistration::new(
@@ -2335,7 +2335,7 @@ async fn process_root(server: HarnessServer, which: ProcessRoot) {
         root: match which {
             ProcessRoot::Child => lash_core::runtime::process_session_turn_id(&process_id),
             ProcessRoot::AdmittedAhead => {
-                lash_core::TurnId::from(format!("ahead-{}", harness.run_nonce()))
+                lash_core::TurnId::fixture(format!("ahead-{}", harness.run_nonce()))
             }
         },
     };
