@@ -280,14 +280,19 @@ fn verify_turns(steps: &[StepRecord], case: &Case) -> Result<()> {
     Ok(())
 }
 
-fn sqlite_drain(node: &NodeBinary, case: &Case, session: &str, generation: &str) -> Result<()> {
+/// The host's check before it stops the store's only node: the engine holds
+/// no open invocation of the case, and the generation has drained. An
+/// invocation open at the stop stays pinned to the stopped node's deployment,
+/// and one on the session's wait index holds the key the next turn needs.
+fn sqlite_drain(node: &NodeBinary, case: &Case, generation: &str) -> Result<()> {
     use lash_upgrade_harness::harness::{block_on, wait_for};
     let view = case.view()?;
-    wait_for("the SQLite session's invocations to finish", || {
-        Ok(block_on(view.live_invocations("LashSession", session))?
-            .is_empty()
-            .then_some(()))
-    })?;
+    let mut open = Vec::new();
+    wait_for("the SQLite case's invocations to finish", || {
+        open = block_on(view.open_invocations())?;
+        Ok(open.is_empty().then_some(()))
+    })
+    .with_context(|| format!("{}: still open: {open:?}", case.name))?;
     wait_for("the SQLite generation to drain", || {
         let status = node.sqlite_upgrade(case, "drain", generation)?;
         ensure!(
@@ -380,7 +385,7 @@ fn roll_sqlite(steps: &mut Vec<StepRecord>, builds: &NodeBuilds, case: &Case) ->
         "migrate",
         Some((n, &n_generation)),
     )?;
-    sqlite_drain(n, case, &session, &n_generation)?;
+    sqlite_drain(n, case, &n_generation)?;
     n_first.stop()?;
     ensure!(
         sqlite_backups(case)?.is_empty(),
@@ -400,7 +405,7 @@ fn roll_sqlite(steps: &mut Vec<StepRecord>, builds: &NodeBuilds, case: &Case) ->
         Some((next, &next_generation)),
     )?;
     require_one_migration_backup(case, "roll")?;
-    sqlite_drain(next, case, &session, &next_generation)?;
+    sqlite_drain(next, case, &next_generation)?;
     next_first.stop()?;
 
     n.sqlite_upgrade(case, "end-drain", &n_generation)?;
@@ -417,7 +422,7 @@ fn roll_sqlite(steps: &mut Vec<StepRecord>, builds: &NodeBuilds, case: &Case) ->
         "rollback",
         Some((n, &n_generation)),
     )?;
-    sqlite_drain(n, case, &session, &n_generation)?;
+    sqlite_drain(n, case, &n_generation)?;
     n_again.stop()?;
 
     next.sqlite_upgrade(case, "end-drain", &next_generation)?;
@@ -471,7 +476,7 @@ fn roll_sqlite(steps: &mut Vec<StepRecord>, builds: &NodeBuilds, case: &Case) ->
         "finalize",
         Some((next, &next_generation)),
     )?;
-    sqlite_drain(next, case, &session, &next_generation)?;
+    sqlite_drain(next, case, &next_generation)?;
     next_again.stop()?;
     require_one_migration_backup(case, "finalize")?;
     verify_turns(steps, case)

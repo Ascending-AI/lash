@@ -197,6 +197,31 @@ impl RestateView {
         .await
     }
 
+    /// Every invocation of any service in this namespace that has not
+    /// completed, oldest first, as its target and status: work the engine
+    /// still owes a serving node. A root's scope close and the wait
+    /// retirement it calls run on `LashTurn` and `LashDurableWaitIndex` after
+    /// the session's drive has returned, so the session's own key does not
+    /// show them.
+    pub async fn open_invocations(&self) -> Result<Vec<String>> {
+        #[derive(Deserialize)]
+        struct Row {
+            target: String,
+            status: String,
+        }
+        let rows: Vec<Row> = self
+            .query(&format!(
+                "SELECT target, status FROM sys_invocation WHERE target_service_name LIKE {} \
+                 AND status <> 'completed' ORDER BY created_at",
+                sql_literal(&format!("{}%", self.service_name("")))
+            ))
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| format!("{} ({})", row.target, row.status))
+            .collect())
+    }
+
     /// Every deployment the server holds.
     pub async fn deployments(&self) -> Result<Vec<Deployment>> {
         #[derive(Deserialize)]

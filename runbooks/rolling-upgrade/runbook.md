@@ -93,9 +93,11 @@ generation again, and finalize runs before the roll's turn:
 | `end-drain` of N's generation, then `migrate --phase contract` | the contract step runs |
 | N probes the store | refused `reader_floor_above` (floor 2) |
 
-SQLite is a single-host embedded store. Each transition waits for the
-session's invocations and generation drain to finish, then stops and reaps
-the serving node before its replacement opens the same directory:
+SQLite is a single-host embedded store. Each transition waits until the
+engine holds no open invocation in the case's namespace (a root's scope
+close outlives its session's drive) and the generation has drained, then
+stops and reaps the serving node before its replacement opens the same
+directory:
 
 | Step | Node serving afterwards | Turn and required driver |
 |---|---|---|
