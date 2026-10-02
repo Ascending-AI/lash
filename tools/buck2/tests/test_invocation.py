@@ -111,10 +111,47 @@ class InvocationTests(unittest.TestCase):
     def started(self, token, root=None):
         path = (root or self.root) / (token + '.start')
         self.wait_for(path)
-        return json.loads(path.read_text())
+        # The client's write can be observed between create and content.
+        deadline = time.monotonic() + 10
+        while True:
+            try:
+                return json.loads(path.read_text())
+            except json.JSONDecodeError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(.02)
 
     def release(self, token, root=None):
         (root or self.root).joinpath(token + '.release').touch()
+
+    def wait_blocked(self, process, root):
+        # The guardian forked by run_command opens admission.lock only after
+        # installing its signal handlers, and its parent's SigCgt records the
+        # relay handler. Both being observable proves SIGTERM becomes exit 143.
+        target = os.path.realpath(root / '.buck2/invocations/admission.lock')
+        deadline = time.monotonic() + 10
+        while True:
+            if process.poll() is not None:
+                self.fail(f'Invocation exited with {process.returncode} before blocking in admission')
+            relay = False
+            children = []
+            try:
+                status = Path(f'/proc/{process.pid}/status').read_text()
+                mask = int(next(line.split()[1] for line in status.splitlines() if line.startswith('SigCgt:')), 16)
+                relay = bool(mask & 1 << (signal.SIGTERM - 1))
+                children = Path(f'/proc/{process.pid}/task/{process.pid}/children').read_text().split()
+            except (FileNotFoundError, StopIteration):
+                pass
+            if relay:
+                for pid in children:
+                    try:
+                        if any(os.path.realpath(entry) == target for entry in Path(f'/proc/{pid}/fd').iterdir()):
+                            return
+                    except (FileNotFoundError, PermissionError):
+                        pass
+            if time.monotonic() >= deadline:
+                self.fail(f'Timed out waiting for {process.pid} to block in admission')
+            time.sleep(.02)
 
     def test_matching_limits_overlap_and_transition_waits_for_both(self):
         a = self.start('a', 2)
@@ -263,7 +300,7 @@ class InvocationTests(unittest.TestCase):
         active = self.start('active', 2)
         self.started('active')
         waiter = self.start('waiter', 1)
-        time.sleep(.2)
+        self.wait_blocked(waiter, self.root)
         waiter.terminate()
         self.assertEqual(waiter.wait(timeout=3), 128 + signal.SIGTERM)
         self.assertIsNone(active.poll())
@@ -335,7 +372,7 @@ class InvocationTests(unittest.TestCase):
                 with os.fdopen(descriptor, 'r+') as gate:
                     fcntl.flock(gate, fcntl.LOCK_EX)
                     cancelled = self.start('cancelled-fifo', 1, root)
-                    time.sleep(.1)
+                    self.wait_blocked(cancelled, root)
                     cancelled.terminate()
                     self.assertEqual(cancelled.wait(timeout=3), 128 + signal.SIGTERM)
                 process = self.start('fifo', 1, root)
