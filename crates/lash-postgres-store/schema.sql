@@ -1062,7 +1062,9 @@ CREATE INDEX IF NOT EXISTS idx_lash_trigger_occurrence_tombstones_reclaimed
 
 CREATE TABLE IF NOT EXISTS lash_trigger_deliveries (
     occurrence_id TEXT NOT NULL,
-    occurrence_outcome_kind TEXT NOT NULL DEFAULT 'fired' CHECK (occurrence_outcome_kind = 'fired'),
+    occurrence_outcome_kind TEXT NOT NULL DEFAULT 'fired'
+        CONSTRAINT lash_trigger_deliveries_occurrence_outcome_kind_check
+        CHECK (occurrence_outcome_kind = 'fired'),
     subscription_id TEXT NOT NULL,
     process_id TEXT,
     subscription_incarnation TEXT NOT NULL,
