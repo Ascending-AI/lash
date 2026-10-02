@@ -1236,6 +1236,7 @@ PACKAGE_DEPS = {
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
             "lash_remote_protocol": "//crates/lash-remote-protocol:lash-remote-protocol",
             "lash_restate": "//crates/lash-restate:lash-restate",
+            "lash_restate_test": "//crates/lash-restate-test:lash-restate-test",
             "lash_vm_client": "//crates/lash-vm-client:lash-vm-client",
             "lashlang": "//crates/lashlang:lashlang",
             "reqwest": "//third-party/rust:p0296",

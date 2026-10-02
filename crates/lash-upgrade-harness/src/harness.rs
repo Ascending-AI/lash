@@ -447,14 +447,16 @@ impl NodeBinary {
         report(&self.path, "retention", output)
     }
 
-    /// Run one `plugin-state` step of this build over the SQLite store
-    /// directory `store_dir`.
+    /// Run a callback, observation or finalize using this build over a
+    /// SQLite directory or PostgreSQL overlap database.
     pub fn plugin_state(
         &self,
         store_dir: &Path,
         session: &str,
         action: &str,
         generation: Option<&str>,
+        database_url: Option<&str>,
+        history_head: Option<&lash_core::store::SessionHeadRef>,
     ) -> Result<crate::node::plugin_state::PluginStateReport> {
         let mut command = Command::new(&self.path);
         command
@@ -464,6 +466,12 @@ impl NodeBinary {
             .args(["--session", session, "--action", action]);
         if let Some(generation) = generation {
             command.args(["--generation", generation]);
+        }
+        if let Some(url) = database_url {
+            command.args(["--database-url", url]);
+        }
+        if let Some(head) = history_head {
+            command.args(["--history-head", &serde_json::to_string(head)?]);
         }
         let output = command
             .output()

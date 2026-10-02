@@ -537,3 +537,127 @@ async fn a_plugin_only_finalize_moves_f_and_the_range_in_one_transaction_and_fen
     assert_eq!(rerun.flip, FleetEpochFlip::AlreadyFinalized { fleet: 2 });
     assert_eq!(recorded_range(&n).await, Some((1, 2)));
 }
+
+/// The shared fleet lock orders a plugin publication wholly before the
+/// epoch/map flip. A migration encoded before the flip can publish only
+/// after the complete successor map is visible.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn plugin_writers_racing_finalize_observe_a_complete_epoch_and_map() {
+    let Some(database) = isolated().await else {
+        return;
+    };
+    let (n, next) = fleet(&database).await;
+    let n_store = store(&n);
+    n_store
+        .admit_session(&root_session_request(&SessionId::from("plugin-race")))
+        .await
+        .expect("admit");
+    let mut base = state("plugin-race");
+    base.set_plugin_state(Some(plugin_state(1, 7)));
+    base.authority.plugin_config.insert_versioned(
+        PLUGIN,
+        version(1),
+        serde_json::json!({"count": 7}),
+    );
+    commit(&n_store, &mut base).await.expect("seed v1");
+
+    // Encode the successor's state and config while only v1 is permitted.
+    let next_store = store(&next);
+    let mut converted = state("preencoded-migration");
+    next_store
+        .admit_session(&root_session_request(&converted.session_id))
+        .await
+        .expect("admit migration target before the race");
+    converted.set_plugin_state(Some(plugin_state(2, 8)));
+    converted.authority.plugin_config.insert_versioned(
+        PLUGIN,
+        version(2),
+        serde_json::json!({"count": 8}),
+    );
+    let candidate = RuntimeCommit::persisted_state_for_test(&converted);
+
+    let seam = crate::testing::AfterFence::new();
+    let paused = open_as(database.url(), N)
+        .await
+        .with_after_fence_for_testing(seam.clone());
+    let mut pause = seam.pause_next();
+    let old_store = store(&paused);
+    let mut old = base.clone();
+    old.set_plugin_state(Some(plugin_state(1, 8)));
+    let writer = tokio::spawn(async move { commit(&old_store, &mut old).await });
+    assert_eq!(pause.reached().await, 1);
+
+    let registrations = [registration(2, &[1, 2])];
+    let pool = next.pool().clone();
+    let fence = next.fence.clone();
+    let finalizer = tokio::spawn(async move {
+        crate::finalize::begin_flip(&pool, &fence, 2, FinalizeMode::Automatic, &registrations)
+            .await
+            .expect("begin plugin flip")
+    });
+    let wait_for_lock = || async {
+        tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            loop {
+                let waiting: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()
+                 AND wait_event_type = 'Lock'",
+                )
+                .fetch_one(n.pool())
+                .await
+                .expect("read lock waiters");
+                if waiting > 0 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the competing transaction waits on the fleet guard");
+    };
+    wait_for_lock().await;
+    let snapshot = || async {
+        sqlx::query_as::<_, (i32, i32, i32)>(
+            "SELECT f.format_version, p.min_format, p.max_format
+             FROM lash_fleet_format f CROSS JOIN lash_fleet_plugin_writers p
+             WHERE f.singleton AND p.plugin_id = $1",
+        )
+        .bind(PLUGIN)
+        .fetch_one(n.pool())
+        .await
+        .expect("one epoch/map snapshot")
+    };
+    assert_eq!(snapshot().await, (1, 1, 1));
+    assert!(!finalizer.is_finished());
+    pause.release();
+    writer
+        .await
+        .expect("writer task")
+        .expect("old publication commits before finalize");
+    let pending = finalizer.await.expect("finalize task");
+    // Hold the production flip after both writes, before COMMIT. Plain
+    // readers still see the complete old tuple; a publication must wait.
+    assert_eq!(snapshot().await, (1, 1, 1));
+    let migration = tokio::spawn(async move {
+        commit_runtime_state_for_test(&next_store, candidate, "preencoded-plugin-migration").await
+    });
+    wait_for_lock().await;
+    assert!(!migration.is_finished());
+    assert_eq!(snapshot().await, (1, 1, 1));
+    pending.commit(&next.fence).await.expect("flip commits");
+    assert_eq!(snapshot().await, (2, 1, 2));
+
+    // The pre-encoded v2 publication meets the complete new map under its
+    // guard. The already-open N handle is fenced and publishes nothing.
+    migration
+        .await
+        .expect("migration task")
+        .expect("pre-encoded migration admitted under the new map");
+    let before = published(&n).await;
+    base.set_plugin_state(Some(plugin_state(1, 9)));
+    assert!(matches!(
+        commit(&n_store, &mut base).await,
+        Err(StoreError::WriterFenced { recorded: 2, .. })
+    ));
+    assert_eq!(published(&n).await, before);
+    assert_eq!(snapshot().await, (2, 1, 2));
+}

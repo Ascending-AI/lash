@@ -548,7 +548,7 @@ fn recovery_lease() -> lash::RecoveryLeaseConfig {
 /// the Lashlang process engine over the store's artifacts. A host never
 /// calls the provider; the node that executes a turn does, and records and
 /// holds each call as `observed` asks.
-fn core(backend: lash::Backend, observed: &ProviderArgs) -> Result<lash::LashCore> {
+fn core_builder(backend: lash::Backend, observed: &ProviderArgs) -> Result<lash::LashCoreBuilder> {
     let build = BuildLabel::current();
     // The generation exists once this core is built: it folds in the core's
     // plugins. The provider reads it when a turn calls it.
@@ -586,7 +586,7 @@ fn core(backend: lash::Backend, observed: &ProviderArgs) -> Result<lash::LashCor
         .build();
     let artifacts = lashlang::LashlangArtifacts::of_backend(&backend);
     let worker_recovery = backend.worker_recovery();
-    lash::LashCore::standard_builder(backend)
+    Ok(lash::LashCore::standard_builder(backend)
         .llm_profiles(Arc::new(
             lash::LlmProfileRegistry::new()
                 .register(
@@ -601,10 +601,14 @@ fn core(backend: lash::Backend, observed: &ProviderArgs) -> Result<lash::LashCor
         )))
         .recovery_lease(recovery_lease())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)))
+}
+
+fn core(backend: lash::Backend, observed: &ProviderArgs) -> Result<lash::LashCore> {
+    core_builder(backend, observed)?
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "lash-upgrade-node",
-            format!("{build}-{}", std::process::id()),
+            format!("{}-{}", BuildLabel::current(), std::process::id()),
         ))
         .map_err(anyhow::Error::from)
 }

@@ -262,6 +262,13 @@ would change a range while `F` already is the build's epoch refuses
 carries the moved ranges, so the open that completes a crashed finalize needs
 no registrations.
 
+`lashctl finalize --plugin-registrations <json-file>` passes the successor's
+writer registrations into this same guarded flip. The file is the serialized
+`PluginHost::composition()?.writer_registrations()` of the successor, an array
+of `{plugin, native, writable}` declarations. The operator reads and validates
+it before opening storage. Omit the file for a deployment with no plugin format
+changes. Retained plugins absent from the successor keep their recorded ranges.
+
 #### 2.6 Segment admissions record the plugin composition and writers
 
 Every segment admission is a plugin adoption point and records its choice
@@ -490,13 +497,16 @@ lifts (`crates/lash-core-store/src/store/synthetic_next.rs:1`).
 rollback, skipped-release refusal, writer/finalize races, wire negotiation,
 object-sweep recovery, generation handover and rollback, retention and
 delivery rollback, history after finalize, workflow-graph range checks, and
-the plugin writer-range rollback over a SQLite store.
+the two-binary plugin writer-range rollback over SQLite file and PostgreSQL
+overlap stores. Plugin rollback and retained-history unit laws also cover
+SQLite memory and file stores, preserving recorded config and model routes.
 `operator_json_contract` lives in `crates/lashctl/tests/`.
 
 The store matrix is SQLite file, SQLite memory and PostgreSQL. Hosts are the
 in-process Restate server double, live Restate and lash-sim's in-process effect
-host. Upgrade proofs use the synthetic-next tier. Phase A and rolling runs use
-the two node builds against live services plus SQLite reopen cases; the
+host. Upgrade proofs use the synthetic-next tier. The plugin rollback laws
+send admitted turns through the in-process server double. Other Phase A and
+rolling runs use the two node builds against live services plus SQLite reopen cases; the
 operator JSON proof needs one binary. `just phase-a` and `just e2e-rolling`
 run the service proofs (`justfile:434`, `runbooks/rolling-upgrade/runbook.md:43`).
 Each law's registration supplies its supported store and host combination.

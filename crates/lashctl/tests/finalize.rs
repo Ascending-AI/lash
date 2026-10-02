@@ -329,3 +329,55 @@ async fn finalize_honours_operator_hold() {
     assert_eq!(scratch.recorded_epoch().await, 1);
     scratch.drop().await;
 }
+
+/// The actual operator passes registrar-derived plugin declarations to the
+/// transaction. N refuses the plugin-only move because F cannot move; the
+/// synthetic successor moves F and the range together.
+#[tokio::test]
+#[ignore = "requires PostgreSQL; run inside a private pg16 gate"]
+async fn finalize_passes_successor_plugin_registrations_to_the_guarded_flip() {
+    let Some(scratch) = Scratch::create().await else {
+        return;
+    };
+    let admin = Admin::start();
+    scratch.execute("INSERT INTO lash_fleet_plugin_writers (plugin_id, min_format, max_format) VALUES ('counter', 1, 1)").await;
+    let (code, drained) = run(&["drain", RETIRED], &scratch.url);
+    assert_eq!(code, 0, "{drained}");
+    let path =
+        std::env::temp_dir().join(format!("lashctl-successor-{}.json", uuid::Uuid::new_v4()));
+    std::fs::write(
+        &path,
+        r#"[{"plugin":"counter","native":2,"writable":[1,2]}]"#,
+    )
+    .expect("successor declarations");
+    let (code, result) = run(
+        &[
+            "finalize",
+            RETIRED,
+            "--restate-admin-url",
+            &admin.url,
+            "--plugin-registrations",
+            path.to_str().expect("path"),
+        ],
+        &scratch.url,
+    );
+    std::fs::remove_file(path).expect("remove declarations");
+    let mut connection = PgConnection::connect(&scratch.url)
+        .await
+        .expect("read fleet snapshot");
+    let snapshot: (i32, i32, i32) = sqlx::query_as("SELECT f.format_version, p.min_format, p.max_format FROM lash_fleet_format f CROSS JOIN lash_fleet_plugin_writers p WHERE f.singleton AND p.plugin_id = 'counter'")
+        .fetch_one(&mut connection).await.expect("epoch/map snapshot");
+    if cfg!(feature = "synthetic-next") {
+        assert_eq!(code, 0, "{result}");
+        assert_eq!(snapshot, (2, 1, 2));
+    } else {
+        assert_eq!(code, 3, "the declarations must reach the flip: {result}");
+        assert_eq!(
+            result["error"]["refusal"]["refusal"],
+            "plugin_ranges_need_epoch_move"
+        );
+        assert_eq!(snapshot, (1, 1, 1));
+    }
+    connection.close().await.expect("close");
+    scratch.drop().await;
+}

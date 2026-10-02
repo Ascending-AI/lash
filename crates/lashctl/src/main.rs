@@ -11,6 +11,7 @@ use lash_core_store::compat::DESCRIPTORS;
 use lash_core_store::store::fleet_finalize::{
     FinalizeError, FinalizeHold, FinalizeMode, FinalizeRefusal,
 };
+use lash_core_store::store::plugin_writers::PluginWriterRegistration;
 use lash_core_store::store::{
     FLEET_WRITABLE_RANGE, StorePreflight, StoreSchemaOutcome, StoreSchemaStatus,
 };
@@ -46,7 +47,7 @@ const OPERATOR_POOL_MAX: u32 = 2;
 /// The most stalled obligations `drain-status` lists per kind, first by id;
 /// `stalled_obligations` still counts every one.
 const STALLED_LISTED_PER_KIND: std::num::NonZeroUsize = std::num::NonZeroUsize::new(100).unwrap();
-const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | drain <generation> | drain-status <generation> --restate-admin-url <url> | end-drain <generation> | finalize <retired-generation> --restate-admin-url <url> [--override-hold] | finalize-hold show | finalize-hold set --reason <text> | finalize-hold clear | objects-preflight --restate-admin-url <url> [--namespace <ns>] | objects-sweep --restate-admin-url <url> --restate-ingress-url <url> [--namespace <ns>] | preflight [--processes-per-generation <n> --pool-max <n> --generations <n> --workers <n> --admin-headroom <n>] | version>";
+const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | drain <generation> | drain-status <generation> --restate-admin-url <url> | end-drain <generation> | finalize <retired-generation> --restate-admin-url <url> [--override-hold] [--plugin-registrations <json-file>] | finalize-hold show | finalize-hold set --reason <text> | finalize-hold clear | objects-preflight --restate-admin-url <url> [--namespace <ns>] | objects-sweep --restate-admin-url <url> --restate-ingress-url <url> [--namespace <ns>] | preflight [--processes-per-generation <n> --pool-max <n> --generations <n> --workers <n> --admin-headroom <n>] | version>";
 
 #[derive(Clone, Copy)]
 enum Exit {
@@ -140,6 +141,30 @@ impl CliError {
     }
 }
 
+/// Read the successor deployment's registrar-derived writer declarations.
+fn parse_plugin_registrations(bytes: &[u8]) -> Result<Vec<PluginWriterRegistration>, CliError> {
+    let registrations: Vec<PluginWriterRegistration> = serde_json::from_slice(bytes)
+        .map_err(|error| CliError::new(Exit::Usage, format!("plugin registrations: {error}")))?;
+    let mut plugins = std::collections::BTreeSet::new();
+    for registration in &registrations {
+        let writable: std::collections::BTreeSet<_> = registration.writable.iter().collect();
+        if registration.plugin.is_empty()
+            || !plugins.insert(&registration.plugin)
+            || !writable.contains(&registration.native)
+            || writable.len() != registration.writable.len()
+        {
+            return Err(CliError::new(
+                Exit::Usage,
+                format!(
+                    "invalid or duplicate plugin registration: {}",
+                    registration.plugin
+                ),
+            ));
+        }
+    }
+    Ok(registrations)
+}
+
 enum Command {
     Migrate {
         phase: MigrationPhase,
@@ -161,6 +186,7 @@ enum Command {
         retired: BuildGeneration,
         restate_admin_url: String,
         mode: FinalizeMode,
+        plugin_registrations: Option<std::path::PathBuf>,
     },
     FinalizeHold(HoldAction),
     ObjectsPreflight {
@@ -281,6 +307,7 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Invocation, CliError>
                 .map_err(|_| CliError::new(Exit::Usage, "invalid build generation"))?;
             let mut restate_admin_url = None;
             let mut mode = FinalizeMode::Automatic;
+            let mut plugin_registrations = None;
             let mut index = 1;
             while index < rest.len() {
                 match rest[index].as_str() {
@@ -288,6 +315,12 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Invocation, CliError>
                         if index + 1 < rest.len() && restate_admin_url.is_none() =>
                     {
                         restate_admin_url = Some(rest[index + 1].clone());
+                        index += 2;
+                    }
+                    "--plugin-registrations"
+                        if index + 1 < rest.len() && plugin_registrations.is_none() =>
+                    {
+                        plugin_registrations = Some(std::path::PathBuf::from(&rest[index + 1]));
                         index += 2;
                     }
                     "--override-hold" if mode == FinalizeMode::Automatic => {
@@ -307,6 +340,7 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Invocation, CliError>
                 retired,
                 restate_admin_url,
                 mode,
+                plugin_registrations,
             }
         }
         "finalize-hold" => match rest.iter().map(String::as_str).collect::<Vec<_>>()[..] {
@@ -725,7 +759,18 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
             retired,
             restate_admin_url,
             mode,
+            plugin_registrations,
         } => {
+            let registrations = plugin_registrations
+                .as_ref()
+                .map(|path| {
+                    let bytes = std::fs::read(path).map_err(|error| {
+                        CliError::new(Exit::Usage, format!("read {}: {error}", path.display()))
+                    })?;
+                    parse_plugin_registrations(&bytes)
+                })
+                .transpose()?
+                .unwrap_or_default();
             let storage = PostgresStorage::connect_with(
                 &database_url()?,
                 PostgresStoreConfig {
@@ -745,9 +790,7 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
                     retired,
                     &registry,
                     *mode,
-                    // The operator binary registers no plugins: it moves `F`
-                    // and leaves every plugin writer range as recorded.
-                    &[],
+                    &registrations,
                     lash_core_execution::facade_support::SystemClock.timestamp_ms(),
                 )
                 .await
@@ -1100,6 +1143,55 @@ mod tests {
     }
 
     #[test]
+    fn finalize_accepts_successor_plugin_registrations() {
+        let parsed = parse(words(&[
+            "finalize",
+            "0123456789ab",
+            "--restate-admin-url",
+            "http://127.0.0.1:9070",
+            "--plugin-registrations",
+            "successor-plugins.json",
+        ]))
+        .unwrap_or_else(|error| panic!("{}", error.message));
+        let Command::Finalize {
+            plugin_registrations,
+            ..
+        } = parsed.command
+        else {
+            panic!("finalize command");
+        };
+        assert_eq!(plugin_registrations, Some("successor-plugins.json".into()));
+        let registrations =
+            parse_plugin_registrations(br#"[{"plugin":"counter","native":2,"writable":[1,2]}]"#)
+                .unwrap_or_else(|error| panic!("{}", error.message));
+        assert_eq!(registrations[0].plugin, "counter");
+        assert_eq!(registrations[0].native.get(), 2);
+        assert_eq!(
+            registrations[0]
+                .writable
+                .iter()
+                .map(|version| version.get())
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
+    }
+
+    #[test]
+    fn finalize_rejects_invalid_successor_registrations_before_opening_storage() {
+        for input in [
+            r#"[{"plugin":"counter","native":0,"writable":[1]}]"#,
+            r#"[{"plugin":"counter","native":2,"writable":[1]}]"#,
+            r#"[{"plugin":"counter","native":1,"writable":[1,1]}]"#,
+            r#"[{"plugin":"","native":1,"writable":[1]}]"#,
+            r#"[{"plugin":"counter","native":1,"writable":[1]},{"plugin":"counter","native":2,"writable":[1,2]}]"#,
+        ] {
+            let error =
+                parse_plugin_registrations(input.as_bytes()).expect_err("refused registration");
+            assert_eq!(error.exit as u8, Exit::Usage as u8);
+        }
+    }
+
+    #[test]
     fn finalize_names_its_retired_generation_the_engine_and_the_hold_override() {
         let parsed = parse(words(&[
             "finalize",
@@ -1114,6 +1206,7 @@ mod tests {
                 retired,
                 restate_admin_url,
                 mode,
+                ..
             } => {
                 assert_eq!(retired.as_str(), "0123456789ab");
                 assert_eq!(restate_admin_url, "http://admin");
