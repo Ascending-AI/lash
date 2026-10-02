@@ -229,12 +229,12 @@ fn default_root_session_id() -> SessionId {
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
-pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 11;
+pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
 /// with version 11's shape; its registered lift reads what N wrote.
 #[cfg(feature = "synthetic-next")]
-pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 12;
+pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 2;
 
 #[cfg(test)]
 #[cfg(test)]

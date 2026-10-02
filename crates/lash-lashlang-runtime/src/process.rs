@@ -134,7 +134,7 @@ pub(crate) fn record_segment_boundary_decline(
 ///         cover(SegmentHandover, PersistedSegmentHandover),
 ///     ),
 /// )
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 23;
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 1;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
@@ -1772,7 +1772,7 @@ use worker_recovery::WorkerRecoveryLedger;
 
 #[cfg(test)]
 #[path = "process/segment_trace_tests.rs"]
-mod segment_trace_tests;
+pub(crate) mod segment_trace_tests;
 #[cfg(test)]
 #[path = "process/signal_wait_tests.rs"]
 mod signal_wait_tests;

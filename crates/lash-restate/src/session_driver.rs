@@ -173,7 +173,7 @@ use continuation::{continuation_generation, session_drive_continuation};
 ///     ),
 ///     items(path = "crates/lash-restate/src/sentinel.rs", GENERATION_SENTINEL),
 /// )
-pub const LASH_SESSION_DRIVE_VERSION: u32 = 4;
+pub const LASH_SESSION_DRIVE_VERSION: u32 = 1;
 
 /// The drive handler's name on `LashSession`.
 const DRIVE_HANDLER: &str = "drive";

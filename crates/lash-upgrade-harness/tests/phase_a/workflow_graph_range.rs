@@ -8,10 +8,10 @@ use lashlang::{WORKFLOW_GRAPH_SCHEMA_VERSION, WorkflowGraph, WorkflowGraphDecode
 #[cfg(feature = "synthetic-next")]
 #[test]
 fn predecessor_graph_validates_on_synthetic_next() {
-    assert_eq!(WORKFLOW_GRAPH_SCHEMA_VERSION, 22);
+    assert_eq!(WORKFLOW_GRAPH_SCHEMA_VERSION, 2);
     let fleet = FleetFormat::from_version(1);
     let mut graph = workflow_graph_from_source("finish(1);\n").expect("project fixture");
-    graph.schema_version = 21;
+    graph.schema_version = 1;
     let graph = WorkflowGraph::decode_json_value_for_fleet(
         serde_json::to_value(graph).expect("encode graph"),
         fleet,
@@ -35,7 +35,7 @@ fn predecessor_graph_validates_on_synthetic_next() {
         .expect_err("after finalize a derived predecessor regenerates");
     assert!(
         matches!(error, GraphRenderError::UnsupportedSchemaVersion(refusal)
-        if refusal.found == 21 && refusal.reads.recorded() == 22)
+        if refusal.found == 1 && refusal.reads.recorded() == 2)
     );
     assert!(
         WorkflowGraph::decode_json_value(serde_json::to_value(&graph).expect("encode graph"),)
@@ -47,14 +47,14 @@ fn predecessor_graph_validates_on_synthetic_next() {
 fn out_of_range_graph_refuses_typed() {
     let fleet = FleetFormat::from_version(1);
     let mut graph = workflow_graph_from_source("finish(1);\n").expect("project fixture");
-    for found in [20, WORKFLOW_GRAPH_SCHEMA_VERSION + 1] {
+    for found in [0, WORKFLOW_GRAPH_SCHEMA_VERSION + 1] {
         graph.schema_version = found;
         let error = validate_for_fleet(&graph, fleet).expect_err("outside the read window");
         let GraphRenderError::UnsupportedSchemaVersion(refusal) = error else {
             panic!("expected a typed version refusal, got {error}");
         };
         assert_eq!(refusal.found, found);
-        assert_eq!(refusal.reads.recorded(), 21);
+        assert_eq!(refusal.reads.recorded(), 1);
         assert_eq!(
             refusal.reads.supported().min(),
             WORKFLOW_GRAPH_SCHEMA_VERSION
@@ -84,7 +84,7 @@ fn out_of_range_graph_refuses_typed() {
 
 #[test]
 fn workflow_diagnostic_classification_changes_in_place_under_the_version_freeze() {
-    assert_eq!(lashlang::WORKFLOW_TYPE_FACET_SCHEMA_VERSION, 4);
+    assert_eq!(lashlang::WORKFLOW_TYPE_FACET_SCHEMA_VERSION, 1);
     let environment = lashlang::LashlangHostEnvironment::new(
         lashlang::LashlangHostCatalog::new(),
         lashlang::LashlangAbilities::all(),
@@ -95,7 +95,7 @@ fn workflow_diagnostic_classification_changes_in_place_under_the_version_freeze(
     )
     .expect("draft projects");
     assert_eq!(graph.schema_version, WORKFLOW_GRAPH_SCHEMA_VERSION);
-    assert_eq!(graph.facet_schema_version, Some(4));
+    assert_eq!(graph.facet_schema_version, Some(1));
     let diagnostics = graph
         .nodes()
         .filter_map(|node| node.type_facets.as_ref())
@@ -108,5 +108,5 @@ fn workflow_diagnostic_classification_changes_in_place_under_the_version_freeze(
     let value = serde_json::to_value(graph).expect("graph encodes");
     let decoded =
         WorkflowGraph::decode_json_value(value).expect("current frozen facet shape decodes");
-    assert_eq!(decoded.facet_schema_version, Some(4));
+    assert_eq!(decoded.facet_schema_version, Some(1));
 }

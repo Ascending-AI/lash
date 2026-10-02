@@ -12,11 +12,11 @@ use crate::runtime::process::identity_projection::{
 ///         project_trigger_process_input, project_process_payload_leaf, project_process_schema_leaf,
 ///     ),
 /// )
-pub(super) const TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 3;
+pub(super) const TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 1;
 /// version_guard(
 ///     items(trigger_subscription_address_preimage, project_trigger_owner),
 /// )
-const TRIGGER_LOOKUP_FAMILY_VERSION: u8 = 2;
+const TRIGGER_LOOKUP_FAMILY_VERSION: u8 = 1;
 /// version_guard(
 ///     items(
 ///         path = "crates/lash-core-execution/src/triggers/router.rs",
@@ -28,7 +28,7 @@ const TRIGGER_SOURCE_FAMILY_VERSION: u8 = 1;
 /// version_guard(
 ///     items(derived_trigger_subscription_key),
 /// )
-const DERIVED_TRIGGER_SUBSCRIPTION_FAMILY_VERSION: u8 = 3;
+const DERIVED_TRIGGER_SUBSCRIPTION_FAMILY_VERSION: u8 = 1;
 
 pub fn deterministic_subscription_id(
     owner_scope: &TriggerOwnerScope,

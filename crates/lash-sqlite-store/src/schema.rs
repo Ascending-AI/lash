@@ -1136,7 +1136,7 @@ CREATE TABLE IF NOT EXISTS lash_compat (
 /// and trigger registration (FIG-4057, changed in place under the version
 /// freeze): a catalog whose kind CHECK predates them rejects both kinds, so
 /// recreate it.
-const BASE_SCHEMA_VERSION: i32 = 99;
+const BASE_SCHEMA_VERSION: i32 = 1;
 /// version_guard(
 ///     roots(
 ///         path = "crates/lash-sqlite-store/src/lib.rs", StoredBlobEnvelope,
@@ -1662,7 +1662,7 @@ CREATE TABLE IF NOT EXISTS draining_generations (
 /// router releases it once the delivery's bind commits. A pinned row is never
 /// pruned. A registry written before the change lacks the columns; recreate
 /// it.
-const BASE_PROCESS_SCHEMA_VERSION: i32 = 44;
+const BASE_PROCESS_SCHEMA_VERSION: i32 = 1;
 /// version_guard(
 ///     items(PROCESS_SCHEMA, elide = "sql_idempotent_index"),
 ///     catalog(
@@ -1709,7 +1709,7 @@ pub(crate) const PROCESS_SCHEMA_VERSION: i32 = BASE_PROCESS_SCHEMA_VERSION + 1;
 // in place under the version freeze): every delete of an occurrence leaves
 // its tombstone, and an ingest that finds one writes nothing back. A trigger
 // store written before the change lacks the table; recreate it.
-const BASE_TRIGGER_SCHEMA_VERSION: i32 = 12;
+const BASE_TRIGGER_SCHEMA_VERSION: i32 = 1;
 /// version_guard(
 ///     shapes(
 ///         path = "crates/lash-core-execution/src/runtime/effect/envelope.rs",

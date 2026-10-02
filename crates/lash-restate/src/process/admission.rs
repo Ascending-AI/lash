@@ -68,7 +68,7 @@ use std::sync::Arc;
 /// the start step journals the id it started, and the requests a caller sends
 /// into a running workflow (complete, await, cancel, attach) are stamped with
 /// this generation and refused by it before their shape is decoded. An
-/// unstamped request is generation 1. Generation 4 changed in place under the
+/// unstamped request is generation 0, which no release serves. Generation 4 changed in place under the
 /// pre-1.0 version freeze (FIG-3846): a registration records its lifetime,
 /// ancestry and session capability where it carried a parent policy
 /// (FIG-3607), and the input carries its sender's drain generation in place
@@ -85,7 +85,7 @@ use std::sync::Arc;
 ///     items(ADMIT_STEP, START_STEP, stamped_journal_version, decode_stamped_request),
 ///     file(path = "crates/lash-restate/src/process/stamped_requests.rs"),
 /// )
-pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 4;
+pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 1;
 
 /// The manual epoch of the journal-bearing handlers' logic, hashed into the
 /// build's drain generation beside the drain-format versions (FIG-3795).
@@ -119,9 +119,10 @@ const ADMIT_STEP: &str = "lash.segment.admit";
 /// The journal name of the start step.
 const START_STEP: &str = "lash.segment.start";
 
-/// The generation a request that carries no stamp was written by.
+/// The generation a request that carries no stamp is refused as. It predates
+/// the stamp, so it is below the release baseline and no handler serves it.
 fn unstamped_journal_version() -> u32 {
-    1
+    0
 }
 
 /// The generation a process request was written by, read before its shape

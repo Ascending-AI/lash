@@ -1553,11 +1553,11 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         };
         assert_eq!(
             without_trace_key.as_str(),
-            "frame-key/v2/f091a7415a8f61330c53a4d67429e6eb35dfafa71901d387dfb676850ae02b10"
+            "frame-key/v2/af0f0ba89f44114a167b7a27ee9c540b3205a90c3f0b8b2066c2f37c7990e8f4"
         );
         assert_eq!(
             with_trace_key.as_str(),
-            "frame-key/v2/f091a7415a8f61330c53a4d67429e6eb35dfafa71901d387dfb676850ae02b10"
+            "frame-key/v2/af0f0ba89f44114a167b7a27ee9c540b3205a90c3f0b8b2066c2f37c7990e8f4"
         );
     });
 }

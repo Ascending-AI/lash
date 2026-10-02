@@ -459,7 +459,7 @@ pub fn direct_effect_invocation(
 ///         direct_effect_replay_preimage, direct_request_discriminator, project_direct_causal_ref,
 ///     ),
 /// )
-const DIRECT_EFFECT_FAMILY_VERSION: u8 = 3;
+const DIRECT_EFFECT_FAMILY_VERSION: u8 = 1;
 
 fn direct_effect_replay_preimage(
     owner: &crate::RuntimeOwner,
@@ -761,34 +761,34 @@ mod tests {
                     session_id: SessionId::from("ab"),
                     turn_id: TurnId::from("c"),
                 },
-                "direct-discriminator:v3:blake3:78e0554f9dc6f57ec9fb07dacb6a6bc9dc221c5d696da56562d52480951c025a",
+                "direct-discriminator:v1:blake3:176ebb5a468f9592b5c4ab6912030b03b11cfb2dfac8f88cfc201b85d142b81f",
             ),
             (
                 CausalRef::Effect {
                     address: EffectAddress::new(ExecutionScope::runtime_operation("s"), "e")
                         .expect("valid effect cause"),
                 },
-                "direct-discriminator:v3:blake3:6a86c188f94aabd14d86ec775e19ad91498610bf7c3f8865cc1231d4cb467efc",
+                "direct-discriminator:v1:blake3:425ad27ed60c1f7ec7c77f59402f6e77432c714f350d50445d1b88cebfa8622a",
             ),
             (
                 CausalRef::ToolCall {
                     session_id: SessionId::from("s"),
                     call_id: crate::ToolCallId::fixture("c"),
                 },
-                "direct-discriminator:v3:blake3:5eacc6971ae377333486f1358c05eb74d677fe1d4a891b3cd25bf7ecadcb2483",
+                "direct-discriminator:v1:blake3:e64ac884bf24fb3a80fe85efa7c8aac03f23a83571185c1801552eb198faaef3",
             ),
             (
                 CausalRef::Process {
                     process_id: crate::process_id_for_test("p"),
                 },
-                "direct-discriminator:v3:blake3:34ad73dc0d8b6305ccdc1207afa8e4ef37c30035a2c2bf9455256563d6861c74",
+                "direct-discriminator:v1:blake3:a5babc397afe676d05a76c4444a388d5ef4387ff72d94195fa3f57268263417c",
             ),
             (
                 CausalRef::ProcessEvent {
                     process_id: crate::process_id_for_test("p"),
                     sequence: 0,
                 },
-                "direct-discriminator:v3:blake3:8e1e40c288970d6da166b74e66c8fd393ace16bf4ca2c36edd30d23a65976b1c",
+                "direct-discriminator:v1:blake3:4b3bb6ca497dc59612d9ea2389a7fca13690138e0ee4cec64dea0c3b2b5a072c",
             ),
             (
                 CausalRef::TriggerOccurrence {
@@ -797,22 +797,27 @@ mod tests {
                     subscription_incarnation: None,
                     subscription_revision: Some(0),
                 },
-                "direct-discriminator:v3:blake3:d56a11d6ab13e7e6d320486668f8c684d0d72725161f4f2d655729bd751a9c04",
+                "direct-discriminator:v1:blake3:21d7b009aebf04cc88d4d29e1366627030b33820ff98a88e930c5caa36b1d113",
             ),
             (
                 CausalRef::SessionNode {
                     session_id: SessionId::from("s"),
                     node_id: "n".to_string(),
                 },
-                "direct-discriminator:v3:blake3:6910556f4a2679c13d3329a613bc5467cecc143d30b2a4013eead1fe77b1b067",
+                "direct-discriminator:v1:blake3:758993a4c2bb5693ddb004c8f26bd969a5d87280abbb00dc8ae813a68dd42580",
             ),
         ];
-        for (cause, expected) in causes {
-            assert_eq!(
-                direct_request_discriminator(None, Some(&cause), 1),
-                expected
-            );
-        }
+        // One comparison over the whole table: a stale table names every row.
+        assert_eq!(
+            causes
+                .iter()
+                .map(|(cause, _)| direct_request_discriminator(None, Some(cause), 1))
+                .collect::<Vec<_>>(),
+            causes
+                .iter()
+                .map(|(_, expected)| *expected)
+                .collect::<Vec<_>>(),
+        );
         assert_eq!(
             direct_request_discriminator(
                 Some(&RuntimeReplay {
@@ -822,7 +827,7 @@ mod tests {
                 None,
                 99,
             ),
-            "direct-discriminator:v3:blake3:62222a794daf6905fa399028c7384ed983a60058bca0c630a91a2e7466b46d88"
+            "direct-discriminator:v1:blake3:14538d26daa6a4cba974c9a66f4c6d869a2d9f43b070dac4e22070a6489218fd"
         );
         assert_eq!(
             direct_request_discriminator(
@@ -833,7 +838,7 @@ mod tests {
                 None,
                 0,
             ),
-            "direct-discriminator:v3:blake3:5ba4e3f6185036771681615925aa5cd3287065402ec0ec69630d8288629bd046"
+            "direct-discriminator:v1:blake3:76e28fff9ee015865dd3dfe187a6a5729059a295b71d53dbc5a156a3bb5c7307"
         );
         assert_eq!(
             direct_request_discriminator(
@@ -844,7 +849,7 @@ mod tests {
                 }),
                 1,
             ),
-            "direct-discriminator:v3:blake3:78e0554f9dc6f57ec9fb07dacb6a6bc9dc221c5d696da56562d52480951c025a"
+            "direct-discriminator:v1:blake3:176ebb5a468f9592b5c4ab6912030b03b11cfb2dfac8f88cfc201b85d142b81f"
         );
         assert_eq!(
             direct_request_discriminator(
@@ -855,7 +860,7 @@ mod tests {
                 }),
                 1,
             ),
-            "direct-discriminator:v3:blake3:c71a5192c9a6d515e0c954b8e295d8c72db1d9215b7a960b5c320b01ca73def6"
+            "direct-discriminator:v1:blake3:d1d0ed35fde306d4984dce6310cb797c07d9baeb891f5eeb75b7dd41dcab6ce3"
         );
 
         let discriminator = direct_request_discriminator(None, None, 1);
@@ -867,7 +872,7 @@ mod tests {
         );
         assert_eq!(
             hex(&preimage),
-            "6c6173682d737461626c652d6964656e746974790203000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b657900000000000000017301000000000000000174000000000000000175000000000000005f6469726563742d6469736372696d696e61746f723a76333a626c616b65333a31666631386539313861383032313933623937636263346537316433313039626639306232656230323966396137343233396264333865386331343839663665"
+            "6c6173682d737461626c652d6964656e746974790201000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b657900000000000000017301000000000000000174000000000000000175000000000000005f6469726563742d6469736372696d696e61746f723a76313a626c616b65333a66613737353431626233636435643361656632326435386237623536386563613233633063336362326535393162646264613366306432306130393534656630"
         );
         assert_eq!(
             direct_effect_invocation(
@@ -879,7 +884,7 @@ mod tests {
                 None,
             )
             .effect_replay_key(),
-            "direct:v3:blake3:43bfa7f80a468e47f435784b0cf43f95ffef5a368e3fb26ee78929ffaf618c35"
+            "direct:v1:blake3:1574b21c6bc26e742b97ce6bdaffc3a274553160f91df1e4fc25ca3fdf523413"
         );
 
         let first_discriminator = direct_request_discriminator(
@@ -898,7 +903,7 @@ mod tests {
         );
         assert_eq!(
             hex(&first_preimage),
-            "6c6173682d737461626c652d6964656e746974790203000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b657900000000000000017301000000000000000174000000000000000175000000000000005f6469726563742d6469736372696d696e61746f723a76333a626c616b65333a34336339616331396231653233316136616162653966386265623333623337376365343731313666343165336661653963373133363535306233346464616634"
+            "6c6173682d737461626c652d6964656e746974790201000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b657900000000000000017301000000000000000174000000000000000175000000000000005f6469726563742d6469736372696d696e61746f723a76313a626c616b65333a66323438343132303230373366636433343130313361643262326666623337383163313433653864393164666335343237343233643264333530343139356461"
         );
         let first = direct_effect_invocation(
             &ExecutionScope::turn("s", "t"),
@@ -910,7 +915,7 @@ mod tests {
         );
         assert_eq!(
             first.effect_replay_key(),
-            "direct:v3:blake3:f8af7289056d371cc0b80d6d1f4ad3f8cccfd86bc863e9744a080354544dfa9e"
+            "direct:v1:blake3:f46825d884b4b4cdf3e2dbb1879100857848f1450696ea1ab391dcc3fc848dc3"
         );
         let second_discriminator = direct_request_discriminator(None, None, 1);
         let second_preimage = direct_effect_replay_preimage(
@@ -921,7 +926,7 @@ mod tests {
         );
         assert_eq!(
             hex(&second_preimage),
-            "6c6173682d737461626c652d6964656e746974790203000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b6579000000000000000173010000000000000001740000000000000017753a6469726563743a76323a63616c6c65723a32313a78000000000000005f6469726563742d6469736372696d696e61746f723a76333a626c616b65333a31666631386539313861383032313933623937636263346537316433313039626639306232656230323966396137343233396264333865386331343839663665"
+            "6c6173682d737461626c652d6964656e746974790201000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b6579000000000000000173010000000000000001740000000000000017753a6469726563743a76323a63616c6c65723a32313a78000000000000005f6469726563742d6469736372696d696e61746f723a76313a626c616b65333a66613737353431626233636435643361656632326435386237623536386563613233633063336362326535393162646264613366306432306130393534656630"
         );
         let second = direct_effect_invocation(
             &ExecutionScope::turn("s", "t"),
@@ -933,7 +938,7 @@ mod tests {
         );
         assert_eq!(
             second.effect_replay_key(),
-            "direct:v3:blake3:89749b2923cda770d21363d4c9723d995d61023fe30a4d9d086f8ef240f60c0c"
+            "direct:v1:blake3:e1bb225807841716cec5e41dc9b516e245eb087b2be10cb2b3d65e27d0c0e59b"
         );
         assert_ne!(first.effect_replay_key(), second.effect_replay_key());
     }

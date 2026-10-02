@@ -363,7 +363,7 @@ pub struct RestateProcessCancelRequest {
     /// commands the sender built this request for (FIG-3673): the request is
     /// refused by any other generation before its shape is decoded, and the
     /// handlers refuse it before journaling anything. An unstamped request is
-    /// generation 1.
+    /// generation 0, which no release serves.
     pub journal_version: u32,
 }
 

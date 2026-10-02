@@ -56,7 +56,7 @@ use std::collections::BTreeMap;
 
 use lash_core::{
     DurableItem, DurableScan, DurableSurface, ScanCoverage, StoreError, StorePreflight,
-    StoreReleaseState, StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict,
+    StoreReleaseState, StoreSchemaOutcome, StoreSchemaStatus,
 };
 
 use crate::formats::{DurableFormat, FormatProbe, durable_formats};
@@ -66,7 +66,7 @@ use report::{FormatTally, reads_version};
 pub use report::{
     ComponentReadability, ComponentVerdict, DrainBlocker, FormatEvidence, FoundVersion, NotScanned,
     PreflightMode, PreflightOutcome, PreflightReport, ReleaseStampComponent, ReleaseStampReport,
-    SchemaDatabaseReport, SchemaReport,
+    SchemaDatabaseReport, SchemaReport, SchemaVerdictReport,
 };
 
 /// How many items one page of a surface walk asks for.
@@ -594,38 +594,7 @@ fn schema_report(status: &StoreSchemaStatus) -> SchemaReport {
         databases: status
             .databases
             .iter()
-            .map(|database| {
-                let (verdict, found, refusal, reason) = match &database.verdict {
-                    StoreSchemaVerdict::Matches => ("matches", None, None, None),
-                    StoreSchemaVerdict::Expanded { found } => {
-                        ("expanded", Some(*found), None, None)
-                    }
-                    StoreSchemaVerdict::Refused { refusal } => {
-                        ("refused", None, Some(refusal.clone()), None)
-                    }
-                    StoreSchemaVerdict::Migratable { found } => {
-                        ("migratable", Some(*found), None, None)
-                    }
-                    StoreSchemaVerdict::Mismatch { found } => {
-                        ("mismatch", Some(*found), None, None)
-                    }
-                    StoreSchemaVerdict::Absent => ("absent", None, None, None),
-                    StoreSchemaVerdict::Unreadable { reason } => {
-                        ("unreadable", None, None, Some(reason.clone()))
-                    }
-                    _ => ("unclassified", None, None, None),
-                };
-                SchemaDatabaseReport {
-                    name: database.name.clone(),
-                    location: database.location.clone(),
-                    expected: database.expected,
-                    min_reader: database.min_reader,
-                    verdict,
-                    found,
-                    refusal,
-                    reason,
-                }
-            })
+            .map(SchemaDatabaseReport::from)
             .collect(),
         release: release_report(&status.release),
     }

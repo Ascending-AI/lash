@@ -672,7 +672,7 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 ///     roots(path = "crates/lash-sansio/src/session_model/mod.rs", TurnOutcome, ErrorEnvelope),
 ///     catalog(path = "crates/lash-postgres-store/src/postgres/migrate.rs", EXPAND_MIGRATIONS),
 /// )
-const SCHEMA_VERSION: i32 = 141;
+const SCHEMA_VERSION: i32 = 1;
 
 /// The oldest component schema version this build admits at open (FIG-3797).
 ///
@@ -1170,14 +1170,14 @@ impl PostgresStorage {
         TEARDOWN_DDL
     }
 
-    /// The pre-1.0 DDL revision used by the migration ledger and shape artifact.
+    /// The DDL revision used by the migration ledger and shape artifact.
     /// Compatibility admission reads the version and floor in
     /// `lash_schema_versions` through the PostgreSQL descriptor.
     pub fn schema_version() -> i32 {
         SCHEMA_VERSION
     }
 
-    /// The pre-1.0 DDL planning floor, retained for the migration ledger.
+    /// The DDL planning floor of the migration ledger.
     pub fn min_supported_schema_version() -> i32 {
         MIN_SUPPORTED_SCHEMA_VERSION
     }

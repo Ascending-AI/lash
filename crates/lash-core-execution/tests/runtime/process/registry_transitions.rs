@@ -263,29 +263,31 @@ mod tests {
         ));
     }
 
-    /// FIG-3607: a version-3 delivery named its process by a reusable name and
-    /// an incarnation; a minted id names the whole lifetime under version 4.
+    /// FIG-3607: a pre-1.0 delivery named its process by a reusable name and
+    /// an incarnation; a minted id names the whole lifetime at the release
+    /// baseline, which reads no pre-1.0 version.
     #[test]
     fn the_immediate_predecessor_wake_delivery_version_is_refused() {
+        // The last pre-1.0 wake-delivery version: no release build reads it.
+        const PRE_RELEASE: u32 = 4;
         let mut payload: serde_json::Value =
             serde_json::from_str(&wake_delivery_json()).expect("wake delivery JSON");
-        payload["version"] = serde_json::json!(3);
+        payload["version"] = serde_json::json!(PRE_RELEASE);
         let error = WakeDeliveryRow {
             delivery_json: serde_json::to_string(&payload).expect("wake delivery JSON"),
             ..wake_row()
         }
         .project(lash_core_execution::FleetFormat::current())
-        .expect_err("a version-3 wake delivery row must be refused");
+        .expect_err("a pre-1.0 wake delivery row must be refused");
 
         assert!(matches!(
             error,
             PluginError::ProcessWakeDeliveryFormatVersionMismatch { expected, found }
-                if expected == PROCESS_WAKE_DELIVERY_FORMAT_VERSION && found == 3
+                if expected == PROCESS_WAKE_DELIVERY_FORMAT_VERSION && found == PRE_RELEASE
         ));
         assert_eq!(
-            3 + 1,
-            PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-            "wake delivery predecessor adjacency pin"
+            PROCESS_WAKE_DELIVERY_FORMAT_VERSION, 1,
+            "wake delivery release baseline pin"
         );
     }
 

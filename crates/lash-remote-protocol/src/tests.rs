@@ -21,25 +21,21 @@ const EXAMPLE_BINDING_KEY: &str = "example.call_path";
 mod version_refusal_tests;
 use version_refusal_tests::decode_empty_envelope;
 
-/// Refusal witness (FIG-3600): the generation-100 decoder rejects its immediate
-/// predecessor before attempting to decode the envelope body.
-///
-/// The predecessor is a literal, not `REMOTE_PROTOCOL_VERSION - 1`: a derived
-/// one makes the adjacency assertion below tautological and stops recording
-/// which window was actually witnessed.
+/// Refusal witness: the release decoder rejects the last pre-1.0 generation
+/// before attempting to decode the envelope body. The release baseline
+/// restarted the counter at 1, so no pre-1.0 peer shares a generation with it.
 #[test]
-fn immediate_predecessor_remote_protocol_generation_99_is_refused() {
-    const PREDECESSOR: u32 = 99;
-    assert_eq!(
-        PREDECESSOR + 1,
-        REMOTE_PROTOCOL_VERSION,
-        "remote-protocol generation adjacency pin"
+fn the_last_pre_release_remote_protocol_generation_is_refused() {
+    const PRE_RELEASE: u32 = 100;
+    assert!(
+        !crate::REMOTE_PROTOCOL.contains(PRE_RELEASE),
+        "remote-protocol release baseline pin"
     );
-    let error = decode_empty_envelope(PREDECESSOR)
-        .expect_err("generation-99 remote envelope must be refused");
+    let error =
+        decode_empty_envelope(PRE_RELEASE).expect_err("a pre-1.0 remote envelope must be refused");
     assert!(matches!(
         error,
-        RemoteProtocolError::Unsupported { peer, local } if peer == crate::VersionRange::exactly(PREDECESSOR) && local == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION)
+        RemoteProtocolError::Unsupported { peer, local } if peer == crate::VersionRange::exactly(PRE_RELEASE) && local == crate::REMOTE_PROTOCOL
     ));
 }
 
@@ -837,7 +833,7 @@ fn remote_trigger_dtos_json_round_trip() {
     .expect_err("version-57 trigger registration must be refused before body decoding");
     assert!(matches!(
         error,
-        RemoteProtocolError::Unsupported { peer, local } if peer == crate::VersionRange::exactly(57) && local == crate::VersionRange::exactly(100)
+        RemoteProtocolError::Unsupported { peer, local } if peer == crate::VersionRange::exactly(57) && local == crate::REMOTE_PROTOCOL
     ));
 
     let cause = RemoteCausalRef::TriggerOccurrence {
@@ -901,7 +897,7 @@ fn protocol_62_session_filter_is_refused_before_removed_field_decode() {
             .expect_err("version-62 session spelling must be refused");
     assert!(matches!(
         error,
-        RemoteProtocolError::Unsupported { peer, local } if peer == crate::VersionRange::exactly(62) && local == crate::VersionRange::exactly(100)
+        RemoteProtocolError::Unsupported { peer, local } if peer == crate::VersionRange::exactly(62) && local == crate::REMOTE_PROTOCOL
     ));
 
     assert_eq!(
@@ -909,9 +905,9 @@ fn protocol_62_session_filter_is_refused_before_removed_field_decode() {
             &crate::negotiation::test_negotiated(),
             RemoteTriggerSubscriptionFilter::for_session("session-blue")
         ))
-        .expect("serialize canonical version-100 filter"),
+        .expect("serialize canonical current-version filter"),
         serde_json::json!({
-            "protocol_version": 100,
+            "protocol_version": REMOTE_PROTOCOL_VERSION,
             "registrant_scope_id": "session:session-blue",
         })
     );
@@ -919,7 +915,7 @@ fn protocol_62_session_filter_is_refused_before_removed_field_decode() {
 
 #[test]
 fn remote_protocol_92_session_filter_refuses_retired_session_id() {
-    let wire = br#"{"protocol_version":100,"session_id":"session-blue"}"#;
+    let wire = br#"{"protocol_version":1,"session_id":"session-blue"}"#;
     let error =
         Envelope::<RemoteTriggerSubscriptionFilter>::decode_json(wire, crate::REMOTE_PROTOCOL)
             .expect_err("current-version filter must reject the retired session_id field");
@@ -934,7 +930,7 @@ fn remote_protocol_92_session_filter_refuses_nested_duplicate_fields() {
     // duplicate key. The property being pinned — nested duplicate-field
     // rejection inside a typed DTO — is pinned on the process-list filter's
     // typed originator selector instead.
-    let wire = br#"{"protocol_version":100,"originator":{"type":"host","scope":"a","scope":"b"}}"#;
+    let wire = br#"{"protocol_version":1,"originator":{"type":"host","scope":"a","scope":"b"}}"#;
     let error = Envelope::<RemoteProcessListFilter>::decode_json(wire, crate::REMOTE_PROTOCOL)
         .expect_err("current-version envelope must preserve nested duplicate-field rejection");
     assert!(matches!(error, RemoteProtocolError::MessageDecode(_)));
@@ -1137,7 +1133,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect emitted envelope"),
         serde_json::json!({
-            "protocol_version": 100,
+            "protocol_version": REMOTE_PROTOCOL_VERSION,
             "session_id": "resident-session",
             "replay_incarnation_id": "resident-incarnation",
             "revision": 7,
@@ -1151,7 +1147,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
         .expect_err("version 41 reader must reject a complete current-version envelope");
     assert!(matches!(
         error,
-        RemoteProtocolError::Unsupported { peer, local } if peer == crate::VersionRange::exactly(100) && local == crate::VersionRange::exactly(41)
+        RemoteProtocolError::Unsupported { peer, local } if peer == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION) && local == crate::VersionRange::exactly(41)
     ));
     assert!(
         !PROTOCOL_41_OBSERVATION_PAYLOAD_DECODED.load(std::sync::atomic::Ordering::SeqCst),
@@ -1192,7 +1188,7 @@ fn protocol_51_process_reference_is_refused() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 100, "remote DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 1, "remote DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         start_key: Some("host-start-1".to_string()),
         input: RemoteProcessInput::External {
@@ -1666,7 +1662,7 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
     assert!(
         matches!(
             decode_empty_envelope(37),
-            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(37) && local == crate::VersionRange::exactly(100)
+            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(37) && local == crate::REMOTE_PROTOCOL
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
     );
@@ -1699,7 +1695,7 @@ fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode()
     assert!(
         matches!(
             decode_empty_envelope(38),
-            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(38) && local == crate::VersionRange::exactly(100)
+            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(38) && local == crate::REMOTE_PROTOCOL
         ),
         "the version gate refuses a 38 peer before any payload is interpreted"
     );
@@ -1751,7 +1747,7 @@ fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_dec
     assert!(
         matches!(
             decode_empty_envelope(39),
-            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(39) && local == crate::VersionRange::exactly(100)
+            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(39) && local == crate::REMOTE_PROTOCOL
         ),
         "the version gate refuses a 39 peer before any payload is interpreted"
     );
@@ -1780,7 +1776,7 @@ fn protocol_40_peer_rejects_protocol_41_caller_departed_before_status_decode() {
     assert!(
         matches!(
             decode_empty_envelope(40),
-            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(40) && local == crate::VersionRange::exactly(100)
+            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(40) && local == crate::REMOTE_PROTOCOL
         ),
         "the version gate refuses a 40 peer before any payload is interpreted"
     );

@@ -205,7 +205,7 @@ pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
 ///     shapes(path = "crates/lashlang/src/runtime/vm/continuation.rs", cover(VmContinuation)),
 ///     items(path = "crates/lashlang/src/runtime/entry_points.rs", compile, compile_main),
 /// )
-pub const BYTECODE_FORMAT_VERSION: u32 = 30;
+pub const BYTECODE_FORMAT_VERSION: u32 = 1;
 
 pub use lash_sansio::WorkflowExecutionSite;
 pub use tracking::{

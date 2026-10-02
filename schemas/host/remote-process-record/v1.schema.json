@@ -1,0 +1,2268 @@
+{
+  "$defs": {
+    "AttachmentRef": {
+      "properties": {
+        "byte_len": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "type_metadata": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttachmentTypeMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "media_type",
+        "byte_len"
+      ],
+      "type": "object"
+    },
+    "AttachmentSource": {
+      "description": "The ownership-explicit attachment source at the LLM/content seam.\n\nInline bytes are transient and must be normalized to `Stored` before a\ndurable effect is emitted. Borrowed sources are never fetched by Lash and\nnever enter the attachment manifest.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bytes": {
+              "items": {
+                "format": "uint8",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "media_type": {
+              "type": "string"
+            },
+            "source": {
+              "const": "inline",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "media_type",
+            "bytes"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attachment_ref": {
+              "$ref": "#/$defs/AttachmentRef"
+            },
+            "source": {
+              "const": "stored",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "attachment_ref"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "media_type": {
+              "type": "string"
+            },
+            "source": {
+              "const": "external_url",
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "media_type",
+            "url"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "media_type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "provider_scope": {
+              "$ref": "#/$defs/ProviderFileScope"
+            },
+            "source": {
+              "const": "provider_file",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "provider_scope",
+            "id"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AttachmentTypeMetadata": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "image",
+              "type": "string"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "CancelOrigin": {
+      "description": "The runtime or actor decision that requested cancellation of a process.",
+      "enum": [
+        "turn_stopped",
+        "parent_ended",
+        "operator_requested",
+        "model_requested",
+        "start_failed"
+      ],
+      "type": "string"
+    },
+    "CancelRequest": {
+      "additionalProperties": false,
+      "description": "A process cancellation fact. Its first timestamp survives retries.",
+      "properties": {
+        "origin": {
+          "$ref": "#/$defs/CancelOrigin"
+        },
+        "requested_at_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "requester": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "origin",
+        "requester",
+        "requested_at_ms"
+      ],
+      "type": "object"
+    },
+    "DefinitionIdSchema": {
+      "additionalProperties": false,
+      "description": "The typed definition reference a durable process row pins: the engine that\nowns the definition, the engine-owned definition value, and the signature\nclaimed for it. The claim is never authority (ADR 0095) \u2014 a peer's claim is\nchecked against the owning engine before any local row is created.",
+      "properties": {
+        "$lash_definition_id": {
+          "pattern": "^lash\\.definition:sha256:[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "$lash_definition_id"
+      ],
+      "type": "object"
+    },
+    "EffectAddress": {
+      "description": "Canonical address of one admitted runtime effect.",
+      "properties": {
+        "execution_scope": {
+          "$ref": "#/$defs/ExecutionScope"
+        },
+        "replay_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_scope",
+        "replay_key"
+      ],
+      "type": "object"
+    },
+    "ExecutionScope": {
+      "description": "Stable semantic identity for one effectful runtime operation.\n\nThis is the scope admitted by the host boundary before nondeterministic\nwork begins. Its journal encoding is an existing durable contract; effect\naddresses compose it with a replay key without changing those bytes.",
+      "oneOf": [
+        {
+          "properties": {
+            "session_id": {
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "turn",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "session_id",
+            "turn_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "process_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "process",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "process_id"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "One operation on a session that runs no turn: a host command, named\nby its batch, or the admissions of one drive request. It has no\nlogical root, and no logical turn runs under it.",
+          "properties": {
+            "operation_id": {
+              "type": "string"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "session_operation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "session_id",
+            "operation_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "session_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "session_delete",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "session_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "operation_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "runtime_operation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ProviderFileScope": {
+      "additionalProperties": false,
+      "description": "Provider/account boundary for a provider-owned file id.",
+      "properties": {
+        "credential_scope": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "credential_scope"
+      ],
+      "type": "object"
+    },
+    "RemoteAbandonEvidence": {
+      "description": "Wire mirror of Abandoned-terminal evidence.",
+      "properties": {
+        "epoch_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RemoteLeaseOwnerIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "writer": {
+          "$ref": "#/$defs/RemoteAbandonWriter"
+        }
+      },
+      "required": [
+        "writer",
+        "epoch_ms"
+      ],
+      "type": "object"
+    },
+    "RemoteAbandonWriter": {
+      "description": "Wire mirror of the writer that established an Abandoned terminal.",
+      "oneOf": [
+        {
+          "enum": [
+            "producer"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "resume_refused": {
+              "properties": {
+                "reason": {
+                  "$ref": "#/$defs/RemoteProcessResumeRefusal"
+                }
+              },
+              "required": [
+                "reason"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "resume_refused"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteAttachmentRef": {
+      "properties": {
+        "byte_len": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "type_metadata": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RemoteAttachmentTypeMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "media_type",
+        "byte_len"
+      ],
+      "type": "object"
+    },
+    "RemoteAttachmentSource": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "data_base64": {
+              "type": "string"
+            },
+            "media_type": {
+              "type": "string"
+            },
+            "source": {
+              "const": "inline",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "media_type",
+            "data_base64"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attachment_ref": {
+              "$ref": "#/$defs/RemoteAttachmentRef"
+            },
+            "source": {
+              "const": "stored",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "attachment_ref"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "media_type": {
+              "type": "string"
+            },
+            "source": {
+              "const": "external_url",
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "media_type",
+            "url"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "media_type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "provider_scope": {
+              "$ref": "#/$defs/RemoteProviderFileScope"
+            },
+            "source": {
+              "const": "provider_file",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "provider_scope",
+            "id"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteAttachmentTypeMetadata": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "image",
+              "type": "string"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteCausalRef": {
+      "oneOf": [
+        {
+          "properties": {
+            "session_id": {
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "turn",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "session_id",
+            "turn_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "address": {
+              "$ref": "#/$defs/EffectAddress"
+            },
+            "type": {
+              "const": "effect",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "address"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "tool_call",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "session_id",
+            "call_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "process_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "process",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "process_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "process_id": {
+              "type": "string"
+            },
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "process_event",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "process_id",
+            "sequence"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "occurrence_id": {
+              "type": "string"
+            },
+            "subscription_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "subscription_incarnation": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "subscription_revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "trigger_occurrence",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "occurrence_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "node_id": {
+              "type": "string"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "session_node",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "session_id",
+            "node_id"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteEffectOpener": {
+      "description": "The wire form of the shared opener vocabulary inside an owned parent.\n\nMirrors `lash_core::EffectOpener` arm for arm so a remote peer names the\nexact durable owner \u2014 a turn, a session operation, or one process \u2014 and\nnever a rendered id.",
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "turn",
+              "type": "string"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "session_id",
+            "turn_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "session_operation",
+              "type": "string"
+            },
+            "operation_id": {
+              "type": "string"
+            },
+            "session_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "session_id",
+            "operation_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "process",
+              "type": "string"
+            },
+            "process_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "process_id"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteInputItem": {
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "text",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "source": {
+              "$ref": "#/$defs/RemoteAttachmentSource"
+            },
+            "type": {
+              "const": "attachment",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "source"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteLeaseOwnerIdentity": {
+      "description": "Wire mirror of one lease holder incarnation. Fencing identity is the full\n`(owner_id, incarnation_id)` pair; neither component may be erased into an\nuntyped JSON carrier.",
+      "properties": {
+        "incarnation_id": {
+          "type": "string"
+        },
+        "owner_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner_id",
+        "incarnation_id"
+      ],
+      "type": "object"
+    },
+    "RemoteLifetimeDecision": {
+      "description": "A process's recorded lifetime decision.",
+      "oneOf": [
+        {
+          "properties": {
+            "lifetime": {
+              "const": "detached",
+              "type": "string"
+            }
+          },
+          "required": [
+            "lifetime"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "grant": {
+              "$ref": "#/$defs/RemoteScopeGrant"
+            },
+            "lifetime": {
+              "const": "until",
+              "type": "string"
+            },
+            "scope": {
+              "$ref": "#/$defs/RemoteScopeId"
+            }
+          },
+          "required": [
+            "lifetime",
+            "scope",
+            "grant"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteParkReason": {
+      "description": "Why a process parked: the serde form of the core park reason, arm for\narm (FIG-3659 NOW-B).",
+      "oneOf": [
+        {
+          "description": "A code cell's re-execution issued a command its journal does not hold.",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "type": {
+              "const": "replay_divergence",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A code cell's journal was written under a replay-key grammar this\nbuild does not mint.",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "type": {
+              "const": "key_format_cutover",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A host tool binding the journal names is missing or changed.",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "type": {
+              "const": "binding_drift",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A recorded effect's envelope no longer matches the one the redrive\nreconstructs.",
+          "properties": {
+            "effect_kind": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "type": {
+              "const": "effect_replay_divergence",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "effect_kind",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The session-state generation gate refused the redrive.",
+          "properties": {
+            "current": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "found": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            },
+            "type": {
+              "const": "session_state_generation_refused",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "found",
+            "current",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The engine stopped retrying work that kept failing live.",
+          "properties": {
+            "attempts": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "last_failure_code": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "model_key": {
+              "description": "The recorded model key the failing attempts could not bind.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "engine_retry_exhausted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "attempts",
+            "message"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteProcessAwaitOutput": {
+      "oneOf": [
+        {
+          "properties": {
+            "output": {
+              "$ref": "#/$defs/RemoteProcessToolCallOutput"
+            },
+            "type": {
+              "const": "settled",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "output"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "control": true,
+            "evidence": {
+              "$ref": "#/$defs/RemoteAbandonEvidence"
+            },
+            "type": {
+              "const": "abandoned",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "evidence"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "pruned_at_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "terminal_label": {
+              "type": "string"
+            },
+            "type": {
+              "const": "no_longer_retained",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "terminal_label",
+            "pruned_at_ms"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteProcessEventSemanticsSpec": {
+      "properties": {
+        "terminal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RemoteProcessTerminalSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "wake": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RemoteProcessWakeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RemoteProcessEventType": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "payload_schema": {
+          "default": null
+        },
+        "semantics": {
+          "$ref": "#/$defs/RemoteProcessEventSemanticsSpec",
+          "default": {}
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "RemoteProcessExternalRef": {
+      "properties": {
+        "backend": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "metadata": true,
+        "segment_ordinal": {
+          "description": "Execution segment the reference was minted for; absent reads as zero.\nCarried so a peer's compare-and-set sees the same ordinal the owning\ntier wrote, rather than silently flattening every segment to the first.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "backend",
+        "id"
+      ],
+      "type": "object"
+    },
+    "RemoteProcessIdentity": {
+      "properties": {
+        "definition_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DefinitionIdSchema"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "RemoteProcessInput": {
+      "oneOf": [
+        {
+          "properties": {
+            "args": {
+              "additionalProperties": true,
+              "default": {},
+              "type": "object"
+            },
+            "definition_id": {
+              "$ref": "#/$defs/DefinitionIdSchema"
+            },
+            "signature_claim": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RemoteProcessSignature"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "const": "definition",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "definition_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "payload": {
+              "default": null
+            },
+            "type": {
+              "const": "engine",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "create_request": {
+              "default": null
+            },
+            "definition_key": {
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/RemoteSessionTurnOutcome"
+            },
+            "turn_input": {
+              "$ref": "#/$defs/RemoteTurnInput"
+            },
+            "type": {
+              "const": "session_turn",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "definition_key",
+            "turn_input"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "metadata": {
+              "default": null
+            },
+            "type": {
+              "const": "external",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteProcessOriginator": {
+      "oneOf": [
+        {
+          "properties": {
+            "scope": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "host",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "agent_frame_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "session",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "session_id"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteProcessPark": {
+      "description": "The park a process is in while its body refuses to replay its journal\n(FIG-3659 NOW-B).",
+      "properties": {
+        "attempts": {
+          "description": "Refusals since the park opened.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "build_generation": {
+          "description": "The drain generation of the build whose checkpoint the park resumes\n(FIG-3795 S8), spelled as the store holds it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "engine": {
+          "description": "The engine's opaque handle on the stopped execution, when the engine\nparked the process itself.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_refused_ms": {
+          "description": "Epoch milliseconds of its latest refusal.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "park_id": {
+          "description": "The process event sequence of the fact that opened the park.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "$ref": "#/$defs/RemoteParkReason",
+          "description": "Why it parked, as its latest refusal said."
+        },
+        "refusing": {
+          "description": "Whether the latest run refused (a rerun under way clears it).",
+          "type": "boolean"
+        },
+        "since_ms": {
+          "description": "Epoch milliseconds of the park's first refusal.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "reason",
+        "park_id",
+        "since_ms",
+        "last_refused_ms",
+        "attempts",
+        "refusing"
+      ],
+      "type": "object"
+    },
+    "RemoteProcessProvenance": {
+      "properties": {
+        "caused_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RemoteCausalRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "originator": {
+          "$ref": "#/$defs/RemoteProcessOriginator"
+        }
+      },
+      "required": [
+        "originator"
+      ],
+      "type": "object"
+    },
+    "RemoteProcessResumeRefusal": {
+      "description": "Wire mirror of why a started process cannot be resumed safely.",
+      "oneOf": [
+        {
+          "enum": [
+            "substrate_lost"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "retired_generation": {
+              "properties": {
+                "found": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "found"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "retired_generation"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteProcessSignature": {
+      "description": "A signature claim travelling on a definition reference, or the explicit\nabsence of one (ADR 0090's unknown process type).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "signature": {
+              "const": "unknown",
+              "type": "string"
+            }
+          },
+          "required": [
+            "signature"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "encoding": true,
+            "signature": {
+              "const": "known",
+              "type": "string"
+            }
+          },
+          "required": [
+            "signature",
+            "encoding"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteProcessStarted": {
+      "description": "Wire mirror of the durable execution-started fact.",
+      "properties": {
+        "attempt": {
+          "default": 1,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "build_generation": {
+          "description": "The drain generation of the build that admitted the incarnation\n(FIG-3795 S1), spelled as the store holds it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "generation": {
+          "description": "The executable generation the incarnation was started under\n(FIG-3571), spelled as the store holds it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "owner": {
+          "$ref": "#/$defs/RemoteLeaseOwnerIdentity"
+        },
+        "started_at_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "owner",
+        "started_at_ms"
+      ],
+      "type": "object"
+    },
+    "RemoteProcessStatus": {
+      "oneOf": [
+        {
+          "enum": [
+            "running",
+            "waiting",
+            "completed",
+            "failed",
+            "cancelled",
+            "abandoned"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "caller_departed",
+          "description": "Mirrors [`lash_core::ProcessStatus::CallerDeparted`]: durably\ndistinguishable, deliberately never terminal.",
+          "type": "string"
+        }
+      ]
+    },
+    "RemoteProcessTerminalSpec": {
+      "properties": {
+        "await_output": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RemoteProcessValueSelector"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/RemoteProcessStatus"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "type": "object"
+    },
+    "RemoteProcessToolCallOutcome": {
+      "oneOf": [
+        {
+          "properties": {
+            "payload": true,
+            "status": {
+              "const": "success",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "payload"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "payload": {
+              "$ref": "#/$defs/RemoteProcessToolFailure"
+            },
+            "status": {
+              "const": "failure",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "payload"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "payload": {
+              "$ref": "#/$defs/RemoteProcessToolCancellation"
+            },
+            "status": {
+              "const": "cancelled",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "payload"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteProcessToolCallOutput": {
+      "properties": {
+        "control": true,
+        "outcome": {
+          "$ref": "#/$defs/RemoteProcessToolCallOutcome"
+        },
+        "projection_value": true,
+        "view": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "type": "object"
+    },
+    "RemoteProcessToolCancellation": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CancelOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "raw": true,
+        "source": {
+          "$ref": "#/$defs/RemoteProcessToolFailureSource"
+        }
+      },
+      "required": [
+        "message",
+        "source"
+      ],
+      "type": "object"
+    },
+    "RemoteProcessToolFailure": {
+      "properties": {
+        "class": {
+          "$ref": "#/$defs/RemoteToolFailureClass"
+        },
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "raw": true,
+        "retry": {
+          "$ref": "#/$defs/RemoteProcessToolRetryStatus"
+        },
+        "source": {
+          "$ref": "#/$defs/RemoteProcessToolFailureSource"
+        }
+      },
+      "required": [
+        "class",
+        "code",
+        "message",
+        "source",
+        "retry"
+      ],
+      "type": "object"
+    },
+    "RemoteProcessToolFailureSource": {
+      "enum": [
+        "runtime",
+        "tool",
+        "plugin",
+        "policy",
+        "cancellation",
+        "unknown_legacy"
+      ],
+      "type": "string"
+    },
+    "RemoteProcessToolRetryStatus": {
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "never",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "after_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "safe",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "attempts": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "exhausted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "attempts"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "unknown_legacy",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteProcessValueSelector": {
+      "oneOf": [
+        {
+          "enum": [
+            "payload"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "pointer": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pointer"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "const": true
+          },
+          "required": [
+            "const"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "template": {
+              "properties": {
+                "fields": {
+                  "additionalProperties": {
+                    "$ref": "#/$defs/RemoteProcessValueSelector"
+                  },
+                  "default": {},
+                  "type": "object"
+                },
+                "template": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "template"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "template"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "present": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "present"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteProcessWaitKind": {
+      "oneOf": [
+        {
+          "properties": {
+            "event_type": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "signal",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "ordinal": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "event_type",
+            "key",
+            "ordinal"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteProcessWaitState": {
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/RemoteProcessWaitKind"
+        },
+        "since_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "since_ms"
+      ],
+      "type": "object"
+    },
+    "RemoteProcessWakeSpec": {
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/RemoteProcessValueSelector"
+        },
+        "when": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RemoteProcessValueSelector"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "RemoteProviderFileScope": {
+      "properties": {
+        "credential_scope": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "credential_scope"
+      ],
+      "type": "object"
+    },
+    "RemoteScopeGrant": {
+      "description": "How a recorded lifetime's scope was granted.",
+      "enum": [
+        "ancestor",
+        "host_session_lookup"
+      ],
+      "type": "string"
+    },
+    "RemoteScopeId": {
+      "description": "The wire form of a scope a process may live until: an opener or a session.",
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "opener",
+              "type": "string"
+            },
+            "scope": {
+              "$ref": "#/$defs/RemoteEffectOpener"
+            }
+          },
+          "required": [
+            "kind",
+            "scope"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "session",
+              "type": "string"
+            },
+            "scope": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "scope"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteSessionTurnOutcome": {
+      "description": "What a remote `SessionTurn` process answers when its child turn ends.",
+      "oneOf": [
+        {
+          "description": "The child's assembled turn.",
+          "properties": {
+            "kind": {
+              "const": "turn",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The child's final value, checked against `schema` when one is given.",
+          "properties": {
+            "kind": {
+              "const": "final_value",
+              "type": "string"
+            },
+            "schema": true
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteToolFailureClass": {
+      "enum": [
+        "invalid_request",
+        "io",
+        "unavailable",
+        "permission_denied",
+        "timeout",
+        "execution",
+        "external",
+        "resource_limit",
+        "internal"
+      ],
+      "type": "string"
+    },
+    "RemoteTurnInput": {
+      "properties": {
+        "items": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RemoteInputItem"
+          },
+          "type": "array"
+        },
+        "trace_turn_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ToolView": {
+      "additionalProperties": false,
+      "properties": {
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/ToolViewBlock"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "blocks"
+      ],
+      "type": "object"
+    },
+    "ToolViewBlock": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "meta": {
+              "$ref": "#/$defs/ToolViewMeta"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "text",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "meta": {
+              "$ref": "#/$defs/ToolViewMeta"
+            },
+            "source": {
+              "$ref": "#/$defs/AttachmentSource"
+            },
+            "type": {
+              "const": "attachment",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "source"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "meta": {
+              "$ref": "#/$defs/ToolViewMeta"
+            },
+            "mime_type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "resource_link",
+              "type": "string"
+            },
+            "uri": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "uri",
+            "name"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ToolViewMeta": {
+      "additionalProperties": false,
+      "properties": {
+        "last_modified": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "priority": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$id": "https://lash.dev/schemas/remote-process-record/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "ancestry": {
+      "description": "The recorded ancestry, nearest first; empty for a root start.",
+      "items": {
+        "$ref": "#/$defs/RemoteScopeId"
+      },
+      "type": "array"
+    },
+    "cancel_request": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CancelRequest"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "created_at_ms": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "engine_config": {
+      "description": "The engine behaviour recorded at process creation."
+    },
+    "env_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "event_types": {
+      "items": {
+        "$ref": "#/$defs/RemoteProcessEventType"
+      },
+      "type": "array"
+    },
+    "external_ref": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RemoteProcessExternalRef"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "first_started": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RemoteProcessStarted"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "identity": {
+      "$ref": "#/$defs/RemoteProcessIdentity"
+    },
+    "input": {
+      "$ref": "#/$defs/RemoteProcessInput"
+    },
+    "last_event_sequence": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "lifetime": {
+      "$ref": "#/$defs/RemoteLifetimeDecision",
+      "description": "The recorded lifetime decision: what ends the process."
+    },
+    "outcome": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RemoteProcessAwaitOutput"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "park": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RemoteProcessPark"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The park the process is in, while its body refuses to replay its\njournal (FIG-3659 NOW-B)."
+    },
+    "process_id": {
+      "type": "string"
+    },
+    "provenance": {
+      "$ref": "#/$defs/RemoteProcessProvenance"
+    },
+    "session_capability": {
+      "description": "The session capability the process's descendants inherit.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "start_key_digest": {
+      "description": "The digest of the key the process was started under, while it is\nretained. It is not a caller's key: a caller that retries sends its\nown raw `start_key` again, never this digest.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "$ref": "#/$defs/RemoteProcessStatus",
+      "default": "running"
+    },
+    "updated_at_ms": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "wait": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RemoteProcessWaitState"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "process_id",
+    "last_event_sequence",
+    "input",
+    "lifetime",
+    "identity",
+    "provenance",
+    "created_at_ms",
+    "updated_at_ms"
+  ],
+  "title": "RemoteProcessRecord",
+  "type": "object",
+  "x-lash-schema-version": 1,
+  "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
+}

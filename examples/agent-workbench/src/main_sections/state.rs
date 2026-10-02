@@ -592,7 +592,7 @@ impl ProductEventHistory {
 /// version_guard(
 ///     roots(PersistedProductEventLog),
 /// )
-pub(crate) const PRODUCT_EVENT_LOG_FORMAT_VERSION: u32 = 2;
+pub(crate) const PRODUCT_EVENT_LOG_FORMAT_VERSION: u32 = 1;
 
 #[derive(Serialize)]
 pub(crate) struct PersistedProductEventLog<'a> {

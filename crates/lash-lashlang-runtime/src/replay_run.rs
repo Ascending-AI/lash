@@ -49,7 +49,7 @@ use lash_sansio::sync::MutexExt;
 ///     roots(path = "crates/lash-lashlang-runtime/src/host_identity.rs", LashlangHostIdentities),
 ///     roots(path = "crates/lash-core-execution/src/runtime/causal.rs", CommandReplayKey),
 /// )
-pub const LASHLANG_REPLAY_KEY_GRAMMAR_VERSION: u32 = 2;
+pub const LASHLANG_REPLAY_KEY_GRAMMAR_VERSION: u32 = 1;
 
 /// The journal grammar a code cell writes (FIG-3587): the replay-key grammar
 /// of [`LASHLANG_REPLAY_KEY_GRAMMAR_VERSION`] plus the cell's ambient binding
@@ -78,7 +78,7 @@ pub const LASHLANG_REPLAY_KEY_GRAMMAR_VERSION: u32 = 2;
 ///     ),
 ///     items(path = "crates/lash-core-execution/src/session.rs", tool_dispatch_surface),
 /// )
-pub const LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION: u32 = 6;
+pub const LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION: u32 = 1;
 
 /// The executable generation code cells run under (FIG-3571): what a turn's
 /// admission records, and what a redrive must match before its first effect.
@@ -114,7 +114,7 @@ pub fn lashlang_cell_generation() -> lash_core::ExecutableGeneration {
 // The instruction accounting is part of the cell journal grammar: moving it
 // moves this grammar with it.
 const _: () = assert!(
-    lashlang::INSTRUCTION_ACCOUNTING_VERSION == 3,
+    lashlang::INSTRUCTION_ACCOUNTING_VERSION == 1,
     "an instruction-accounting change is a cell journal grammar change: bump \
      LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION and update this pin"
 );

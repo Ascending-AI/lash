@@ -13,7 +13,6 @@ use lash_core_store::store::fleet_finalize::{
 };
 use lash_core_store::store::{
     FLEET_WRITABLE_RANGE, FleetFormatState, StorePreflight, StoreReleaseState, StoreSchemaOutcome,
-    StoreSchemaVerdict,
 };
 use lash_core_store::store::{ObligationKey, ObligationKind, StalledObligation, StoreError};
 use lash_postgres_store::{
@@ -787,19 +786,11 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
             probe.close().await;
             let status = status?;
             let outcome = status.outcome();
-            let databases = status.databases.iter().map(|database| {
-                let (verdict, found, refusal, reason) = match &database.verdict {
-                    StoreSchemaVerdict::Matches => ("matches", None, None, None),
-                    StoreSchemaVerdict::Expanded { found } => ("expanded", Some(*found), None, None),
-                    StoreSchemaVerdict::Refused { refusal } => ("refused", None, Some(refusal), None),
-                    StoreSchemaVerdict::Migratable { found } => ("migratable", Some(*found), None, None),
-                    StoreSchemaVerdict::Mismatch { found } => ("mismatch", Some(*found), None, None),
-                    StoreSchemaVerdict::Absent => ("absent", None, None, None),
-                    StoreSchemaVerdict::Unreadable { reason } => ("unreadable", None, None, Some(reason.as_str())),
-                    _ => ("unknown", None, None, None),
-                };
-                json!({"name":database.name,"location":database.location,"expected":database.expected,"min_reader":database.min_reader,"verdict":verdict,"found":found,"refusal":refusal,"reason":reason})
-            }).collect::<Vec<_>>();
+            let databases = status
+                .databases
+                .iter()
+                .map(lash::preflight::SchemaDatabaseReport::from)
+                .collect::<Vec<_>>();
             let release = match &status.release {
                 StoreReleaseState::Stamped(stamp) => {
                     json!({"state":"stamped","release":stamp.release,"written_at_ms":stamp.written_at_epoch_ms})

@@ -570,12 +570,12 @@ impl WakeDeliveryState {
 ///     roots(ProcessWakeDelivery),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
-pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 4;
+pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
 /// with version 4's shape; its registered lift reads what N wrote.
 #[cfg(feature = "synthetic-next")]
-pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 5;
+pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProcessWakeDelivery {

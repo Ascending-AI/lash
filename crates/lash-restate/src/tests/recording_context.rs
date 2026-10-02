@@ -1062,8 +1062,27 @@ pub(super) struct ReplayableRecordingContext {
     pub(super) defer_process_workflows: AtomicBool,
 }
 
+/// The generation that wrote a checked-in journal: a journal is a golden of
+/// the build whose generation it records, and of no other.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub(super) struct ToolIntentJournalCorpusGeneration {
+    effect_journal_version: u32,
+    build_generation: lash_core::engine::BuildGeneration,
+}
+
+impl ToolIntentJournalCorpusGeneration {
+    /// The generation the corpus endpoint of this build writes.
+    fn of_this_build() -> Self {
+        Self {
+            effect_journal_version: crate::EFFECT_JOURNAL_VERSION,
+            build_generation: test_build_generation(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub(super) struct ToolIntentJournalCorpusFixture {
+    generation: ToolIntentJournalCorpusGeneration,
     crash_point: String,
     captured_from_endpoint_interruption: bool,
     invocation_body_bytes: Vec<u8>,
@@ -1303,12 +1322,19 @@ pub(super) async fn replay_tool_intent_corpus_fixture(
 pub(super) async fn checked_in_tool_intent_journals_replay_through_endpoint_with_literal_outcomes()
 {
     for checked_in in [
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v20-mid-drain.json").as_slice(),
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v20-mid-intent.json").as_slice(),
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v20-full-drain.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/mid-drain.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/mid-intent.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/full-drain.json").as_slice(),
     ] {
         let fixture: ToolIntentJournalCorpusFixture =
             serde_json::from_slice(checked_in).expect("decode checked-in endpoint corpus fixture");
+        assert_eq!(
+            fixture.generation,
+            ToolIntentJournalCorpusGeneration::of_this_build(),
+            "{} was written by another generation; recapture the corpus with \
+             capture_tool_intent_journal_corpus_from_real_endpoint_interruptions",
+            fixture.crash_point
+        );
         assert!(
             fixture.captured_from_endpoint_interruption,
             "{} must name its real endpoint-interruption provenance",
@@ -1330,380 +1356,6 @@ pub(super) async fn checked_in_tool_intent_journals_replay_through_endpoint_with
             signal_events, fixture.expected_signal_events,
             "{} literal process outcome count",
             fixture.crash_point
-        );
-    }
-}
-
-/// Journals another effect-journal generation wrote (ADR 0105 §12) replay
-/// their shape unchanged, so they reach the generation gate: the tool
-/// attempt's journal entry carries no generation (it predates the stamp) or a
-/// retired one, and is refused, typed, before the attempt's outcome is acted
-/// on. Nothing is dispatched, so the recorded signal effect never reaches a
-/// fresh registry.
-#[tokio::test]
-pub(super) async fn old_generation_tool_calls_are_never_reminted() {
-    const PRE_STAMP: &str = "carries no effect-journal generation";
-    const GENERATION_ONE: &str = "carries effect-journal generation 1;";
-    const GENERATION_TWO: &str = "carries effect-journal generation 2;";
-    const GENERATION_THREE: &str = "carries effect-journal generation 3;";
-    const GENERATION_FOUR: &str = "carries effect-journal generation 4;";
-    const GENERATION_FIVE: &str = "carries effect-journal generation 5;";
-    const GENERATION_SIX: &str = "carries effect-journal generation 6;";
-    const GENERATION_SEVEN: &str = "carries effect-journal generation 7;";
-    const GENERATION_EIGHT: &str = "carries effect-journal generation 8;";
-    const GENERATION_NINE: &str = "carries effect-journal generation 9;";
-    const GENERATION_TEN: &str = "carries effect-journal generation 10;";
-    const GENERATION_ELEVEN: &str = "carries effect-journal generation 11;";
-    const GENERATION_TWELVE: &str = "carries effect-journal generation 12;";
-    const GENERATION_THIRTEEN: &str = "carries effect-journal generation 13;";
-    const GENERATION_FOURTEEN: &str = "carries effect-journal generation 14;";
-    for (name, checked_in, refusal) in [
-        (
-            "v1-full-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v1-full-drain.json")
-                .as_slice(),
-            PRE_STAMP,
-        ),
-        (
-            "v2-mid-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v2-mid-drain.json")
-                .as_slice(),
-            PRE_STAMP,
-        ),
-        (
-            "v2-mid-intent",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v2-mid-intent.json")
-                .as_slice(),
-            PRE_STAMP,
-        ),
-        (
-            "v2-full-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v2-full-drain.json")
-                .as_slice(),
-            PRE_STAMP,
-        ),
-        (
-            "v3-mid-intent",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v3-mid-intent.json")
-                .as_slice(),
-            PRE_STAMP,
-        ),
-        (
-            "v3-full-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v3-full-drain.json")
-                .as_slice(),
-            PRE_STAMP,
-        ),
-        (
-            "v5-mid-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v5-mid-drain.json")
-                .as_slice(),
-            PRE_STAMP,
-        ),
-        (
-            "v5-mid-intent",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v5-mid-intent.json")
-                .as_slice(),
-            PRE_STAMP,
-        ),
-        (
-            "v5-full-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v5-full-drain.json")
-                .as_slice(),
-            PRE_STAMP,
-        ),
-        (
-            "v6-mid-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v6-mid-drain.json")
-                .as_slice(),
-            GENERATION_ONE,
-        ),
-        (
-            "v6-mid-intent",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v6-mid-intent.json")
-                .as_slice(),
-            GENERATION_ONE,
-        ),
-        (
-            "v6-full-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v6-full-drain.json")
-                .as_slice(),
-            GENERATION_ONE,
-        ),
-        (
-            "v7-mid-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v7-mid-drain.json")
-                .as_slice(),
-            GENERATION_TWO,
-        ),
-        (
-            "v7-mid-intent",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v7-mid-intent.json")
-                .as_slice(),
-            GENERATION_TWO,
-        ),
-        (
-            "v7-full-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v7-full-drain.json")
-                .as_slice(),
-            GENERATION_TWO,
-        ),
-        (
-            "v8-mid-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v8-mid-drain.json")
-                .as_slice(),
-            GENERATION_THREE,
-        ),
-        (
-            "v8-mid-intent",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v8-mid-intent.json")
-                .as_slice(),
-            GENERATION_THREE,
-        ),
-        (
-            "v8-full-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v8-full-drain.json")
-                .as_slice(),
-            GENERATION_THREE,
-        ),
-        (
-            "v9-mid-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v9-mid-drain.json")
-                .as_slice(),
-            GENERATION_FOUR,
-        ),
-        (
-            "v9-mid-intent",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v9-mid-intent.json")
-                .as_slice(),
-            GENERATION_FOUR,
-        ),
-        (
-            "v9-full-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v9-full-drain.json")
-                .as_slice(),
-            GENERATION_FOUR,
-        ),
-        (
-            "v10-mid-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v10-mid-drain.json")
-                .as_slice(),
-            GENERATION_FIVE,
-        ),
-        (
-            "v10-mid-intent",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v10-mid-intent.json")
-                .as_slice(),
-            GENERATION_FIVE,
-        ),
-        (
-            "v10-full-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v10-full-drain.json")
-                .as_slice(),
-            GENERATION_FIVE,
-        ),
-        (
-            "v11-mid-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v11-mid-drain.json")
-                .as_slice(),
-            GENERATION_SIX,
-        ),
-        (
-            "v11-mid-intent",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v11-mid-intent.json")
-                .as_slice(),
-            GENERATION_SIX,
-        ),
-        (
-            "v11-full-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v11-full-drain.json")
-                .as_slice(),
-            GENERATION_SIX,
-        ),
-        (
-            "v12-mid-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v12-mid-drain.json")
-                .as_slice(),
-            GENERATION_SEVEN,
-        ),
-        (
-            "v12-mid-intent",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v12-mid-intent.json")
-                .as_slice(),
-            GENERATION_SEVEN,
-        ),
-        (
-            "v12-full-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v12-full-drain.json")
-                .as_slice(),
-            GENERATION_SEVEN,
-        ),
-        (
-            "v13-mid-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v13-mid-drain.json")
-                .as_slice(),
-            GENERATION_EIGHT,
-        ),
-        (
-            "v13-mid-intent",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v13-mid-intent.json")
-                .as_slice(),
-            GENERATION_EIGHT,
-        ),
-        (
-            "v13-full-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v13-full-drain.json")
-                .as_slice(),
-            GENERATION_EIGHT,
-        ),
-        (
-            "v14-mid-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v14-mid-drain.json")
-                .as_slice(),
-            GENERATION_NINE,
-        ),
-        (
-            "v14-mid-intent",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v14-mid-intent.json")
-                .as_slice(),
-            GENERATION_NINE,
-        ),
-        (
-            "v14-full-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v14-full-drain.json")
-                .as_slice(),
-            GENERATION_NINE,
-        ),
-        (
-            "v15-mid-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v15-mid-drain.json")
-                .as_slice(),
-            GENERATION_TEN,
-        ),
-        (
-            "v15-mid-intent",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v15-mid-intent.json")
-                .as_slice(),
-            GENERATION_TEN,
-        ),
-        (
-            "v15-full-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v15-full-drain.json")
-                .as_slice(),
-            GENERATION_TEN,
-        ),
-        (
-            "v16-mid-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v16-mid-drain.json")
-                .as_slice(),
-            GENERATION_ELEVEN,
-        ),
-        (
-            "v16-mid-intent",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v16-mid-intent.json")
-                .as_slice(),
-            GENERATION_ELEVEN,
-        ),
-        (
-            "v16-full-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v16-full-drain.json")
-                .as_slice(),
-            GENERATION_ELEVEN,
-        ),
-        (
-            "v17-mid-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v17-mid-drain.json")
-                .as_slice(),
-            GENERATION_TWELVE,
-        ),
-        (
-            "v17-mid-intent",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v17-mid-intent.json")
-                .as_slice(),
-            GENERATION_TWELVE,
-        ),
-        (
-            "v17-full-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v17-full-drain.json")
-                .as_slice(),
-            GENERATION_TWELVE,
-        ),
-        (
-            "v18-mid-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v18-mid-drain.json")
-                .as_slice(),
-            GENERATION_THIRTEEN,
-        ),
-        (
-            "v18-mid-intent",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v18-mid-intent.json")
-                .as_slice(),
-            GENERATION_THIRTEEN,
-        ),
-        (
-            "v18-full-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v18-full-drain.json")
-                .as_slice(),
-            GENERATION_THIRTEEN,
-        ),
-        (
-            "v19-mid-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v19-mid-drain.json")
-                .as_slice(),
-            GENERATION_FOURTEEN,
-        ),
-        (
-            "v19-mid-intent",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v19-mid-intent.json")
-                .as_slice(),
-            GENERATION_FOURTEEN,
-        ),
-        (
-            "v19-full-drain",
-            include_bytes!("../../tests/fixtures/tool_intent_journals/v19-full-drain.json")
-                .as_slice(),
-            GENERATION_FOURTEEN,
-        ),
-    ] {
-        let fixture: ToolIntentJournalCorpusFixture = serde_json::from_slice(checked_in)
-            .expect("decode the checked-in endpoint corpus fixture");
-        let (endpoint, registry) = tool_intent_corpus_endpoint().await;
-        let response = invoke_endpoint_body(
-            &endpoint,
-            "ToolIntentCorpusReplay",
-            "run",
-            bytes::Bytes::from(fixture.invocation_body_bytes),
-        )
-        .await
-        .expect("feed the retired journal through the current endpoint");
-        let error = restate_output_failure_message(&response)
-            .or_else(|| restate_error_message(&response))
-            .unwrap_or_else(|| {
-                panic!(
-                    "{name} replay must refuse; frames={:?}; output={:?}",
-                    restate_command_frame_types(&response),
-                    restate_output_json::<serde_json::Value>(&response)
-                )
-            });
-        assert!(
-            error.contains("effect_replay_divergence") && error.contains(refusal),
-            "{name} must refuse at the effect-journal generation gate: {error}"
-        );
-        assert_eq!(
-            restate_command_frame_types(&response),
-            Vec::<u16>::new(),
-            "{name}: the refusal journals nothing further"
-        );
-        assert_eq!(
-            registry
-                .full_event_window(&tool_intent_corpus_target(), 0)
-                .await
-                .expect("read the refusal witness target")
-                .into_iter()
-                .filter(|event| event.event_type == "signal.resume")
-                .count(),
-            0,
-            "{name}: the refusal happens before any effect is dispatched"
         );
     }
 }
@@ -1764,19 +1416,20 @@ pub(super) async fn capture_tool_intent_journal_corpus_from_real_endpoint_interr
 
     let captures = [
         (
-            "v20-mid-drain",
+            "mid-drain",
             "after_tool_attempt_before_signal_command",
             mid_drain,
         ),
         (
-            "v20-mid-intent",
+            "mid-intent",
             "after_signal_command_commit_before_reply",
             mid_intent,
         ),
-        ("v20-full-drain", "full_drain", full),
+        ("full-drain", "full_drain", full),
     ];
     for (name, crash_point, invocation_body) in captures {
         let mut fixture = ToolIntentJournalCorpusFixture {
+            generation: ToolIntentJournalCorpusGeneration::of_this_build(),
             crash_point: crash_point.to_string(),
             captured_from_endpoint_interruption: true,
             invocation_body_bytes: invocation_body.to_vec(),
@@ -2058,7 +1711,7 @@ impl ReplayableRecordingContext {
 /// engine's cancellation, ADR 0107, or a command's
 /// recorded store work, FIG-3827), or the frontier marker a process start or
 /// a sleep journals before it acts (FIG-3779).
-fn is_process_command_journal_fact(effect_name: &str) -> bool {
+pub(super) fn is_process_command_journal_fact(effect_name: &str) -> bool {
     [
         ".process-cancel-admission:v1",
         ".process-await-observation:v1",

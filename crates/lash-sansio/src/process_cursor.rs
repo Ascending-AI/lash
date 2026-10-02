@@ -1,7 +1,7 @@
 //! The one process cursor (FIG-3571 §E): a single token that pages a process's
 //! durable event history and resumes its live observation.
 //!
-//! `lashpc3:<epoch>:<process-reference>:<position>:<sequence>`
+//! `lashpc1:<epoch>:<process-reference>:<position>:<sequence>`
 //!
 //! - `epoch` names the live publisher route the cursor was minted under.
 //! - `process-reference` is ONE opaque component naming the process: its
@@ -9,10 +9,11 @@
 //! - `position` is the live publisher position the holder has seen.
 //! - `sequence` is the durable event high-water mark the holder has seen.
 //!
-//! The version stamp is explicit: a cursor from a retired version is refused
-//! with a typed error that names the version it found, so under the current,
-//! temporary clean-cutover policy an old cursor is never reinterpreted, and a
-//! later migration could still identify it.
+//! The version stamp is explicit: a cursor outside this build's read range is
+//! refused with a typed error that names the version it found, so it is never
+//! reinterpreted. The 1.0 release baseline restarted the stamp at 1 and reads
+//! no pre-1.0 cursor: one that carries a pre-1.0 stamp is unsupported, or, where
+//! the stamp is this build's own number, malformed by its retired shape.
 
 use std::fmt;
 
@@ -24,17 +25,17 @@ use crate::{ProcessId, VersionRange};
 ///
 /// version_guard(
 ///     roots(ProcessCursor, ProcessCursorReference),
-///     items(parse, fmt, PROCESS_CURSOR_UNROUTED_EPOCH, RETIRED_PROCESS_CURSOR_VERSIONS),
+///     items(parse, fmt, PROCESS_CURSOR_UNROUTED_EPOCH),
 ///     file(path = "crates/lash-sansio/src/identity.rs", cover("string_identity!", ProcessId)),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
-pub const PROCESS_CURSOR_VERSION: u32 = 3;
+pub const PROCESS_CURSOR_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the cursor to 4. Its shape is
 /// 3's; while `F` is N's epoch the fleet pins minting to 3, so a cursor N+1
 /// hands a host before finalize is one N parses after a rollback.
 #[cfg(feature = "synthetic-next")]
-pub const PROCESS_CURSOR_VERSION: u32 = 4;
+pub const PROCESS_CURSOR_VERSION: u32 = 2;
 
 /// Cursor versions whose identity and position shape this build understands.
 /// A compatibility release widens this range while its fleet pins writers to
@@ -46,12 +47,6 @@ pub const PROCESS_CURSOR_READ_RANGE: VersionRange = VersionRange::exactly(PROCES
 #[cfg(feature = "synthetic-next")]
 pub const PROCESS_CURSOR_READ_RANGE: VersionRange =
     VersionRange::between(PROCESS_CURSOR_VERSION - 1, PROCESS_CURSOR_VERSION);
-
-/// Cursor version stamps this build recognises only to refuse them.
-///
-/// `lashpc2` named a process by its reusable name and incarnation; its
-/// component cannot name a minted process, so it is refused, never read.
-const RETIRED_PROCESS_CURSOR_VERSIONS: &[&str] = &["lashpc1", "lashpc2"];
 
 /// The epoch a cursor carries when no live publisher route existed for its
 /// process when it was minted. It never equals a publisher epoch, so a
@@ -95,9 +90,6 @@ impl ProcessCursorReference {
 /// Why a string is not a current process cursor.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProcessCursorError {
-    /// The cursor carries a retired version stamp. It is refused, never
-    /// reinterpreted; `found` names the version so old state stays identifiable.
-    RetiredVersion { found: String },
     /// The cursor carries a version outside this build's read range. List
     /// again from a fresh cursor on a build that knows that version.
     UnsupportedVersion { found: String },
@@ -108,10 +100,6 @@ pub enum ProcessCursorError {
 impl fmt::Display for ProcessCursorError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::RetiredVersion { found } => write!(
-                formatter,
-                "process cursor version `{found}` is retired; this build reads only `lashpc{PROCESS_CURSOR_VERSION}` cursors"
-            ),
             Self::UnsupportedVersion { found } => write!(
                 formatter,
                 "process cursor version `{found}` is unsupported; list again from a fresh cursor"
@@ -170,16 +158,11 @@ impl ProcessCursor {
         })
     }
 
-    /// Parse a wire cursor, refusing retired versions by name.
+    /// Parse a wire cursor, refusing a version outside the read range by name.
     pub fn parse(token: &str) -> Result<Self, ProcessCursorError> {
         let Some((version, rest)) = token.split_once(':') else {
             return Err(ProcessCursorError::Malformed);
         };
-        if RETIRED_PROCESS_CURSOR_VERSIONS.contains(&version) {
-            return Err(ProcessCursorError::RetiredVersion {
-                found: version.to_string(),
-            });
-        }
         let number = version
             .strip_prefix("lashpc")
             .and_then(|number| number.parse::<u32>().ok())
@@ -344,26 +327,32 @@ mod tests {
         );
     }
 
+    /// Pre-1.0 cursors are never read. One whose stamp is past the read
+    /// range is refused naming it; one whose stamp is a number this build
+    /// reads is refused by its retired shape.
     #[test]
-    fn a_retired_cursor_is_refused_naming_its_version() {
-        for (retired, wire) in [
-            ("lashpc1", "lashpc1:epoch:1:1:process:wire"),
-            // A `lashpc2` cursor named a reusable name and its incarnation.
-            ("lashpc2", "lashpc2:epoch:r3.702d37:7:11"),
-        ] {
-            assert_eq!(
-                ProcessCursor::parse(wire),
-                Err(ProcessCursorError::RetiredVersion {
-                    found: retired.to_string()
-                })
-            );
-            assert!(
-                serde_json::from_str::<ProcessCursor>(&format!("\"{wire}\""))
-                    .expect_err("retired")
-                    .to_string()
-                    .contains(retired)
-            );
-        }
+    fn a_pre_release_cursor_is_refused() {
+        // Pre-1.0 `lashpc1` carried six components.
+        assert_eq!(
+            ProcessCursor::parse("lashpc1:epoch:1:1:process:wire"),
+            Err(ProcessCursorError::Malformed)
+        );
+        // Pre-1.0 `lashpc2` named a reusable name and its incarnation.
+        assert!(ProcessCursor::parse("lashpc2:epoch:r3.702d37:7:11").is_err());
+        let past = format!("lashpc{}", PROCESS_CURSOR_READ_RANGE.max() + 2);
+        let wire = format!("{past}:epoch-a:p_00000000000070008000000000000003:7:11");
+        assert_eq!(
+            ProcessCursor::parse(&wire),
+            Err(ProcessCursorError::UnsupportedVersion {
+                found: past.clone()
+            })
+        );
+        assert!(
+            serde_json::from_str::<ProcessCursor>(&format!("\"{wire}\""))
+                .expect_err("unsupported")
+                .to_string()
+                .contains(&past)
+        );
     }
 
     #[test]
@@ -378,11 +367,11 @@ mod tests {
             format!("{good}:9"),
             good.replace(":1:2", ":-1:2"),
             good.replace(":1:2", ":+1:2"),
-            "lashpc3::p_00000000000070008000000000000003:1:2".to_string(),
-            "lashpc3:e:r1.61:1:2".to_string(),
-            "lashpc3:e:p-7:1:2".to_string(),
-            "lashpc3:e:p_0000000000000000000000000000003:1:2".to_string(),
-            "lashpc3:e:process:1:2".to_string(),
+            format!("lashpc{PROCESS_CURSOR_VERSION}::p_00000000000070008000000000000003:1:2"),
+            format!("lashpc{PROCESS_CURSOR_VERSION}:e:r1.61:1:2"),
+            format!("lashpc{PROCESS_CURSOR_VERSION}:e:p-7:1:2"),
+            format!("lashpc{PROCESS_CURSOR_VERSION}:e:p_0000000000000000000000000000003:1:2"),
+            format!("lashpc{PROCESS_CURSOR_VERSION}:e:process:1:2"),
         ] {
             assert_eq!(
                 ProcessCursor::parse(&bad),

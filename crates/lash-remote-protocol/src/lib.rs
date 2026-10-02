@@ -319,7 +319,7 @@ pub use usage_activity::*;
 ///         cover(RemoteLlmRequest, RemoteProcessInput, RemoteTurnEvent, RemoteTurnReport),
 ///     ),
 /// )
-pub const REMOTE_PROTOCOL_VERSION: u32 = 100;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 1;
 
 /// One versioned remote-protocol message.
 ///

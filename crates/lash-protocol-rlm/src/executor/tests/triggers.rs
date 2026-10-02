@@ -808,7 +808,7 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
         // FIG-3571 cutover moved it once more with the semantic hash version
         // and the lifted-process name domain.
         let expected_key =
-            "derived/v3/9579ddf94026db8f3517f8e16148c3a089d710c7efbbeffb4f74744a5b90f1dd";
+            "derived/v1/2fff0dac8a7627100d1693cc87f7348bcbea49af7c80f3031043b796b954d7ff";
         // The cell journals its projections before its tool bindings and
         // deferred resolution. Registration follows once the leaf tool's
         // declared intent is realized.

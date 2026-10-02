@@ -79,12 +79,12 @@ fn lift_process_event_vocabulary(value: &mut serde_json::Value) -> Result<(), cr
 
 /// `SCOPE_STORAGE_PAYLOAD_VERSION` N+1.
 fn lift_scope_storage_payload(value: &mut serde_json::Value) -> Result<(), crate::StoreError> {
-    restamp(value, "scope storage payload", "version", 3)
+    restamp(value, "scope storage payload", "version", 2)
 }
 
 /// `NATIVE_DRIVER_STATE_VERSION` N+1.
 fn lift_native_driver_state(value: &mut serde_json::Value) -> Result<(), crate::StoreError> {
-    restamp(value, "native driver state", "schema_version", 3)
+    restamp(value, "native driver state", "schema_version", 2)
 }
 
 /// A Restate object family's stamped body, or a `LashTurn` outcome's: N+1
@@ -159,14 +159,14 @@ pub(super) const RECORD_UPCASTERS: &[RecordUpcaster] = &[
     ),
     tree(
         "SCOPE_STORAGE_PAYLOAD_VERSION",
-        2,
+        1,
         lift_scope_storage_payload,
     ),
-    decoder("LASHLANG_SNAPSHOT_VERSION", 14),
-    decoder("HEAP_SIZE_SCHEDULE_VERSION", 3),
-    decoder("RLM_SNAPSHOT_VERSION", 26),
+    decoder("LASHLANG_SNAPSHOT_VERSION", 1),
+    decoder("HEAP_SIZE_SCHEDULE_VERSION", 1),
+    decoder("RLM_SNAPSHOT_VERSION", 1),
     decoder("NATIVE_TRANSPORT_VERSION", 1),
-    tree("NATIVE_DRIVER_STATE_VERSION", 2, lift_native_driver_state),
+    tree("NATIVE_DRIVER_STATE_VERSION", 1, lift_native_driver_state),
     decoder("SQLITE_BLOB_ENVELOPE_VERSION", 1),
     tree("EFFECT_GROUP_STATE_FORMAT_VERSION", 1, lift_object_body),
     tree("EFFECT_GROUP_PAYLOAD_FORMAT_VERSION", 1, lift_object_body),
@@ -218,13 +218,13 @@ pub(super) const WRITER_PINS: &[WriterPin] = &[
         super::OBLIGATION_LEDGER_VOCABULARY_VERSION - 1,
     ),
     pin("PROCESS_EVENT_VOCABULARY_VERSION", 1),
-    pin("SCOPE_STORAGE_PAYLOAD_VERSION", 2),
-    pin("LASHLANG_SNAPSHOT_VERSION", 14),
-    pin("HEAP_SIZE_SCHEDULE_VERSION", 3),
-    pin("WORKFLOW_GRAPH_SCHEMA_VERSION", 21),
-    pin("RLM_SNAPSHOT_VERSION", 26),
+    pin("SCOPE_STORAGE_PAYLOAD_VERSION", 1),
+    pin("LASHLANG_SNAPSHOT_VERSION", 1),
+    pin("HEAP_SIZE_SCHEDULE_VERSION", 1),
+    pin("WORKFLOW_GRAPH_SCHEMA_VERSION", 1),
+    pin("RLM_SNAPSHOT_VERSION", 1),
     pin("NATIVE_TRANSPORT_VERSION", 1),
-    pin("NATIVE_DRIVER_STATE_VERSION", 2),
+    pin("NATIVE_DRIVER_STATE_VERSION", 1),
     pin("SQLITE_BLOB_ENVELOPE_VERSION", 1),
     pin("EFFECT_GROUP_STATE_FORMAT_VERSION", 1),
     pin("EFFECT_GROUP_PAYLOAD_FORMAT_VERSION", 1),

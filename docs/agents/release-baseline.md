@@ -1,18 +1,19 @@
-# Release baseline preparation
+# Release baseline
 
-`scripts/versioned-surfaces.toml` owns the surface list. The source inventory
-resolves each owning constant for the default and synthetic-next builds:
+`scripts/versioned-surfaces.toml` owns the surface list. The release baseline
+is one rule over it, `baseline_of` in `scripts/release_baseline.py`: every
+counter is 1, and a string identity keeps its prefix and ends in `v1`. There
+is no baseline table to keep in step with the registry.
 
 ```sh
 kiln gate lash my-fork -- python3 scripts/release_baseline.py inventory
-kiln gate lash my-fork -- python3 scripts/release_baseline.py check \
-  --baseline scripts/release-baseline.toml
+kiln gate lash my-fork -- python3 scripts/release_baseline.py check
 ```
 
-The draft table declares the cut's values. Every counter starts at 1. String
-identities retain their prefix and use version 1. Until FIG-4485 executes, the
-check deliberately fails on production values. Missing rows, extra rows,
-unresolved constants and unsupported source expressions also fail.
+`inventory` resolves each owning constant for the default and synthetic-next
+builds. `check` fails on any constant off its baseline, on an unresolved
+constant or unsupported source expression, and on a SQLite or PostgreSQL stamp
+that differs from the version its compat descriptor writes.
 
 Compare the source inventory with a compiled operator's durable-format table
 and version response without a database connection:
@@ -25,28 +26,47 @@ kiln gate lash my-fork -- python3 scripts/release_baseline.py inventory \
   --build-report .buck2/release-probe/root/crates/lashctl/lashctl__unit_test/test.log
 ```
 
-At the cut, first inspect `release_reset.py --dry-run`. Then run `--apply`
-through a private PostgreSQL gate. It resets constants, coupled version pins and admission floors, empties
-production catalogs, updates schema references, and runs the schema,
-PostgreSQL shape, durable-store and replay-corpus generators. Historical
-predecessor captures remain immutable. FIG-4495 owns tagged release capture.
-`--source-only` is for a disposable scratch proof and skips generation.
+## The reset
 
-The ignored PostgreSQL catalog and fresh-ledger laws name FIG-4493. Run them
-explicitly with `--ignored --exact` during rehearsal. The cut removes their
-ignore attributes. SQLite's production-empty and synthetic-adjacent law runs
-in both tiers today.
+`release_reset.py` moves a tree to the baseline. Inspect `--dry-run`, then run
+`--apply` through a private PostgreSQL gate:
 
-The Python release law is cut-gated under FIG-4485. Rehearse it with
-`LASH_RELEASE_CUT=1 python3 scripts/test_release_baseline.py
-ReleaseBaselineTests.test_release_values_match_declared_baseline` through
-`kiln gate`. At the cut, remove that law's skip gate and update the preparation
-gate's selection. The tooling laws run against both the pre-cut and reset trees.
+```sh
+kiln gate lash my-fork -- scripts/ci/with-service.sh pg16 -- \
+  python3 scripts/release_reset.py --dry-run
+kiln gate lash my-fork -- scripts/ci/with-service.sh pg16 -- \
+  python3 scripts/release_reset.py --apply
+```
 
-`test_sqlite_stamps_equal_their_catalog_numbers` is cut-gated the same way.
-After the reset each SQLite schema stamp must equal the version its
-database's compat descriptor writes, in the default and synthetic-next
-builds, and every catalog step must lie inside that stamp's range: the
-version-bump gate reads a stamp's catalog steps in the stamp's own numbers.
-`release_baseline.py check` and `release_reset.py --apply` enforce it, and the
-scratch reset law proves it on the reset tree with two red mutants.
+It resets constants, coupled version pins and admission floors, empties the
+production migration catalogs, rewrites the `schema.sql` header, renames the
+versioned schema files, and runs the generators: the host schemas, the
+PostgreSQL shape and teardown artifacts, the durable-read stores, the replay
+corpus, the tool-intent journal corpus and the parked-segment golden. It ends
+with `kiln sync`. `--source-only` is for a disposable scratch proof and skips
+generation.
+
+The reset does not rewrite test pins. A test that asserts a literal version,
+an identity hash or a golden byte string fails after the reset and prints the
+value the baseline build produces; `docs/release/cut-1.0.md` lists how each
+kind is refreshed.
+
+Every golden a generator writes records the generation that wrote it, and its
+law refuses a golden of another generation by name. Predecessor captures are
+not kept: a release build has no predecessor to read.
+
+After the reset each store stamp must equal the version its component's compat
+descriptor writes, in the default and synthetic-next builds, and every catalog
+step must lie inside that stamp's range. `release_baseline.py check` and
+`release_reset.py --apply` enforce it, and the scratch reset law in
+`scripts/test_release_baseline.py` proves it on a reset tree with red mutants.
+
+## The gate
+
+`scripts/ci/version-bump-gate.sh <head> [<base>]` is the strict version-bump
+gate. With a base it compares the two commits. Without one its baseline is the
+newest `v1`-or-later tag that is not the candidate; before any such tag exists
+the candidate must be exactly the release baseline. It is the `version-bumps`
+job of `ci.yml`, a required leg of the CI conclusion, and a job the release
+workflow's publish step needs. There is no freeze switch and no report-only
+exit.

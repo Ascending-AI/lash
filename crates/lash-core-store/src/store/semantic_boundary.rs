@@ -19,7 +19,7 @@ use crate::SessionId;
 ///     roots(SemanticBoundaryRequestIntent),
 ///     items(semantic_boundary_request_intent_encoding, semantic_boundary_request_identity),
 /// )
-pub const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
+pub const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
 /// Encoding version of the create-session semantic-boundary request identity;
 /// moves with [`RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION`] for the same
 /// reasons.
@@ -28,7 +28,7 @@ pub const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
 ///     roots(SemanticBoundaryRequestIntent),
 ///     items(semantic_boundary_request_intent_encoding, semantic_boundary_request_identity),
 /// )
-pub const CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
+pub const CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
 /// Refuse settlement or evidence content on a semantic-boundary commit.
 ///
 /// The canonical request encoding deliberately excludes these fields, so a
@@ -201,8 +201,8 @@ mod semantic_boundary_request_identity_tests {
         //   --test_env "BUILD_WORKSPACE_DIRECTORY=$PWD" \
         //   --test_arg=semantic_boundary_request_identity_v1_golden_corpus
         let rows = [
-            ("record-config", "protocol-materialization", 3),
-            ("create-session", "child-1", 3),
+            ("record-config", "protocol-materialization", 1),
+            ("create-session", "child-1", 1),
         ]
         .into_iter()
         .map(|(key, boundary, expected_version)| {

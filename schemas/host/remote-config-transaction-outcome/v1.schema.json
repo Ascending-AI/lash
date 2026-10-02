@@ -1,0 +1,123 @@
+{
+  "$defs": {
+    "RemoteConfigRefusal": {
+      "additionalProperties": false,
+      "description": "Why an owner refused a config transaction: which command, by which\nowner, and the owner's typed refusal as data.",
+      "properties": {
+        "command": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "index": {
+          "description": "The refused command's position; absent when the final candidate as a\nwhole failed an owner's validation.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "refusal": {
+          "description": "The owner's refusal, in the shape of its registered refusal schema."
+        }
+      },
+      "required": [
+        "owner",
+        "refusal",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://lash.dev/schemas/remote-config-transaction-outcome/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What a config transaction settled as.",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "description": "Every command applied, and the config moved one revision step.",
+      "properties": {
+        "base_revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "const": "applied",
+          "type": "string"
+        },
+        "outputs": {
+          "items": true,
+          "type": "array"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "base_revision",
+        "revision",
+        "outputs"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "The transaction was written against `expected`, but the session's\nconfig was at `actual`: nothing was published.",
+      "properties": {
+        "actual": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "expected": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "const": "stale",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "expected",
+        "actual"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "An owner refused: nothing was published.",
+      "properties": {
+        "kind": {
+          "const": "refused",
+          "type": "string"
+        },
+        "refusal": {
+          "$ref": "#/$defs/RemoteConfigRefusal"
+        }
+      },
+      "required": [
+        "kind",
+        "refusal"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "RemoteConfigTransactionOutcome",
+  "x-lash-schema-version": 1,
+  "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
+}

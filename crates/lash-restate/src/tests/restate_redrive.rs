@@ -144,9 +144,9 @@ async fn fig1128_deadline_wire_typed_refusal_and_no_deadline_shape() {
     let error = restate_output_failure_message(&refused)
         .expect("the predecessor request must return a terminal handler refusal");
     assert!(
-        error.contains("predecessor field `timeout_ms` is incompatible with version 2")
+        error.contains("predecessor field `timeout_ms` is incompatible with version 1")
             && error.contains("drain deadline-bearing waits before opening this deployment"),
-        "the v1 refusal must be typed and name the drain requirement: {error}"
+        "the predecessor refusal must be typed and name the drain requirement: {error}"
     );
     assert!(
         !error.contains("unknown field") && !error.contains("failed to deserialize"),
@@ -154,14 +154,14 @@ async fn fig1128_deadline_wire_typed_refusal_and_no_deadline_shape() {
     );
 
     let incompatible = crate::durable_wait::RestateDurableWaitDeadline {
-        version: 1,
+        version: 0,
         unix_epoch_ms: 1_800_000_030_000,
     };
     let error = incompatible
         .remaining(1_800_000_000_000)
-        .expect_err("a stamped predecessor deadline must be refused");
+        .expect_err("a deadline stamped below the release baseline must be refused");
     assert!(
-        error.to_string().contains("version 1 is incompatible"),
+        error.to_string().contains("version 0 is incompatible"),
         "the stamped-version refusal must identify the incompatibility: {error}"
     );
 }

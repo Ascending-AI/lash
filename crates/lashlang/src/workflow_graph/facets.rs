@@ -17,7 +17,7 @@ use crate::linker::{LinkError, WorkflowLinkAnalysis};
 ///         ProcessParam,
 ///     ),
 /// )
-pub const WORKFLOW_TYPE_FACET_SCHEMA_VERSION: u32 = 4;
+pub const WORKFLOW_TYPE_FACET_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WorkflowNodeTypeFacets {

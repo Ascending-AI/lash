@@ -87,12 +87,6 @@ pub enum StoreSchemaVerdict {
         /// The version stamped in the store before migration.
         found: i64,
     },
-    /// A version was read and it is not the expected one. This is the refusal
-    /// a host would otherwise have discovered at open.
-    Mismatch {
-        /// The version stamped in the store.
-        found: i64,
-    },
     /// Nothing is provisioned yet, so the next open would create it. Not a
     /// refusal.
     Absent,
@@ -114,10 +108,7 @@ impl StoreSchemaVerdict {
     /// verdict behind evidence the probe does not have. It is not a pass
     /// either — see [`StoreSchemaVerdict::is_undecided`].
     pub fn refuses_open(&self) -> bool {
-        matches!(
-            self,
-            StoreSchemaVerdict::Mismatch { .. } | StoreSchemaVerdict::Refused { .. }
-        )
+        matches!(self, StoreSchemaVerdict::Refused { .. })
     }
 
     /// The counterpart to [`StoreSchemaVerdict::refuses_open`], and the reason
@@ -472,11 +463,6 @@ impl std::fmt::Display for StoreSchemaStatus {
                     "{}: found version {found}, migrates to {} on open at {}",
                     database.name, database.expected, database.location
                 )?,
-                StoreSchemaVerdict::Mismatch { found } => writeln!(
-                    f,
-                    "{}: found version {found}, expected {} at {}",
-                    database.name, database.expected, database.location
-                )?,
                 StoreSchemaVerdict::Absent => writeln!(
                     f,
                     "{}: not provisioned at {} (would be created)",
@@ -722,6 +708,19 @@ mod tests {
     use super::super::FleetFormatState;
     use super::*;
 
+    /// A store older than this build reads: the refusal a host would
+    /// otherwise have discovered at open.
+    fn too_old(found: u32) -> StoreSchemaVerdict {
+        StoreSchemaVerdict::Refused {
+            refusal: crate::compat::CompatRefusal::TooOld {
+                component: "durable core".to_string(),
+                found,
+                reads: crate::compat::VersionRange::new(37, 37).expect("range"),
+                writing_release: None,
+            },
+        }
+    }
+
     fn database(name: &str, verdict: StoreSchemaVerdict) -> StoreSchemaDatabase {
         StoreSchemaDatabase {
             name: name.to_string(),
@@ -733,8 +732,8 @@ mod tests {
     }
 
     #[test]
-    fn only_a_version_mismatch_refuses_an_open() {
-        assert!(StoreSchemaVerdict::Mismatch { found: 36 }.refuses_open());
+    fn only_a_typed_refusal_refuses_an_open() {
+        assert!(too_old(36).refuses_open());
         assert!(!StoreSchemaVerdict::Matches.refuses_open());
         assert!(!StoreSchemaVerdict::Migratable { found: 36 }.refuses_open());
         assert!(!StoreSchemaVerdict::Absent.refuses_open());
@@ -758,7 +757,7 @@ mod tests {
             StoreSchemaVerdict::Matches,
             StoreSchemaVerdict::Migratable { found: 1 },
             StoreSchemaVerdict::Absent,
-            StoreSchemaVerdict::Mismatch { found: 1 },
+            too_old(1),
         ] {
             assert!(!decided.is_undecided(), "{decided:?}");
         }
@@ -792,7 +791,7 @@ mod tests {
             release: StoreReleaseState::Unstamped,
             fleet_format: FleetFormatState::Unrecorded,
             databases: vec![
-                database("durable core", StoreSchemaVerdict::Mismatch { found: 36 }),
+                database("durable core", too_old(36)),
                 database(
                     "effect replay",
                     StoreSchemaVerdict::Unreadable {
@@ -817,10 +816,7 @@ mod tests {
             fleet_format: FleetFormatState::Unrecorded,
             databases: vec![
                 database("durable core", StoreSchemaVerdict::Matches),
-                database(
-                    "process registry",
-                    StoreSchemaVerdict::Mismatch { found: 23 },
-                ),
+                database("process registry", too_old(23)),
                 database("triggers", StoreSchemaVerdict::Absent),
                 database(
                     "effect replay",
@@ -988,17 +984,15 @@ mod tests {
     }
 
     #[test]
-    fn rendering_names_the_found_and_expected_versions() {
+    fn rendering_carries_the_refusal_in_its_own_words() {
         let status = StoreSchemaStatus {
             release: StoreReleaseState::Unstamped,
             fleet_format: FleetFormatState::Unrecorded,
-            databases: vec![database(
-                "durable core",
-                StoreSchemaVerdict::Mismatch { found: 36 },
-            )],
+            databases: vec![database("durable core", too_old(36))],
         };
         let rendered = status.to_string();
-        assert!(rendered.contains("found version 36"), "{rendered}");
-        assert!(rendered.contains("expected 37"), "{rendered}");
+        assert!(rendered.contains("durable core: refused: "), "{rendered}");
+        assert!(rendered.contains("is at version 36"), "{rendered}");
+        assert!(rendered.contains("`lashctl migrate`"), "{rendered}");
     }
 }

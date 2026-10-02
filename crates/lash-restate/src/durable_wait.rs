@@ -133,9 +133,9 @@ pub(crate) fn restate_unknown_or_revoked() -> RuntimeError {
 pub(crate) const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
 /// Current wire version of a deadline carried by a durable-wait request.
 ///
-/// Version 1 was the unversioned `timeout_ms` field. Version 2 carries the
-/// absolute deadline first journaled by the invoking handler. The request
-/// decoder rejects the version-1 field instead of silently granting a fresh
+/// It carries the absolute deadline first journaled by the invoking handler.
+/// The pre-1.0 request carried an unversioned relative `timeout_ms`; the
+/// request decoder rejects that field instead of silently granting a fresh
 /// relative timeout after a worker replacement.
 ///
 /// version_guard(
@@ -144,7 +144,7 @@ pub(crate) const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
 ///         RestateDurableWaitAwaitRequest,
 ///     ),
 /// )
-pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 2;
+pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 1;
 /// The stored format every value the durable-wait index keeps under its
 /// `wait-index/v2/` keys stamps into its object-state envelope (FIG-3814):
 /// metadata, wait, resolution, marker, and membership rows alike. It is also

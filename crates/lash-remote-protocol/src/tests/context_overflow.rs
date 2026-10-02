@@ -21,8 +21,9 @@ fn remote_context_overflow_stop_is_its_own_wire_tag() {
     // A peer that does not speak this generation has no tolerant-decode arm:
     // the envelope version refuses it before the body is read.
     let body = serde_json::to_value(&outcome).unwrap();
+    const PRE_RELEASE: u32 = 100;
     let stale = serde_json::json!({
-        "protocol_version": REMOTE_PROTOCOL_VERSION - 1,
+        "protocol_version": PRE_RELEASE,
         "outcome": body,
     });
     #[derive(serde::Deserialize)]
@@ -33,7 +34,7 @@ fn remote_context_overflow_stop_is_its_own_wire_tag() {
     assert!(matches!(
         Envelope::<OutcomeBody>::decode_json(stale.to_string().as_bytes(), crate::REMOTE_PROTOCOL),
         Err(RemoteProtocolError::Unsupported { peer, local })
-            if peer == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION - 1)
+            if peer == crate::VersionRange::exactly(PRE_RELEASE)
                 && local == crate::REMOTE_PROTOCOL
     ));
 }

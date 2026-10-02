@@ -112,9 +112,9 @@ fn a_component_outside_its_range_is_refused_typed() {
         }
     );
     let expected_range = if cfg!(feature = "synthetic-next") {
-        "[3,4]"
+        "[1,2]"
     } else {
-        "[3,3]"
+        "[1,1]"
     };
     assert!(
         refusal.to_string().contains("heap") && refusal.to_string().contains(expected_range),

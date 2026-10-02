@@ -5450,7 +5450,7 @@
     }
 
     function truncateSubscriptionId(value) {
-      const prefix = "trigger-subscription:v2:blake3:";
+      const prefix = "trigger-subscription:v1:blake3:";
       if (!value) return "unknown";
       if (value.startsWith(prefix)) {
         return "blake3:" + truncateTriggerDetail(value.slice(prefix.length), 10);

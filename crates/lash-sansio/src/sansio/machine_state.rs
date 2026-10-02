@@ -43,7 +43,7 @@ use super::*;
 ///     ),
 ///     roots(path = "crates/lash-sansio/src/session_model/message.rs", FlatPart, FlatPartRef),
 /// )
-pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 11;
+pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 1;
 
 const fn legacy_turn_checkpoint_schema_version() -> u32 {
     1

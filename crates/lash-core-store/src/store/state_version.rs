@@ -2,7 +2,7 @@ use super::StoreError;
 use crate::SessionId;
 
 /// Oldest session-state generation this runtime can admit.
-pub const OLDEST_SUPPORTED_SESSION_STATE_VERSION: u32 = 3;
+pub const OLDEST_SUPPORTED_SESSION_STATE_VERSION: u32 = 1;
 
 /// Complete mutable-continuation generation emitted and admitted by this runtime.
 /// ADR 0078 refuses the snapshot generation; no converter crosses this cutover.
@@ -22,12 +22,12 @@ pub const OLDEST_SUPPORTED_SESSION_STATE_VERSION: u32 = 3;
 ///     roots(path = "crates/lash-core-store/src/plugin_state.rs", PluginState),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
-pub const CURRENT_SESSION_STATE_VERSION: u32 = 3;
+pub const CURRENT_SESSION_STATE_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
 /// with version 3's shape; its registered lift reads what N wrote.
 #[cfg(feature = "synthetic-next")]
-pub const CURRENT_SESSION_STATE_VERSION: u32 = 4;
+pub const CURRENT_SESSION_STATE_VERSION: u32 = 2;
 
 /// Successful drive-fenced admission of one complete session-state generation.
 #[derive(Clone, Debug, PartialEq, Eq)]

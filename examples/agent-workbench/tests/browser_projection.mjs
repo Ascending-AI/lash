@@ -71,8 +71,8 @@ assert.ok(
 );
 
 function expectedSubscriptionIdDetail(value) {
-  const prefix = "trigger-subscription:v2:blake3:";
-  assert.match(value, /^trigger-subscription:v2:blake3:[0-9a-f]{64}$/);
+  const prefix = "trigger-subscription:v1:blake3:";
+  assert.match(value, /^trigger-subscription:v1:blake3:[0-9a-f]{64}$/);
   return `blake3:${value.slice(prefix.length, prefix.length + 10)}…`;
 }
 
@@ -3068,8 +3068,8 @@ test("trigger registration rows separate display name, identity, and trigger key
     rowContext,
   );
 
-  assert.match(subscriptionIdA, /^trigger-subscription:v2:blake3:[0-9a-f]{64}$/);
-  assert.match(subscriptionIdB, /^trigger-subscription:v2:blake3:[0-9a-f]{64}$/);
+  assert.match(subscriptionIdA, /^trigger-subscription:v1:blake3:[0-9a-f]{64}$/);
+  assert.match(subscriptionIdB, /^trigger-subscription:v1:blake3:[0-9a-f]{64}$/);
   assert.equal(rowContext.rows[0].name, "mirror_job ← cron.Schedule (every 2s)");
   assert.equal(rowContext.rows[1].name, rowContext.rows[0].name);
   assert.equal(
@@ -3107,7 +3107,7 @@ test("the registration alias is on the collapsed rail row, not only in the title
          $lash_host_descriptor_value: { expr: "*/2 * * * * *", tz: "UTC" }
        },
        target: { label: "mirror_job" },
-       subscription_id: "trigger-subscription:v2:blake3:${"a".repeat(64)}",
+       subscription_id: "trigger-subscription:v1:blake3:${"a".repeat(64)}",
        subscription_key: "derived/v2/content-address",
        incarnation: "incarnation-a"
      };

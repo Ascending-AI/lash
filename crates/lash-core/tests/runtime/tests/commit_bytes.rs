@@ -207,7 +207,7 @@ async fn tool_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "tool turn",
         &pinned,
-        &["6edc8e01f0a61c654767a550cfacc39184648403fd1bd05bf78aa8f89961a391"],
+        &["0c45d3c319336ea44d89e7585f2e374fb38445051cbbdf579d655c67d8412626"],
         r#"{
             "assistant_output": "done",
             "errors": [],
@@ -281,7 +281,7 @@ async fn parallel_tool_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "parallel tool turn",
         &pinned,
-        &["45794ba4d510a90aaf4651b4355a6fffd8d9825cffbf95e3e63a1728fa1f1854"],
+        &["0f519caadf9a81abbb2bd640922f2489efecc5b5bed4a8537ebb334e9de582dd"],
         r#"{
             "assistant_output": "all three echoed",
             "errors": [],
@@ -378,7 +378,7 @@ async fn provider_failure_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "provider failure",
         &pinned,
-        &["7cf55f7c21248f5de2b584b608d682ba7e7fde5683f215bc05af49d7d27e26a0"],
+        &["9e95cf7308d9485591a11d8054118057b397d2c00843aa2c6a43686233c86ae6"],
         r#"{
             "assistant_output": "",
             "errors": [
@@ -416,7 +416,7 @@ async fn cancelled_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "cancelled",
         &pinned,
-        &["88ca72fcdd070f510c31b4d90e014ff33e8ea812644ab3dee8d8bfd0fadbaffe"],
+        &["e0216231e4b429021b8d85564cee7db27edebef3dbe818789bf08bb031857ede"],
         r#"{
             "assistant_output": "",
             "errors": [],
@@ -478,7 +478,7 @@ async fn cancelled_mid_tool_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "cancelled mid tool",
         &pinned,
-        &["03518bb682f48951f6e8a11cae9fd4ed4ddf3e9ac1ecb42b8aa1fff7719e5160"],
+        &["a3a2b99b3aad8de7630ee9e330d998070b29f6095e3e6178ceb927dd4f4af1f5"],
         r#"{
             "assistant_output": "",
             "errors": [],
@@ -634,7 +634,7 @@ async fn a_blocked_host_sink_holds_neither_the_commit_nor_its_bytes() {
     crate::runtime_support::commit_pins::assert_commit_pins(
         "blocked host",
         &store.runtime_commits(),
-        &["45794ba4d510a90aaf4651b4355a6fffd8d9825cffbf95e3e63a1728fa1f1854"],
+        &["0f519caadf9a81abbb2bd640922f2489efecc5b5bed4a8537ebb334e9de582dd"],
     );
     assert!(host.received().is_empty(), "the host has taken nothing yet");
 

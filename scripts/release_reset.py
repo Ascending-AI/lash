@@ -28,6 +28,11 @@ SCHEMA_GENERATORS = [
 SHAPE_TARGET = "//crates/lash-postgres-store:lash-postgres-store__unit_test"
 SHAPE_LAW = "schema_shape::tests::committed_shape_artifact_matches_the_ddl_artifact"
 SHAPE_PATH = "crates/lash-postgres-store/schema-shape.txt"
+TEARDOWN_LAW = "schema_shape::tests::the_published_teardown_is_generated_from_the_schema_object_list"
+TEARDOWN_PATH = "crates/lash-postgres-store/teardown.sql"
+DDL_PATH = "crates/lash-postgres-store/schema.sql"
+DDL_HEADER = re.compile(r"\A(-- lash-postgres-store schema, DDL revision )\d+(; compatibility stamp )")
+POSTGRES_STAMP = "crates/lash-postgres-store/src/lib.rs:SCHEMA_VERSION"
 FIXTURE_GENERATORS = [
     ("//crates/lash-sqlite-store:durable_read_fixture__test", "regenerate_sqlite_durable_fixture",
      {"LASH_REGENERATE_DURABLE_READ_FIXTURES": "1"}, "fixtures/durable-read/v1/sqlite"),
@@ -35,15 +40,18 @@ FIXTURE_GENERATORS = [
      {"LASH_REGENERATE_DURABLE_READ_FIXTURES": "1"}, "fixtures/durable-read/v1/postgres"),
     ("//crates/lash-restate:lash-restate__unit_test", "tests::replay_corpus::regenerate_replay_corpus_fixtures",
      {"LASH_REGENERATE_REPLAY_CORPUS": "1"}, "crates/lash-restate/testdata/replay-corpus"),
+    ("//crates/lash-restate:lash-restate__unit_test",
+     "tests::recording_context::capture_tool_intent_journal_corpus_from_real_endpoint_interruptions",
+     {}, "crates/lash-restate/tests/fixtures/tool_intent_journals"),
+    ("//crates/lash-lashlang-runtime:lash-lashlang-runtime__unit_test",
+     "process::segment_trace_tests::capture_parked_loop_segment",
+     {"LASH_CAPTURE_SEGMENT_GOLDEN": "1"}, "crates/lash-lashlang-runtime/src/fixtures"),
 ]
 
 
-def plan(repo: Path, declaration: Path):
+def plan(repo: Path):
     rows = baseline.inventory(repo)
-    declared = baseline.load_baseline(declaration)
-    keys = {row["key"] for row in rows}
-    if keys != declared.keys():
-        raise baseline.BaselineError("reset requires an exact, complete baseline table")
+    declared = {row["key"]: baseline.baseline_of(row["default"]) for row in rows}
     edits = {}
     replacements = {}
 
@@ -63,12 +71,6 @@ def plan(repo: Path, declaration: Path):
 
     for row in rows:
         expected = declared[row["key"]]
-        if type(expected) is not type(row["default"]):
-            raise baseline.BaselineError(f'{row["key"]}: baseline changes the constant type')
-        if type(expected) is int and expected != 1:
-            raise baseline.BaselineError("the 1.0 reset requires counter baseline 1")
-        if type(expected) is str and expected != re.sub(r"v\d+$", "v1", row["default"]):
-            raise baseline.BaselineError("string identities must retain their prefix and end in v1")
         path, name = row["key"].rsplit(":", 1)
         successor = expected + 1 if type(expected) is int and row["synthetic"] != row["default"] else expected
         constant(repo / path, name, expected, successor)
@@ -118,7 +120,18 @@ def plan(repo: Path, declaration: Path):
             body = match[2]
             if body.strip() and '#[cfg(feature = "synthetic-next")]' not in body:
                 raise baseline.BaselineError(f"unrecognized production rows in {table}")
-        text = text[:match.start(2)] + body + text[match.end(2):]
+        # An emptied table is written the way rustfmt leaves it.
+        text = text[:match.start(2)] + (body + match[3] if body.strip() else "];") + text[match.end(3):]
+    if text != path.read_text():
+        edits[path] = text
+
+    # The published DDL names its own revision in its first line; the
+    # teardown artifact is generated from it.
+    path = repo / DDL_PATH
+    text = path.read_text()
+    if DDL_HEADER.match(text) is None:
+        raise baseline.BaselineError(f"cannot find the DDL revision header in {DDL_PATH}")
+    text = DDL_HEADER.sub(lambda match: f"{match[1]}{declared[POSTGRES_STAMP]}{match[2]}", text)
     if text != path.read_text():
         edits[path] = text
 
@@ -143,7 +156,8 @@ def plan(repo: Path, declaration: Path):
                 edits[path] = text
             if re.search(r"workflow-(?:graph|type-facets)/v\d+\.schema\.json", text):
                 hardcoded.append(str(path.relative_to(repo)))
-    generated = sorted({str(path.relative_to(repo)) for path in schemas} | set(renames.values()) | {SHAPE_PATH})
+    generated = sorted({str(path.relative_to(repo)) for path in schemas} | set(renames.values())
+                       | {SHAPE_PATH, TEARDOWN_PATH})
     fixtures = []
     for _, _, _, directory in FIXTURE_GENERATORS:
         root = repo / directory
@@ -161,6 +175,8 @@ def plan(repo: Path, declaration: Path):
               "schema_generators": SCHEMA_GENERATORS,
               "schema_shape_generator": dict(target=SHAPE_TARGET, law=SHAPE_LAW,
                                              environment={"LASH_UPDATE_SCHEMA_SHAPE": "1"}),
+              "teardown_generator": dict(target=SHAPE_TARGET, law=TEARDOWN_LAW,
+                                         environment={"LASH_UPDATE_TEARDOWN_SQL": "1"}),
               "fixture_generators": [dict(target=t, law=l, environment=e, output=d)
                                      for t, l, e, d in FIXTURE_GENERATORS]}
     return public, edits
@@ -170,24 +186,25 @@ def run(repo: Path, argv: list[str], environment=None):
     subprocess.run(argv, cwd=repo, env={**os.environ, **(environment or {})}, check=True)
 
 
-def regenerate_schema_shape(repo: Path):
-    path = repo / SHAPE_PATH
+def regenerate_artifact(repo: Path, artifact: str, law: str, switch: str):
+    """Rewrite one committed PostgreSQL artifact through the law that owns it."""
+    path = repo / artifact
     before = path.read_bytes()
     argv = ["kiln", "test", SHAPE_TARGET, "--local-test-execution", "--no-test-cache",
-            "--test_arg=--exact", f"--test_arg={SHAPE_LAW}",
+            "--test_arg=--exact", f"--test_arg={law}",
             *[f"--test_env={key}" for key in ("LASH_POSTGRES_DATABASE_URL", "LASH_REQUIRE_POSTGRES")
               if key in os.environ]]
-    result = subprocess.run([*argv, "--test_env=LASH_UPDATE_SCHEMA_SHAPE=1"],
+    result = subprocess.run([*argv, f"--test_env={switch}=1"],
                             cwd=repo, capture_output=True, text=True)
     output = result.stdout + result.stderr
     print(output, end="", flush=True)
     if result.returncode:
         # The owning generator deliberately fails its rewrite run, then asks
         # for a fresh build so include_str! verifies the newly generated bytes.
-        if (path.read_bytes() == before or "schema-shape.txt -- rerun the suite to confirm" not in output
+        if (path.read_bytes() == before or f"{path.name} -- rerun the suite to confirm" not in output
                 or "test result: FAILED. 0 passed; 1 failed;" not in output):
             raise subprocess.CalledProcessError(result.returncode, argv)
-    run(repo, [*argv, "--test_env=LASH_UPDATE_SCHEMA_SHAPE=0"])
+    run(repo, [*argv, f"--test_env={switch}=0"])
 
 
 def regenerate(repo: Path):
@@ -203,10 +220,12 @@ def regenerate(repo: Path):
         generators.extend(["--generator", output])
     run(repo, [sys.executable, "scripts/generate-workflow-schemas.py", *generators])
     run(repo, ["kiln", "sync"])
-    regenerate_schema_shape(repo)
+    regenerate_artifact(repo, SHAPE_PATH, SHAPE_LAW, "LASH_UPDATE_SCHEMA_SHAPE")
+    regenerate_artifact(repo, TEARDOWN_PATH, TEARDOWN_LAW, "LASH_UPDATE_TEARDOWN_SQL")
     for target, law, environment, _ in FIXTURE_GENERATORS:
         run(repo, ["kiln", "test", target, "--local-test-execution", "--no-test-cache",
                    "--test_arg=--ignored", "--test_arg=--exact", f"--test_arg={law}",
+                   f"--test_env=BUILD_WORKSPACE_DIRECTORY={repo}",
                    *[f"--test_env={key}={value}" for key, value in environment.items()],
                    *[f"--test_env={key}" for key in ("LASH_POSTGRES_DATABASE_URL", "LASH_REQUIRE_POSTGRES")
                      if key in os.environ]])
@@ -216,7 +235,6 @@ def regenerate(repo: Path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=baseline.ROOT)
-    parser.add_argument("--baseline", type=Path, default=baseline.BASELINE)
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--dry-run", action="store_true")
     action.add_argument("--apply", action="store_true")
@@ -224,8 +242,7 @@ def main():
     args = parser.parse_args()
     try:
         repo = args.repo.resolve()
-        declaration = args.baseline if args.baseline.is_absolute() else repo / args.baseline
-        public, edits = plan(repo, declaration)
+        public, edits = plan(repo)
         print(json.dumps(public, indent=2), flush=True)
         if public["hardcoded_workflow_schema_paths_after_reset"]:
             raise baseline.BaselineError("hard-coded workflow schema version paths remain after reset")
@@ -237,7 +254,7 @@ def main():
             path.write_text(text)
         if not args.source_only:
             regenerate(repo)
-        errors = baseline.mismatches(baseline.inventory(repo), baseline.load_baseline(declaration))
+        errors = baseline.mismatches(baseline.inventory(repo))
         errors += baseline.sqlite_stamp_mismatches(repo)
         errors += baseline.postgres_stamp_mismatches(repo)
         if errors:

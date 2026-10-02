@@ -1232,7 +1232,7 @@ pub(super) fn retired_process_requests_are_refused_by_generation_not_by_shape() 
         ),
     ] {
         assert!(
-            error.contains("restate-process-journal-v1"),
+            error.contains("restate-process-journal-v0"),
             "{kind}: refused by generation, not shape: {error}"
         );
     }

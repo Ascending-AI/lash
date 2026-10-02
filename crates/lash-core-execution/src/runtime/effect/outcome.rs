@@ -526,7 +526,7 @@ mod tests {
         assert!(
             invocation
                 .effect_replay_key()
-                .starts_with("direct:v3:blake3:")
+                .starts_with("direct:v1:blake3:")
         );
     }
 

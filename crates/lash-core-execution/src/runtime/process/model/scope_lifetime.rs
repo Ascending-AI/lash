@@ -448,12 +448,12 @@ pub mod lifetime {
 ///     roots(ScopeStoragePayload),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
-pub const SCOPE_STORAGE_PAYLOAD_VERSION: u16 = 2;
+pub const SCOPE_STORAGE_PAYLOAD_VERSION: u16 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
 /// with version 2's shape; its registered lift reads what N wrote.
 #[cfg(feature = "synthetic-next")]
-pub const SCOPE_STORAGE_PAYLOAD_VERSION: u16 = 3;
+pub const SCOPE_STORAGE_PAYLOAD_VERSION: u16 = 2;
 
 /// The versioned typed scope persisted beside the index projection.
 #[derive(Serialize, Deserialize)]
@@ -704,8 +704,9 @@ mod tests {
     /// scope.
     #[test]
     fn a_parent_scope_payload_is_refused() {
+        // A pre-1.0 stamp over the retired parent-scope shape.
         let old = serde_json::json!({
-            "version": 2,
+            "version": 1,
             "scope": { "kind": "owned", "opener": { "kind": "turn", "session_id": "s", "turn_id": "t" } },
         })
         .to_string();

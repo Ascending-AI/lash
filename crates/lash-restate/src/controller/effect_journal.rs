@@ -106,7 +106,7 @@ use serde::{Deserialize, Serialize};
 ///         ),
 ///     ),
 /// )
-pub const EFFECT_JOURNAL_VERSION: u32 = 15;
+pub const EFFECT_JOURNAL_VERSION: u32 = 1;
 
 /// The entry field the generation is stamped under.
 const EFFECT_JOURNAL_VERSION_FIELD: &str = "effect_journal_version";

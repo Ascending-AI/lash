@@ -155,7 +155,7 @@ async fn a_parent_scope_row_is_refused_as_malformed() {
 
     let scope = turn_scope("pg-v2-session", "pg-v2-turn");
     let payload = serde_json::json!({
-        "version": 2,
+        "version": 1,
         "scope": {"kind": "turn", "session_id": "pg-v2-session", "turn_id": "pg-v2-turn"},
     })
     .to_string();

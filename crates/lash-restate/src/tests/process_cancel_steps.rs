@@ -371,7 +371,7 @@ pub(super) async fn a_retired_cancel_request_is_refused_before_any_command() {
             assert!(
                 refusal.contains(&format!(
                     "restate-process-journal-v{}",
-                    journal_version.unwrap_or(1)
+                    journal_version.unwrap_or(0)
                 )),
                 "{handler}: the refusal names the generation: {refusal}"
             );

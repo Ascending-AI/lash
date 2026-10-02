@@ -79,13 +79,95 @@ impl PreflightOutcome {
     }
 }
 
+/// One database's schema verdict, in serializable form: the one projection of
+/// [`StoreSchemaVerdict`](lash_core::StoreSchemaVerdict), which the store
+/// contract deliberately keeps free of serde derives. The preflight report and
+/// `lashctl preflight` both serialize this, so the wire names one verdict the
+/// same way everywhere.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "verdict", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum SchemaVerdictReport {
+    /// The found version equals the version this build expects.
+    Matches,
+    /// A newer expanded catalog remains readable under its recorded floor.
+    Expanded {
+        /// The version stamped in the store.
+        found: i64,
+    },
+    /// Admission or the tolerant shape check refused the store.
+    Refused {
+        /// The typed refusal, which names its own remedy.
+        refusal: lash_core::compat::CompatRefusal,
+    },
+    /// The next open migrates the store to the expected version.
+    Migratable {
+        /// The version stamped in the store before migration.
+        found: i64,
+    },
+    /// Nothing is provisioned yet.
+    Absent,
+    /// The database could not be read far enough to decide.
+    Unreadable {
+        /// The backend's diagnostic, verbatim.
+        reason: String,
+    },
+    /// A verdict this build does not classify.
+    Unclassified,
+}
+
+impl SchemaVerdictReport {
+    /// The verdict's wire name.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Matches => "matches",
+            Self::Expanded { .. } => "expanded",
+            Self::Refused { .. } => "refused",
+            Self::Migratable { .. } => "migratable",
+            Self::Absent => "absent",
+            Self::Unreadable { .. } => "unreadable",
+            Self::Unclassified => "unclassified",
+        }
+    }
+}
+
+impl From<&lash_core::StoreSchemaVerdict> for SchemaVerdictReport {
+    fn from(verdict: &lash_core::StoreSchemaVerdict) -> Self {
+        use lash_core::StoreSchemaVerdict as Verdict;
+        match verdict {
+            Verdict::Matches => Self::Matches,
+            Verdict::Expanded { found } => Self::Expanded { found: *found },
+            Verdict::Refused { refusal } => Self::Refused {
+                refusal: refusal.clone(),
+            },
+            Verdict::Migratable { found } => Self::Migratable { found: *found },
+            Verdict::Absent => Self::Absent,
+            Verdict::Unreadable { reason } => Self::Unreadable {
+                reason: reason.clone(),
+            },
+            _ => Self::Unclassified,
+        }
+    }
+}
+
+impl std::fmt::Display for SchemaVerdictReport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Expanded { found } | Self::Migratable { found } => {
+                write!(f, "{} (found {found})", self.name())
+            }
+            Self::Refused { refusal } => write!(f, "refused: {refusal}"),
+            Self::Unreadable { reason } => write!(f, "unreadable: {reason}"),
+            _ => f.write_str(self.name()),
+        }
+    }
+}
+
 /// One database's schema answer, in serializable form.
 ///
 /// A projection of [`StoreSchemaDatabase`](lash_core::StoreSchemaDatabase)
 /// rather than the type itself: the store contract deliberately carries no
-/// serde derives, and a report that a gate reads has to serialize. The
-/// projection is total — every verdict maps onto a name and, where there is
-/// one, a found version.
+/// serde derives, and a report that a gate reads has to serialize.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct SchemaDatabaseReport {
     /// Operator-facing name of the database.
@@ -97,17 +179,22 @@ pub struct SchemaDatabaseReport {
     /// The recorded reader floor, when present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_reader: Option<i64>,
-    /// `matches`, `mismatch`, `absent` or `unreadable`.
-    pub verdict: &'static str,
-    /// The version stamped in the store, when one was read.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub found: Option<i64>,
-    /// A typed admission or shape refusal, when present.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub refusal: Option<lash_core::compat::CompatRefusal>,
-    /// The backend's diagnostic, when the read could not decide.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
+    /// What was read, and what that means: `verdict` names the arm and its
+    /// fields ride beside it.
+    #[serde(flatten)]
+    pub verdict: SchemaVerdictReport,
+}
+
+impl From<&lash_core::StoreSchemaDatabase> for SchemaDatabaseReport {
+    fn from(database: &lash_core::StoreSchemaDatabase) -> Self {
+        Self {
+            name: database.name.clone(),
+            location: database.location.clone(),
+            expected: database.expected,
+            min_reader: database.min_reader,
+            verdict: SchemaVerdictReport::from(&database.verdict),
+        }
+    }
 }
 
 /// Every schema-carrying database, and what they mean together.
@@ -405,17 +492,11 @@ impl PreflightReport {
             .schema
             .databases
             .iter()
-            .filter(|database| database.verdict == "mismatch")
-            .map(|database| {
-                format!(
-                    "schema `{}` is at version {} and this build requires {}",
-                    database.name,
-                    database
-                        .found
-                        .map(|found| found.to_string())
-                        .unwrap_or_else(|| "an unread version".to_string()),
-                    database.expected
-                )
+            .filter_map(|database| match &database.verdict {
+                SchemaVerdictReport::Refused { refusal } => {
+                    Some(format!("schema `{}` is refused: {refusal}", database.name))
+                }
+                _ => None,
             })
             .collect();
         for component in self.refusals() {
@@ -466,12 +547,7 @@ impl std::fmt::Display for PreflightReport {
             writeln!(
                 f,
                 "  {}: {} (expected {})",
-                database.name,
-                match (database.verdict, database.found) {
-                    ("mismatch", Some(found)) => format!("found {found}"),
-                    (verdict, _) => verdict.to_string(),
-                },
-                database.expected
+                database.name, database.verdict, database.expected
             )?;
         }
         for component in &self.components {

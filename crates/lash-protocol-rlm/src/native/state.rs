@@ -38,12 +38,12 @@ pub(crate) struct RlmDriverState {
 ///     shapes(cover(RlmDriverState, Envelope)),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
-pub const NATIVE_DRIVER_STATE_VERSION: u32 = 2;
+pub const NATIVE_DRIVER_STATE_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
 /// with version 2's shape; its registered lift reads what N wrote.
 #[cfg(feature = "synthetic-next")]
-pub const NATIVE_DRIVER_STATE_VERSION: u32 = 3;
+pub const NATIVE_DRIVER_STATE_VERSION: u32 = 2;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Envelope {
@@ -169,8 +169,8 @@ mod tests {
             encoded.payload["schema_version"],
             NATIVE_DRIVER_STATE_VERSION
         );
-        // Version 1 was never lifted: it stays refused in every build.
-        encoded.payload["schema_version"] = serde_json::json!(1);
+        // Below the release baseline: no build wrote it and none lifts it.
+        encoded.payload["schema_version"] = serde_json::json!(0);
         assert!(decode_rlm_driver_state(encoded, NATIVE_DRIVER_STATE_VERSION).is_err());
         let unversioned = lash_core::ProtocolDriverState::new(
             crate::plugin::RLM_PROTOCOL_PLUGIN_ID,

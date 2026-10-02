@@ -103,7 +103,7 @@ pub const SESSION_ID: &str = "durable-read-fixture";
 /// version_guard(
 ///     roots(ExpectedFixture),
 /// )
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 131;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 1;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 pub const FIXTURE_PARENT_END_OBLIGATION_ID: &str = "parent_end:00000000000040008000000000000887";

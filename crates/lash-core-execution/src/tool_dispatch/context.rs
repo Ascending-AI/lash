@@ -216,7 +216,7 @@ impl ToolDispatchContext<'_> {
 ///     roots(ToolDispatchContext, RebindField, RebindSource),
 ///     items(REBIND_FIELDS),
 /// )
-pub const TOOL_CHILD_REBIND_VERSION: u16 = 7;
+pub const TOOL_CHILD_REBIND_VERSION: u16 = 1;
 
 /// Where a tool child's value for one [`ToolDispatchContext`] field comes from
 /// (ADR 0099 section 3).

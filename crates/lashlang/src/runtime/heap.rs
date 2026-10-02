@@ -65,12 +65,12 @@ use super::{
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
-pub const HEAP_SIZE_SCHEDULE_VERSION: u32 = 3;
+pub const HEAP_SIZE_SCHEDULE_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the schedule with version 3's
 /// charges; its registered lift reads the heaps N wrote.
 #[cfg(feature = "synthetic-next")]
-pub const HEAP_SIZE_SCHEDULE_VERSION: u32 = 4;
+pub const HEAP_SIZE_SCHEDULE_VERSION: u32 = 2;
 pub const HEAP_GC_ALLOCATION_INTERVAL: u64 = 1_024;
 pub const DEFAULT_HEAP_LOGICAL_BYTE_LIMIT: u64 = 64 * 1024 * 1024;
 

@@ -168,7 +168,7 @@ use super::executor::RuntimeEffectControllerError;
 ///         cover("string_identity!", SessionId, ProcessId, TurnId),
 ///     ),
 /// )
-pub const TOOL_CHILD_REQUEST_VERSION: u16 = 10;
+pub const TOOL_CHILD_REQUEST_VERSION: u16 = 1;
 
 mod session_facts;
 pub use session_facts::{

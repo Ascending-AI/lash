@@ -2,7 +2,6 @@
 """Release-cut inventory and reset laws."""
 
 import json
-import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -29,7 +28,7 @@ class ReleaseBaselineTests(unittest.TestCase):
         rows = json.loads(result.stdout)
         self.assertEqual(len(rows), len(baseline.surfaces(ROOT)))
         by_name = {row["key"]: row for row in rows}
-        at_cut = not baseline.mismatches(rows, baseline.load_baseline(ROOT / baseline.BASELINE))
+        at_cut = not baseline.mismatches(rows)
         for path, constant, default, synthetic in [
             ("crates/lash-sqlite-store/src/schema.rs", "SCHEMA_VERSION", 99, 100),
             ("crates/lash-sqlite-store/src/schema.rs", "PROCESS_SCHEMA_VERSION", 44, 45),
@@ -44,8 +43,8 @@ class ReleaseBaselineTests(unittest.TestCase):
         self.assertTrue(all(row["upgrade"] and row["default"] is not None for row in rows))
 
     def test_draft_table_detects_pre_cut_constants(self):
-        result = self.command("check", "--baseline", "scripts/release-baseline.toml")
-        if not baseline.mismatches(baseline.inventory(ROOT), baseline.load_baseline(ROOT / baseline.BASELINE)):
+        result = self.command("check")
+        if not baseline.mismatches(baseline.inventory(ROOT)):
             self.assertEqual(result.returncode, 0, result.stderr)
             return
         self.assertEqual(result.returncode, 1, result.stderr)
@@ -54,22 +53,19 @@ class ReleaseBaselineTests(unittest.TestCase):
                      "TRIGGER_SCHEMA_VERSION", "lash-postgres-store/src/lib.rs:SCHEMA_VERSION"]:
             self.assertIn(name, result.stderr)
 
-    @unittest.skipUnless(os.environ.get("LASH_RELEASE_CUT") == "1", "FIG-4485: release baseline activates at the 1.0 cut")
     def test_release_values_match_declared_baseline(self):
-        result = self.command("check", "--baseline", "scripts/release-baseline.toml")
+        result = self.command("check")
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    @unittest.skipUnless(os.environ.get("LASH_RELEASE_CUT") == "1", "FIG-4485: release baseline activates at the 1.0 cut")
     def test_sqlite_stamps_equal_their_catalog_numbers(self):
         self.assertEqual(baseline.sqlite_stamp_mismatches(ROOT), [])
 
-    @unittest.skipUnless(os.environ.get("LASH_RELEASE_CUT") == "1", "FIG-4485: release baseline activates at the 1.0 cut")
     def test_postgres_stamp_equals_its_catalog_number(self):
         self.assertEqual(baseline.postgres_stamp_mismatches(ROOT), [])
 
     def test_pre_cut_postgres_stamp_is_named_against_its_descriptor(self):
         errors = baseline.postgres_stamp_mismatches(ROOT)
-        if not baseline.mismatches(baseline.inventory(ROOT), baseline.load_baseline(ROOT / baseline.BASELINE)):
+        if not baseline.mismatches(baseline.inventory(ROOT)):
             self.assertEqual(errors, [])
             return
         self.assertTrue(
@@ -81,7 +77,7 @@ class ReleaseBaselineTests(unittest.TestCase):
 
     def test_pre_cut_sqlite_stamps_are_named_against_their_catalog_numbers(self):
         errors = baseline.sqlite_stamp_mismatches(ROOT)
-        if not baseline.mismatches(baseline.inventory(ROOT), baseline.load_baseline(ROOT / baseline.BASELINE)):
+        if not baseline.mismatches(baseline.inventory(ROOT)):
             self.assertEqual(errors, [])
             return
         for stamp, component in [("SCHEMA_VERSION", "SQLITE_CORE"),
@@ -115,11 +111,18 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
         self.assertEqual(baseline.resolve(text, "V", False), 7)
         self.assertEqual(baseline.resolve(text, "V", True), 8)
 
-    def test_baseline_omissions_extras_and_wrong_types_are_refused(self):
-        rows = [{"key": "owner:V", "default": 1}]
-        self.assertIn("omitted", baseline.mismatches(rows, {})[0])
-        self.assertIn("unregistered", baseline.mismatches(rows, {"owner:V": 1, "other:V": 1})[0])
-        self.assertTrue(baseline.mismatches(rows, {"owner:V": "1"}))
+    def test_the_baseline_is_one_rule_over_the_inventory(self):
+        self.assertEqual(baseline.baseline_of(141), 1)
+        self.assertEqual(baseline.baseline_of("lashlang-vm-abi-v14"), "lashlang-vm-abi-v1")
+        self.assertEqual(baseline.mismatches([{"key": "owner:V", "default": 1},
+                                              {"key": "owner:ABI", "default": "abi-v1"}]), [])
+        self.assertIn("default 2, release baseline 1",
+                      baseline.mismatches([{"key": "owner:V", "default": 2}])[0])
+        self.assertIn("release baseline 'abi-v1'",
+                      baseline.mismatches([{"key": "owner:ABI", "default": "abi-v7"}])[0])
+        # A value the rule cannot place is refused, never passed.
+        for unplaced in ("abi", 1.5, None):
+            self.assertTrue(baseline.mismatches([{"key": "owner:V", "default": unplaced}]))
 
     def test_scratch_reset_plan_covers_changes_and_retained_old_value_is_red(self):
         scratch_root = ROOT / ".buck2/release-baseline-tests"
@@ -127,10 +130,11 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
         with tempfile.TemporaryDirectory(dir=scratch_root) as temporary:
             repo = Path(temporary)
             paths = {row["constant_path"] for row in baseline.surfaces(ROOT)}
-            paths.update(["scripts/versioned-surfaces.toml", "scripts/release-baseline.toml",
+            paths.update(["scripts/versioned-surfaces.toml",
                           "crates/lash-core-store/src/store/state_version.rs",
                           "crates/lash-core-store/src/store/synthetic_next.rs",
                           "crates/lash-postgres-store/src/postgres/migrate.rs",
+                          "crates/lash-postgres-store/schema.sql",
                           "crates/lash-sqlite-store/src/migration.rs",
                           "crates/lash-core-store/src/compat.rs",
                           "crates/lash-typescript/tests/workflow_graph_schema.rs",
@@ -141,19 +145,18 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(ROOT / relative, destination)
             before = {path: (repo / path).read_bytes() for path in paths}
-            public, edits = reset.plan(repo, repo / baseline.BASELINE)
+            public, edits = reset.plan(repo)
             self.assertEqual(public["hardcoded_workflow_schema_paths_after_reset"], [])
             self.assertEqual(before, {path: (repo / path).read_bytes() for path in paths}, "dry-run writes nothing")
             for path, text in edits.items():
                 path.write_text(text)
             changed = {path for path in paths if before[path] != (repo / path).read_bytes()}
             self.assertEqual(changed, set(public["source_edits"]))
-            declared = baseline.load_baseline(repo / baseline.BASELINE)
-            self.assertEqual(baseline.mismatches(baseline.inventory(repo), declared), [])
+            self.assertEqual(baseline.mismatches(baseline.inventory(repo)), [])
             source = repo / "crates/lash-remote-protocol/src/lib.rs"
             source.write_text(source.read_text().replace("REMOTE_PROTOCOL_VERSION: u32 = 1;",
                                                        "REMOTE_PROTOCOL_VERSION: u32 = 100;"))
-            errors = baseline.mismatches(baseline.inventory(repo), declared)
+            errors = baseline.mismatches(baseline.inventory(repo))
             self.assertTrue(any("REMOTE_PROTOCOL_VERSION" in error for error in errors))
 
             # After the reset every SQLite stamp is its catalog's number, in
@@ -171,6 +174,8 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
             lib = repo / "crates/lash-postgres-store/src/lib.rs"
             reset_lib = lib.read_text()
             self.assertIn("const SCHEMA_VERSION: i32 = 1;", reset_lib)
+            self.assertTrue((repo / "crates/lash-postgres-store/schema.sql").read_text().startswith(
+                "-- lash-postgres-store schema, DDL revision 1; compatibility stamp "))
             lib.write_text(reset_lib.replace("const SCHEMA_VERSION: i32 = 1;",
                                              "const SCHEMA_VERSION: i32 = 2;"))
             errors = baseline.postgres_stamp_mismatches(repo)

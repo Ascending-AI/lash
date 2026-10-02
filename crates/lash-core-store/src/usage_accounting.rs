@@ -409,7 +409,7 @@ pub struct UsageRunPage {
 ///         correction_payload_bytes, payload_bytes, as_str,
 ///     ),
 /// )
-pub const USAGE_PAYLOAD_FAMILY_VERSION: u8 = 4;
+pub const USAGE_PAYLOAD_FAMILY_VERSION: u8 = 1;
 /// BLAKE3 hex under domain `lash-usage-fact-payload/v4` of the framed
 /// projection: kind, disposition tag, source, model key, requested model,
 /// optional served model, the five counters (big-endian i64), llm_call_id,
@@ -862,7 +862,7 @@ mod tests {
         cases
     }
     #[test]
-    fn usage_fact_payload_v4_golden_corpus() {
+    fn usage_fact_payload_golden_corpus() {
         let rendered = corpus()
             .into_iter()
             .map(|(name, bytes, hash)| {
@@ -870,7 +870,7 @@ mod tests {
                 format!("{name}={hex}|{hash}\n")
             })
             .collect::<String>();
-        assert_eq!(rendered, include_str!("testdata/usage_fact_payload_v4.hex"));
+        assert_eq!(rendered, include_str!("testdata/usage_fact_payload.hex"));
     }
     #[test]
     fn run_ids_accept_only_canonical_v4_renderings() {

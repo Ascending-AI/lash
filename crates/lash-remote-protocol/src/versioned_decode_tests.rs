@@ -2,6 +2,10 @@ use super::*;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
+/// The last pre-1.0 remote-protocol generation: a positive version no release
+/// build negotiates.
+const PRE_RELEASE_GENERATION: u32 = 100;
+
 fn assert_streamed_envelope_contract<T>(
     body: T,
     encode: impl Fn(&T, &Negotiated) -> Result<Vec<u8>, serde_json::Error>,
@@ -154,7 +158,7 @@ fn process_node_record() -> lash_trace::TraceRecord {
 /// event record are typed trace shapes, not opaque JSON.
 fn published_observation_item_schema() -> jsonschema::Validator {
     let schema: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../schemas/host/remote-process-observation-item/v100.schema.json"
+        "../../../schemas/host/remote-process-observation-item/v1.schema.json"
     ))
     .expect("published observation item schema parses");
     assert_eq!(
@@ -209,12 +213,12 @@ fn assert_process_observation_wire_contract(item: RemoteProcessObservationItem) 
         "item schema refuses unknown fields"
     );
     let mut value: serde_json::Value = serde_json::from_slice(&wire).expect("wire json");
-    value["protocol_version"] = serde_json::json!(REMOTE_PROTOCOL_VERSION - 1);
+    value["protocol_version"] = serde_json::json!(PRE_RELEASE_GENERATION);
     value["type"] = serde_json::json!("unknown_future_item");
     assert!(matches!(
         RemoteProcessObservationItem::decode_json(value.to_string().as_bytes()),
         Err(RemoteProtocolError::Unsupported { peer: actual, local: expected })
-            if actual == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION - 1) && expected == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION)
+            if actual == crate::VersionRange::exactly(PRE_RELEASE_GENERATION) && expected == crate::REMOTE_PROTOCOL
     ));
     value["protocol_version"] = serde_json::json!(REMOTE_PROTOCOL_VERSION);
     assert!(RemoteProcessObservationItem::decode_json(value.to_string().as_bytes()).is_err());
@@ -286,7 +290,7 @@ fn process_observation_cursor_wire_contract() {
         request
     );
     let mut value: serde_json::Value = serde_json::from_slice(&wire).expect("wire json");
-    value["protocol_version"] = serde_json::json!(REMOTE_PROTOCOL_VERSION - 1);
+    value["protocol_version"] = serde_json::json!(PRE_RELEASE_GENERATION);
     value["retired_cursor"] = serde_json::json!("old");
     assert!(matches!(
         RemoteProcessObservationRequest::decode_json(value.to_string().as_bytes()),
@@ -295,12 +299,12 @@ fn process_observation_cursor_wire_contract() {
     value["protocol_version"] = serde_json::json!(REMOTE_PROTOCOL_VERSION);
     assert!(RemoteProcessObservationRequest::decode_json(value.to_string().as_bytes()).is_err());
 
-    // A retired `lashpc1` cursor is refused at decode, naming its version.
+    // A pre-1.0 `lashpc3` cursor is refused at decode, naming its version.
     let mut retired: serde_json::Value = serde_json::from_slice(&wire).expect("wire json");
-    retired["cursor"] = serde_json::json!("lashpc1:epoch:1:1:process:wire");
+    retired["cursor"] = serde_json::json!("lashpc3:epoch:p_00000000000070008000000000000003:1:1");
     let error = RemoteProcessObservationRequest::decode_json(retired.to_string().as_bytes())
-        .expect_err("a retired cursor is refused");
-    assert!(error.to_string().contains("lashpc1"), "{error}");
+        .expect_err("a pre-1.0 cursor is refused");
+    assert!(error.to_string().contains("lashpc3"), "{error}");
 }
 
 #[test]
@@ -588,7 +592,7 @@ fn paged_process_events_wire_contract() {
         request
     );
     let mut value: serde_json::Value = serde_json::from_slice(&wire).expect("wire json");
-    value["protocol_version"] = serde_json::json!(REMOTE_PROTOCOL_VERSION - 1);
+    value["protocol_version"] = serde_json::json!(PRE_RELEASE_GENERATION);
     value["mode"] = serde_json::json!("future_mode");
     assert!(matches!(
         RemoteProcessEventsRequest::decode_json(value.to_string().as_bytes()),

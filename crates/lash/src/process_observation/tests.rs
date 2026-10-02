@@ -751,11 +751,11 @@ async fn l8_full_and_lite_history_page_through_one_cursor() {
     let next_commit = fixture.commit(true).await;
     expect_committed(&next(&mut live).await, next_commit.sequence);
 
-    // A retired cursor version is refused by name.
+    // A pre-1.0 cursor version is refused by name.
     assert_eq!(
-        ProcessCursor::parse("lashpc1:epoch:1:1:l8-pages"),
-        Err(ProcessCursorError::RetiredVersion {
-            found: "lashpc1".to_string()
+        ProcessCursor::parse("lashpc3:epoch:1:1:l8-pages"),
+        Err(ProcessCursorError::UnsupportedVersion {
+            found: "lashpc3".to_string()
         })
     );
 }

@@ -711,6 +711,8 @@ fn rlm_snapshot_accepts_inline_global_named_schema() {
 
 #[test]
 fn older_snapshot_version_is_typed_rejection_with_cutover_remedy() {
+    // Below the 1.0 baseline: no build wrote it and no decoder row reads it.
+    const BELOW_BASELINE: u32 = 0;
     #[derive(Serialize)]
     struct PreviousEnvelope {
         version: u32,
@@ -722,7 +724,7 @@ fn older_snapshot_version_is_typed_rejection_with_cutover_remedy() {
     }
     let hydration = lash_core::plugin::HydratedExecutionState {
         root: rmp_serde::to_vec_named(&PreviousEnvelope {
-            version: RLM_SNAPSHOT_VERSION - 2,
+            version: BELOW_BASELINE,
             engine: "lashlang",
             vars: lashlang::Snapshot::default()
                 .to_canonical_bytes()
@@ -745,7 +747,7 @@ fn older_snapshot_version_is_typed_rejection_with_cutover_remedy() {
         RlmSnapshotError::VersionMismatch {
             expected: RLM_SNAPSHOT_VERSION,
             found
-        } if *found == RLM_SNAPSHOT_VERSION - 2
+        } if *found == BELOW_BASELINE
     ));
     let message = error.to_string();
     assert!(message.contains("drain in-flight sessions on the old build"));
@@ -754,8 +756,9 @@ fn older_snapshot_version_is_typed_rejection_with_cutover_remedy() {
 
 #[test]
 fn version_17_snapshot_is_typed_rejection_with_or_without_file_leaves() {
+    // A pre-1.0 stamp: the release baseline restarted the counter below it,
+    // and no read window admits it.
     const EFFECT_ADDRESS_PREDECESSOR_SNAPSHOT_VERSION: u32 = 17;
-    const { assert!(RLM_SNAPSHOT_VERSION > EFFECT_ADDRESS_PREDECESSOR_SNAPSHOT_VERSION) };
 
     #[derive(Serialize)]
     struct PreviousEnvelope {
@@ -882,7 +885,7 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
     ));
 }
 
-/// Fixed-byte authority for the version-26 root encoding (ADR 0056).
+/// Fixed-byte authority for the release root encoding (ADR 0056).
 ///
 /// Encoding both sides of a comparison with the currently linked encoder
 /// cannot see the drift that matters: a dependency bump or serializer change
@@ -895,10 +898,10 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
 // The golden pins N's encoding; the synthetic N+1 moves the root's stamps.
 #[cfg(not(feature = "synthetic-next"))]
 #[test]
-fn version_26_root_encodes_to_golden_bytes() {
+fn release_root_encodes_to_golden_bytes() {
     const GOLDEN: &str = concat!(
-        "86a776657273696f6e1aa6656e67696e65a86c6173686c616e67ac73746174655f686561646572c40a81a776657273696f6e",
-        "0ea7676c6f62616c7382ad696e6c696e655f7363616c617282a46b696e64a6696e6c696e65a4626f6479c42982a576616c75",
+        "86a776657273696f6e01a6656e67696e65a86c6173686c616e67ac73746174655f686561646572c40a81a776657273696f6e",
+        "01a7676c6f62616c7382ad696e6c696e655f7363616c617282a46b696e64a6696e6c696e65a4626f6479c42982a576616c75",
         "6582a46b696e64a6737472696e67a576616c7565a5736d616c6ca76f626a6563747390b06c65616665645f636f6d706f7369",
         "746582a46b696e64a46c656166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f626c616b65332f6366",
         "3737383234633263313231663030663133626563343139626164306464663766653930646639313730653732303139643938",
@@ -984,7 +987,7 @@ fn version_26_root_encodes_to_golden_bytes() {
         .collect::<String>();
     assert_eq!(
         hex, GOLDEN,
-        "the version-26 root encoding changed; decide on a version bump before updating the golden"
+        "the release root encoding changed; decide on a version bump before updating the golden"
     );
 
     let decoded: RlmSnapshotRoot =

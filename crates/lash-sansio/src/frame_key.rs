@@ -7,7 +7,7 @@ const FRAME_KEY_PREFIX: &str = "frame-key/v2/";
 /// version_guard(
 ///     items(derive),
 /// )
-const FRAME_KEY_VERSION: u8 = 2;
+const FRAME_KEY_VERSION: u8 = 1;
 
 /// A non-empty, deterministically derived key that Lash turns into a durable
 /// agent-frame identity.
@@ -148,7 +148,7 @@ mod tests {
         );
         assert_eq!(
             first.as_str(),
-            "frame-key/v2/574275a71d540cb32814b287b29dd44180ff6d49dc621ceee1dc10892b7b1fc0"
+            "frame-key/v2/b6e23215b1bd1cc71d07b82140fe78b4419c92d2f9c9a49a614ca80b5d8f5ffb"
         );
         assert_ne!(
             first,
@@ -194,15 +194,15 @@ mod tests {
 
         assert_eq!(
             first.as_str(),
-            "frame-key/v2/fe671c9a9b3ab71d456f809a0be6d1f9dbe3306aeda6af2881a30f836cba62b5"
+            "frame-key/v2/7411c0c4ac35ce1892d8a4eb7073e5412c1ac466feb5b6ba8f5ddb29cbafad62"
         );
         assert_eq!(
             second.as_str(),
-            "frame-key/v2/f14a7e6f82be497296c03890ec01dea6133116800a43cd5b30e691cc1a132413"
+            "frame-key/v2/092da81322c036a9c30b4ea23505b339d8daa6a03636b6a6be6139d0db69bf76"
         );
         assert_eq!(
             reused.as_str(),
-            "frame-key/v2/fe671c9a9b3ab71d456f809a0be6d1f9dbe3306aeda6af2881a30f836cba62b5"
+            "frame-key/v2/7411c0c4ac35ce1892d8a4eb7073e5412c1ac466feb5b6ba8f5ddb29cbafad62"
         );
     }
 
@@ -217,7 +217,7 @@ mod tests {
         );
         assert_eq!(
             first.as_str(),
-            "frame-key/v2/c72af05c2980ca4fc9221f68a297a9706ee80c7058d82ba82ca1e7d8ff69a755"
+            "frame-key/v2/dfdd2443860c3476c0038f0c6c27861e2c8042322995487c68a2102ff7ae71ec"
         );
         assert_ne!(
             first,

@@ -480,12 +480,12 @@ pub struct RuntimeCommitReceipt {
 ///     items(decode_runtime_commit_receipt, ensure_supported_receipt_version),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
-pub const RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION: u32 = 2;
+pub const RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
 /// with version 2's shape; its registered lift reads what N wrote.
 #[cfg(feature = "synthetic-next")]
-pub const RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION: u32 = 3;
+pub const RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION: u32 = 2;
 
 /// Stable record-kind label the receipt's decode refusals carry.
 pub const RUNTIME_COMMIT_RECEIPT_RECORD_KIND: &str = "RuntimeCommitReceipt";

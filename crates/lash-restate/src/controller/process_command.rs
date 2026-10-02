@@ -12,7 +12,7 @@ use restate_sdk::serde::Json;
 ///         RegisteredProcessStart,
 ///     ),
 /// )
-pub const PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION: u32 = 2;
+pub const PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]

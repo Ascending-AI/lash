@@ -97,7 +97,7 @@ const fn envelope_encoding_admitted(encoding: u64) -> bool {
 /// version_guard(
 ///     roots(path = "crates/lashlang/src/runtime/host.rs", AbilityOp, AbilityOutcome),
 /// )
-pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v14";
+pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v1";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]

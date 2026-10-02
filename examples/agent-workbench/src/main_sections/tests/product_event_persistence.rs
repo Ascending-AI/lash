@@ -5,7 +5,7 @@ use lash::SessionId;
 fn product_event_log_rejects_future_format_with_expected_and_found_versions() {
     let data_dir = tempfile::tempdir().expect("future product event tempdir");
     let path = data_dir.path().join("product-events.json");
-    std::fs::write(&path, r#"{"format_version":3,"histories":{}}"#)
+    std::fs::write(&path, r#"{"format_version":2,"histories":{}}"#)
         .expect("write future product event log");
 
     let error = match SessionEventRegistry::persistent(path, 4) {
@@ -18,20 +18,20 @@ fn product_event_log_rejects_future_format_with_expected_and_found_versions() {
     assert!(matches!(
         typed.source,
         ProductEventLogDecodeError::FormatVersionMismatch {
-            expected: 2,
-            found: 3
+            expected: 1,
+            found: 2
         }
     ));
     let rendered = error.to_string();
-    assert!(rendered.contains("expected 2"), "actual error: {rendered}");
-    assert!(rendered.contains("found 3"), "actual error: {rendered}");
+    assert!(rendered.contains("expected 1"), "actual error: {rendered}");
+    assert!(rendered.contains("found 2"), "actual error: {rendered}");
 }
 
 #[test]
 fn product_event_log_rejects_old_format_with_expected_and_found_versions() {
     let data_dir = tempfile::tempdir().expect("old product event tempdir");
     let path = data_dir.path().join("product-events.json");
-    std::fs::write(&path, r#"{"format_version":1,"histories":{}}"#)
+    std::fs::write(&path, r#"{"format_version":0,"histories":{}}"#)
         .expect("write old product event log");
 
     let error = match SessionEventRegistry::persistent(path, 4) {
@@ -44,13 +44,13 @@ fn product_event_log_rejects_old_format_with_expected_and_found_versions() {
     assert!(matches!(
         typed.source,
         ProductEventLogDecodeError::FormatVersionMismatch {
-            expected: 2,
-            found: 1
+            expected: 1,
+            found: 0
         }
     ));
     let rendered = error.to_string();
-    assert!(rendered.contains("expected 2"), "actual error: {rendered}");
-    assert!(rendered.contains("found 1"), "actual error: {rendered}");
+    assert!(rendered.contains("expected 1"), "actual error: {rendered}");
+    assert!(rendered.contains("found 0"), "actual error: {rendered}");
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn product_event_log_decode_error_names_histories_and_the_nested_cause() {
     std::fs::write(
         &path,
         r#"{
-            "format_version": 2,
+            "format_version": 1,
             "histories": {
                 "session": {
                     "cursor": 1,

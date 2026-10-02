@@ -86,14 +86,14 @@ pub use projection::{
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
-pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 21;
+pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the document with version
 /// 21's shape. A derived projection registers no lift: while `F` is N's epoch
 /// its readers admit the version `F` pins its writers to, and after finalize
 /// an older document is regenerated from its module (FIG-4262).
 #[cfg(feature = "synthetic-next")]
-pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 22;
+pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 2;
 
 /// A deterministic node identifier minted from structural owner and AST path.
 #[derive(

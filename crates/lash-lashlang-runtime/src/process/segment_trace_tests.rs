@@ -436,22 +436,45 @@ fn untraced_completed_resource_calls_retain_no_correlation_state() {
 }
 use std::sync::atomic::Ordering;
 
-const UNVERSIONED_SEGMENT_STATE: &[u8] =
-    include_bytes!("../fixtures/lashlang_segment_state_unversioned.json");
-const VM_V10_SEGMENT_STATE: &[u8] =
-    include_bytes!("../fixtures/lashlang_segment_state_vm_v10.json");
-const BYTECODE_V17_PARKED_LOOP: &[u8] =
-    include_bytes!("../fixtures/lashlang_bytecode_v17_parked_loop.json");
-// Captured by the real predecessor writer at
-// f0bdb98f6567e94d41b28a7404a8920e2f9966eb after one observed `tools.echo`
-// effect parked. Only nondeterministic elapsed time and nonce were normalized.
-const SEGMENT_V12_PARKED_OLD_IDS: &[u8] =
-    include_bytes!("../fixtures/lashlang_segment_v12_parked_old_ids.json");
-// Captured by the real pre-FIG-3571 writer at
-// d5d4956d33935d4f25bd8f2e311173d8e482a21b (segment v17, bytecode v19, VM
-// continuation v18): the loop program parked inside its `for` after one sleep.
-const SEGMENT_V17_PARKED_PRE_FIG3571: &[u8] =
-    include_bytes!("../fixtures/lashlang_segment_v17_parked_pre_fig3571.json");
+/// A loop parked by this build inside its `for` body after one sleep, with the
+/// generation that wrote it. Regenerate with `capture_parked_loop_segment`.
+pub(crate) const PARKED_LOOP_SEGMENT: &[u8] =
+    include_bytes!("../fixtures/lashlang_segment_parked_loop.json");
+
+/// The generation that wrote a parked-segment golden: a golden is evidence
+/// about the build whose generation it records, and about no other.
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SegmentGoldenGeneration {
+    segment_state_version: u32,
+    bytecode_format_version: u32,
+    vm_continuation_format_version: u32,
+}
+
+impl SegmentGoldenGeneration {
+    pub(crate) fn of_this_build() -> Self {
+        Self {
+            segment_state_version: LASHLANG_SEGMENT_STATE_VERSION,
+            bytecode_format_version: lashlang::BYTECODE_FORMAT_VERSION,
+            vm_continuation_format_version: lashlang::VM_CONTINUATION_FORMAT_VERSION,
+        }
+    }
+}
+
+/// The parked-loop golden as JSON, after checking this build wrote it.
+pub(crate) fn parked_loop_segment_golden() -> serde_json::Value {
+    let golden: serde_json::Value =
+        serde_json::from_slice(PARKED_LOOP_SEGMENT).expect("the parked-loop golden is JSON");
+    let generation: SegmentGoldenGeneration =
+        serde_json::from_value(golden["generation"].clone()).expect("the golden's generation");
+    assert_eq!(
+        generation,
+        SegmentGoldenGeneration::of_this_build(),
+        "the parked-loop golden was written by another generation; recapture it with \
+         capture_parked_loop_segment"
+    );
+    golden
+}
 
 struct SegmentFixtureHost;
 
@@ -471,8 +494,8 @@ impl lashlang::ExecutionHost for SegmentFixtureHost {
     }
 }
 
-fn bytecode_v17_loop_input() -> crate::LashlangProcessInput {
-    let hash = lashlang::ContentHash::new("bytecode-v17-parked-loop");
+fn parked_loop_input() -> crate::LashlangProcessInput {
+    let hash = lashlang::ContentHash::new("parked-loop");
     crate::LashlangProcessInput {
         module_ref: lashlang::ModuleRef::new(&hash),
         process_ref: lashlang::ProcessRef::new(hash.clone(), 0),
@@ -482,7 +505,7 @@ fn bytecode_v17_loop_input() -> crate::LashlangProcessInput {
     }
 }
 
-fn bytecode_v17_loop_program() -> lashlang::Program {
+fn parked_loop_program() -> lashlang::Program {
     use lashlang::testing::ast_builders as b;
 
     b::program(vec![
@@ -495,15 +518,17 @@ fn bytecode_v17_loop_program() -> lashlang::Program {
     ])
 }
 
+const CAPTURE_ENV: &str = "LASH_CAPTURE_SEGMENT_GOLDEN";
+
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "run only against the version-17 compiler before the loop-site cutover"]
-async fn capture_bytecode_v17_parked_loop_from_predecessor_writer() {
+#[ignore = "writes the committed parked-loop golden; set LASH_CAPTURE_SEGMENT_GOLDEN=1"]
+async fn capture_parked_loop_segment() {
     assert_eq!(
-        lashlang::BYTECODE_FORMAT_VERSION,
-        17,
-        "capture this fixture only from the version-17 predecessor writer"
+        std::env::var(CAPTURE_ENV).as_deref(),
+        Ok("1"),
+        "set {CAPTURE_ENV}=1 to acknowledge replacing the committed golden"
     );
-    let compiled = lashlang::testing::harness::try_compile_program(&bytecode_v17_loop_program())
+    let compiled = lashlang::testing::harness::try_compile_program(&parked_loop_program())
         .expect("compile loop");
     let mut state = lashlang::State::new();
     let host = SegmentFixtureHost;
@@ -518,101 +543,73 @@ async fn capture_bytecode_v17_parked_loop_from_predecessor_writer() {
     assert_eq!(
         continuation.iterator_stack.len(),
         1,
-        "the predecessor must be parked inside its loop"
+        "the loop must be parked inside its body"
     );
-    // The predecessor's envelope embedded its continuation inline; the capture
-    // writes that shape.
-    let segment_state = predecessor_envelope(
-        &continuation,
-        ReplayOrdinalsState {
-            commands: crate::LashlangRunOrdinals {
-                next: 0,
-                dispatched: crate::DispatchedOrdinalsDigest::empty(),
-            },
+    let process_id = lash_sansio::ProcessId::fixture("fixture");
+    let segment_state = LashlangSegmentState {
+        version: LASHLANG_SEGMENT_STATE_VERSION,
+        vm: lash_vm_protocol::OpaqueVmState::seal(
+            lash_vm_protocol::VmStateKind::Continuation,
+            super::segment_continuation_owner(&process_id),
+            lashlang::vm_contract_versions(),
+            lashlang::VM_CONTINUATION_FORMAT_VERSION,
+            worker_parked_continuation(continuation.to_bytes().expect("encode the continuation")),
+        ),
+        ordinals: ReplayOrdinalsState {
+            commands: crate::LashlangRunOrdinals::start(),
             event_sequence: 0,
             signal_wait_ordinals: Default::default(),
         },
-    );
-    let input = bytecode_v17_loop_input();
-    let mut fixture = serde_json::json!({
-        "bytecode_format_version": 17,
-        "source_commit": "4f96c76629575e46b8d7f29526bb0cab7c16625b",
-        "program": "for (const item of [1]) { await sleep(item); } finish(null);",
-        "input": input,
-        "program_hash": super::lashlang_program_hash(&input),
-        "segment_state": segment_state,
-    });
-    fixture["segment_state"]["vm"]["execution_nonce"] = serde_json::json!(958985677965949815_u64);
-    fixture["segment_state"]["vm"]["active_execution_elapsed"] =
-        serde_json::json!({"nanos": 0, "secs": 0});
-    let mut bytes = serde_json::to_vec_pretty(&fixture).expect("serialize parked loop fixture");
-    bytes.push(b'\n');
-    std::fs::write(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/fixtures/lashlang_bytecode_v17_parked_loop.json"),
-        bytes,
-    )
-    .expect("write version-17 parked loop fixture");
-}
-
-#[test]
-#[ignore = "run only with the predecessor writer at ccab40166"]
-fn capture_vm_v10_segment_state_from_predecessor_writer() {
-    assert_eq!(
-        lashlang::VM_CONTINUATION_FORMAT_VERSION,
-        10,
-        "capture this fixture only from predecessor writer commit ccab40166"
-    );
-    let program = lashlang::testing::harness::try_compile_program(&finish_null())
-        .expect("compile fixture program");
-    let mut state = lashlang::State::new();
-    let host = SegmentFixtureHost;
-    let environment = lashlang::ExecutionEnvironment::new(&host).foreground();
-    let mut vm =
-        lashlang::Vm::from_state(&program, &mut state, &environment).expect("construct fixture VM");
-    let mut wire = predecessor_envelope(
-        &vm.suspend().expect("capture fixture VM continuation"),
-        ReplayOrdinalsState {
-            commands: crate::LashlangRunOrdinals {
-                next: 3,
-                dispatched: crate::DispatchedOrdinalsDigest::empty(),
-            },
-            event_sequence: 5,
-            signal_wait_ordinals: [("ready".to_string(), 11)].into(),
-        },
-    );
-    wire["vm"]["execution_nonce"] = serde_json::json!(16294208416658607535_u64);
-    wire["vm"]["active_execution_elapsed"] = serde_json::json!({"nanos": 0, "secs": 0});
-    let mut bytes = serde_json::to_vec(&wire).expect("serialize v10 predecessor");
-    bytes.push(b'\n');
-    std::fs::write(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/fixtures/lashlang_segment_state_vm_v10.json"),
-        bytes,
-    )
-    .expect("write v10 predecessor fixture");
-}
-
-/// The envelope shape the predecessor writers wrote, with the continuation
-/// inline under `vm`; only the ignored capture tools write it.
-fn predecessor_envelope(
-    continuation: &lashlang::VmContinuation,
-    ordinals: ReplayOrdinalsState,
-) -> serde_json::Value {
-    let mut wire = serde_json::to_value(LashlangSegmentState {
-        version: LASHLANG_SEGMENT_STATE_VERSION,
-        vm: sealed_continuation(continuation, &lash_sansio::ProcessId::fixture("fixture")),
-        ordinals,
         started_process_ids: Vec::new(),
         incorporation_ledger: lash_core::session::IncorporationLedger::default(),
         pending_summary: Vec::new(),
         effect_omissions: std::collections::BTreeMap::new(),
         outstanding_groups: Vec::new(),
         worker_recovery: Default::default(),
-    })
-    .expect("serialize segment-state writer");
-    wire["vm"] = serde_json::to_value(continuation).expect("serialize the inline continuation");
-    wire
+    };
+    let input = parked_loop_input();
+    let golden = serde_json::json!({
+        "generation": SegmentGoldenGeneration::of_this_build(),
+        "program": "for (const item of [1]) { await sleep(item); } finish(null);",
+        "input": input,
+        "program_hash": super::lashlang_program_hash(&input),
+        "segment_state": segment_state,
+    });
+    let mut bytes = serde_json::to_vec_pretty(&golden).expect("serialize the parked-loop golden");
+    bytes.push(b'\n');
+    let root = std::env::var_os("BUILD_WORKSPACE_DIRECTORY").map_or_else(
+        || std::path::Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf(),
+        |root| std::path::PathBuf::from(root).join("crates/lash-lashlang-runtime"),
+    );
+    std::fs::write(
+        root.join("src/fixtures/lashlang_segment_parked_loop.json"),
+        bytes,
+    )
+    .expect("write the parked-loop golden");
+}
+
+/// The golden this build parked decodes, names this build's program identity
+/// and restores in the worker inside its loop.
+#[test]
+fn the_parked_loop_golden_is_this_builds_segment() {
+    let golden = parked_loop_segment_golden();
+    let input: crate::LashlangProcessInput =
+        serde_json::from_value(golden["input"].clone()).expect("the golden's input");
+    assert_eq!(
+        golden["program_hash"],
+        serde_json::json!(super::lashlang_program_hash(&input)),
+        "the golden names this build's program identity"
+    );
+    let engine_state =
+        serde_json::to_vec(&golden["segment_state"]).expect("encode the parked handover");
+    let segment = decode_lashlang_segment_state(&engine_state)
+        .unwrap_or_else(|error| panic!("this build's segment decodes: {error}"));
+    assert_eq!(segment.version, LASHLANG_SEGMENT_STATE_VERSION);
+    assert_eq!(
+        worker_continuation_info(&segment.vm),
+        Ok(1),
+        "the continuation is parked inside its loop"
+    );
 }
 
 /// A continuation sealed the way a boundary seals it for `process_id`.
@@ -629,10 +626,18 @@ fn sealed_continuation(
     )
 }
 
+/// A handover with no version stamp has no compatibility decoder: it is the
+/// typed mismatch, with the drain remedy.
 #[test]
-fn unversioned_prior_shape_is_typed_rejection_with_cutover_remedy() {
-    let Err(error) = decode_lashlang_segment_state(UNVERSIONED_SEGMENT_STATE) else {
-        panic!("unversioned handover must not have a compatibility decoder");
+fn an_unversioned_segment_is_a_typed_rejection_with_the_drain_remedy() {
+    let mut unversioned = parked_loop_segment_golden()["segment_state"].clone();
+    unversioned
+        .as_object_mut()
+        .expect("the segment state is an object")
+        .remove("version");
+    let bytes = serde_json::to_vec(&unversioned).expect("encode the unversioned handover");
+    let Err(error) = decode_lashlang_segment_state(&bytes) else {
+        panic!("an unversioned handover must not have a compatibility decoder");
     };
 
     assert!(
@@ -650,63 +655,42 @@ fn unversioned_prior_shape_is_typed_rejection_with_cutover_remedy() {
     assert!(message.contains("recreate development/test stores"));
 }
 
-/// The predecessor fixture is refused twice over, and each fence is asserted on
-/// its own.
-///
-/// The fixture is a v11 envelope carrying a v10 VM continuation. Once the
-/// envelope generation moved (v12, FIG-3394), decoding it whole stops at the
-/// outer version and never reaches the continuation, so a single assertion
-/// would silently stop testing the inner fence it was written for. The fixture
-/// bytes are not edited to keep it reachable — they are a predecessor capture
-/// (`capture_vm_v10_segment_state_from_predecessor_writer`) and hand-editing
-/// them would make the evidence describe a shape no writer ever produced.
-/// Instead the *outer* refusal is asserted on the file as captured, and the
-/// inner one on the same file's `vm` node re-enveloped at the current
-/// generation, which is the only construction that can reach the continuation
-/// fence at all.
+/// A segment another generation parked is refused at both fences: the envelope
+/// version, on the bytes as written, and the continuation's own format, which
+/// the parent refuses structurally without decoding it.
 #[test]
-fn the_v11_envelope_is_refused_by_the_current_envelope_version() {
-    let Err(error) = decode_lashlang_segment_state(VM_V10_SEGMENT_STATE) else {
-        panic!("a predecessor envelope must not decode");
+fn another_generations_segment_is_refused_at_both_fences() {
+    let other_version = LASHLANG_SEGMENT_STATE_VERSION + 1;
+    let mut other = parked_loop_segment_golden()["segment_state"].clone();
+    other["version"] = serde_json::json!(other_version);
+    let bytes = serde_json::to_vec(&other).expect("encode the other generation's handover");
+    let Err(error) = decode_lashlang_segment_state(&bytes) else {
+        panic!("another generation's envelope must not decode");
     };
     assert!(
         matches!(
             &error,
             LashlangSegmentStateError::VersionMismatch {
                 expected: LASHLANG_SEGMENT_STATE_VERSION,
-                found: 11,
-            }
+                found,
+            } if *found == other_version
         ),
         "unexpected error: {error}"
     );
-}
 
-/// The predecessor's v10 continuation, sealed as the opaque state a current
-/// envelope carries, is refused twice: the parent's structural check refuses
-/// its format version without decoding it, and the worker's semantic decode
-/// refuses the bytes on their own.
-#[test]
-fn vm_v10_shape_with_projected_slots_is_a_versioned_rejection() {
-    assert!(
-        VM_V10_SEGMENT_STATE
-            .windows(b"projected_slots".len())
-            .any(|window| window == b"projected_slots"),
-        "the predecessor fixture must preserve the retired key"
-    );
-    let wire: serde_json::Value =
-        serde_json::from_slice(VM_V10_SEGMENT_STATE).expect("the predecessor fixture is JSON");
-    assert_eq!(wire["vm"]["format_version"], 10);
+    let segment: LashlangSegmentState =
+        serde_json::from_value(parked_loop_segment_golden()["segment_state"].clone())
+            .expect("this build's envelope");
     let process_id = lash_sansio::ProcessId::fixture("fixture");
     let owner = super::segment_continuation_owner(&process_id);
-    let bytes = serde_json::to_vec(&wire["vm"]).expect("the predecessor continuation encodes");
+    let other_format = lashlang::VM_CONTINUATION_FORMAT_VERSION + 1;
     let sealed = lash_vm_protocol::OpaqueVmState::seal(
         lash_vm_protocol::VmStateKind::Continuation,
         owner.clone(),
         lashlang::vm_contract_versions(),
-        10,
-        worker_parked_continuation(bytes),
+        other_format,
+        segment.vm.bytes().to_vec(),
     );
-
     let reads = lashlang::vm_contract_reads();
     assert_eq!(
         sealed.check(&super::segment_continuation_expectation(&owner, &reads)),
@@ -714,24 +698,9 @@ fn vm_v10_shape_with_projected_slots_is_a_versioned_rejection() {
             lash_vm_protocol::OpaqueStateRefusal::ComponentOutsideReadRange {
                 component: lash_vm_protocol::VmContractComponent::Continuation,
                 reads: lashlang::VM_CONTINUATION_READ_RANGE,
-                found: 10,
+                found: other_format,
             }
         )
-    );
-    let Err(refusal) = worker_continuation_info(&sealed) else {
-        panic!("the v10 VM continuation must be refused by the current decoder");
-    };
-    let details = refusal.to_string();
-    assert!(
-        details.contains("version 10"),
-        "unexpected refusal: {details}"
-    );
-    assert!(
-        details.contains(&format!(
-            "version {}",
-            lashlang::VM_CONTINUATION_FORMAT_VERSION
-        )),
-        "the refusal must name the current VM continuation version: {details}"
     );
 }
 
@@ -757,107 +726,6 @@ fn resume_rejects_changed_bytecode_program_hash_with_typed_failure() {
     let output = refuse_foreign_program("sha256:old", "sha256:current", None)
         .expect("changed bytecode identity must fail closed");
     assert_retired_generation(&output, "sha256:old");
-}
-
-#[test]
-fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
-    let mut fixture: serde_json::Value = serde_json::from_slice(BYTECODE_V17_PARKED_LOOP)
-        .expect("the version-17 parked-loop fixture is JSON");
-    assert_eq!(fixture["bytecode_format_version"], 17);
-    assert_eq!(
-        fixture["source_commit"],
-        "4f96c76629575e46b8d7f29526bb0cab7c16625b"
-    );
-    assert!(
-        serde_json::from_value::<crate::LashlangProcessInput>(fixture["input"].clone()).is_err(),
-        "the obsolete named input is refused"
-    );
-    let input = crate::LashlangProcessInput {
-        module_ref: serde_json::from_value(fixture["input"]["module_ref"].clone()).unwrap(),
-        process_ref: serde_json::from_value(fixture["input"]["process_ref"].clone()).unwrap(),
-        host_requirements_ref: serde_json::from_value(
-            fixture["input"]["host_requirements_ref"].clone(),
-        )
-        .unwrap(),
-        args: serde_json::from_value(fixture["input"]["args"].clone()).unwrap(),
-        process_name: String::new(),
-    };
-    let persisted = fixture["program_hash"]
-        .as_str()
-        .expect("fixture program hash");
-    let current = super::lashlang_program_hash(&input);
-    assert_ne!(
-        persisted, current,
-        "the bytecode version must move identity"
-    );
-
-    let output = refuse_foreign_program(persisted, &current, None)
-        .expect("the predecessor must fail at the program-identity fence");
-    assert_retired_generation(&output, persisted);
-
-    // Keep the predecessor capture intact. Only re-envelope its parked VM at
-    // the current continuation version, with the envelope fields later
-    // versions added, to reach the bytecode identity fence.
-    fixture["segment_state"]["vm"]["format_version"] =
-        serde_json::json!(lashlang::VM_CONTINUATION_FORMAT_VERSION);
-    // The predecessor names no executable; the current envelope binds its
-    // continuation to one (FIG-3571). Only its shape matters here: the fence
-    // under test is the program generation above.
-    fixture["segment_state"]["vm"]["executable"] = serde_json::json!(current);
-    // The predecessor parked under size schedule 2; the current envelope
-    // prices heap objects under schedule 3 (FIG-3655 closure metadata).
-    fixture["segment_state"]["vm"]["heap"]["size_schedule_version"] =
-        serde_json::json!(lashlang::HEAP_SIZE_SCHEDULE_VERSION);
-    // The predecessor parked a wall-clock meter; the current envelope carries
-    // no deadline meter at all (FIG-3672), so the field is dead rather than
-    // re-valued.
-    fixture["segment_state"]["vm"]
-        .as_object_mut()
-        .expect("the parked VM is an object")
-        .remove("active_execution_elapsed");
-    fixture["segment_state"]["effect_omissions"] = serde_json::json!({});
-    // The predecessor committed each summary occurrence as it was recorded;
-    // the current envelope carries the ones no boundary committed yet
-    // (FIG-3571).
-    fixture["segment_state"]["pending_summary"] = serde_json::json!([]);
-    // The predecessor held no effect group across its boundary; the current
-    // envelope states that explicitly (ADR 0099 §9).
-    fixture["segment_state"]["outstanding_groups"] = serde_json::json!([]);
-    // The predecessor counted sleeps per kind; the current envelope carries the
-    // run's issue-ordinal state instead (FIG-3586).
-    fixture["segment_state"]["commands"] =
-        serde_json::to_value(crate::LashlangRunOrdinals::start()).expect("run ordinals encode");
-    // A v20 list cursor names the live collection it follows, if any
-    // (FIG-3625); the predecessor's parked loop walked a snapshot.
-    for iterator in fixture["segment_state"]["vm"]["iterator_stack"]
-        .as_array_mut()
-        .expect("the parked VM has an iterator stack")
-    {
-        if let Some(list) = iterator["cursor"].get_mut("List") {
-            list["collection"] = serde_json::json!({"kind": "unset"});
-        }
-    }
-    // A current continuation names where it resumes; the predecessor parked
-    // after a completed sleep.
-    fixture["segment_state"]["vm"]["resume"] = serde_json::json!({"kind": "next_instruction"});
-    let continuation = serde_json::to_vec(&fixture["segment_state"]["vm"])
-        .expect("the patched continuation encodes");
-    fixture["segment_state"]["vm"] = serde_json::to_value(lash_vm_protocol::OpaqueVmState::seal(
-        lash_vm_protocol::VmStateKind::Continuation,
-        super::segment_continuation_owner(&lash_sansio::ProcessId::fixture("fixture")),
-        lashlang::vm_contract_versions(),
-        lashlang::VM_CONTINUATION_FORMAT_VERSION,
-        worker_parked_continuation(continuation),
-    ))
-    .expect("the sealed continuation encodes");
-    let segment: LashlangSegmentState = serde_json::from_value(fixture["segment_state"].clone())
-        .expect("the fixture carries a structurally valid current envelope");
-    let continuation = worker_continuation_info(&segment.vm)
-        .expect("the worker decodes the re-enveloped continuation");
-    assert_eq!(
-        continuation, 1,
-        "the refused continuation is parked inside the predecessor loop"
-    );
 }
 
 /// The v11 envelope no longer carries `signal_send_sequence`: its only
@@ -1030,89 +898,6 @@ fn durable_exhaustion_has_a_typed_process_failure_surface() {
             if matches!(output.outcome, lash_core::ToolCallOutcome::Failure(ref failure)
                 if failure.code == "process_execution_bound_exhausted")
     ));
-}
-
-#[test]
-fn predecessor_segment_with_old_node_id_occurrence_counters_is_refused() {
-    let wire: serde_json::Value = serde_json::from_slice(SEGMENT_V12_PARKED_OLD_IDS)
-        .expect("the real v12 predecessor segment is JSON");
-    assert_eq!(wire["version"], 12, "the fixture must remain literal v12");
-    assert_eq!(
-        wire["vm"]["occurrence_counters"]["resource_operation:f5157b6682a34e8b5f1fccdc"], 1,
-        "the predecessor bytes must retain their real old-family occurrence counter"
-    );
-
-    let Err(error) = decode_lashlang_segment_state(SEGMENT_V12_PARKED_OLD_IDS) else {
-        panic!("an old-id handover must not decode against the new node-id generation");
-    };
-    assert!(
-        matches!(
-            &error,
-            LashlangSegmentStateError::VersionMismatch {
-                expected: LASHLANG_SEGMENT_STATE_VERSION,
-                found,
-            } if *found == 12
-        ),
-        "unexpected error: {error}"
-    );
-    let message = error.to_string();
-    assert!(message.contains("drain in-flight sessions on the old build"));
-    assert!(message.contains("recreate development/test stores"));
-}
-
-/// Under the current, temporary cutover policy, a segment parked by the
-/// pre-FIG-3571 writer is refused at both of its fences — program identity and
-/// segment version, which names the old version — and is never restored under
-/// the carrier IR's node ids.
-#[test]
-fn pre_fig3571_parked_segment_is_refused_at_both_fences() {
-    let fixture: serde_json::Value = serde_json::from_slice(SEGMENT_V17_PARKED_PRE_FIG3571)
-        .expect("the pre-FIG-3571 parked-segment fixture is JSON");
-    assert_eq!(fixture["segment_state_version"], 17);
-    assert_eq!(fixture["bytecode_format_version"], 19);
-    assert_eq!(fixture["source_commit"], "d5d4956d3");
-    assert_eq!(fixture["segment_state"]["version"], 17);
-    assert_eq!(fixture["segment_state"]["vm"]["format_version"], 18);
-
-    assert!(
-        serde_json::from_value::<crate::LashlangProcessInput>(fixture["input"].clone()).is_err(),
-        "the obsolete named input is refused"
-    );
-    let input = crate::LashlangProcessInput {
-        module_ref: serde_json::from_value(fixture["input"]["module_ref"].clone()).unwrap(),
-        process_ref: serde_json::from_value(fixture["input"]["process_ref"].clone()).unwrap(),
-        host_requirements_ref: serde_json::from_value(
-            fixture["input"]["host_requirements_ref"].clone(),
-        )
-        .unwrap(),
-        args: serde_json::from_value(fixture["input"]["args"].clone()).unwrap(),
-        process_name: String::new(),
-    };
-    let persisted = fixture["program_hash"]
-        .as_str()
-        .expect("fixture program hash");
-    let current = super::lashlang_program_hash(&input);
-    assert_ne!(persisted, current, "the bytecode bump must move identity");
-    let output = refuse_foreign_program(persisted, &current, None)
-        .expect("the predecessor must fail at the program-identity fence");
-    assert_retired_generation(&output, persisted);
-
-    // The literal handover bytes, unedited, meet the segment-version fence.
-    let engine_state =
-        serde_json::to_vec(&fixture["segment_state"]).expect("re-encode the parked handover");
-    let Err(error) = decode_lashlang_segment_state(&engine_state) else {
-        panic!("a pre-FIG-3571 segment must not decode against the carrier generation");
-    };
-    assert!(
-        matches!(
-            &error,
-            LashlangSegmentStateError::VersionMismatch {
-                expected: LASHLANG_SEGMENT_STATE_VERSION,
-                found: 17,
-            }
-        ),
-        "unexpected error: {error}"
-    );
 }
 
 /// FIG-4420 wraps the VM wire in the worker's MessagePack `ParkedRun`.

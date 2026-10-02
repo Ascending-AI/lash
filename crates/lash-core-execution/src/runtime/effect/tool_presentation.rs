@@ -45,7 +45,7 @@ use super::executor::RuntimeEffectControllerError;
 ///         cover("string_identity!", SessionId, ProcessId),
 ///     ),
 /// )
-pub const TOOL_PRESENTATION_VERSION: u16 = 3;
+pub const TOOL_PRESENTATION_VERSION: u16 = 1;
 
 /// The journaled product of one tool result's presentation chain.
 ///

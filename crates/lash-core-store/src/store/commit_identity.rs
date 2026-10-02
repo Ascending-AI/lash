@@ -36,7 +36,7 @@ pub struct OperationId {
 ///         optional, sequence, finish, provider_route,
 ///     ),
 /// )
-pub const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 7;
+pub const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
 
 /// Frozen durable-identity family domains minted by this module (ADR 0097).
 /// These are `FAMILY_DOMAINS`-registered names whose preimages carry no

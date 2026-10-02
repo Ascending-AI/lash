@@ -1119,7 +1119,7 @@ impl ProcessEventAppendRequest {
 /// version_guard(
 ///     items(cancellation_replay_preimage),
 /// )
-const PROCESS_CANCELLATION_FAMILY_VERSION: u8 = 3;
+const PROCESS_CANCELLATION_FAMILY_VERSION: u8 = 1;
 
 /// Permanent cancellation origin tags: TurnStopped=0, ParentEnded=1,
 /// OperatorRequested=2, ModelRequested=3, StartFailed=4. Clock readings are
@@ -1291,12 +1291,12 @@ mod cancellation_identity_tests {
         );
         assert_eq!(
             key,
-            "process-cancellation:v3:blake3:88f852453064ce3fe2c7aa1c45fd73d10a4053d73cb2305ea4a656b46f34070c"
+            "process-cancellation:v1:blake3:4f07a7a686f6008d21f686db3df644675a80da9a0c3b1e5779d78700c793e682"
         );
         let empty = CancelRequest::new(CancelOrigin::OperatorRequested, "", 10);
         assert_eq!(
             hex(&cancellation_replay_preimage(&process_ref, &empty)),
-            "6c6173682d737461626c652d6964656e74697479020300000000000000216c6173682e70726f636573732d63616e63656c6c6174696f6e2d726571756573740000000000000022705f3030303030303030303030303730303038303030303030303030303030303031020000000000000000"
+            "6c6173682d737461626c652d6964656e74697479020100000000000000216c6173682e70726f636573732d63616e63656c6c6174696f6e2d726571756573740000000000000022705f3030303030303030303030303730303038303030303030303030303030303031020000000000000000"
         );
         let retry = CancelRequest {
             requested_at_ms: 99,
