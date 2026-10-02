@@ -458,6 +458,32 @@ def check_action_categories() -> None:
     assert "exec_compatible_with = [pool_constraint(cpu, memory)]" in rust
 
 
+def check_queue_priority() -> None:
+    # Every executor that can send an Execute request carries the invocation's
+    # queue priority; an override that only runs locally sends none.
+    platforms = (HERE / "platforms.bzl").read_text(encoding="utf-8")
+    assert 'RE_PRIORITY = int(read_root_config("kiln", "re_priority", "0"))' in platforms
+    assert "if RE_PRIORITY < -1000 or RE_PRIORITY > 1000:\n    fail(" in platforms
+    assert "KILN_RE_PRIORITY" in platforms
+    assert "re_priority" not in (ROOT / ".buckconfig").read_text(encoding="utf-8")
+    remote = 0
+    for path in sorted(HERE.glob("*.bzl")):
+        text = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"CommandExecutorConfig\(", text):
+            depth, end = 1, match.end()
+            while depth:
+                depth += {"(": 1, ")": -1}.get(text[end], 0)
+                end += 1
+            call = text[match.end():end - 1]
+            if re.search(r"remote_enabled = False\b", call):
+                assert "priority" not in call, f"{path.name}: a local-only executor sets a priority"
+                continue
+            remote += 1
+            assert re.search(r"\bpriority = RE_PRIORITY,", call), f"{path.name}: a remote-enabled CommandExecutorConfig passes no priority = RE_PRIORITY"
+            assert path.name == "platforms.bzl" or re.search(r'load\(":platforms.bzl",[^)]*"RE_PRIORITY"', text), path.name
+    assert remote == 5, remote
+
+
 def check_ownership() -> None:
     ownership = load_json("source-ownership.json")
     package_dirs = {
@@ -1727,6 +1753,7 @@ def main() -> int:
     checks = [
         check_inventory,
         check_sizing,
+        check_queue_priority,
         check_action_categories,
         check_ownership,
         check_action_bridge,

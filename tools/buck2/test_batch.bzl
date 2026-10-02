@@ -1,6 +1,6 @@
 """One cacheable remote action for a package's plain libtest binaries."""
 
-load(":platforms.bzl", "pool_properties")
+load(":platforms.bzl", "RE_PRIORITY", "pool_properties")
 
 def _batch_impl(ctx):
     local = read_root_config("kiln", "execution_mode", "remote") == "local"
@@ -49,6 +49,7 @@ def _batch_impl(ctx):
                 local_enabled = local,
                 remote_enabled = not local,
                 remote_cache_enabled = not local,
+                priority = RE_PRIORITY,
                 remote_execution_properties = pool_properties(ctx.attrs.cpu, ctx.attrs.memory_kb),
                 remote_execution_use_case = "lash",
             ),

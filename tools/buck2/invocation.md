@@ -1,8 +1,8 @@
 # Remote concurrency and daemon ownership
 
 Use `scripts/hermetic-build.sh` or Kiln for managed builds. `--jobs` sets the
-stock Buck2 daemon's remote execution semaphore. The local default is 16; CI
-uses 32. Test runner concurrency uses the same requested limit. Each fork has
+stock Buck2 daemon's remote execution semaphore. The default is 32, locally
+and in CI. Test runner concurrency uses the same requested limit. Each fork has
 its own semaphore, so callers running independent forks must coordinate their
 combined remote load.
 

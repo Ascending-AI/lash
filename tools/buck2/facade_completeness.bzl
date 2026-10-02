@@ -23,7 +23,7 @@ load("@prelude//linking:link_info.bzl", "LinkStrategy")
 load("@prelude//rust:build_params.bzl", "MetadataKind")
 load("@prelude//rust:link_info.bzl", "RustLinkInfo", "strategy_info")
 load("@prelude//rust:rust_toolchain.bzl", "RustToolchainInfo")
-load(":platforms.bzl", "pool_properties")
+load(":platforms.bzl", "RE_PRIORITY", "pool_properties")
 
 _THIRD_PARTY_PACKAGE = "third-party/rust"
 
@@ -93,6 +93,7 @@ def _facade_completeness_impl(ctx):
                 local_enabled = local,
                 remote_enabled = not local,
                 remote_cache_enabled = not local,
+                priority = RE_PRIORITY,
                 remote_execution_properties = pool_properties(ctx.attrs.cpu, ctx.attrs.memory_kb),
                 remote_execution_use_case = "lash",
             ),

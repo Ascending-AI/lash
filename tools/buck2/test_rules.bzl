@@ -1,6 +1,6 @@
 """Cacheable Lash test wrappers with reports and exact run budgets."""
 
-load(":platforms.bzl", "pool_properties")
+load(":platforms.bzl", "RE_PRIORITY", "pool_properties")
 
 def _bundle_impl(ctx):
     directory = ctx.actions.copied_dir("helpers", {
@@ -52,6 +52,7 @@ def _external_test_impl(ctx):
         local_enabled = local,
         remote_enabled = not local,
         remote_cache_enabled = not local,
+        priority = RE_PRIORITY,
         remote_execution_properties = ctx.attrs.properties,
         remote_execution_use_case = "lash",
     )

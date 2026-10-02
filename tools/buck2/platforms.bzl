@@ -6,6 +6,13 @@ load(":exec_sizes.bzl", "POOL_BUDGETS")
 # request is exactly its table's.
 MEMORY_SCALE = int(read_root_config("kiln", "memory_scale", "1"))
 
+# `-c kiln.re_priority=N` is the priority of every Execute request the
+# invocation sends: the pool queue serves a higher one first and never
+# preempts a running action. The driver passes KILN_RE_PRIORITY, 0 when unset.
+RE_PRIORITY = int(read_root_config("kiln", "re_priority", "0"))
+if RE_PRIORITY < -1000 or RE_PRIORITY > 1000:
+    fail("kiln.re_priority (KILN_RE_PRIORITY) must be an integer from -1000 to 1000, not {}".format(RE_PRIORITY))
+
 def pool_budget_name(cpu, memory_kb):
     return "pool_{}_{}".format(cpu, memory_kb)
 
@@ -33,15 +40,6 @@ def pool_properties(cpu = "1", memory = "1572864"):
     }
 
 
-def test_remote_execution(cpu, memory_kb):
-    local = read_root_config("kiln", "execution_mode", "remote") == "local"
-    return {
-        "capabilities": pool_properties(str(cpu), str(memory_kb)),
-        "local_enabled": local,
-        "remote_cache_enabled": not local,
-        "use_case": "lash",
-    }
-
 def _platforms(ctx):
     local = read_root_config("kiln", "execution_mode", "remote") == "local"
     constraints = {
@@ -61,6 +59,7 @@ def _platforms(ctx):
             executor_config = CommandExecutorConfig(
                 local_enabled = local,
                 remote_enabled = not local,
+                priority = RE_PRIORITY,
                 remote_execution_properties = pool_properties(cpu, memory),
                 remote_execution_use_case = "lash",
                 remote_output_paths = "output_paths",

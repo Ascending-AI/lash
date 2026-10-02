@@ -23,7 +23,7 @@ settings and must not be committed. The combined client certificate/key PEM is
 private, mode 0600, under `.kiln/`. Buck2 endpoint values omit the `grpcs://`
 scheme. The graph uses SHA256 digests and the existing NativeLink pool.
 
-The driver defaults to 16 remote actions, or 32 in CI. `--jobs N` selects remote
+The driver defaults to 32 remote actions. `--jobs N` selects remote
 concurrency; eight coordinator threads bound local scheduling. Compatibility
 and benchmark runs use controlled concurrency separately from these defaults.
 Each checkout has its own `kiln` isolation directory and daemon.

@@ -554,6 +554,24 @@ commands on the same test binary with different filters.
 - **Build and test together.** Both hold a shared lease on the daemon and run
   at once. Buck2 itself orders commands whose configuration differs.
 
+### Queue priority
+
+The driver sends `KILN_RE_PRIORITY` as the priority of every Execute request,
+as `-c kiln.re_priority=<n>`: `0` when the variable is unset, and an error
+before Buck2 starts when it is not an integer from -1000 to 1000. Kiln exports
+`100` for `kiln build|check|test|clippy|doc|run` and `0` for `kiln gate` and
+the commands a gate's script runs; CI and direct `scripts/hermetic-build.sh`
+calls leave it unset. The pool queue serves the higher priority first, then
+the older request, so `kiln` commands outrank gates and CI.
+
+- **No preemption.** Priority orders queued actions only. A running action is
+  never interrupted, and a request for an action already queued keeps that
+  action's priority.
+- **One fork, two priorities.** The priority is part of the graph's
+  configuration, so a gate and an agent command in one fork serialize, and the
+  first command after a change of priority re-analyses the graph. Run a gate in
+  its own fork.
+
 Artifact consumers request final materialization and use the native build report:
 
 ```sh

@@ -401,6 +401,43 @@ class DriverTests(unittest.TestCase):
         self.assertNotIn('--local-only', command)
         self.assertNotIn('--num-threads', command)
 
+    def priority(self, command):
+        return [value for flag, value in zip(command, command[1:]) if flag == '-c' and value.startswith('kiln.re_priority=')]
+
+    def test_every_graph_command_carries_the_queue_priority(self):
+        inventory = {'packages': [{'targets': [{'label': '//lib:lib', 'build_label': '//lib:lib[static]', 'check_label': '//lib:lib[check]', 'clippy_label': '//lib:lib[clippy.txt]', 'doc_label': '//lib:lib[doc]'}]}]}
+        commands = [[operation, '//lib:lib'] for operation in ('build', 'check', 'clippy', 'doc', 'test', 'run')] + [['--local', 'analyze', '//lib:lib']]
+        for exported, expected in ((None, '0'), ('100', '100'), ('-1000', '-1000')):
+            environment = {} if exported is None else {'KILN_RE_PRIORITY': exported}
+            with patch.dict(os.environ, environment), self.subTest(exported=exported):
+                if exported is None:
+                    os.environ.pop('KILN_RE_PRIORITY', None)
+                for args in commands:
+                    self.assertEqual(self.priority(self.command(args, inventory)), ['kiln.re_priority=' + expected], args)
+                self.assertEqual(self.command(['clean']), ['/buck2', '--isolation-dir', 'kiln', 'clean'])
+
+    def test_an_invalid_queue_priority_is_rejected_naming_the_variable(self):
+        for value in ('abc', '5000', '-1001', '', '1.5', '007'):
+            with patch.dict(os.environ, {'KILN_RE_PRIORITY': value}), self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, 'KILN_RE_PRIORITY must be an integer from -1000 to 1000'):
+                    self.command(['check', '//lib:lib'], {'packages': []})
+
+    def test_repetitions_carry_the_queue_priority(self):
+        options, remaining = driver.arguments(['test', '--runs_per_test=2', '//pkg:test'])
+        seen = []
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {'KILN_RE_PRIORITY': '100'}):
+            options.test_output_dir = Path(temporary)
+            driver.repeat_tests(options, remaining, Path('/buck2'), Path('/repo'), [], lambda args: seen.append(args) or 1)
+        self.assertEqual(self.priority(seen[0]), ['kiln.re_priority=100'])
+
+    def test_the_default_remote_concurrency_is_32_and_an_explicit_value_wins(self):
+        for ci in (None, 'true'):
+            with patch.dict(os.environ, {} if ci is None else {'CI': ci}), self.subTest(ci=ci):
+                if ci is None:
+                    os.environ.pop('CI', None)
+                self.assertEqual(driver.arguments(['check'])[0].jobs, 32)
+                self.assertEqual(driver.arguments(['check', '--jobs', '16'])[0].jobs, 16)
+
     def test_remote_configuration_requires_pool_metadata_but_local_remains_available(self):
         with tempfile.TemporaryDirectory() as work:
             root = Path(work)

@@ -67,6 +67,10 @@ FEATURE_VARIANT = re.compile(r'__fv_[0-9a-f]+$')
 TEST_DEFAULTS = {'test_report': '.buck2/test-report.json', 'test_output_dir': '.buck2/test-results'}
 # How long a finished invocation's private outputs outlive it unpublished.
 TEST_OUTPUT_RETENTION_SECONDS = 3600
+# The pool queue serves a higher priority first. Kiln exports 100 for an
+# agent's command and 0 for a gate; CI and direct calls leave it unset.
+RE_PRIORITY_VARIABLE = 'KILN_RE_PRIORITY'
+RE_PRIORITY_LIMIT = 1000
 
 
 def validate_remote_configuration(path):
@@ -90,13 +94,20 @@ def validate_remote_configuration(path):
         )
 
 
+def re_priority(environment):
+    value = environment.get(RE_PRIORITY_VARIABLE, '0')
+    if not re.fullmatch(r'0|-?[1-9][0-9]*', value) or abs(int(value)) > RE_PRIORITY_LIMIT:
+        raise ValueError(f'{RE_PRIORITY_VARIABLE} must be an integer from -{RE_PRIORITY_LIMIT} to {RE_PRIORITY_LIMIT}, not {value!r}')
+    return int(value)
+
+
 def arguments(argv):
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--local', action='store_true')
     mode.add_argument('--shared', action='store_true')
     parser.add_argument('operation', choices=['sync', 'clean', 'analyze', *DEFAULTS, 'run'], nargs='?', default='build')
-    parser.add_argument('--jobs', type=int, default=32 if os.environ.get('CI') else 16)
+    parser.add_argument('--jobs', type=int, default=32)
     parser.add_argument('--isolation-dir', default='kiln')
     parser.add_argument('--materializations', choices=['final', 'none'])
     parser.add_argument('--config')
@@ -269,6 +280,8 @@ def command(options, remaining, executable, root, inventory=None, skipped=None):
     if operation != 'analyze':
         result += ['--num-threads', '8']
     result += ['-c', 'kiln.execution_mode=' + ('local' if options.local else 'remote')]
+    # Always passed, so a fork's daemon only ever holds the agent's graph or the gate's.
+    result += ['-c', f'kiln.re_priority={re_priority(os.environ)}']
     if options.local and operation != 'analyze':
         result.append('--local-only')
     if options.config:

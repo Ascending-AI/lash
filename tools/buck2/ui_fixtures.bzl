@@ -6,7 +6,7 @@ load("@prelude//rust:build_params.bzl", "MetadataKind")
 load("@prelude//rust:link_info.bzl", "RustLinkInfo", "RustProcMacroMarker", "RustProcMacroPlugin", "get_available_proc_macros", "strategy_info")
 load("@prelude//rust:rust_toolchain.bzl", "RustToolchainInfo")
 load("@prelude//rust:sources.bzl", "RustSources")
-load(":platforms.bzl", "pool_properties")
+load(":platforms.bzl", "RE_PRIORITY", "pool_properties")
 
 UIHarnessInfo = provider(fields = {
     "edition": str,
@@ -130,6 +130,7 @@ def _ui_fixtures_impl(ctx):
                 local_enabled = local,
                 remote_enabled = not local,
                 remote_cache_enabled = not local,
+                priority = RE_PRIORITY,
                 remote_execution_properties = pool_properties(ctx.attrs.cpu, ctx.attrs.memory_kb),
                 remote_execution_use_case = "lash",
             ),
