@@ -1,5 +1,17 @@
 //! Durable process identity and lifecycle vocabulary.
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_STABLE_IDENTITY_DOMAIN_VERSION, derive))
+const LASH_STABLE_IDENTITY_DOMAIN_VERSION: &str = "lash-stable-identity/v2";
+
+/// version_surface = "coexist"
+/// version_guard(items(PROCESS_ENV_PREFIX_VERSION, process_execution_env_ref_for_bytes))
+const PROCESS_ENV_PREFIX_VERSION: &str = "process-env:v6:blake3:";
+
+/// version_surface = "coexist"
+/// version_guard(items(LASH_PROCESS_ENV_DOMAIN_VERSION, process_execution_env_ref_for_bytes))
+const LASH_PROCESS_ENV_DOMAIN_VERSION: &str = "lash-process-env/v6";
+
 use crate::{ProcessId, SessionId};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -259,7 +271,7 @@ impl StartKey {
         Self(format!(
             "{START_KEY_PREFIX}:v{START_KEY_FAMILY_VERSION}:{}:blake3:{}",
             namespace.name(),
-            crate::stable_hash::blake3_hex("lash-stable-identity/v2", &digest)
+            crate::stable_hash::blake3_hex(LASH_STABLE_IDENTITY_DOMAIN_VERSION, &digest)
         ))
     }
 
@@ -627,8 +639,8 @@ impl fmt::Display for ProcessExecutionEnvRef {
 }
 pub fn process_execution_env_ref_for_bytes(bytes: &[u8]) -> ProcessExecutionEnvRef {
     ProcessExecutionEnvRef::new(format!(
-        "process-env:v6:blake3:{}",
-        crate::stable_hash::blake3_hex("lash-process-env/v6", bytes)
+        "{PROCESS_ENV_PREFIX_VERSION}{}",
+        crate::stable_hash::blake3_hex(LASH_PROCESS_ENV_DOMAIN_VERSION, bytes)
     ))
 }
 

@@ -1,3 +1,7 @@
+/// version_surface = "coexist"
+/// version_guard(items(LASH_OPENAI_RESPONSES_REQUEST_DOMAIN_VERSION, request_fingerprint))
+const LASH_OPENAI_RESPONSES_REQUEST_DOMAIN_VERSION: &str = "lash-openai-responses-request/v2";
+
 use crate::request_work::{body_excerpt, needs_blocking, run, serialize_body};
 use crate::support::*;
 
@@ -139,7 +143,10 @@ pub(crate) fn build_request_body(
 }
 
 fn request_fingerprint(body: &[u8]) -> ResponsesRequestFingerprint {
-    lash_sansio::core_support::blake3_domain_hash("lash-openai-responses-request/v2", body)
+    lash_sansio::core_support::blake3_domain_hash(
+        LASH_OPENAI_RESPONSES_REQUEST_DOMAIN_VERSION,
+        body,
+    )
 }
 
 pub(crate) fn responses_request_fingerprint(

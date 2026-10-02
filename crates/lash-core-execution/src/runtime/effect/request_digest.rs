@@ -12,6 +12,10 @@
 //! The encoding is streamed into the hasher, so the transcript is never
 //! materialized as a second string.
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_LLM_REQUEST_CONTENT_DOMAIN_VERSION, digest_instructions, of_items))
+const LASH_LLM_REQUEST_CONTENT_DOMAIN_VERSION: &str = "lash-llm-request-content/v1";
+
 use std::io;
 use std::sync::Arc;
 
@@ -121,7 +125,9 @@ struct ContentDigest {
 
 impl ContentDigest {
     fn of_items<T: Serialize>(items: &[T]) -> Result<Self, serde_json::Error> {
-        let mut writer = HashWriter(Blake3DomainHasher::new("lash-llm-request-content/v1"));
+        let mut writer = HashWriter(Blake3DomainHasher::new(
+            LASH_LLM_REQUEST_CONTENT_DOMAIN_VERSION,
+        ));
         serde_json::to_writer(&mut writer, items)?;
         Ok(Self {
             len: items.len(),
@@ -131,7 +137,7 @@ impl ContentDigest {
 }
 
 fn digest_instructions(instructions: &Arc<str>) -> ContentDigest {
-    let mut hasher = Blake3DomainHasher::new("lash-llm-request-content/v1");
+    let mut hasher = Blake3DomainHasher::new(LASH_LLM_REQUEST_CONTENT_DOMAIN_VERSION);
     hasher.update(instructions.as_bytes());
     ContentDigest {
         len: instructions.len(),

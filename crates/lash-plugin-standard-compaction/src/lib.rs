@@ -15,6 +15,10 @@
 //! The standard protocol's plugin only: RLM switches frames through the
 //! model-driven `continue_as`.
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_STANDARD_COMPACTION_DOMAIN_VERSION, compaction_request_ids))
+const LASH_STANDARD_COMPACTION_DOMAIN_VERSION: &str = "lash-standard-compaction/v1";
+
 use lash_sansio::{SessionId, TurnId};
 
 mod recovery;
@@ -441,8 +445,10 @@ pub(crate) fn compaction_request_ids(
     append_identity_field(&mut identity, journal_scope.key());
     let request_identity = compaction_request_identity(request_snapshot, prompt_text)?;
     append_identity_field(&mut identity, &request_identity);
-    let discriminator =
-        lash_sansio::core_support::blake3_domain_hash_hex("lash-standard-compaction/v1", identity);
+    let discriminator = lash_sansio::core_support::blake3_domain_hash_hex(
+        LASH_STANDARD_COMPACTION_DOMAIN_VERSION,
+        identity,
+    );
     Ok((
         SessionId::from(format!("{parent_session_id}-compaction:{discriminator}")),
         TurnId::from(format!(

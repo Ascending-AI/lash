@@ -73,9 +73,10 @@ def main(argv: list[str] | None = None) -> int:
         registry = view.content(gate.REGISTRY)
         if registry is None:
             raise gate.CheckError(f"cannot read {gate.REGISTRY}")
+        from discover_version_surfaces import surfaces as discover_surfaces
         reports = [
             surface_report(view, surface)
-            for surface in gate.load_surfaces(registry, gate.REGISTRY)
+            for surface in discover_surfaces(view)
             if not args.constant or surface.constant in args.constant
         ]
     except gate.CheckError as error:

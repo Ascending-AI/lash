@@ -4,6 +4,18 @@
 //! payloads, and the checkpoint boundary rule stores filter on. The ingress
 //! driver that normalizes and applies them stays in `lash-core`.
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_ACCEPTED_TURN_INPUT_DOMAIN_VERSION, provisioned_turn_input_id))
+const LASH_ACCEPTED_TURN_INPUT_DOMAIN_VERSION: &str = "lash-accepted-turn-input/v1";
+
+/// version_surface = "coexist"
+/// version_guard(items(LASH_TURN_INPUT_DOMAIN_VERSION, derive_pending_turn_input_id))
+const LASH_TURN_INPUT_DOMAIN_VERSION: &str = "lash-turn-input/v2";
+
+/// version_surface = "coexist"
+/// version_guard(items(LASH_KEYED_TURN_INPUT_DOMAIN_VERSION, keyed_input_id))
+const LASH_KEYED_TURN_INPUT_DOMAIN_VERSION: &str = "lash-keyed-turn-input/v1";
+
 pub use crate::run_spec::{
     BindingId, CapabilityRef, ContractRef, DefinitionRef, NoRunOptionsOwner, RecordedRender,
     RenderFault, RenderRefusal, ResolvedRun, RunDefinition, RunDefinitionRefusal, RunDefinitions,
@@ -30,7 +42,7 @@ pub fn provisioned_turn_input_id(acceptance: &crate::EffectAddress) -> String {
     format!(
         "ti:{}",
         crate::stable_hash::blake3_hex(
-            "lash-accepted-turn-input/v1",
+            LASH_ACCEPTED_TURN_INPUT_DOMAIN_VERSION,
             acceptance.graph_key().as_bytes(),
         )
     )
@@ -53,7 +65,7 @@ pub fn derive_pending_turn_input_id(
     format!(
         "ti:{}",
         crate::stable_hash::blake3_hex(
-            "lash-turn-input/v2",
+            LASH_TURN_INPUT_DOMAIN_VERSION,
             format!("{session_id}:{source_key:?}:{now_epoch_ms}:{nonce}").as_bytes(),
         )
     )
@@ -384,7 +396,7 @@ impl PendingTurnInputDraft {
         format!(
             "ti:{}",
             crate::stable_hash::blake3_hex(
-                "lash-keyed-turn-input/v1",
+                LASH_KEYED_TURN_INPUT_DOMAIN_VERSION,
                 // Length-prefixed, so no session and key pair spells another.
                 format!("{}:{session_id}:{source_key}", session_id.as_str().len()).as_bytes(),
             )

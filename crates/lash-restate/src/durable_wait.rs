@@ -182,7 +182,11 @@ pub(crate) const DURABLE_WAIT_REGISTRY_FAMILY: ObjectFamily = ObjectFamily {
     component: lash_core_store::compat::ComponentId::RESTATE_DURABLE_WAIT_REGISTRY,
     formats: &DURABLE_WAIT_REGISTRY_FORMATS,
 };
+/// version_surface = "coexist"
+/// version_guard(items(DURABLE_WAIT_INDEX_METADATA_KEY, fence_cancel_decided, load_durable_wait_index_metadata, peek_turn_gate, read_durable_wait_index_metadata, register_awakeable, reinstate, resolve, revoke_index, unregister_awakeable))
 pub(crate) const DURABLE_WAIT_INDEX_METADATA_KEY: &str = "wait-index/v2/metadata";
+/// version_surface = "coexist"
+/// version_guard(items(DURABLE_WAIT_INDEX_WAIT_PREFIX, durable_wait_address_from_state_key, durable_wait_index_state_key, load_indexed_waits))
 const DURABLE_WAIT_INDEX_WAIT_PREFIX: &str = "wait-index/v2/wait/";
 /// One wait's retained authority and mirrored terminal, for every scope kind.
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
@@ -192,13 +196,21 @@ pub(crate) struct IndexedWait {
 }
 /// An effect executing under the scope inside a handler, keyed by replay
 /// key: recorded at start, cleared at completion (FIG-2499 quiescence).
+/// version_surface = "coexist"
+/// version_guard(items(DURABLE_WAIT_INDEX_EFFECT_PREFIX, durable_wait_index_effect_key, scope_effects_and_groups_are_quiescent))
 const DURABLE_WAIT_INDEX_EFFECT_PREFIX: &str = "wait-index/v2/effect/";
 /// An effect group opened under the scope, keyed by group key; cleared once
 /// the group's index reports no unsettled child.
+/// version_surface = "coexist"
+/// version_guard(items(DURABLE_WAIT_INDEX_GROUP_PREFIX, durable_wait_index_group_key, scope_effects_and_groups_are_quiescent))
 const DURABLE_WAIT_INDEX_GROUP_PREFIX: &str = "wait-index/v2/group/";
 /// A group child's replay-key-to-group binding, keyed by replay key: the
 /// membership a §4 boundary commit resolves its group from (FIG-3409).
+/// version_surface = "coexist"
+/// version_guard(items(DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX, durable_wait_index_group_child_key))
 const DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX: &str = "wait-index/v2/group-child/";
+/// version_surface = "coexist"
+/// version_guard(items(DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX, durable_wait_index_closure_participant_key, revoke_index))
 const DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX: &str = "wait-index/v2/closure-participant/";
 
 #[cfg(test)]

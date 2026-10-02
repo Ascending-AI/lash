@@ -626,11 +626,8 @@ manifest = "engine:restate.effect_journal"
 suffix = "_FAMILY_VERSION"
 reason = "hash-domain family tag: an identity-preimage component, not a durable format stamp"
 
-# Durable formats without their own guarded surface, and constants whose names
-# look like versions but version nothing durable. TOOL_INTENT_PROTOCOL_V3 sits
-# outside the swept name pattern by design: it is a permanently named v3
-# discriminator, not a mutable current-version constant, and predecessors are
-# refused by number rather than rewritten in place.
+# Constants whose names look like versions but version nothing durable,
+# and admission floors or aliases of a registered writer version.
 [[unregistered]]
 constant = "OLDEST_SUPPORTED_SESSION_STATE_VERSION"
 constant_path = "crates/lash-core-store/src/store/state_version.rs"
@@ -661,16 +658,7 @@ constant = "PROCESS_CURSOR_UNROUTED_EPOCH"
 constant_path = "crates/lash-sansio/src/process_cursor.rs"
 reason = "the reserved publisher-epoch value of a cursor minted with no live route; an epoch names a publisher lifetime, not a format"
 
-[[unregistered]]
-constant = "JOURNAL_IDENTITY_VERSION"
-constant_path = "crates/lash-sansio/src/effect_identity.rs"
-upgrade = "coexist"
-reason = "hash-domain tag of ExecutionScope journal keys: the *_FAMILY_VERSION class under another name"
 
-[[unregistered]]
-constant = "NUMBER_WIRE_VERSION"
-constant_path = "crates/lashlang/src/runtime/vm/continuation.rs"
-reason = "inner stamp of the continuation's number wire; the whole of continuation.rs is swept by the VM_CONTINUATION_FORMAT_VERSION guard, which owes the bump"
 
 [[unregistered]]
 constant = "SESSION_SCHEMA_VERSION"

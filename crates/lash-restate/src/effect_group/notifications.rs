@@ -21,6 +21,8 @@ use super::*;
 
 /// The state key the group's outstanding subscribers live under, apart from
 /// the index record so the handlers that notify nobody never read it.
+/// version_surface = "coexist"
+/// version_guard(items(SUBSCRIPTIONS_STATE_KEY, load_subscriptions, store_subscriptions))
 const SUBSCRIPTIONS_STATE_KEY: &str = "effect-group/v1/subscriptions";
 
 /// What a subscriber waits for.

@@ -14,6 +14,10 @@
 //! completes it from its own journal, so no group-internal notification goes
 //! through the generic durable-wait services.
 
+/// version_surface = "coexist"
+/// version_guard(items(EFFECT_GROUP_PREFIX_VERSION, committed_final_state_key))
+const EFFECT_GROUP_PREFIX_VERSION: &str = "effect-group/v1/committed-final/";
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -43,17 +47,21 @@ use crate::object_state::{
     self, FleetView, ObjectFamily, ObjectUpgradeResponse, StoredValueFormats,
 };
 
+/// version_surface = "coexist"
+/// version_guard(items(INDEX_STATE_KEY, store_index))
 const INDEX_STATE_KEY: &str = "effect-group/v1/state";
 /// The group's accepted membership, apart from the index record every
 /// per-child handler reads (FIG-4068): written once at open, read only where
 /// children are rebuilt, and cleared when retirement completes.
+/// version_surface = "coexist"
+/// version_guard(items(MEMBERSHIP_STATE_KEY, finish_retirement, store_membership))
 const MEMBERSHIP_STATE_KEY: &str = "effect-group/v1/membership";
 /// The final a child's winning commit offered, one key per position, apart
 /// from the index record every handler reads: a tool child's is its sealed
 /// drain input, which only a later commit of the same child reads. Written
 /// with the commit, and cleared when retirement completes.
 fn committed_final_state_key(position: usize) -> String {
-    format!("effect-group/v1/committed-final/{position}")
+    format!("{EFFECT_GROUP_PREFIX_VERSION}{position}")
 }
 
 mod drain_barrier;

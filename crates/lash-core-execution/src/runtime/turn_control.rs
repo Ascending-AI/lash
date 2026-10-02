@@ -86,6 +86,8 @@ impl TurnCancelPeekIdentity {
     }
 }
 
+/// version_surface = "coexist"
+/// version_guard(items(PHYSICAL_TURN_CANCEL_PEEK_FAMILY_VERSION, turn_cancel_peek_replay_key))
 const PHYSICAL_TURN_CANCEL_PEEK_FAMILY_VERSION: u8 = 1;
 
 fn turn_cancel_peek_replay_key(

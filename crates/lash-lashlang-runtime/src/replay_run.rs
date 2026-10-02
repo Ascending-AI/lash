@@ -25,6 +25,18 @@
 //! (Restate) answer the frontier read as positional: their own check is the
 //! fence, and this run only mints the keys and journals the seal.
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_LASHLANG_CELL_GENERATION_DOMAIN_VERSION, lashlang_cell_generation))
+const LASH_LASHLANG_CELL_GENERATION_DOMAIN_VERSION: &str = "lash-lashlang-cell-generation/v1";
+
+/// version_surface = "coexist"
+/// version_guard(items(LASHLANG_PREFIX_VERSION, process))
+const LASHLANG_PREFIX_VERSION: &str = "lashlang:v2:";
+
+/// version_surface = "coexist"
+/// version_guard(items(LASHLANG_DISPATCHED_ORDINALS_DOMAIN_VERSION, hash))
+const LASHLANG_DISPATCHED_ORDINALS_DOMAIN_VERSION: &str = "lashlang-dispatched-ordinals/v1";
+
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
@@ -105,7 +117,7 @@ pub fn lashlang_cell_generation() -> lash_core::ExecutableGeneration {
     lash_core::ExecutableGeneration::new(format!(
         "blake3:{}",
         lash_sansio::core_support::blake3_domain_hash_hex(
-            "lash-lashlang-cell-generation/v1",
+            LASH_LASHLANG_CELL_GENERATION_DOMAIN_VERSION,
             preimage,
         )
     ))
@@ -152,7 +164,7 @@ impl LashlangReplayNamespace {
     /// opener encoding, for the whole life of the incarnation.
     pub fn process(opener_scope: &str) -> Self {
         Self {
-            prefix: format!("lashlang:v2:{opener_scope}:{NAMESPACE_MARKER}"),
+            prefix: format!("{LASHLANG_PREFIX_VERSION}{opener_scope}:{NAMESPACE_MARKER}"),
         }
     }
 
@@ -383,7 +395,7 @@ pub struct DispatchedOrdinalsDigest(String);
 impl DispatchedOrdinalsDigest {
     fn hash(preimage: &[u8]) -> Self {
         Self(lash_sansio::core_support::blake3_domain_hash_hex(
-            "lashlang-dispatched-ordinals/v1",
+            LASHLANG_DISPATCHED_ORDINALS_DOMAIN_VERSION,
             preimage,
         ))
     }

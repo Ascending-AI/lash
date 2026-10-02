@@ -5,6 +5,10 @@
 //! no source syntax: the one piece of dialect text a graph carries, an opaque
 //! statement's source, comes from an injected [`WorkflowStatementText`].
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_WORKFLOW_EDGE_DOMAIN_VERSION, edge))
+const LASH_WORKFLOW_EDGE_DOMAIN_VERSION: &str = "lash-workflow-edge/v2";
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ast::{
@@ -884,7 +888,7 @@ fn edge(from: WorkflowNodeId, to: WorkflowNodeId, kind: WorkflowEdgeKind) -> Wor
         id: format!(
             "edge:{}",
             &lash_sansio::core_support::blake3_domain_hash_hex(
-                "lash-workflow-edge/v2",
+                LASH_WORKFLOW_EDGE_DOMAIN_VERSION,
                 material.as_bytes()
             )[..24]
         ),

@@ -16,6 +16,10 @@
 //! command with its [`ConfigTransactionOutcome`]. A redrive publishes the
 //! recorded resolution and never runs a reducer again.
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_CONFIG_TRANSACTION_DOMAIN_VERSION, digest))
+const LASH_CONFIG_TRANSACTION_DOMAIN_VERSION: &str = "lash-config-transaction/v1";
+
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -119,7 +123,7 @@ impl ConfigTransactionRecord {
         });
         let canonical = lash_core_ids::stable_hash::stable_json_string(&submitted)?;
         Ok(lash_core_ids::stable_hash::blake3_hex(
-            "lash-config-transaction/v1",
+            LASH_CONFIG_TRANSACTION_DOMAIN_VERSION,
             canonical.as_bytes(),
         ))
     }

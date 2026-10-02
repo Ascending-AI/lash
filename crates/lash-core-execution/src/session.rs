@@ -1,3 +1,7 @@
+/// version_surface = "coexist"
+/// version_guard(items(LASH_TOOL_CATALOG_AUTHORITY_DOMAIN_VERSION, tool_catalog_authority_fingerprint))
+const LASH_TOOL_CATALOG_AUTHORITY_DOMAIN_VERSION: &str = "lash-tool-catalog-authority/v2";
+
 use crate::SessionId;
 #[cfg(test)]
 use crate::plugin::PluginSessionRequest;
@@ -912,7 +916,10 @@ impl Session {
 fn tool_catalog_authority_fingerprint(tool_access: &crate::SessionToolAccess) -> [u8; 32] {
     let encoded = serde_json::to_vec(tool_access)
         .expect("SessionToolAccess is composed entirely of serializable authority values");
-    lash_sansio::core_support::blake3_domain_hash("lash-tool-catalog-authority/v2", encoded)
+    lash_sansio::core_support::blake3_domain_hash(
+        LASH_TOOL_CATALOG_AUTHORITY_DOMAIN_VERSION,
+        encoded,
+    )
 }
 
 #[cfg(test)]

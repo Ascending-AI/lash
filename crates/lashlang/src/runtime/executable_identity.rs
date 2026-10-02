@@ -12,6 +12,10 @@
 //! compiling the artifact, which is what lets a durable engine fence a retired
 //! generation before any other step of a run.
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_LASHLANG_EXECUTABLE_DOMAIN_VERSION, of))
+const LASH_LASHLANG_EXECUTABLE_DOMAIN_VERSION: &str = "lash-lashlang-executable/v1";
+
 use serde::{Deserialize, Serialize};
 
 use crate::{BYTECODE_FORMAT_VERSION, LASHLANG_SEMANTIC_HASH_VERSION, ModuleRef};
@@ -21,6 +25,8 @@ use super::entry_points::Entry;
 /// The domain the node ids a compiled program reports are minted under
 /// ([`crate::workflow_node_id`]). It is part of the identity so a node-id
 /// change retires what the previous ids were recorded against.
+/// version_surface = "coexist"
+/// version_guard(items(WORKFLOW_NODE_DOMAIN, of))
 const WORKFLOW_NODE_DOMAIN: &str = "lash-workflow-node/v3";
 
 /// The executable identity of one compiled entry point.
@@ -55,7 +61,7 @@ impl ExecutableIdentity {
         Self(format!(
             "blake3:{}",
             lash_sansio::core_support::blake3_domain_hash_hex(
-                "lash-lashlang-executable/v1",
+                LASH_LASHLANG_EXECUTABLE_DOMAIN_VERSION,
                 preimage,
             )
         ))

@@ -23,6 +23,10 @@
 //! facts once, while presentation reads the model return the child projected
 //! and recorded rather than re-projecting it (§6).
 
+/// version_surface = "coexist"
+/// version_guard(items(retained_request_digest))
+const TOOL_CALL_REQUEST_FAMILY_VERSION: u8 = 1;
+
 use super::*;
 
 use crate::runtime::effect::{
@@ -1443,7 +1447,10 @@ fn retained_request_digest(
     call: &crate::PreparedToolCall,
     admission: &ToolChildAdmission,
 ) -> String {
-    let mut identity = crate::stable_identity::IdentityEncoder::new("lash.tool-call-request", 1);
+    let mut identity = crate::stable_identity::IdentityEncoder::new(
+        "lash.tool-call-request",
+        TOOL_CALL_REQUEST_FAMILY_VERSION,
+    );
     identity.string(call.call_id.as_str());
     identity.string(call.tool_id.as_str());
     identity.string(&call.tool_name);
@@ -1464,7 +1471,11 @@ fn retained_request_digest(
             ));
         }
     }
-    crate::stable_identity::rendered_hash("tool-call-request", 1, &identity.finish())
+    crate::stable_identity::rendered_hash(
+        "tool-call-request",
+        TOOL_CALL_REQUEST_FAMILY_VERSION,
+        &identity.finish(),
+    )
 }
 
 #[cfg(test)]

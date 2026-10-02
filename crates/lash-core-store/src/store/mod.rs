@@ -1,4 +1,8 @@
 //! The runtime's settled-session persistence contract and shared store types.
+/// version_surface = "coexist"
+/// version_guard(items(LASH_BLOB_DOMAIN_VERSION, for_content))
+const LASH_BLOB_DOMAIN_VERSION: &str = "lash-blob/v2";
+
 use crate::SessionId;
 use crate::TurnId;
 use crate::facade_support::SessionGraphFacadeOps;
@@ -301,7 +305,10 @@ pub struct BlobRef(pub String);
 
 impl BlobRef {
     pub fn for_content(content: &[u8]) -> Self {
-        Self(crate::stable_hash::blake3_hex("lash-blob/v2", content))
+        Self(crate::stable_hash::blake3_hex(
+            LASH_BLOB_DOMAIN_VERSION,
+            content,
+        ))
     }
 
     /// Exposes the opaque durable blob reference to store implementors for backend round-tripping

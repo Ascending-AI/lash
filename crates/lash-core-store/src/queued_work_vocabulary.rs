@@ -617,6 +617,8 @@ impl QueuedWorkBatchDraft {
     }
 }
 /// The queued-work submission identity family's current version.
+/// version_surface = "coexist"
+/// version_guard(items(QUEUED_WORK_SUBMISSION_FAMILY_VERSION, queued_work_submission_preimage, submission_digest))
 pub const QUEUED_WORK_SUBMISSION_FAMILY_VERSION: u8 = 1;
 
 /// Permanent tag registry for the queued-work submission preimage.

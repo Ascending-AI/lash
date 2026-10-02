@@ -27,6 +27,8 @@ const CELL_TOOL_BINDINGS_SUFFIX: &str = "cell-tool-bindings";
 
 /// The operation label the binding record journals under; it names the
 /// referenced call paths, so a redrive of other source cannot read it.
+/// version_surface = "coexist"
+/// version_guard(items(CELL_TOOL_BINDINGS_OPERATION, journal_cell_tool_bindings))
 const CELL_TOOL_BINDINGS_OPERATION: &str = "cell_tool_bindings:v1";
 
 /// How a drifted binding's live tool differs from its recorded one.

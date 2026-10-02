@@ -406,9 +406,20 @@ fn subscription_record_from_draft(
 /// command commits.
 #[must_use]
 pub fn trigger_incarnation(owner: &super::TriggerOwnerScope, operation_id: &str) -> String {
-    let mut identity = crate::stable_identity::IdentityEncoder::new("lash.trigger-incarnation", 1);
+    let mut identity = crate::stable_identity::IdentityEncoder::new(
+        "lash.trigger-incarnation",
+        TRIGGER_INCARNATION_FAMILY_VERSION,
+    );
     identity.string(owner.owner_kind_column());
     identity.string(owner.owner_id_column());
     identity.string(operation_id);
-    crate::stable_identity::rendered_hash("trigger-incarnation", 1, &identity.finish())
+    crate::stable_identity::rendered_hash(
+        "trigger-incarnation",
+        TRIGGER_INCARNATION_FAMILY_VERSION,
+        &identity.finish(),
+    )
 }
+
+/// version_surface = "coexist"
+/// version_guard(items(trigger_incarnation))
+const TRIGGER_INCARNATION_FAMILY_VERSION: u8 = 1;

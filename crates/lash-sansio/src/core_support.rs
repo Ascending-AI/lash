@@ -25,6 +25,7 @@ use crate::{
 
 /// Reserved BLAKE3 domains used by workspace hash owners. Entries are
 /// append-only so a retired domain cannot be silently reused.
+/// version_reservations = "append-only hash-domain reservations, including retired names"
 const BLAKE3_DOMAINS: &[&str] = &[
     "lash-accepted-turn-input/v1",
     "lash-anthropic-tool-call-wire/v1",
@@ -396,7 +397,7 @@ impl ModelToolReturnPartCoreSupport for ModelToolReturnPart {
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)] // FIG-2971: test module is a host; ambient fs/env/process access is sanctioned
 mod blake3_domain_tests {
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::path::{Path, PathBuf};
 
     use super::BLAKE3_DOMAINS;
@@ -483,6 +484,20 @@ mod blake3_domain_tests {
             ("domain_hash", "("),
             ("hex_digest", "("),
         ];
+        let constants = source
+            .split("const ")
+            .skip(1)
+            .filter_map(|declaration| {
+                let (declaration, _) = declaration.split_once(';')?;
+                let (name, definition) = declaration.split_once(':')?;
+                let (kind, value) = definition.split_once('=')?;
+                if kind.trim() != "&str" {
+                    return None;
+                }
+                let (domain, _) = value.trim().strip_prefix('"')?.split_once('"')?;
+                Some((name.trim(), domain))
+            })
+            .collect::<BTreeMap<_, _>>();
         let mut domains = BTreeSet::new();
         for (name, suffix) in constructors {
             let needle = format!("{name}{suffix}");
@@ -490,16 +505,40 @@ mod blake3_domain_tests {
             while let Some(offset) = remaining.find(&needle) {
                 remaining = &remaining[offset + needle.len()..];
                 let argument = remaining.trim_start();
-                let Some(literal) = argument.strip_prefix('"') else {
-                    continue;
+                let domain = if let Some(literal) = argument.strip_prefix('"') {
+                    literal.split_once('"').map(|(domain, _)| domain)
+                } else {
+                    argument
+                        .split([',', ')'])
+                        .next()
+                        .and_then(|name| constants.get(name.trim()).copied())
                 };
-                let Some((domain, _)) = literal.split_once('"') else {
-                    continue;
-                };
-                domains.insert(domain.to_string());
+                if let Some(domain) = domain {
+                    domains.insert(domain.to_string());
+                }
             }
         }
         domains
+    }
+
+    #[test]
+    fn domain_usage_follows_source_declared_constants() {
+        let source = r#"
+const ACTIVE_DOMAIN: &str = "lash-build-generation/v1";
+const MULTILINE_DOMAIN: &str =
+    "lash-standard-compaction/v1";
+fn encode() {
+    Blake3DomainHasher::new(ACTIVE_DOMAIN);
+    blake3_domain_hash(MULTILINE_DOMAIN, bytes);
+}
+"#;
+        assert_eq!(
+            domain_literals(source),
+            BTreeSet::from([
+                "lash-build-generation/v1".to_string(),
+                "lash-standard-compaction/v1".to_string()
+            ])
+        );
     }
 
     #[test]

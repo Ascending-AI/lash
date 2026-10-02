@@ -21,6 +21,8 @@ use super::{ClaimToken, EnginePark, ObligationId, ParkId};
 use crate::{SessionId, TurnId};
 
 /// The registered durable format of a [`ControlIntent`] record.
+/// version_surface = "coexist"
+/// version_guard(roots(ControlIntent), items(from_stored))
 pub const CONTROL_INTENT_FORMAT: u32 = 1;
 
 /// A control intent's id: the store's intent clock sequence.

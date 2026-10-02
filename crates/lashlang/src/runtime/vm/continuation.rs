@@ -529,6 +529,8 @@ mod continuation_serde {
     use crate::runtime::heap::{UrlObject, UrlSearchParamsObject};
     use crate::runtime::projected_wire::CanonicalProjectedValue;
 
+    /// version_surface = "coexist"
+    /// version_guard(items(number_to_wire, number_from_wire), roots(NumberWire))
     const NUMBER_WIRE_VERSION: u32 = 1;
 
     #[derive(Serialize, Deserialize)]

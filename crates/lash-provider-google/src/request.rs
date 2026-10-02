@@ -2,6 +2,10 @@
 //! Code (Gemini) wire shape (contents, systemInstruction, tools, generation
 //! and thinking config), plus the inline-attachment-part helpers.
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_GOOGLE_USER_PROMPT_ID_DOMAIN_VERSION, user_prompt_id))
+const LASH_GOOGLE_USER_PROMPT_ID_DOMAIN_VERSION: &str = "lash-google-user-prompt-id/v1";
+
 use crate::support::*;
 use lash_core::GoogleDialect;
 use lash_core::facade_support::{
@@ -11,8 +15,10 @@ use lash_sansio::llm::capability::ReasoningRetentionSelection;
 
 fn user_prompt_id(req: &LlmRequest) -> uuid::Uuid {
     let scope = format!("{}\0{}", req.provider_prompt_cache_key(), req.request_id());
-    let hash =
-        lash_sansio::core_support::blake3_domain_hash("lash-google-user-prompt-id/v1", scope);
+    let hash = lash_sansio::core_support::blake3_domain_hash(
+        LASH_GOOGLE_USER_PROMPT_ID_DOMAIN_VERSION,
+        scope,
+    );
     let mut bytes = [0_u8; 16];
     bytes.copy_from_slice(&hash[..16]);
     bytes[6] = (bytes[6] & 0x0f) | 0x40;

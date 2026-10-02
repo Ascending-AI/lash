@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Inventory registered source constants, or check a declared release baseline.
+"""Inventory registered and source-declared constants, or check the 1.0 baseline.
 
 The resolver accepts literal counters, string identities and local constant
 aliases with integer addition/subtraction. It evaluates cfg(feature =
 "synthetic-next") in both tiers. Unsupported expressions, missing definitions,
-duplicate active definitions and incomplete baseline tables fail closed.
+duplicate active definitions and unregistered versions fail closed.
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = Path("scripts/versioned-surfaces.toml")
-BASELINE = Path("scripts/release-baseline.toml")
 CONST = re.compile(
     r"^[ \t]*(?P<attrs>(?:#\[[^\]]*\]\s*)*)"
     r"(?:pub(?:\([^)]*\))?\s+)?const\s+(?P<name>[A-Z][A-Z0-9_]*)"
@@ -113,11 +112,17 @@ def resolve(text: str, name: str, synthetic: bool):
 
 
 def surfaces(repo: Path):
+    import check_version_bumps as gate
+    from discover_version_surfaces import discover
     rows = tomllib.loads((repo / REGISTRY).read_text())["surface"]
     keys = [f'{row["constant_path"]}:{row["constant"]}' for row in rows]
     if not rows or len(set(keys)) != len(keys):
         raise BaselineError("surface registry is empty or contains duplicate keys")
-    return rows
+    try:
+        discovered, _ = discover(gate.WorktreeView(repo), rows)
+    except gate.CheckError as error:
+        raise BaselineError(str(error)) from error
+    return [*rows, *discovered]
 
 
 def inventory(repo: Path):
@@ -135,21 +140,22 @@ def inventory(repo: Path):
     return rows
 
 
-def load_baseline(path: Path):
-    baseline = tomllib.loads(path.read_text())["baseline"]
-    if not baseline or any(type(v) not in (int, str) for v in baseline.values()):
-        raise BaselineError("baseline needs a nonempty table of counters or string identities")
-    return baseline
+def baseline_of(value):
+    """Every counter starts at 1; a string retains its prefix and suffix."""
+    if type(value) is int:
+        return 1
+    if type(value) is str and re.search(r'[/:-]v[0-9]+(?=[/:-]|$)', value):
+        return re.sub(r'([/:-])v[0-9]+(?=[/:-]|$)', r'\1v1', value)
+    raise BaselineError(f"{value!r} is neither a counter nor a versioned string identity")
 
 
-def mismatches(rows: list[dict], baseline: dict):
-    by_key = {row["key"]: row for row in rows}
-    errors = [f"{key}: omitted from baseline" for key in sorted(by_key.keys() - baseline.keys())]
-    errors += [f"{key}: baseline has an unregistered surface" for key in sorted(baseline.keys() - by_key.keys())]
-    for key in sorted(by_key.keys() & baseline.keys()):
-        actual, expected = by_key[key]["default"], baseline[key]
-        if type(actual) is not type(expected) or actual != expected:
-            errors.append(f"{key}: default {actual!r}, declared baseline {expected!r}")
+def mismatches(rows: list[dict]):
+    errors = []
+    for row in sorted(rows, key=lambda row: row["key"]):
+        actual = row["default"]
+        expected = baseline_of(actual)
+        if actual != expected:
+            errors.append(f'{row["key"]}: default {actual!r}, release baseline {expected!r}')
     return errors
 
 
@@ -353,8 +359,7 @@ def main():
     inventory_command = commands.add_parser("inventory")
     inventory_command.add_argument("--build-report", type=Path)
     inventory_command.add_argument("--synthetic", action="store_true")
-    check = commands.add_parser("check")
-    check.add_argument("--baseline", type=Path, default=BASELINE)
+    commands.add_parser("check")
     args = parser.parse_args()
     try:
         rows = inventory(args.repo)
@@ -363,14 +368,13 @@ def main():
                 verify_build(rows, args.build_report, args.synthetic)
             print(json.dumps(rows, indent=2))
             return 0
-        path = args.baseline if args.baseline.is_absolute() else args.repo / args.baseline
-        errors = (mismatches(rows, load_baseline(path)) + sqlite_stamp_mismatches(args.repo)
+        errors = (mismatches(rows) + sqlite_stamp_mismatches(args.repo)
                   + postgres_stamp_mismatches(args.repo))
         if errors:
             print("\n".join(errors), file=sys.stderr)
             return 1
         print(
-            f"release baseline: {len(rows)} surfaces, zero omissions, zero mismatches; "
+            f"release baseline: {len(rows)} surfaces, zero mismatches; "
             "SQLite and PostgreSQL stamps equal their catalog numbers"
         )
         return 0

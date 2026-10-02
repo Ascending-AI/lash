@@ -1,6 +1,11 @@
 //! Gemini Files resumable upload: Lash-content-id caching of stored
 //! attachments and the two-step (start / upload+finalize) upload protocol.
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_GOOGLE_UPLOAD_CREDENTIAL_SCOPE_DOMAIN_VERSION, upload_cache_key))
+const LASH_GOOGLE_UPLOAD_CREDENTIAL_SCOPE_DOMAIN_VERSION: &str =
+    "lash-google-upload-credential-scope/v2";
+
 use crate::config::{UploadedAttachmentCacheKey, UploadedAttachmentRef};
 use crate::support::*;
 
@@ -31,7 +36,7 @@ impl GoogleOAuthProvider {
         content_id: &lash_core::AttachmentId,
     ) -> UploadedAttachmentCacheKey {
         let credential_hash = lash_sansio::core_support::blake3_domain_hash_hex(
-            "lash-google-upload-credential-scope/v2",
+            LASH_GOOGLE_UPLOAD_CREDENTIAL_SCOPE_DOMAIN_VERSION,
             credential_scope_seed.as_bytes(),
         );
         UploadedAttachmentCacheKey {

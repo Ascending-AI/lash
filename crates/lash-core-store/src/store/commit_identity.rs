@@ -8,6 +8,18 @@
 //! predates the framed identity kit. ADR 0097 is the authority; the golden
 //! corpora in this module pin the exact bytes.
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_APPEND_REQUEST_DOMAIN_VERSION, append_request_identity_hash))
+const LASH_APPEND_REQUEST_DOMAIN_VERSION: &str = "lash-append-request/v2";
+
+/// version_surface = "coexist"
+/// version_guard(items(LASH_INTENT_DOMAIN_VERSION, turn_commit_hash))
+const LASH_INTENT_DOMAIN_VERSION: &str = "lash-intent/v2";
+
+/// version_surface = "coexist"
+/// version_guard(items(LASH_HISTORY_NODE_DOMAIN_VERSION, derive_history_node_id))
+const LASH_HISTORY_NODE_DOMAIN_VERSION: &str = "lash-history-node/v3";
+
 use super::*;
 use crate::SessionId;
 use crate::TurnId;
@@ -678,7 +690,7 @@ pub(super) fn append_request_identity_hash(
     nodes: &[crate::SessionAppendNode],
 ) -> Result<String, StoreError> {
     Ok(crate::stable_hash::blake3_hex(
-        "lash-append-request/v2",
+        LASH_APPEND_REQUEST_DOMAIN_VERSION,
         &append_request_identity_bytes(operation, requested_ancestor_node_id, nodes)?,
     ))
 }
@@ -1459,7 +1471,7 @@ pub(super) fn turn_commit_hash(commit: &RuntimeCommit) -> Result<String, StoreEr
         crate::stable_identity::IdentityEncoder::new_unframed(TURN_COMMIT_IDENTITY_DOMAIN);
     identity.bytes(encoded.as_bytes());
     Ok(crate::stable_hash::blake3_hex(
-        "lash-intent/v2",
+        LASH_INTENT_DOMAIN_VERSION,
         &identity.finish(),
     ))
 }
@@ -1487,7 +1499,7 @@ pub fn derive_history_node_id(
     let preimage = history_node_preimage(session_id, operation, ordinal)?;
     Ok(crate::NodeId::new(format!(
         "n_{}",
-        crate::stable_hash::blake3_hex("lash-history-node/v3", &preimage)
+        crate::stable_hash::blake3_hex(LASH_HISTORY_NODE_DOMAIN_VERSION, &preimage)
     )))
 }
 

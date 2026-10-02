@@ -1,3 +1,7 @@
+/// version_surface = "coexist"
+/// version_guard(items(LASH_VM_CLIENT_POOL_DOMAIN_VERSION, measurements))
+const LASH_VM_CLIENT_POOL_DOMAIN_VERSION: &str = "lash-vm-client/pool-v1";
+
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -160,7 +164,7 @@ impl WorkerPool {
         let state = lock(&self.0.state);
         let measurements = lock(&self.0.measurements);
         PoolMeasurements {
-            exporter: "lash-vm-client/pool-v1",
+            exporter: LASH_VM_CLIENT_POOL_DOMAIN_VERSION,
             epoch: self.0.epoch,
             workers: state.workers,
             idle: state.idle.len(),

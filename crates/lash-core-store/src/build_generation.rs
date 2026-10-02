@@ -13,6 +13,10 @@
 //! admission records carry it, so it must sit below every writer that stamps
 //! one (FIG-3795).
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_BUILD_GENERATION_DOMAIN_VERSION, for_test))
+const LASH_BUILD_GENERATION_DOMAIN_VERSION: &str = "lash-build-generation/v1";
+
 use lash_sansio::core_support::Blake3DomainHasher;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -72,7 +76,7 @@ impl BuildGeneration {
     /// anything a real build writes — only tests mint one.
     #[doc(hidden)]
     pub fn for_test(label: &'static str) -> Self {
-        let mut hasher = Blake3DomainHasher::new("lash-build-generation/v1");
+        let mut hasher = Blake3DomainHasher::new(LASH_BUILD_GENERATION_DOMAIN_VERSION);
         hasher.update(b"for-test");
         hasher.update(label);
         let digest = hasher.finalize();

@@ -1,3 +1,11 @@
+/// version_surface = "coexist"
+/// version_guard(items(LASHLANG_PREFIX_VERSION, hash_hex, new))
+const LASHLANG_PREFIX_VERSION: &str = "lashlang:v2:blake3:";
+
+/// version_surface = "coexist"
+/// version_guard(items(LASHLANG_HOST_REQUIREMENTS_PREFIX_VERSION, new))
+const LASHLANG_HOST_REQUIREMENTS_PREFIX_VERSION: &str = "lashlang-host-requirements:v2:blake3:";
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 #[cfg(test)]
@@ -129,7 +137,7 @@ pub struct ModuleRef(String);
 
 impl ModuleRef {
     pub fn new(hash: &ContentHash) -> Self {
-        Self(format!("lashlang:v2:blake3:{hash}"))
+        Self(format!("{LASHLANG_PREFIX_VERSION}{hash}"))
     }
 
     pub fn as_str(&self) -> &str {
@@ -137,7 +145,7 @@ impl ModuleRef {
     }
 
     pub fn hash_hex(&self) -> Option<&str> {
-        self.0.strip_prefix("lashlang:v2:blake3:")
+        self.0.strip_prefix(LASHLANG_PREFIX_VERSION)
     }
 }
 
@@ -165,7 +173,7 @@ pub struct HostRequirementsRef(String);
 
 impl HostRequirementsRef {
     pub fn new(hash: &ContentHash) -> Self {
-        Self(format!("lashlang-host-requirements:v2:blake3:{hash}"))
+        Self(format!("{LASHLANG_HOST_REQUIREMENTS_PREFIX_VERSION}{hash}"))
     }
 
     pub fn as_str(&self) -> &str {

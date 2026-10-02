@@ -6,6 +6,14 @@
 //! replays while differing content is refused. Receipts never reconstruct
 //! requests (store-as-continuation doctrine).
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_RECORD_CONFIG_REQUEST_DOMAIN_VERSION, semantic_boundary_request_identity))
+const LASH_RECORD_CONFIG_REQUEST_DOMAIN_VERSION: &str = "lash-record-config-request/v1";
+
+/// version_surface = "coexist"
+/// version_guard(items(LASH_CREATE_SESSION_REQUEST_DOMAIN_VERSION, semantic_boundary_request_identity))
+const LASH_CREATE_SESSION_REQUEST_DOMAIN_VERSION: &str = "lash-create-session-request/v1";
+
 use super::*;
 use crate::SessionId;
 
@@ -141,11 +149,17 @@ pub(super) fn semantic_boundary_request_identity(
     Ok(match operation {
         Operation::RecordConfig => (
             RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION,
-            crate::stable_hash::blake3_hex("lash-record-config-request/v1", encoded.as_bytes()),
+            crate::stable_hash::blake3_hex(
+                LASH_RECORD_CONFIG_REQUEST_DOMAIN_VERSION,
+                encoded.as_bytes(),
+            ),
         ),
         Operation::CreateSession => (
             CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION,
-            crate::stable_hash::blake3_hex("lash-create-session-request/v1", encoded.as_bytes()),
+            crate::stable_hash::blake3_hex(
+                LASH_CREATE_SESSION_REQUEST_DOMAIN_VERSION,
+                encoded.as_bytes(),
+            ),
         ),
     })
 }

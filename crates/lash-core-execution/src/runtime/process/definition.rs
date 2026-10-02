@@ -70,6 +70,8 @@ const PROCESS_DEFINITION_ID_DOMAIN: &str = "lash.process-definition-id";
 
 /// Version 1 of that family's grammar; the grammar is frozen by the golden
 /// vectors below.
+/// version_surface = "coexist"
+/// version_guard(items(PROCESS_DEFINITION_ID_FAMILY_VERSION, canonical_preimage))
 const PROCESS_DEFINITION_ID_FAMILY_VERSION: u8 = 1;
 
 /// Store tags in the preimage. Permanent: a retired store keeps its tag.

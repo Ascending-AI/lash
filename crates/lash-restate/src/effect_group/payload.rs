@@ -3,7 +3,11 @@
 
 use super::*;
 
+/// version_surface = "coexist"
+/// version_guard(items(PAYLOAD_STATE_KEY, delete_bytes, get, put))
 const PAYLOAD_STATE_KEY: &str = "effect-group/v1/payload";
+/// version_surface = "coexist"
+/// version_guard(items(PAYLOAD_RETIRED_KEY, get, put, retire))
 const PAYLOAD_RETIRED_KEY: &str = "effect-group/v1/retired";
 
 /// The stored format the payload object stamps into its `effect-group/v1/`

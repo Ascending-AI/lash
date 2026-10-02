@@ -10,6 +10,10 @@
 //! graph back to source and parsing edited node text belong to the dialect
 //! (`lash_typescript::workflow_graph` for TypeScript).
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_WORKFLOW_NODE_DOMAIN_VERSION, workflow_node_id))
+const LASH_WORKFLOW_NODE_DOMAIN_VERSION: &str = "lash-workflow-node/v3";
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use schemars::JsonSchema;
@@ -116,7 +120,7 @@ impl WorkflowNodeId {
 /// includes the linker's body digest. The process declaration root uses the
 /// empty path and has no runtime execution site.
 pub fn workflow_node_id(owner: &str, path: &[u32]) -> WorkflowNodeId {
-    let mut hasher = Blake3DomainHasher::new("lash-workflow-node/v3");
+    let mut hasher = Blake3DomainHasher::new(LASH_WORKFLOW_NODE_DOMAIN_VERSION);
     hasher.update(owner.as_bytes());
     hasher.update([0]);
     for index in path {

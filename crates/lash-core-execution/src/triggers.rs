@@ -1445,14 +1445,6 @@ pub fn evaluate_trigger_prune(
     Ok(TriggerCommandOutcome::Prune { receipts })
 }
 
-// Rotated past the whole retired 1..=5 band by FIG-2913: a draft-bearing
-// command now projects the admitted source contract and provider route, so
-// every draft-bearing command preimage moved. The list preimage did not move
-// on its own, but the three tags share one family namespace and are rotated
-// together so no retired encoding can be re-read under a live tag.
-const LEGACY_TRIGGER_COMMAND_FAMILY_VERSION: u8 = 6;
-// Was 5 (FIG-2886): list filters carry the canonical owner scope and retain an
-// absent slot for the retired raw session-id spelling.
 /// version_guard(
 ///     items(trigger_command_preimage),
 ///     items(
@@ -1477,15 +1469,8 @@ const TRIGGER_OPERATION_ADDRESS_FAMILY_VERSION: u8 = 2;
 /// 6 delete, 7 revive, 8 prune. Retired tags remain burned. Nested owner,
 /// actor, draft, and JSON tags are registered beside the trigger-definition
 /// projection they share; nested projections carry no version of their own.
-fn trigger_command_family_version(command: &TriggerCommand) -> u8 {
-    if matches!(command, TriggerCommand::List { .. }) {
-        return TRIGGER_COMMAND_FAMILY_VERSION;
-    }
-    LEGACY_TRIGGER_COMMAND_FAMILY_VERSION
-}
-
 fn trigger_command_preimage(command: &TriggerCommand) -> Vec<u8> {
-    let family_version = trigger_command_family_version(command);
+    let family_version = TRIGGER_COMMAND_FAMILY_VERSION;
     let mut fingerprint =
         crate::stable_identity::IdentityEncoder::new("lash.trigger-command", family_version);
     match command {
@@ -1610,7 +1595,7 @@ fn trigger_command_preimage(command: &TriggerCommand) -> Vec<u8> {
 }
 
 pub fn trigger_command_fingerprint(command: &TriggerCommand) -> String {
-    let family_version = trigger_command_family_version(command);
+    let family_version = TRIGGER_COMMAND_FAMILY_VERSION;
     let preimage = trigger_command_preimage(command);
     crate::stable_identity::rendered_hash("trigger-command", family_version, &preimage)
 }

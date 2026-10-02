@@ -468,6 +468,8 @@ impl SubscriptionRevisionId {
     }
 }
 
+/// version_surface = "coexist"
+/// version_guard(items(HOST_PIN_PREFIX, mint, try_from))
 const HOST_PIN_PREFIX: &str = "host-pin:v1:";
 const HOST_PIN_HEX_LEN: usize = 32;
 
@@ -566,6 +568,8 @@ impl UploadReferrerId {
     }
 }
 
+/// version_surface = "coexist"
+/// version_guard(items(UPLOAD_PREFIX, mint, try_from))
 const UPLOAD_PREFIX: &str = "upload:v1:";
 const UPLOAD_HEX_LEN: usize = 32;
 

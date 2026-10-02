@@ -1,3 +1,8 @@
+/// version_surface = "coexist"
+/// version_guard(items(LASH_DERIVED_TRIGGER_SUBSCRIPTION_DOMAIN_VERSION, derived_trigger_subscription_key))
+const LASH_DERIVED_TRIGGER_SUBSCRIPTION_DOMAIN_VERSION: &str =
+    "lash-derived-trigger-subscription/v2";
+
 use super::*;
 use crate::runtime::process::identity_projection::{
     project_process_event_type, project_process_payload_leaf, project_process_schema_leaf,
@@ -332,7 +337,10 @@ pub fn derived_trigger_subscription_key(
     identity.string(source_key);
     format!(
         "derived/v{DERIVED_TRIGGER_SUBSCRIPTION_FAMILY_VERSION}/{}",
-        crate::stable_hash::blake3_hex("lash-derived-trigger-subscription/v2", &identity.finish())
+        crate::stable_hash::blake3_hex(
+            LASH_DERIVED_TRIGGER_SUBSCRIPTION_DOMAIN_VERSION,
+            &identity.finish()
+        )
     )
 }
 

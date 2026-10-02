@@ -1,3 +1,11 @@
+/// version_surface = "coexist"
+/// version_guard(items(LASH_RUNTIME_EFFECT_ENVELOPE_DOMAIN_VERSION, capture, verify))
+const LASH_RUNTIME_EFFECT_ENVELOPE_DOMAIN_VERSION: &str = "lash-runtime-effect-envelope/v3";
+
+/// version_surface = "coexist"
+/// version_guard(items(TOOL_INTENT_PREFIX_VERSION, tool_intent_key_format_cutover))
+const TOOL_INTENT_PREFIX_VERSION: &str = "tool-intent:v2:";
+
 pub use lash_core_store::runtime_error::*;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -62,8 +70,10 @@ impl CanonicalRuntimeEffectEnvelope {
                 format!("failed to serialize runtime effect envelope: {err}"),
             )
         })?;
-        let hash =
-            crate::stable_hash::blake3_hex("lash-runtime-effect-envelope/v3", json.as_bytes());
+        let hash = crate::stable_hash::blake3_hex(
+            LASH_RUNTIME_EFFECT_ENVELOPE_DOMAIN_VERSION,
+            json.as_bytes(),
+        );
         Ok(Self { json, hash })
     }
 
@@ -110,8 +120,10 @@ impl CanonicalRuntimeEffectEnvelope {
     }
 
     fn verify(&self, side: &str) -> Result<(), RuntimeEffectControllerError> {
-        let actual =
-            crate::stable_hash::blake3_hex("lash-runtime-effect-envelope/v3", self.json.as_bytes());
+        let actual = crate::stable_hash::blake3_hex(
+            LASH_RUNTIME_EFFECT_ENVELOPE_DOMAIN_VERSION,
+            self.json.as_bytes(),
+        );
         if actual == self.hash {
             return Ok(());
         }
@@ -301,11 +313,15 @@ fn tool_intent_key_format_cutover<'a>(
     recorded: &'a Value,
     reconstructed: &'a Value,
 ) -> Option<(&'a str, &'a str)> {
+    /// version_reservations = "retired tool-intent family recognized only to refuse replay"
+    const RETIRED_TOOL_INTENT_PREFIXES: &[&str] = &["tool-intent:v1:"];
     const IDENTITY_REPLAY_KEY: &str = "/invocation/replay/attribution/identity/replay_key";
     let recorded_key = recorded.pointer(IDENTITY_REPLAY_KEY)?.as_str()?;
     let reconstructed_key = reconstructed.pointer(IDENTITY_REPLAY_KEY)?.as_str()?;
-    (recorded_key.starts_with("tool-intent:v1:")
-        && reconstructed_key.starts_with("tool-intent:v2:"))
+    (RETIRED_TOOL_INTENT_PREFIXES
+        .iter()
+        .any(|prefix| recorded_key.starts_with(prefix))
+        && reconstructed_key.starts_with(TOOL_INTENT_PREFIX_VERSION))
     .then_some((recorded_key, reconstructed_key))
 }
 

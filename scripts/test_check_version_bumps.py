@@ -265,6 +265,21 @@ class Fixture(unittest.TestCase):
         self.write(gate.UPCASTER_REGISTRY, LIFTS)
         self.base = self.commit("base")
 
+    def test_source_declared_identity_is_checked_without_a_registry_row(self):
+        source = "crates/demo/src/identity.rs"
+        identity = ('/// version_surface = "coexist"\n'
+                    '/// version_guard(items(encode_identity))\n'
+                    'const IDENTITY_PREFIX: &str = "demo:v2:blake3:";\n'
+                    'fn encode_identity() -> u8 { 1 }\n')
+        self.write(source, identity)
+        base = self.commit("declare an identity in source")
+        self.write(source, identity.replace("{ 1 }", "{ 2 }"))
+        code, output = self.verdict(self.commit("change its grammar"), base)
+        self.assertEqual(code, 1, output)
+        self.assertIn("IDENTITY_PREFIX is 2 on both sides", output)
+        self.write(source, identity.replace("{ 1 }", "{ 2 }").replace(":v2:", ":v3:"))
+        self.assertEqual(self.verdict(self.commit("bump its identity"), base)[0], 0)
+
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
@@ -1078,8 +1093,9 @@ class RealRepository(unittest.TestCase):
         cls.view = gate.WorktreeView(gate.ROOT)
         registry = cls.view.content(gate.REGISTRY)
         assert registry is not None
+        from discover_version_surfaces import surfaces as discover_surfaces
         cls.surfaces = {
-            surface.key: surface for surface in gate.load_surfaces(registry, gate.REGISTRY)
+            surface.key: surface for surface in discover_surfaces(cls.view)
         }
 
     def declaration(self, key: str) -> gate.Declaration:

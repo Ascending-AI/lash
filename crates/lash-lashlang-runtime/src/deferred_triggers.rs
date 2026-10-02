@@ -6,6 +6,10 @@
 //! link-scoped catalog. It never installs a route, activates a provider,
 //! creates a subscription, or changes Tool Catalog membership.
 
+/// version_surface = "coexist"
+/// version_guard(items(DEFERRED_TRIGGER_RESOLUTION_PREFIX_VERSION, resolve_and_fold_deferred_triggers))
+const DEFERRED_TRIGGER_RESOLUTION_PREFIX_VERSION: &str = "deferred_trigger_resolution:v1:";
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -262,7 +266,7 @@ pub async fn resolve_and_fold_deferred_triggers(
         link_key.address.replay_key
     );
     let operation = format!(
-        "deferred_trigger_resolution:v1:{}",
+        "{DEFERRED_TRIGGER_RESOLUTION_PREFIX_VERSION}{}",
         serde_json::to_string(referenced)
             .expect("deferred trigger call-paths encode as canonical JSON")
     );

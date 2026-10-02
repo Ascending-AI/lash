@@ -1,3 +1,7 @@
+/// version_surface = "coexist"
+/// version_guard(items(LASH_TOOL_INTENT_PAYLOAD_DOMAIN_VERSION, new))
+const LASH_TOOL_INTENT_PAYLOAD_DOMAIN_VERSION: &str = "lash-tool-intent-payload/v3";
+
 use crate::ProcessId;
 use crate::RuntimeOwner;
 use crate::{ToolIntentIdentity, ToolIntentKind};
@@ -14,6 +18,8 @@ use serde::{Deserialize, Serialize};
 /// received when version 2 rebound `EmitTrigger` occurrence idempotency to the
 /// declaration replay key.
 /// **Integrator class 3: protocol and process-engine implementors.**
+/// version_surface = "coexist"
+/// version_guard(roots(ToolIntents, ToolIntentSubmissionRecord), items(deserialize))
 pub const TOOL_INTENT_PROTOCOL_V3: u16 = 3;
 pub const TOOL_INTENT_MAX_COUNT: usize = 32;
 /// Maximum canonical JSON bytes one recorded intent batch may declare.
@@ -154,7 +160,7 @@ impl ToolIntentSubmissionRecord {
     ) -> Result<Self, serde_json::Error> {
         let kind = intent.kind();
         let payload_hash = crate::stable_hash::blake3_hex(
-            "lash-tool-intent-payload/v3",
+            LASH_TOOL_INTENT_PAYLOAD_DOMAIN_VERSION,
             &serde_json::to_vec(&intent)?,
         );
         Ok(Self {
@@ -363,6 +369,8 @@ pub struct EmitTriggerIntent {
     pub request: crate::TriggerOccurrenceRequest,
 }
 
+/// version_surface = "coexist"
+/// version_guard(items(TOOL_INTENT_IDENTITY_FAMILY_VERSION, derive_tool_intent_identity_inner))
 const TOOL_INTENT_IDENTITY_FAMILY_VERSION: u8 = 2;
 
 /// The public identity seam for host-submitted intents.

@@ -1,3 +1,7 @@
+/// version_surface = "coexist"
+/// version_guard(items(LASH_TOOL_SCHEMA_CACHE_DOMAIN_VERSION, schema_content_fingerprint))
+const LASH_TOOL_SCHEMA_CACHE_DOMAIN_VERSION: &str = "lash-tool-schema-cache/v2";
+
 use crate::sync::MutexExt;
 use std::collections::HashMap;
 use std::io::{self, Write};
@@ -82,7 +86,7 @@ fn schema_content_fingerprint(schema: &Value) -> Result<([u8; 32], usize), Strin
         }
     }
 
-    let mut digest = Blake3DomainHasher::new("lash-tool-schema-cache/v2");
+    let mut digest = Blake3DomainHasher::new(LASH_TOOL_SCHEMA_CACHE_DOMAIN_VERSION);
     let serialized_bytes = {
         let mut writer = DigestWriter {
             digest: &mut digest,

@@ -7,6 +7,10 @@
 //! enters it, so a crash replay and a reported-failure retry present the same
 //! id, and two distinct calls never share one.
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_TOOL_CALL_ID_DOMAIN_VERSION, child, derive))
+const LASH_TOOL_CALL_ID_DOMAIN_VERSION: &str = "lash-tool-call-id/v1";
+
 use std::fmt;
 
 use crate::ProcessId;
@@ -275,7 +279,7 @@ impl ToolCallId {
         root: ToolCallRoot<'_>,
         positions: &[ToolCallPosition<'_>],
     ) -> Self {
-        let mut digest = Blake3DomainHasher::new("lash-tool-call-id/v1");
+        let mut digest = Blake3DomainHasher::new(LASH_TOOL_CALL_ID_DOMAIN_VERSION);
         digest.update([FORM_ADMITTED]);
         encode_bytes(&mut digest, namespace);
         root.encode(&mut digest);
@@ -289,7 +293,7 @@ impl ToolCallId {
     /// The id of the batch member at its original `member_index` in the
     /// wrapper this id names, counted before any member is refused.
     pub fn child(&self, member_index: u64) -> Self {
-        let mut digest = Blake3DomainHasher::new("lash-tool-call-id/v1");
+        let mut digest = Blake3DomainHasher::new(LASH_TOOL_CALL_ID_DOMAIN_VERSION);
         digest.update([FORM_BATCH_MEMBER]);
         // Fixed width, so the parent needs no length prefix.
         digest.update(self.digest_hex().as_bytes());

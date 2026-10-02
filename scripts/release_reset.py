@@ -38,12 +38,9 @@ FIXTURE_GENERATORS = [
 ]
 
 
-def plan(repo: Path, declaration: Path):
+def plan(repo: Path):
     rows = baseline.inventory(repo)
-    declared = baseline.load_baseline(declaration)
-    keys = {row["key"] for row in rows}
-    if keys != declared.keys():
-        raise baseline.BaselineError("reset requires an exact, complete baseline table")
+    declared = {row["key"]: baseline.baseline_of(row["default"]) for row in rows}
     edits = {}
     replacements = {}
 
@@ -63,12 +60,6 @@ def plan(repo: Path, declaration: Path):
 
     for row in rows:
         expected = declared[row["key"]]
-        if type(expected) is not type(row["default"]):
-            raise baseline.BaselineError(f'{row["key"]}: baseline changes the constant type')
-        if type(expected) is int and expected != 1:
-            raise baseline.BaselineError("the 1.0 reset requires counter baseline 1")
-        if type(expected) is str and expected != re.sub(r"v\d+$", "v1", row["default"]):
-            raise baseline.BaselineError("string identities must retain their prefix and end in v1")
         path, name = row["key"].rsplit(":", 1)
         successor = expected + 1 if type(expected) is int and row["synthetic"] != row["default"] else expected
         constant(repo / path, name, expected, successor)
@@ -82,6 +73,31 @@ def plan(repo: Path, declaration: Path):
             text = text[:start] + value + text[end:]
         if text != path.read_text():
             edits[path] = text
+
+    # Domain reservations retain retired names. Add the newly reset current
+    # hash domains from the discovered constants, so their runtime check holds.
+    path = repo / "crates/lash-sansio/src/core_support.rs"
+    text = edits.get(path, path.read_text())
+    domains = sorted({value for value in declared.values()
+                      if isinstance(value, str) and re.fullmatch(r"lash[^/]+/v1", value)})
+    table = re.search(r"const BLAKE3_DOMAINS: &\[&str\] = &\[(.*?)\n\];", text, re.DOTALL)
+    if table is None:
+        raise baseline.BaselineError("cannot read the hash-domain reservations")
+    additions = [value for value in domains if json.dumps(value) not in table[1]]
+    if additions:
+        text = text[:table.end(1)] + "".join(f'\n    {json.dumps(value)},' for value in additions) + text[table.end(1):]
+    retired = re.search(r"const RETIRED_BLAKE3_DOMAINS: &\[&str\] = &\[(.*?)\n    \];", text, re.DOTALL)
+    if retired is None:
+        raise baseline.BaselineError("cannot read the retired hash-domain reservations")
+    old_domains = sorted({row["default"] for row in rows
+                          if isinstance(row["default"], str)
+                          and re.fullmatch(r"lash[^/]+/v[0-9]+", row["default"])
+                          and row["default"] not in domains})
+    additions = [value for value in old_domains if json.dumps(value) not in retired[1]]
+    if additions:
+        text = text[:retired.end(1)] + "".join(f'\n        {json.dumps(value)},' for value in additions) + text[retired.end(1):]
+    if text != path.read_text():
+        edits[path] = text
 
     # These literals are deliberately below their owning crates. Keep the
     # synthetic old-writer pins and predecessor decoders aligned with N = 1.
@@ -216,7 +232,6 @@ def regenerate(repo: Path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=baseline.ROOT)
-    parser.add_argument("--baseline", type=Path, default=baseline.BASELINE)
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--dry-run", action="store_true")
     action.add_argument("--apply", action="store_true")
@@ -224,8 +239,7 @@ def main():
     args = parser.parse_args()
     try:
         repo = args.repo.resolve()
-        declaration = args.baseline if args.baseline.is_absolute() else repo / args.baseline
-        public, edits = plan(repo, declaration)
+        public, edits = plan(repo)
         print(json.dumps(public, indent=2), flush=True)
         if public["hardcoded_workflow_schema_paths_after_reset"]:
             raise baseline.BaselineError("hard-coded workflow schema version paths remain after reset")
@@ -237,7 +251,7 @@ def main():
             path.write_text(text)
         if not args.source_only:
             regenerate(repo)
-        errors = baseline.mismatches(baseline.inventory(repo), baseline.load_baseline(declaration))
+        errors = baseline.mismatches(baseline.inventory(repo))
         errors += baseline.sqlite_stamp_mismatches(repo)
         errors += baseline.postgres_stamp_mismatches(repo)
         if errors:

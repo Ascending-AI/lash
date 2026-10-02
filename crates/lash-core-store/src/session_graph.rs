@@ -1,3 +1,19 @@
+/// version_surface = "coexist"
+/// version_guard(items(DRAFT_NODE_PREFIX_VERSION, draft_node_id))
+const DRAFT_NODE_PREFIX_VERSION: &str = "draft-node/v3/";
+
+/// version_surface = "coexist"
+/// version_guard(items(LASH_DRAFT_NODE_DOMAIN_VERSION, draft_node_id))
+const LASH_DRAFT_NODE_DOMAIN_VERSION: &str = "lash-draft-node/v3";
+
+/// version_surface = "coexist"
+/// version_guard(items(FRAME_NODE_PREFIX_VERSION, frame_node_id))
+const FRAME_NODE_PREFIX_VERSION: &str = "frame-node/v3/";
+
+/// version_surface = "coexist"
+/// version_guard(items(LASH_FRAME_NODE_DOMAIN_VERSION, frame_node_id))
+const LASH_FRAME_NODE_DOMAIN_VERSION: &str = "lash-frame-node/v3";
+
 use crate::{NodeId, SessionId};
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
@@ -110,8 +126,8 @@ pub mod facade_ops {
 pub fn draft_node_id(namespace: &str, ordinal: u64) -> NodeId {
     let preimage = format!("{}:{namespace}:{ordinal}", namespace.len());
     NodeId::new(format!(
-        "draft-node/v3/{}",
-        crate::stable_hash::blake3_hex("lash-draft-node/v3", preimage.as_bytes())
+        "{DRAFT_NODE_PREFIX_VERSION}{}",
+        crate::stable_hash::blake3_hex(LASH_DRAFT_NODE_DOMAIN_VERSION, preimage.as_bytes())
     ))
 }
 
@@ -132,8 +148,8 @@ pub fn frame_node_id(session_id: &SessionId, frame_key: &str) -> crate::FrameNod
         frame_key.len()
     );
     crate::FrameNodeId::new(format!(
-        "frame-node/v3/{}",
-        crate::stable_hash::blake3_hex("lash-frame-node/v3", preimage.as_bytes())
+        "{FRAME_NODE_PREFIX_VERSION}{}",
+        crate::stable_hash::blake3_hex(LASH_FRAME_NODE_DOMAIN_VERSION, preimage.as_bytes())
     ))
     .expect("derived frame node ids are non-empty")
 }

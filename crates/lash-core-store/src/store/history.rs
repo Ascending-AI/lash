@@ -3,6 +3,10 @@
 //! These are the only store reads that decode graph bodies or turn receipts. A window read is bounded by the session's current frame;
 //! every other read that returns history is paged under an explicit budget,
 //! and the rest are predicates that return no content.
+/// version_surface = "coexist"
+/// version_guard(items(LASH_HISTORY_LINEAGE_DOMAIN_VERSION, of_lineage))
+const LASH_HISTORY_LINEAGE_DOMAIN_VERSION: &str = "lash-history-lineage/v1";
+
 use std::num::{NonZeroU32, NonZeroU64};
 
 use super::{BlobRef, HydratedSessionCheckpoint, PendingFollowOn, SessionHeadRef, StoreError};
@@ -219,7 +223,7 @@ impl LineageStamp {
             preimage.extend_from_slice(id);
             preimage.extend_from_slice(&fork_generation.to_be_bytes());
         }
-        let hex = crate::stable_hash::blake3_hex("lash-history-lineage/v1", &preimage);
+        let hex = crate::stable_hash::blake3_hex(LASH_HISTORY_LINEAGE_DOMAIN_VERSION, &preimage);
         let mut bytes = [0_u8; 32];
         let (pairs, _) = hex.as_bytes().as_chunks::<2>();
         for (byte, [high, low]) in bytes.iter_mut().zip(pairs) {

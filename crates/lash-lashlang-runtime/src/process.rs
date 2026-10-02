@@ -1,3 +1,7 @@
+/// version_surface = "coexist"
+/// version_guard(items(LASH_LASHLANG_PROGRAM_DOMAIN_VERSION, lashlang_program_hash))
+const LASH_LASHLANG_PROGRAM_DOMAIN_VERSION: &str = "lash-lashlang-program/v3";
+
 mod execution_result;
 mod segment_state;
 use execution_result::{
@@ -326,7 +330,10 @@ pub fn lashlang_program_hash(input: &LashlangProcessInput) -> String {
     .expect("lashlang program identity should serialize");
     format!(
         "blake3:{}",
-        lash_sansio::core_support::blake3_domain_hash_hex("lash-lashlang-program/v3", identity,)
+        lash_sansio::core_support::blake3_domain_hash_hex(
+            LASH_LASHLANG_PROGRAM_DOMAIN_VERSION,
+            identity,
+        )
     )
 }
 

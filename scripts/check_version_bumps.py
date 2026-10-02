@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Require a version bump, and its upgrade evidence, when a guarded shape changes.
 
-Every ``[[surface]]`` of ``scripts/versioned-surfaces.toml`` names a version
-constant. The shapes that constant guards are declared in code, on the
+The inventory combines ``[[surface]]`` rows in ``scripts/versioned-surfaces.toml``
+with constants declaring ``/// version_surface = "coexist"`` in source.
+Source declarations use the same ``migrate``, ``drain`` and ``coexist`` policies. The shapes that constant guards are declared in code, on the
 constant itself, by a marker in its doc comment::
 
     /// The demo record's stored format.
@@ -3006,7 +3007,7 @@ def version_at(view: TreeView, surface: Surface) -> int:
         value = _default_build_value(content, name, where)
         if re.fullmatch(r"[0-9][0-9_]*", value):
             return int(value.replace("_", ""))
-        tagged = re.fullmatch(r'"[^"\\]*?([0-9]+)"', value)
+        tagged = re.fullmatch(r'"[^"\\]*?v([0-9]+)(?:[/:-][^"\\]*)?"', value)
         if tagged is not None:
             return int(tagged.group(1))
         if re.fullmatch(r"[A-Z][A-Z0-9_]*", value) is None:
@@ -3266,14 +3267,15 @@ def check_views(
     head_registry = head_view.content(REGISTRY)
     if head_registry is None:
         raise CheckError(f"{head_view.label}: cannot read {REGISTRY}")
-    surfaces = load_surfaces(head_registry, f"{head_view.label}:{REGISTRY}")
+    from discover_version_surfaces import surfaces as discover_surfaces
+    surfaces = discover_surfaces(head_view)
     base_registry = base_view.content(REGISTRY)
     base_surfaces = (
         {}
         if base_registry is None
         else {
             surface.key: surface
-            for surface in load_surfaces(base_registry, f"{base_view.label}:{REGISTRY}")
+            for surface in discover_surfaces(base_view, enforce=False)
         }
     )
     head_keys = {surface.key for surface in surfaces}
@@ -3507,7 +3509,8 @@ def guarded_path_patterns(repo: Path) -> frozenset[str]:
     if registry is None:
         raise CheckError(f"cannot read {REGISTRY}")
     patterns = {REGISTRY, UPCASTER_REGISTRY}
-    for surface in load_surfaces(registry, REGISTRY):
+    from discover_version_surfaces import surfaces as discover_surfaces
+    for surface in discover_surfaces(view):
         patterns.add(surface.constant_path)
         declaration = _declaration(view, surface)
         if declaration is not None:

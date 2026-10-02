@@ -6,6 +6,10 @@
 //! content is assembled elsewhere, from recorded state
 //! (`turn_boundary::recorded_assembly`).
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_PROVIDER_CALL_CORRELATION_DOMAIN_VERSION, repair_tool_call_ids))
+const LASH_PROVIDER_CALL_CORRELATION_DOMAIN_VERSION: &str = "lash-provider-call-correlation/v1";
+
 use std::collections::HashSet;
 use std::time::Instant;
 
@@ -641,7 +645,7 @@ fn repair_tool_call_ids(parts: &mut [LlmOutputPart], request_id: &str) {
             continue;
         }
         for attempt in 0u64.. {
-            let mut hash = Blake3DomainHasher::new("lash-provider-call-correlation/v1");
+            let mut hash = Blake3DomainHasher::new(LASH_PROVIDER_CALL_CORRELATION_DOMAIN_VERSION);
             hash.update((request_id.len() as u64).to_le_bytes());
             hash.update(request_id.as_bytes());
             hash.update((index as u64).to_le_bytes());

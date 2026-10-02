@@ -5,6 +5,10 @@
 //! [`HttpTransport`] (ADR 0014), so this module owns only URL shaping, request
 //! encoding, status handling, and response decoding.
 
+/// version_surface = "coexist"
+/// version_guard(items(RESTATE_AUTHORITY_PREFIX_VERSION, from_binding_id, new))
+const RESTATE_AUTHORITY_PREFIX_VERSION: &str = "restate-authority-v1:";
+
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -46,11 +50,13 @@ impl RestateAuthorityId {
         }
         use sha2::Digest;
         let digest = sha2::Sha256::digest(value.as_bytes());
-        Ok(Self(Arc::from(format!("restate-authority-v1:{digest:x}"))))
+        Ok(Self(Arc::from(format!(
+            "{RESTATE_AUTHORITY_PREFIX_VERSION}{digest:x}"
+        ))))
     }
 
     pub(crate) fn from_binding_id(value: &str) -> Option<Self> {
-        let digest = value.strip_prefix("restate-authority-v1:")?;
+        let digest = value.strip_prefix(RESTATE_AUTHORITY_PREFIX_VERSION)?;
         (digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()))
             .then(|| Self(Arc::from(value)))
     }

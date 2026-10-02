@@ -9,6 +9,14 @@
 //! across requests and processes without disclosing what the host put in the
 //! id — and two ids can never collide by sharing a prefix.
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_PROVIDER_SESSION_AFFINITY_DOMAIN_VERSION, provider_session_affinity_key))
+const LASH_PROVIDER_SESSION_AFFINITY_DOMAIN_VERSION: &str = "lash-provider-session-affinity/v1";
+
+/// version_surface = "coexist"
+/// version_guard(items(LASH_PROVIDER_PROMPT_CACHE_KEY_DOMAIN_VERSION, provider_prompt_cache_key))
+const LASH_PROVIDER_PROMPT_CACHE_KEY_DOMAIN_VERSION: &str = "lash-provider-prompt-cache-key/v1";
+
 use super::types::{LlmRequest, LlmRequestScope};
 use crate::core_support::blake3_domain_hash_hex;
 
@@ -17,7 +25,7 @@ impl LlmRequestScope {
     /// domain hash of the session id.
     pub fn provider_session_affinity_key(&self) -> String {
         blake3_domain_hash_hex(
-            "lash-provider-session-affinity/v1",
+            LASH_PROVIDER_SESSION_AFFINITY_DOMAIN_VERSION,
             self.session_id.as_str(),
         )
     }
@@ -26,7 +34,10 @@ impl LlmRequestScope {
     /// hex domain hash of [`Self::continuation_key`]. Same rationale as
     /// [`Self::provider_session_affinity_key`].
     pub fn provider_prompt_cache_key(&self) -> String {
-        blake3_domain_hash_hex("lash-provider-prompt-cache-key/v1", self.continuation_key())
+        blake3_domain_hash_hex(
+            LASH_PROVIDER_PROMPT_CACHE_KEY_DOMAIN_VERSION,
+            self.continuation_key(),
+        )
     }
 }
 

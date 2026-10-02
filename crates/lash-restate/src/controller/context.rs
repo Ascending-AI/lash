@@ -6,6 +6,10 @@
 //! suspension protocol — including the one-shot fusing of a context future that
 //! wakes synchronously and then returns `Pending`.
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_DURABLE_WAIT_DEADLINE_PREFIX_VERSION, journaled_restate_durable_wait_request))
+const LASH_DURABLE_WAIT_DEADLINE_PREFIX_VERSION: &str = "lash:durable-wait-deadline:v2:";
+
 use lash_sansio::SessionId;
 use std::future::Future;
 use std::pin::Pin;
@@ -836,7 +840,7 @@ where
     };
     let Json(deadline): Json<RestateDurableWaitDeadline> = context
         .run_json_send(
-            format!("lash:durable-wait-deadline:v2:{}", key.key_id),
+            format!("{LASH_DURABLE_WAIT_DEADLINE_PREFIX_VERSION}{}", key.key_id),
             None,
             async move { proposed_deadline },
         )

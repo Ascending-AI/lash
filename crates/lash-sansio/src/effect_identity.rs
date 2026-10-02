@@ -238,6 +238,8 @@ pub struct EffectJournalIdentity {
 const SESSION_OPERATION_JOURNAL_KIND: &str = "drain";
 
 /// The exact existing generation of `ExecutionScope` journal keys.
+/// version_surface = "coexist"
+/// version_guard(items(from_scope), roots(ExecutionScope))
 const JOURNAL_IDENTITY_VERSION: u8 = 2;
 
 impl EffectJournalIdentity {

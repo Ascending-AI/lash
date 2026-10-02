@@ -27,6 +27,8 @@ use crate::{GenerationOptions, ModelKey, ProtocolTurnOptions, ReasoningSelection
 
 /// Family version of the [`RunSpecHash`] preimage and of the canonical spec
 /// bytes it hashes.
+/// version_surface = "coexist"
+/// version_guard(items(RUN_SPEC_FAMILY_VERSION, hash))
 pub const RUN_SPEC_FAMILY_VERSION: u8 = 1;
 
 /// An immutable run definition name and revision a deployment registers.

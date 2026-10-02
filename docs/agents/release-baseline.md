@@ -1,18 +1,23 @@
 # Release baseline preparation
 
-`scripts/versioned-surfaces.toml` owns the surface list. The source inventory
+`scripts/versioned-surfaces.toml` lists existing formats. Identity constants declare
+`/// version_surface = "coexist"` beside their `version_guard` in source and
+are discovered automatically. The source inventory
 resolves each owning constant for the default and synthetic-next builds:
 
 ```sh
 kiln gate lash my-fork -- python3 scripts/release_baseline.py inventory
-kiln gate lash my-fork -- python3 scripts/release_baseline.py check \
-  --baseline scripts/release-baseline.toml
+kiln gate lash my-fork -- python3 scripts/release_baseline.py check
 ```
 
-The draft table declares the cut's values. Every counter starts at 1. String
-identities retain their prefix and use version 1. Until FIG-4485 executes, the
-check deliberately fails on production values. Missing rows, extra rows,
-unresolved constants and unsupported source expressions also fail.
+The cut derives every baseline from the discovered value. Every counter starts
+at 1. String identities retain their prefix and suffix and use version 1.
+Until FIG-4485 executes, the check deliberately fails on production values.
+Unregistered version constants, inline family counters or string literals,
+unresolved constants and unsupported source expressions fail. Test fixtures and upstream endpoint versions
+are outside identity discovery. Append-only domain reservation arrays declare
+`version_reservations` with their reason; the reset retains historical names and
+adds the discovered current domains at v1.
 
 Compare the source inventory with a compiled operator's durable-format table
 and version response without a database connection:

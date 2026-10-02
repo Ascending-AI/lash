@@ -8,6 +8,10 @@
 //! rule has a single implementation, exercised against every backend by the
 //! shared `runtime_persistence` conformance suite.
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_QUEUED_WORK_BATCH_DOMAIN_VERSION, derive_batch_id))
+const LASH_QUEUED_WORK_BATCH_DOMAIN_VERSION: &str = "lash-queued-work-batch/v2";
+
 use crate::{
     AdmissionBoundary, DeliveryPolicy, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkKind,
     QueuedWorkPayload, StoreError, TurnCause, TurnLaneAdmissionPolicy,
@@ -514,7 +518,7 @@ pub fn derive_batch_id(
     }
     format!(
         "qwb:{}",
-        crate::stable_hash::blake3_hex("lash-queued-work-batch/v2", seed.as_bytes())
+        crate::stable_hash::blake3_hex(LASH_QUEUED_WORK_BATCH_DOMAIN_VERSION, seed.as_bytes())
     )
 }
 

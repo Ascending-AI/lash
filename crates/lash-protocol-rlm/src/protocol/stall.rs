@@ -6,6 +6,10 @@
 //! committed. This module also mints the reply fingerprint each attempt records,
 //! which carries no runtime behavior — it is evidence a host can read.
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_RLM_STALL_REPLY_DOMAIN_VERSION, reply_fingerprint))
+const LASH_RLM_STALL_REPLY_DOMAIN_VERSION: &str = "lash-rlm-stall-reply/v2";
+
 use lash_core::llm::types::ProviderReasoningReplay;
 use lash_core::session_model::SessionHistoryRecord;
 use lash_core::{DriverAction, DriverContextView};
@@ -138,7 +142,7 @@ fn trajectory_entry_turn_prefix(turn_id: &TurnId) -> String {
 /// reply is not small. Derived from the reply alone, so it is replay-stable.
 pub(crate) fn reply_fingerprint(assistant_text: &str) -> String {
     let digest = lash_sansio::core_support::blake3_domain_hash(
-        "lash-rlm-stall-reply/v2",
+        LASH_RLM_STALL_REPLY_DOMAIN_VERSION,
         assistant_text.as_bytes(),
     );
     digest[..8]

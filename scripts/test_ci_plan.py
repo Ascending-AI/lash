@@ -1693,7 +1693,7 @@ class RollingUpgradeSelectionTests(unittest.TestCase):
         for path in (
             "docs/guide.md",
             "runbooks/rolling-upgrade/runbook.md",
-            "crates/lash-core/src/runtime/assembly.rs",
+            "crates/lash-core/src/lib.rs",
         ):
             with self.subTest(path=path):
                 self.assertEqual("false", self.plan(path)["rolling_upgrade"])
@@ -1725,8 +1725,11 @@ class ReleaseJournalReplaySelectionTests(unittest.TestCase):
         self.assertNotIn("release-journal-replay", aggregator["needs"])
 
     def test_every_registered_constant_selects_release_journal_replay(self):
-        registry = tomllib.loads((ROOT / "scripts/versioned-surfaces.toml").read_text())
-        constant_files = {surface["constant_path"] for surface in registry["surface"]}
+        import check_version_bumps
+        from discover_version_surfaces import surfaces
+
+        constant_files = {surface.constant_path
+                          for surface in surfaces(check_version_bumps.WorktreeView(ROOT))}
         self.assertLessEqual(constant_files, ci_plan.versioned_surface_paths())
         for path in sorted(constant_files):
             with self.subTest(path=path):
@@ -1744,7 +1747,7 @@ class ReleaseJournalReplaySelectionTests(unittest.TestCase):
         self.assertEqual("true", plan.get("release_journal_replay"))
 
     def test_unrelated_pull_requests_skip_release_journal_replay(self):
-        plan = ci_plan.classify([("M", "crates/lash-core/src/runtime/assembly.rs")], event_name="pull_request")
+        plan = ci_plan.classify([("M", "crates/lash-core/src/lib.rs")], event_name="pull_request")
         self.assertEqual("false", plan.get("release_journal_replay"))
 
 
@@ -1771,7 +1774,7 @@ class VersionedSurfaceSelectionTests(unittest.TestCase):
     def test_docs_and_unguarded_paths_do_not_select_it(self) -> None:
         self.assertFalse(
             ci_plan.touches_versioned_surface(
-                ["docs/guide.md", "crates/lash-core/src/runtime/assembly.rs", "justfile"]
+                ["docs/guide.md", "crates/lash-core/src/lib.rs", "justfile"]
             )
         )
 

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Hold the durable format-version registry exhaustive and the manifest true.
 
-``scripts/versioned-surfaces.toml`` is the one registry of versioned formats.
+The format table and source-declared identity constants form the inventory.
+`discover_version_surfaces.py` rejects unregistered version strings, inline
+family counters and constants, including those covered by a class exclusion.
 Every ``*_VERSION`` / ``*_EPOCH`` constant defined in non-test Rust under
 ``crates/`` and ``examples/`` must be one of:
 
-- a registered ``[[surface]]``;
+- a registered ``[[surface]]`` or a source ``version_surface`` declaration;
 - a member of a ``[[excluded_class]]`` suffix, whose reason is written once
   for the whole class; or
 - an ``[[unregistered]]`` entry naming the constant and why it versions no
@@ -430,11 +432,26 @@ def row_label(row: str) -> str:
 def check(repo: Path, registry: Registry, manifest_text: str) -> list[str]:
     problems: list[str] = []
 
+    from discover_version_surfaces import discover
+    discovered, discovery_problems = discover(
+        check_version_bumps.WorktreeView(repo), registry.surfaces.values(), unregistered=registry.unregistered, enforce=False,
+    )
+    problems.extend(sorted(discovery_problems))
+    for row in discovered:
+        key = f'{row["constant_path"]}:{row["constant"]}'
+        if class_of(registry, key) is not None:
+            row.pop("outside_manifest", None)
+    registry = Registry(
+        {**registry.surfaces, **{f'{r["constant_path"]}:{r["constant"]}': r for r in discovered}},
+        registry.classes, registry.unregistered, registry.unregistered_upgrades,
+    )
     swept = sweep(repo)
     for key in sorted(swept):
         if key in registry.surfaces or key in registry.unregistered:
             continue
         if class_of(registry, key) is not None:
+            continue
+        if any(problem.startswith(key + " ") for problem in discovery_problems):
             continue
         problems.append(
             f"{key} is a version-shaped constant the registry does not know: "

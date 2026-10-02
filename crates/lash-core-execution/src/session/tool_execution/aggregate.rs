@@ -321,7 +321,10 @@ impl RuntimeExecutionContext<'_> {
 /// against the journal's retained children
 /// ([`GroupReopen::RetainedContent`](crate::GroupReopen::RetainedContent)).
 fn aggregate_content_digest(calls: &[ToolInvocation], timers: &[(usize, u64)]) -> String {
-    let mut identity = crate::stable_identity::IdentityEncoder::new("lash.aggregate-content", 1);
+    let mut identity = crate::stable_identity::IdentityEncoder::new(
+        "lash.aggregate-content",
+        AGGREGATE_CONTENT_FAMILY_VERSION,
+    );
     identity.bytes(&tool_invocation_batch_preimage(calls));
     identity.sequence(timers, |identity, (position, duration_ms)| {
         identity.u64(*position as u64);
@@ -355,3 +358,7 @@ fn prefix_decision(
     (settled_value_after == Some(prefix.len()) && consumer.decides(true))
         .then_some(PrefixDecision::Value)
 }
+
+/// version_surface = "coexist"
+/// version_guard(items(aggregate_content_digest))
+const AGGREGATE_CONTENT_FAMILY_VERSION: u8 = 1;

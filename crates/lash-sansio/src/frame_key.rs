@@ -1,8 +1,14 @@
 //! Deterministic key material for opening an agent frame.
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_AGENT_FRAME_KEY_DOMAIN_VERSION, derive))
+const LASH_AGENT_FRAME_KEY_DOMAIN_VERSION: &str = "lash.agent-frame-key/v2";
+
 use crate::SessionId;
 use crate::core_support::Blake3DomainHasher;
 
+/// version_surface = "coexist"
+/// version_guard(items(FRAME_KEY_PREFIX, derive, is_derived))
 const FRAME_KEY_PREFIX: &str = "frame-key/v2/";
 /// version_guard(
 ///     items(derive),
@@ -77,7 +83,7 @@ impl FrameKey {
     }
 
     fn derive<'a>(source_tag: u8, parts: impl IntoIterator<Item = &'a str>) -> Self {
-        let mut digest = Blake3DomainHasher::new("lash.agent-frame-key/v2");
+        let mut digest = Blake3DomainHasher::new(LASH_AGENT_FRAME_KEY_DOMAIN_VERSION);
         digest.update([FRAME_KEY_VERSION, source_tag]);
         for part in parts {
             digest.update((part.len() as u64).to_be_bytes());

@@ -179,6 +179,8 @@ impl std::fmt::Display for ProcessSignature {
 }
 
 /// Family version of the definition-reference fingerprint preimage.
+/// version_surface = "coexist"
+/// version_guard(items(PROCESS_DEFINITION_REF_FAMILY_VERSION, fingerprint))
 const PROCESS_DEFINITION_REF_FAMILY_VERSION: u8 = 1;
 
 /// A typed, verifiable reference to one process definition.

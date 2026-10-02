@@ -3,6 +3,11 @@
 //! `RuntimeSessionState` is the runtime-private mutable state shape. Public
 //! host/plugin reads use `SessionSnapshot` from the plugin API instead.
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_SESSION_APPEND_DRAFT_FALLBACK_DOMAIN_VERSION, session_append_node_drafts))
+const LASH_SESSION_APPEND_DRAFT_FALLBACK_DOMAIN_VERSION: &str =
+    "lash-session-append-draft-fallback/v2";
+
 use crate::SessionId;
 use crate::TurnId;
 use crate::facade_support::{SessionGraphFacadeOps, ToolStateFacadeOps};
@@ -1750,7 +1755,7 @@ pub fn session_append_node_drafts(
         .enumerate()
         .map(|(ordinal, node)| {
             let fallback_digest = crate::stable_hash::blake3_hex(
-                "lash-session-append-draft-fallback/v2",
+                LASH_SESSION_APPEND_DRAFT_FALLBACK_DOMAIN_VERSION,
                 format!("{draft_namespace}:{ordinal}").as_bytes(),
             );
             session_append_node_draft(node, &format!("m_append_{fallback_digest}"))

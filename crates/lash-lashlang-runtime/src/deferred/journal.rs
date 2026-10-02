@@ -4,6 +4,10 @@
 //! production line budget; the journal identity and the recorded-then-fold
 //! application order live together here.
 
+/// version_surface = "coexist"
+/// version_guard(items(DEFERRED_TOOL_RESOLUTION_PREFIX_VERSION, journal_deferred_outcomes))
+const DEFERRED_TOOL_RESOLUTION_PREFIX_VERSION: &str = "deferred_tool_resolution:v2:";
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::LashlangHostEnvironment;
@@ -36,7 +40,7 @@ where
     }
     let effect_id = format!("{}:deferred-tool-resolution", link_key.address.replay_key);
     let operation = format!(
-        "deferred_tool_resolution:v2:{}",
+        "{DEFERRED_TOOL_RESOLUTION_PREFIX_VERSION}{}",
         serde_json::to_string(&referenced)
             .expect("deferred call-path strings encode as canonical JSON")
     );

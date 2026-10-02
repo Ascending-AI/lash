@@ -1,3 +1,11 @@
+/// version_surface = "coexist"
+/// version_guard(items(LASH_COMPOSITION_TOOL_DOMAIN_VERSION, composition_tool_fingerprint))
+const LASH_COMPOSITION_TOOL_DOMAIN_VERSION: &str = "lash-composition-tool/v2";
+
+/// version_surface = "coexist"
+/// version_guard(items(LASH_MODEL_FACING_COMPOSITION_DOMAIN_VERSION, trace_composition_key))
+const LASH_MODEL_FACING_COMPOSITION_DOMAIN_VERSION: &str = "lash-model-facing-composition/v3";
+
 use std::sync::Arc;
 
 use lash_trace::{
@@ -454,7 +462,9 @@ impl std::io::Write for CompositionHashWriter {
 pub(crate) fn composition_tool_fingerprint(tool: &LlmToolSpec) -> [u8; 32] {
     #[cfg(any(test, feature = "testing"))]
     COMPOSITION_SCHEMA_SERIALIZATIONS.with(|count| count.set(count.get() + 1));
-    let mut writer = CompositionHashWriter(Blake3DomainHasher::new("lash-composition-tool/v2"));
+    let mut writer = CompositionHashWriter(Blake3DomainHasher::new(
+        LASH_COMPOSITION_TOOL_DOMAIN_VERSION,
+    ));
     serde_json::to_writer(&mut writer, tool)
         .expect("model-facing tool contract serialization is infallible");
     writer.0.finalize()
@@ -462,7 +472,7 @@ pub(crate) fn composition_tool_fingerprint(tool: &LlmToolSpec) -> [u8; 32] {
 
 pub fn trace_composition_key(req: &LlmRequest, tool_fingerprints: &[[u8; 32]]) -> [u8; 32] {
     debug_assert_eq!(req.tools.len(), tool_fingerprints.len());
-    let mut hash = Blake3DomainHasher::new("lash-model-facing-composition/v3");
+    let mut hash = Blake3DomainHasher::new(LASH_MODEL_FACING_COMPOSITION_DOMAIN_VERSION);
     hash.update([u8::from(req.instructions.is_some())]);
     hash.update(req.model_capability.instruction_role.as_str().as_bytes());
     if let Some(text) = &req.instructions {

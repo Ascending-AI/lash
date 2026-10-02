@@ -1,3 +1,11 @@
+/// version_surface = "coexist"
+/// version_guard(items(LASH_LASHLANG_CONTENT_DOMAIN_VERSION, new))
+const LASH_LASHLANG_CONTENT_DOMAIN_VERSION: &str = "lash-lashlang-content/v2";
+
+/// version_surface = "coexist"
+/// version_guard(items(LASH_WORKFLOW_SOURCE_DOMAIN_VERSION, for_source_identity))
+const LASH_WORKFLOW_SOURCE_DOMAIN_VERSION: &str = "lash-workflow-source/v4";
+
 use lash_sansio::core_support::Blake3DomainHasher;
 
 use super::ContentHash;
@@ -36,7 +44,7 @@ impl HashWriter {
             // `blake3_domains_are_unique_and_match_workspace_usage` gate scans
             // constructor call sites for the string, and a named constant is
             // invisible to it.
-            hasher: Blake3DomainHasher::new("lash-lashlang-content/v2"),
+            hasher: Blake3DomainHasher::new(LASH_LASHLANG_CONTENT_DOMAIN_VERSION),
         }
     }
 
@@ -44,7 +52,7 @@ impl HashWriter {
     /// deterministic atom stream as its content hash, under its own domain.
     pub(super) fn for_source_identity() -> Self {
         Self {
-            hasher: Blake3DomainHasher::new("lash-workflow-source/v4"),
+            hasher: Blake3DomainHasher::new(LASH_WORKFLOW_SOURCE_DOMAIN_VERSION),
         }
     }
 

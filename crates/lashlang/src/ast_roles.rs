@@ -4,6 +4,10 @@
 //! has to infer structure from a binding's spelling. Each role names its shape,
 //! and [`super::validate_ast`] refuses a role whose expression lacks it.
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_LIFTED_PROCESS_NAME_DOMAIN_VERSION, lifted_process_identity))
+const LASH_LIFTED_PROCESS_NAME_DOMAIN_VERSION: &str = "lash-lifted-process-name/v2";
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -555,7 +559,7 @@ pub fn lifted_process_identity(body: &Expr, path: &[u32]) -> String {
         "path": path,
     });
     let digest = lash_sansio::core_support::blake3_domain_hash_hex(
-        "lash-lifted-process-name/v2",
+        LASH_LIFTED_PROCESS_NAME_DOMAIN_VERSION,
         preimage.to_string(),
     );
     format!("{LIFTED_PROCESS_NAME_PREFIX}{digest}")

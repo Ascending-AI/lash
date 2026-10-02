@@ -2,6 +2,10 @@
 //! Messages wire shape (messages, tools, cache control, thinking config,
 //! structured output).
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_ANTHROPIC_TOOL_CALL_WIRE_DOMAIN_VERSION, provider_call_id_map))
+const LASH_ANTHROPIC_TOOL_CALL_WIRE_DOMAIN_VERSION: &str = "lash-anthropic-tool-call-wire/v1";
+
 use crate::support::*;
 use lash_core::llm::types::LlmMessage;
 use lash_sansio::core_support::Blake3DomainHasher;
@@ -734,7 +738,7 @@ fn provider_call_id_map(req: &LlmRequest) -> Result<HashMap<String, String>, Llm
             .take(47)
             .collect();
         for attempt in 0u64.. {
-            let mut hash = Blake3DomainHasher::new("lash-anthropic-tool-call-wire/v1");
+            let mut hash = Blake3DomainHasher::new(LASH_ANTHROPIC_TOOL_CALL_WIRE_DOMAIN_VERSION);
             hash.update(id.as_bytes());
             hash.update(attempt.to_le_bytes());
             let digest = hash.finalize_hex();

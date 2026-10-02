@@ -1,4 +1,8 @@
 //! Owner-scoped, effect-keyed usage facts and dispatch liabilities.
+/// version_surface = "coexist"
+/// version_guard(items(LASH_USAGE_FACT_PAYLOAD_DOMAIN_VERSION, usage_correction_payload_hash, usage_fact_payload_hash))
+const LASH_USAGE_FACT_PAYLOAD_DOMAIN_VERSION: &str = "lash-usage-fact-payload/v4";
+
 use crate::usage::{SessionUsageReport, UsageAttributionKey, UsageTotals};
 use crate::{ModelKey, RuntimeOwner, StoreError};
 use lash_sansio::TokenUsage;
@@ -599,7 +603,7 @@ pub const USAGE_PAYLOAD_FAMILY_VERSION: u8 = 4;
 /// The identity columns are not part of the payload. Full destructures, no `..`.
 pub fn usage_fact_payload_hash(fact: &UsageAttemptFact, run: &UsageRunId) -> String {
     crate::stable_hash::blake3_hex(
-        "lash-usage-fact-payload/v4",
+        LASH_USAGE_FACT_PAYLOAD_DOMAIN_VERSION,
         &attempt_payload_bytes(fact, run),
     )
 }
@@ -611,7 +615,7 @@ pub fn usage_correction_payload_hash(
     target: &UsageFactRecord,
 ) -> String {
     crate::stable_hash::blake3_hex(
-        "lash-usage-fact-payload/v4",
+        LASH_USAGE_FACT_PAYLOAD_DOMAIN_VERSION,
         &correction_payload_bytes(correction, target),
     )
 }

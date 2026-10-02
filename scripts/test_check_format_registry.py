@@ -58,6 +58,8 @@ pub const WIRE_VERSION: u16 = 3;
 pub const PEER_PROTOCOL_VERSION: u32 = 1;
 /// version_guard(unshaped = "a hash-domain tag with no projected shape")
 const KEY_FAMILY_VERSION: u8 = 2;
+/// version_surface = "coexist"
+/// version_guard(items(OTHER_FAMILY_VERSION))
 const OTHER_FAMILY_VERSION: u8 = 1;
 pub(crate) const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -173,6 +175,7 @@ class FormatRegistryTests(unittest.TestCase):
     def problems(self) -> list[str]:
         config = self.repo / "registry.toml"
         config.write_text(self.registry_text, encoding="utf-8")
+        self.write("scripts/versioned-surfaces.toml", self.registry_text)
         return gate.check(self.repo, gate.load_registry(config), self.manifest)
 
     def test_a_consistent_registry_passes(self) -> None:

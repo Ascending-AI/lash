@@ -53,6 +53,10 @@
 //! semantic identity are owned by non-optional `lash-sansio`, so the format is
 //! listed in every build even when the optional verifier is absent.
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_BUILD_GENERATION_DOMAIN_VERSION, build_generation_of))
+const LASH_BUILD_GENERATION_DOMAIN_VERSION: &str = "lash-build-generation/v1";
+
 use lash_core::engine::BuildGeneration;
 pub use lash_core::engine::UpgradePolicy;
 use lash_core::store::SessionAdmissionWindow;
@@ -614,7 +618,7 @@ fn build_generation_of(
         .map(|entry| (entry.format.name().to_string(), entry.version.to_string()))
         .collect();
     rows.sort();
-    let mut hasher = Blake3DomainHasher::new("lash-build-generation/v1");
+    let mut hasher = Blake3DomainHasher::new(LASH_BUILD_GENERATION_DOMAIN_VERSION);
     for (name, version) in &rows {
         hasher.update((name.len() as u64).to_be_bytes());
         hasher.update(name.as_bytes());

@@ -1,3 +1,7 @@
+/// version_surface = "coexist"
+/// version_guard(items(LASH_ATTACHMENT_DOMAIN_VERSION, content_id))
+const LASH_ATTACHMENT_DOMAIN_VERSION: &str = "lash-attachment/v2";
+
 use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 mod file_store;
@@ -1504,8 +1508,11 @@ async fn reclamation_fence_backoff(clock: &dyn crate::Clock, attempt: u32) {
 pub fn content_id(bytes: &[u8]) -> AttachmentId {
     // A BLAKE3 hex digest is 64 lowercase hex characters — statically within
     // every attachment-id rule, so this cannot fail.
-    AttachmentId::parse(crate::stable_hash::blake3_hex("lash-attachment/v2", bytes))
-        .expect("BLAKE3 hex digest is a valid attachment id")
+    AttachmentId::parse(crate::stable_hash::blake3_hex(
+        LASH_ATTACHMENT_DOMAIN_VERSION,
+        bytes,
+    ))
+    .expect("BLAKE3 hex digest is a valid attachment id")
 }
 
 /// The default lifetime of an unbound session upload's staging referrer.
