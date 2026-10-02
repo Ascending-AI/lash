@@ -25,7 +25,7 @@ def plant_tree(root: Path) -> None:
         if leg.name == "replay-corpus":
             source = root / leg.source / "scenario"
             source.mkdir(parents=True, exist_ok=True)
-            (source / "journal.json").write_text(json.dumps({"journal_logic_epoch": 7}) + "\n")
+            (source / "journal.json").write_text(json.dumps({"generation": "0123456789ab"}) + "\n")
             continue
         source = root / leg.source
         if leg.source.endswith(".db"):
@@ -77,10 +77,24 @@ class CaptureTests(unittest.TestCase):
             (self.repo / "fixtures/durable-read/v1/sqlite/durable-core.db").read_bytes(),
         )
 
-    def test_manifest_records_the_replay_capture_epoch(self):
+    def test_the_source_commit_is_the_manifests_only_provenance(self):
         self.assertEqual(self.run_capture("--dry-run"), 0)
         manifest = json.loads((self.dest / "manifest.json").read_text())
-        self.assertEqual(manifest["journal_logic_epoch"], 7)
+        self.assertEqual(
+            set(manifest),
+            {"schema", "tag", "source_commit", "dry_run", "captured_at", "legs"},
+        )
+
+    def test_journals_of_two_generations_are_refused(self):
+        other = self.repo / "crates/lash-restate/testdata/replay-corpus/other"
+        other.mkdir()
+        (other / "journal.json").write_text(json.dumps({"generation": "ba9876543210"}) + "\n")
+        self.assertEqual(self.run_capture("--dry-run"), 2)
+
+    def test_a_journal_without_a_generation_is_refused(self):
+        journal = self.repo / "crates/lash-restate/testdata/replay-corpus/scenario/journal.json"
+        journal.write_text(json.dumps({"journal_logic_epoch": 7}) + "\n")
+        self.assertEqual(self.run_capture("--dry-run"), 2)
 
     def test_dry_run_without_dest_lands_in_a_temp_dir(self):
         self.assertEqual(capture.main(

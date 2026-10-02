@@ -13,10 +13,15 @@ rather than serializing anything new:
 - ``session-at-rest``: the seeded ``durable-read-fixture`` session's own
   catalog file, captured on its own so the session-state upgrade law has a
   named artifact (its bytes are the same file ``sqlite-stores`` carries);
-- ``segment-state``: the parked ``LashlangSegmentState`` captures and their
-  provenance sidecars under ``crates/lash-lashlang-runtime/src/fixtures/``;
+- ``segment-state``: the parked ``LashlangSegmentState`` golden under
+  ``crates/lash-lashlang-runtime/src/fixtures/``;
 - ``tool-intent-journals``: the checked-in Restate tool-intent journal corpus;
-- ``replay-corpus``: the deterministic ``RecordedRuntimeEffect`` journals.
+- ``replay-corpus``: the deterministic release replay journals.
+
+A fixture that records the generation that wrote it belongs to exactly that
+build, and its own law refuses it under any other. The legs therefore hold
+only what the tagged build wrote: predecessor goldens are not part of a
+release corpus.
 
 ``--regenerate`` first re-runs the committed generators through Cargo after
 the caller sources ``./env.sh``. The ignored Rust capture tests then refresh
@@ -66,11 +71,24 @@ POSTGRES_REGENERATE = (
         "regenerate_postgres_durable_fixture", "--", "--ignored", "--exact",
     ],
 )
+# The journals record the build generation of the facade this test links.
+# Selecting the facade with `rlm` gives this package-scoped build the
+# workspace's durable-format manifest, and so the generation the workspace
+# build replays; the capture refuses the journals if that still differs.
 REPLAY_CORPUS_REGENERATE = (
     {"LASH_REGENERATE_REPLAY_CORPUS": "1"},
     [
-        "cargo", "test", "-p", "lash-internal-restate", "--locked", "--lib",
+        "cargo", "test", "-p", "lash-internal-restate", "-p", "lash-runtime",
+        "--features", "lash-runtime/rlm", "--locked", "--lib",
         "tests::replay_corpus::regenerate_replay_corpus_fixtures", "--",
+        "--ignored", "--exact",
+    ],
+)
+SEGMENT_STATE_CAPTURE = (
+    {"LASH_CAPTURE_SEGMENT_GOLDEN": "1"},
+    [
+        "cargo", "test", "-p", "lash-internal-lashlang-runtime", "--locked", "--lib",
+        "process::segment_trace_tests::capture_parked_loop_segment", "--",
         "--ignored", "--exact",
     ],
 )
@@ -133,23 +151,26 @@ LEGS = (
     Leg(
         name="segment-state",
         source="crates/lash-lashlang-runtime/src/fixtures",
+        regenerate=(SEGMENT_STATE_CAPTURE,),
         note=(
-            "parked LashlangSegmentState captures plus their provenance sidecars; "
-            "new captures are written by the version-pinned ignored tests in "
-            "process::segment_trace_tests"
+            "the LashlangSegmentState the tagged build parks inside a loop, with "
+            "the generation that wrote it"
         ),
     ),
     Leg(
         name="tool-intent-journals",
         source="crates/lash-restate/tests/fixtures/tool_intent_journals",
         regenerate=(TOOL_INTENT_CAPTURE,),
-        note="Restate endpoint-interruption journal captures at each generation gate",
+        note=(
+            "Restate endpoint-interruption journal captures, each with the "
+            "generation that wrote it"
+        ),
     ),
     Leg(
         name="replay-corpus",
         source="crates/lash-restate/testdata/replay-corpus",
         regenerate=(REPLAY_CORPUS_REGENERATE,),
-        note="deterministic RecordedRuntimeEffect journals per scenario",
+        note="one ordered journal per scenario, stamped with the capturing build's generation",
     ),
 )
 
@@ -267,6 +288,29 @@ def run_generators(repo: Path, legs: tuple[Leg, ...]) -> None:
                 )
 
 
+def require_committed_fixtures_unchanged(repo: Path, legs: tuple[Leg, ...]) -> None:
+    """Refuse a regeneration that rewrote a fixture the tagged commit carries.
+
+    The committed goldens were written by the build the tag names. A generator
+    that produces other bytes for them ran as a different build (another
+    feature graph gives another build generation), so what it captured is not
+    what the tagged build's laws read.
+    """
+    sources = sorted({leg.source for leg in legs})
+    result = subprocess.run(
+        ["git", "status", "--porcelain", "--", *sources],
+        cwd=repo, capture_output=True, text=True, check=False, env=git_env(),
+    )
+    if result.returncode != 0:
+        raise CaptureError(f"git status failed: {result.stderr.strip()}")
+    changed = [line[3:] for line in result.stdout.splitlines()]
+    if changed:
+        raise CaptureError(
+            "regeneration changed fixtures the tagged commit carries, so the "
+            "capturing build is not the build that wrote them: " + ", ".join(changed)
+        )
+
+
 def verify_tag(repo: Path, tag: str) -> str:
     """Require HEAD to be the tagged commit; return that commit."""
     resolved = subprocess.run(
@@ -285,34 +329,41 @@ def verify_tag(repo: Path, tag: str) -> str:
     return head
 
 
-def replay_corpus_epoch(root: Path) -> int:
-    """Read the epoch of the copied journals, never the capturing binary's epoch."""
+GENERATION = re.compile(r"^[0-9a-f]{12}$")
+
+
+def check_replay_corpus_generation(root: Path) -> None:
+    """Require one build generation across the copied journals.
+
+    The journals carry their own generation; the manifest does not repeat it.
+    """
     journals = sorted((root / "replay-corpus").glob("*/journal.json"))
     if not journals:
         raise CaptureError("replay-corpus: no scenario journals")
-    epochs = set()
+    generations = set()
     for journal in journals:
         try:
-            epoch = json.loads(journal.read_text(encoding="utf-8"))["journal_logic_epoch"]
+            generation = json.loads(journal.read_text(encoding="utf-8"))["generation"]
         except (OSError, ValueError, KeyError, TypeError) as error:
-            raise CaptureError(f"replay-corpus: {journal.name}: missing or invalid capture epoch") from error
-        if type(epoch) is not int or not 0 < epoch <= 0xFFFFFFFF:
-            raise CaptureError("replay-corpus: journal_logic_epoch must be a positive u32")
-        epochs.add(epoch)
-    if len(epochs) != 1:
-        raise CaptureError("replay-corpus: journals have different capture epochs")
-    return epochs.pop()
+            raise CaptureError(
+                f"replay-corpus: {journal.parent.name}: missing or invalid generation"
+            ) from error
+        if not isinstance(generation, str) or not GENERATION.fullmatch(generation):
+            raise CaptureError("replay-corpus: generation must be 12 lowercase hex characters")
+        generations.add(generation)
+    if len(generations) != 1:
+        raise CaptureError("replay-corpus: journals were written by different generations")
 
 
 def write_manifest(
     dest: Path, tag: str, commit: str | None, dry_run: bool, legs: list[dict]
 ) -> None:
+    check_replay_corpus_generation(dest)
     manifest = {
         "schema": MANIFEST_SCHEMA,
         "tag": tag,
         "source_commit": commit,
         "dry_run": dry_run,
-        "journal_logic_epoch": replay_corpus_epoch(dest),
         "captured_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "legs": legs,
     }
@@ -368,6 +419,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.regenerate:
             run_generators(repo, LEGS)
+            require_committed_fixtures_unchanged(repo, LEGS)
         dest.mkdir(parents=True, exist_ok=True)
         captured = []
         for leg in LEGS:

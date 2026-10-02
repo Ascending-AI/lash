@@ -1,60 +1,34 @@
 name: Release journal replay
 
+# The release-journal replay (FIG-4097) on main. Pull requests, merge groups
+# and dispatches run the same replay as the `release-journal-replay` job of
+# ci.yml, inside the required CI conclusion. This workflow covers a commit
+# pushed straight to main.
+
 on:
   push:
     branches: [main]
-  pull_request:
-    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-journal-replay-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: release-journal-replay-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  plan:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    outputs:
-      release_journal_replay: ${{ steps.classify.outputs.release_journal_replay }}
-      trusted: ${{ github.event_name == 'push' || (github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository) }}
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          fetch-depth: 0
-      - name: Select main and registered surfaces
-        id: classify
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -euo pipefail
-          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
-            python3 scripts/ci_plan.py fail-open --reason "main replays release journals" >> "$GITHUB_OUTPUT"
-          elif git diff --no-renames --name-status -z "$PR_BASE_SHA" HEAD > "$RUNNER_TEMP/replay-paths"; then
-            python3 scripts/ci_plan.py classify --event pull_request --paths-file "$RUNNER_TEMP/replay-paths" >> "$GITHUB_OUTPUT"
-          else
-            python3 scripts/ci_plan.py fail-open --reason "release journal diff unavailable" >> "$GITHUB_OUTPUT"
-          fi
-
   release-journal-replay:
     name: Release journal replay
-    needs: plan
-    if: needs.plan.outputs.release_journal_replay == 'true'
-    # FIG-4097 enables the required gate at the cut. This separate workflow
-    # reports failures without joining the required CI conclusion.
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: build-cache
     env:
-      # FIG-4495 repoints this at fixtures/release/v1.0.0/replay-corpus at the cut.
-      # Persisted replay leg of FIG-4532's full regenerate rehearsal.
-      LASH_REPLAY_CORPUS_ROOT: fixtures/release-rehearsal/fig-4532-rehearsal-20261001/replay-corpus
+      # The dry-run capture of the 1.0 cut branch. The tagged capture
+      # (FIG-4495) repoints this at fixtures/release/v1.0.0/replay-corpus.
+      LASH_REPLAY_CORPUS_ROOT: fixtures/release-rehearsal/cut-1.0-dry-run/replay-corpus
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Configure shared build cache
-        if: needs.plan.outputs.trusted == 'true'
         uses: ./.github/actions/buck2-shared-cache
         env:
           CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
@@ -64,13 +38,9 @@ jobs:
           CACHE_CERT: ${{ secrets.CACHE_CERT }}
           CACHE_KEY: ${{ secrets.CACHE_KEY }}
       - name: Replay every release scenario and the added-step self-test
-        env:
-          TRUSTED: ${{ needs.plan.outputs.trusted }}
         run: |
           set -euo pipefail
-          execution=()
-          if [[ "$TRUSTED" != true ]]; then execution=(--local); fi
-          scripts/hermetic-build.sh "${execution[@]}" test \
+          scripts/hermetic-build.sh test \
             //crates/lash-restate:lash-restate__unit_test \
             --local-test-execution --no-test-cache \
             --test_arg=tests::replay_corpus:: --test_arg=--nocapture \

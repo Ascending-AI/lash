@@ -214,22 +214,30 @@ The replay law reads `LASH_REPLAY_CORPUS_ROOT` as the directory containing
 `lash.release-fixtures-manifest.v1`. An explicit root has no fallback.
 Without the variable it reads `testdata/replay-corpus`.
 
-Each capture records `journal_logic_epoch` and the ordered `journal_steps`.
-The capture manifest records the epoch read from those journals. When the
-current `JOURNAL_LOGIC_EPOCH` matches, replay checks the envelopes and exact
-step sequence. A divergence fails with
-`journal logic changed: bump JOURNAL_LOGIC_EPOCH`. A different epoch returns
-`DifferentGeneration` and prints `different generation, not compared`.
-The added-step self-test proves the unchanged-epoch failure and the distinct
-result after an epoch bump, without changing production constants.
+Each `journal.json` records the build generation `G` that wrote it and one
+ordered `journal`: every step's Restate name and the entry journaled under it,
+a runtime effect or a process command fact. The capture manifest names the
+source commit and repeats nothing from the journals.
+
+When the journal's generation equals this build's
+(`lash::formats::build_generation()`), replay checks the envelopes and the
+exact step sequence. A divergence fails with
+`journal logic changed: bump JOURNAL_LOGIC_EPOCH`. Any other generation
+returns `DifferentGeneration` and prints `different generation, not compared`:
+a durable format, the epoch or the session admission moved, so those journals
+drain instead of replaying. The added-step self-test proves both outcomes
+without changing production constants.
 
 ```sh
 kiln test //crates/lash-restate:lash-restate__unit_test \
+  --local-test-execution --no-test-cache \
   --test_arg=tests::replay_corpus:: --test_arg=--nocapture \
   --test_env LASH_REPLAY_CORPUS_ROOT=crates/lash-restate/testdata/replay-corpus
 ```
 
-The `Release journal replay` workflow runs on main and registered-surface
-pull requests. It stays non-required under FIG-4097 during the version
-freeze. The cut repoints its root to
-`fixtures/release/v1.0.0/replay-corpus` and makes the job required.
+The replay is the `release-journal-replay` job of `ci.yml`, a required leg of
+the CI conclusion for every change the versioned-surface selection covers; the
+`Release journal replay` workflow repeats it on main. Both read the corpus at
+`fixtures/release-rehearsal/cut-1.0-dry-run/replay-corpus` until the 1.0 tag
+is captured; `docs/release/cut-1.0.md` repoints them to
+`fixtures/release/v1.0.0/replay-corpus`.
