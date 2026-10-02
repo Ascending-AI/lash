@@ -512,6 +512,8 @@ where
     }
 }
 
+mod schema_conversions;
+
 #[cfg(any(feature = "core-conversions", test))]
 mod core_conversions;
 

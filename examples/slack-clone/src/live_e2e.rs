@@ -182,7 +182,7 @@ impl SpendLedger {
                 ProviderFailureKind::Unsupported,
                 format!(
                     "model {} has no conservative live-E2E price entry",
-                    request.model
+                    request.model.wire_model()
                 ),
             ));
         };
@@ -398,7 +398,7 @@ impl Provider for MeteredProvider {
                 ProviderFailureKind::Unsupported,
                 format!(
                     "model {} has no conservative live-E2E price entry",
-                    request.model
+                    request.model.wire_model()
                 ),
             ));
         }
