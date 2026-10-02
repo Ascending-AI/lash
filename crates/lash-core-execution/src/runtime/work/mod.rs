@@ -162,6 +162,11 @@ pub trait SessionDriver: Send + Sync {
     /// through `controller`, which serves
     /// [`drive_admission_scope`](crate::engine::drive_admission_scope).
     ///
+    /// `request.build_generation` is the generation of the build that
+    /// admits, which the admitted root is stamped with (FIG-4742): an engine
+    /// whose drive requests cross builds names the build serving the
+    /// admission, not the one that sent the request.
+    ///
     /// `draining` is the build generation whose drain this admission hands
     /// over for (FIG-4639, ADR 0106 §1): the generation of the build the
     /// engine's drive invocation is pinned to, named for every admission

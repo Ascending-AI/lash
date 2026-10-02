@@ -150,7 +150,7 @@ pub(crate) struct DriveRootRun {
     root: TurnId,
     pub(crate) fence: crate::store::DriveFence,
     /// The drain generation stamped on the journal the root runs on: the
-    /// admitting drive's request stamp (FIG-3795 S9). A park this run writes
+    /// admitting build's (FIG-3795 S9, FIG-4742). A park this run writes
     /// records it, so the drain routes the root's resume to the build its
     /// journal belongs to.
     journal_generation: crate::engine::BuildGeneration,

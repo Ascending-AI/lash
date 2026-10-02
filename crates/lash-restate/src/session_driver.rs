@@ -123,7 +123,7 @@ use crate::{
 mod asks;
 mod continuation;
 
-use continuation::{continuation_generation, drain_answered, session_drive_continuation};
+use continuation::{admits, continuation_generation, drain_answered, session_drive_continuation};
 
 /// The generation of the session driver's journaled command prefix
 /// (ADR 0105 §12): a drain surface, and so an input to the build's drain
@@ -1168,7 +1168,7 @@ async fn drive_admissions(
             .map_err(refused_scope)?;
         let draining = drain_answered(route, &request.request, ordinal).then_some(generation);
         let verdict = driver
-            .admit(scoped, &request, ordinal, draining)
+            .admit(scoped, &admits(&request, generation), ordinal, draining)
             .await
             .map_err(abort_failure)?;
         // The leg's stop, and what it hands the rest of the drive to when it

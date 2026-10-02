@@ -94,9 +94,17 @@ reads no mark: under the stable name a new invocation is already the newest
 build's, so a drain never passes work back and forth. The in-process drive
 loop is pinned to no build and reads none.
 
+A root is stamped with the generation of the build that admits it, the one
+serving the admission's drive invocation. A continuation's request keeps the
+generation that first sent the drive only as provenance. So a root the newest
+build admits from a hand-over counts in that build's in-flight turns and parks
+under its generation, and the draining generation counts only the root still
+running on its own build.
+
 Evidence: `crates/lash/src/formats.rs:594`,
 `crates/lash-core/src/runtime/drive/admission.rs:193`,
 `crates/lash-restate/src/session_driver.rs:1169`,
+`crates/lash-restate/src/session_driver/continuation.rs:61`,
 `crates/lash/src/tests/drain_hand_over.rs:1`,
 `crates/lash-core-store/src/store/state_version.rs:51`,
 `crates/lash-restate/src/services.rs:35`,

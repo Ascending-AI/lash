@@ -51,6 +51,21 @@ pub(super) fn drain_answered(
             && continuation_generation(request).is_some()
 }
 
+/// The request the admissions of `request`'s drive run under on the build
+/// of `generation`, the one its invocation is pinned to. A root is stamped
+/// with the generation of the build that admits it (FIG-4742), never the
+/// request's: a continuation crosses builds under the stable name, and its
+/// request keeps the generation that first sent the drive only as
+/// provenance. Stamped with that one, a root the newest build admits from a
+/// hand-off would count in, and park under, a generation it never ran on.
+pub(super) fn admits(request: &DriveRequest, generation: &BuildGeneration) -> DriveRequest {
+    DriveRequest {
+        session: request.session.clone(),
+        request: request.request.clone(),
+        build_generation: generation.clone(),
+    }
+}
+
 #[expect(
     clippy::result_large_err,
     reason = "the ingress client returns RestateHttpError unboxed across its public API"

@@ -15,6 +15,12 @@
 //!   decided again would admit the next root on N. It hands over as its
 //!   first execution did: the decision is the journaled admission's.
 //!
+//! - **stamp** (FIG-4742): a root is stamped with the generation of the build
+//!   that admits it. While N's root is in flight N counts it; once N+1 has
+//!   admitted the next root from the hand-over, N counts none and its drain
+//!   is complete, and a park of that root names N+1. These run on the double
+//!   only.
+//!
 //! Both run on the Restate server double over SQLite memory, SQLite file
 //! and PostgreSQL, and on a live `restate-server` over SQLite memory and
 //! PostgreSQL. The PostgreSQL legs are ignored in ordinary runs and require
@@ -200,13 +206,24 @@ async fn open(
 }
 
 /// The provider both builds' cores answer with: it echoes the last user
-/// text, records every question it was asked, and holds its first call
-/// until the law releases it.
-#[derive(Default)]
+/// text, records every question it was asked, and holds each of its first
+/// `held` calls until the law releases it.
 struct Model {
+    held: usize,
     asked: std::sync::Mutex<Vec<String>>,
     reached: tokio::sync::Notify,
     release: tokio::sync::Notify,
+}
+
+impl Model {
+    fn holding(held: usize) -> Self {
+        Self {
+            held,
+            asked: std::sync::Mutex::default(),
+            reached: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        }
+    }
 }
 
 fn provider(model: &Arc<Model>) -> ProviderHandle {
@@ -217,12 +234,12 @@ fn provider(model: &Arc<Model>) -> ProviderHandle {
             let model = Arc::clone(&model);
             async move {
                 let question = last_user_text(&request);
-                let first = {
+                let call = {
                     let mut asked = model.asked.lock_recover();
                     asked.push(question.clone());
-                    asked.len() == 1
+                    asked.len()
                 };
-                if first {
+                if call <= model.held {
                     model.reached.notify_one();
                     model.release.notified().await;
                 }
@@ -240,21 +257,38 @@ fn core_over(
     work: Arc<dyn lash_core::SessionWorkEngine>,
     model: &Arc<Model>,
 ) -> LashCore {
+    core_with_protocol(backend, work, model, None)
+}
+
+/// [`core_over`], with `protocol` as the sessions' protocol plugin.
+fn core_with_protocol(
+    backend: lash_core::Backend,
+    work: Arc<dyn lash_core::SessionWorkEngine>,
+    model: &Arc<Model>,
+    protocol: Option<Arc<dyn lash_core::plugin::ProtocolSessionPlugin>>,
+) -> LashCore {
     let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(backend)
         .with_session_work(work)
         .into_backend();
-    LashCore::standard_builder(
+    let builder = LashCore::standard_builder(
         backend,
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
-    )
-    .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-    .queued_work_batching(
-        crate::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_admission(1),
-    )
-    .serve_test_model(provider(model), mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())
-    .expect("build the core")
+    );
+    let builder = match protocol {
+        Some(protocol) => builder.protocol_plugin(
+            lash_core::testing::test_standard_protocol_factory_with_runtime_state(protocol, None),
+        ),
+        None => builder,
+    };
+    builder
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(
+            crate::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_admission(1),
+        )
+        .serve_test_model(provider(model), mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())
+        .expect("build the core")
 }
 
 type Live = lash_restate_test::live::LiveRestateBackend<dyn lash_core::StoreSet>;
@@ -508,7 +542,7 @@ async fn a_drive_on_a_draining_build_hands_over_after_its_current_root(
         always_replay,
         _keep,
     } = world;
-    let model = Arc::new(Model::default());
+    let model = Arc::new(Model::holding(1));
     let old_generation = engine.old_backend().build_generation().clone();
     lever
         .generation
@@ -743,6 +777,241 @@ async fn on_live_restate(storage: Storage, crash: bool) -> Result<()> {
     .await
 }
 
+/// A protocol whose `before_llm_call` meets a replay refusal whenever the
+/// model is about to be asked `question`, as a code cell does when its
+/// re-execution diverges from its journal.
+struct DivergingAt {
+    question: String,
+}
+
+#[async_trait::async_trait]
+impl lash_core::plugin::ProtocolSessionPlugin for DivergingAt {
+    async fn before_llm_call(
+        &self,
+        _ctx: lash_core::plugin::ProtocolBeforeLlmCallContext,
+        request: &LlmRequest,
+    ) -> std::result::Result<Option<lash_core::ProtocolLlmCallAction>, lash_core::PluginError> {
+        if last_user_text(request) != self.question {
+            return Ok(None);
+        }
+        Err(lash_core::PluginError::RuntimeEffectController(
+            lash_core::RuntimeEffectControllerError::new(
+                lash_core::RuntimeErrorCode::LashlangCellReplayDivergence,
+                "lashlang run diverged from its journal at issue ordinal 0",
+            ),
+        ))
+    }
+}
+
+/// A double's session mid-roll: its drive's first root is held in its model
+/// call on build N, build N+1 is registered, and N is marked draining.
+struct MidRoll {
+    engine: Engine,
+    core: LashCore,
+    model: Arc<Model>,
+    session: lash_core::SessionId,
+    request: DriveRequestId,
+    old: BuildGeneration,
+    next: BuildGeneration,
+    _keep: Keep,
+}
+
+impl MidRoll {
+    /// Open `session` with [`ROOTS`] inputs, start its drive on N and roll
+    /// while the first root is in its model call. The model holds its first
+    /// `held` calls; `protocol` is the session's protocol plugin.
+    async fn start(
+        storage: Storage,
+        session: &str,
+        held: usize,
+        protocol: Option<Arc<dyn lash_core::plugin::ProtocolSessionPlugin>>,
+    ) -> Result<Self> {
+        let World { engine, _keep, .. } = double_world(storage).await;
+        let model = Arc::new(Model::holding(held));
+        let old = engine.old_backend().build_generation().clone();
+        let core = core_with_protocol(engine.old_backend(), engine.old_work(), &model, protocol);
+        core.session(session).created().await.open().await?;
+        let session = lash_core::SessionId::from(session);
+        let store = lash_core::runtime::live_session_view(&core.store_factory, &session)
+            .await?
+            .expect("an opened session has a store");
+        for index in 0..ROOTS {
+            store
+                .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
+                    session.clone(),
+                    lash_core::TurnInputIngress::NextTurn,
+                    TurnInput::text(format!("question {index}")),
+                ))
+                .await
+                .expect("enqueue the input");
+        }
+        let request = DriveRequestId::new("drain-hand-over");
+        core.substrate_slot
+            .ports()
+            .await
+            .queued
+            .schedule_drive(&session, request.clone());
+        tokio::time::timeout(WEDGE, model.reached.notified())
+            .await
+            .expect("the drive's first root reaches its model call");
+        let next = BuildGeneration::for_test("drain-hand-over-next");
+        engine.roll(next.clone(), &model).await;
+        assert!(
+            engine
+                .old_backend()
+                .generation_drain()
+                .mark_draining(&old, 1)
+                .await
+                .expect("mark build N draining"),
+            "the law's mark is N's first"
+        );
+        Ok(Self {
+            engine,
+            core,
+            model,
+            session,
+            request,
+            old,
+            next,
+            _keep,
+        })
+    }
+
+    /// The turns `generation` holds: `(in flight, parked)`.
+    async fn turns(&self, generation: &BuildGeneration) -> (u64, u64) {
+        let work = self
+            .engine
+            .old_backend()
+            .generation_drain()
+            .generation_work(generation)
+            .await
+            .expect("read the generation's work");
+        (work.in_flight_turns, work.parked_turns)
+    }
+
+    /// Whether N's drain is complete.
+    async fn old_drained(&self) -> Result<bool> {
+        Ok(self
+            .core
+            .generation_drain_status(&self.old)
+            .await?
+            .drained())
+    }
+}
+
+/// FIG-4742 (a), (c): the draining build counts the root still running on
+/// it, and none of the roots the newest build admits from its hand-over, so
+/// its drain completes while the newest build is still working the backlog.
+async fn a_root_admitted_from_a_hand_over_counts_in_the_admitting_generation(
+    storage: Storage,
+) -> Result<()> {
+    let roll = MidRoll::start(storage, "drain-hand-over-stamp", 2, None).await?;
+
+    // N's root is in its model call: N holds it, and its drain waits on it.
+    assert_eq!(
+        (roll.turns(&roll.old).await, roll.turns(&roll.next).await),
+        ((1, 0), (0, 0)),
+        "the root still running on the draining build counts there"
+    );
+    assert!(
+        !roll.old_drained().await?,
+        "the drain waits for the root running on its build"
+    );
+
+    // N's root ends and N hands over; N+1 admits the next root, which
+    // reaches its model call.
+    roll.model.release.notify_one();
+    tokio::time::timeout(WEDGE, roll.model.reached.notified())
+        .await
+        .expect("the newest build's first root reaches its model call");
+    assert_eq!(
+        (roll.turns(&roll.old).await, roll.turns(&roll.next).await),
+        ((0, 0), (1, 0)),
+        "a root admitted from the hand-over counts in the generation that admitted it"
+    );
+    assert!(
+        roll.old_drained().await?,
+        "the drain completes while the newest build runs the backlog"
+    );
+
+    roll.model.release.notify_one();
+    let port = roll.core.substrate_slot.ports().await.queued;
+    let outcome = tokio::time::timeout(WEDGE, port.await_drive(&roll.session, &roll.request))
+        .await
+        .expect("the drive chain ends")
+        .expect("the drive is not refused");
+    assert_eq!(outcome.stop, DriveStop::Idle, "{outcome:?}");
+    assert_eq!(outcome.ran.len(), ROOTS, "{outcome:?}");
+    assert_eq!(
+        (roll.turns(&roll.old).await, roll.turns(&roll.next).await),
+        ((0, 0), (0, 0)),
+        "every root ended"
+    );
+    assert!(roll.old_drained().await?, "the drain stays complete");
+    Ok(())
+}
+
+/// FIG-4742 (b): a root the newest build admits from a hand-over and then
+/// parks names the newest build's generation, so the draining build's drain
+/// does not wait on a park it cannot redrive.
+async fn a_park_of_a_root_admitted_from_a_hand_over_names_the_admitting_generation(
+    storage: Storage,
+) -> Result<()> {
+    let roll = MidRoll::start(
+        storage,
+        "drain-hand-over-park",
+        1,
+        Some(Arc::new(DivergingAt {
+            question: "question 1".to_owned(),
+        })),
+    )
+    .await?;
+    roll.model.release.notify_one();
+
+    // N's root commits, N hands over, and the root N+1 admits next parks.
+    let store = lash_core::runtime::live_session_view(&roll.core.store_factory, &roll.session)
+        .await?
+        .expect("an opened session has a store");
+    let park = tokio::time::timeout(WEDGE, async {
+        loop {
+            if let Some(park) = store.load_turn_park().await.expect("read the park") {
+                break park;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the root the newest build admitted parks");
+    assert_eq!(
+        park.build_generation.as_ref(),
+        Some(&roll.next),
+        "the park names the generation that admitted its root: {park:?}"
+    );
+    assert_eq!(
+        (roll.turns(&roll.old).await, roll.turns(&roll.next).await),
+        ((0, 0), (1, 1)),
+        "the park is the admitting generation's"
+    );
+    assert!(
+        roll.old_drained().await?,
+        "the draining build holds neither the parked root nor its park"
+    );
+    assert_eq!(
+        *roll.model.asked.lock_recover(),
+        ["question 0"],
+        "the parked root never reached the model, and nothing ran past it"
+    );
+    Ok(())
+}
+
+async fn stamp_counts(storage: Storage, (): ()) -> Result<()> {
+    a_root_admitted_from_a_hand_over_counts_in_the_admitting_generation(storage).await
+}
+
+async fn stamp_park(storage: Storage, (): ()) -> Result<()> {
+    a_park_of_a_root_admitted_from_a_hand_over_names_the_admitting_generation(storage).await
+}
+
 macro_rules! drain_hand_over_laws {
     ($($(#[$attr:meta])* $name:ident: $run:ident, $storage:expr, $crash:expr;)*) => {
         $(
@@ -764,6 +1033,14 @@ drain_hand_over_laws! {
     replay_hands_over_sqlite_file: on_the_double, Storage::SqliteFile, true;
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     replay_hands_over_postgres: on_the_double, Storage::Postgres, true;
+    stamp_counts_sqlite_memory: stamp_counts, Storage::SqliteMemory, ();
+    stamp_counts_sqlite_file: stamp_counts, Storage::SqliteFile, ();
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
+    stamp_counts_postgres: stamp_counts, Storage::Postgres, ();
+    stamp_park_sqlite_memory: stamp_park, Storage::SqliteMemory, ();
+    stamp_park_sqlite_file: stamp_park, Storage::SqliteFile, ();
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
+    stamp_park_postgres: stamp_park, Storage::Postgres, ();
     #[ignore = "requires an isolated Restate server; run by the drain-hand-over suite"]
     live_restate_hands_over: on_live_restate, Storage::SqliteMemory, false;
     #[ignore = "requires an isolated Restate server; run by the drain-hand-over suite"]

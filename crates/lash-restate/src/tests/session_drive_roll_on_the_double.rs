@@ -597,8 +597,9 @@ async fn l9_every_request_sent_during_the_roll_is_admitted_once() {
     );
 
     // New work after the roll lands on the newest build, even a request a
-    // stale sender stamped `G_N` — the stable lane takes every stamp; the
-    // admission records it (S9).
+    // stale sender stamped `G_N` — the stable lane takes every stamp. The
+    // admission records the generation of the build that admits (S9,
+    // FIG-4742): the root runs on N+1, so it is N+1's work, not N's.
     let session_new = SessionId::from("l9-new");
     roll.driver.accept(&session_new, "n1");
     roll.driver.accept(&session_new, "n2");
@@ -621,8 +622,8 @@ async fn l9_every_request_sent_during_the_roll_is_admitted_once() {
     );
     assert_eq!(
         roll.driver.stamp("r-new"),
-        Some(gn.clone()),
-        "the admission saw the request's stamp, which S9 records"
+        Some(gn1.clone()),
+        "the admission saw the admitting build's generation, which S9 records"
     );
 
     // A resume stamped `G_N` to `LashSession_g<G_N>` runs on build N, the

@@ -12,10 +12,11 @@ pub use lash_core_store::store::{AdmissionId, DriveFence, RootStartNonce};
 /// the queue prefix it takes), so a replay decodes the same root and a fresh
 /// execution never trusts a root the caller guessed.
 ///
-/// `build_generation` is the sender's drain generation, the stamp the
-/// drive's request carries ([`DriveRequest::build_generation`]): the
-/// admission records it so the queued run it begins routes its resume by the
-/// generation that admitted it (FIG-3795 S9).
+/// `build_generation` is the drain generation of the build that admits: the
+/// admission records it, so the root counts in that generation's drain and
+/// its resume routes by the generation that admitted it (FIG-3795 S9). An
+/// engine whose drive requests cross builds names the build serving the
+/// admission, never the stamp the request was sent with (FIG-4742).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdmitRequest {
     pub session: SessionId,
@@ -79,9 +80,9 @@ pub struct Admitted {
     request: DriveRequestId,
     admission: AdmissionId,
     observed_epoch: u64,
-    /// The sender's drain generation the drive request carried, recorded
-    /// with the admission (FIG-3795 S9): the root's admission stamps it, and
-    /// the root's resume routes by it.
+    /// The drain generation of the build that admitted the root, recorded
+    /// with the admission (FIG-3795 S9, FIG-4742): the root's admission
+    /// stamps it, and the root's resume routes by it.
     admitted_generation: super::contracts::BuildGeneration,
     /// What the root drives.
     work: AdmittedWork,
@@ -154,7 +155,7 @@ impl Admitted {
         self.observed_epoch
     }
 
-    /// The drain generation the drive's request was stamped with: the
+    /// The drain generation of the build that admitted the root: the
     /// generation a queued run this root begins resumes through
     /// (FIG-3795 S9).
     pub fn admitted_generation(&self) -> &super::contracts::BuildGeneration {
