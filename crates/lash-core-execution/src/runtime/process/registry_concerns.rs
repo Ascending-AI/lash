@@ -614,7 +614,9 @@ pub trait ProcessLifecycle: Send + Sync {
         limit: NonZeroUsize,
     ) -> Result<Vec<ProcessRecord>, PluginError>;
 
-    /// Mark one ledger row settled. Repetition is idempotent.
+    /// Deliver a due plan and arm reclaim atomically. A claimed plan waits
+    /// for its token-fenced obligation settlement; a stalled plan stays retained.
+    /// Repetition is idempotent.
     async fn settle_parent_end_plan(&self, parent: &crate::ScopeId) -> Result<(), PluginError>;
 
     /// Page turn and session-operation parent scopes that still owe a ledger row.

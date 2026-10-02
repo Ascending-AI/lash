@@ -1149,7 +1149,7 @@ CREATE TABLE IF NOT EXISTS parent_end_plans (
     parent_id        TEXT NOT NULL,
     parent_payload   TEXT NOT NULL,
     ended_at_ms      INTEGER NOT NULL,
-    settled_at_ms    INTEGER,
+    settled_at_ms    INTEGER CONSTRAINT ck_parent_end_plans_reclaimable CHECK ((settled_at_ms IS NULL OR obligation_state = 'delivered') IS TRUE),
     obligation_id    TEXT,
     obligation_state TEXT,
     obligation_attempts INTEGER NOT NULL DEFAULT 0,

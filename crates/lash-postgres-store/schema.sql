@@ -1027,7 +1027,7 @@ CREATE TABLE IF NOT EXISTS lash_parent_end_plans (
     parent_id TEXT COLLATE "C" NOT NULL,
     parent_payload TEXT NOT NULL,
     ended_at_ms BIGINT NOT NULL,
-    settled_at_ms BIGINT,
+    settled_at_ms BIGINT CONSTRAINT ck_parent_end_plans_reclaimable CHECK ((settled_at_ms IS NULL OR obligation_state = 'delivered') IS TRUE),
     obligation_id TEXT,
     obligation_state TEXT,
     obligation_attempts INTEGER NOT NULL DEFAULT 0,
@@ -1077,7 +1077,7 @@ INSERT INTO lash_trigger_subscription_change_clock (singleton, current_seq, prun
 CREATE TABLE IF NOT EXISTS lash_trigger_subscription_changes (
     subscription_id TEXT PRIMARY KEY,
     change_seq BIGINT NOT NULL UNIQUE CHECK (change_seq > 0),
-    deleted_at_ms BIGINT,
+    deleted_at_ms BIGINT CONSTRAINT ck_trigger_subscription_changes_reclaimable CHECK ((deleted_at_ms IS NULL OR record_json::jsonb -> 'lifecycle' ->> 'lifecycle' = 'tombstoned') IS TRUE),
     record_json TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_lash_trigger_subscription_changes_deleted

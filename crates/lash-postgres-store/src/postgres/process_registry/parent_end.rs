@@ -399,13 +399,6 @@ pub(super) async fn settle(
     lock_parent_scope_tx(&mut tx, parent).await?;
     sqlx::query(process_sql().plan.settle.sql())
         .bind(kind)
-        .bind(id.clone())
-        .bind(settled_at_ms as i64)
-        .execute(&mut **tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
-    sqlx::query(process_sql().plan.obligation_apply_delivered.sql())
-        .bind(kind)
         .bind(id)
         .bind(settled_at_ms as i64)
         .execute(&mut **tx)

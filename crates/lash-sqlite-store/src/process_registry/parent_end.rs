@@ -384,10 +384,8 @@ pub(super) async fn children(
         .map_err(process_sqlite_error)?
 }
 
-/// Settle the plan — and deliver the `due` obligation the same row owes:
-/// the apply that ends here is the delivery that obligation carries
-/// (ADR 0109). A `claimed` row's claim owns its own settle, and a `stalled`
-/// row keeps its stall for the operator.
+/// Deliver a due plan and arm reclaim atomically. Claimed delivery waits
+/// for its token-fenced settlement; a stalled plan remains unreclaimable.
 pub(super) async fn settle(
     registry: &SqliteProcessRegistry,
     parent: &ScopeId,
@@ -402,12 +400,6 @@ pub(super) async fn settle(
                 crate::conn::cached_execute(
                     tx,
                     process_sql().plan.settle.sql(),
-                    params![kind, id.clone(), settled_at_ms as i64],
-                )
-                .map_err(process_sqlite_error)?;
-                crate::conn::cached_execute(
-                    tx,
-                    process_sql().plan.obligation_apply_delivered.sql(),
                     params![kind, id, settled_at_ms as i64],
                 )
                 .map_err(process_sqlite_error)?;

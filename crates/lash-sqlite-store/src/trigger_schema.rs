@@ -22,7 +22,7 @@ INSERT INTO trigger_subscription_change_clock (singleton, current_seq, pruned_th
 CREATE TABLE IF NOT EXISTS trigger_subscription_changes (
     subscription_id TEXT PRIMARY KEY,
     change_seq INTEGER NOT NULL UNIQUE CHECK (change_seq > 0),
-    deleted_at_ms INTEGER,
+    deleted_at_ms INTEGER CONSTRAINT ck_trigger_subscription_changes_reclaimable CHECK ((deleted_at_ms IS NULL OR json_extract(record_json, '$.lifecycle.lifecycle') = 'tombstoned') IS TRUE),
     record_json TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_trigger_subscription_changes_deleted

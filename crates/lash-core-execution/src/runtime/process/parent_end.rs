@@ -6,9 +6,9 @@
 //!
 //! A plan is a ledger row and nothing else: its work is the query for the
 //! parent's live `Until` children that carry no cancel request yet. Applying
-//! it delivers `ParentEnded` to each of them, then marks the row settled —
-//! and settling also marks a still-`due` obligation `delivered`, since the
-//! apply is the delivery that obligation owes.
+//! it delivers `ParentEnded` to each of them, then delivers a still-`due`
+//! obligation and arms reclaim atomically. A claimed obligation waits for
+//! its token-fenced settlement to arm reclaim. A stalled plan stays retained.
 //!
 //! **Delivery precedes the registry write.** The children query stops
 //! returning a child once its cancel request is recorded. If the registry

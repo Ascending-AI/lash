@@ -841,3 +841,158 @@ async fn turn_cancellation_shape_is_guarded() {
         .await
         .expect("rollback");
 }
+
+#[tokio::test]
+async fn reclaim_markers_require_terminal_owners_when_configured() {
+    let Some(url) = database_url() else {
+        panic!("the reclaim CHECK witness requires hermetic PostgreSQL");
+    };
+    let _database_lock = SharedDatabaseLock::acquire(&url).await;
+    let mut connection = PgConnection::connect(&url)
+        .await
+        .expect("connect CHECK fixture");
+    sqlx::raw_sql("BEGIN; CREATE SCHEMA lash_fig1606_constraints; SET LOCAL search_path TO lash_fig1606_constraints;")
+        .execute(&mut connection).await.expect("isolate reclaim fixture");
+    sqlx::raw_sql(PostgresStorage::schema_ddl())
+        .execute(&mut connection)
+        .await
+        .expect("apply production DDL");
+    for (state, fields) in [
+        ("NULL", "NULL, NULL, NULL, NULL, NULL"),
+        ("'due'", "'due-id', 1, NULL, NULL, NULL"),
+        ("'claimed'", "'claim-id', 1, 'token', NULL, NULL"),
+        ("'stalled'", "'stall-id', NULL, NULL, 'refused', 1"),
+    ] {
+        sqlx::raw_sql(&format!(
+            "DELETE FROM lash_parent_end_plans;
+            INSERT INTO lash_parent_end_plans (parent_kind, parent_id, parent_payload, ended_at_ms,
+                obligation_state, obligation_id, obligation_due_at_ms, obligation_claim_token,
+                obligation_stall_reason, obligation_settled_at_ms)
+            VALUES ('session', 'parent', '{{}}', 0, {state}, {fields})"
+        ))
+        .execute(&mut connection)
+        .await
+        .expect("retain unreclaimable plan");
+        assert_check_rejects(
+            &mut connection,
+            "UPDATE lash_parent_end_plans SET settled_at_ms = 1",
+            "ck_parent_end_plans_reclaimable",
+        )
+        .await;
+    }
+    sqlx::raw_sql(
+        "DELETE FROM lash_parent_end_plans;
+        INSERT INTO lash_parent_end_plans (parent_kind, parent_id, parent_payload, ended_at_ms,
+            settled_at_ms, obligation_id, obligation_state, obligation_settled_at_ms)
+        VALUES ('session', 'parent', '{}', 0, 1, 'delivered-id', 'delivered', 1)",
+    )
+    .execute(&mut connection)
+    .await
+    .expect("a delivered plan may be reclaimed");
+    for tag in ["enabled", "disabled", "unknown"] {
+        sqlx::raw_sql(&format!(
+            r#"DELETE FROM lash_trigger_subscription_changes;
+            INSERT INTO lash_trigger_subscription_changes VALUES ('subscription', 1, NULL,
+                '{{"lifecycle":{{"lifecycle":"{tag}"}}}}')"#
+        ))
+        .execute(&mut connection)
+        .await
+        .expect("retain live change");
+        assert_check_rejects(
+            &mut connection,
+            "UPDATE lash_trigger_subscription_changes SET deleted_at_ms = 1",
+            "ck_trigger_subscription_changes_reclaimable",
+        )
+        .await;
+    }
+    sqlx::raw_sql(
+        "DELETE FROM lash_trigger_subscription_changes;
+        INSERT INTO lash_trigger_subscription_changes VALUES ('subscription', 1, NULL, '{}')",
+    )
+    .execute(&mut connection)
+    .await
+    .expect("retain untagged change");
+    assert_check_rejects(
+        &mut connection,
+        "UPDATE lash_trigger_subscription_changes SET deleted_at_ms = 1",
+        "ck_trigger_subscription_changes_reclaimable",
+    )
+    .await;
+    sqlx::raw_sql(
+        r#"DELETE FROM lash_trigger_subscription_changes;
+        INSERT INTO lash_trigger_subscription_changes VALUES ('subscription', 1, 1,
+            '{"lifecycle":{"lifecycle":"tombstoned","deleted_at_ms":1}}')"#,
+    )
+    .execute(&mut connection)
+    .await
+    .expect("a tombstoned change may be reclaimed");
+    use lash_store_sql::process::parent_end_plans::{
+        ParentEndPlanObligationStatements, ParentEndPlanStatements,
+    };
+    let dialect = lash_store_sql::Dialect::postgres();
+    let plan = ParentEndPlanStatements::render(dialect);
+    let obligation = ParentEndPlanObligationStatements::render(dialect);
+    sqlx::raw_sql(
+        "UPDATE lash_parent_end_plans SET settled_at_ms = NULL,
+        obligation_state = 'due', obligation_due_at_ms = 0, obligation_settled_at_ms = NULL",
+    )
+    .execute(&mut connection)
+    .await
+    .expect("arm due application");
+    sqlx::query(plan.settle.sql())
+        .bind("session")
+        .bind("parent")
+        .bind(7_i64)
+        .execute(&mut connection)
+        .await
+        .expect("apply due plan atomically");
+    let stamps: (String, Option<i64>) =
+        sqlx::query_as("SELECT obligation_state, settled_at_ms FROM lash_parent_end_plans")
+            .fetch_one(&mut connection)
+            .await
+            .expect("read due settlement");
+    assert_eq!(stamps, ("delivered".into(), Some(7)));
+    sqlx::raw_sql(
+        "UPDATE lash_parent_end_plans SET settled_at_ms = NULL,
+        obligation_state = 'claimed', obligation_due_at_ms = 1, obligation_claim_token = 'token',
+        obligation_settled_at_ms = NULL",
+    )
+    .execute(&mut connection)
+    .await
+    .expect("claim delivery");
+    sqlx::query(plan.settle.sql())
+        .bind("session")
+        .bind("parent")
+        .bind(9_i64)
+        .execute(&mut connection)
+        .await
+        .expect("apply claimed plan");
+    let stamps: (String, Option<i64>) =
+        sqlx::query_as("SELECT obligation_state, settled_at_ms FROM lash_parent_end_plans")
+            .fetch_one(&mut connection)
+            .await
+            .expect("read claimed application");
+    assert_eq!(stamps, ("claimed".into(), None));
+    for (token, expected) in [
+        ("wrong-token", ("claimed", None)),
+        ("token", ("delivered", Some(13))),
+    ] {
+        sqlx::query(obligation.obligation_settle_delivered.sql())
+            .bind("delivered-id")
+            .bind(token)
+            .bind(13_i64)
+            .execute(&mut connection)
+            .await
+            .expect("fenced delivery settlement");
+        let stamps: (String, Option<i64>) =
+            sqlx::query_as("SELECT obligation_state, settled_at_ms FROM lash_parent_end_plans")
+                .fetch_one(&mut connection)
+                .await
+                .expect("read fenced settlement");
+        assert_eq!(stamps, (expected.0.into(), expected.1));
+    }
+    sqlx::query("ROLLBACK")
+        .execute(&mut connection)
+        .await
+        .expect("remove isolated fixture");
+}
