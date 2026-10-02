@@ -236,14 +236,22 @@ impl AppDb {
         })
     }
 
-    pub(crate) fn list_chats(&mut self) -> AppResult<Vec<ChatSummary>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, title, created_at, updated_at, model, model_variant
-             FROM chats WHERE fork_pending = 0 ORDER BY updated_at DESC",
-        )?;
-        let rows = stmt.query_map([], chat_summary_from_row)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(AppError::from)
+    pub(crate) fn catalog_chat_summaries(
+        &mut self,
+        session_ids: &[lash::SessionId],
+    ) -> AppResult<Vec<ChatSummary>> {
+        let mut chats = Vec::with_capacity(session_ids.len());
+        for session_id in session_ids {
+            if let Some(chat) = self.chat(session_id.as_str()).optional()? {
+                chats.push(chat);
+            }
+        }
+        chats.sort_by(|a, b| {
+            b.updated_at
+                .cmp(&a.updated_at)
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        Ok(chats)
     }
 
     pub(crate) fn create_chat(
@@ -1165,10 +1173,10 @@ mod tests {
         db.prepare_chat_fork(&source.id, "node-pinned", "branch")
             .expect("fork product projection");
         assert!(
-            db.list_chats()
-                .expect("list while branch is pending")
-                .iter()
-                .all(|chat| chat.id != "branch"),
+            db.chat("branch")
+                .optional()
+                .expect("read pending branch")
+                .is_none(),
             "pending product projection must not be externally visible"
         );
         let branch = db.finish_chat_fork("branch").expect("publish branch");

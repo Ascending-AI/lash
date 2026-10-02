@@ -46,6 +46,25 @@ impl AppStateData {
         &self.core
     }
 
+    pub(crate) async fn chat_summaries(&self) -> AppResult<Vec<crate::db::ChatSummary>> {
+        let session_ids = self
+            .core
+            .sessions_filtered(lash::SessionListFilter {
+                deleted: Some(false),
+                ..Default::default()
+            })
+            .await?
+            .into_iter()
+            .filter(|session| {
+                matches!(session.entry, lash::SessionEntry::Live { .. })
+                    && session.relation_kind() != lash::SessionRelationKind::Child
+            })
+            .map(|session| session.session_id)
+            .collect::<Vec<_>>();
+        self.with_db(move |db| db.catalog_chat_summaries(&session_ids))
+            .await
+    }
+
     pub(crate) async fn record_board_context(&self, session: &LashSession) -> AppResult<()> {
         let chat_id = session.session_id().to_string();
         let board = self.with_db(move |db| db.chat_board(&chat_id)).await?;

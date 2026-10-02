@@ -109,8 +109,8 @@ pub(crate) async fn run_store_retention_pass(
     report
 }
 
-/// `vacuum` is session-scoped. This example's app chat catalog is its root
-/// session catalog; process-owned sessions are not represented here and need
+/// `vacuum` is session-scoped. Lash's live root and fork sessions with chat
+/// metadata are its retention set; process-owned sessions need
 /// retention owned by their process host. Store GC is a verify/repair audit;
 /// owner-delete transactions remain the correctness path.
 ///
@@ -136,16 +136,12 @@ pub(crate) fn spawn_retention(
                 }
                 _ = ticker.tick() => {}
             }
-            let session_ids = match state
-                .with_db(|db| {
-                    Ok(db
-                        .list_chats()?
-                        .into_iter()
-                        .map(|chat| SessionId::parse(chat.id))
-                        .collect::<Result<Vec<_>, _>>()?)
-                })
-                .await
-            {
+            let session_ids = match state.chat_summaries().await.and_then(|chats| {
+                Ok(chats
+                    .into_iter()
+                    .map(|chat| SessionId::parse(chat.id))
+                    .collect::<Result<Vec<_>, _>>()?)
+            }) {
                 Ok(session_ids) => session_ids,
                 Err(error) => {
                     eprintln!("agent-service: retention could not list chats: {error}");

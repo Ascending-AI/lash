@@ -132,8 +132,9 @@ use crate::effect_groups::{
 };
 use crate::raw_activities::stream_raw_activities;
 use crate::routes::{
-    cancel_turn, chat_board, create_chat, fork_chat, index, list_chat_branch_points, list_chats,
-    list_messages, pin_chat_branch_point, send_message, settings, update_chat_llm_profile,
+    attach_input, attach_turn, cancel_turn, chat_board, create_chat, fork_chat, index,
+    list_chat_branch_points, list_chats, list_messages, pin_chat_branch_point, send_message,
+    settings, update_chat_llm_profile,
 };
 use crate::state::{AppStateData, anyhow_like};
 use lash::durability::DurableProcessWorker;
@@ -386,41 +387,7 @@ async fn async_main() -> anyhow_like::Result<()> {
 
         // Keep a state clone for the drain; the router consumes the original.
         let drain_state = state.clone();
-        let app = Router::new()
-            .route("/", get(index))
-            .route("/api/settings", get(settings))
-            .route("/api/chats", get(list_chats).post(create_chat))
-            .route(
-                "/api/chats/{chat_id}/model",
-                axum::routing::post(update_chat_llm_profile),
-            )
-            .route(
-                "/api/chats/{chat_id}/messages",
-                get(list_messages).post(send_message),
-            )
-            .route(
-                "/api/chats/{chat_id}/activities",
-                axum::routing::post(stream_raw_activities),
-            )
-            .route("/api/chats/{chat_id}/board", get(chat_board))
-            .route(
-                "/api/chats/{chat_id}/branch-points",
-                get(list_chat_branch_points).post(pin_chat_branch_point),
-            )
-            .route("/api/chats/{chat_id}/forks", axum::routing::post(fork_chat))
-            .route(
-                "/api/chats/{chat_id}/turns/{turn_id}/cancel",
-                axum::routing::post(cancel_turn),
-            )
-            .route(
-                "/api/effect-groups",
-                axum::routing::post(crate::effect_groups::run_effect_group),
-            )
-            .route(
-                "/api/effect-groups/{run_id}",
-                get(crate::effect_groups::get_effect_group),
-            )
-            .with_state(state);
+        let app = app_router(state);
 
         println!("agent-service listening on http://{addr}");
         let listener = tokio::net::TcpListener::bind(addr)
@@ -541,4 +508,44 @@ fn service_attachment_acceptance() -> lash::provider::AttachmentCapabilitySnapsh
         ],
         &["image/jpeg", "image/png", "image/gif", "image/webp"],
     )
+}
+
+fn app_router(state: AppStateData) -> Router {
+    Router::new()
+        .route("/", get(index))
+        .route("/api/settings", get(settings))
+        .route("/api/chats", get(list_chats).post(create_chat))
+        .route(
+            "/api/chats/{chat_id}/model",
+            axum::routing::post(update_chat_llm_profile),
+        )
+        .route(
+            "/api/chats/{chat_id}/messages",
+            get(list_messages).post(send_message),
+        )
+        .route(
+            "/api/chats/{chat_id}/activities",
+            axum::routing::post(stream_raw_activities),
+        )
+        .route("/api/chats/{chat_id}/board", get(chat_board))
+        .route(
+            "/api/chats/{chat_id}/branch-points",
+            get(list_chat_branch_points).post(pin_chat_branch_point),
+        )
+        .route("/api/chats/{chat_id}/forks", axum::routing::post(fork_chat))
+        .route("/api/chats/{chat_id}/turns/{turn_id}", get(attach_turn))
+        .route("/api/chats/{chat_id}/inputs/{input_id}", get(attach_input))
+        .route(
+            "/api/chats/{chat_id}/turns/{turn_id}/cancel",
+            axum::routing::post(cancel_turn),
+        )
+        .route(
+            "/api/effect-groups",
+            axum::routing::post(crate::effect_groups::run_effect_group),
+        )
+        .route(
+            "/api/effect-groups/{run_id}",
+            get(crate::effect_groups::get_effect_group),
+        )
+        .with_state(state)
 }

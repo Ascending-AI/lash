@@ -9,7 +9,7 @@ use axum::http::StatusCode;
 
 use crate::db::AppDb;
 use crate::routes::{ForkChatRequest, fork_chat};
-use crate::state::test_support::{test_core, test_state};
+use crate::state::test_support::{mock_llm_profile, test_core, test_state};
 
 #[tokio::test]
 async fn a_failed_fork_leaves_no_pending_marker_or_orphaned_session() {
@@ -27,6 +27,10 @@ async fn a_failed_fork_leaves_no_pending_marker_or_orphaned_session() {
         .with_db(|db| db.create_chat("source", "mock-model", None))
         .await
         .expect("create source chat");
+    state
+        .open_session(&source.id, mock_llm_profile())
+        .await
+        .expect("catalogue the source chat");
     // The product db carries a branch point for a node the session store
     // never retained, so `prepare_chat_fork` succeeds and `fork_at` fails
     // — the abort path under test.
@@ -55,10 +59,7 @@ async fn a_failed_fork_leaves_no_pending_marker_or_orphaned_session() {
     .expect_err("fork at an unretained node fails");
 
     assert_eq!(error.status, StatusCode::CONFLICT);
-    let chats = state
-        .with_db(|db| db.list_chats())
-        .await
-        .expect("list chats");
+    let chats = state.chat_summaries().await.expect("list chats");
     assert_eq!(
         chats
             .iter()
@@ -75,9 +76,8 @@ async fn a_failed_fork_leaves_no_pending_marker_or_orphaned_session() {
         pending.is_empty(),
         "no fork_pending marker may outlive the abort"
     );
-    // No session was ever opened for either chat, so the session catalog may
-    // only hold stores `fork_at` created before failing; the compensator must
-    // have reclaimed every one of them.
+    // The source remains catalogued; the compensator reclaims every store
+    // `fork_at` created before failing.
     let catalog = rusqlite::Connection::open(
         double
             .stores()
@@ -87,5 +87,5 @@ async fn a_failed_fork_leaves_no_pending_marker_or_orphaned_session() {
     let leftovers: i64 = catalog
         .query_row("SELECT count(*) FROM session_meta", [], |row| row.get(0))
         .expect("count catalogued sessions");
-    assert_eq!(leftovers, 0, "no orphaned session store may remain");
+    assert_eq!(leftovers, 1, "only the source session store may remain");
 }

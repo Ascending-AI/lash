@@ -12,17 +12,20 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{Html, Response};
 use futures_util::StreamExt;
 use lash::observe::{RemoteSessionObservationStreamItem, SessionCursor};
+use lash::remote::observations::{
+    RemoteLiveReplayGap, RemoteSessionCursor, RemoteSessionObservation,
+    RemoteSessionObservationEvent, RemoteSessionObservationEventPayload,
+};
+use lash::remote::turn_result::RemoteSendOutcome;
+use lash::remote::usage::RemoteTurnActivity;
+use lash::remote::{Envelope, Negotiated};
+#[cfg(test)]
+use lash::remote::{Negotiation, REMOTE_PROTOCOL};
 use lash::rlm::RlmSendBuilderExt as _;
 use lash::{
     LashSession, TurnActivity, TurnActivitySink, TurnCancelOutcome, TurnEvent, TurnInput,
     TurnOutput,
 };
-use lash_remote_protocol::{
-    Envelope, Negotiated, RemoteLiveReplayGap, RemoteSessionCursor, RemoteSessionObservation,
-    RemoteSessionObservationEvent, RemoteSessionObservationEventPayload,
-};
-#[cfg(test)]
-use lash_remote_protocol::{Negotiation, REMOTE_PROTOCOL};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::mpsc;
@@ -114,6 +117,12 @@ pub(crate) struct AppSettings {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum StreamItem {
+    Activity {
+        activity: Box<Envelope<RemoteTurnActivity>>,
+    },
+    Outcome {
+        outcome: Box<Envelope<RemoteSendOutcome>>,
+    },
     Observation {
         event: Box<Envelope<RemoteSessionObservationEvent>>,
     },
@@ -199,7 +208,7 @@ pub(crate) async fn index() -> Html<&'static str> {
 pub(crate) async fn list_chats(
     State(state): State<AppStateData>,
 ) -> AppResult<Json<Vec<ChatSummary>>> {
-    state.with_db(|db| db.list_chats()).await.map(Json)
+    state.chat_summaries().await.map(Json)
 }
 
 pub(crate) async fn settings(State(state): State<AppStateData>) -> Json<AppSettings> {
@@ -227,12 +236,140 @@ pub(crate) async fn create_chat(
         state.default_profile(),
         state.default_profile_variant(),
     )?;
-    state
+    let chat = state
         .with_db(move |db| {
             db.create_chat(&title, &selection.model, selection.model_variant.as_deref())
         })
-        .await
-        .map(Json)
+        .await?;
+    let profile = llm_profile_choice_for_chat_selection(&ChatModelSelection {
+        model: chat.model.clone(),
+        model_variant: chat.model_variant.clone(),
+    });
+    state.open_session(&chat.id, profile).await?;
+    Ok(Json(chat))
+}
+
+pub(crate) async fn attach_turn(
+    State(state): State<AppStateData>,
+    AxumPath((chat_id, turn_id)): AxumPath<(String, TurnId)>,
+    headers: HeaderMap,
+) -> AppResult<Response> {
+    let durable = chat_durable_session(&state, chat_id).await?;
+    let handle = durable.attach_id(turn_id.clone());
+    follow_accepted_input(durable.session_id().clone(), handle, headers, Some(turn_id))
+}
+
+pub(crate) async fn attach_input(
+    State(state): State<AppStateData>,
+    AxumPath((chat_id, input_id)): AxumPath<(String, lash::InputId)>,
+    headers: HeaderMap,
+) -> AppResult<Response> {
+    let durable = chat_durable_session(&state, chat_id).await?;
+    let handle = durable.attach(input_id);
+    follow_accepted_input(durable.session_id().clone(), handle, headers, None)
+}
+
+async fn chat_durable_session(
+    state: &AppStateData,
+    chat_id: String,
+) -> AppResult<lash::DurableSession> {
+    let session_id = SessionId::parse(&chat_id)?;
+    state.with_db(move |db| db.require_chat(&chat_id)).await?;
+    let durable = state.core().session(session_id).durable().await?;
+    if !durable.exists().await? {
+        return Err(AppError {
+            status: StatusCode::NOT_FOUND,
+            message: "the chat has no durable session".to_string(),
+        });
+    }
+    Ok(durable)
+}
+
+fn follow_accepted_input(
+    session_id: SessionId,
+    handle: lash::SendHandle,
+    headers: HeaderMap,
+    turn_id: Option<TurnId>,
+) -> AppResult<Response> {
+    let (negotiated, accept_json) = negotiate_remote(&headers)?;
+    let input_id = handle.input_id().clone();
+    let (tx, rx) = mpsc::channel::<StreamItem>(64);
+    let sink = FollowTurnEvents {
+        tx: tx.clone(),
+        negotiated,
+        sequence: Mutex::new(0),
+    };
+    let task_input_id = input_id.clone();
+    tokio::spawn(async move {
+        // Disconnecting drops only this observer; the engine keeps executing.
+        let outcome = tokio::select! {
+            _ = tx.closed() => return,
+            outcome = handle.outcome_into(&sink) => outcome,
+        };
+        let item = match outcome {
+            Ok(outcome) => StreamItem::Outcome {
+                outcome: Box::new(Envelope::at(
+                    &negotiated,
+                    outcome.to_remote(&session_id, &task_input_id),
+                )),
+            },
+            Err(error) => TurnRefusal::from(error).into_stream_item(),
+        };
+        let _ = tx.send(item).await;
+        let _ = tx.send(StreamItem::Done).await;
+    });
+    let mut response = crate::ndjson::ndjson_response(ReceiverStream::new(rx));
+    response.headers_mut().insert(
+        "x-lash-protocol-accept",
+        accept_json
+            .parse()
+            .map_err(|err| AppError::internal(format!("protocol Accept header: {err}")))?,
+    );
+    response.headers_mut().insert(
+        "x-lash-input-id",
+        input_id
+            .as_str()
+            .parse()
+            .map_err(|err| AppError::internal(format!("input id header: {err}")))?,
+    );
+    if let Some(turn_id) = turn_id {
+        response.headers_mut().insert(
+            "x-lash-turn-id",
+            turn_id
+                .as_str()
+                .parse()
+                .map_err(|err| AppError::internal(format!("turn id header: {err}")))?,
+        );
+    }
+    Ok(response)
+}
+
+struct FollowTurnEvents {
+    tx: mpsc::Sender<StreamItem>,
+    negotiated: Negotiated,
+    sequence: Mutex<u64>,
+}
+
+#[async_trait]
+impl TurnActivitySink for FollowTurnEvents {
+    async fn emit(&self, activity: TurnActivity) {
+        let sequence = {
+            let mut sequence = self.sequence.lock_recover();
+            let current = *sequence;
+            *sequence = sequence.saturating_add(1);
+            current
+        };
+        let item = match RemoteTurnActivity::from_core(sequence, activity) {
+            Ok(activity) => StreamItem::Activity {
+                activity: Box::new(Envelope::at(&self.negotiated, activity)),
+            },
+            Err(error) => StreamItem::Error {
+                message: error.to_string(),
+                retryable: false,
+            },
+        };
+        let _ = self.tx.send(item).await;
+    }
 }
 
 pub(crate) async fn update_chat_llm_profile(
@@ -471,19 +608,25 @@ pub(crate) async fn send_message(
         })
         .await?;
 
-    // The chat's session takes the input through `send()`, and the session's
-    // engine -- Restate, in a `LashSession` handler -- executes the turn.
+    // The response names an accepted input. The session's engine executes it.
     let turn_profile = llm_profile_choice_for_chat_selection(&llm_profile_selection);
     let session = state.open_session(&chat_id, turn_profile).await?;
     state.record_board_context(&session).await?;
     let replay_cursor = session.observe().current_observation().cursor;
     let turn_id = TurnId::prefixed("agent-service-turn:", uuid::Uuid::new_v4());
+    let accepted = session
+        .send(TurnInput::text(text.clone()))
+        .id(turn_id.clone())
+        .require_finish()?
+        .await?;
+    let input_id = accepted.input_id().clone();
     let (tx, rx) = mpsc::channel::<StreamItem>(64);
     let mut replay =
         spawn_live_replay_forwarder(session.clone(), replay_cursor, tx.clone(), negotiated);
     let run_state = state.clone();
     let task_turn_id = turn_id.clone();
     tokio::spawn(async move {
+        let mut accepted = Some(accepted);
         let _ = tx
             .send(StreamItem::Message {
                 message: user_message,
@@ -499,6 +642,7 @@ pub(crate) async fn send_message(
             task_turn_id,
             || TurnId::prefixed("agent-service-turn:", uuid::Uuid::new_v4()),
             |turn_input, turn_id| {
+                let accepted = accepted.take();
                 let session = session.clone();
                 let run_state = run_state.clone();
                 let chat_id = chat_id.clone();
@@ -511,13 +655,16 @@ pub(crate) async fn send_message(
                         Arc::clone(&turn_state),
                         Some(tx.clone()),
                     );
-                    let turn = match session
-                        .send(TurnInput::text(turn_input))
-                        .id(turn_id)
-                        .require_finish()
-                    {
-                        Ok(turn) => turn.outcome_into(&ui_events).await,
-                        Err(err) => Err(err),
+                    let turn = match accepted {
+                        Some(turn) => turn.outcome_into(&ui_events).await,
+                        None => match session
+                            .send(TurnInput::text(turn_input))
+                            .id(turn_id)
+                            .require_finish()
+                        {
+                            Ok(turn) => turn.outcome_into(&ui_events).await,
+                            Err(err) => Err(err),
+                        },
                     };
                     let output = match turn.map_err(TurnRefusal::from).and_then(answered_output) {
                         Ok(output) => output,
@@ -575,6 +722,11 @@ pub(crate) async fn send_message(
         "x-lash-turn-id",
         HeaderValue::from_str(turn_id.as_str())
             .map_err(|err| AppError::internal(format!("invalid turn-id header: {err}")))?,
+    );
+    headers.insert(
+        "x-lash-input-id",
+        HeaderValue::from_str(input_id.as_str())
+            .map_err(|err| AppError::internal(format!("invalid input-id header: {err}")))?,
     );
     headers.insert(
         "x-lash-protocol-accept",
@@ -1213,294 +1365,9 @@ fn terminal_value_text(value: &serde_json::Value) -> String {
 mod zero_move_turn_tests;
 
 #[cfg(test)]
-mod tests {
-    use std::sync::{Arc, Mutex};
+#[path = "route_tests/reconnect.rs"]
+mod reconnect_tests;
 
-    use axum::body::to_bytes;
-    use lash::LashCore;
-    use lash::direct::LlmOutputPart;
-    use lash::provider::LlmResponse;
-
-    use super::*;
-    use crate::db::AppDb;
-
-    #[tokio::test]
-    async fn message_route_streams_session_observations_with_mock_provider() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let data_dir = temp.path();
-        let provider = lash::testing::TestProvider::builder()
-            .kind("agent-service-route-mock")
-            .complete(|_request| async {
-                let text = r#"<typescript>
-finish("done through route");
-</typescript>"#;
-                Ok(LlmResponse {
-                    parts: vec![LlmOutputPart::Text {
-                        text: text.to_string(),
-                        response_meta: None,
-                    }],
-                    response_metadata: Default::default(),
-                    ..LlmResponse::default()
-                })
-            })
-            .build()
-            .into_handle();
-        let double = crate::state::test_support::test_double().await;
-        let backend = double.lash_backend();
-        let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash::rlm::RlmChannel::Cell)
-                .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-                .build(),
-            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
-            &backend,
-        );
-        let core = LashCore::rlm_builder(backend, factory)
-            .serve_test_llm_profile(
-                provider,
-                lash::LlmProfileMetadata::builder("mock-model")
-                    .context_window_tokens(200_000)
-                    .build()
-                    .expect("model spec"),
-            )
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                "agent-service-test",
-                "test",
-            ))
-            .expect("core");
-        let db = Arc::new(Mutex::new(
-            AppDb::open(&data_dir.join("app.db")).expect("app db"),
-        ));
-        let state = AppStateData::new(
-            core,
-            Arc::clone(&db),
-            "mock-model".to_string(),
-            None,
-            double.connection(),
-        );
-        let chat = state
-            .with_db(|db| db.create_chat("route replay", "mock-model", None))
-            .await
-            .expect("create chat");
-        // Boxed: the handler's future is large enough that holding it inline
-        // in a test frame trips `clippy::large_futures` under the `restate`
-        // feature, where this target is only ever built.
-        let response = Box::pin(send_message(
-            State(state.clone()),
-            AxumPath(chat.id.clone()),
-            test_remote_headers(),
-            Json(SendMessageRequest {
-                text: "exercise live replay".to_string(),
-                board: crate::board::default_board(),
-                model: None,
-                model_variant: Default::default(),
-            }),
-        ))
-        .await
-        .expect("send message");
-        let accept: Negotiation = serde_json::from_str(
-            response
-                .headers()
-                .get("x-lash-protocol-accept")
-                .expect("protocol Accept response header")
-                .to_str()
-                .expect("protocol Accept header text"),
-        )
-        .expect("protocol Accept JSON");
-        assert_eq!(
-            Negotiated::from_accept(REMOTE_PROTOCOL, &accept)
-                .expect("valid protocol Accept")
-                .selected(),
-            lash_remote_protocol::REMOTE_PROTOCOL_VERSION
-        );
-        let turn_id = TurnId::fixture(
-            response
-                .headers()
-                .get("x-lash-turn-id")
-                .expect("turn id response header")
-                .to_str()
-                .expect("turn id header text"),
-        );
-        let body = to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("response body");
-        let lines = std::str::from_utf8(&body)
-            .expect("utf8")
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("json line"))
-            .collect::<Vec<_>>();
-
-        assert!(
-            lines
-                .iter()
-                .any(|line| line.get("type").and_then(serde_json::Value::as_str)
-                    == Some("replay_cursor")),
-            "stream should expose an opaque live replay cursor: {lines:#?}"
-        );
-        assert!(
-            lines.iter().all(|line| {
-                line.get("type").and_then(serde_json::Value::as_str) != Some("event")
-            }),
-            "stream should not expose legacy direct turn events: {lines:#?}"
-        );
-        assert!(
-            lines.iter().any(|line| {
-                line.get("type").and_then(serde_json::Value::as_str) == Some("observation")
-                    && line
-                        .pointer("/event/type")
-                        .and_then(serde_json::Value::as_str)
-                        == Some("turn_activity")
-                    && line
-                        .pointer("/event/activity/type")
-                        .and_then(serde_json::Value::as_str)
-                        == Some("final_value")
-            }),
-            "stream should contain remote observation turn activity: {lines:#?}"
-        );
-        assert!(
-            lines.iter().any(|line| {
-                line.get("type").and_then(serde_json::Value::as_str) == Some("message")
-                    && line
-                        .pointer("/message/role")
-                        .and_then(serde_json::Value::as_str)
-                        == Some("assistant")
-                    && line
-                        .pointer("/message/text")
-                        .and_then(serde_json::Value::as_str)
-                        == Some("done through route")
-            }),
-            "stream should include the persisted assistant message: {lines:#?}"
-        );
-        let cancelled = cancel_turn(
-            State(state),
-            AxumPath((chat.id, turn_id)),
-            Json(CancelTurnRequest {
-                request_id: Some("route-test-stop".to_string()),
-                reason: Some("test completed turn".to_string()),
-            }),
-        )
-        .await
-        .expect("cancel endpoint");
-        assert!(matches!(
-            cancelled.0.outcome,
-            CancelTurnOutcome::AlreadySettled
-        ));
-    }
-
-    /// A queued input cancels by withdrawal: no run ever applies it.
-    #[tokio::test]
-    async fn cancel_turn_withdraws_a_still_queued_input() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let data_dir = temp.path();
-        // The first turn's provider never answers, so its run stays in flight
-        // and the second input waits queued behind it.
-        let provider = lash::testing::TestProvider::builder()
-            .kind("agent-service-cancel-test")
-            .complete(|_request| async {
-                std::future::pending::<Result<LlmResponse, lash::provider::LlmTransportError>>()
-                    .await
-            })
-            .build()
-            .into_handle();
-        let double = crate::state::test_support::test_double().await;
-        let core = crate::state::test_support::test_core_with_provider(&double, provider).await;
-        let state = crate::state::test_support::test_state(
-            &double,
-            &core,
-            AppDb::open(&data_dir.join("app.db")).expect("app db"),
-        );
-        let chat = state
-            .with_db(|db| db.create_chat("cancel queued", "mock-model", None))
-            .await
-            .expect("create chat");
-        let session = state
-            .open_session(&chat.id, crate::state::test_support::mock_llm_profile())
-            .await
-            .expect("open session");
-        let running_turn = TurnId::prefixed("agent-service-turn:", uuid::Uuid::new_v4());
-        let _running = session
-            .send(TurnInput::text("run forever"))
-            .id(running_turn)
-            .require_finish()
-            .expect("legal turn shape")
-            .await
-            .expect("first input accepted");
-        let queued_turn = TurnId::prefixed("agent-service-turn:", uuid::Uuid::new_v4());
-        let _queued = session
-            .send(TurnInput::text("still queued"))
-            .id(queued_turn.clone())
-            .require_finish()
-            .expect("legal turn shape")
-            .await
-            .expect("queued input accepted");
-
-        let cancelled = cancel_turn(
-            State(state),
-            AxumPath((chat.id, queued_turn)),
-            Json(CancelTurnRequest {
-                request_id: Some("route-test-queued-stop".to_string()),
-                reason: Some("test queued input".to_string()),
-            }),
-        )
-        .await
-        .expect("cancel endpoint");
-        assert!(
-            matches!(cancelled.0.outcome, CancelTurnOutcome::Withdrawn),
-            "a queued input cancels by withdrawal: {:?}",
-            cancelled.0.outcome
-        );
-    }
-
-    #[test]
-    fn replay_gap_stream_item_uses_remote_gap_payload() {
-        let negotiated = negotiate_remote(&test_remote_headers()).unwrap().0;
-        let item = StreamItem::ReplayGap {
-            observation: Box::new(Envelope::at(
-                &negotiated,
-                RemoteSessionObservation {
-                    // Standalone stream payloads carry one shared protocol envelope.
-                    session_id: SessionId::from("session-1"),
-                    cursor: "cursor-after".to_string(),
-                    turn_index: 3,
-                    usage: lash_remote_protocol::RemoteUsage::default(),
-                },
-            )),
-            gap: Box::new(Envelope::at(
-                &negotiated,
-                RemoteLiveReplayGap {
-                    // Nested DTOs remain bare inside that envelope body.
-                    session_id: SessionId::from("session-1"),
-                    requested_cursor: "cursor-before".to_string(),
-                    latest_cursor: "cursor-after".to_string(),
-                    latest_revision: 7,
-                    reason: lash_remote_protocol::RemoteLiveReplayGapReason::Trimmed,
-                },
-            )),
-        };
-        let value = serde_json::to_value(item).expect("json");
-
-        assert_eq!(value.pointer("/type"), Some(&json!("replay_gap")));
-        assert_eq!(
-            value.pointer("/gap/requested_cursor"),
-            Some(&json!("cursor-before"))
-        );
-        assert_eq!(
-            value.pointer("/gap/latest_cursor"),
-            Some(&json!("cursor-after"))
-        );
-        assert_eq!(
-            value.pointer("/observation/cursor"),
-            Some(&json!("cursor-after"))
-        );
-        assert_eq!(
-            value.pointer("/observation/session_id"),
-            Some(&json!("session-1"))
-        );
-        assert_eq!(value.pointer("/gap/latest_revision"), Some(&json!(7)));
-        assert_eq!(value.pointer("/gap/reason"), Some(&json!("trimmed")));
-    }
-}
+#[cfg(test)]
+#[path = "route_tests/streaming.rs"]
+mod tests;

@@ -191,6 +191,32 @@ The browser also listens for submitted/tool value stream events and renders
 their JSON-shaped value with the same display rule as Lash: strings pass
 through, `null` is empty, and other values pretty-print.
 
+## Reconnecting to an accepted input
+
+Every message response names an accepted input in `x-lash-input-id` and its
+stable host key in `x-lash-turn-id`. The route accepts before returning the
+response. A client can reconnect after a disconnect or HTTP host restart with
+either identity:
+
+```http
+GET /api/chats/{chat_id}/turns/{turn_id}
+x-lash-protocol-hello: {"negotiation":"hello","supported":{"min":100,"max":100}}
+```
+
+`GET /api/chats/{chat_id}/inputs/{input_id}` follows the same accepted input
+when the client holds its input id. Both routes use `DurableSession::attach_id`
+or `attach`, without opening a runtime session, reading live configuration or
+sending another input. They return negotiated NDJSON with request-local
+`activity` rows, one `outcome` row containing the typed `RemoteSendOutcome`
+envelope, then `done`. The settled outcome includes the original report and
+any live replay gaps even when no live activities survive the host restart.
+A parked or stalled input returns its typed outcome; an absent or withdrawn
+input returns `withdrawn`, as Lash's attachment API specifies. A missing chat
+or durable session returns 404. Reconnection writes no transcript rows and
+does not rerun the board's zero-move recovery policy. Disconnecting a follower
+stops observation and leaves engine execution running. There is no host turn
+registry.
+
 ## Cancelling a turn
 
 Every message response includes the stable turn id in the `x-lash-turn-id`
@@ -288,8 +314,13 @@ refuses and reports an empty live root set; it never treats an empty catalog as
 standing authorization to delete every eligible blob. A non-zero store-GC
 result is a verify/repair finding to investigate, not routine throughput.
 
-This example's chat list is the vacuum catalog. Process-owned sessions are not
-listed there and need retention owned by their process host. The attachment
+The chat list starts with `core.sessions_filtered` and includes live root and
+fork sessions that have published app chat metadata. The app database supplies
+titles, model labels and transcript rows; it does not enumerate sessions. New
+chats create their Lash session before returning, so empty chats are listed.
+Closing sessions, deletion tombstones, process-owned child sessions and pending
+fork metadata are excluded. This same list is the vacuum catalog.
+Process-owned sessions need retention owned by their process host. The attachment
 backend and deployment store must also belong exclusively to the same
 deployment; pairing the backend with the wrong store can classify live bytes
 as unreachable.
