@@ -9,7 +9,7 @@ import sys
 
 
 EXCLUDED = (
-    "*/.git", "*/.claude", "*/target", "*/.tgt", "*/vendor",
+    "*/.git", "*/.claude", "*/target", "*/.tgt", "*/vendor", "*/buck-out",
     "*/crates/lash-regress", "*/vendored", "*/generated",
 )
 TEST_PATHS = (
