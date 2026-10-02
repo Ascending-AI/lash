@@ -226,7 +226,7 @@ async fn wait_edges(fixture: &Fixture, predicate: impl Fn(&[Edge]) -> bool) -> V
         if predicate(&edges) {
             return edges;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        fixture.reconcile().await;
     }
 }
 
@@ -262,27 +262,39 @@ async fn wait_definition_reclaimed(
         if descriptor.is_none() && module.is_none() {
             return;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        fixture.reconcile().await;
     }
 }
 
-/// On the real clock: a paused one auto-advances while a PostgreSQL read
-/// waits on the network, and the pool's acquire timeout fires at once.
+/// Move past the former deadline after a real store read. Manual polling
+/// checks the pending wait without letting a paused clock auto-advance
+/// PostgreSQL's connection timeouts.
 #[tokio::test]
 async fn wait_edges_waits_for_condition_past_former_deadline() {
+    use futures_util::FutureExt as _;
+
     let fixture = Fixture::new(0x4232_0001).await;
     let ready = std::sync::atomic::AtomicBool::new(false);
-
-    let (edges, ()) = tokio::join!(
-        wait_edges(&fixture, |edges| {
-            ready.load(std::sync::atomic::Ordering::Relaxed) && edges.is_empty()
-        }),
-        async {
-            tokio::time::sleep(std::time::Duration::from_secs(11)).await;
-            ready.store(true, std::sync::atomic::Ordering::Relaxed);
-        }
+    let observed = tokio::sync::Notify::new();
+    let waiting = wait_edges(&fixture, |edges| {
+        observed.notify_one();
+        ready.load(std::sync::atomic::Ordering::Relaxed) && edges.is_empty()
+    });
+    tokio::pin!(waiting);
+    tokio::select! {
+        biased;
+        _ = &mut waiting => panic!("the state wait returned before the condition held"),
+        () = observed.notified() => {}
+    }
+    tokio::time::pause();
+    tokio::time::advance(std::time::Duration::from_secs(11)).await;
+    assert!(
+        waiting.as_mut().now_or_never().is_none(),
+        "the state wait remains pending past the former deadline"
     );
-    assert!(edges.is_empty());
+    tokio::time::resume();
+    ready.store(true, std::sync::atomic::Ordering::Relaxed);
+    assert!(waiting.await.is_empty());
 }
 
 fn last_cell_finish(output: &TurnOutput) -> Option<serde_json::Value> {
@@ -348,7 +360,9 @@ fn rlm_core_with_plugins(
         })
         .build()
         .into_handle();
-    let backend = double.lash_backend();
+    let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(double.lash_backend())
+        .with_session_work(double.explicit_reconcile_session_work())
+        .into_backend();
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -1220,7 +1234,7 @@ async fn created_definition_is_reclaimed_after_session_deletion() {
         .expect("read module after deletion")
         .is_some()
     {
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        fixture.reconcile().await;
     }
 }
 

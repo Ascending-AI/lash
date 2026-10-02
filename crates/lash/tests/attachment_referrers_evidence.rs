@@ -54,16 +54,28 @@ impl Witness {
         })
     }
 
-    /// Wait until `hold` has started `count` times.
-    async fn held_times(&self, count: usize) {
+    /// Reconcile until `hold` has started `count` times. External terminal
+    /// publication is an obligation too, so waiting only on the tool's
+    /// notification would leave the PostgreSQL terminal relay undriven.
+    async fn held_times(&self, fixture: &Fixture, count: usize) {
         tokio::time::timeout(std::time::Duration::from_secs(30), async {
-            loop {
-                let notified = self.held.notified();
-                if self.holds.load(Ordering::SeqCst) >= count {
-                    return;
+            let observed = async {
+                loop {
+                    let notified = self.held.notified();
+                    tokio::pin!(notified);
+                    notified.as_mut().enable();
+                    if self.holds.load(Ordering::SeqCst) >= count {
+                        return;
+                    }
+                    notified.await;
                 }
-                notified.await;
-            }
+            };
+            let reconcile = async {
+                while self.holds.load(Ordering::SeqCst) < count {
+                    fixture.reconcile().await;
+                }
+            };
+            tokio::join!(observed, reconcile);
         })
         .await
         .expect("the cell reached its hold");
@@ -413,7 +425,9 @@ fn law_core_over(
         })
         .build()
         .into_handle();
-    let backend = double.lash_backend();
+    let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(double.lash_backend())
+        .with_session_work(double.explicit_reconcile_session_work())
+        .into_backend();
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -479,8 +493,7 @@ async fn referrers(fixture: &Fixture, id: &AttachmentId) -> Vec<ArtifactReferrer
         .expect("read attachment referrers")
 }
 
-/// Poll `id`'s referrers until `predicate` holds: the cleanup relay runs on
-/// the engine's own reconcile cadence.
+/// Run cleanup passes until `id`'s durable referrers satisfy `predicate`.
 async fn wait_referrers(
     fixture: &Fixture,
     id: &AttachmentId,
@@ -493,7 +506,7 @@ async fn wait_referrers(
             if predicate(&found) {
                 return found;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            fixture.reconcile().await;
         }
     })
     .await;
@@ -551,22 +564,13 @@ async fn blob_present(fixture: &Fixture, id: &AttachmentId) -> bool {
 }
 
 async fn process_terminal(core: &LashCore, process_id: &lash_core::ProcessId) {
-    let registry = core.process_registry();
-    tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        loop {
-            let record = registry
-                .get_process(process_id)
-                .await
-                .expect("read the process")
-                .expect("the process is retained");
-            if record.status.is_terminal() {
-                return;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-    })
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        core.processes().await_output(process_id),
+    )
     .await
-    .expect("the process reaches its terminal");
+    .expect("the process reaches its terminal")
+    .expect("read the process terminal");
 }
 
 fn final_value(output: &lash::TurnOutput) -> Option<serde_json::Value> {
@@ -677,7 +681,7 @@ async fn delivered_attachment_survives_prune(seed: u64, text: &str, cell: String
                 .await
         })
     };
-    witness.held_times(1).await;
+    witness.held_times(&fixture, 1).await;
     let id = blob_id(text);
     let delivered = referrers(&fixture, &id).await;
     assert!(
@@ -694,7 +698,7 @@ async fn delivered_attachment_survives_prune(seed: u64, text: &str, cell: String
                 name: None,
             });
         witness.release_one();
-        witness.held_times(2).await;
+        witness.held_times(&fixture, 2).await;
     }
 
     prune_processes(&core).await;
@@ -808,7 +812,7 @@ async fn declared_external_child<T: std::fmt::Debug>(
                 let output = (&mut *turn).await;
                 panic!("the turn ended before its child registered: {output:?}; {processes:?}");
             }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            tokio::task::yield_now().await;
         }
     })
     .await;
@@ -866,7 +870,7 @@ finish(value);",
         )
         .await
         .expect("the host completes the external child");
-    witness.held_times(1).await;
+    witness.held_times(&fixture, 1).await;
     let id = delivered.id.clone();
     let held = referrers(&fixture, &id).await;
     assert!(
@@ -880,7 +884,7 @@ finish(value);",
                 name: None,
             });
         witness.release_one();
-        witness.held_times(2).await;
+        witness.held_times(&fixture, 2).await;
     }
 
     fixture.double.test_clock().advance(1001);
@@ -927,8 +931,14 @@ async fn delivered_attachment_survives_prune_and_replay_parked_declared_start_cr
 /// of every process when it never does.
 async fn child_reached_its_hold(core: &LashCore, witness: &Witness) {
     let reached = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        while witness.holds.load(Ordering::SeqCst) < 1 {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        loop {
+            let notified = witness.held.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if witness.holds.load(Ordering::SeqCst) >= 1 {
+                return;
+            }
+            notified.await;
         }
     })
     .await;
@@ -1005,7 +1015,7 @@ finish(\"child done\");",
             .within_attempts(1),
         );
         witness.release_one();
-        witness.held_times(2).await;
+        witness.held_times(&fixture, 2).await;
     }
     let report = sweep(&fixture).await;
     assert!(
@@ -1368,7 +1378,7 @@ finish(handle.process_id);"
         .expect("the starting turn");
     assert!(output.is_success(), "starting turn: {output:?}");
     let engine = started_process_id(&output);
-    witness.held_times(1).await;
+    witness.held_times(&fixture, 1).await;
     let record = ArtifactReferrer::ProcessRecord(engine.clone());
     let id = blob_id(text);
     assert_eq!(referrers(&fixture, &id).await, vec![record.clone()]);

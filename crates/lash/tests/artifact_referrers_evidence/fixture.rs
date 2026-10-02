@@ -24,6 +24,28 @@ enum Database {
 impl Fixture {
     #[expect(
         clippy::expect_used,
+        reason = "the evidence fixture runs the real reconcile pass"
+    )]
+    pub async fn reconcile(&self) {
+        if let Some(driver) = self
+            .double
+            .restate()
+            .session_work_engine()
+            .driver_slot()
+            .installed()
+        {
+            driver
+                .reconcile(
+                    &lash_core::engine::ReconcileCursor::default(),
+                    std::num::NonZeroUsize::MIN.saturating_add(63),
+                )
+                .await
+                .expect("reconcile the evidence fixture");
+        }
+        tokio::task::yield_now().await;
+    }
+    #[expect(
+        clippy::expect_used,
         reason = "acceptance fixture validates its store setup"
     )]
     pub async fn new(seed: u64) -> Self {
